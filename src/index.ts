@@ -61,6 +61,17 @@ function saveState(): void {
   saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
 }
 
+function registerGroup(jid: string, group: RegisteredGroup): void {
+  registeredGroups[jid] = group;
+  saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
+
+  // Create group folder
+  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
+  fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+
+  logger.info({ jid, name: group.name, folder: group.folder }, 'Group registered');
+}
+
 /**
  * Sync group metadata from WhatsApp.
  * Fetches all participating groups and stores their names in the database.
@@ -306,6 +317,12 @@ async function processTaskIpc(
     context_mode?: string;
     groupFolder?: string;
     chatJid?: string;
+    // For register_group
+    jid?: string;
+    name?: string;
+    folder?: string;
+    trigger?: string;
+    containerConfig?: RegisteredGroup['containerConfig'];
   },
   sourceGroup: string,  // Verified identity from IPC directory
   isMain: boolean       // Verified from directory path
@@ -428,6 +445,25 @@ async function processTaskIpc(
         writeGroups(sourceGroup, true, availableGroups, new Set(Object.keys(registeredGroups)));
       } else {
         logger.warn({ sourceGroup }, 'Unauthorized refresh_groups attempt blocked');
+      }
+      break;
+
+    case 'register_group':
+      // Only main group can register new groups
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized register_group attempt blocked');
+        break;
+      }
+      if (data.jid && data.name && data.folder && data.trigger) {
+        registerGroup(data.jid, {
+          name: data.name,
+          folder: data.folder,
+          trigger: data.trigger,
+          added_at: new Date().toISOString(),
+          containerConfig: data.containerConfig
+        });
+      } else {
+        logger.warn({ data }, 'Invalid register_group request - missing required fields');
       }
       break;
 
