@@ -22,7 +22,7 @@ import { RegisteredGroup, Session, NewMessage } from './types.js';
 import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessagesSince, getAllTasks, getTaskById } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
-import { loadJson, saveJson } from './utils.js';
+import { loadJson, saveJson, validateSchedule, ScheduleType } from './utils.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -213,22 +213,21 @@ async function processTaskIpc(data: {
 }): Promise<void> {
   // Import db functions dynamically to avoid circular deps
   const { createTask, updateTask, deleteTask, getTaskById: getTask } = await import('./db.js');
-  const { CronExpressionParser } = await import('cron-parser');
 
   switch (data.type) {
     case 'schedule_task':
       if (data.prompt && data.schedule_type && data.schedule_value && data.groupFolder && data.chatJid) {
-        const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
+        const scheduleType = data.schedule_type as ScheduleType;
 
-        let nextRun: string | null = null;
-        if (scheduleType === 'cron') {
-          const interval = CronExpressionParser.parse(data.schedule_value);
-          nextRun = interval.next().toISOString();
-        } else if (scheduleType === 'interval') {
-          const ms = parseInt(data.schedule_value, 10);
-          nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (scheduleType === 'once') {
-          nextRun = data.schedule_value; // ISO timestamp
+        // Validate the schedule before creating the task
+        const validation = validateSchedule(scheduleType, data.schedule_value);
+        if (!validation.valid) {
+          logger.error(
+            { scheduleType, scheduleValue: data.schedule_value, error: validation.error },
+            'Invalid schedule value in IPC task creation'
+          );
+          // Don't create the task - it would fail anyway
+          return;
         }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -239,7 +238,7 @@ async function processTaskIpc(data: {
           prompt: data.prompt,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
-          next_run: nextRun,
+          next_run: validation.nextRun ?? null,
           status: 'active',
           created_at: new Date().toISOString()
         });

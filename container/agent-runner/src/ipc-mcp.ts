@@ -7,6 +7,83 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import { CronExpressionParser } from 'cron-parser';
+
+type ScheduleType = 'cron' | 'interval' | 'once';
+
+interface ScheduleValidationResult {
+  valid: boolean;
+  error?: string;
+  nextRun?: string | null;
+}
+
+/**
+ * Validates a schedule value based on its type.
+ * Returns validation result with next run time if valid.
+ */
+function validateSchedule(
+  scheduleType: ScheduleType,
+  scheduleValue: string
+): ScheduleValidationResult {
+  switch (scheduleType) {
+    case 'cron':
+      try {
+        const interval = CronExpressionParser.parse(scheduleValue);
+        const nextRun = interval.next().toISOString();
+        return { valid: true, nextRun };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          valid: false,
+          error: `Invalid cron expression "${scheduleValue}": ${message}. Use standard cron format (e.g., "0 9 * * *" for daily at 9am, "*/5 * * * *" for every 5 minutes).`
+        };
+      }
+
+    case 'interval': {
+      const ms = parseInt(scheduleValue, 10);
+      if (isNaN(ms)) {
+        return {
+          valid: false,
+          error: `Invalid interval "${scheduleValue}": must be a number (milliseconds). Use values like "300000" for 5 minutes or "3600000" for 1 hour.`
+        };
+      }
+      if (ms <= 0) {
+        return {
+          valid: false,
+          error: `Invalid interval "${scheduleValue}": must be a positive number. Use values like "300000" for 5 minutes.`
+        };
+      }
+      if (ms < 60000) {
+        return {
+          valid: false,
+          error: `Interval ${ms}ms is too short. Minimum interval is 60000ms (1 minute).`
+        };
+      }
+      const nextRun = new Date(Date.now() + ms).toISOString();
+      return { valid: true, nextRun };
+    }
+
+    case 'once': {
+      const date = new Date(scheduleValue);
+      if (isNaN(date.getTime())) {
+        return {
+          valid: false,
+          error: `Invalid timestamp "${scheduleValue}": must be a valid ISO 8601 date (e.g., "2026-02-01T15:30:00.000Z").`
+        };
+      }
+      if (date.getTime() <= Date.now()) {
+        return {
+          valid: false,
+          error: `Timestamp "${scheduleValue}" is in the past. Please provide a future date/time.`
+        };
+      }
+      return { valid: true, nextRun: date.toISOString() };
+    }
+
+    default:
+      return { valid: false, error: `Unknown schedule type: ${scheduleType}` };
+  }
+}
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -80,6 +157,18 @@ IMPORTANT - schedule_value format depends on schedule_type:
           target_group: z.string().optional().describe('Target group folder (main only, defaults to current group)')
         },
         async (args) => {
+          // Validate the schedule before writing IPC file
+          const validation = validateSchedule(args.schedule_type, args.schedule_value);
+          if (!validation.valid) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Error: ${validation.error}\n\nPlease correct the schedule_value and try again.`
+              }],
+              isError: true
+            };
+          }
+
           // Non-main groups can only schedule for themselves
           const targetGroup = isMain && args.target_group ? args.target_group : groupFolder;
 
@@ -99,7 +188,7 @@ IMPORTANT - schedule_value format depends on schedule_type:
           return {
             content: [{
               type: 'text',
-              text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}`
+              text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}\nNext run: ${validation.nextRun}`
             }]
           };
         }

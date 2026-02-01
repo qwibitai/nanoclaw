@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
-import { CronExpressionParser } from 'cron-parser';
 import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks } from './db.js';
 import { ScheduledTask, RegisteredGroup } from './types.js';
 import { GROUPS_DIR, SCHEDULER_POLL_INTERVAL, DATA_DIR, MAIN_GROUP_FOLDER } from './config.js';
 import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { validateSchedule, ScheduleType } from './utils.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -89,12 +89,17 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   });
 
   let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value);
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
+  if (task.schedule_type !== 'once') {
+    const validation = validateSchedule(task.schedule_type as ScheduleType, task.schedule_value);
+    if (validation.valid) {
+      nextRun = validation.nextRun ?? null;
+    } else {
+      // Log the validation error but don't crash - the task will remain with stale next_run
+      logger.error(
+        { taskId: task.id, scheduleType: task.schedule_type, scheduleValue: task.schedule_value },
+        `Failed to compute next run: ${validation.error}`
+      );
+    }
   }
   // 'once' tasks have no next run
 
