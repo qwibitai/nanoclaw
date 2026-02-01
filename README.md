@@ -6,7 +6,7 @@
   My personal Claude assistant that runs securely in Apple containers. Lightweight and built to be understood and customized for your own needs.
 </p>
 
-## Why This Exists
+## Why I Built This
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project with a great vision. But I can't sleep well running software I don't understand with access to my life. OpenClaw has 52+ modules, 8 config management files, 45+ dependencies, and abstractions for 15 channel providers. Security is application-level (allowlists, pairing codes) rather than OS isolation. Everything runs in one Node process with shared memory.
 
@@ -40,7 +40,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **No ToS gray areas.** Because it uses Claude Agent SDK natively with no hacks or workarounds, using your subscription with your auth token is completely legitimate (I think). No risk of being shut down for terms of service violations (I am not a lawyer).
 
-## What You Get
+## What It Supports
 
 - **WhatsApp I/O** - Message Claude from your phone
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
@@ -67,7 +67,7 @@ From the main channel (your self-chat), you can manage groups and tasks:
 @Andy join the Family Chat group
 ```
 
-## Customization
+## Customizing
 
 There are no configuration files to learn. Just tell Claude Code what you want:
 
