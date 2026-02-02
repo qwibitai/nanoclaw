@@ -21,3 +21,4 @@ logs/
 .vscode/
 
 agents-sdk-docs
+.backups/
