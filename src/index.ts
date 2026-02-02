@@ -532,45 +532,27 @@ telegrafBot.on('message', async (ctx) => {
   const telegramJid = `telegram:${chatId}`;
 
   try {
+    // Check if this chat is registered
+    if (!registeredGroups[telegramJid]) {
+      logger.debug({ chatId }, 'Message from unregistered Telegram chat');
+      return;
+    }
+
     // Show typing indicator
     await setTelegramTyping(chatId);
 
-    // Store chat metadata
+    // Store chat metadata (but NOT the message itself - we process immediately)
     storeChatMetadata(telegramJid, timestamp);
 
-    // Store message for registered groups
-    if (registeredGroups[telegramJid]) {
-      // Store in format compatible with existing system
-      const fakeMsg = {
-        key: {
-          remoteJid: telegramJid,
-          fromMe: false,
-          id: `telegram-${ctx.message.message_id}`
-        },
-        message: {
-          conversation: ctx.message.text
-        },
-        messageTimestamp: ctx.message.date,
-        pushName: senderName
-      };
-      storeMessage(fakeMsg as any, telegramJid, false, senderName);
-
-      // Process through existing routing
-      await processMessage({
-        id: fakeMsg.key.id!,
-        chat_jid: telegramJid,
-        sender: senderId,
-        sender_name: senderName,
-        content: ctx.message.text,
-        timestamp
-      });
-
-      // Update lastTimestamp to prevent duplicate processing in message loop
-      lastTimestamp = timestamp;
-      saveState();
-    } else {
-      logger.debug({ chatId }, 'Message from unregistered Telegram chat');
-    }
+    // Process immediately (don't store in DB to avoid duplicate processing by message loop)
+    await processMessage({
+      id: `telegram-${ctx.message.message_id}`,
+      chat_jid: telegramJid,
+      sender: senderId,
+      sender_name: senderName,
+      content: ctx.message.text,
+      timestamp
+    });
   } catch (error) {
     logger.error({ error, chatId }, 'Error processing Telegram message');
     await telegrafBot.telegram.sendMessage(chatId, 'Sorry, something went wrong.');

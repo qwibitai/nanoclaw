@@ -162,69 +162,31 @@ This prevents two instances of NanoClaw from running simultaneously.
 
 Replace WhatsApp entirely with Telegram.
 
-### Step 1: Add Telegram Handler
+### Step 1: Add Imports and Bot Instance
 
-Read `src/index.ts` and find where WhatsApp is initialized (look for `connectWhatsApp` or similar).
-
-At the top of the file, add the Telegraf import:
+At the top of `src/index.ts`, add the imports:
 
 ```typescript
+import 'dotenv/config';
 import { Telegraf } from 'telegraf';
 ```
 
-Create the bot instance after your logger setup:
+After the logger setup, create the bot instance:
 
 ```typescript
+// Initialize Telegram bot
 const telegrafBot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
 ```
 
-Add this message handler (before any WhatsApp code or replacing it):
+### Step 2: Add Helper Functions
 
-```typescript
-// Telegram message handler
-telegrafBot.on('message', async (ctx) => {
-  if (!ctx.message || !('text' in ctx.message)) return;
-  
-  const chatId = String(ctx.chat.id);
-  const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-  
-  // Extract sender information
-  const senderId = String(ctx.from?.id || ctx.chat.id);
-  const senderName = ctx.from?.first_name || ctx.from?.username || 'User';
-  
-  logger.info(
-    { chatId, isGroup, senderName },
-    `Telegram message: ${ctx.message.text}`
-  );
-  
-  try {
-    // Show typing indicator
-    await telegrafBot.telegram.sendChatAction(chatId, 'typing');
-    
-    // Process message through existing routing
-    // (adapt to your existing message handler)
-    await processIncomingMessage({
-      chatId,
-      sender: senderId,
-      senderName,
-      content: ctx.message.text,
-      timestamp: ctx.message.date * 1000,
-      isGroup,
-      platform: 'telegram'
-    });
-  } catch (error) {
-    logger.error({ error, chatId }, 'Error processing Telegram message');
-    await telegrafBot.telegram.sendMessage(chatId, 'Sorry, something went wrong.');
-  }
-});
-```
-
-Add these helper functions after the bot setup:
+Add these helper functions (e.g., after `setTyping` function):
 
 ```typescript
 async function sendTelegramMessage(chatId: string, text: string): Promise<void> {
   try {
     await telegrafBot.telegram.sendMessage(chatId, text);
+    logger.info({ chatId, length: text.length }, 'Telegram message sent');
   } catch (error) {
     logger.error({ error, chatId }, 'Failed to send Telegram message');
     throw error;
@@ -240,63 +202,222 @@ async function setTelegramTyping(chatId: string): Promise<void> {
 }
 ```
 
-### Step 2: Start the Bot
+### Step 3: Update Existing Functions
 
-Find where WhatsApp or other services start their connection. Replace or add (in `src/index.ts`):
+Update `setTyping` to support Telegram:
 
 ```typescript
-// Start Telegram bot
-try {
-  telegrafBot.launch();
-  logger.info('Telegram bot started');
-  
-  process.once('SIGINT', () => {
-    logger.info('Shutting down Telegram bot');
-    telegrafBot.stop('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    logger.info('Shutting down Telegram bot');
-    telegrafBot.stop('SIGTERM');
-  });
-} catch (error) {
-  logger.error({ error }, 'Failed to start Telegram bot');
-  process.exit(1);
+async function setTyping(jid: string, isTyping: boolean): Promise<void> {
+  // Telegram uses chat ID format: telegram:123456789
+  if (jid.startsWith('telegram:')) {
+    const chatId = jid.replace('telegram:', '');
+    await setTelegramTyping(chatId);
+  } else {
+    // WhatsApp
+    try {
+      await sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', jid);
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to update typing status');
+    }
+  }
 }
 ```
 
-### Step 3: Remove WhatsApp Code
+Update `sendMessage` to route to the correct platform:
 
-Find and comment out or delete:
-- `connectWhatsApp()` function calls
-- WhatsApp-specific message handlers
-- WhatsApp initialization code
+```typescript
+async function sendMessage(jid: string, text: string): Promise<void> {
+  if (jid.startsWith('telegram:')) {
+    const chatId = jid.replace('telegram:', '');
+    await sendTelegramMessage(chatId, text);
+  } else {
+    // WhatsApp
+    try {
+      await sock.sendMessage(jid, { text });
+      logger.info({ jid, length: text.length }, 'Message sent');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send message');
+    }
+  }
+}
+```
 
-Keep the existing `processIncomingMessage` or agent routing function - just wire Telegram to it instead.
+### Step 4: Fix Message Prefix
 
-### Step 4: Update Group Memory
+Update `processMessage` to not add prefix for Telegram (bots send as themselves):
+
+```typescript
+if (response) {
+  lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
+  // Telegram bots send as themselves, no prefix needed. WhatsApp needs prefix since you message yourself.
+  const message = msg.chat_jid.startsWith('telegram:') ? response : `${ASSISTANT_NAME}: ${response}`;
+  await sendMessage(msg.chat_jid, message);
+}
+```
+
+Also update the IPC message handler:
+
+```typescript
+// In the IPC message handler
+const message = data.chatJid.startsWith('telegram:') ? data.text : `${ASSISTANT_NAME}: ${data.text}`;
+await sendMessage(data.chatJid, message);
+```
+
+### Step 5: Add Telegram Message Handler
+
+**CRITICAL**: Add this handler BEFORE `connectWhatsApp()` function. Do NOT store messages in the database to avoid duplicate processing:
+
+```typescript
+// Telegram message handler
+telegrafBot.on('message', async (ctx) => {
+  if (!ctx.message || !('text' in ctx.message)) return;
+
+  const chatId = String(ctx.chat.id);
+  const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+
+  // Extract sender information
+  const senderId = String(ctx.from?.id || ctx.chat.id);
+  const senderName = ctx.from?.first_name || ctx.from?.username || 'User';
+
+  logger.info(
+    { chatId, isGroup, senderName },
+    `Telegram message: ${ctx.message.text}`
+  );
+
+  const timestamp = new Date(ctx.message.date * 1000).toISOString();
+  const telegramJid = `telegram:${chatId}`;
+
+  try {
+    // Check if this chat is registered
+    if (!registeredGroups[telegramJid]) {
+      logger.debug({ chatId }, 'Message from unregistered Telegram chat');
+      return;
+    }
+
+    // Show typing indicator
+    await setTelegramTyping(chatId);
+
+    // Store chat metadata (but NOT the message itself - we process immediately)
+    storeChatMetadata(telegramJid, timestamp);
+
+    // Process immediately (don't store in DB to avoid duplicate processing by message loop)
+    await processMessage({
+      id: `telegram-${ctx.message.message_id}`,
+      chat_jid: telegramJid,
+      sender: senderId,
+      sender_name: senderName,
+      content: ctx.message.text,
+      timestamp
+    });
+  } catch (error) {
+    logger.error({ error, chatId }, 'Error processing Telegram message');
+    await telegrafBot.telegram.sendMessage(chatId, 'Sorry, something went wrong.');
+  }
+});
+```
+
+**Why we don't store in DB**: Telegram messages are processed immediately via the event handler. If we also store them in the database, the message loop (`startMessageLoop`) will process them again, causing duplicate responses.
+
+### Step 6: Update main() Function
+
+Find the `main()` function and update it to start Telegram instead of WhatsApp:
+
+```typescript
+async function main(): Promise<void> {
+  ensureContainerSystemRunning();
+  initDatabase();
+  logger.info('Database initialized');
+  loadState();
+
+  // Start Telegram bot
+  try {
+    telegrafBot.launch();
+    logger.info('Telegram bot started (Bot Name)');
+
+    // Start message loop and other services
+    startIpcWatcher();
+    startSchedulerLoop({
+      sendMessage,
+      registeredGroups: () => registeredGroups,
+      getSessions: () => sessions
+    });
+    startMessageLoop();
+
+    // Graceful shutdown handlers
+    process.once('SIGINT', () => {
+      logger.info('Shutting down Telegram bot');
+      telegrafBot.stop('SIGINT');
+    });
+    process.once('SIGTERM', () => {
+      logger.info('Shutting down Telegram bot');
+      telegrafBot.stop('SIGTERM');
+    });
+  } catch (error) {
+    logger.error({ error }, 'Failed to start Telegram bot');
+    process.exit(1);
+  }
+
+  // WhatsApp connection disabled (replaced with Telegram)
+  // await connectWhatsApp();
+}
+```
+
+### Step 7: Update launchd Plist (macOS)
+
+Update `~/Library/LaunchAgents/com.nanoclaw.plist` to include environment variables:
+
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/Users/USERNAME/.local/bin</string>
+    <key>HOME</key>
+    <string>/Users/USERNAME</string>
+    <key>ASSISTANT_NAME</key>
+    <string>BotName</string>
+    <key>TELEGRAM_BOT_TOKEN</key>
+    <string>YOUR_BOT_TOKEN_HERE</string>
+</dict>
+```
+
+Replace `USERNAME` with your actual username and `BotName` with your bot's name.
+
+### Step 8: Rebuild and Restart
+
+```bash
+npm run build
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+```
+
+### Step 9: Update Group Memory
 
 Update `groups/main/CLAUDE.md`:
 
 ```markdown
 ## Communication
 
-You are accessed via Telegram. Users send you messages in their chat or group, and you respond to them.
+You are accessed via **Telegram** using the bot **@bot_username** (display name: BotName).
 
-Your chat ID: [USER_CHAT_ID]
+Users will message you through Telegram, and you respond there. Messages support standard Telegram formatting:
+- **Bold** (asterisks or double asterisks)
+- *Italic* (underscores or single asterisks)
+- `Code` (backticks)
+- ```Code blocks``` (triple backticks)
+- [Links](https://example.com)
+
+Keep messages clean and readable for Telegram chat.
 ```
 
-### Step 5: Test
+### Step 10: Test
 
-Run the service:
-
-```bash
-npm run dev
-```
-
-Test by sending a message to your bot in Telegram. Verify:
-- Bot responds
+Send a message to your bot in Telegram. Verify:
+- Bot responds without "BotName:" prefix
+- Only ONE response per message (no duplicates)
 - Typing indicator appears
 - No errors in logs
+
+Check logs: `tail -f logs/nanoclaw.log`
 
 ---
 
