@@ -36,7 +36,7 @@ If Docker is not installed:
 
 Edit `src/container-runner.ts`:
 
-### 1a. Update module comment (line 3)
+### 1a. Update module comment (around line 3)
 
 ```typescript
 // Before:

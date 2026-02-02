@@ -13,15 +13,40 @@ Run all commands automatically. Only pause when user action is required (scannin
 npm install
 ```
 
-## 2. Install Apple Container
+## 2. Install Container Runtime
 
-Check if Apple Container is installed:
+First, detect the platform and check what's available:
 
 ```bash
-which container && container --version || echo "Not installed"
+echo "Platform: $(uname -s)"
+which container && echo "Apple Container: installed" || echo "Apple Container: not installed"
+which docker && docker info >/dev/null 2>&1 && echo "Docker: installed and running" || echo "Docker: not installed or not running"
 ```
 
-If not installed, tell the user:
+### If NOT on macOS (Linux, etc.)
+
+Apple Container is macOS-only. Use Docker instead.
+
+Tell the user:
+> You're on Linux, so we'll use Docker for container isolation. Let me set that up now.
+
+**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
+
+### If on macOS
+
+**If Apple Container is already installed:** Continue to Section 3.
+
+**If Apple Container is NOT installed:** Ask the user:
+> NanoClaw needs a container runtime for isolated agent execution. You have two options:
+>
+> 1. **Apple Container** (default) - macOS-native, lightweight, designed for Apple silicon
+> 2. **Docker** - Cross-platform, widely used, works on macOS and Linux
+>
+> Which would you prefer?
+
+#### Option A: Apple Container
+
+Tell the user:
 > Apple Container is required for running agents in isolated environments.
 >
 > 1. Download the latest `.pkg` from https://github.com/apple/container/releases
@@ -38,6 +63,13 @@ container --version
 ```
 
 **Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
+
+#### Option B: Docker
+
+Tell the user:
+> You've chosen Docker. Let me set that up now.
+
+**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
 
 ## 3. Configure Claude Authentication
 
@@ -95,10 +127,14 @@ Build the NanoClaw agent container:
 
 This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
 
-Verify the build succeeded (the `container images` command may not work due to a plugin issue, so we verify by running a simple test):
+Verify the build succeeded by running a simple test (this auto-detects which runtime you're using):
 
 ```bash
-echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
+if which docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
+else
+  echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
+fi
 ```
 
 ## 5. WhatsApp Authentication
@@ -363,7 +399,9 @@ The user should receive a response in WhatsApp.
 **Service not starting**: Check `logs/nanoclaw.error.log`
 
 **Container agent fails with "Claude Code process exited with code 1"**:
-- Ensure Apple Container is running: `container system start`
+- Ensure the container runtime is running:
+  - Apple Container: `container system start`
+  - Docker: `docker info` (start Docker Desktop on macOS, or `sudo systemctl start docker` on Linux)
 - Check container logs: `cat groups/main/logs/container-*.log | tail -50`
 
 **No response to messages**:
