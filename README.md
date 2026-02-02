@@ -121,9 +121,6 @@ Skills we'd love to see:
 - `/add-slack` - Add Slack
 - `/add-discord` - Add Discord
 
-**Container Runtime**
-- `/convert-to-docker` - Replace Apple Container with Docker (unlocks Linux)
-
 **Platform Support**
 - `/setup-windows` - Windows via WSL2 + Docker
 
