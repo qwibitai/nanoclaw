@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { proto } from '@whiskeysockets/baileys';
 import { NewMessage, ScheduledTask, TaskRunLog } from './types.js';
 import { STORE_DIR } from './config.js';
 
@@ -141,41 +140,38 @@ export function setLastGroupSync(): void {
 }
 
 /**
- * Store a message with full content.
- * Only call this for registered groups where message history is needed.
+ * Store a message with full content (generic version).
+ * Works with any messaging platform.
  */
-export function storeMessage(msg: proto.IWebMessageInfo, chatJid: string, isFromMe: boolean, pushName?: string): void {
-  if (!msg.key) return;
-
-  const content =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
-    '';
-
-  const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
-  const sender = msg.key.participant || msg.key.remoteJid || '';
-  const senderName = pushName || sender.split('@')[0];
-  const msgId = msg.key.id || '';
-
+export function storeMessage(
+  msgId: string,
+  chatId: string,
+  senderId: string,
+  senderName: string,
+  content: string,
+  timestamp: string,
+  isFromMe: boolean
+): void {
   db.prepare(`INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(msgId, chatJid, sender, senderName, content, timestamp, isFromMe ? 1 : 0);
+    .run(msgId, chatId, senderId, senderName, content, timestamp, isFromMe ? 1 : 0);
 }
 
-export function getNewMessages(jids: string[], lastTimestamp: string, botPrefix: string): { messages: NewMessage[]; newTimestamp: string } {
+export function getNewMessages(jids: string[], lastTimestamp: string, _botPrefix: string): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
+
+  // Filter by is_from_me - bot's messages are stored with is_from_me=1
+  // We only want messages from users (is_from_me=0)
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND is_from_me = 0
     ORDER BY timestamp
   `;
+  const params = [lastTimestamp, ...jids];
 
-  const rows = db.prepare(sql).all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+  const rows = db.prepare(sql).all(...params) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -185,15 +181,18 @@ export function getNewMessages(jids: string[], lastTimestamp: string, botPrefix:
   return { messages: rows, newTimestamp };
 }
 
-export function getMessagesSince(chatJid: string, sinceTimestamp: string, botPrefix: string): NewMessage[] {
-  // Filter out bot's own messages by checking content prefix
+export function getMessagesSince(chatJid: string, sinceTimestamp: string, _botPrefix: string): NewMessage[] {
+  // Filter by is_from_me - bot's messages are stored with is_from_me=1
+  // We only want messages from users (is_from_me=0)
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ? AND is_from_me = 0
     ORDER BY timestamp
   `;
-  return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+  const params = [chatJid, sinceTimestamp];
+
+  return db.prepare(sql).all(...params) as NewMessage[];
 }
 
 export function createTask(task: Omit<ScheduledTask, 'last_run' | 'last_result'>): void {

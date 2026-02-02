@@ -1,5 +1,5 @@
 {
-  "name": "nanoclaw",
+  "name": "dotclaw",
   "version": "1.0.0",
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
@@ -8,22 +8,22 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "auth": "tsx src/whatsapp-auth.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "init": "node scripts/init.js",
+    "doctor": "node scripts/doctor.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "dotenv": "^17.2.3",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
-    "qrcode-terminal": "^0.12.0",
+    "telegraf": "^4.16.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
-    "@types/qrcode-terminal": "^0.12.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },

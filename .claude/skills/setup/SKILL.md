@@ -1,11 +1,11 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial DotClaw setup. Use when user wants to install dependencies, configure Telegram bot, register their main channel, or start the background services. Triggers on "setup", "install", "configure dotclaw", or first-time setup requests.
 ---
 
-# NanoClaw Setup
+# DotClaw Setup
 
-Run all commands automatically. Only pause when user action is required (scanning QR codes).
+Run all commands automatically. Only pause when user action is required (creating Telegram bot).
 
 ## 1. Install Dependencies
 
@@ -44,7 +44,7 @@ Wait for user confirmation, then verify:
 docker run --rm hello-world
 ```
 
-**Note:** NanoClaw checks that Docker is running when it starts, but does not auto-start Docker. Make sure Docker Desktop is running (macOS) or the docker service is started (Linux).
+**Note:** DotClaw checks that Docker is running when it starts, but does not auto-start Docker. Make sure Docker Desktop is running (macOS) or the docker service is started (Linux).
 
 ## 3. Configure Claude Authentication
 
@@ -94,103 +94,112 @@ KEY=$(grep "^ANTHROPIC_API_KEY=" .env | cut -d= -f2)
 
 ## 4. Build Container Image
 
-Build the NanoClaw agent container:
+Build the DotClaw agent container:
 
 ```bash
 ./container/build.sh
 ```
 
-This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
+This creates the `dotclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
 
 Verify the build succeeded:
 
 ```bash
-docker images | grep nanoclaw-agent
-echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
+docker images | grep dotclaw-agent
+echo '{}' | docker run -i --entrypoint /bin/echo dotclaw-agent:latest "Container OK" || echo "Container build failed"
 ```
 
-## 5. WhatsApp Authentication
+## 5. Telegram Bot Setup
 
 **USER ACTION REQUIRED**
 
-Run the authentication script:
+Tell the user:
+> I need you to create a Telegram bot. Here's how:
+>
+> 1. Open Telegram and search for `@BotFather`
+> 2. Start a chat and send: `/newbot`
+> 3. Follow the prompts:
+>    - **Name:** Something friendly (e.g., "My Assistant" or your preferred name)
+>    - **Username:** Must end with "bot" and be unique (e.g., "my_assistant_bot")
+> 4. BotFather will give you a token like: `123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`
+> 5. **Copy this token** - you'll need it in a moment
+>
+> Let me know when you have the token.
+
+When they provide the token, save it to `.env`:
 
 ```bash
-npm run auth
+# Add to .env (append if file exists with other vars)
+echo 'TELEGRAM_BOT_TOKEN=YOUR_TOKEN_HERE' >> .env
 ```
 
+Verify the token:
+
+```bash
+source .env
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" | jq '.result.username'
+```
+
+If it returns a username, the token is valid. If it returns an error, have the user check their token.
+
+## 6. Get Telegram Chat ID
+
 Tell the user:
-> A QR code will appear. On your phone:
-> 1. Open WhatsApp
-> 2. Tap **Settings → Linked Devices → Link a Device**
-> 3. Scan the QR code
+> Now I need your Telegram chat ID so I can register you as the main channel.
+>
+> 1. Open Telegram and search for your bot (the username from BotFather)
+> 2. Start a chat with your bot and send any message (e.g., "hello")
+> 3. Let me know when you've done this.
 
-Wait for the script to output "Successfully authenticated" then continue.
+After they confirm, get the chat ID:
 
-If it says "Already authenticated", skip to the next step.
+```bash
+source .env
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates" | jq '.result[-1].message.chat'
+```
 
-## 6. Configure Assistant Name
+Save the chat ID for step 8.
+
+## 7. Configure Assistant Name
 
 Ask the user:
-> What trigger word do you want to use? (default: `Andy`)
+> What trigger word do you want to use? (default: `Rain`)
 >
-> Messages starting with `@TriggerWord` will be sent to Claude.
+> In Telegram groups, messages starting with `@TriggerWord` will be sent to Claude.
+> In your personal chat with the bot, all messages go to Claude.
 
-If they choose something other than `Andy`, update it in these places:
-1. `groups/CLAUDE.md` - Change "# Andy" and "You are Andy" to the new name
+If they choose something other than `Rain`, update it in these places:
+1. `groups/CLAUDE.md` - Change "# Rain" and "You are Rain" to the new name
 2. `groups/main/CLAUDE.md` - Same changes at the top
 3. `data/registered_groups.json` - Use `@NewName` as the trigger when registering groups
 
-Store their choice - you'll use it when creating the registered_groups.json and when telling them how to test.
+Store their choice - you'll use it when creating the registered_groups.json.
 
-## 7. Register Main Channel
+## 8. Register Main Channel
 
-Ask the user:
-> Do you want to use your **personal chat** (message yourself) or a **WhatsApp group** as your main control channel?
-
-For personal chat:
-> Send any message to yourself in WhatsApp (the "Message Yourself" chat). Tell me when done.
-
-For group:
-> Send any message in the WhatsApp group you want to use as your main channel. Tell me when done.
-
-After user confirms, start the app briefly to capture the message:
+Create/update `data/registered_groups.json` using the chat ID from step 6 and the assistant name from step 7:
 
 ```bash
-timeout 10 npm run dev || true
-```
+mkdir -p data groups/main/logs
 
-Then find the JID from the database:
-
-```bash
-# For personal chat (ends with @s.whatsapp.net)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@s.whatsapp.net' ORDER BY timestamp DESC LIMIT 5"
-
-# For group (ends with @g.us)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@g.us' ORDER BY timestamp DESC LIMIT 5"
-```
-
-Create/update `data/registered_groups.json` using the JID from above and the assistant name from step 5:
-```json
+cat > data/registered_groups.json << EOF
 {
-  "JID_HERE": {
+  "CHAT_ID_HERE": {
     "name": "main",
     "folder": "main",
     "trigger": "@ASSISTANT_NAME",
-    "added_at": "CURRENT_ISO_TIMESTAMP"
+    "added_at": "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
   }
 }
+EOF
 ```
 
-Ensure the groups folder exists:
-```bash
-mkdir -p groups/main/logs
-```
+Replace `CHAT_ID_HERE` with the actual chat ID and `@ASSISTANT_NAME` with the trigger word.
 
-## 8. Configure External Directory Access (Mount Allowlist)
+## 9. Configure External Directory Access (Mount Allowlist)
 
 Ask the user:
-> Do you want the agent to be able to access any directories **outside** the NanoClaw project?
+> Do you want the agent to be able to access any directories **outside** the DotClaw project?
 >
 > Examples: Git repositories, project folders, documents you want Claude to work on.
 >
@@ -199,8 +208,8 @@ Ask the user:
 If **no**, create an empty allowlist to make this explicit:
 
 ```bash
-mkdir -p ~/.config/nanoclaw
-cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
+mkdir -p ~/.config/dotclaw
+cat > ~/.config/dotclaw/mount-allowlist.json << 'EOF'
 {
   "allowedRoots": [],
   "blockedPatterns": [],
@@ -214,7 +223,7 @@ Skip to the next step.
 
 If **yes**, ask follow-up questions:
 
-### 8a. Collect Directory Paths
+### 9a. Collect Directory Paths
 
 Ask the user:
 > Which directories do you want to allow access to?
@@ -231,25 +240,25 @@ For each directory they provide, ask:
 > Read-write is needed for: code changes, creating files, git commits
 > Read-only is safer for: reference docs, config examples, templates
 
-### 8b. Configure Non-Main Group Access
+### 9b. Configure Non-Main Group Access
 
 Ask the user:
-> Should **non-main groups** (other WhatsApp chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
+> Should **non-main groups** (other Telegram chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
 >
 > Recommended: **Yes** - this prevents other groups from modifying files even if you grant them access to a directory.
 
-### 8c. Create the Allowlist
+### 9c. Create the Allowlist
 
 Create the allowlist file based on their answers:
 
 ```bash
-mkdir -p ~/.config/nanoclaw
+mkdir -p ~/.config/dotclaw
 ```
 
 Then write the JSON file. Example for a user who wants `~/projects` (read-write) and `~/docs` (read-only) with non-main read-only:
 
 ```bash
-cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
+cat > ~/.config/dotclaw/mount-allowlist.json << 'EOF'
 {
   "allowedRoots": [
     {
@@ -272,7 +281,7 @@ EOF
 Verify the file:
 
 ```bash
-cat ~/.config/nanoclaw/mount-allowlist.json
+cat ~/.config/dotclaw/mount-allowlist.json
 ```
 
 Tell the user:
@@ -283,7 +292,7 @@ Tell the user:
 > **Security notes:**
 > - Sensitive paths (`.ssh`, `.gnupg`, `.aws`, credentials) are always blocked
 > - This config file is stored outside the project, so agents cannot modify it
-> - Changes require restarting the NanoClaw service
+> - Changes require restarting the DotClaw service
 >
 > To grant a group access to a directory, add it to their config in `data/registered_groups.json`:
 > ```json
@@ -294,7 +303,7 @@ Tell the user:
 > }
 > ```
 
-## 9. Configure launchd Service
+## 10. Configure launchd Service
 
 Generate the plist file with correct paths automatically:
 
@@ -303,13 +312,13 @@ NODE_PATH=$(which node)
 PROJECT_PATH=$(pwd)
 HOME_PATH=$HOME
 
-cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
+cat > ~/Library/LaunchAgents/com.dotclaw.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nanoclaw</string>
+    <string>com.dotclaw</string>
     <key>ProgramArguments</key>
     <array>
         <string>${NODE_PATH}</string>
@@ -329,9 +338,9 @@ cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
         <string>${HOME_PATH}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.log</string>
+    <string>${PROJECT_PATH}/logs/dotclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.error.log</string>
+    <string>${PROJECT_PATH}/logs/dotclaw.error.log</string>
 </dict>
 </plist>
 EOF
@@ -346,29 +355,29 @@ Build and start the service:
 ```bash
 npm run build
 mkdir -p logs
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.dotclaw.plist
 ```
 
 Verify it's running:
 ```bash
-launchctl list | grep nanoclaw
+launchctl list | grep dotclaw
 ```
 
 ## 11. Test
 
 Tell the user (using the assistant name they configured):
-> Send `@ASSISTANT_NAME hello` in your registered chat.
+> Send a message to your bot in Telegram.
 
 Check the logs:
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/dotclaw.log
 ```
 
-The user should receive a response in WhatsApp.
+The user should receive a response from the bot.
 
 ## Troubleshooting
 
-**Service not starting**: Check `logs/nanoclaw.error.log`
+**Service not starting**: Check `logs/dotclaw.error.log`
 
 **Docker not running**:
 - macOS: Start Docker Desktop from Applications
@@ -380,16 +389,15 @@ The user should receive a response in WhatsApp.
 - Verify authentication: `cat .env` (should have CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)
 
 **No response to messages**:
-- Verify the trigger pattern matches (e.g., `@AssistantName` at start of message)
-- Check that the chat JID is in `data/registered_groups.json`
-- Check `logs/nanoclaw.log` for errors
+- Verify the chat ID is in `data/registered_groups.json`
+- Check `logs/dotclaw.log` for errors
+- Verify bot token: `curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"`
 
-**WhatsApp disconnected**:
-- The service will show a macOS notification
-- Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+**Bot token invalid ("Unauthorized")**:
+- Check TELEGRAM_BOT_TOKEN in .env
+- Get a new token from @BotFather if needed
 
 **Unload service**:
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.dotclaw.plist
 ```

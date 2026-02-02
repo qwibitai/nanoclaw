@@ -1,5 +1,5 @@
 /**
- * IPC-based MCP Server for NanoClaw
+ * IPC-based MCP Server for DotClaw
  * Writes messages and tasks to files for the host process to pick up
  */
 
@@ -37,12 +37,12 @@ export function createIpcMcp(ctx: IpcMcpContext) {
   const { chatJid, groupFolder, isMain } = ctx;
 
   return createSdkMcpServer({
-    name: 'nanoclaw',
+    name: 'dotclaw',
     version: '1.0.0',
     tools: [
       tool(
         'send_message',
-        'Send a message to the current WhatsApp group. Use this to proactively share information or updates.',
+        'Send a message to the current Telegram chat. Use this to proactively share information or updates.',
         {
           text: z.string().describe('The message text to send')
         },
@@ -114,7 +114,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
             const date = new Date(args.schedule_value);
             if (isNaN(date.getTime())) {
               return {
-                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00.000Z".` }],
+                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Use local ISO 8601 format like "2026-02-01T15:30:00" (no Z/UTC suffix).` }],
                 isError: true
               };
             }
@@ -280,14 +280,14 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
       tool(
         'register_group',
-        `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+        `Register a new Telegram chat so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+The folder name should be lowercase with hyphens (e.g., "family-chat"). Chat IDs are positive for DMs, negative for groups.`,
         {
-          jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+          jid: z.string().describe('The Telegram chat ID (e.g., "7205165195" for DM or "-987654321" for group)'),
           name: z.string().describe('Display name for the group'),
           folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
-          trigger: z.string().describe('Trigger word (e.g., "@Andy")')
+          trigger: z.string().describe('Trigger word (e.g., "@Rain")')
         },
         async (args) => {
           if (!isMain) {

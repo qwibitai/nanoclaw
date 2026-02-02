@@ -1,4 +1,4 @@
-# NanoClaw Agent Container
+# DotClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
 FROM node:22-slim
@@ -51,7 +51,7 @@ RUN npm run build
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks
 
 # Create entrypoint script
-# Sources env from mounted /workspace/env-dir/env if it exists (workaround for Apple Container -i bug)
+# Sources env from mounted /workspace/env-dir/env if it exists
 RUN printf '#!/bin/bash\nset -e\n[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories

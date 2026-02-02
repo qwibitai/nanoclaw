@@ -1,170 +1,167 @@
-<p align="center">
-  <img src="assets/nanoclaw-logo.png" alt="NanoClaw" width="400">
-</p>
+# DotClaw
 
-<p align="center">
-  My personal Claude assistant that runs securely in Docker containers. Lightweight and built to be understood and customized for your own needs.
-</p>
+A personal Claude assistant accessible via Telegram. Runs Claude Agent SDK in isolated Docker containers with persistent memory, scheduled tasks, and web access.
 
-## Why I Built This
+Forked from [NanoClaw](https://github.com/gavrielc/nanoclaw).
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project with a great vision. But I can't sleep well running software I don't understand with access to my life. OpenClaw has 52+ modules, 8 config management files, 45+ dependencies, and abstractions for 15 channel providers. Security is application-level (allowlists, pairing codes) rather than OS isolation. Everything runs in one Node process with shared memory.
+## Features
 
-NanoClaw gives you the same core functionality in a codebase you can understand in 8 minutes. One process. A handful of files. Agents run in actual Linux containers with filesystem isolation, not behind permission checks.
-
-## Quick Start
-
-```bash
-git clone https://github.com/gavrielc/nanoclaw.git
-cd nanoclaw
-claude
-```
-
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
-
-## Philosophy
-
-**Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
-
-**Secure by isolation.** Agents run in Docker containers. They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
-
-**AI-native.** No installation wizard; Claude Code guides setup. No monitoring dashboard; ask Claude what's happening. No debugging tools; describe the problem, Claude fixes it.
-
-**Skills over features.** Contributors shouldn't add features (e.g. support for Telegram) to the codebase. Instead, they contribute [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
-
-**Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers. Claude Code is (IMO) the best harness available.
-
-**No ToS gray areas.** Because it uses Claude Agent SDK natively with no hacks or workarounds, using your subscription with your auth token is completely legitimate (I think). No risk of being shut down for terms of service violations (I am not a lawyer).
-
-## What It Supports
-
-- **WhatsApp I/O** - Message Claude from your phone
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
-- **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Docker containers
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
-```
-
-From the main channel (your self-chat), you can manage groups and tasks:
-```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
-```
-
-## Customizing
-
-There are no configuration files to learn. Just tell Claude Code what you want:
-
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
-
-Or run `/customize` for guided changes.
-
-The codebase is small enough that Claude can safely modify it.
-
-## Contributing
-
-**Don't add features. Add skills.**
-
-If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NanoClaw installation to use Telegram.
-
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
-
-### RFS (Request for Skills)
-
-Skills we'd love to see:
-
-**Communication Channels**
-- `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
-- `/add-slack` - Add Slack
-- `/add-discord` - Add Discord
-
-**Container Runtime**
-- Already uses Docker for cross-platform support (macOS and Linux)
-
-**Platform Support**
-- `/setup-windows` - Windows via WSL2 + Docker
-
-**Session Management**
-- `/add-clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+- **Telegram Integration** - Chat with Claude from your phone via Telegram bot
+- **Container Isolation** - Each conversation runs in a Docker container with only explicitly mounted directories accessible
+- **Persistent Memory** - Per-group `CLAUDE.md` files store context that persists across sessions
+- **Scheduled Tasks** - Set up recurring or one-time tasks with cron expressions, intervals, or timestamps
+- **Web Access** - Search the web and fetch content from URLs
+- **Multi-Group Support** - Register multiple Telegram chats with isolated contexts
 
 ## Requirements
 
 - macOS or Linux
 - Node.js 20+
-- [Claude Code](https://claude.ai/download)
 - [Docker](https://docker.com/products/docker-desktop)
+- [Claude Code CLI](https://claude.ai/download)
+- Telegram bot token (create via [@BotFather](https://t.me/botfather))
+
+## Installation
+
+```bash
+git clone https://github.com/yourusername/dotclaw.git
+cd dotclaw
+npm install
+```
+
+### Configuration
+
+1. Create a `.env` file with your credentials:
+
+```bash
+# Telegram bot token from @BotFather
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# Claude authentication (choose one)
+CLAUDE_CODE_OAUTH_TOKEN=your_oauth_token   # From ~/.claude/.credentials.json
+# OR
+ANTHROPIC_API_KEY=your_api_key             # From console.anthropic.com
+```
+
+2. Build the Docker container:
+
+```bash
+./container/build.sh
+```
+
+3. Register your Telegram chat in `data/registered_groups.json`:
+
+```json
+{
+  "YOUR_CHAT_ID": {
+    "name": "main",
+    "folder": "main",
+    "trigger": "@Rain",
+    "added_at": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+### First Group Setup (Telegram)
+
+To find your chat ID:
+
+1. Message your bot (or create a group and add the bot).
+2. Use @userinfobot or @get_id_bot in Telegram to get the chat ID.
+3. Add the entry to `data/registered_groups.json` and restart the app.
+
+Example entry:
+
+```json
+{
+  "-123456789": {
+    "name": "family-chat",
+    "folder": "family-chat",
+    "trigger": "@Rain",
+    "added_at": "2024-01-01T00:00:00.000Z"
+  }
+}
+```
+
+4. Build and run:
+
+```bash
+npm run build
+npm start
+```
+
+### Running as a Service (macOS)
+
+```bash
+# Copy and configure the launchd plist
+cp launchd/com.dotclaw.plist ~/Library/LaunchAgents/
+
+# Edit the plist to set correct paths (NODE_PATH, PROJECT_ROOT, HOME)
+
+# Load the service
+launchctl load ~/Library/LaunchAgents/com.dotclaw.plist
+```
+
+## Usage
+
+Message your bot with the trigger word (default: `@Rain`):
+
+```
+@Rain what's the weather in New York?
+@Rain remind me every Monday at 9am to check my emails
+@Rain search for recent news about AI
+```
+
+In your main channel, you can manage groups and tasks:
+
+```
+@Rain list all scheduled tasks
+@Rain pause task [id]
+@Rain add a new group for "Family Chat" with chat ID -123456789
+```
+
+## Project Structure
+
+```
+dotclaw/
+├── src/
+│   ├── index.ts           # Main app: Telegram, routing, IPC
+│   ├── config.ts          # Configuration constants
+│   ├── container-runner.ts # Spawns Docker containers
+│   ├── task-scheduler.ts  # Runs scheduled tasks
+│   └── db.ts              # SQLite operations
+├── container/
+│   ├── Dockerfile         # Agent container image
+│   ├── build.sh           # Build script
+│   └── agent-runner/      # Code that runs inside containers
+├── groups/
+│   ├── global/CLAUDE.md   # Shared memory (read by all groups)
+│   └── main/CLAUDE.md     # Main channel memory
+├── data/
+│   ├── registered_groups.json
+│   └── sessions.json
+└── store/
+    └── messages.db        # SQLite database
+```
 
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Telegram (Telegraf) → SQLite → Event Handler → Docker Container (Claude Agent SDK) → Response
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with mounted directories. IPC via filesystem. No daemons, no queues, no complexity.
+- Single Node.js process handles Telegram connection, message routing, and scheduling
+- Each agent invocation spawns an isolated Docker container
+- Containers communicate back via filesystem-based IPC
+- Memory persists in `CLAUDE.md` files per group
 
-Key files:
-- `src/index.ts` - Main app: WhatsApp connection, routing, IPC
-- `src/container-runner.ts` - Spawns agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations
-- `groups/*/CLAUDE.md` - Per-group memory
+## Development
 
-## FAQ
-
-**Why WhatsApp and not Telegram/Signal/etc?**
-
-Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
-
-**Why Docker?**
-
-Docker provides cross-platform support (macOS and Linux), a large ecosystem, and mature tooling. Docker Desktop on macOS uses a lightweight Linux VM similar to other container solutions.
-
-**Can I run this on Linux?**
-
-Yes. NanoClaw uses Docker, which works on both macOS and Linux. Just install Docker and run `/setup`.
-
-**Is this secure?**
-
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
-
-**Why no configuration files?**
-
-We don't want configuration sprawl. Every user should customize it to so that the code matches exactly what they want rather than configuring a generic system. If you like having config files, tell Claude to add them.
-
-**How do I debug issues?**
-
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach.
-
-**Why isn't the setup working for me?**
-
-I don't know. Run `claude`, then run `/debug`. If claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
-
-**What changes will be accepted into the codebase?**
-
-Security fixes, bug fixes, and clear improvements to the base configuration. That's it.
-
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
-
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+```bash
+npm run dev      # Run with hot reload
+npm run build    # Compile TypeScript
+npm run typecheck # Type check without emitting
+```
 
 ## License
 

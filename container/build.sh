@@ -1,15 +1,15 @@
 #!/bin/bash
-# Build the NanoClaw agent container image
+# Build the DotClaw agent container image
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-IMAGE_NAME="nanoclaw-agent"
+IMAGE_NAME="dotclaw-agent"
 TAG="${1:-latest}"
 
-echo "Building NanoClaw agent container image..."
+echo "Building DotClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
 # Build with Docker

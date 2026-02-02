@@ -1,4 +1,4 @@
-# NanoClaw Requirements
+# DotClaw Requirements
 
 Original requirements and design decisions from the project creator.
 
@@ -8,7 +8,7 @@ Original requirements and design decisions from the project creator.
 
 This is a lightweight, secure alternative to OpenClaw (formerly ClawBot). That project became a monstrosity - 4-5 different processes running different gateways, endless configuration files, endless integrations. It's a security nightmare where agents don't run in isolated processes; there's all kinds of leaky workarounds trying to prevent them from accessing parts of the system they shouldn't. It's impossible for anyone to realistically understand the whole codebase. When you run it you're kind of just yoloing it.
 
-NanoClaw gives you the core functionality without that mess.
+DotClaw gives you the core functionality without that mess.
 
 ---
 
@@ -24,7 +24,7 @@ Instead of application-level permission systems trying to prevent agents from ac
 
 ### Built for One User
 
-This isn't a framework or a platform. It's working software for my specific needs. I use WhatsApp and Email, so it supports WhatsApp and Email. I don't use Telegram, so it doesn't support Telegram. I add the integrations I actually want, not every possible integration.
+This isn't a framework or a platform. It's working software for my specific needs. I use Telegram, so it supports Telegram. I add the integrations I actually want, not every possible integration.
 
 ### Customization = Code Changes
 
@@ -38,7 +38,7 @@ The codebase assumes you have an AI collaborator. It doesn't need to be excessiv
 
 ### Skills Over Features
 
-When people contribute, they shouldn't add "Telegram support alongside WhatsApp." They should contribute a skill like `/add-telegram` that transforms the codebase. Users fork the repo, run skills to customize, and end up with clean code that does exactly what they need - not a bloated system trying to support everyone's use case simultaneously.
+When people contribute, they shouldn't add "Slack support alongside Telegram." They should contribute a skill like `/add-slack` that transforms the codebase. Users fork the repo, run skills to customize, and end up with clean code that does exactly what they need - not a bloated system trying to support everyone's use case simultaneously.
 
 ---
 
@@ -48,11 +48,10 @@ Skills we'd love contributors to build:
 
 ### Communication Channels
 Skills to add or switch to different messaging platforms:
-- `/add-telegram` - Add Telegram as an input channel
 - `/add-slack` - Add Slack as an input channel
 - `/add-discord` - Add Discord as an input channel
+- `/add-whatsapp` - Add WhatsApp as an input channel
 - `/add-sms` - Add SMS via Twilio or similar
-- `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
 ### Container Runtime
 The project uses Docker for cross-platform support (macOS and Linux).
@@ -64,19 +63,19 @@ The project uses Docker for cross-platform support (macOS and Linux).
 
 ## Vision
 
-A personal Claude assistant accessible via WhatsApp, with minimal custom code.
+A personal Claude assistant accessible via Telegram, with minimal custom code.
 
 **Core components:**
 - **Claude Agent SDK** as the core agent
 - **Docker** for isolated agent execution
-- **WhatsApp** as the primary I/O channel
+- **Telegram** as the primary I/O channel
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
 - **Web access** for search and browsing
 - **Browser automation** via agent-browser
 
 **Implementation approach:**
-- Use existing tools (WhatsApp connector, Claude Agent SDK, MCP servers)
+- Use existing tools (Telegram bot API, Claude Agent SDK, MCP servers)
 - Minimal glue code
 - File-based systems where possible (CLAUDE.md for memory, folders for groups)
 
@@ -85,14 +84,14 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ## Architecture Decisions
 
 ### Message Routing
-- A router listens to WhatsApp and routes messages based on configuration
-- Only messages from registered groups are processed
-- Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
-- Unregistered groups are ignored completely
+- A router listens to Telegram and routes messages based on configuration
+- Only messages from registered chats are processed
+- Trigger: `@Rain` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
+- Unregistered chats are silently ignored
 
 ### Memory System
 - **Per-group memory**: Each group has a folder with its own `CLAUDE.md`
-- **Global memory**: Root `CLAUDE.md` is read by all groups, but only writable from "main" (self-chat)
+- **Global memory**: Root `CLAUDE.md` is read by all groups, but only writable from "main" (personal chat)
 - **Files**: Groups can create/read files in their folder and reference them
 - Agent runs in the group's folder, automatically inherits both CLAUDE.md files
 
@@ -124,7 +123,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Groups can have additional directories mounted via `containerConfig`
 
 ### Main Channel Privileges
-- Main channel is the admin/control group (typically self-chat)
+- Main channel is the admin/control group (typically your personal Telegram chat)
 - Can write to global memory (`groups/CLAUDE.md`)
 - Can schedule tasks for any group
 - Can view and manage tasks from all groups
@@ -134,14 +133,14 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ## Integration Points
 
-### WhatsApp
-- Using baileys library for WhatsApp Web connection
-- Messages stored in SQLite, polled by router
-- QR code authentication during setup
+### Telegram
+- Using Telegraf library for Telegram Bot API
+- Messages stored in SQLite, processed via event handler
+- Bot token authentication via @BotFather
 
 ### Scheduler
 - Built-in scheduler runs on the host, spawns containers for task execution
-- Custom `nanoclaw` MCP server (inside container) provides scheduling tools
+- Custom `dotclaw` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
 - Tasks stored in SQLite with run history
 - Scheduler loop checks for due tasks every minute
@@ -168,8 +167,8 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Each user gets a custom setup matching their exact needs
 
 ### Skills
-- `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
-- `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
+- `/setup` - Install dependencies, configure Telegram bot, start services
+- `/customize` - General-purpose skill for adding capabilities (new channels, new integrations, behavior changes)
 
 ### Deployment
 - Runs on local Mac via launchd
@@ -181,13 +180,13 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 These are the creator's settings, stored here for reference:
 
-- **Trigger**: `@Andy` (case insensitive)
-- **Response prefix**: `Andy:`
+- **Trigger**: `@Rain` (case insensitive)
+- **Response prefix**: None (Telegram bots send as themselves)
 - **Persona**: Default Claude (no custom personality)
-- **Main channel**: Self-chat (messaging yourself in WhatsApp)
+- **Main channel**: Personal Telegram chat with the bot
 
 ---
 
 ## Project Name
 
-**NanoClaw** - A reference to Clawdbot (now OpenClaw).
+**DotClaw** - A reference to Clawdbot (now OpenClaw).

@@ -1,6 +1,6 @@
-# NanoClaw Testing
+# DotClaw Testing
 
-This group is used for testing NanoClaw features and functionality.
+This group is used for testing DotClaw features and functionality.
 
 ## What You Can Do
 

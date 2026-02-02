@@ -1,5 +1,5 @@
 /**
- * Container Runner for NanoClaw
+ * Container Runner for DotClaw
  * Spawns agent execution in Docker container and handles IPC
  */
 
@@ -24,8 +24,8 @@ const logger = pino({
 });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = '---DOTCLAW_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---DOTCLAW_OUTPUT_END---';
 
 function getHomeDir(): string {
   const home = process.env.HOME || os.homedir();
@@ -69,6 +69,22 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
       containerPath: '/workspace/project',
       readonly: false
     });
+
+    // Mask .env inside the project root to avoid leaking secrets to the container
+    const envMaskDir = path.join(DATA_DIR, 'env');
+    const envMaskFile = path.join(envMaskDir, '.env-mask');
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      fs.mkdirSync(envMaskDir, { recursive: true });
+      if (!fs.existsSync(envMaskFile)) {
+        fs.writeFileSync(envMaskFile, '');
+      }
+      mounts.push({
+        hostPath: envMaskFile,
+        containerPath: '/workspace/project/.env',
+        readonly: true
+      });
+    }
 
     // Main also gets its group folder as the working directory
     mounts.push({

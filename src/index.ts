@@ -1,146 +1,182 @@
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  makeCacheableSignalKeyStore,
-  WASocket
-} from '@whiskeysockets/baileys';
+import 'dotenv/config';
+import { Telegraf } from 'telegraf';
 import pino from 'pino';
-import { exec, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  POLL_INTERVAL,
-  STORE_DIR,
   DATA_DIR,
   TRIGGER_PATTERN,
   MAIN_GROUP_FOLDER,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   TIMEZONE
 } from './config.js';
-import { RegisteredGroup, Session, NewMessage } from './types.js';
-import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessagesSince, getAllTasks, getTaskById, updateChatName, getAllChats, getLastGroupSync, setLastGroupSync } from './db.js';
+import { RegisteredGroup, Session } from './types.js';
+import { initDatabase, storeMessage, storeChatMetadata, getMessagesSince, getAllTasks, createTask, updateTask, deleteTask, getTaskById } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './container-runner.js';
-import { loadJson, saveJson } from './utils.js';
-
-const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot } from './container-runner.js';
+import { loadJson, saveJson, isSafeGroupFolder } from './utils.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
   transport: { target: 'pino-pretty', options: { colorize: true } }
 });
 
-let sock: WASocket;
-let lastTimestamp = '';
+// Initialize Telegram bot
+const telegrafBot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN!);
+
 let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 
-async function setTyping(jid: string, isTyping: boolean): Promise<void> {
+const TELEGRAM_MAX_MESSAGE_LENGTH = 4000;
+const TELEGRAM_SEND_DELAY_MS = 250;
+
+async function setTyping(chatId: string): Promise<void> {
   try {
-    await sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', jid);
+    await telegrafBot.telegram.sendChatAction(chatId, 'typing');
   } catch (err) {
-    logger.debug({ jid, err }, 'Failed to update typing status');
+    logger.debug({ chatId, err }, 'Failed to set typing indicator');
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildTriggerPattern(trigger: string): RegExp {
+  const trimmed = trigger.trim();
+  const normalized = trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
+  return new RegExp(`^${escapeRegex(normalized)}\\b`, 'i');
 }
 
 function loadState(): void {
   const statePath = path.join(DATA_DIR, 'router_state.json');
-  const state = loadJson<{ last_timestamp?: string; last_agent_timestamp?: Record<string, string> }>(statePath, {});
-  lastTimestamp = state.last_timestamp || '';
+  const state = loadJson<{ last_agent_timestamp?: Record<string, string> }>(statePath, {});
   lastAgentTimestamp = state.last_agent_timestamp || {};
   sessions = loadJson(path.join(DATA_DIR, 'sessions.json'), {});
-  registeredGroups = loadJson(path.join(DATA_DIR, 'registered_groups.json'), {});
+  const loadedGroups = loadJson(path.join(DATA_DIR, 'registered_groups.json'), {});
+  const sanitizedGroups: Record<string, RegisteredGroup> = {};
+  const usedFolders = new Set<string>();
+  let invalidCount = 0;
+  let duplicateCount = 0;
+
+  for (const [chatId, group] of Object.entries(loadedGroups as Record<string, RegisteredGroup>)) {
+    if (!group || typeof group !== 'object') {
+      logger.warn({ chatId }, 'Skipping registered group with invalid entry');
+      invalidCount += 1;
+      continue;
+    }
+    if (typeof group.name !== 'string' || group.name.trim() === '') {
+      logger.warn({ chatId }, 'Skipping registered group with invalid name');
+      invalidCount += 1;
+      continue;
+    }
+    if (typeof group.trigger !== 'string' || group.trigger.trim() === '') {
+      logger.warn({ chatId }, 'Skipping registered group with invalid trigger');
+      invalidCount += 1;
+      continue;
+    }
+    if (!isSafeGroupFolder(group.folder, GROUPS_DIR)) {
+      logger.warn({ chatId, folder: group.folder }, 'Skipping registered group with invalid folder');
+      invalidCount += 1;
+      continue;
+    }
+    if (usedFolders.has(group.folder)) {
+      logger.warn({ chatId, folder: group.folder }, 'Skipping registered group with duplicate folder');
+      duplicateCount += 1;
+      continue;
+    }
+    usedFolders.add(group.folder);
+    sanitizedGroups[chatId] = group;
+  }
+
+  registeredGroups = sanitizedGroups;
+  if (invalidCount > 0 || duplicateCount > 0) {
+    logger.error({ invalidCount, duplicateCount }, 'Registered groups contained invalid or duplicate folders');
+  }
   logger.info({ groupCount: Object.keys(registeredGroups).length }, 'State loaded');
 }
 
 function saveState(): void {
-  saveJson(path.join(DATA_DIR, 'router_state.json'), { last_timestamp: lastTimestamp, last_agent_timestamp: lastAgentTimestamp });
+  saveJson(path.join(DATA_DIR, 'router_state.json'), { last_agent_timestamp: lastAgentTimestamp });
   saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
 }
 
-function registerGroup(jid: string, group: RegisteredGroup): void {
-  registeredGroups[jid] = group;
+function registerGroup(chatId: string, group: RegisteredGroup): void {
+  if (!isSafeGroupFolder(group.folder, GROUPS_DIR)) {
+    logger.warn({ chatId, folder: group.folder }, 'Refusing to register group with invalid folder');
+    return;
+  }
+  const folderCollision = Object.values(registeredGroups).some(g => g.folder === group.folder);
+  if (folderCollision) {
+    logger.warn({ chatId, folder: group.folder }, 'Refusing to register group with duplicate folder');
+    return;
+  }
+  registeredGroups[chatId] = group;
   saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
 
   // Create group folder
   const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
-  logger.info({ jid, name: group.name, folder: group.folder }, 'Group registered');
+  logger.info({ chatId, name: group.name, folder: group.folder }, 'Group registered');
 }
 
-/**
- * Sync group metadata from WhatsApp.
- * Fetches all participating groups and stores their names in the database.
- * Called on startup, daily, and on-demand via IPC.
- */
-async function syncGroupMetadata(force = false): Promise<void> {
-  // Check if we need to sync (skip if synced recently, unless forced)
-  if (!force) {
-    const lastSync = getLastGroupSync();
-    if (lastSync) {
-      const lastSyncTime = new Date(lastSync).getTime();
-      const now = Date.now();
-      if (now - lastSyncTime < GROUP_SYNC_INTERVAL_MS) {
-        logger.debug({ lastSync }, 'Skipping group sync - synced recently');
-        return;
-      }
-    }
-  }
-
+async function sendMessage(chatId: string, text: string): Promise<void> {
   try {
-    logger.info('Syncing group metadata from WhatsApp...');
-    const groups = await sock.groupFetchAllParticipating();
-
-    let count = 0;
-    for (const [jid, metadata] of Object.entries(groups)) {
-      if (metadata.subject) {
-        updateChatName(jid, metadata.subject);
-        count++;
+    // Telegram bots send messages as themselves, no prefix needed
+    if (text.length <= TELEGRAM_MAX_MESSAGE_LENGTH) {
+      await telegrafBot.telegram.sendMessage(chatId, text);
+    } else {
+      for (let i = 0; i < text.length; i += TELEGRAM_MAX_MESSAGE_LENGTH) {
+        const chunk = text.slice(i, i + TELEGRAM_MAX_MESSAGE_LENGTH);
+        await telegrafBot.telegram.sendMessage(chatId, chunk);
+        if (i + TELEGRAM_MAX_MESSAGE_LENGTH < text.length) {
+          await sleep(TELEGRAM_SEND_DELAY_MS);
+        }
       }
     }
-
-    setLastGroupSync();
-    logger.info({ count }, 'Group metadata synced');
+    logger.info({ chatId, length: text.length }, 'Message sent');
   } catch (err) {
-    logger.error({ err }, 'Failed to sync group metadata');
+    logger.error({ chatId, err }, 'Failed to send message');
   }
 }
 
-/**
- * Get available groups list for the agent.
- * Returns groups ordered by most recent activity.
- */
-function getAvailableGroups(): AvailableGroup[] {
-  const chats = getAllChats();
-  const registeredJids = new Set(Object.keys(registeredGroups));
-
-  return chats
-    .filter(c => c.jid !== '__group_sync__' && c.jid.endsWith('@g.us'))
-    .map(c => ({
-      jid: c.jid,
-      name: c.name,
-      lastActivity: c.last_message_time,
-      isRegistered: registeredJids.has(c.jid)
-    }));
+interface TelegramMessage {
+  chatId: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: string;
+  isGroup: boolean;
 }
 
-async function processMessage(msg: NewMessage): Promise<void> {
-  const group = registeredGroups[msg.chat_jid];
-  if (!group) return;
+async function processMessage(msg: TelegramMessage): Promise<void> {
+  const group = registeredGroups[msg.chatId];
+  if (!group) {
+    logger.debug({ chatId: msg.chatId }, 'Message from unregistered Telegram chat');
+    return;
+  }
 
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const triggerPattern = group.trigger
+    ? buildTriggerPattern(group.trigger)
+    : TRIGGER_PATTERN;
 
   // Main group responds to all messages; other groups require trigger prefix
-  if (!isMainGroup && !TRIGGER_PATTERN.test(content)) return;
+  if (!isMainGroup && !triggerPattern.test(content)) return;
 
   // Get all messages since last agent interaction so the session has full context
-  const sinceTimestamp = lastAgentTimestamp[msg.chat_jid] || '';
-  const missedMessages = getMessagesSince(msg.chat_jid, sinceTimestamp, ASSISTANT_NAME);
+  const sinceTimestamp = lastAgentTimestamp[msg.chatId] || '';
+  const missedMessages = getMessagesSince(msg.chatId, sinceTimestamp, ASSISTANT_NAME);
 
   const lines = missedMessages.map(m => {
     // Escape XML special characters in content
@@ -153,21 +189,25 @@ async function processMessage(msg: NewMessage): Promise<void> {
   });
   const prompt = `<messages>\n${lines.join('\n')}\n</messages>`;
 
-  if (!prompt) return;
+  if (missedMessages.length === 0) return;
 
   logger.info({ group: group.name, messageCount: missedMessages.length }, 'Processing message');
 
-  await setTyping(msg.chat_jid, true);
-  const response = await runAgent(group, prompt, msg.chat_jid);
-  await setTyping(msg.chat_jid, false);
+  await setTyping(msg.chatId);
+  let response: string | null = null;
+  try {
+    response = await runAgent(group, prompt, msg.chatId);
+  } finally {
+    lastAgentTimestamp[msg.chatId] = msg.timestamp;
+    saveState();
+  }
 
   if (response) {
-    lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
-    await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    await sendMessage(msg.chatId, response);
   }
 }
 
-async function runAgent(group: RegisteredGroup, prompt: string, chatJid: string): Promise<string | null> {
+async function runAgent(group: RegisteredGroup, prompt: string, chatId: string): Promise<string | null> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const sessionId = sessions[group.folder];
 
@@ -183,16 +223,16 @@ async function runAgent(group: RegisteredGroup, prompt: string, chatJid: string)
     next_run: t.next_run
   })));
 
-  // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(group.folder, isMain, availableGroups, new Set(Object.keys(registeredGroups)));
+  // For Telegram, we don't have dynamic group discovery like WhatsApp
+  // Just pass the registered groups
+  writeGroupsSnapshot(group.folder, isMain, [], new Set(Object.keys(registeredGroups)));
 
   try {
     const output = await runContainerAgent(group, {
       prompt,
       sessionId,
       groupFolder: group.folder,
-      chatJid,
+      chatJid: chatId,
       isMain
     });
 
@@ -213,20 +253,17 @@ async function runAgent(group: RegisteredGroup, prompt: string, chatJid: string)
   }
 }
 
-async function sendMessage(jid: string, text: string): Promise<void> {
-  try {
-    await sock.sendMessage(jid, { text });
-    logger.info({ jid, length: text.length }, 'Message sent');
-  } catch (err) {
-    logger.error({ jid, err }, 'Failed to send message');
-  }
-}
-
 function startIpcWatcher(): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
 
+  let processing = false;
+  let scheduled = false;
+  let pollingTimer: NodeJS.Timeout | null = null;
+
   const processIpcFiles = async () => {
+    if (processing) return;
+    processing = true;
     // Scan all group IPC directories (identity determined by directory)
     let groupFolders: string[];
     try {
@@ -236,7 +273,7 @@ function startIpcWatcher(): void {
       });
     } catch (err) {
       logger.error({ err }, 'Error reading IPC base directory');
-      setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+      processing = false;
       return;
     }
 
@@ -257,7 +294,7 @@ function startIpcWatcher(): void {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
-                  await sendMessage(data.chatJid, `${ASSISTANT_NAME}: ${data.text}`);
+                  await sendMessage(data.chatJid, data.text);
                   logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
                 } else {
                   logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
@@ -300,11 +337,55 @@ function startIpcWatcher(): void {
       }
     }
 
-    setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
+    processing = false;
   };
 
-  processIpcFiles();
-  logger.info('IPC watcher started (per-group namespaces)');
+  const scheduleProcess = () => {
+    if (scheduled) return;
+    scheduled = true;
+    setTimeout(async () => {
+      scheduled = false;
+      await processIpcFiles();
+    }, 100);
+  };
+
+  let watcherActive = false;
+  let watcher: fs.FSWatcher | null = null;
+  try {
+    watcher = fs.watch(ipcBaseDir, { recursive: true }, () => {
+      scheduleProcess();
+    });
+    watcher.on('error', (err) => {
+      logger.warn({ err }, 'IPC watcher error; falling back to polling');
+      watcher?.close();
+      if (!pollingTimer) {
+        const poll = () => {
+          scheduleProcess();
+          pollingTimer = setTimeout(poll, IPC_POLL_INTERVAL);
+        };
+        poll();
+      }
+    });
+    watcherActive = true;
+  } catch (err) {
+    logger.warn({ err }, 'IPC watch unsupported; falling back to polling');
+  }
+
+  if (!watcherActive) {
+    const poll = () => {
+      scheduleProcess();
+      pollingTimer = setTimeout(poll, IPC_POLL_INTERVAL);
+    };
+    poll();
+  } else {
+    scheduleProcess();
+  }
+
+  if (pollingTimer) {
+    logger.info('IPC watcher started (polling)');
+  } else {
+    logger.info('IPC watcher started (fs.watch)');
+  }
 }
 
 async function processTaskIpc(
@@ -324,11 +405,9 @@ async function processTaskIpc(
     trigger?: string;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
-  sourceGroup: string,  // Verified identity from IPC directory
-  isMain: boolean       // Verified from directory path
+  sourceGroup: string,
+  isMain: boolean
 ): Promise<void> {
-  // Import db functions dynamically to avoid circular deps
-  const { createTask, updateTask, deleteTask, getTaskById: getTask } = await import('./db.js');
   const { CronExpressionParser } = await import('cron-parser');
 
   switch (data.type) {
@@ -341,12 +420,12 @@ async function processTaskIpc(
           break;
         }
 
-        // Resolve the correct JID for the target group (don't trust IPC payload)
-        const targetJid = Object.entries(registeredGroups).find(
+        // Resolve the correct chat ID for the target group (don't trust IPC payload)
+        const targetChatId = Object.entries(registeredGroups).find(
           ([, group]) => group.folder === targetGroup
         )?.[0];
 
-        if (!targetJid) {
+        if (!targetChatId) {
           logger.warn({ targetGroup }, 'Cannot schedule task: target group not registered');
           break;
         }
@@ -385,7 +464,7 @@ async function processTaskIpc(
         createTask({
           id: taskId,
           group_folder: targetGroup,
-          chat_jid: targetJid,
+          chat_jid: targetChatId,
           prompt: data.prompt,
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
@@ -400,7 +479,7 @@ async function processTaskIpc(
 
     case 'pause_task':
       if (data.taskId) {
-        const task = getTask(data.taskId);
+        const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'paused' });
           logger.info({ taskId: data.taskId, sourceGroup }, 'Task paused via IPC');
@@ -412,7 +491,7 @@ async function processTaskIpc(
 
     case 'resume_task':
       if (data.taskId) {
-        const task = getTask(data.taskId);
+        const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           updateTask(data.taskId, { status: 'active' });
           logger.info({ taskId: data.taskId, sourceGroup }, 'Task resumed via IPC');
@@ -424,27 +503,13 @@ async function processTaskIpc(
 
     case 'cancel_task':
       if (data.taskId) {
-        const task = getTask(data.taskId);
+        const task = getTaskById(data.taskId);
         if (task && (isMain || task.group_folder === sourceGroup)) {
           deleteTask(data.taskId);
           logger.info({ taskId: data.taskId, sourceGroup }, 'Task cancelled via IPC');
         } else {
           logger.warn({ taskId: data.taskId, sourceGroup }, 'Unauthorized task cancel attempt');
         }
-      }
-      break;
-
-    case 'refresh_groups':
-      // Only main group can request a refresh
-      if (isMain) {
-        logger.info({ sourceGroup }, 'Group metadata refresh requested via IPC');
-        await syncGroupMetadata(true);
-        // Write updated snapshot immediately
-        const availableGroups = getAvailableGroups();
-        const { writeGroupsSnapshot: writeGroups } = await import('./container-runner.js');
-        writeGroups(sourceGroup, true, availableGroups, new Set(Object.keys(registeredGroups)));
-      } else {
-        logger.warn({ sourceGroup }, 'Unauthorized refresh_groups attempt blocked');
       }
       break;
 
@@ -472,106 +537,52 @@ async function processTaskIpc(
   }
 }
 
-async function connectWhatsApp(): Promise<void> {
-  const authDir = path.join(STORE_DIR, 'auth');
-  fs.mkdirSync(authDir, { recursive: true });
+function setupTelegramHandlers(): void {
+  // Handle all text messages
+  telegrafBot.on('message', async (ctx) => {
+    if (!ctx.message || !('text' in ctx.message)) return;
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const chatId = String(ctx.chat.id);
+    const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+    const senderId = String(ctx.from?.id || ctx.chat.id);
+    const senderName = ctx.from?.first_name || ctx.from?.username || 'User';
+    const content = ctx.message.text;
+    const timestamp = new Date(ctx.message.date * 1000).toISOString();
 
-  sock = makeWASocket({
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
-    printQRInTerminal: false,
-    logger,
-    browser: ['NanoClaw', 'Chrome', '1.0.0']
-  });
+    logger.info({ chatId, isGroup, senderName }, `Telegram message: ${content.substring(0, 50)}...`);
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    // Ensure chat exists in database (required for foreign key)
+    const chatName = ctx.chat.type === 'private'
+      ? (ctx.from?.first_name || ctx.from?.username || 'Private Chat')
+      : ('title' in ctx.chat ? ctx.chat.title : 'Group Chat');
+    storeChatMetadata(chatId, timestamp, chatName);
 
-    if (qr) {
-      const msg = 'WhatsApp authentication required. Run /setup in Claude Code.';
-      logger.error(msg);
-      exec(`osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`);
-      setTimeout(() => process.exit(1), 1000);
-    }
+    // Store message in database
+    storeMessage(
+      String(ctx.message.message_id),
+      chatId,
+      senderId,
+      senderName,
+      content,
+      timestamp,
+      false
+    );
 
-    if (connection === 'close') {
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-      const shouldReconnect = reason !== DisconnectReason.loggedOut;
-      logger.info({ reason, shouldReconnect }, 'Connection closed');
-
-      if (shouldReconnect) {
-        logger.info('Reconnecting...');
-        connectWhatsApp();
-      } else {
-        logger.info('Logged out. Run /setup to re-authenticate.');
-        process.exit(0);
-      }
-    } else if (connection === 'open') {
-      logger.info('Connected to WhatsApp');
-      // Sync group metadata on startup (respects 24h cache)
-      syncGroupMetadata().catch(err => logger.error({ err }, 'Initial group sync failed'));
-      // Set up daily sync timer
-      setInterval(() => {
-        syncGroupMetadata().catch(err => logger.error({ err }, 'Periodic group sync failed'));
-      }, GROUP_SYNC_INTERVAL_MS);
-      startSchedulerLoop({
-        sendMessage,
-        registeredGroups: () => registeredGroups,
-        getSessions: () => sessions
-      });
-      startIpcWatcher();
-      startMessageLoop();
-    }
-  });
-
-  sock.ev.on('creds.update', saveCreds);
-
-  sock.ev.on('messages.upsert', ({ messages }) => {
-    for (const msg of messages) {
-      if (!msg.message) continue;
-      const chatJid = msg.key.remoteJid;
-      if (!chatJid || chatJid === 'status@broadcast') continue;
-
-      const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
-
-      // Always store chat metadata for group discovery
-      storeChatMetadata(chatJid, timestamp);
-
-      // Only store full message content for registered groups
-      if (registeredGroups[chatJid]) {
-        storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined);
-      }
-    }
-  });
-}
-
-async function startMessageLoop(): Promise<void> {
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
-
-  while (true) {
+    // Process through agent
     try {
-      const jids = Object.keys(registeredGroups);
-      const { messages } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
-
-      if (messages.length > 0) logger.info({ count: messages.length }, 'New messages');
-      for (const msg of messages) {
-        try {
-          await processMessage(msg);
-          // Only advance timestamp after successful processing for at-least-once delivery
-          lastTimestamp = msg.timestamp;
-          saveState();
-        } catch (err) {
-          logger.error({ err, msg: msg.id }, 'Error processing message, will retry');
-          // Stop processing this batch - failed message will be retried next loop
-          break;
-        }
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in message loop');
+      await processMessage({
+        chatId,
+        senderId,
+        senderName,
+        content,
+        timestamp,
+        isGroup
+      });
+    } catch (error) {
+      logger.error({ error, chatId }, 'Error processing Telegram message');
+      await telegrafBot.telegram.sendMessage(chatId, 'Sorry, something went wrong.');
     }
-    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
-  }
+  });
 }
 
 function ensureDockerRunning(): void {
@@ -594,14 +605,64 @@ function ensureDockerRunning(): void {
 }
 
 async function main(): Promise<void> {
+  const envPath = path.join(process.cwd(), '.env');
+  try {
+    const envStat = fs.existsSync(envPath) ? fs.statSync(envPath) : null;
+    if (!envStat || envStat.size === 0) {
+      logger.warn({ envPath }, '.env is missing or empty; set TELEGRAM_BOT_TOKEN and Claude auth');
+    }
+  } catch (err) {
+    logger.warn({ envPath, err }, 'Failed to check .env file');
+  }
+
+  // Validate Telegram token
+  if (!process.env.TELEGRAM_BOT_TOKEN) {
+    throw new Error(
+      'TELEGRAM_BOT_TOKEN environment variable is required.\n' +
+      'Create a bot with @BotFather and add the token to your .env file at: ' +
+      envPath
+    );
+  }
+
   ensureDockerRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
-  await connectWhatsApp();
+
+  // Set up Telegram message handlers
+  setupTelegramHandlers();
+
+  // Start Telegram bot
+  try {
+    telegrafBot.launch();
+    logger.info('Telegram bot started');
+
+    // Graceful shutdown
+    process.once('SIGINT', () => {
+      logger.info('Shutting down Telegram bot');
+      telegrafBot.stop('SIGINT');
+    });
+    process.once('SIGTERM', () => {
+      logger.info('Shutting down Telegram bot');
+      telegrafBot.stop('SIGTERM');
+    });
+
+    // Start scheduler and IPC watcher
+    startSchedulerLoop({
+      sendMessage,
+      registeredGroups: () => registeredGroups,
+      getSessions: () => sessions
+    });
+    startIpcWatcher();
+
+    logger.info(`DotClaw running on Telegram (trigger: @${ASSISTANT_NAME})`);
+  } catch (error) {
+    logger.error({ error }, 'Failed to start Telegram bot');
+    process.exit(1);
+  }
 }
 
 main().catch(err => {
-  logger.error({ err }, 'Failed to start NanoClaw');
+  logger.error({ err }, 'Failed to start DotClaw');
   process.exit(1);
 });

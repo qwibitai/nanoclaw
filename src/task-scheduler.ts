@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 import { CronExpressionParser } from 'cron-parser';
-import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks } from './db.js';
+import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks, updateTask } from './db.js';
 import { ScheduledTask, RegisteredGroup } from './types.js';
 import { GROUPS_DIR, SCHEDULER_POLL_INTERVAL, DATA_DIR, MAIN_GROUP_FOLDER, TIMEZONE } from './config.js';
 import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
@@ -95,17 +95,34 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
   });
 
   let nextRun: string | null = null;
+  let scheduleError: string | null = null;
   if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, { tz: TIMEZONE });
-    nextRun = interval.next().toISOString();
+    try {
+      const interval = CronExpressionParser.parse(task.schedule_value, { tz: TIMEZONE });
+      nextRun = interval.next().toISOString();
+    } catch (err) {
+      scheduleError = `Invalid cron expression: ${err instanceof Error ? err.message : String(err)}`;
+    }
   } else if (task.schedule_type === 'interval') {
     const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
+    if (isNaN(ms) || ms <= 0) {
+      scheduleError = `Invalid interval: "${task.schedule_value}"`;
+    } else {
+      nextRun = new Date(Date.now() + ms).toISOString();
+    }
   }
   // 'once' tasks have no next run
 
+  if (scheduleError) {
+    error = error ? `${error}; ${scheduleError}` : scheduleError;
+  }
+
   const resultSummary = error ? `Error: ${error}` : (result ? result.slice(0, 200) : 'Completed');
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  if (scheduleError) {
+    updateTask(task.id, { status: 'paused', next_run: null });
+  }
 }
 
 export function startSchedulerLoop(deps: SchedulerDependencies): void {

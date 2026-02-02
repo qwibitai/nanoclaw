@@ -1,6 +1,6 @@
-# NanoClaw Specification
+# DotClaw Specification
 
-A personal Claude assistant accessible via WhatsApp, with persistent memory per conversation, scheduled tasks, and email integration.
+A personal Claude assistant accessible via Telegram, with persistent memory per conversation, scheduled tasks, and email integration.
 
 ---
 
@@ -29,16 +29,16 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌──────────────┐                     ┌────────────────────┐        │
-│  │  WhatsApp    │────────────────────▶│   SQLite Database  │        │
-│  │  (baileys)   │◀────────────────────│   (messages.db)    │        │
+│  │   Telegram   │────────────────────▶│   SQLite Database  │        │
+│  │  (telegraf)  │◀────────────────────│   (messages.db)    │        │
 │  └──────────────┘   store/send        └─────────┬──────────┘        │
 │                                                  │                   │
 │         ┌────────────────────────────────────────┘                   │
 │         │                                                            │
 │         ▼                                                            │
 │  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐  │
-│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │  │
-│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (file-based) │  │
+│  │  Event Handler   │    │  Scheduler Loop  │    │  IPC Watcher  │  │
+│  │  (on message)    │    │  (checks tasks)  │    │  (file-based) │  │
 │  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘  │
 │           │                       │                                  │
 │           └───────────┬───────────┘                                  │
@@ -62,7 +62,7 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 │  │    • Read, Write, Edit, Glob, Grep (file operations)           │   │
 │  │    • WebSearch, WebFetch (internet access)                     │   │
 │  │    • agent-browser (browser automation)                        │   │
-│  │    • mcp__nanoclaw__* (scheduler tools via IPC)                │   │
+│  │    • mcp__dotclaw__* (scheduler tools via IPC)                │   │
 │  │                                                                │   │
 │  └──────────────────────────────────────────────────────────────┘   │
 │                                                                      │
@@ -73,8 +73,8 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| WhatsApp Connection | Node.js (@whiskeysockets/baileys) | Connect to WhatsApp, send/receive messages |
-| Message Storage | SQLite (better-sqlite3) | Store messages for polling |
+| Telegram Connection | Node.js (telegraf) | Connect to Telegram Bot API, send/receive messages |
+| Message Storage | SQLite (better-sqlite3) | Store messages for context |
 | Container Runtime | Docker | Isolated containers for agent execution |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
@@ -85,7 +85,7 @@ A personal Claude assistant accessible via WhatsApp, with persistent memory per 
 ## Folder Structure
 
 ```
-nanoclaw/
+dotclaw/
 ├── CLAUDE.md                      # Project context for Claude Code
 ├── docs/
 │   ├── SPEC.md                    # This specification document
@@ -98,14 +98,13 @@ nanoclaw/
 ├── .gitignore
 │
 ├── src/
-│   ├── index.ts                   # Main application (WhatsApp + routing)
+│   ├── index.ts                   # Main application (Telegram + routing)
 │   ├── config.ts                  # Configuration constants
 │   ├── types.ts                   # TypeScript interfaces
 │   ├── utils.ts                   # Generic utility functions
 │   ├── db.ts                      # Database initialization and queries
-│   ├── whatsapp-auth.ts           # Standalone WhatsApp authentication
 │   ├── task-scheduler.ts          # Runs scheduled tasks when due
-│   └── container-runner.ts        # Spawns agents in Apple Containers
+│   └── container-runner.ts        # Spawns agents in Docker containers
 │
 ├── container/
 │   ├── Dockerfile                 # Container image (runs as 'node' user, includes Claude Code CLI)
@@ -132,7 +131,7 @@ nanoclaw/
 │
 ├── groups/
 │   ├── CLAUDE.md                  # Global memory (all groups read this)
-│   ├── main/                      # Self-chat (main control channel)
+│   ├── main/                      # Personal chat (main control channel)
 │   │   ├── CLAUDE.md              # Main channel memory
 │   │   └── logs/                  # Task execution logs
 │   └── {Group Name}/              # Per-group folders (created on registration)
@@ -141,23 +140,22 @@ nanoclaw/
 │       └── *.md                   # Files created by the agent
 │
 ├── store/                         # Local data (gitignored)
-│   ├── auth/                      # WhatsApp authentication state
 │   └── messages.db                # SQLite database (messages, scheduled_tasks, task_run_logs)
 │
 ├── data/                          # Application state (gitignored)
 │   ├── sessions.json              # Active session IDs per group
-│   ├── registered_groups.json     # Group JID → folder mapping
-│   ├── router_state.json          # Last processed timestamp + last agent timestamps
+│   ├── registered_groups.json     # Chat ID → folder mapping
+│   ├── router_state.json          # Last agent timestamps
 │   ├── env/env                    # Copy of .env for container mounting
 │   └── ipc/                       # Container IPC (messages/, tasks/)
 │
 ├── logs/                          # Runtime logs (gitignored)
-│   ├── nanoclaw.log               # Host stdout
-│   └── nanoclaw.error.log         # Host stderr
+│   ├── dotclaw.log               # Host stdout
+│   └── dotclaw.error.log         # Host stderr
 │   # Note: Per-container logs are in groups/{folder}/logs/container-*.log
 │
 └── launchd/
-    └── com.nanoclaw.plist         # macOS service configuration
+    └── com.dotclaw.plist         # macOS service configuration
 ```
 
 ---
@@ -169,7 +167,7 @@ Configuration constants are in `src/config.ts`:
 ```typescript
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Rain';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -180,14 +178,14 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 // Container configuration
-export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'dotclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '300000', 10);
 export const IPC_POLL_INTERVAL = 1000;
 
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 ```
 
-**Note:** Paths must be absolute for Apple Container volume mounts to work correctly.
+**Note:** Paths must be absolute for Docker volume mounts to work correctly.
 
 ### Container Configuration
 
@@ -195,10 +193,10 @@ Groups can have additional directories mounted via `containerConfig` in `data/re
 
 ```json
 {
-  "1234567890@g.us": {
+  "-987654321": {
     "name": "Dev Team",
     "folder": "dev-team",
-    "trigger": "@Andy",
+    "trigger": "@Rain",
     "added_at": "2026-01-31T12:00:00Z",
     "containerConfig": {
       "additionalMounts": [
@@ -233,7 +231,16 @@ The token can be extracted from `~/.claude/.credentials.json` if you're logged i
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and mounted into the container at `/workspace/env-dir/env`, then sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent and keeps credentials out of process listings.
+Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and mounted into the container at `/workspace/env-dir/env`, then sourced by the entrypoint script.
+
+### Telegram Bot Token
+
+Add your Telegram bot token to `.env`:
+```bash
+TELEGRAM_BOT_TOKEN=123456789:ABC-DEF...
+```
+
+Create a bot via @BotFather on Telegram to get your token.
 
 ### Changing the Assistant Name
 
@@ -243,14 +250,12 @@ Set the `ASSISTANT_NAME` environment variable:
 ASSISTANT_NAME=Bot npm start
 ```
 
-Or edit the default in `src/config.ts`. This changes:
-- The trigger pattern (messages must start with `@YourName`)
-- The response prefix (`YourName:` added automatically)
+Or edit the default in `src/config.ts`. This changes the trigger pattern (messages must start with `@YourName` in groups).
 
 ### Placeholder Values in launchd
 
 Files with `{{PLACEHOLDER}}` values need to be configured:
-- `{{PROJECT_ROOT}}` - Absolute path to your nanoclaw installation
+- `{{PROJECT_ROOT}}` - Absolute path to your dotclaw installation
 - `{{NODE_PATH}}` - Path to node binary (detected via `which node`)
 - `{{HOME}}` - User's home directory
 
@@ -258,7 +263,7 @@ Files with `{{PLACEHOLDER}}` values need to be configured:
 
 ## Memory System
 
-NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
+DotClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 ### Memory Hierarchy
 
@@ -282,7 +287,7 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
    - Agent can create files like `notes.md`, `research.md` in the group folder
 
 3. **Main Channel Privileges**
-   - Only the "main" group (self-chat) can write to global memory
+   - Only the "main" group (personal chat) can write to global memory
    - Main can manage registered groups and schedule tasks for any group
    - Main can configure additional directory mounts for any group
    - All groups have Bash access (safe because it runs inside container)
@@ -303,7 +308,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 ```json
 {
   "main": "session-abc123",
-  "Family Chat": "session-def456"
+  "family-chat": "session-def456"
 }
 ```
 
@@ -314,21 +319,21 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 ### Incoming Message Flow
 
 ```
-1. User sends WhatsApp message
+1. User sends Telegram message
    │
    ▼
-2. Baileys receives message via WhatsApp Web protocol
+2. Telegraf receives message via Bot API
    │
    ▼
 3. Message stored in SQLite (store/messages.db)
    │
    ▼
-4. Message loop polls SQLite (every 2 seconds)
+4. Event handler processes immediately
    │
    ▼
 5. Router checks:
-   ├── Is chat_jid in registered_groups.json? → No: ignore
-   └── Does message start with @Assistant? → No: ignore
+   ├── Is chat_id in registered_groups.json? → No: ignore
+   └── Does message start with @Assistant (in groups)? → No: ignore
    │
    ▼
 6. Router catches up conversation:
@@ -341,15 +346,15 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    ├── cwd: groups/{group-name}/
    ├── prompt: conversation history + current message
    ├── resume: session_id (for continuity)
-   └── mcpServers: nanoclaw (scheduler)
+   └── mcpServers: dotclaw (scheduler)
    │
    ▼
 8. Claude processes message:
    ├── Reads CLAUDE.md files for context
-   └── Uses tools as needed (search, email, etc.)
+   └── Uses tools as needed (search, etc.)
    │
    ▼
-9. Router prefixes response with assistant name and sends via WhatsApp
+9. Router sends response via Telegram (bot sends as itself)
    │
    ▼
 10. Router updates last agent timestamp and saves session ID
@@ -357,11 +362,13 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### Trigger Word Matching
 
-Messages must start with the trigger pattern (default: `@Andy`):
-- `@Andy what's the weather?` → ✅ Triggers Claude
+In groups, messages must start with the trigger pattern (default: `@Rain`):
+- `@Rain what's the weather?` → ✅ Triggers Claude
 - `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
+- `Hey @Rain` → ❌ Ignored (trigger not at start)
 - `What's up?` → ❌ Ignored (no trigger)
+
+In the main channel (personal DM), all messages trigger the agent.
 
 ### Conversation Catch-Up
 
@@ -370,7 +377,7 @@ When a triggered message arrives, the agent receives all messages since its last
 ```
 [Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
 [Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
+[Jan 31 2:35 PM] John: @Rain what toppings do you recommend?
 ```
 
 This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
@@ -383,22 +390,22 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| `@Assistant [message]` | `@Rain what's the weather?` | Talk to Claude |
 
 ### Commands Available in Main Channel Only
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| `@Assistant add group "Name"` | `@Andy add group "Family Chat"` | Register a new group |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"` | Unregister a group |
-| `@Assistant list groups` | `@Andy list groups` | Show registered groups |
-| `@Assistant remember [fact]` | `@Andy remember I prefer dark mode` | Add to global memory |
+| `@Assistant add group [chat_id]` | `@Rain add group "-987654321"` | Register a new group |
+| `@Assistant remove group [name]` | `@Rain remove group "work-team"` | Unregister a group |
+| `@Assistant list groups` | `@Rain list groups` | Show registered groups |
+| `@Assistant remember [fact]` | `@Rain remember I prefer dark mode` | Add to global memory |
 
 ---
 
 ## Scheduled Tasks
 
-NanoClaw has a built-in scheduler that runs tasks as full agents in their group's context.
+DotClaw has a built-in scheduler that runs tasks as full agents in their group's context.
 
 ### How Scheduling Works
 
@@ -418,9 +425,9 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 ### Creating a Task
 
 ```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
+User: @Rain remind me every Monday at 9am to review the weekly metrics
 
-Claude: [calls mcp__nanoclaw__schedule_task]
+Claude: [calls mcp__dotclaw__schedule_task]
         {
           "prompt": "Send a reminder to review weekly metrics. Be encouraging!",
           "schedule_type": "cron",
@@ -433,9 +440,9 @@ Claude: Done! I'll remind you every Monday at 9am.
 ### One-Time Tasks
 
 ```
-User: @Andy at 5pm today, send me a summary of today's emails
+User: @Rain at 5pm today, send me a summary of today's emails
 
-Claude: [calls mcp__nanoclaw__schedule_task]
+Claude: [calls mcp__dotclaw__schedule_task]
         {
           "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
           "schedule_type": "once",
@@ -446,22 +453,22 @@ Claude: [calls mcp__nanoclaw__schedule_task]
 ### Managing Tasks
 
 From any group:
-- `@Andy list my scheduled tasks` - View tasks for this group
-- `@Andy pause task [id]` - Pause a task
-- `@Andy resume task [id]` - Resume a paused task
-- `@Andy cancel task [id]` - Delete a task
+- `@Rain list my scheduled tasks` - View tasks for this group
+- `@Rain pause task [id]` - Pause a task
+- `@Rain resume task [id]` - Resume a paused task
+- `@Rain cancel task [id]` - Delete a task
 
 From main channel:
-- `@Andy list all tasks` - View tasks from all groups
-- `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+- `@Rain list all tasks` - View tasks from all groups
+- `@Rain schedule task for "family-chat": [prompt]` - Schedule for another group
 
 ---
 
 ## MCP Servers
 
-### NanoClaw MCP (built-in)
+### DotClaw MCP (built-in)
 
-The `nanoclaw` MCP server is created dynamically per agent call with the current group's context.
+The `dotclaw` MCP server is created dynamically per agent call with the current group's context.
 
 **Available Tools:**
 | Tool | Purpose |
@@ -473,35 +480,36 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 | `pause_task` | Pause a task |
 | `resume_task` | Resume a paused task |
 | `cancel_task` | Delete a task |
-| `send_message` | Send a WhatsApp message to the group |
+| `send_message` | Send a Telegram message to the chat |
 
 ---
 
 ## Deployment
 
-NanoClaw runs as a single macOS launchd service.
+DotClaw runs as a single macOS launchd service.
 
 ### Startup Sequence
 
-When NanoClaw starts, it:
-1. **Ensures Docker is running** - Checks that Docker daemon is available
-2. Initializes the SQLite database
-3. Loads state (registered groups, sessions, router state)
-4. Connects to WhatsApp
-5. Starts the message polling loop
-6. Starts the scheduler loop
-7. Starts the IPC watcher for container messages
+When DotClaw starts, it:
+1. **Validates Telegram token** - Checks TELEGRAM_BOT_TOKEN is set
+2. **Ensures Docker is running** - Checks that Docker daemon is available
+3. Initializes the SQLite database
+4. Loads state (registered groups, sessions, router state)
+5. Sets up Telegram message handlers
+6. Launches Telegram bot
+7. Starts the scheduler loop
+8. Starts the IPC watcher for container messages
 
-### Service: com.nanoclaw
+### Service: com.dotclaw
 
-**launchd/com.nanoclaw.plist:**
+**launchd/com.dotclaw.plist:**
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "...">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nanoclaw</string>
+    <string>com.dotclaw</string>
     <key>ProgramArguments</key>
     <array>
         <string>{{NODE_PATH}}</string>
@@ -520,12 +528,12 @@ When NanoClaw starts, it:
         <key>HOME</key>
         <string>{{HOME}}</string>
         <key>ASSISTANT_NAME</key>
-        <string>Andy</string>
+        <string>Rain</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
+    <string>{{PROJECT_ROOT}}/logs/dotclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.error.log</string>
+    <string>{{PROJECT_ROOT}}/logs/dotclaw.error.log</string>
 </dict>
 </plist>
 ```
@@ -534,19 +542,19 @@ When NanoClaw starts, it:
 
 ```bash
 # Install service
-cp launchd/com.nanoclaw.plist ~/Library/LaunchAgents/
+cp launchd/com.dotclaw.plist ~/Library/LaunchAgents/
 
 # Start service
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.dotclaw.plist
 
 # Stop service
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.dotclaw.plist
 
 # Check status
-launchctl list | grep nanoclaw
+launchctl list | grep dotclaw
 
 # View logs
-tail -f logs/nanoclaw.log
+tail -f logs/dotclaw.log
 ```
 
 ---
@@ -564,18 +572,18 @@ All agents run inside Docker containers, providing:
 
 ### Prompt Injection Risk
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+Telegram messages could contain malicious instructions attempting to manipulate Claude's behavior.
 
 **Mitigations:**
 - Container isolation limits blast radius
-- Only registered groups are processed
-- Trigger word required (reduces accidental processing)
+- Only registered chats are processed
+- Trigger word required in groups (reduces accidental processing)
 - Agents can only access their group's mounted directories
 - Main can configure additional directories per group
 - Claude's built-in safety training
 
 **Recommendations:**
-- Only register trusted groups
+- Only register trusted chats
 - Review additional directory mounts carefully
 - Review scheduled tasks periodically
 - Monitor logs for unusual activity
@@ -585,7 +593,7 @@ WhatsApp messages could contain malicious instructions attempting to manipulate 
 | Credential | Storage Location | Notes |
 |------------|------------------|-------|
 | Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/ | Auto-created, persists ~20 days |
+| Telegram Bot Token | .env | Not mounted into containers |
 
 ### File Permissions
 
@@ -602,18 +610,18 @@ chmod 700 groups/
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| No response to messages | Service not running | Check `launchctl list | grep nanoclaw` |
+| No response to messages | Service not running | Check `launchctl list | grep dotclaw` |
+| No response to messages | Chat not registered | Add chat ID to registered_groups.json |
 | "Claude Code process exited with code 1" | Docker not running | Check Docker Desktop is running (macOS) or `sudo systemctl start docker` (Linux) |
 | "Claude Code process exited with code 1" | Session mount path wrong | Ensure mount is to `/home/node/.claude/` not `/root/.claude/` |
 | Session not continuing | Session ID not saved | Check `data/sessions.json` |
 | Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
-| "QR code expired" | WhatsApp session expired | Delete store/auth/ and restart |
-| "No groups registered" | Haven't added groups | Use `@Andy add group "Name"` in main |
+| "Unauthorized" Telegram error | Bot token invalid | Check TELEGRAM_BOT_TOKEN in .env |
 
 ### Log Location
 
-- `logs/nanoclaw.log` - stdout
-- `logs/nanoclaw.error.log` - stderr
+- `logs/dotclaw.log` - stdout
+- `logs/dotclaw.error.log` - stderr
 
 ### Debug Mode
 
