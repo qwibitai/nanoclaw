@@ -26,7 +26,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container). They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+**Secure by isolation.** Agents run in Docker containers. They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
 
 **Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
 
@@ -47,7 +47,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Apple containers
+- **Container isolation** - Agents sandboxed in Docker containers
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
@@ -105,18 +105,18 @@ Skills we'd love to see:
 
 ## Requirements
 
-- macOS Tahoe (26) or later - runs great on Mac Mini
+- macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container)
+- [Docker](https://docker.com/products/docker-desktop)
 
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+WhatsApp (baileys) --> SQLite --> Polling loop --> Docker (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with mounted directories. IPC via filesystem. No daemons, no queues, no complexity.
+Single Node.js process. Agents execute in isolated Docker containers with mounted directories. IPC via filesystem. No daemons, no queues, no complexity.
 
 Key files:
 - `src/index.ts` - Main app: WhatsApp connection, routing, IPC
@@ -131,13 +131,13 @@ Key files:
 
 Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
 
-**Why Apple Container instead of Docker?**
+**Why Docker?**
 
-Lightweight, fast, and built into macOS. Requires macOS Tahoe and runs great on a Mac Mini. Contribute a skill to convert to Docker if you want Docker.
+Docker provides cross-platform support (macOS and Linux), a large ecosystem, and mature tooling. Docker Desktop on macOS uses a lightweight Linux VM similar to other container solutions.
 
 **Can I run this on Linux?**
 
-Yes. Run Claude Code and say "make this run on Linux." ~30 min of back-and-forth and it'll work. When you're done, ask Claude to create a skill explaining how to make it work on Linux, then contribute the skill back to the project.
+Yes. NanoClaw uses Docker, which works on both macOS and Linux. Just install Docker and run `/setup`.
 
 **Is this secure?**
 
