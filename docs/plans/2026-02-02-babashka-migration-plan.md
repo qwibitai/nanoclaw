@@ -1,6 +1,7 @@
 # NanoClaw: TypeScript to Babashka Migration Plan
 
 **Date**: 2026-02-02
+**Updated**: 2026-02-02 (Telegram replaces WhatsApp)
 **Author**: Claude
 **Status**: Planning Phase
 
@@ -22,13 +23,15 @@
 
 ## Executive Summary
 
-This document outlines a plan to migrate NanoClaw from TypeScript/Node.js to Babashka (Clojure). The migration presents several challenges, particularly around WhatsApp connectivity which has no native Clojure implementation. A **hybrid architecture** using nbb (ClojureScript on Node.js) for WhatsApp and Babashka for core logic is recommended.
+This document outlines a plan to migrate NanoClaw from TypeScript/Node.js to Babashka (Clojure), replacing WhatsApp with Telegram as the messaging platform.
+
+**Key Decision**: Replacing WhatsApp with Telegram dramatically simplifies the migration. Telegram's HTTP-based Bot API can be called directly from Babashka using the built-in `babashka.http-client` - **no hybrid architecture or external runtimes needed**.
 
 ### Key Findings
 
 | Component | Migration Path | Difficulty |
 |-----------|---------------|------------|
-| WhatsApp Client | nbb + Baileys OR subprocess bridge | High |
+| Telegram Client | babashka.http-client (built-in) | **Low** |
 | SQLite Database | pod-babashka-go-sqlite3 | Low |
 | Container Runner | babashka.process | Low |
 | Task Scheduler | at-at + manual cron parsing | Medium |
@@ -37,9 +40,26 @@ This document outlines a plan to migrate NanoClaw from TypeScript/Node.js to Bab
 | Schema Validation | malli | Low |
 | MCP Server (container) | clojure-mcp or modex | Medium |
 
+### Architecture: Pure Babashka
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    BABASHKA (Single Process)                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  Telegram Bot API ←──HTTP──→ babashka.http-client                   │
+│  SQLite           ←─────────→ pod-babashka-go-sqlite3               │
+│  Containers       ←─────────→ babashka.process                      │
+│  File Watching    ←─────────→ pod-babashka-fswatcher                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**No Node.js, no nbb, no hybrid architecture required.**
+
 ---
 
 ## Current Architecture Overview
+
+### Current (TypeScript + WhatsApp)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -61,6 +81,35 @@ This document outlines a plan to migrate NanoClaw from TypeScript/Node.js to Bab
 │                                │                                    │
 │                       Container Runner                              │
 │                    (spawn Apple Container)                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                  APPLE CONTAINER (Linux VM)                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  Agent Runner (Node.js) + Claude Agent SDK + IPC MCP Server        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Target (Babashka + Telegram)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        HOST (macOS)                                  │
+│                    (Single Babashka Process)                        │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────────┐    ┌────────────────────┐    ┌───────────────┐   │
+│  │  Telegram    │    │   SQLite Database  │    │  Registered   │   │
+│  │  (HTTP API)  │───▶│   (go-sqlite3 pod) │    │  Groups EDN   │   │
+│  └──────────────┘    └─────────┬──────────┘    └───────────────┘   │
+│                                │                                    │
+│  ┌──────────────────┐  ┌───────┴───────┐  ┌───────────────────┐   │
+│  │  Long Polling    │  │  Scheduler    │  │  IPC Watcher      │   │
+│  │  (30s timeout)   │  │  (at-at pool) │  │  (fswatcher pod)  │   │
+│  └────────┬─────────┘  └───────┬───────┘  └─────────┬─────────┘   │
+│           │                    │                    │              │
+│           └────────────────────┴────────────────────┘              │
+│                                │                                    │
+│                       Container Runner                              │
+│                    (babashka.process)                               │
 ├─────────────────────────────────────────────────────────────────────┤
 │                  APPLE CONTAINER (Linux VM)                         │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -121,7 +170,7 @@ interface ContainerConfig {
   env?: Record<string, string>;
 }
 
-// Registered WhatsApp group
+// Registered chat/group (WhatsApp → Telegram)
 interface RegisteredGroup {
   name: string;
   folder: string;
@@ -530,10 +579,59 @@ function createIpcMcp(ctx: IpcMcpContext): McpServer
 
 | TypeScript | Babashka Approach | Complexity |
 |------------|-------------------|------------|
-| `@whiskeysockets/baileys` | nbb + Baileys OR Node subprocess | High |
+| `@whiskeysockets/baileys` | **REPLACED**: Telegram Bot API via `babashka.http-client` | **Low** |
 | `cron-parser` | Manual impl OR `at-at` for scheduling | Medium |
 | `@anthropic-ai/claude-agent-sdk` | Keep as subprocess (Node.js) | Medium |
 | MCP Server creation | `modex`, `mcp-clj`, or manual impl | Medium |
+
+### Telegram Bot API (NEW)
+
+The Telegram Bot API is HTTP/JSON-based and works perfectly with Babashka's built-in HTTP client.
+
+```clojure
+(require '[babashka.http-client :as http]
+         '[cheshire.core :as json])
+
+(def token (System/getenv "TELEGRAM_BOT_TOKEN"))
+(def base-url (str "https://api.telegram.org/bot" token))
+
+;; Send a message
+(defn send-message [chat-id text]
+  (-> (http/post (str base-url "/sendMessage")
+        {:headers {"Content-Type" "application/json"}
+         :body (json/generate-string {:chat_id chat-id :text text})})
+      :body
+      (json/parse-string true)))
+
+;; Long polling for updates (30 second timeout)
+(defn get-updates [offset]
+  (-> (http/get (str base-url "/getUpdates")
+        {:query-params {:offset offset :timeout 30}})
+      :body
+      (json/parse-string true)))
+
+;; Typing indicator
+(defn send-typing [chat-id]
+  (http/post (str base-url "/sendChatAction")
+    {:headers {"Content-Type" "application/json"}
+     :body (json/generate-string {:chat_id chat-id :action "typing"})}))
+
+;; Message reactions (Bot API 7.0+)
+(defn set-reaction [chat-id message-id emoji]
+  (http/post (str base-url "/setMessageReaction")
+    {:headers {"Content-Type" "application/json"}
+     :body (json/generate-string
+             {:chat_id chat-id
+              :message_id message-id
+              :reaction [{:type "emoji" :emoji emoji}]})}))
+```
+
+**Features supported via direct HTTP**:
+- ✅ Send/receive messages
+- ✅ Group chat support (chat_id works for groups)
+- ✅ Typing indicators (`sendChatAction`)
+- ✅ Message reactions (`setMessageReaction`)
+- ✅ Long polling (no webhooks needed)
 
 ### Library Details
 
@@ -647,35 +745,26 @@ For cron parsing, a simple implementation:
 
 ## Migration Strategy
 
-### Recommended Approach: Hybrid Architecture
+### Recommended Approach: Pure Babashka
 
-Given the WhatsApp connectivity challenge, a hybrid approach is most practical:
+With Telegram replacing WhatsApp, we can use a **pure Babashka architecture**. No hybrid systems, no nbb, no subprocess bridges needed.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        HOST (macOS)                                  │
+│                    (Single Babashka Process)                        │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                      │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │           BABASHKA CORE (bb nanoclaw.clj)                     │  │
+│  │           BABASHKA (bb src/nanoclaw/core.clj)                 │  │
 │  │                                                                │  │
-│  │  • SQLite database operations                                  │  │
-│  │  • Task scheduling logic                                       │  │
-│  │  • Container spawning/management                               │  │
-│  │  • IPC file watching                                          │  │
+│  │  • Telegram Bot API (babashka.http-client)                    │  │
+│  │  • SQLite database (pod-babashka-go-sqlite3)                  │  │
+│  │  • Task scheduling (at-at)                                     │  │
+│  │  • Container spawning (babashka.process)                       │  │
+│  │  • IPC file watching (pod-babashka-fswatcher)                 │  │
 │  │  • Mount security validation                                   │  │
 │  │  • State management                                           │  │
-│  └────────────────────────┬──────────────────────────────────────┘  │
-│                           │                                          │
-│                    JSON over stdio                                   │
-│                           │                                          │
-│  ┌────────────────────────┴──────────────────────────────────────┐  │
-│  │         nbb WhatsApp Bridge (whatsapp-bridge.cljs)            │  │
-│  │                                                                │  │
-│  │  • Baileys connection                                          │  │
-│  │  • Message send/receive                                        │  │
-│  │  • QR code authentication                                      │  │
-│  │  • Presence updates (typing indicators)                        │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
@@ -683,23 +772,26 @@ Given the WhatsApp connectivity challenge, a hybrid approach is most practical:
 
 ### Migration Phases
 
-#### Phase 1: Core Infrastructure (Week 1-2)
+#### Phase 1: Core Infrastructure (Week 1)
 
 **Goal**: Set up Babashka project structure and migrate stateless components.
 
 1. **Project Setup**
    ```
-   bb/
+   nanoclaw/
    ├── bb.edn                 # Babashka config, pods, deps
    ├── src/
-   │   ├── nanoclaw/
-   │   │   ├── core.clj       # Main entry point
-   │   │   ├── config.clj     # Configuration
-   │   │   ├── schemas.clj    # Malli schemas
-   │   │   ├── db.clj         # SQLite operations
-   │   │   ├── utils.clj      # JSON, file utils
-   │   │   └── ...
-   │   └── ...
+   │   └── nanoclaw/
+   │       ├── core.clj       # Main entry point
+   │       ├── config.clj     # Configuration
+   │       ├── schemas.clj    # Malli schemas
+   │       ├── db.clj         # SQLite operations
+   │       ├── telegram.clj   # Telegram Bot API client
+   │       ├── container.clj  # Container runner
+   │       ├── scheduler.clj  # Task scheduler
+   │       ├── ipc.clj        # IPC watcher
+   │       ├── mount_security.clj
+   │       └── utils.clj
    └── test/
    ```
 
@@ -708,11 +800,35 @@ Given the WhatsApp connectivity challenge, a hybrid approach is most practical:
    - `types.ts` → `schemas.clj` (Malli)
    - `utils.ts` → `utils.clj`
    - `db.ts` → `db.clj` (pod-babashka-go-sqlite3)
-   - `mount-security.ts` → `mount-security.clj`
+   - `mount-security.ts` → `mount_security.clj`
 
 **Deliverable**: Database operations working, all schemas defined.
 
-#### Phase 2: Container Management (Week 3)
+#### Phase 2: Telegram Client (Week 2)
+
+**Goal**: Implement Telegram Bot API client.
+
+1. **Create** `telegram.clj`:
+   ```clojure
+   (ns nanoclaw.telegram
+     (:require [babashka.http-client :as http]
+               [cheshire.core :as json]
+               [nanoclaw.config :as config]))
+
+   ;; Core API functions
+   (defn send-message [chat-id text] ...)
+   (defn get-updates [offset] ...)
+   (defn send-typing [chat-id] ...)
+
+   ;; Long-polling loop
+   (defn start-polling [handler] ...)
+   ```
+
+2. **Test**: Send/receive messages, typing indicators.
+
+**Deliverable**: Can send/receive Telegram messages.
+
+#### Phase 3: Container Management (Week 3)
 
 **Goal**: Migrate container spawning and IPC.
 
@@ -724,28 +840,7 @@ Given the WhatsApp connectivity challenge, a hybrid approach is most practical:
 
 **Deliverable**: Can run agent containers from Babashka.
 
-#### Phase 3: WhatsApp Bridge (Week 4-5)
-
-**Goal**: Create nbb-based WhatsApp bridge.
-
-1. **Create** `whatsapp-bridge.cljs`:
-   ```clojure
-   (ns whatsapp-bridge
-     (:require ["@whiskeysockets/baileys" :as baileys]
-               ["fs" :as fs]))
-
-   ;; Connect to WhatsApp
-   ;; Read commands from stdin (JSON)
-   ;; Write events to stdout (JSON)
-   ;; Commands: send-message, set-typing
-   ;; Events: message-received, connection-update
-   ```
-
-2. **Integration**: Babashka spawns nbb bridge as subprocess.
-
-**Deliverable**: Can send/receive WhatsApp messages via bridge.
-
-#### Phase 4: Scheduler & Main Loop (Week 6)
+#### Phase 4: Scheduler & Main Loop (Week 4)
 
 **Goal**: Complete the migration.
 
@@ -757,7 +852,7 @@ Given the WhatsApp connectivity challenge, a hybrid approach is most practical:
 
 **Deliverable**: Fully functional Babashka-based NanoClaw.
 
-#### Phase 5: Container Agent (Week 7-8, Optional)
+#### Phase 5: Container Agent (Optional)
 
 **Goal**: Migrate container-side code.
 
@@ -771,46 +866,90 @@ If migrating:
 
 ## Detailed Component Analysis
 
-### Component: WhatsApp Client (CRITICAL PATH)
+### Component: Telegram Client (LOW RISK - Replaces WhatsApp)
 
-**Current**: `@whiskeysockets/baileys` - Pure JavaScript WebSocket implementation.
+**Current**: `@whiskeysockets/baileys` - Pure JavaScript WebSocket implementation for WhatsApp.
 
-**Challenge**: No native Clojure WhatsApp library exists.
+**Migration**: Telegram Bot API via `babashka.http-client` - **Direct HTTP calls, no libraries needed.**
 
-**Options**:
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **nbb + Baileys** | Full ClojureScript, npm interop | Requires nbb runtime, two runtimes |
-| **Node subprocess** | Minimal change to WhatsApp code | IPC complexity, process management |
-| **Pure Clojure websocket** | Single runtime | Would need to reimplement Baileys protocol (~10k lines) |
-
-**Recommendation**: **nbb + Baileys** for cleanest Clojure integration.
+**Why Telegram is easier**:
+- HTTP/JSON API (no WebSocket protocol to implement)
+- Official, documented, stable API
+- Long polling works without webhooks
+- No authentication complexity (just a bot token)
 
 ```clojure
-;; nbb bridge example
-(ns whatsapp-bridge
-  (:require ["@whiskeysockets/baileys" :refer [makeWASocket useMultiFileAuthState]]
-            ["readline" :as readline]))
+;; telegram.clj - Full implementation
+(ns nanoclaw.telegram
+  (:require [babashka.http-client :as http]
+            [cheshire.core :as json]
+            [taoensso.timbre :as log]))
 
-(defn start-bridge []
-  (let [{:keys [state saveCreds]} (js/await (useMultiFileAuthState "auth"))
-        sock (makeWASocket #js {:auth state :printQRInTerminal true})]
+(def token (System/getenv "TELEGRAM_BOT_TOKEN"))
+(def base-url (str "https://api.telegram.org/bot" token))
 
-    ;; Handle incoming messages
-    (.on (.-ev sock) "messages.upsert"
-         (fn [event]
-           (println (js/JSON.stringify #js {:type "messages" :data event}))))
+(defn api-call [method params]
+  (let [response (http/post (str base-url "/" method)
+                   {:headers {"Content-Type" "application/json"}
+                    :body (json/generate-string params)
+                    :throw false})]
+    (-> response :body (json/parse-string true))))
 
-    ;; Read commands from stdin
-    (let [rl (.createInterface readline #js {:input js/process.stdin})]
-      (.on rl "line"
-           (fn [line]
-             (let [cmd (js/JSON.parse line)]
-               (case (.-type cmd)
-                 "send" (.sendMessage sock (.-jid cmd) #js {:text (.-text cmd)})
-                 "typing" (.sendPresenceUpdate sock (if (.-typing cmd) "composing" "paused") (.-jid cmd)))))))))
+(defn send-message [chat-id text]
+  (api-call "sendMessage" {:chat_id chat-id :text text}))
+
+(defn send-typing [chat-id]
+  (api-call "sendChatAction" {:chat_id chat-id :action "typing"}))
+
+(defn get-updates
+  "Long polling with 30 second timeout"
+  [offset]
+  (let [response (http/get (str base-url "/getUpdates")
+                   {:query-params (cond-> {:timeout 30}
+                                    offset (assoc :offset offset))
+                    :timeout 35000  ; slightly longer than API timeout
+                    :throw false})]
+    (-> response :body (json/parse-string true))))
+
+(defn extract-message [update]
+  (when-let [msg (:message update)]
+    {:update-id (:update_id update)
+     :chat-id (get-in msg [:chat :id])
+     :chat-type (get-in msg [:chat :type])
+     :chat-title (get-in msg [:chat :title])
+     :from-id (get-in msg [:from :id])
+     :from-name (or (get-in msg [:from :first_name])
+                    (get-in msg [:from :username]))
+     :text (:text msg)
+     :message-id (:message_id msg)
+     :timestamp (:date msg)}))
+
+(defn start-polling
+  "Start long-polling loop. Calls handler for each message."
+  [handler]
+  (log/info "Starting Telegram long-polling")
+  (loop [offset nil]
+    (let [{:keys [ok result]} (get-updates offset)]
+      (when ok
+        (doseq [update result]
+          (when-let [msg (extract-message update)]
+            (try
+              (handler msg)
+              (catch Exception e
+                (log/error "Error handling message" {:error (.getMessage e)})))))
+        (recur (when (seq result)
+                 (inc (:update_id (last result)))))))))
 ```
+
+**Comparison**:
+
+| Aspect | WhatsApp (baileys) | Telegram Bot API |
+|--------|-------------------|------------------|
+| Protocol | WebSocket + custom | HTTP/JSON |
+| Auth | QR code scan | Bot token (string) |
+| Library needed | Yes (baileys) | No (just HTTP) |
+| Babashka support | None | Native |
+| Complexity | High | Low |
 
 ### Component: Database (LOW RISK)
 
@@ -1015,9 +1154,7 @@ If migrating:
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| WhatsApp library compatibility | System won't connect | Use nbb bridge; keep Node fallback |
 | Claude Agent SDK changes | Container agent breaks | Keep container in TypeScript |
-| Performance degradation | Slower message handling | Profile, optimize hot paths |
 
 ### Medium Risk
 
@@ -1026,14 +1163,28 @@ If migrating:
 | Cron parsing edge cases | Missed scheduled tasks | Port comprehensive tests |
 | Process management complexity | Orphaned processes | Proper cleanup, process groups |
 | State serialization differences | Data corruption | Version state files, migration |
+| Telegram API rate limits | Messages blocked | Implement backoff, queue messages |
 
 ### Low Risk
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
+| Telegram API connectivity | HTTP calls fail | Built-in retry, error handling |
 | SQLite API differences | Query failures | pod has similar API |
 | JSON parsing differences | Parse errors | cheshire handles edge cases |
 | Logging format changes | Log analysis breaks | Use structured logging |
+
+### Eliminated Risks (WhatsApp → Telegram)
+
+The following risks from the original plan are **no longer applicable**:
+
+| Eliminated Risk | Why |
+|-----------------|-----|
+| WhatsApp library compatibility | Telegram uses simple HTTP API |
+| Hybrid architecture complexity | Pure Babashka, single runtime |
+| nbb runtime stability | Not needed |
+| WebSocket protocol issues | HTTP only |
+| QR code authentication | Bot token (string) |
 
 ---
 
@@ -1043,23 +1194,27 @@ If migrating:
 
 1. **Keep container agent in TypeScript**: The Claude Agent SDK is Node.js-native. Migrating the container code provides minimal benefit.
 
-2. **Start with hybrid architecture**: Use nbb for WhatsApp, Babashka for everything else. This is the path of least resistance.
+2. **Use pure Babashka**: With Telegram, no hybrid architecture needed. Single runtime, single language.
 
-3. **Maintain compatibility**: Keep the same data formats (JSON files, SQLite schema) to allow rollback.
+3. **Maintain compatibility**: Keep the same SQLite schema to allow rollback. State files can migrate from JSON to EDN.
+
+4. **Start with Telegram Bot API**: Create a BotFather bot, get token, start building.
 
 ### Medium-Term (Post-Migration)
 
-1. **Consider pure-Babashka WhatsApp**: If nbb proves unstable, evaluate writing a minimal WhatsApp Web protocol implementation.
+1. **Explore MCP in Clojure**: Once stable, consider migrating container MCP server to `modex` or `mcp-clj`.
 
-2. **Explore MCP in Clojure**: Once stable, consider migrating container MCP server to `modex` or `mcp-clj`.
+2. **Add property-based testing**: Use `test.check` for schema validation and state transitions.
 
-3. **Add property-based testing**: Use `test.check` for schema validation and state transitions.
+3. **Implement message queuing**: Handle Telegram rate limits gracefully with a message queue.
 
 ### Long-Term
 
 1. **Evaluate GraalVM native-image**: Could compile Babashka scripts to native binaries for faster startup.
 
 2. **Consider sci-based plugins**: Allow users to extend NanoClaw with Clojure scripts evaluated at runtime.
+
+3. **Multi-platform support**: Telegram's simple API makes it easy to add other platforms later (Discord, Slack) via similar HTTP clients.
 
 ---
 
@@ -1076,42 +1231,52 @@ If migrating:
         org.babashka/fswatcher {:version "0.0.5"}}
  :tasks
  {dev {:doc "Run in development mode"
-       :task (shell "bb src/nanoclaw/core.clj")}
+       :task (shell "bb -m nanoclaw.core")}
 
   test {:doc "Run tests"
         :task (shell "bb test/runner.clj")}
 
-  whatsapp {:doc "Start WhatsApp bridge"
-            :task (shell "npx nbb src/whatsapp_bridge.cljs")}}}
+  repl {:doc "Start a REPL"
+        :task (clojure "-M:repl")}}}
 ```
+
+**Note**: No `package.json` or Node.js dependencies needed for the host application.
 
 ## Appendix B: File Structure After Migration
 
 ```
 nanoclaw/
 ├── bb.edn                          # Babashka configuration
-├── package.json                    # For nbb dependencies
 ├── src/
-│   ├── nanoclaw/                   # Babashka (Clojure)
-│   │   ├── core.clj                # Main entry point
-│   │   ├── config.clj              # Configuration
-│   │   ├── schemas.clj             # Malli schemas
-│   │   ├── db.clj                  # SQLite operations
-│   │   ├── container.clj           # Container runner
-│   │   ├── scheduler.clj           # Task scheduler
-│   │   ├── ipc.clj                 # IPC watcher
-│   │   ├── mount_security.clj      # Mount validation
-│   │   └── utils.clj               # Utilities
-│   └── whatsapp_bridge.cljs        # nbb WhatsApp bridge
+│   └── nanoclaw/                   # Babashka (Clojure)
+│       ├── core.clj                # Main entry point
+│       ├── config.clj              # Configuration
+│       ├── schemas.clj             # Malli schemas
+│       ├── db.clj                  # SQLite operations
+│       ├── telegram.clj            # Telegram Bot API client
+│       ├── container.clj           # Container runner
+│       ├── scheduler.clj           # Task scheduler
+│       ├── ipc.clj                 # IPC watcher
+│       ├── mount_security.clj      # Mount validation
+│       └── utils.clj               # Utilities
+├── test/
+│   └── nanoclaw/
+│       ├── telegram_test.clj
+│       ├── db_test.clj
+│       └── ...
 ├── container/                      # Unchanged (TypeScript)
 │   └── agent-runner/
-├── groups/                         # Unchanged
-├── store/                          # Unchanged
-├── data/                           # Unchanged
+├── groups/                         # Unchanged (per-group memory)
+├── data/                           # Unchanged (sessions, IPC)
+│   ├── sessions/
+│   ├── ipc/
+│   └── env/
 └── docs/
     └── plans/
         └── 2026-02-02-babashka-migration-plan.md
 ```
+
+**Key difference from original plan**: No `whatsapp_bridge.cljs`, no `package.json` for host.
 
 ---
 
@@ -1119,13 +1284,22 @@ nanoclaw/
 
 | Phase | Duration | FTEs | Deliverables |
 |-------|----------|------|--------------|
-| Phase 1: Core | 2 weeks | 1 | Schemas, DB, config |
-| Phase 2: Container | 1 week | 1 | Container runner, IPC |
-| Phase 3: WhatsApp | 2 weeks | 1 | nbb bridge, integration |
+| Phase 1: Core Infrastructure | 1 week | 1 | Schemas, DB, config, utils |
+| Phase 2: Telegram Client | 1 week | 1 | HTTP client, long polling |
+| Phase 3: Container Management | 1 week | 1 | Container runner, IPC watcher |
 | Phase 4: Main Loop | 1 week | 1 | Scheduler, full integration |
-| Phase 5: Container (Optional) | 2 weeks | 1 | MCP server in Clojure |
+| Phase 5: Container Agent (Optional) | 2 weeks | 1 | MCP server in Clojure |
 
-**Total**: 6-8 weeks for full migration (excluding optional Phase 5)
+**Total**: 4 weeks for full migration (excluding optional Phase 5)
+
+### Comparison: WhatsApp vs Telegram Timeline
+
+| Approach | Estimated Time | Complexity |
+|----------|---------------|------------|
+| WhatsApp (hybrid nbb) | 6-8 weeks | High (two runtimes, IPC) |
+| Telegram (pure Babashka) | **4 weeks** | **Low (single runtime, HTTP)** |
+
+**Time saved**: ~50% reduction by switching to Telegram
 
 ---
 
