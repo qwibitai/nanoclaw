@@ -43,11 +43,27 @@ Store their choice and proceed to the appropriate section.
 
 ## Prerequisites (All Modes)
 
-### 1. Install Telegraf Library
+### 1. Install Dependencies
+
+Install Telegraf library:
 
 ```bash
 npm install telegraf
 ```
+
+If dotenv is not already installed, add it:
+
+```bash
+npm install dotenv
+```
+
+At the top of `src/index.ts`, add this import (if not already present):
+
+```typescript
+import 'dotenv/config';
+```
+
+This ensures your `.env` file is loaded before any other code runs.
 
 ### 2. Create Telegram Bot
 
@@ -59,8 +75,8 @@ Tell the user:
 > 2. Click on it and start a chat
 > 3. Send: `/newbot`
 > 4. Follow the prompts:
->    - **"Give your bot a name:"** - Something friendly (e.g., "My NanoClaw Bot")
->    - **"Give your bot a username:"** - Must end with "bot" (e.g., "my_nanoclaw_bot")
+>    - **"Give your bot a name:"** - Something friendly (can be anthropomorphic, e.g., "Sara" or "Pii" rather than "My NanoClaw Bot")
+>    - **"Give your bot a username:"** - Must end with "bot" and be unique (e.g., "sara_ai_bot" or "pii_assistant_bot")
 > 5. BotFather will give you a token - it looks like: `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`
 > 6. **COPY THIS TOKEN** - you'll need it in a moment
 
@@ -78,11 +94,7 @@ Tell the user:
 
 If user provides the token directly:
 
-```bash
-export TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234..."
-```
-
-Then save it to `.env`:
+First, add it to your `.env` file:
 
 ```bash
 echo 'TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234..."' >> .env
@@ -94,23 +106,55 @@ Verify it's set:
 grep TELEGRAM_BOT_TOKEN .env
 ```
 
-### 4. Get Your Chat ID (For Action-Only Mode)
+Then validate the token by testing it:
+
+```bash
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" | jq '.result.username'
+```
+
+This should return your bot's username (e.g., `"my_nanoclaw_bot"`). If you get an error like `{"ok":false,"error_code":401,"description":"Unauthorized"}`, the token is invalid.
+
+### 4. Get Your Chat ID
 
 Tell the user:
 
-> If you're using action-only mode, I need your personal chat ID. Here's how to find it:
+> I need your personal or group chat ID to enable message handling. Here's how to find it:
 >
-> 1. Message your bot (find it in Telegram by its username)
-> 2. Send it any message
-> 3. Run this command:
+> 1. **In Telegram**, search for your bot by username (e.g., `@my_nanoclaw_bot`)
+> 2. **Send any message** to the bot
+> 3. **Run this command** in your terminal:
 
 ```bash
-curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates" | jq '.result[0].message.chat.id'
+curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates" | jq '.result[-1].message.chat.id'
 ```
 
-> Copy the number you get - that's your chat ID.
+> The number returned (e.g., `79057070`) is your **personal chat ID**.
+>
+> **For groups:** Add your bot to a group and send it a message, then run the same command. The ID will be a negative number (e.g., `-987654321`).
 
-For groups, the user will need to add the bot and note the group ID (negative number).
+Save this chat ID - you'll use it when registering the group.
+
+---
+
+## Important: Service Conflict (If NanoClaw is Already Running)
+
+If NanoClaw is already running as a background service (e.g., via launchctl), stop it **before testing**:
+
+```bash
+# Stop the existing NanoClaw service
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+```
+
+Now you can run `npm run dev` without conflicts.
+
+**After testing is complete**, restart the service:
+
+```bash
+# Restart the background service
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+```
+
+This prevents two instances of NanoClaw from running simultaneously.
 
 ---
 
@@ -284,7 +328,7 @@ The routing should use `chat_jid` (or similar) to store the platform and chat ID
 
 ### Step 3: Update Send Functions
 
-When the agent sends a reply, route to the correct platform:
+When the agent sends a reply, route to the correct platform. **Important**: Telegram bots send messages from themselves, so don't add the assistant name prefix:
 
 ```typescript
 async function sendMessage(
@@ -293,13 +337,17 @@ async function sendMessage(
 ): Promise<void> {
   if (chatJid.startsWith('telegram:')) {
     const chatId = chatJid.replace('telegram:', '');
+    // Telegram: bot sends as itself, no ASSISTANT_NAME prefix
     await sendTelegramMessage(chatId, text);
   } else {
-    // WhatsApp or other platform
-    await sendWhatsAppMessage(chatJid, text);
+    // WhatsApp: include ASSISTANT_NAME prefix
+    const message = `${ASSISTANT_NAME}: ${text}`;
+    await sendWhatsAppMessage(chatJid, message);
   }
 }
 ```
+
+Also update IPC message sending with the same pattern - if the target is Telegram, don't include the `ASSISTANT_NAME:` prefix in the response.
 
 ### Step 4: Update Memory
 
@@ -463,6 +511,71 @@ Update `groups/main/CLAUDE.md`:
 
 Notifications are sent to Telegram chat ID: ${TELEGRAM_NOTIFICATION_CHAT_ID}
 ```
+
+---
+
+## Privacy Model: How Registered Chats Work
+
+When you set up Telegram with NanoClaw, understand the privacy model:
+
+### Public Discovery
+- Your bot's username is **public** - anyone can find it and message it
+- Example: `@my_nanoclaw_bot` is searchable and discoverable
+
+### Private Access Control
+- **Only registered chat IDs get responses** from your agent
+- All other messages are **silently ignored** and logged as "Message from unregistered Telegram chat"
+- This makes your bot effectively **private** even though it's discoverable
+
+### Registered Groups Format
+
+When you register a chat with NanoClaw, it's stored in `data/registered_groups.json`:
+
+```json
+{
+  "telegram:79057070": {
+    "name": "main",
+    "folder": "main",
+    "trigger": "@Sara",
+    "added_at": "2026-02-02T14:30:00.000Z"
+  }
+}
+```
+
+**Key fields:**
+- `telegram:79057070` - Chat ID prefixed with `telegram:`
+- `name` - Human-readable group name
+- `folder` - Where agent context is stored
+- `trigger` - Keyword/mention to activate the agent (e.g., `@Sara` for groups)
+- `added_at` - When the chat was registered
+
+### Example: Multiple Registered Chats
+
+```json
+{
+  "telegram:79057070": {
+    "name": "personal",
+    "folder": "main",
+    "trigger": "@Sara",
+    "added_at": "2026-02-02T14:30:00.000Z"
+  },
+  "telegram:-987654321": {
+    "name": "team_group",
+    "folder": "team",
+    "trigger": "@Sara",
+    "added_at": "2026-02-02T15:45:00.000Z"
+  }
+}
+```
+
+### Security Implications
+
+- **Registered chats**: Full two-way communication with your agent
+- **Unregistered chats**: Silently ignored (no response, no error message)
+- **Bot discovery**: Anyone finding your bot sees the description but gets no response
+- **Group privacy**: Even if added to a group, bot only responds to registered group IDs
+
+This design prevents accidental exposure while keeping the bot easy to manage.
 
 ---
 
