@@ -132,9 +132,15 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   // Ensure container's node user (UID 1000) can write to IPC directories on Linux
   // On macOS/Docker Desktop this is handled by file sharing, but on native Linux
   // the container user needs explicit write permission to the mounted volume
-  fs.chmodSync(groupIpcDir, 0o777);
-  fs.chmodSync(messagesDir, 0o777);
-  fs.chmodSync(tasksDir, 0o777);
+  // Use try/catch in case directories are owned by a different user (e.g., root)
+  try {
+    fs.chmodSync(groupIpcDir, 0o777);
+    fs.chmodSync(messagesDir, 0o777);
+    fs.chmodSync(tasksDir, 0o777);
+  } catch {
+    // Permissions may already be correct, or user needs to fix ownership manually
+    logger.warn({ path: groupIpcDir }, 'Could not chmod IPC directories - run: sudo chown -R $USER data/');
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
