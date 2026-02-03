@@ -6,6 +6,10 @@ const PROJECT_ROOT = process.cwd();
 const DATA_DIR = path.join(PROJECT_ROOT, 'data');
 const GROUPS_DIR = path.join(PROJECT_ROOT, 'groups');
 const STORE_DIR = path.join(PROJECT_ROOT, 'store');
+const HOME_DIR = process.env.HOME || '';
+const DOTCLAW_CONFIG_DIR = HOME_DIR ? path.join(HOME_DIR, '.config', 'dotclaw') : '';
+const TRACE_DIR = DOTCLAW_CONFIG_DIR ? path.join(DOTCLAW_CONFIG_DIR, 'traces') : '';
+const PROMPTS_DIR = DOTCLAW_CONFIG_DIR ? path.join(DOTCLAW_CONFIG_DIR, 'prompts') : '';
 
 function log(label, value) {
   console.log(`${label}: ${value}`);
@@ -27,6 +31,24 @@ function checkPathAccess(label, dir) {
     log(label, 'read/write OK');
   } catch (err) {
     log(label, `permission error (${err instanceof Error ? err.message : String(err)})`);
+  }
+}
+
+function countFiles(dir) {
+  try {
+    if (!fs.existsSync(dir)) return 0;
+    return fs.readdirSync(dir).length;
+  } catch {
+    return 0;
+  }
+}
+
+function checkSystemd(service) {
+  try {
+    const output = execSync(`systemctl is-active ${service}`, { stdio: 'pipe' }).toString().trim();
+    log(`systemd ${service}`, output);
+  } catch {
+    log(`systemd ${service}`, 'not available');
   }
 }
 
@@ -63,6 +85,12 @@ log('Disk space (data/)', diskSpace(DATA_DIR));
 log('Disk space (groups/)', diskSpace(GROUPS_DIR));
 log('Disk space (store/)', diskSpace(STORE_DIR));
 
+if (DOTCLAW_CONFIG_DIR) {
+  checkPathAccess('~/.config/dotclaw', DOTCLAW_CONFIG_DIR);
+  log('Trace files', String(countFiles(TRACE_DIR)));
+  log('Prompt packs', String(countFiles(PROMPTS_DIR)));
+}
+
 const envPath = path.join(PROJECT_ROOT, '.env');
 log('.env', fs.existsSync(envPath) ? 'present' : 'missing');
 
@@ -73,6 +101,9 @@ if (fs.existsSync(envPath)) {
   log('OPENROUTER_API_KEY', hasOpenRouter ? 'set' : 'missing');
   log('BRAVE_SEARCH_API_KEY', hasBrave ? 'set (optional, enables WebSearch)' : 'missing');
 }
+
+checkSystemd('dotclaw.service');
+checkSystemd('autotune.timer');
 
 if (typeof process.getuid === 'function' && process.getuid() === 0) {
   log('Warning', 'Running as root. For best security, run as a non-root user.');

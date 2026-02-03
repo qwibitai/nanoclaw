@@ -235,6 +235,19 @@ launchctl load ~/Library/LaunchAgents/com.dotclaw.plist
 
 Message your bot directly in DMs. In group chats, mention the bot or reply to it:
 
+### Quick Install (Linux/systemd)
+
+From the DotClaw repo:
+```bash
+./scripts/install.sh
+```
+
+This script:
+- Sets up `.env` defaults
+- Builds DotClaw and the container image
+- Creates systemd services with the correct Node path
+- Enables Autotune timer if a sibling `autotune/` repo is present
+
 ```
 @dotclaw_bot what's the weather in New York?
 @dotclaw_bot remind me every Monday at 9am to check my emails
