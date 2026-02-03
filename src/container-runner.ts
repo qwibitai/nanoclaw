@@ -157,32 +157,43 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
 }
 
 function detectContainerRuntime(): 'docker' | 'container' {
-  // Check if Docker is available and running
+  const { execSync } = require('child_process');
+
+  // 1. Check for Docker (preferred)
   try {
-    const { execSync } = require('child_process');
-    // Use full path to docker and increase timeout
-    execSync('/usr/bin/docker info', { stdio: 'ignore', timeout: 5000 });
+    execSync('docker info', { stdio: 'ignore', timeout: 5000 });
     logger.info('Container runtime: docker');
     return 'docker';
   } catch (err) {
-    // Check if Apple Container is available
+    // Try full path as fallback
     try {
-      const { execSync } = require('child_process');
-      execSync('which container', { stdio: 'ignore' });
-      logger.info('Container runtime: Apple Container');
-      return 'container';
+      execSync('/usr/bin/docker info', { stdio: 'ignore', timeout: 5000 });
+      logger.info('Container runtime: docker');
+      return 'docker';
     } catch {
-      // Default to docker if neither check works but docker binary exists
-      try {
-        const { execSync } = require('child_process');
-        execSync('which docker', { stdio: 'ignore' });
-        logger.info('Container runtime: docker (fallback)');
-        return 'docker';
-      } catch {
-        logger.warn('No container runtime detected, defaulting to docker');
-        return 'docker';
-      }
+      // Docker daemon might not be running yet, but we'll check for the binary later
     }
+  }
+
+  // 2. Check for Apple Container (macOS only)
+  try {
+    // Check for binary and system status
+    execSync('container system status', { stdio: 'ignore' });
+    logger.info('Container runtime: Apple Container');
+    return 'container';
+  } catch {
+    // Apple Container not available or not running
+  }
+
+  // 3. Last resort: check if docker binary exists even if daemon check failed
+  try {
+    execSync('which docker', { stdio: 'ignore' });
+    logger.info('Container runtime: docker (binary found, daemon check failed)');
+    return 'docker';
+  } catch {
+    // No runtime found, defaulting to docker for better error messages
+    logger.warn('No container runtime detected, defaulting to docker');
+    return 'docker';
   }
 }
 

@@ -23,11 +23,16 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    iputils-ping \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Mitigate DNS/IPv6 timeout issues (common on some VPS/server environments)
+ENV NODE_OPTIONS="--dns-result-order=ipv4first"
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code

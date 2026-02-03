@@ -623,31 +623,46 @@ async function startMessageLoop(): Promise<void> {
 }
 
 function ensureContainerSystemRunning(): void {
-  // Check Docker first (cross-platform)
+  // 1. Check for Docker (cross-platform)
   try {
     execSync('docker info', { stdio: 'pipe', timeout: 10000 });
     logger.info('Using Docker container runtime');
     return;
   } catch (dockerErr) {
-    // Docker not available, try Apple Container (macOS only)
-    logger.debug({ err: dockerErr }, 'Docker not available, trying Apple Container');
-  }
-
-  // Try Apple Container
-  try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-    return;
-  } catch {
-    logger.info('Starting Apple Container system...');
+    // Docker might be installed but daemon not running, or not in PATH
     try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
+      execSync('/usr/bin/docker info', { stdio: 'pipe', timeout: 10000 });
+      logger.info('Using Docker container runtime (/usr/bin/docker)');
       return;
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
+    } catch {
+      logger.debug({ err: dockerErr }, 'Docker not available, trying Apple Container');
     }
   }
+
+  // 2. Try Apple Container (macOS only)
+  if (process.platform === 'darwin') {
+    try {
+      execSync('container system status', { stdio: 'pipe' });
+      logger.debug('Apple Container system already running');
+      return;
+    } catch {
+      logger.info('Starting Apple Container system...');
+      try {
+        execSync('container system start', { stdio: 'pipe', timeout: 30000 });
+        logger.info('Apple Container system started');
+        return;
+      } catch (err) {
+        logger.error({ err }, 'Failed to start Apple Container system');
+      }
+    }
+  }
+
+  // 3. Fallback check for docker binary existence (to provide better error later if spawn fails)
+  try {
+    execSync('which docker', { stdio: 'ignore' });
+    logger.warn('Docker binary found but daemon check failed. Agent execution may still fail.');
+    return;
+  } catch {}
 
   // Neither runtime available
   console.error('\n╔════════════════════════════════════════════════════════════════╗');
