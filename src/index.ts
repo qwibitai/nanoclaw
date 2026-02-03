@@ -24,6 +24,7 @@ import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessa
 import { startSchedulerLoop } from './task-scheduler.js';
 import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './container-runner.js';
 import { loadJson, saveJson } from './utils.js';
+import { startTelegramBot, sendTelegramMessage, sendTelegramPhoto, isTelegramJid, TELEGRAM_GROUP_FOLDER } from './telegram.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -222,6 +223,19 @@ async function sendMessage(jid: string, text: string): Promise<void> {
   }
 }
 
+async function sendWhatsAppPhoto(jid: string, imagePath: string, caption?: string): Promise<void> {
+  try {
+    const imageBuffer = fs.readFileSync(imagePath);
+    await sock.sendMessage(jid, {
+      image: imageBuffer,
+      caption: caption ? `${ASSISTANT_NAME}: ${caption}` : undefined
+    });
+    logger.info({ jid, imagePath }, 'WhatsApp photo sent');
+  } catch (err) {
+    logger.error({ jid, imagePath, err }, 'Failed to send WhatsApp photo');
+  }
+}
+
 function startIpcWatcher(): void {
   const ipcBaseDir = path.join(DATA_DIR, 'ipc');
   fs.mkdirSync(ipcBaseDir, { recursive: true });
@@ -253,16 +267,42 @@ function startIpcWatcher(): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+
+              // Handle text messages
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
-                  await sendMessage(data.chatJid, `${ASSISTANT_NAME}: ${data.text}`);
-                  logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+                // Check if this is a Telegram message
+                if (isTelegramJid(data.chatJid) || sourceGroup === TELEGRAM_GROUP_FOLDER) {
+                  await sendTelegramMessage(data.chatJid, `${ASSISTANT_NAME}: ${data.text}`);
+                  logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC Telegram message sent');
                 } else {
-                  logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
+                  // WhatsApp message - verify authorization
+                  const targetGroup = registeredGroups[data.chatJid];
+                  if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+                    await sendMessage(data.chatJid, `${ASSISTANT_NAME}: ${data.text}`);
+                    logger.info({ chatJid: data.chatJid, sourceGroup }, 'IPC message sent');
+                  } else {
+                    logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
+                  }
                 }
               }
+
+              // Handle photo messages
+              if (data.type === 'photo' && data.chatJid && data.imagePath) {
+                if (isTelegramJid(data.chatJid) || sourceGroup === TELEGRAM_GROUP_FOLDER) {
+                  await sendTelegramPhoto(data.chatJid, data.imagePath, data.caption);
+                  logger.info({ chatJid: data.chatJid, imagePath: data.imagePath, sourceGroup }, 'IPC Telegram photo sent');
+                } else {
+                  // WhatsApp photo - verify authorization
+                  const targetGroup = registeredGroups[data.chatJid];
+                  if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+                    await sendWhatsAppPhoto(data.chatJid, data.imagePath, data.caption);
+                    logger.info({ chatJid: data.chatJid, imagePath: data.imagePath, sourceGroup }, 'IPC WhatsApp photo sent');
+                  } else {
+                    logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC photo attempt blocked');
+                  }
+                }
+              }
+
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error({ file, sourceGroup, err }, 'Error processing IPC message');
@@ -482,7 +522,19 @@ async function connectWhatsApp(): Promise<void> {
     auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
     printQRInTerminal: false,
     logger,
-    browser: ['NanoClaw', 'Chrome', '1.0.0']
+    browser: ['NanoClaw', 'Chrome', '1.0.0'],
+    syncFullHistory: false  // Don't wait for full history, get real-time messages faster
+  });
+
+  // Debug: log all message-related events
+  sock.ev.on('messages.update', (updates) => {
+    logger.debug({ count: updates.length }, 'messages.update event');
+  });
+  sock.ev.on('messages.reaction', (reactions) => {
+    logger.debug({ count: reactions.length }, 'messages.reaction event');
+  });
+  sock.ev.on('message-receipt.update', (updates) => {
+    logger.debug({ count: updates.length }, 'message-receipt.update event');
   });
 
   sock.ev.on('connection.update', (update) => {
@@ -527,10 +579,12 @@ async function connectWhatsApp(): Promise<void> {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('messages.upsert', ({ messages }) => {
+  sock.ev.on('messages.upsert', ({ messages, type }) => {
+    logger.debug({ count: messages.length, type }, 'messages.upsert event received');
     for (const msg of messages) {
       if (!msg.message) continue;
       const chatJid = msg.key.remoteJid;
+      logger.debug({ chatJid, fromMe: msg.key.fromMe, hasMessage: !!msg.message }, 'Processing message');
       if (!chatJid || chatJid === 'status@broadcast') continue;
 
       const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
@@ -575,27 +629,41 @@ async function startMessageLoop(): Promise<void> {
 }
 
 function ensureContainerSystemRunning(): void {
+  // Check Docker first (cross-platform)
+  try {
+    execSync('docker info', { stdio: 'pipe', timeout: 10000 });
+    logger.info('Using Docker container runtime');
+    return;
+  } catch (dockerErr) {
+    // Docker not available, try Apple Container (macOS only)
+    logger.debug({ err: dockerErr }, 'Docker not available, trying Apple Container');
+  }
+
+  // Try Apple Container
   try {
     execSync('container system status', { stdio: 'pipe' });
     logger.debug('Apple Container system already running');
+    return;
   } catch {
     logger.info('Starting Apple Container system...');
     try {
       execSync('container system start', { stdio: 'pipe', timeout: 30000 });
       logger.info('Apple Container system started');
+      return;
     } catch (err) {
       logger.error({ err }, 'Failed to start Apple Container system');
-      console.error('\n╔════════════════════════════════════════════════════════════════╗');
-      console.error('║  FATAL: Apple Container system failed to start                 ║');
-      console.error('║                                                                ║');
-      console.error('║  Agents cannot run without Apple Container. To fix:           ║');
-      console.error('║  1. Install from: https://github.com/apple/container/releases ║');
-      console.error('║  2. Run: container system start                               ║');
-      console.error('║  3. Restart NanoClaw                                          ║');
-      console.error('╚════════════════════════════════════════════════════════════════╝\n');
-      throw new Error('Apple Container system is required but failed to start');
     }
   }
+
+  // Neither runtime available
+  console.error('\n╔════════════════════════════════════════════════════════════════╗');
+  console.error('║  FATAL: No container runtime available                         ║');
+  console.error('║                                                                ║');
+  console.error('║  Agents require Docker or Apple Container. To fix:            ║');
+  console.error('║  - Docker: Install and start Docker                           ║');
+  console.error('║  - macOS: Install Apple Container and run: container system start ║');
+  console.error('╚════════════════════════════════════════════════════════════════╝\n');
+  throw new Error('Container runtime (Docker or Apple Container) is required');
 }
 
 async function main(): Promise<void> {
@@ -603,6 +671,12 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Start Telegram bot (non-blocking, runs alongside WhatsApp)
+  startTelegramBot().catch(err => {
+    logger.error({ err }, 'Failed to start Telegram bot');
+  });
+
   await connectWhatsApp();
 }
 

@@ -156,15 +156,58 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   return mounts;
 }
 
+function detectContainerRuntime(): 'docker' | 'container' {
+  // Check if Docker is available and running
+  try {
+    const { execSync } = require('child_process');
+    // Use full path to docker and increase timeout
+    execSync('/usr/bin/docker info', { stdio: 'ignore', timeout: 5000 });
+    logger.info('Container runtime: docker');
+    return 'docker';
+  } catch (err) {
+    // Check if Apple Container is available
+    try {
+      const { execSync } = require('child_process');
+      execSync('which container', { stdio: 'ignore' });
+      logger.info('Container runtime: Apple Container');
+      return 'container';
+    } catch {
+      // Default to docker if neither check works but docker binary exists
+      try {
+        const { execSync } = require('child_process');
+        execSync('which docker', { stdio: 'ignore' });
+        logger.info('Container runtime: docker (fallback)');
+        return 'docker';
+      } catch {
+        logger.warn('No container runtime detected, defaulting to docker');
+        return 'docker';
+      }
+    }
+  }
+}
+
+const CONTAINER_RUNTIME = detectContainerRuntime();
+
 function buildContainerArgs(mounts: VolumeMount[]): string[] {
   const args: string[] = ['run', '-i', '--rm'];
 
-  // Apple Container: --mount for readonly, -v for read-write
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push('--mount', `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`);
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+  if (CONTAINER_RUNTIME === 'docker') {
+    // Docker: use --mount for both readonly and read-write with bind type
+    for (const mount of mounts) {
+      if (mount.readonly) {
+        args.push('--mount', `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`);
+      } else {
+        args.push('--mount', `type=bind,source=${mount.hostPath},target=${mount.containerPath}`);
+      }
+    }
+  } else {
+    // Apple Container: --mount for readonly, -v for read-write
+    for (const mount of mounts) {
+      if (mount.readonly) {
+        args.push('--mount', `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`);
+      } else {
+        args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
+      }
     }
   }
 
@@ -201,7 +244,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('container', containerArgs, {
+    const container = spawn(CONTAINER_RUNTIME, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 

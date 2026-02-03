@@ -42,7 +42,7 @@ export function createIpcMcp(ctx: IpcMcpContext) {
     tools: [
       tool(
         'send_message',
-        'Send a message to the current WhatsApp group. Use this to proactively share information or updates.',
+        'Send a text message to the current chat. Use this to proactively share information or updates.',
         {
           text: z.string().describe('The message text to send')
         },
@@ -61,6 +61,42 @@ export function createIpcMcp(ctx: IpcMcpContext) {
             content: [{
               type: 'text',
               text: `Message queued for delivery (${filename})`
+            }]
+          };
+        }
+      ),
+
+      tool(
+        'send_photo',
+        'Send a photo/image to the current chat. The image must be a file in your workspace.',
+        {
+          path: z.string().describe('Path to the image file (e.g., /workspace/group/screenshot.png)'),
+          caption: z.string().optional().describe('Optional caption for the image')
+        },
+        async (args) => {
+          // Verify file exists
+          if (!fs.existsSync(args.path)) {
+            return {
+              content: [{ type: 'text', text: `Error: File not found: ${args.path}` }],
+              isError: true
+            };
+          }
+
+          const data = {
+            type: 'photo',
+            chatJid,
+            imagePath: args.path,
+            caption: args.caption,
+            groupFolder,
+            timestamp: new Date().toISOString()
+          };
+
+          const filename = writeIpcFile(MESSAGES_DIR, data);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Photo queued for delivery (${filename})`
             }]
           };
         }

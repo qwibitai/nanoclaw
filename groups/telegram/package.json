@@ -1,0 +1,12 @@
+{
+  "name": "playwright-mcp-server",
+  "version": "1.0.0",
+  "description": "Playwright browser automation MCP server for Claude Code",
+  "main": "playwright-mcp-server.js",
+  "scripts": {
+    "start": "node playwright-mcp-server.js"
+  },
+  "dependencies": {
+    "playwright": "^1.40.0"
+  }
+}

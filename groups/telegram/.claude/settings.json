@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "playwright-browser": {
+      "command": "node",
+      "args": ["/workspace/group/playwright-mcp-server.js"]
+    }
+  }
+}

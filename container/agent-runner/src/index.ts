@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { createIpcMcp } from './ipc-mcp.js';
+import { createBrowserMcp } from './browser-mcp.js';
 
 interface ContainerInput {
   prompt: string;
@@ -243,13 +244,15 @@ async function main(): Promise<void> {
           'Bash',
           'Read', 'Write', 'Edit', 'Glob', 'Grep',
           'WebSearch', 'WebFetch',
-          'mcp__nanoclaw__*'
+          'mcp__nanoclaw__*',
+          'mcp__browser__*'
         ],
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         settingSources: ['project'],
         mcpServers: {
-          nanoclaw: ipcMcp
+          nanoclaw: ipcMcp,
+          browser: createBrowserMcp()
         },
         hooks: {
           PreCompact: [{ hooks: [createPreCompactHook()] }]
