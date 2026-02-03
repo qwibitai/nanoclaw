@@ -80,14 +80,14 @@ If unsure which mode to use, ask the user. Examples:
 - "Follow up on my request" → group (needs to know what was requested)
 - "Generate a daily report" → isolated (just needs instructions in prompt)
 
-SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
-• cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
+SCHEDULE VALUE FORMAT:
+• cron: Standard cron expression in LOCAL timezone (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am local)
 • interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
-• once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00"). Do NOT use UTC/Z suffix.`,
+• once: UTC timestamp WITH "Z" suffix (e.g., "2026-02-01T23:30:00.000Z"). Use the exact format from message timestamps.`,
         {
           prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
           schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-          schedule_value: z.string().describe('cron: "*/5 * * * *" | interval: milliseconds like "300000" | once: local timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
+          schedule_value: z.string().describe('cron: "*/5 * * * *" (local timezone) | interval: milliseconds like "300000" | once: UTC timestamp like "2026-02-01T23:30:00.000Z" (WITH Z suffix!)'),
           context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
           target_group: z.string().optional().describe('Target group folder (main only, defaults to current group)')
         },
@@ -112,9 +112,9 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
             }
           } else if (args.schedule_type === 'once') {
             const date = new Date(args.schedule_value);
-            if (isNaN(date.getTime())) {
+            if (isNaN(date.getTime()) || !args.schedule_value.endsWith('Z')) {
               return {
-                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Use ISO 8601 format like "2026-02-01T15:30:00.000Z".` }],
+                content: [{ type: 'text', text: `Invalid timestamp: "${args.schedule_value}". Must be UTC with Z suffix, like "2026-02-01T23:30:00.000Z" (use message timestamps as reference).` }],
                 isError: true
               };
             }

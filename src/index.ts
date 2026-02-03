@@ -370,11 +370,17 @@ async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
-            logger.warn({ scheduleValue: data.schedule_value }, 'Invalid timestamp');
+          // Expect UTC timestamp with Z suffix (e.g., "2026-02-01T23:30:00.000Z")
+          if (!data.schedule_value.endsWith('Z')) {
+            logger.warn({ scheduleValue: data.schedule_value }, 'Invalid timestamp: must be UTC with Z suffix');
             break;
           }
+          const scheduled = new Date(data.schedule_value);
+          if (isNaN(scheduled.getTime())) {
+            logger.warn({ scheduleValue: data.schedule_value }, 'Invalid UTC timestamp');
+            break;
+          }
+          // Store as-is (already UTC)
           nextRun = scheduled.toISOString();
         }
 
