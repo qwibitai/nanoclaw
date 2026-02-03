@@ -27,7 +27,7 @@ import {
 } from './memory.js';
 import { loadPromptPackWithCanary, formatTaskExtractionPack, formatResponseQualityPack, formatToolCallingPack, formatMemoryPolicyPack, PromptPack } from './prompt-packs.js';
 
-interface ContainerInput {
+export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
@@ -52,7 +52,7 @@ interface ContainerInput {
   modelTemperature?: number;
 }
 
-interface ContainerOutput {
+export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;

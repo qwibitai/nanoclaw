@@ -15,7 +15,8 @@
     "doctor": "node scripts/doctor.js",
     "autotune": "node scripts/autotune.js",
     "lint": "eslint . --max-warnings=0",
-    "test": "npm run build && node --test test/**/*.test.js"
+    "test": "npm run build && node --test test/**/*.test.js && npm run test:agent-runner",
+    "test:agent-runner": "node scripts/test-agent-runner.js"
   },
   "dependencies": {
     "@dotsetlabs/autotune": "^1.0.0",

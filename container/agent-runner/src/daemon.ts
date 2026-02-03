@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runAgentOnce } from './index.js';
+import type { ContainerInput } from './index.js';
 
 const REQUESTS_DIR = '/workspace/ipc/agent_requests';
 const RESPONSES_DIR = '/workspace/ipc/agent_responses';
@@ -25,6 +26,9 @@ async function processRequests(): Promise<void> {
       const payload = JSON.parse(raw) as { id?: string; input?: unknown };
       requestId = payload.id || requestId;
       const input = payload.input || payload;
+      if (!isContainerInput(input)) {
+        throw new Error('Invalid agent request payload');
+      }
       const output = await runAgentOnce(input);
       const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
       fs.writeFileSync(responsePath, JSON.stringify(output));
@@ -44,6 +48,15 @@ async function processRequests(): Promise<void> {
       }
     }
   }
+}
+
+function isContainerInput(value: unknown): value is ContainerInput {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.prompt === 'string'
+    && typeof record.groupFolder === 'string'
+    && typeof record.chatJid === 'string'
+    && typeof record.isMain === 'boolean';
 }
 
 async function loop(): Promise<void> {

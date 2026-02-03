@@ -718,29 +718,34 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     })
   });
 
-  const webSearchTool = tool({
+  const webSearchInputSchema = z.object({
+    query: z.string().describe('Search query'),
+    count: z.number().int().positive().optional().describe('Number of results (default 5)'),
+    offset: z.number().int().nonnegative().optional().describe('Offset for pagination'),
+    safesearch: z.enum(['off', 'moderate', 'strict']).optional().describe('Safe search setting')
+  });
+  const webSearchOutputSchema = z.object({
+    query: z.string(),
+    results: z.array(z.object({
+      title: z.string().nullable(),
+      url: z.string().nullable(),
+      description: z.string().nullable()
+    }))
+  });
+  type WebSearchInput = z.infer<typeof webSearchInputSchema>;
+  type WebSearchOutput = z.infer<typeof webSearchOutputSchema>;
+
+  const webSearchTool = tool<typeof webSearchInputSchema, typeof webSearchOutputSchema>({
     name: 'WebSearch',
     description: 'Search the web using Brave Search API.',
-    inputSchema: z.object({
-      query: z.string().describe('Search query'),
-      count: z.number().int().positive().optional().describe('Number of results (default 5)'),
-      offset: z.number().int().nonnegative().optional().describe('Offset for pagination'),
-      safesearch: z.enum(['off', 'moderate', 'strict']).optional().describe('Safe search setting')
-    }),
-    outputSchema: z.object({
-      query: z.string(),
-      results: z.array(z.object({
-        title: z.string().nullable(),
-        url: z.string().nullable(),
-        description: z.string().nullable()
-      }))
-    }),
+    inputSchema: webSearchInputSchema,
+    outputSchema: webSearchOutputSchema,
     execute: wrapExecute('WebSearch', async ({
       query,
       count,
       offset,
       safesearch
-    }: { query: string; count?: number; offset?: number; safesearch?: 'off' | 'moderate' | 'strict' }) => {
+    }: WebSearchInput): Promise<WebSearchOutput> => {
       const apiKey = process.env.BRAVE_SEARCH_API_KEY;
       if (!apiKey) {
         throw new Error('BRAVE_SEARCH_API_KEY is not set');
@@ -762,10 +767,12 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
         throw new Error(`Brave search error (${response.status}): ${text}`);
       }
       const data = await response.json() as { web?: { results?: Array<Record<string, unknown>> } };
-      const results = (data?.web?.results || []).map((result) => ({
-        title: result?.title ?? null,
-        url: result?.url ?? null,
-        description: result?.description ?? result?.snippet ?? null
+      const toMaybeString = (value: unknown): string | null =>
+        typeof value === 'string' ? value : null;
+      const results: WebSearchOutput['results'] = (data?.web?.results || []).map((result) => ({
+        title: toMaybeString(result?.title),
+        url: toMaybeString(result?.url),
+        description: toMaybeString(result?.description) ?? toMaybeString(result?.snippet)
       }));
       return { query, results };
     })
