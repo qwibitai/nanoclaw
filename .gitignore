@@ -9,6 +9,10 @@ store/
 data/
 logs/
 
+# Group runtime data (keep only CLAUDE.md)
+groups/*/logs/
+groups/*/*.json
+
 # Secrets
 *.keys.json
 .env

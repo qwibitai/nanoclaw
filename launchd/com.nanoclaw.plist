@@ -6,6 +6,10 @@
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
+        <string>{{PROJECT_ROOT}}/node_modules/.bin/dotenv</string>
+        <string>-e</string>
+        <string>.env</string>
+        <string>--</string>
         <string>{{NODE_PATH}}</string>
         <string>{{PROJECT_ROOT}}/dist/index.js</string>
     </array>
@@ -21,8 +25,6 @@
         <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>{{HOME}}</string>
-        <key>ASSISTANT_NAME</key>
-        <string>Andy</string>
     </dict>
     <key>StandardOutPath</key>
     <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
