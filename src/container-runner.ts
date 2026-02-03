@@ -3,7 +3,7 @@
  * Spawns agent execution in Apple Container and handles IPC
  */
 
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -17,6 +17,21 @@ import {
 } from './config.js';
 import { RegisteredGroup } from './types.js';
 import { validateAdditionalMounts } from './mount-security.js';
+
+const activeProcesses = new Set<ChildProcess>();
+
+export function cleanupProcesses(): void {
+  for (const proc of activeProcesses) {
+    if (proc.pid) {
+      try {
+        process.kill(-proc.pid, 'SIGKILL'); // Kill process group
+      } catch {
+        proc.kill('SIGKILL');
+      }
+    }
+  }
+  activeProcesses.clear();
+}
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -202,8 +217,10 @@ export async function runContainerAgent(
 
   return new Promise((resolve) => {
     const container = spawn('container', containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true // Start in new process group for easier cleanup
     });
+    activeProcesses.add(container);
 
     let stdout = '';
     let stderr = '';
@@ -254,6 +271,7 @@ export async function runContainerAgent(
     }, group.containerConfig?.timeout || CONTAINER_TIMEOUT);
 
     container.on('close', (code) => {
+      activeProcesses.delete(container);
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
 

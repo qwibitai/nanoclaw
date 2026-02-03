@@ -22,8 +22,16 @@ import {
 import { RegisteredGroup, Session, NewMessage } from './types.js';
 import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessagesSince, getAllTasks, getTaskById, updateChatName, getAllChats, getLastGroupSync, setLastGroupSync } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './container-runner.js';
+import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup, cleanupProcesses } from './container-runner.js';
 import { loadJson, saveJson } from './utils.js';
+
+// Cleanup active containers on exit
+['SIGINT', 'SIGTERM', 'exit'].forEach(signal => {
+  process.on(signal, () => {
+    cleanupProcesses();
+    if (signal !== 'exit') process.exit();
+  });
+});
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
