@@ -203,7 +203,7 @@ Groups can have additional directories mounted via `containerConfig` in `data/re
     "containerConfig": {
       "additionalMounts": [
         {
-          "hostPath": "/Users/gavriel/projects/webapp",
+          "hostPath": "/Users/username/projects/webapp",
           "containerPath": "webapp",
           "readonly": false
         }
