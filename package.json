@@ -6,10 +6,12 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.ts",
     "dev": "tsx src/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build-rootfs": "sudo bash scripts/build-agent-rootfs.sh",
+    "setup-network": "bash scripts/setup-firecracker-networking.sh"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

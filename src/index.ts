@@ -5,7 +5,7 @@ import makeWASocket, {
   WASocket
 } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import { exec, execSync } from 'child_process';
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,7 +22,7 @@ import {
 import { RegisteredGroup, Session, NewMessage } from './types.js';
 import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessagesSince, getAllTasks, getTaskById, updateChatName, getAllChats, getLastGroupSync, setLastGroupSync } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup } from './container-runner.js';
+import { runContainerAgent, writeTasksSnapshot, writeGroupsSnapshot, AvailableGroup, verifyFirecrackerSetup, cleanupAll } from './firecracker-runner.js';
 import { loadJson, saveJson } from './utils.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -441,7 +441,7 @@ async function processTaskIpc(
         await syncGroupMetadata(true);
         // Write updated snapshot immediately
         const availableGroups = getAvailableGroups();
-        const { writeGroupsSnapshot: writeGroups } = await import('./container-runner.js');
+        const { writeGroupsSnapshot: writeGroups } = await import('./firecracker-runner.js');
         writeGroups(sourceGroup, true, availableGroups, new Set(Object.keys(registeredGroups)));
       } else {
         logger.warn({ sourceGroup }, 'Unauthorized refresh_groups attempt blocked');
@@ -491,7 +491,7 @@ async function connectWhatsApp(): Promise<void> {
     if (qr) {
       const msg = 'WhatsApp authentication required. Run /setup in Claude Code.';
       logger.error(msg);
-      exec(`osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`);
+      console.log(`[NanoClaw] ${msg}`);
       setTimeout(() => process.exit(1), 1000);
     }
 
@@ -574,37 +574,25 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-  } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error('\n╔════════════════════════════════════════════════════════════════╗');
-      console.error('║  FATAL: Apple Container system failed to start                 ║');
-      console.error('║                                                                ║');
-      console.error('║  Agents cannot run without Apple Container. To fix:           ║');
-      console.error('║  1. Install from: https://github.com/apple/container/releases ║');
-      console.error('║  2. Run: container system start                               ║');
-      console.error('║  3. Restart NanoClaw                                          ║');
-      console.error('╚════════════════════════════════════════════════════════════════╝\n');
-      throw new Error('Apple Container system is required but failed to start');
-    }
-  }
-}
-
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  verifyFirecrackerSetup();
   initDatabase();
   logger.info('Database initialized');
   loadState();
   await connectWhatsApp();
 }
+
+// Graceful shutdown: clean up all running VMs
+process.on('SIGINT', async () => {
+  console.log('[NanoClaw] Shutting down, cleaning up VMs...');
+  await cleanupAll();
+  process.exit(0);
+});
+process.on('SIGTERM', async () => {
+  console.log('[NanoClaw] Shutting down, cleaning up VMs...');
+  await cleanupAll();
+  process.exit(0);
+});
 
 main().catch(err => {
   logger.error({ err }, 'Failed to start NanoClaw');
