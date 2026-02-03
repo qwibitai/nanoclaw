@@ -1,7 +1,6 @@
 /**
  * Firecracker MicroVM Runner for NanoClaw
  *
- * Replaces Apple Container isolation with Firecracker microVMs.
  * Each agent task gets its own microVM with its own Linux kernel,
  * providing strong isolation on Linux (Ubuntu Server 24.04).
  *
@@ -638,8 +637,7 @@ function getHomeDir(): string {
 }
 
 /**
- * Build the mount list for a Firecracker VM, matching the security model
- * from the original Apple Container runner.
+ * Build the mount list for a Firecracker VM.
  */
 function buildMounts(group: RegisteredGroup, isMain: boolean): Mount[] {
   const mounts: Mount[] = [];
@@ -798,9 +796,8 @@ export async function runContainerAgent(
   }
 }
 
-// ── IPC Helpers (unchanged from container-runner) ──────────────────────
-// These write data to IPC directories for agents to read.
-// In the Firecracker model, these files are copied into the rootfs.
+// ── IPC Helpers ────────────────────────────────────────────────────────
+// These write data to IPC directories for reference on the host.
 
 export function writeTasksSnapshot(
   groupFolder: string,

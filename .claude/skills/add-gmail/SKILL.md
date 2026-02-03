@@ -161,7 +161,7 @@ For Tool Mode, integrate Gmail MCP into the agent runner. Execute these changes 
 
 ### Step 1: Add Gmail MCP to Agent Runner
 
-Read `container/agent-runner/src/index.ts` and find the `mcpServers` config in the `query()` call.
+Read `src/firecracker-runner.ts` and find the `mcpServers` config in the `query()` call.
 
 Add `gmail` to the `mcpServers` object:
 
@@ -193,7 +193,7 @@ allowedTools: [
 
 ### Step 2: Mount Gmail Credentials in Container
 
-Read `src/container-runner.ts` and find the `buildVolumeMounts` function.
+Read `src/firecracker-runner.ts` and find the `buildVolumeMounts` function.
 
 Add this mount block (after the `.claude` mount is a good location):
 
@@ -246,13 +246,13 @@ cd .. && npm run build
 Wait for TypeScript compilation, then restart the service:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+sudo systemctl restart nanoclaw
 ```
 
 Check that it started:
 
 ```bash
-sleep 2 && launchctl list | grep nanoclaw
+sleep 2 && sudo systemctl status nanoclaw --no-pager
 ```
 
 ### Step 5: Test Gmail Integration
@@ -646,7 +646,7 @@ cd .. && npm run build
 Restart the service:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+sudo systemctl restart nanoclaw
 ```
 
 Verify it started and check for email channel startup message:
@@ -702,11 +702,11 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 
 To remove Gmail entirely:
 
-1. Remove from `container/agent-runner/src/index.ts`:
+1. Remove from `src/firecracker-runner.ts`:
    - Delete `gmail` from `mcpServers`
    - Remove `mcp__gmail__*` from `allowedTools`
 
-2. Remove from `src/container-runner.ts`:
+2. Remove from `src/firecracker-runner.ts`:
    - Delete the `~/.gmail-mcp` mount block
 
 3. Remove from `src/index.ts` (Channel Mode only):
@@ -721,5 +721,5 @@ To remove Gmail entirely:
    ```bash
    cd container && ./build.sh && cd ..
    npm run build
-   launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+   sudo systemctl restart nanoclaw
    ```

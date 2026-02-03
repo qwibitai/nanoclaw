@@ -6,14 +6,14 @@ Adds Parallel AI MCP integration to NanoClaw for advanced web research capabilit
 
 - **Quick Search** - Fast web lookups using Parallel Search API (free to use)
 - **Deep Research** - Comprehensive analysis using Parallel Task API (asks permission)
-- **Non-blocking Design** - Uses NanoClaw scheduler for result polling (no container blocking)
+- **Non-blocking Design** - Uses NanoClaw scheduler for result polling (no VM blocking)
 
 ## Prerequisites
 
 User must have:
 1. Parallel AI API key from https://platform.parallel.ai
 2. NanoClaw already set up and running
-3. Container system working (Apple Container or Docker)
+3. Container system working (Firecracker microVMs)
 
 ## Implementation Steps
 
@@ -65,7 +65,7 @@ grep "PARALLEL_API_KEY" .env | head -c 50
 
 ### 3. Update Container Runner
 
-Add `PARALLEL_API_KEY` to allowed environment variables in `src/container-runner.ts`:
+Add `PARALLEL_API_KEY` to allowed environment variables in `src/firecracker-runner.ts`:
 
 Find the line:
 ```typescript
@@ -79,7 +79,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'PARALLEL_A
 
 ### 4. Configure MCP Servers in Agent Runner
 
-Update `container/agent-runner/src/index.ts`:
+Update `src/firecracker-runner.ts`:
 
 Find the section where `mcpServers` is configured (around line 237-252):
 ```typescript
@@ -218,20 +218,15 @@ I can do deep research on [topic] using Parallel's Task API. This will take
 
 ### 6. Rebuild Container
 
-Build the container with updated agent runner:
+Rebuild the agent rootfs:
 
 ```bash
-./container/build.sh
+npm run build-rootfs
 ```
 
-The build script will automatically:
-- Try Apple Container first
-- Fall back to Docker if Rosetta is required
-- Import to Apple Container
-
-Verify the build:
+Verify the rootfs:
 ```bash
-echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK"
+[ -f /opt/firecracker/agent-rootfs.ext4 ] && echo "Rootfs OK" || echo "Rootfs missing"
 ```
 
 ### 7. Restart Service
@@ -240,13 +235,13 @@ Rebuild the main app and restart:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+sudo systemctl restart nanoclaw
 ```
 
 Wait 3 seconds for service to start, then verify:
 ```bash
 sleep 3
-launchctl list | grep nanoclaw
+sudo systemctl status nanoclaw --no-pager
 ```
 
 ### 8. Test Integration
@@ -272,11 +267,11 @@ Look for: `Parallel AI MCP servers configured`
 **Container hangs or times out:**
 - Check that `type: 'http'` is specified in MCP server config
 - Verify API key is correct in .env
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+- Check VM logs: `cat groups/main/logs/firecracker-*.log | tail -50`
 
 **MCP servers not loading:**
 - Ensure PARALLEL_API_KEY is in .env
-- Verify container-runner.ts includes PARALLEL_API_KEY in allowedVars
+- Verify firecracker-runner.ts includes PARALLEL_API_KEY in allowedVars
 - Check agent-runner logs for "Parallel AI MCP servers configured" message
 
 **Task polling not working:**
@@ -289,7 +284,7 @@ Look for: `Parallel AI MCP servers configured`
 To remove Parallel AI integration:
 
 1. Remove from .env: `sed -i.bak '/PARALLEL_API_KEY/d' .env`
-2. Revert changes to container-runner.ts and agent-runner/src/index.ts
+2. Revert changes to firecracker-runner.ts and agent-runner/src/index.ts
 3. Remove Web Research Tools section from groups/main/CLAUDE.md
-4. Rebuild: `./container/build.sh && npm run build`
-5. Restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+4. Rebuild: `npm run build-rootfs && npm run build`
+5. Restart: `sudo systemctl restart nanoclaw`

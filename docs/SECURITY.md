@@ -6,20 +6,22 @@
 |--------|-------------|-----------|
 | Main group | Trusted | Private self-chat, admin control |
 | Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
+| Firecracker VM agents | Sandboxed | Isolated execution environment (own kernel) |
 | WhatsApp messages | User input | Potential prompt injection |
 
 ## Security Boundaries
 
-### 1. Container Isolation (Primary Boundary)
+### 1. Firecracker MicroVM Isolation (Primary Boundary)
 
-Agents execute in Apple Container (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+Agents execute in Firecracker microVMs (each with its own Linux kernel), providing:
+- **Kernel isolation** - Each VM has its own kernel, isolated at the hypervisor level via KVM
+- **Process isolation** - VM processes cannot affect the host
+- **Filesystem isolation** - Files are copied into the VM rootfs, not live-mounted
+- **Non-root execution** - Runs as unprivileged `agent` user (uid 1000)
+- **Ephemeral VMs** - Fresh VM per invocation, destroyed after task completion
+- **Network isolation** - VMs on private bridge (172.16.0.0/24) with NAT
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's copied into the rootfs. This provides stronger isolation than Docker (which shares the host kernel).
 
 ### 2. Mount Security
 
@@ -37,7 +39,7 @@ private_key, .secret
 
 **Protections:**
 - Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
+- Guest path validation (rejects `..` and absolute paths)
 - `nonMainReadOnly` option forces read-only for non-main groups
 
 ### 3. Session Isolation
@@ -62,21 +64,16 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Handling
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+**Injected into VM rootfs:**
+- Claude session credentials (from `data/sessions/{group}/.claude/`)
+- Vercel AI Gateway API key (from `.env`)
 
-**NOT Mounted:**
+**NOT accessible to VMs:**
 - WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
+- Mount allowlist - external, never copied into VMs
 - Any credentials matching blocked patterns
 
-**Credential Filtering:**
-Only these environment variables are exposed to containers:
-```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
-```
-
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
+> **Note:** Claude credentials are copied into the VM rootfs so that Claude Code can authenticate when the agent runs. This means the agent can discover these credentials via Bash or file operations inside the VM. However, the ephemeral nature of VMs limits exposure — credentials are destroyed with the VM after task completion.
 
 ## Privilege Comparison
 
@@ -103,13 +100,13 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 │  • Message routing                                                │
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
-│  • Credential filtering                                           │
+│  • VM lifecycle (Firecracker microVMs)                             │
+│  • Credential injection into rootfs                               │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Explicit mounts only
 ┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
+│              FIRECRACKER microVM (ISOLATED/SANDBOXED)             │
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │

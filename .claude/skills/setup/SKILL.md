@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup on Ubuntu Server. Use when user wants to install dependencies, build rootfs, configure networking, authenticate WhatsApp, register their main channel, or start the background service. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
@@ -13,128 +13,94 @@ Run all commands automatically. Only pause when user action is required (scannin
 npm install
 ```
 
-## 2. Install Container Runtime
+## 2. Verify Firecracker Setup
 
-First, detect the platform and check what's available:
-
-```bash
-echo "Platform: $(uname -s)"
-which container && echo "Apple Container: installed" || echo "Apple Container: not installed"
-which docker && docker info >/dev/null 2>&1 && echo "Docker: installed and running" || echo "Docker: not installed or not running"
-```
-
-### If NOT on macOS (Linux, etc.)
-
-Apple Container is macOS-only. Use Docker instead.
-
-Tell the user:
-> You're on Linux, so we'll use Docker for container isolation. Let me set that up now.
-
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
-
-### If on macOS
-
-**If Apple Container is already installed:** Continue to Section 3.
-
-**If Apple Container is NOT installed:** Ask the user:
-> NanoClaw needs a container runtime for isolated agent execution. You have two options:
->
-> 1. **Apple Container** (default) - macOS-native, lightweight, designed for Apple silicon
-> 2. **Docker** - Cross-platform, widely used, works on macOS and Linux
->
-> Which would you prefer?
-
-#### Option A: Apple Container
-
-Tell the user:
-> Apple Container is required for running agents in isolated environments.
->
-> 1. Download the latest `.pkg` from https://github.com/apple/container/releases
-> 2. Double-click to install
-> 3. Run `container system start` to start the service
->
-> Let me know when you've completed these steps.
-
-Wait for user confirmation, then verify:
+Check that the Firecracker prerequisites are in place:
 
 ```bash
-container system start
-container --version
+echo "=== Checking Firecracker Prerequisites ==="
+
+echo -n "1. /dev/kvm access: "
+[ -r /dev/kvm ] && [ -w /dev/kvm ] && echo "OK" || echo "MISSING - run: sudo usermod -aG kvm $USER"
+
+echo -n "2. Firecracker binary: "
+[ -x /usr/local/bin/firecracker ] && echo "OK ($(/usr/local/bin/firecracker --version 2>&1 | head -1))" || echo "MISSING - install from https://github.com/firecracker-microvm/firecracker/releases"
+
+echo -n "3. VM kernel: "
+[ -f /opt/firecracker/vmlinux.bin ] && echo "OK" || echo "MISSING - download a Firecracker-compatible vmlinux"
+
+echo -n "4. Agent rootfs: "
+[ -f /opt/firecracker/agent-rootfs.ext4 ] && echo "OK ($(du -h /opt/firecracker/agent-rootfs.ext4 | cut -f1))" || echo "MISSING - will build in step 3"
+
+echo -n "5. Network bridge (fcbr0): "
+ip link show fcbr0 &>/dev/null && echo "OK" || echo "MISSING - will configure in step 3"
 ```
 
-**Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
+If Firecracker is not installed, tell the user:
+> Firecracker v1.7.0+ is required for running agents in isolated microVMs.
+>
+> Install it:
+> ```bash
+> ARCH=$(uname -m)
+> curl -L https://github.com/firecracker-microvm/firecracker/releases/download/v1.7.0/firecracker-v1.7.0-${ARCH}.tgz | tar xz
+> sudo mv release-v1.7.0-${ARCH}/firecracker-v1.7.0-${ARCH} /usr/local/bin/firecracker
+> sudo chmod +x /usr/local/bin/firecracker
+> rm -rf release-v1.7.0-${ARCH}
+> ```
+>
+> You also need a Firecracker-compatible kernel:
+> ```bash
+> sudo mkdir -p /opt/firecracker
+> curl -L -o /opt/firecracker/vmlinux.bin https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin
+> ```
+>
+> And ensure your user is in the kvm group:
+> ```bash
+> sudo usermod -aG kvm $USER
+> # Log out and back in for this to take effect
+> ```
 
-#### Option B: Docker
+## 3. Build Rootfs and Configure Networking
 
-Tell the user:
-> You've chosen Docker. Let me set that up now.
+### 3a. Set up networking (bridge + NAT)
 
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
+```bash
+npm run setup-network
+```
 
-## 3. Configure Claude Authentication
+### 3b. Build the agent rootfs image
+
+This creates `/opt/firecracker/agent-rootfs.ext4` with Ubuntu 22.04, Node.js 22, and Claude Code CLI.
+
+```bash
+npm run build-rootfs
+```
+
+Verify:
+```bash
+[ -f /opt/firecracker/agent-rootfs.ext4 ] && echo "Rootfs built: $(du -h /opt/firecracker/agent-rootfs.ext4 | cut -f1)" || echo "Build failed"
+```
+
+## 4. Configure Vercel AI Gateway
 
 Ask the user:
-> Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+> Do you have a Vercel AI Gateway API key? This allows Claude Code to use your existing Claude Max subscription ($0 API costs).
+>
+> Get one from: https://vercel.com/account/ai-gateway
 
-### Option 1: Claude Subscription (Recommended)
-
-Ask the user:
-> Want me to grab the OAuth token from your current Claude session?
-
-If yes:
+If they have a key:
 ```bash
-TOKEN=$(cat ~/.claude/.credentials.json 2>/dev/null | jq -r '.claudeAiOauth.accessToken // empty')
-if [ -n "$TOKEN" ]; then
-  echo "CLAUDE_CODE_OAUTH_TOKEN=$TOKEN" > .env
-  echo "Token configured: ${TOKEN:0:20}...${TOKEN: -4}"
-else
-  echo "No token found - are you logged in to Claude Code?"
-fi
+echo "VERCEL_AI_GATEWAY_KEY=<their-key>" > .env
 ```
 
-If the token wasn't found, tell the user:
-> Run `claude` in another terminal and log in first, then come back here.
-
-### Option 2: API Key
-
-Ask if they have an existing key to copy or need to create one.
-
-**Copy existing:**
+If they don't have one and want to use a direct API key instead:
 ```bash
-grep "^ANTHROPIC_API_KEY=" /path/to/source/.env > .env
+echo "ANTHROPIC_API_KEY=<their-key>" > .env
 ```
 
-**Create new:**
+Verify:
 ```bash
-echo 'ANTHROPIC_API_KEY=' > .env
-```
-
-Tell the user to add their key from https://console.anthropic.com/
-
-**Verify:**
-```bash
-KEY=$(grep "^ANTHROPIC_API_KEY=" .env | cut -d= -f2)
-[ -n "$KEY" ] && echo "API key configured: ${KEY:0:10}...${KEY: -4}" || echo "Missing"
-```
-
-## 4. Build Container Image
-
-Build the NanoClaw agent container:
-
-```bash
-./container/build.sh
-```
-
-This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
-
-Verify the build succeeded by running a simple test (this auto-detects which runtime you're using):
-
-```bash
-if which docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-else
-  echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-fi
+[ -f .env ] && echo ".env configured" || echo ".env missing"
 ```
 
 ## 5. WhatsApp Authentication
@@ -155,8 +121,6 @@ Tell the user:
 
 Wait for the script to output "Successfully authenticated" then continue.
 
-If it says "Already authenticated", skip to the next step.
-
 ## 6. Configure Assistant Name
 
 Ask the user:
@@ -164,12 +128,9 @@ Ask the user:
 >
 > Messages starting with `@TriggerWord` will be sent to Claude.
 
-If they choose something other than `Andy`, update it in these places:
+If they choose something other than `Andy`, update:
 1. `groups/CLAUDE.md` - Change "# Andy" and "You are Andy" to the new name
 2. `groups/main/CLAUDE.md` - Same changes at the top
-3. `data/registered_groups.json` - Use `@NewName` as the trigger when registering groups
-
-Store their choice - you'll use it when creating the registered_groups.json and when telling them how to test.
 
 ## 7. Register Main Channel
 
@@ -178,9 +139,6 @@ Ask the user:
 
 For personal chat:
 > Send any message to yourself in WhatsApp (the "Message Yourself" chat). Tell me when done.
-
-For group:
-> Send any message in the WhatsApp group you want to use as your main channel. Tell me when done.
 
 After user confirms, start the app briefly to capture the message:
 
@@ -191,14 +149,10 @@ timeout 10 npm run dev || true
 Then find the JID from the database:
 
 ```bash
-# For personal chat (ends with @s.whatsapp.net)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@s.whatsapp.net' ORDER BY timestamp DESC LIMIT 5"
-
-# For group (ends with @g.us)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@g.us' ORDER BY timestamp DESC LIMIT 5"
+sqlite3 store/messages.db "SELECT DISTINCT chat_jid, name FROM chats ORDER BY last_message_time DESC LIMIT 5"
 ```
 
-Create/update `data/registered_groups.json` using the JID from above and the assistant name from step 5:
+Create/update `data/registered_groups.json`:
 ```json
 {
   "JID_HERE": {
@@ -221,10 +175,8 @@ Ask the user:
 > Do you want the agent to be able to access any directories **outside** the NanoClaw project?
 >
 > Examples: Git repositories, project folders, documents you want Claude to work on.
->
-> **Note:** This is optional. Without configuration, agents can only access their own group folders.
 
-If **no**, create an empty allowlist to make this explicit:
+If **no**, create an empty allowlist:
 
 ```bash
 mkdir -p ~/.config/nanoclaw
@@ -235,156 +187,53 @@ cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
   "nonMainReadOnly": true
 }
 EOF
-echo "Mount allowlist created - no external directories allowed"
 ```
 
-Skip to the next step.
+If **yes**, ask which directories and create the allowlist accordingly. See the mount-security.ts module for the format.
 
-If **yes**, ask follow-up questions:
+## 9. Configure systemd Service
 
-### 8a. Collect Directory Paths
-
-Ask the user:
-> Which directories do you want to allow access to?
->
-> You can specify:
-> - A parent folder like `~/projects` (allows access to anything inside)
-> - Specific paths like `~/repos/my-app`
->
-> List them one per line, or give me a comma-separated list.
-
-For each directory they provide, ask:
-> Should `[directory]` be **read-write** (agents can modify files) or **read-only**?
->
-> Read-write is needed for: code changes, creating files, git commits
-> Read-only is safer for: reference docs, config examples, templates
-
-### 8b. Configure Non-Main Group Access
-
-Ask the user:
-> Should **non-main groups** (other WhatsApp chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
->
-> Recommended: **Yes** - this prevents other groups from modifying files even if you grant them access to a directory.
-
-### 8c. Create the Allowlist
-
-Create the allowlist file based on their answers:
+Generate the systemd service file:
 
 ```bash
-mkdir -p ~/.config/nanoclaw
-```
-
-Then write the JSON file. Example for a user who wants `~/projects` (read-write) and `~/docs` (read-only) with non-main read-only:
-
-```bash
-cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
-{
-  "allowedRoots": [
-    {
-      "path": "~/projects",
-      "allowReadWrite": true,
-      "description": "Development projects"
-    },
-    {
-      "path": "~/docs",
-      "allowReadWrite": false,
-      "description": "Reference documents"
-    }
-  ],
-  "blockedPatterns": [],
-  "nonMainReadOnly": true
-}
-EOF
-```
-
-Verify the file:
-
-```bash
-cat ~/.config/nanoclaw/mount-allowlist.json
-```
-
-Tell the user:
-> Mount allowlist configured. The following directories are now accessible:
-> - `~/projects` (read-write)
-> - `~/docs` (read-only)
->
-> **Security notes:**
-> - Sensitive paths (`.ssh`, `.gnupg`, `.aws`, credentials) are always blocked
-> - This config file is stored outside the project, so agents cannot modify it
-> - Changes require restarting the NanoClaw service
->
-> To grant a group access to a directory, add it to their config in `data/registered_groups.json`:
-> ```json
-> "containerConfig": {
->   "additionalMounts": [
->     { "hostPath": "~/projects/my-app", "containerPath": "my-app", "readonly": false }
->   ]
-> }
-> ```
-
-## 9. Configure launchd Service
-
-Generate the plist file with correct paths automatically:
-
-```bash
-NODE_PATH=$(which node)
+NODE_PATH=$(which tsx || which node)
 PROJECT_PATH=$(pwd)
-HOME_PATH=$HOME
 
-cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.nanoclaw</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${NODE_PATH}</string>
-        <string>${PROJECT_PATH}/dist/index.js</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${PROJECT_PATH}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin</string>
-        <key>HOME</key>
-        <string>${HOME_PATH}</string>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.log</string>
-    <key>StandardErrorPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.error.log</string>
-</dict>
-</plist>
-EOF
+sudo bash -c "cat > /etc/systemd/system/nanoclaw.service << EOF
+[Unit]
+Description=NanoClaw Personal Claude Assistant
+After=network.target
 
-echo "Created launchd plist with:"
-echo "  Node: ${NODE_PATH}"
-echo "  Project: ${PROJECT_PATH}"
-```
+[Service]
+Type=simple
+User=$(whoami)
+WorkingDirectory=${PROJECT_PATH}
+ExecStart=${NODE_PATH} src/index.ts
+Restart=always
+RestartSec=5
+StandardOutput=append:${PROJECT_PATH}/logs/nanoclaw.log
+StandardError=append:${PROJECT_PATH}/logs/nanoclaw.error.log
+Environment=HOME=${HOME}
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${HOME}/.local/bin
 
-Build and start the service:
+[Install]
+WantedBy=multi-user.target
+EOF"
 
-```bash
-npm run build
 mkdir -p logs
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+sudo systemctl daemon-reload
+sudo systemctl enable nanoclaw
+sudo systemctl start nanoclaw
 ```
 
 Verify it's running:
 ```bash
-launchctl list | grep nanoclaw
+sleep 2 && sudo systemctl status nanoclaw --no-pager
 ```
 
-## 11. Test
+## 10. Test
 
-Tell the user (using the assistant name they configured):
+Tell the user:
 > Send `@ASSISTANT_NAME hello` in your registered chat.
 
 Check the logs:
@@ -392,29 +241,26 @@ Check the logs:
 tail -f logs/nanoclaw.log
 ```
 
-The user should receive a response in WhatsApp.
-
 ## Troubleshooting
 
-**Service not starting**: Check `logs/nanoclaw.error.log`
+**Service not starting**: Check `logs/nanoclaw.error.log` or `sudo journalctl -u nanoclaw`
 
-**Container agent fails with "Claude Code process exited with code 1"**:
-- Ensure the container runtime is running:
-  - Apple Container: `container system start`
-  - Docker: `docker info` (start Docker Desktop on macOS, or `sudo systemctl start docker` on Linux)
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+**VM fails to boot**:
+- Check /dev/kvm access: `ls -la /dev/kvm`
+- Check rootfs exists: `ls -la /opt/firecracker/agent-rootfs.ext4`
+- Check bridge exists: `ip link show fcbr0`
+- Check VM logs: `cat groups/main/logs/firecracker-*.log | tail -50`
 
 **No response to messages**:
-- Verify the trigger pattern matches (e.g., `@AssistantName` at start of message)
+- Verify the trigger pattern matches
 - Check that the chat JID is in `data/registered_groups.json`
 - Check `logs/nanoclaw.log` for errors
 
 **WhatsApp disconnected**:
-- The service will show a macOS notification
 - Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+- Restart: `sudo systemctl restart nanoclaw`
 
-**Unload service**:
+**Restart service**:
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+sudo systemctl restart nanoclaw
 ```

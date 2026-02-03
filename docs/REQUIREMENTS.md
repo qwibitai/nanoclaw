@@ -20,7 +20,7 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Apple Container). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in Firecracker microVMs — each with its own Linux kernel. The isolation is at the hypervisor level. Agents can only see what's explicitly copied into the VM rootfs. Bash access is safe because commands run inside the microVM, not on the host.
 
 ### Built for One User
 
@@ -54,14 +54,8 @@ Skills to add or switch to different messaging platforms:
 - `/add-sms` - Add SMS via Twilio or similar
 - `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
-### Container Runtime
-The project currently uses Apple Container (macOS-only). We need:
-- `/convert-to-docker` - Replace Apple Container with standard Docker
-- This unlocks Linux support and broader deployment options
-
 ### Platform Support
-- `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
-- `/setup-windows` - Windows support via WSL2 + Docker
+- `/setup-windows` - Windows support via WSL2
 
 ---
 
@@ -70,8 +64,8 @@ The project currently uses Apple Container (macOS-only). We need:
 A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 **Core components:**
-- **Claude Agent SDK** as the core agent
-- **Apple Container** for isolated agent execution (Linux VMs)
+- **Claude Code CLI** as the core agent
+- **Firecracker microVMs** for isolated agent execution (each with its own Linux kernel)
 - **WhatsApp** as the primary I/O channel
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
@@ -103,17 +97,17 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Each group maintains a conversation session (via Claude Agent SDK)
 - Sessions auto-compact when context gets too long, preserving critical information
 
-### Container Isolation
-- All agents run inside Apple Container (lightweight Linux VMs)
-- Each agent invocation spawns a container with mounted directories
-- Containers provide filesystem isolation - agents can only see mounted paths
-- Bash access is safe because commands run inside the container, not on the host
-- Browser automation via agent-browser with Chromium in the container
+### Firecracker MicroVM Isolation
+- All agents run inside Firecracker microVMs (each with its own Linux kernel)
+- Each agent invocation boots a fresh VM with files copied into the rootfs
+- VMs provide kernel-level isolation — stronger than Docker or namespace-based containers
+- Bash access is safe because commands run inside the microVM, not on the host
+- VMs network via TAP devices on a bridge (fcbr0) with NAT to internet
 
 ### Scheduled Tasks
 - Users can ask Claude to schedule recurring or one-time tasks from any group
 - Tasks run as full agents in the context of the group that created them
-- Tasks have access to all tools including Bash (safe in container)
+- Tasks have access to all tools including Bash (safe in microVM)
 - Tasks can optionally send messages to their group via `send_message` tool, or complete silently
 - Task runs are logged to the database with duration and result
 - Schedule types: cron expressions, intervals (ms), or one-time (ISO timestamp)
@@ -171,11 +165,12 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Each user gets a custom setup matching their exact needs
 
 ### Skills
-- `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
+- `/setup` - Install dependencies, build rootfs, configure networking, authenticate WhatsApp, start services
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
+- `/debug` - VM issues, logs, troubleshooting
 
 ### Deployment
-- Runs on local Mac via launchd
+- Runs on Ubuntu Server 24.04 via systemd
 - Single Node.js process handles everything
 
 ---

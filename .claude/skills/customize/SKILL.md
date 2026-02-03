@@ -78,8 +78,7 @@ Implementation:
 ### Changing Deployment
 
 Questions to ask:
-- Target platform? (Linux server, Docker, different Mac)
-- Service manager? (systemd, Docker, supervisord)
+- Service manager? (systemd, supervisord, manual)
 
 Implementation:
 1. Create appropriate service files
@@ -92,8 +91,7 @@ Always tell the user:
 ```bash
 # Rebuild and restart
 npm run build
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+sudo systemctl restart nanoclaw
 ```
 
 ## Example Interaction
