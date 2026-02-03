@@ -393,10 +393,18 @@ async function main(): Promise<void> {
       maxOutputTokens: config.maxOutputTokens,
       temperature: config.temperature
     });
+    // Get tool calls to see what the model did
+    const toolCalls = await result.getToolCalls();
+    if (toolCalls.length > 0) {
+      log(`Model made ${toolCalls.length} tool call(s): ${toolCalls.map(t => t.name).join(', ')}`);
+    }
+
     responseText = await result.getText();
 
     if (!responseText || !responseText.trim()) {
-      log(`Warning: Model returned empty/whitespace response. Raw length: ${responseText?.length ?? 0}`);
+      log(`Warning: Model returned empty/whitespace response. Raw length: ${responseText?.length ?? 0}, tool calls: ${toolCalls.length}`);
+    } else {
+      log(`Model returned text response (${responseText.length} chars)`);
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
