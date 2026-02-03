@@ -38,8 +38,6 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 **Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers. Claude Code is (IMO) the best harness available.
 
-**No ToS gray areas.** Because it uses Claude Agent SDK natively with no hacks or workarounds, using your subscription with your auth token is completely legitimate (I think). No risk of being shut down for terms of service violations (I am not a lawyer).
-
 ## What It Supports
 
 - **WhatsApp I/O** - Message Claude from your phone
