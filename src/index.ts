@@ -55,6 +55,23 @@ let lastTimestamp = '';
 let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+// LID to phone number mapping (WhatsApp now sends LID JIDs for self-chats)
+let lidToPhoneMap: Record<string, string> = {};
+
+/**
+ * Translate a JID from LID format to phone format if we have a mapping.
+ * Returns the original JID if no mapping exists.
+ */
+function translateJid(jid: string): string {
+  if (!jid.endsWith('@lid')) return jid;
+  const lidUser = jid.split('@')[0].split(':')[0];
+  const phoneJid = lidToPhoneMap[lidUser];
+  if (phoneJid) {
+    logger.debug({ lidJid: jid, phoneJid }, 'Translated LID to phone JID');
+    return phoneJid;
+  }
+  return jid;
+}
 
 async function setTyping(jid: string, isTyping: boolean): Promise<void> {
   try {
@@ -670,6 +687,17 @@ async function connectWhatsApp(): Promise<void> {
       }
     } else if (connection === 'open') {
       logger.info('Connected to WhatsApp');
+      
+      // Build LID to phone mapping from auth state for self-chat translation
+      if (sock.user) {
+        const phoneUser = sock.user.id.split(':')[0];
+        const lidUser = sock.user.lid?.split(':')[0];
+        if (lidUser && phoneUser) {
+          lidToPhoneMap[lidUser] = `${phoneUser}@s.whatsapp.net`;
+          logger.debug({ lidUser, phoneUser }, 'LID to phone mapping set');
+        }
+      }
+      
       // Sync group metadata on startup (respects 24h cache)
       syncGroupMetadata().catch((err) =>
         logger.error({ err }, 'Initial group sync failed'),
@@ -695,9 +723,12 @@ async function connectWhatsApp(): Promise<void> {
   sock.ev.on('messages.upsert', ({ messages }) => {
     for (const msg of messages) {
       if (!msg.message) continue;
-      const chatJid = msg.key.remoteJid;
-      if (!chatJid || chatJid === 'status@broadcast') continue;
+      const rawJid = msg.key.remoteJid;
+      if (!rawJid || rawJid === 'status@broadcast') continue;
 
+      // Translate LID JID to phone JID if applicable
+      const chatJid = translateJid(rawJid);
+      
       const timestamp = new Date(
         Number(msg.messageTimestamp) * 1000,
       ).toISOString();
