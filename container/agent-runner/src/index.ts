@@ -124,7 +124,6 @@ async function readStdin(): Promise<string> {
 function getConfig(): MemoryConfig & {
   maxOutputTokens: number;
   summaryMaxOutputTokens: number;
-  maxToolRounds: number;
   temperature: number;
 } {
   return {
@@ -136,7 +135,6 @@ function getConfig(): MemoryConfig & {
     memoryMaxTokens: parseInt(process.env.DOTCLAW_MEMORY_MAX_TOKENS || '2000', 10),
     maxOutputTokens: parseInt(process.env.DOTCLAW_MAX_OUTPUT_TOKENS || '4096', 10),
     summaryMaxOutputTokens: parseInt(process.env.DOTCLAW_SUMMARY_MAX_OUTPUT_TOKENS || '1200', 10),
-    maxToolRounds: parseInt(process.env.DOTCLAW_MAX_TOOL_ROUNDS || '8', 10),
     temperature: parseFloat(process.env.DOTCLAW_TEMPERATURE || '0.2')
   };
 }
@@ -264,17 +262,8 @@ async function main(): Promise<void> {
   const assistantName = process.env.ASSISTANT_NAME || 'Rain';
   const config = getConfig();
 
-  const headers: Record<string, string> = {};
-  if (process.env.OPENROUTER_SITE_URL) {
-    headers['HTTP-Referer'] = process.env.OPENROUTER_SITE_URL;
-  }
-  if (process.env.OPENROUTER_SITE_NAME) {
-    headers['X-Title'] = process.env.OPENROUTER_SITE_NAME;
-  }
-
   const openrouter = new OpenRouter({
-    apiKey,
-    defaultHeaders: Object.keys(headers).length > 0 ? headers : undefined
+    apiKey
   });
 
   const { ctx: sessionCtx, isNew } = createSessionContext(SESSION_ROOT, input.sessionId);
@@ -376,7 +365,6 @@ async function main(): Promise<void> {
       input: messagesToOpenRouter(contextMessages),
       tools,
       maxOutputTokens: config.maxOutputTokens,
-      maxToolRounds: config.maxToolRounds,
       temperature: config.temperature
     });
     responseText = await result.getText();

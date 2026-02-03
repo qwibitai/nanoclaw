@@ -711,7 +711,7 @@ export function createTools(ctx: IpcContext) {
     execute: async ({ model }: { model: string }) => ipc.setModel({ model })
   });
 
-  const tools = [
+  const tools: Array<ReturnType<typeof tool>> = [
     readTool,
     writeTool,
     editTool,
@@ -727,9 +727,9 @@ export function createTools(ctx: IpcContext) {
     setModelTool
   ];
 
-  if (enableBash) tools.push(bashTool);
-  if (enableWebSearch) tools.push(webSearchTool);
-  if (enableWebFetch) tools.push(webFetchTool);
+  if (enableBash) tools.push(bashTool as ReturnType<typeof tool>);
+  if (enableWebSearch) tools.push(webSearchTool as ReturnType<typeof tool>);
+  if (enableWebFetch) tools.push(webFetchTool as ReturnType<typeof tool>);
 
   return tools;
 }
