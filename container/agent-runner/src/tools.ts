@@ -311,6 +311,31 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     .map(normalizeDomain)
     .filter(Boolean);
 
+  const wrapExecute = <TInput, TOutput>(name: string, execute: (args: TInput) => Promise<TOutput>) => {
+    return async (args: TInput): Promise<TOutput> => {
+      const start = Date.now();
+      try {
+        const result = await execute(args);
+        onToolCall?.({
+          name,
+          args: sanitizeToolArgs(name, args),
+          ok: true,
+          duration_ms: Date.now() - start
+        });
+        return result;
+      } catch (err) {
+        onToolCall?.({
+          name,
+          args: sanitizeToolArgs(name, args),
+          ok: false,
+          duration_ms: Date.now() - start,
+          error: err instanceof Error ? err.message : String(err)
+        });
+        throw err;
+      }
+    };
+  };
+
   const bashTool = tool({
     name: 'Bash',
     description: 'Run a shell command inside the container. CWD is /workspace/group.',
@@ -325,9 +350,9 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       durationMs: z.number(),
       truncated: z.boolean()
     }),
-    execute: async ({ command, timeoutMs }: { command: string; timeoutMs?: number }) => {
+    execute: wrapExecute('Bash', async ({ command, timeoutMs }: { command: string; timeoutMs?: number }) => {
       return runCommand(command, timeoutMs || DEFAULT_BASH_TIMEOUT_MS, DEFAULT_BASH_OUTPUT_LIMIT);
-    }
+    })
   });
 
   const readTool = tool({
@@ -343,11 +368,11 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       truncated: z.boolean(),
       size: z.number()
     }),
-    execute: async ({ path: inputPath, maxBytes }: { path: string; maxBytes?: number }) => {
+    execute: wrapExecute('Read', async ({ path: inputPath, maxBytes }: { path: string; maxBytes?: number }) => {
       const resolved = resolvePath(inputPath, isMain, true);
       const { content, truncated, size } = await readFileSafe(resolved, Math.min(maxBytes || DEFAULT_TOOL_OUTPUT_LIMIT, DEFAULT_TOOL_OUTPUT_LIMIT));
       return { path: resolved, content, truncated, size };
-    }
+    })
   });
 
   const writeTool = tool({
@@ -362,7 +387,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       path: z.string(),
       bytesWritten: z.number()
     }),
-    execute: async ({ path: inputPath, content, overwrite }: { path: string; content: string; overwrite?: boolean }) => {
+    execute: wrapExecute('Write', async ({ path: inputPath, content, overwrite }: { path: string; content: string; overwrite?: boolean }) => {
       const resolved = resolvePath(inputPath, isMain, false);
       if (fs.existsSync(resolved) && overwrite === false) {
         throw new Error(`File already exists: ${resolved}`);
@@ -370,7 +395,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       fs.mkdirSync(path.dirname(resolved), { recursive: true });
       fs.writeFileSync(resolved, content);
       return { path: resolved, bytesWritten: Buffer.byteLength(content, 'utf-8') };
-    }
+    })
   });
 
   const editTool = tool({
@@ -386,7 +411,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       replaced: z.boolean(),
       occurrences: z.number()
     }),
-    execute: async ({ path: inputPath, old_text, new_text }: { path: string; old_text: string; new_text: string }) => {
+    execute: wrapExecute('Edit', async ({ path: inputPath, old_text, new_text }: { path: string; old_text: string; new_text: string }) => {
       if (!old_text) {
         throw new Error('old_text must be non-empty');
       }
@@ -399,7 +424,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       const updated = content.replace(old_text, new_text);
       fs.writeFileSync(resolved, updated);
       return { path: resolved, replaced: true, occurrences };
-    }
+    })
   });
 
   const globTool = tool({
@@ -412,7 +437,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     outputSchema: z.object({
       matches: z.array(z.string())
     }),
-    execute: async ({ pattern, maxResults }: { pattern: string; maxResults?: number }) => {
+    execute: wrapExecute('Glob', async ({ pattern, maxResults }: { pattern: string; maxResults?: number }) => {
       const roots = getAllowedRoots(isMain);
       const absolutePattern = path.isAbsolute(pattern)
         ? resolvePath(pattern, isMain, false)
@@ -449,7 +474,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       });
 
       return { matches: matches.slice(0, limit) };
-    }
+    })
   });
 
   const grepTool = tool({
@@ -469,7 +494,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
         line: z.string()
       }))
     }),
-    execute: async ({
+    execute: wrapExecute('Grep', async ({
       pattern,
       path: targetPath,
       glob,
@@ -517,7 +542,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       }
 
       return { matches: results };
-    }
+    })
   });
 
   const webFetchTool = tool({
@@ -534,7 +559,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       content: z.string(),
       truncated: z.boolean()
     }),
-    execute: async ({ url, maxBytes }: { url: string; maxBytes?: number }) => {
+    execute: wrapExecute('WebFetch', async ({ url, maxBytes }: { url: string; maxBytes?: number }) => {
       let hostname: string;
       try {
         hostname = new URL(url).hostname.toLowerCase();
@@ -580,7 +605,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
         content: limited.text,
         truncated: truncated || limited.truncated
       };
-    }
+    })
   });
 
   const webSearchTool = tool({
@@ -600,7 +625,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
         description: z.string().nullable()
       }))
     }),
-    execute: async ({
+    execute: wrapExecute('WebSearch', async ({
       query,
       count,
       offset,
@@ -633,7 +658,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
         description: result?.description ?? result?.snippet ?? null
       }));
       return { query, results };
-    }
+    })
   });
 
   const sendMessageTool = tool({
@@ -646,7 +671,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       ok: z.boolean(),
       id: z.string().optional()
     }),
-    execute: async ({ text }: { text: string }) => ipc.sendMessage(text)
+    execute: wrapExecute('mcp__dotclaw__send_message', async ({ text }: { text: string }) => ipc.sendMessage(text))
   });
 
   const scheduleTaskTool = tool({
@@ -664,8 +689,8 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       id: z.string().optional(),
       error: z.string().optional()
     }),
-    execute: async (args: { prompt: string; schedule_type: 'cron' | 'interval' | 'once'; schedule_value: string; context_mode?: 'group' | 'isolated'; target_group?: string }) =>
-      ipc.scheduleTask(args)
+    execute: wrapExecute('mcp__dotclaw__schedule_task', async (args: { prompt: string; schedule_type: 'cron' | 'interval' | 'once'; schedule_value: string; context_mode?: 'group' | 'isolated'; target_group?: string }) =>
+      ipc.scheduleTask(args))
   });
 
   const listTasksTool = tool({
@@ -676,7 +701,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       ok: z.boolean(),
       tasks: z.array(z.any())
     }),
-    execute: async () => ipc.listTasks()
+    execute: wrapExecute('mcp__dotclaw__list_tasks', async () => ipc.listTasks())
   });
 
   const pauseTaskTool = tool({
@@ -688,7 +713,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     outputSchema: z.object({
       ok: z.boolean()
     }),
-    execute: async ({ task_id }: { task_id: string }) => ipc.pauseTask(task_id)
+    execute: wrapExecute('mcp__dotclaw__pause_task', async ({ task_id }: { task_id: string }) => ipc.pauseTask(task_id))
   });
 
   const resumeTaskTool = tool({
@@ -700,7 +725,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     outputSchema: z.object({
       ok: z.boolean()
     }),
-    execute: async ({ task_id }: { task_id: string }) => ipc.resumeTask(task_id)
+    execute: wrapExecute('mcp__dotclaw__resume_task', async ({ task_id }: { task_id: string }) => ipc.resumeTask(task_id))
   });
 
   const cancelTaskTool = tool({
@@ -712,7 +737,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
     outputSchema: z.object({
       ok: z.boolean()
     }),
-    execute: async ({ task_id }: { task_id: string }) => ipc.cancelTask(task_id)
+    execute: wrapExecute('mcp__dotclaw__cancel_task', async ({ task_id }: { task_id: string }) => ipc.cancelTask(task_id))
   });
 
   const registerGroupTool = tool({
@@ -728,8 +753,8 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       ok: z.boolean(),
       error: z.string().optional()
     }),
-    execute: async ({ jid, name, folder, trigger }: { jid: string; name: string; folder: string; trigger?: string }) =>
-      ipc.registerGroup({ jid, name, folder, trigger })
+    execute: wrapExecute('mcp__dotclaw__register_group', async ({ jid, name, folder, trigger }: { jid: string; name: string; folder: string; trigger?: string }) =>
+      ipc.registerGroup({ jid, name, folder, trigger }))
   });
 
   const setModelTool = tool({
@@ -742,7 +767,7 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
       ok: z.boolean(),
       error: z.string().optional()
     }),
-    execute: async ({ model }: { model: string }) => ipc.setModel({ model })
+    execute: wrapExecute('mcp__dotclaw__set_model', async ({ model }: { model: string }) => ipc.setModel({ model }))
   });
 
   const tools: Array<ReturnType<typeof tool>> = [
@@ -764,34 +789,6 @@ export function createTools(ctx: IpcContext, options?: { onToolCall?: ToolCallLo
   if (enableBash) tools.push(bashTool as ReturnType<typeof tool>);
   if (enableWebSearch) tools.push(webSearchTool as ReturnType<typeof tool>);
   if (enableWebFetch) tools.push(webFetchTool as ReturnType<typeof tool>);
-
-  if (onToolCall) {
-    for (const toolDef of tools) {
-      const originalExecute = toolDef.execute;
-      toolDef.execute = async (args: unknown) => {
-        const start = Date.now();
-        try {
-          const result = await originalExecute(args);
-          onToolCall({
-            name: toolDef.name,
-            args: sanitizeToolArgs(toolDef.name, args),
-            ok: true,
-            duration_ms: Date.now() - start
-          });
-          return result;
-        } catch (err) {
-          onToolCall({
-            name: toolDef.name,
-            args: sanitizeToolArgs(toolDef.name, args),
-            ok: false,
-            duration_ms: Date.now() - start,
-            error: err instanceof Error ? err.message : String(err)
-          });
-          throw err;
-        }
-      };
-    }
-  }
 
   return tools;
 }
