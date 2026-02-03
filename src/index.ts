@@ -16,7 +16,8 @@ import {
   TRIGGER_PATTERN,
   MAIN_GROUP_FOLDER,
   IPC_POLL_INTERVAL,
-  TIMEZONE
+  TIMEZONE,
+  CONTAINER_RUNTIME
 } from './config.js';
 import { RegisteredGroup, Session, NewMessage } from './types.js';
 import { initDatabase, storeMessage, storeChatMetadata, getNewMessages, getMessagesSince, getAllTasks, getTaskById, updateChatName, getAllChats, getLastGroupSync, setLastGroupSync } from './db.js';
@@ -570,6 +571,12 @@ async function startMessageLoop(): Promise<void> {
 }
 
 function ensureContainerSystemRunning(): void {
+  // Docker doesn't need a separate system start
+  if (CONTAINER_RUNTIME !== 'container') {
+    logger.info({ runtime: CONTAINER_RUNTIME }, 'Using container runtime');
+    return;
+  }
+
   try {
     execSync('container system status', { stdio: 'pipe' });
     logger.debug('Apple Container system already running');

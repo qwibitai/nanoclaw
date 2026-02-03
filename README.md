@@ -20,7 +20,7 @@ cd nanoclaw
 claude
 ```
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
+Then run `/setup` or `/setup-linux`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
 
 ## Philosophy
 

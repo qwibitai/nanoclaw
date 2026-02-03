@@ -1,4 +1,29 @@
 import path from 'path';
+import { execSync } from 'child_process';
+
+type Runtime = 'container' | 'podman' | 'docker';
+
+function detectContainerRuntime(): Runtime {
+  if (process.env.CONTAINER_RUNTIME) {
+    return process.env.CONTAINER_RUNTIME as Runtime;
+  }
+
+  const runtimes = process.platform === 'darwin'
+    ? (['container', 'podman', 'docker'] as const)
+    : (['podman', 'docker'] as const);
+
+  for (const rt of runtimes) {
+    try {
+      execSync(`command -v ${rt}`, { stdio: 'ignore' });
+      execSync(`${rt} version`, { stdio: 'ignore' });
+      return rt;
+    } catch {}
+  }
+
+  throw new Error('No container runtime found. Install Podman or Docker.');
+}
+
+export const CONTAINER_RUNTIME = detectContainerRuntime();
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
 export const POLL_INTERVAL = 2000;
