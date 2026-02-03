@@ -5,7 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { getDueTasks, updateTaskAfterRun, logTaskRun, getTaskById, getAllTasks } from './db.js';
 import { ScheduledTask, RegisteredGroup } from './types.js';
 import { GROUPS_DIR, SCHEDULER_POLL_INTERVAL, DATA_DIR, MAIN_GROUP_FOLDER, TIMEZONE } from './config.js';
-import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { runContainerAgent, writeTasksSnapshot } from './firecracker-runner.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
