@@ -52,6 +52,10 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 // LID to phone number mapping (WhatsApp now sends LID JIDs for self-chats)
 let lidToPhoneMap: Record<string, string> = {};
+// Prevent duplicate message loops on reconnect
+let messageLoopRunning = false;
+// Per-chat processing lock to prevent concurrent agent runs
+const processingChats = new Set<string>();
 
 /**
  * Translate a JID from LID format to phone format if we have a mapping.
@@ -183,6 +187,15 @@ async function processMessage(msg: NewMessage): Promise<void> {
   // Main group responds to all messages; other groups require trigger prefix
   if (!isMainGroup && !TRIGGER_PATTERN.test(content)) return;
 
+  // Per-chat lock: skip if an agent is already processing this chat
+  if (processingChats.has(msg.chat_jid)) {
+    logger.info(
+      { chatJid: msg.chat_jid, group: group.name },
+      'Skipping message - agent already processing this chat',
+    );
+    return;
+  }
+
   // Get all messages since last agent interaction so the session has full context
   const sinceTimestamp = lastAgentTimestamp[msg.chat_jid] || '';
   const missedMessages = getMessagesSince(
@@ -210,13 +223,20 @@ async function processMessage(msg: NewMessage): Promise<void> {
     'Processing message',
   );
 
-  await setTyping(msg.chat_jid, true);
-  const response = await runAgent(group, prompt, msg.chat_jid);
-  await setTyping(msg.chat_jid, false);
+  // Acquire per-chat lock
+  processingChats.add(msg.chat_jid);
+  try {
+    await setTyping(msg.chat_jid, true);
+    const response = await runAgent(group, prompt, msg.chat_jid);
+    await setTyping(msg.chat_jid, false);
 
-  if (response) {
-    lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
-    await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    if (response) {
+      lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
+      await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    }
+  } finally {
+    // Always release the lock
+    processingChats.delete(msg.chat_jid);
   }
 }
 
@@ -745,6 +765,12 @@ async function connectWhatsApp(): Promise<void> {
 }
 
 async function startMessageLoop(): Promise<void> {
+  // Prevent duplicate loops on reconnect
+  if (messageLoopRunning) {
+    logger.debug('Message loop already running, skipping duplicate start');
+    return;
+  }
+  messageLoopRunning = true;
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
