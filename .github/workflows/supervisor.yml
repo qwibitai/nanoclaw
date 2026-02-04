@@ -1,0 +1,31 @@
+name: Supervisor PR gate (template)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+  statuses: read
+
+jobs:
+  supervisor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Run supervisor policy (recommend/auto)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Set to "true" to print verdict without posting labels/comments/auto-merge.
+          # Flip to "false" (or remove) once validated in your repo.
+          SUPERVISOR_DRY_RUN: ${{ vars.SUPERVISOR_DRY_RUN || 'true' }}
+        run: |
+          python projects/eng-supervisor-agent/scripts/supervisor.py

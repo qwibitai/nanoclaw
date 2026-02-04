@@ -1,0 +1,25 @@
+# Supervisor Agent repo config (minimal)
+# These are DEFAULTS. The supervisor should confirm/override at role assumption time.
+
+merge_mode: auto_merge           # auto_merge | recommend_only
+canonical_language: en           # default output language
+bilingual_summary_languages: ["zh-hant"]
+
+# Which risk levels are eligible for auto-merge (when merge_mode=auto_merge)
+auto_merge_levels: ["L0", "L1"]
+
+# Gate thresholds (conservative defaults)
+max_files_changed: 20
+max_additions: 500
+max_deletions: 500
+
+block_labels: ["do-not-merge", "WIP", "blocked", "needs-human"]
+
+# Paths that always escalate (>= L2)
+protected_paths:
+  - ".github/workflows/**"
+  - "**/auth/**"
+  - "**/security/**"
+  - "Dockerfile"
+  - "docker-compose.*"
+  - "**/*lock*"  # lockfiles
