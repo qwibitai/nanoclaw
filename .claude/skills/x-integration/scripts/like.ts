@@ -4,7 +4,12 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx tsx like.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';
+import { getBrowserContext, navigateToTweet } from '../lib/browser.js';
+import { runScript, ScriptResult } from '../lib/script.js';
+import { validateTweetUrl, getFirstTweet, toggleTweetAction } from '../lib/utils.js';
+import { config } from '../lib/config.js';
+
+const btn = config.selectors.buttons;
 
 interface LikeInput {
   tweetUrl: string;
@@ -13,9 +18,8 @@ interface LikeInput {
 async function likeTweet(input: LikeInput): Promise<ScriptResult> {
   const { tweetUrl } = input;
 
-  if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
-  }
+  const urlError = validateTweetUrl(tweetUrl);
+  if (urlError) return urlError;
 
   let context = null;
   try {
@@ -26,27 +30,14 @@ async function likeTweet(input: LikeInput): Promise<ScriptResult> {
       return { success: false, message: error || 'Navigation failed' };
     }
 
-    const tweet = page.locator('article[data-testid="tweet"]').first();
-    const unlikeButton = tweet.locator('[data-testid="unlike"]');
-    const likeButton = tweet.locator('[data-testid="like"]');
-
-    // Check if already liked
-    const alreadyLiked = await unlikeButton.isVisible().catch(() => false);
-    if (alreadyLiked) {
-      return { success: true, message: 'Tweet already liked' };
-    }
-
-    await likeButton.waitFor({ timeout: config.timeouts.elementWait });
-    await likeButton.click();
-    await page.waitForTimeout(config.timeouts.afterClick);
-
-    // Verify
-    const nowLiked = await unlikeButton.isVisible().catch(() => false);
-    if (nowLiked) {
-      return { success: true, message: 'Like successful' };
-    }
-
-    return { success: false, message: 'Like action completed but could not verify success' };
+    const tweet = getFirstTweet(page);
+    return await toggleTweetAction({
+      tweet,
+      page,
+      doneButtonSelector: btn.unlike,
+      actionButtonSelector: btn.like,
+      actionName: 'Like'
+    });
 
   } finally {
     if (context) await context.close();

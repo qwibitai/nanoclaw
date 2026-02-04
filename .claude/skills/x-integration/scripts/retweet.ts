@@ -4,7 +4,12 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx tsx retweet.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';
+import { getBrowserContext, navigateToTweet } from '../lib/browser.js';
+import { runScript, ScriptResult } from '../lib/script.js';
+import { validateTweetUrl, getFirstTweet, toggleTweetAction } from '../lib/utils.js';
+import { config } from '../lib/config.js';
+
+const btn = config.selectors.buttons;
 
 interface RetweetInput {
   tweetUrl: string;
@@ -13,9 +18,8 @@ interface RetweetInput {
 async function retweet(input: RetweetInput): Promise<ScriptResult> {
   const { tweetUrl } = input;
 
-  if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
-  }
+  const urlError = validateTweetUrl(tweetUrl);
+  if (urlError) return urlError;
 
   let context = null;
   try {
@@ -26,33 +30,20 @@ async function retweet(input: RetweetInput): Promise<ScriptResult> {
       return { success: false, message: error || 'Navigation failed' };
     }
 
-    const tweet = page.locator('article[data-testid="tweet"]').first();
-    const unretweetButton = tweet.locator('[data-testid="unretweet"]');
-    const retweetButton = tweet.locator('[data-testid="retweet"]');
-
-    // Check if already retweeted
-    const alreadyRetweeted = await unretweetButton.isVisible().catch(() => false);
-    if (alreadyRetweeted) {
-      return { success: true, message: 'Tweet already retweeted' };
-    }
-
-    await retweetButton.waitFor({ timeout: config.timeouts.elementWait });
-    await retweetButton.click();
-    await page.waitForTimeout(config.timeouts.afterClick);
-
-    // Click retweet confirm option
-    const retweetConfirm = page.locator('[data-testid="retweetConfirm"]');
-    await retweetConfirm.waitFor({ timeout: config.timeouts.elementWait });
-    await retweetConfirm.click();
-    await page.waitForTimeout(config.timeouts.afterClick * 2);
-
-    // Verify
-    const nowRetweeted = await unretweetButton.isVisible().catch(() => false);
-    if (nowRetweeted) {
-      return { success: true, message: 'Retweet successful' };
-    }
-
-    return { success: false, message: 'Retweet action completed but could not verify success' };
+    const tweet = getFirstTweet(page);
+    return await toggleTweetAction({
+      tweet,
+      page,
+      doneButtonSelector: btn.unretweet,
+      actionButtonSelector: btn.retweet,
+      actionName: 'Retweet',
+      onAfterClick: async () => {
+        const retweetConfirm = page.locator(btn.retweetConfirm);
+        await retweetConfirm.waitFor({ timeout: config.timeouts.elementWait });
+        await retweetConfirm.click();
+        await page.waitForTimeout(config.timeouts.actionDelay);
+      }
+    });
 
   } finally {
     if (context) await context.close();

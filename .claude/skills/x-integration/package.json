@@ -1,0 +1,24 @@
+{
+  "name": "@nanoclaw/x-integration",
+  "version": "1.0.0",
+  "description": "X (Twitter) integration skill for NanoClaw",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test:post": "echo '{\"content\":\"Test tweet\"}' | npx tsx scripts/post.ts",
+    "setup": "npx tsx scripts/setup.ts"
+  },
+  "dependencies": {
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "playwright": "^1.58.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

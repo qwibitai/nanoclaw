@@ -3,14 +3,18 @@
  * X Integration - Authentication Setup
  * Usage: npx tsx setup.ts
  *
- * Interactive script - opens browser for manual login
+ * Opens browser for manual login and auto-detects when login is complete.
  */
 
-import { chromium } from 'playwright';
-import * as readline from 'readline';
 import fs from 'fs';
 import path from 'path';
-import { config, cleanupLockFiles } from '../lib/browser.js';
+import { getBrowserContext } from '../lib/browser.js';
+import { checkLoginStatus } from '../lib/utils.js';
+import { config } from '../lib/config.js';
+
+const POLL_INTERVAL_MS = 3000;
+const MAX_WAIT_MINUTES = 5;
+const MAX_WAIT_MS = MAX_WAIT_MINUTES * 60 * 1000;
 
 async function setup(): Promise<void> {
   console.log('=== X (Twitter) Authentication Setup ===\n');
@@ -23,47 +27,57 @@ async function setup(): Promise<void> {
   fs.mkdirSync(path.dirname(config.authPath), { recursive: true });
   fs.mkdirSync(config.browserDataDir, { recursive: true });
 
-  cleanupLockFiles();
-
   console.log('Launching browser...\n');
 
-  const context = await chromium.launchPersistentContext(config.browserDataDir, {
-    executablePath: config.chromePath,
-    headless: false,
-    viewport: config.viewport,
-    args: config.chromeArgs.slice(0, 3), // Use first 3 args for setup (less restrictive)
-    ignoreDefaultArgs: config.chromeIgnoreDefaultArgs,
-  });
-
+  const context = await getBrowserContext(true); // skipAuthCheck = true
   const page = context.pages()[0] || await context.newPage();
 
   // Navigate to login page
   await page.goto('https://x.com/login');
 
   console.log('Please log in to X in the browser window.');
-  console.log('After you see your home feed, come back here and press Enter.\n');
+  console.log('Waiting for login to complete (auto-detecting)...\n');
 
-  // Wait for user to complete login
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-  });
+  // Poll for login completion
+  let elapsed = 0;
+  let loggedIn = false;
 
-  await new Promise<void>(resolve => {
-    rl.question('Press Enter when logged in... ', () => {
-      rl.close();
-      resolve();
-    });
-  });
+  while (elapsed < MAX_WAIT_MS) {
+    await page.waitForTimeout(POLL_INTERVAL_MS);
+    elapsed += POLL_INTERVAL_MS;
 
-  // Verify login by navigating to home and checking for account button
-  console.log('\nVerifying login status...');
-  await page.goto('https://x.com/home');
-  await page.waitForTimeout(config.timeouts.pageLoad);
+    // Check if we're on the home page or still on login
+    const url = page.url();
+    if (url.includes('/home') || url === 'https://x.com/' || url === 'https://twitter.com/') {
+      const status = await checkLoginStatus(page);
+      if (status.loggedIn) {
+        loggedIn = true;
+        break;
+      }
+    }
 
-  const isLoggedIn = await page.locator('[data-testid="SideNav_AccountSwitcher_Button"]').isVisible().catch(() => false);
+    // Also try navigating to home to check
+    if (elapsed % 15000 === 0) { // Every 15 seconds
+      console.log('Still waiting for login...');
+      try {
+        await page.goto('https://x.com/home', { timeout: 10000 });
+        await page.waitForTimeout(config.timeouts.loadWait);
+        const status = await checkLoginStatus(page);
+        if (status.loggedIn) {
+          loggedIn = true;
+          break;
+        }
+        // If not logged in, go back to login page
+        if (status.onLoginPage) {
+          await page.goto('https://x.com/login');
+        }
+      } catch {
+        // Ignore navigation errors
+      }
+    }
+  }
 
-  if (isLoggedIn) {
+  if (loggedIn) {
     // Save auth marker
     fs.writeFileSync(config.authPath, JSON.stringify({
       authenticated: true,
@@ -74,8 +88,8 @@ async function setup(): Promise<void> {
     console.log(`Session saved to: ${config.browserDataDir}`);
     console.log('\nYou can now use X integration features.');
   } else {
-    console.log('\n❌ Could not verify login status.');
-    console.log('Please try again and make sure you are logged in to X.');
+    console.log(`\n❌ Login timed out after ${MAX_WAIT_MINUTES} minutes.`);
+    console.log('Please run the setup again and complete the login.');
   }
 
   await context.close();

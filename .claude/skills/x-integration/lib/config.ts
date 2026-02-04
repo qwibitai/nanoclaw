@@ -6,57 +6,109 @@
  */
 
 import path from 'path';
+import { loadEnv } from './env.js';
 
-// Project root - can be overridden for different deployments
-const PROJECT_ROOT = process.env.NANOCLAW_ROOT || process.cwd();
+loadEnv();
+
+// Project root
+const PROJECT_ROOT = process.cwd();
 
 /**
  * Configuration object with all settings
  */
 export const config = {
-  // Chrome executable path
-  // Default: standard macOS Chrome location
-  // Override: CHROME_PATH environment variable
+  // ==========================================================================
+  // Browser Settings
+  // ==========================================================================
+
+  /** Chrome executable path. Override: CHROME_PATH env var */
   chromePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
 
-  // Browser profile directory for persistent login sessions
+  /** Browser profile directory for persistent login sessions */
   browserDataDir: path.join(PROJECT_ROOT, 'data', 'x-browser-profile'),
 
-  // Auth state marker file
+  /** Auth state marker file - indicates X login is complete */
   authPath: path.join(PROJECT_ROOT, 'data', 'x-auth.json'),
 
-  // Browser viewport settings
-  viewport: {
-    width: 1280,
-    height: 800,
+  /** Browser viewport dimensions */
+  viewport: { width: 1280, height: 800 },
+
+  /** Chrome launch options */
+  chrome: {
+    args: [
+      '--disable-blink-features=AutomationControlled', // Avoid bot detection
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-sync',
+    ],
+    ignoreDefaultArgs: ['--enable-automation'],
   },
 
-  // Timeouts (in milliseconds)
+  // ==========================================================================
+  // Timeouts (milliseconds)
+  // ==========================================================================
+
   timeouts: {
+    /** Page navigation timeout */
     navigation: 30000,
+
+    /** Wait for element to appear */
     elementWait: 5000,
-    afterClick: 1000,
-    afterFill: 1000,
-    afterSubmit: 3000,
-    pageLoad: 3000,
+
+    /** Wait after page load or form submission */
+    loadWait: 3000,
+
+    /** Pause after click or fill actions */
+    actionDelay: 1000,
+
+    /** Brief pause for focus/animations */
+    shortPause: 500,
   },
 
-  // X character limits
+  // ==========================================================================
+  // X Platform Limits
+  // ==========================================================================
+
   limits: {
+    /** Maximum tweet/reply length */
     tweetMaxLength: 280,
   },
 
-  // Chrome launch arguments
-  chromeArgs: [
-    '--disable-blink-features=AutomationControlled',
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-sync',
-  ],
+  // ==========================================================================
+  // X Page Selectors
+  // ==========================================================================
 
-  // Args to ignore when launching Chrome
-  chromeIgnoreDefaultArgs: ['--enable-automation'],
+  selectors: {
+    /** Tweet article container */
+    tweet: 'article[data-testid="tweet"]',
+
+    /** Tweet compose textarea */
+    tweetTextarea: '[data-testid="tweetTextarea_0"]',
+
+    /** Modal dialog container */
+    modalDialog: '[role="dialog"][aria-modal="true"]',
+
+    /** Account switcher (indicates logged in) */
+    accountSwitcher: '[data-testid="SideNav_AccountSwitcher_Button"]',
+
+    /** Username input on login page */
+    usernameInput: 'input[autocomplete="username"]',
+
+    /** Tweet timestamp link (contains time element, links to tweet status) */
+    tweetTimestampLink: 'a[href*="/status/"] time',
+
+    /** Action buttons */
+    buttons: {
+      postInline: '[data-testid="tweetButtonInline"]',
+      postDialog: '[data-testid="tweetButton"]',
+      like: '[data-testid="like"]',
+      unlike: '[data-testid="unlike"]',
+      retweet: '[data-testid="retweet"]',
+      unretweet: '[data-testid="unretweet"]',
+      retweetConfirm: '[data-testid="retweetConfirm"]',
+      reply: '[data-testid="reply"]',
+    },
+  },
 };
-
