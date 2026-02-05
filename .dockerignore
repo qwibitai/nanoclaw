@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output (rebuilt in container)
+dist/
+
+# Development files
+*.log
+.env
+.env.*
+
+# Store and auth (runtime data)
+store/
+auth/
+
+# Git
+.git/
+.gitignore
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scripts and docs (not needed in container)
+scripts/
+docs/
+*.md
+!README.md
+
+# Claude config (local only)
+.claude/
+
+# Container build (agent image has its own context)
+container/
