@@ -23,6 +23,8 @@ import { unpinDiscordMessage } from './scripts/unpin.js';
 import { sendDiscordWebhook } from './scripts/webhook_send.js';
 
 export {
+  destroyDiscordClient,
+  ensureConnected,
   getDiscordClient,
   initDiscordClient,
   isDiscordReady,

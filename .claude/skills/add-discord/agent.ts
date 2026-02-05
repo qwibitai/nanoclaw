@@ -187,6 +187,14 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        const msgErr = validateSnowflake(args.message_id, 'message_id');
+        if (msgErr)
+          return { content: [{ type: 'text', text: msgErr }], isError: true };
+
         return executeIpc('discord_react', {
           channelId: args.channel_id,
           messageId: args.message_id,
@@ -214,6 +222,14 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        const msgErr = validateSnowflake(args.message_id, 'message_id');
+        if (msgErr)
+          return { content: [{ type: 'text', text: msgErr }], isError: true };
+
         return executeIpc('discord_edit', {
           channelId: args.channel_id,
           messageId: args.message_id,
@@ -234,6 +250,14 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        const msgErr = validateSnowflake(args.message_id, 'message_id');
+        if (msgErr)
+          return { content: [{ type: 'text', text: msgErr }], isError: true };
+
         return executeIpc('discord_delete', {
           channelId: args.channel_id,
           messageId: args.message_id,
@@ -253,6 +277,14 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        const msgErr = validateSnowflake(args.message_id, 'message_id');
+        if (msgErr)
+          return { content: [{ type: 'text', text: msgErr }], isError: true };
+
         return executeIpc('discord_pin', {
           channelId: args.channel_id,
           messageId: args.message_id,
@@ -271,6 +303,14 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        const msgErr = validateSnowflake(args.message_id, 'message_id');
+        if (msgErr)
+          return { content: [{ type: 'text', text: msgErr }], isError: true };
 
         return executeIpc('discord_unpin', {
           channelId: args.channel_id,
@@ -299,6 +339,19 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        if (args.before) {
+          const beforeErr = validateSnowflake(args.before, 'before');
+          if (beforeErr)
+            return {
+              content: [{ type: 'text', text: beforeErr }],
+              isError: true,
+            };
+        }
 
         return executeIpc('discord_get_messages', {
           channelId: args.channel_id,
@@ -336,6 +389,16 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
+
+        if (args.message_id) {
+          const msgErr = validateSnowflake(args.message_id, 'message_id');
+          if (msgErr)
+            return { content: [{ type: 'text', text: msgErr }], isError: true };
+        }
+
         return executeIpc('discord_create_thread', {
           channelId: args.channel_id,
           name: args.name,
@@ -356,6 +419,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const guildErr = validateSnowflake(args.guild_id, 'guild_id');
+        if (guildErr)
+          return { content: [{ type: 'text', text: guildErr }], isError: true };
+
         return executeIpc('discord_list_channels', { guildId: args.guild_id });
       },
     ),
@@ -370,6 +437,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const chErr = validateSnowflake(args.channel_id, 'channel_id');
+        if (chErr)
+          return { content: [{ type: 'text', text: chErr }], isError: true };
 
         return executeIpc('discord_get_channel_info', {
           channelId: args.channel_id,
@@ -388,6 +459,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const userErr = validateSnowflake(args.user_id, 'user_id');
+        if (userErr)
+          return { content: [{ type: 'text', text: userErr }], isError: true };
 
         return executeIpc('discord_get_user', { userId: args.user_id });
       },
@@ -410,6 +485,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
 
+        const guildErr = validateSnowflake(args.guild_id, 'guild_id');
+        if (guildErr)
+          return { content: [{ type: 'text', text: guildErr }], isError: true };
+
         return executeIpc('discord_list_members', {
           guildId: args.guild_id,
           limit: args.limit,
@@ -428,6 +507,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const userErr = validateSnowflake(args.user_id, 'user_id');
+        if (userErr)
+          return { content: [{ type: 'text', text: userErr }], isError: true };
 
         return executeIpc('discord_dm', {
           userId: args.user_id,
@@ -460,6 +543,10 @@ export function createDiscordTools(ctx: SkillToolsContext) {
         const permErr = checkPermission(isMain, isScheduledTask);
         if (permErr)
           return { content: [{ type: 'text', text: permErr }], isError: true };
+
+        const guildErr = validateSnowflake(args.guild_id, 'guild_id');
+        if (guildErr)
+          return { content: [{ type: 'text', text: guildErr }], isError: true };
 
         return executeIpc('discord_get_guild_info', { guildId: args.guild_id });
       },

@@ -1,25 +1,19 @@
 import { type Client, TextChannel } from 'discord.js';
 
-import {
-  getDiscordClient,
-  initDiscordClient,
-  isDiscordReady,
-} from './discord-client.js';
+import { ensureConnected, getDiscordClient } from './discord-client.js';
 import type { SkillResult } from './types.js';
 
 export async function getReadyDiscordClient(): Promise<
   { client: Client } | { error: SkillResult }
 > {
-  if (!getDiscordClient() || !isDiscordReady()) {
-    const initialized = await initDiscordClient();
-    if (!initialized) {
-      return {
-        error: {
-          success: false,
-          message: 'Discord client not initialized. Check DISCORD_BOT_TOKEN.',
-        },
-      };
-    }
+  const connected = await ensureConnected();
+  if (!connected) {
+    return {
+      error: {
+        success: false,
+        message: 'Discord client not initialized. Check DISCORD_BOT_TOKEN.',
+      },
+    };
   }
 
   const client = getDiscordClient();
