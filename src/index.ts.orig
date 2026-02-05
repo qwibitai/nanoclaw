@@ -10,13 +10,6 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import {
-  Client,
-  Events,
-  GatewayIntentBits,
-  TextBasedChannel,
-} from 'discord.js';
-
-import {
   ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
@@ -53,7 +46,6 @@ import { logger } from './logger.js';
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 let sock: WASocket;
-let discordClient: Client | null = null;
 let lastTimestamp = '';
 let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -74,62 +66,6 @@ function translateJid(jid: string): string {
     return phoneJid;
   }
   return jid;
-}
-
-async function getDiscordClient(): Promise<Client> {
-  if (discordClient) return discordClient;
-
-  const token = process.env.DISCORD_BOT_TOKEN;
-  if (!token) {
-    throw new Error('DISCORD_BOT_TOKEN is not set in .env');
-  }
-
-  discordClient = new Client({
-    intents: [
-      GatewayIntentBits.Guilds,
-      GatewayIntentBits.GuildMessages,
-      GatewayIntentBits.DirectMessages,
-      GatewayIntentBits.MessageContent,
-    ],
-  });
-
-  discordClient.once(Events.ClientReady, (ready) => {
-    logger.info({ user: ready.user.tag }, 'Discord bot ready');
-  });
-
-  await discordClient.login(token);
-  return discordClient;
-}
-
-async function sendDiscordMessage(
-  channelOrUserId: string,
-  text: string,
-): Promise<void> {
-  const discord = await getDiscordClient();
-
-  // Try as channel first
-  try {
-    const channel = await discord.channels.fetch(channelOrUserId);
-    if (channel && channel.isTextBased() && 'send' in channel) {
-      await channel.send(text);
-      logger.info({ channelId: channelOrUserId, length: text.length }, 'Discord message sent');
-      return;
-    }
-  } catch (err) {
-    // Not a channel, try as user DM
-  }
-
-  // Try as user DM
-  try {
-    const user = await discord.users.fetch(channelOrUserId);
-    if (user) {
-      await user.send(text);
-      logger.info({ userId: channelOrUserId, length: text.length }, 'Discord DM sent');
-      return;
-    }
-  } catch (err) {
-    logger.warn({ id: channelOrUserId, err }, 'Discord target not found (neither channel nor user)');
-  }
 }
 
 async function setTyping(jid: string, isTyping: boolean): Promise<void> {
@@ -354,13 +290,6 @@ async function runAgent(
 }
 
 async function sendMessage(jid: string, text: string): Promise<void> {
-  if (jid.startsWith('discord:')) {
-    const id = jid.replace('discord:', '');
-    await sendDiscordMessage(id, text);
-    return;
-  }
-
-  // WhatsApp messages
   try {
     await sock.sendMessage(jid, { text });
     logger.info({ jid, length: text.length }, 'Message sent');
@@ -501,9 +430,6 @@ async function processTaskIpc(
     folder?: string;
     trigger?: string;
     containerConfig?: RegisteredGroup['containerConfig'];
-    // For discord_dm
-    userId?: string;
-    text?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -715,21 +641,7 @@ async function processTaskIpc(
       }
       break;
 
-    case 'discord_dm':
-      // Only main group can send Discord DMs via IPC
-      if (!isMain) {
-        logger.warn({ sourceGroup }, 'Unauthorized discord_dm attempt blocked');
-        break;
-      }
-      if (data.userId && data.text) {
-        await sendDiscordMessage(data.userId as string, data.text as string);
-        logger.info({ userId: data.userId, sourceGroup }, 'Discord DM sent via IPC');
-      } else {
-        logger.warn({ data }, 'Invalid discord_dm request - missing userId or text');
-      }
-      break;
-
-        default:
+    default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
 }
@@ -911,85 +823,12 @@ function ensureContainerSystemRunning(): void {
   }
 }
 
-async function startDiscordBot(): Promise<void> {
-  const discord = await getDiscordClient();
-
-  discord.on(Events.MessageCreate, async (message) => {
-    if (message.author.bot) return;
-
-    // Handle both channel messages and DMs
-    // For DMs: use user ID as the "channel" (no guild)
-    // For channels: use channel ID
-    const discordJid = message.guildId
-      ? `discord:${message.channelId}`
-      : `discord:${message.author.id}`;
-
-    const group = registeredGroups[discordJid];
-    if (!group) {
-      // For DMs, auto-register a group for this user if they DM the bot
-      if (!message.guildId) {
-        const dmGroup: RegisteredGroup = {
-          name: `DM: ${message.author.username}`,
-          folder: `discord-dm-${message.author.id}`,
-          trigger: '',
-          added_at: new Date().toISOString(),
-        };
-        registeredGroups[discordJid] = dmGroup;
-        saveJson(
-          path.join(DATA_DIR, 'registered_groups.json'),
-          registeredGroups,
-        );
-        logger.info(
-          { userId: message.author.id, username: message.author.username },
-          'Auto-registered Discord DM',
-        );
-
-        // Create group directory
-        const groupDir = path.join(DATA_DIR, '..', 'groups', dmGroup.folder);
-        fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
-
-        // Create CLAUDE.md
-        const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
-        const claudeMdContent = `# Discord DM with ${message.author.username}
-
-This is a direct message conversation with Discord user ${message.author.username} (ID: ${message.author.id}).
-`;
-        fs.writeFileSync(claudeMdPath, claudeMdContent);
-      } else {
-        return;
-      }
-    }
-
-    // Note: Message storage will be handled by the message polling loop
-    logger.info(
-      {
-        jid: discordJid,
-        sender: message.author.username,
-        length: message.content?.length || 0,
-      },
-      'Discord message received',
-    );
-  });
-
-  logger.info('Discord bot started');
-}
-
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
   await connectWhatsApp();
-  
-  // Start Discord bot if token is configured
-  if (process.env.DISCORD_BOT_TOKEN) {
-    try {
-      await startDiscordBot();
-      logger.info('Discord bot initialized');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Discord bot');
-    }
-  }
 }
 
 main().catch((err) => {
