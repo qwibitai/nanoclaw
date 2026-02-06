@@ -196,7 +196,7 @@ function findAllowedRoot(
 }
 
 /**
- * Validate the container path to prevent escaping /workspace/extra/
+ * Validate the container path to prevent conflicts with system mounts
  */
 function isValidContainerPath(containerPath: string): boolean {
   // Must not contain .. to prevent path traversal
@@ -204,13 +204,19 @@ function isValidContainerPath(containerPath: string): boolean {
     return false;
   }
 
-  // Must not be absolute (it will be prefixed with /workspace/extra/)
-  if (containerPath.startsWith('/')) {
+  // Must be absolute (mounted at container root)
+  if (!containerPath.startsWith('/')) {
     return false;
   }
 
   // Must not be empty
   if (!containerPath || containerPath.trim() === '') {
+    return false;
+  }
+
+  // Reserved system paths that cannot be overridden
+  const reservedPaths = ['/group', '/project', '/system', '/ipc', '/skills', '/global', '/env-dir'];
+  if (reservedPaths.includes(containerPath)) {
     return false;
   }
 
@@ -348,7 +354,7 @@ export function validateAdditionalMounts(
     if (result.allowed) {
       validatedMounts.push({
         hostPath: result.realHostPath!,
-        containerPath: `/workspace/extra/${mount.containerPath}`,
+        containerPath: mount.containerPath,
         readonly: result.effectiveReadonly!,
       });
 

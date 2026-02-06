@@ -1,0 +1,22 @@
+{
+  "name": "swarmhook",
+  "version": "0.1.0",
+  "description": "Zero-cost webhook infrastructure for autonomous AI agents",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "ioredis": "^5.3.2",
+    "nanoid": "^5.0.4"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "bun-types": "latest"
+  }
+}

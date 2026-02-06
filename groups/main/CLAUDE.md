@@ -49,17 +49,27 @@ This is the **main channel**, which has elevated privileges.
 
 ## Container Mounts
 
-Main has access to the entire project:
+Main has selective access to NanoClaw:
 
-| Container Path | Host Path | Access |
-|----------------|-----------|--------|
-| `/workspace/project` | Project root | read-write |
-| `/workspace/group` | `groups/main/` | read-write |
+| Container Path | Host Path | Access | Purpose |
+|----------------|-----------|--------|---------|
+| `/project/` | `project/` | read-write | Your working directory |
+| `/group/` | `groups/main/` | read-write | Your memory & logs |
+| `/system/data/` | `data/` | read-write | System config |
+| `/system/groups/` | `groups/` | read-write | All group folders |
+| `/system/store/` | `store/` | read-write | Database |
+| `/skills/` | `.claude/skills/` | read-write | Add/modify skills |
 
-Key paths inside the container:
-- `/workspace/project/store/messages.db` - SQLite database
-- `/workspace/project/data/registered_groups.json` - Group config
-- `/workspace/project/groups/` - All group folders
+**Working Directory:**
+- Use `/project/` for ALL user work, code generation, and file creation
+- You do NOT have access to NanoClaw source code (src/, container/, etc.)
+- This is intentional - keeps you safe from breaking the system
+
+**System Paths:**
+- `/system/store/messages.db` - SQLite database for queries
+- `/system/data/registered_groups.json` - Group registration
+- `/system/groups/` - Manage all group folders
+- `/skills/` - Create and modify skills
 
 ---
 
@@ -67,7 +77,7 @@ Key paths inside the container:
 
 ### Finding Available Groups
 
-Available groups are provided in `/workspace/ipc/available_groups.json`:
+Available groups are provided in `/ipc/available_groups.json`:
 
 ```json
 {
@@ -88,7 +98,7 @@ Groups are ordered by most recent activity. The list is synced from WhatsApp dai
 If a group the user mentions isn't in the list, request a fresh sync:
 
 ```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
+echo '{"type": "refresh_groups"}' > /ipc/tasks/refresh_$(date +%s).json
 ```
 
 Then wait a moment and re-read `available_groups.json`.
@@ -96,7 +106,7 @@ Then wait a moment and re-read `available_groups.json`.
 **Fallback**: Query the SQLite database directly:
 
 ```bash
-sqlite3 /workspace/project/store/messages.db "
+sqlite3 /project/store/messages.db "
   SELECT jid, name, last_message_time
   FROM chats
   WHERE jid LIKE '%@g.us' AND jid != '__group_sync__'
@@ -107,7 +117,7 @@ sqlite3 /workspace/project/store/messages.db "
 
 ### Registered Groups Config
 
-Groups are registered in `/workspace/project/data/registered_groups.json`:
+Groups are registered in `/project/data/registered_groups.json`:
 
 ```json
 {
@@ -130,10 +140,10 @@ Fields:
 ### Adding a Group
 
 1. Query the database to find the group's JID
-2. Read `/workspace/project/data/registered_groups.json`
+2. Read `/project/data/registered_groups.json`
 3. Add the new group entry with `containerConfig` if needed
 4. Write the updated JSON back
-5. Create the group folder: `/workspace/project/groups/{folder-name}/`
+5. Create the group folder: `/project/groups/{folder-name}/`
 6. Optionally create an initial `CLAUDE.md` for the group
 
 Example folder name conventions:
@@ -150,13 +160,13 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
   "1234567890@g.us": {
     "name": "Dev Team",
     "folder": "dev-team",
-    "trigger": "@Andy",
+    "trigger": "@digi",
     "added_at": "2026-01-31T12:00:00Z",
     "containerConfig": {
       "additionalMounts": [
         {
           "hostPath": "~/projects/webapp",
-          "containerPath": "webapp",
+          "containerPath": "/webapp",
           "readonly": false
         }
       ]
@@ -165,24 +175,26 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 }
 ```
 
-The directory will appear at `/workspace/extra/webapp` in that group's container.
+The directory will appear at `/webapp` in that group's container.
+
+**Note:** Container paths must be absolute (e.g., `/webapp`) and cannot conflict with reserved paths: `/group`, `/project`, `/system`, `/ipc`, `/skills`, `/global`.
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
+1. Read `/project/data/registered_groups.json`
 2. Remove the entry for that group
 3. Write the updated JSON back
 4. The group folder and its files remain (don't delete them)
 
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+Read `/project/data/registered_groups.json` and format it nicely.
 
 ---
 
 ## Global Memory
 
-You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+You can read and write to `/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
 
 ---
 

@@ -1,0 +1,11 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "bun start"
+healthcheckPath = "/health"
+restartPolicyType = "ON_FAILURE"
+
+[env]
+PORT = { default = "3000" }
+NODE_ENV = { default = "production" }

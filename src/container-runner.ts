@@ -13,6 +13,7 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  STORE_DIR,
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -64,24 +65,53 @@ function buildVolumeMounts(
   const projectRoot = process.cwd();
 
   if (isMain) {
-    // Main gets the entire project root mounted
+    // Sandboxed working directory for agent-created files
+    const projectDir = path.join(projectRoot, 'project');
+    fs.mkdirSync(projectDir, { recursive: true });
     mounts.push({
-      hostPath: projectRoot,
-      containerPath: '/workspace/project',
+      hostPath: projectDir,
+      containerPath: '/project',
       readonly: false,
     });
 
-    // Main also gets its group folder as the working directory
+    // Group folder
     mounts.push({
       hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
+      containerPath: '/group',
       readonly: false,
     });
+
+    // System directories for admin tasks
+    mounts.push({
+      hostPath: DATA_DIR,
+      containerPath: '/system/data',
+      readonly: false,
+    });
+    mounts.push({
+      hostPath: GROUPS_DIR,
+      containerPath: '/system/groups',
+      readonly: false,
+    });
+    mounts.push({
+      hostPath: STORE_DIR,
+      containerPath: '/system/store',
+      readonly: false,
+    });
+
+    // Skills directory (read-write so agent can add skills)
+    const skillsDir = path.join(projectRoot, '.claude', 'skills');
+    if (fs.existsSync(skillsDir)) {
+      mounts.push({
+        hostPath: skillsDir,
+        containerPath: '/skills',
+        readonly: false,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({
       hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
+      containerPath: '/group',
       readonly: false,
     });
 
@@ -91,7 +121,7 @@ function buildVolumeMounts(
     if (fs.existsSync(globalDir)) {
       mounts.push({
         hostPath: globalDir,
-        containerPath: '/workspace/global',
+        containerPath: '/global',
         readonly: true,
       });
     }
@@ -119,7 +149,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
-    containerPath: '/workspace/ipc',
+    containerPath: '/ipc',
     readonly: false,
   });
 
@@ -144,7 +174,7 @@ function buildVolumeMounts(
       );
       mounts.push({
         hostPath: envDir,
-        containerPath: '/workspace/env-dir',
+        containerPath: '/env-dir',
         readonly: true,
       });
     }

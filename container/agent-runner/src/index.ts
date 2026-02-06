@@ -108,7 +108,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = '/group/conversations';
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -238,7 +238,7 @@ async function main(): Promise<void> {
     for await (const message of query({
       prompt,
       options: {
-        cwd: '/workspace/group',
+        cwd: '/group',
         resume: input.sessionId,
         allowedTools: [
           'Bash',
