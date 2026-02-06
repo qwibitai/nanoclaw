@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(container system info:*)",
+      "Bash(npm install:*)",
+      "Bash(sqlite3:*)",
+      "Bash(npm run build:*)",
+      "Bash(./container/build.sh:*)",
+      "Bash(bash:*)"
+    ]
+  }
+}

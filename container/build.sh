@@ -13,7 +13,8 @@ echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
 # Build with Apple Container
-container build -t "${IMAGE_NAME}:${TAG}" .
+# --dns flag ensures DNS resolution works inside the buildkit builder VM
+container build --dns 192.168.64.1 -t "${IMAGE_NAME}:${TAG}" .
 
 echo ""
 echo "Build complete!"

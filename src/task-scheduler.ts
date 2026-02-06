@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ASSISTANT_NAME,
   DATA_DIR,
   GROUPS_DIR,
   MAIN_GROUP_FOLDER,
@@ -93,6 +94,7 @@ async function runTask(
       chatJid: task.chat_jid,
       isMain,
       isScheduledTask: true,
+      assistantName: ASSISTANT_NAME,
     });
 
     if (output.status === 'error') {

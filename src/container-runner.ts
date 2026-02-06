@@ -39,6 +39,7 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  assistantName?: string;
 }
 
 export interface ContainerOutput {
