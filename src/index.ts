@@ -662,7 +662,7 @@ async function connectWhatsApp(): Promise<void> {
     },
     printQRInTerminal: false,
     logger,
-    browser: ['NanoClaw', 'Chrome', '1.0.0'],
+    browser: ['Mac OS', 'NanoClaw', '14.4.1'],
   });
 
   sock.ev.on('connection.update', (update) => {
