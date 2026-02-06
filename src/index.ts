@@ -1,4 +1,4 @@
-import { exec, execSync } from 'child_process';
+import { execFile, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -672,9 +672,10 @@ async function connectWhatsApp(): Promise<void> {
       const msg =
         'WhatsApp authentication required. Run /setup in Claude Code.';
       logger.error(msg);
-      exec(
-        `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-      );
+      execFile('osascript', [
+        '-e',
+        `display notification "${msg}" with title "NanoClaw" sound name "Basso"`,
+      ]);
       setTimeout(() => process.exit(1), 1000);
     }
 
