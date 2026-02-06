@@ -24,6 +24,7 @@ Single Bun process that connects to Telegram, routes messages to Claude Agent SD
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/commit` | Commit/push with secret scanning and co-author credits |
+| `/pr` | Create a pull request (branches off main if needed) |
 | `/debug` | Container issues, logs, troubleshooting |
 
 ## Development
