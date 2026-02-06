@@ -42,12 +42,42 @@ export function createIpcMcp(ctx: IpcMcpContext) {
     tools: [
       tool(
         'send_message',
-        'Send a message to the current WhatsApp group. Use this to proactively share information or updates.',
+        `Send a message to the current chat. Use this to proactively share information or updates.
+
+For Telegram chats, you can include inline keyboard buttons.
+Each row is an array of buttons. Each button has "text" (label) and either:
+- "callback": data string (max 64 bytes) routed back as a message when pressed
+- "url": opens a link when pressed
+
+Buttons are ignored for WhatsApp targets.`,
         {
           text: z.string().describe('The message text to send'),
+          buttons: z
+            .array(
+              z.array(
+                z.object({
+                  text: z.string().describe('Button label'),
+                  callback: z
+                    .string()
+                    .max(64)
+                    .optional()
+                    .describe(
+                      'Callback data sent back when pressed (max 64 bytes)',
+                    ),
+                  url: z
+                    .string()
+                    .optional()
+                    .describe('URL to open when pressed'),
+                }),
+              ),
+            )
+            .optional()
+            .describe(
+              'Optional inline keyboard buttons (Telegram only). Each inner array is a row of buttons.',
+            ),
         },
         async (args) => {
-          const data = {
+          const data: Record<string, unknown> = {
             type: 'message',
             chatJid,
             text: args.text,
@@ -55,13 +85,17 @@ export function createIpcMcp(ctx: IpcMcpContext) {
             timestamp: new Date().toISOString(),
           };
 
+          if (args.buttons && args.buttons.length > 0) {
+            data.buttons = args.buttons;
+          }
+
           const filename = writeIpcFile(MESSAGES_DIR, data);
 
           return {
             content: [
               {
                 type: 'text',
-                text: `Message queued for delivery (${filename})`,
+                text: `Message queued for delivery (${filename})${args.buttons ? ' with inline keyboard' : ''}`,
               },
             ],
           };

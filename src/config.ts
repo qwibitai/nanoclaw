@@ -90,6 +90,8 @@ export const ICLOUD_CALENDARS = process.env.ICLOUD_CALENDARS; // Comma-separated
 // Telegram bot (optional)
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 export const TELEGRAM_ENABLED = !!TELEGRAM_BOT_TOKEN;
+export const TELEGRAM_OWNER_ID = process.env.TELEGRAM_OWNER_ID;
+export const TELEGRAM_BOT_USERNAME = process.env.TELEGRAM_BOT_USERNAME;
 
 // Email channel (optional)
 import type { EmailConfig } from './types.js';

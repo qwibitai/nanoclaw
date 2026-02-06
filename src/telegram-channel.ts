@@ -4,10 +4,16 @@
  * Connects to Telegram via Grammy bot framework using long polling.
  * Receives messages and routes them through the standard message pipeline.
  */
-import { Bot, GrammyError, HttpError } from 'grammy';
+import { Bot, GrammyError, HttpError, InlineKeyboard } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import { TRIGGER_PATTERN, TELEGRAM_OWNER_ID } from './config.js';
 import { logger } from './logger.js';
+
+export interface TelegramButton {
+  text: string;
+  callback?: string;
+  url?: string;
+}
 
 export interface TelegramChannelDeps {
   onMessage: (
@@ -31,6 +37,10 @@ export class TelegramChannel {
     this.bot = new Bot(token);
   }
 
+  getBotUsername(): string {
+    return this.botUsername;
+  }
+
   async start(): Promise<void> {
     const me = await this.bot.api.getMe();
     this.botUsername = me.username || '';
@@ -40,6 +50,11 @@ export class TelegramChannel {
     );
 
     this.bot.on('message:text', (ctx) => {
+      // Only accept messages from the configured owner
+      if (TELEGRAM_OWNER_ID && String(ctx.from.id) !== TELEGRAM_OWNER_ID) {
+        return;
+      }
+
       const chatId = ctx.chat.id;
       const chatJid = `tg:${chatId}`;
       const isPrivate = ctx.chat.type === 'private';
@@ -75,6 +90,62 @@ export class TelegramChannel {
       );
     });
 
+    this.bot.on('callback_query:data', async (ctx) => {
+      if (TELEGRAM_OWNER_ID && String(ctx.from.id) !== TELEGRAM_OWNER_ID) {
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      const callbackData = ctx.callbackQuery.data;
+      const chatId = ctx.callbackQuery.message?.chat.id;
+      const messageId = ctx.callbackQuery.message?.message_id;
+
+      await ctx.answerCallbackQuery();
+
+      // Edit the original message: remove buttons, show selection
+      if (chatId && messageId) {
+        const originalText = ctx.callbackQuery.message?.text || '';
+        try {
+          await this.bot.api.editMessageText(
+            chatId,
+            messageId,
+            `${originalText}\n\n_Selected: ${callbackData}_`,
+            { parse_mode: 'Markdown' },
+          );
+        } catch {
+          try {
+            await this.bot.api.editMessageReplyMarkup(chatId, messageId);
+          } catch {
+            // Best effort
+          }
+        }
+      }
+
+      // Route callback to message pipeline
+      if (chatId) {
+        const chatJid = `tg:${chatId}`;
+        const senderId = `tg:${ctx.from.id}`;
+        const senderName =
+          ctx.from.first_name +
+          (ctx.from.last_name ? ` ${ctx.from.last_name}` : '');
+        const cbMessageId = `cb-${messageId}-${Date.now()}`;
+        const isPrivate = ctx.callbackQuery.message?.chat.type === 'private';
+        const chatName = isPrivate
+          ? senderName
+          : (ctx.callbackQuery.message?.chat as { title?: string }).title ||
+            `Group ${chatId}`;
+
+        this.deps.onMessage(
+          chatJid,
+          chatName,
+          senderId,
+          `${senderName} [button]`,
+          callbackData,
+          cbMessageId,
+        );
+      }
+    });
+
     this.bot.catch((err) => {
       const e = err.error;
       if (e instanceof GrammyError) {
@@ -93,7 +164,43 @@ export class TelegramChannel {
   }
 
   async sendMessage(chatId: string, text: string): Promise<void> {
-    await this.bot.api.sendMessage(Number(chatId), text);
+    try {
+      await this.bot.api.sendMessage(Number(chatId), text, {
+        parse_mode: 'Markdown',
+      });
+    } catch {
+      // Markdown parsing can fail on unescaped special characters — fall back to plain text
+      await this.bot.api.sendMessage(Number(chatId), text);
+    }
+  }
+
+  async sendMessageWithButtons(
+    chatId: string,
+    text: string,
+    buttons: TelegramButton[][],
+  ): Promise<void> {
+    const keyboard = new InlineKeyboard();
+    for (const row of buttons) {
+      for (const btn of row) {
+        if (btn.callback) {
+          keyboard.text(btn.text, btn.callback);
+        } else if (btn.url) {
+          keyboard.url(btn.text, btn.url);
+        }
+      }
+      keyboard.row();
+    }
+
+    try {
+      await this.bot.api.sendMessage(Number(chatId), text, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard,
+      });
+    } catch {
+      await this.bot.api.sendMessage(Number(chatId), text, {
+        reply_markup: keyboard,
+      });
+    }
   }
 
   async setTyping(chatId: string): Promise<void> {

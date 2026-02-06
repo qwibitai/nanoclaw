@@ -22,6 +22,7 @@ import {
   PUSHOVER_DEVICE,
   PUSHOVER_ENABLED,
   PUSHOVER_USER_KEY,
+  TELEGRAM_BOT_USERNAME,
   TIMEZONE,
 } from './config.js';
 import { logger } from './logger.js';
@@ -230,6 +231,9 @@ export async function runContainerAgent(
     envVars.PUSHOVER_APP_TOKEN = PUSHOVER_APP_TOKEN!;
     if (PUSHOVER_DEVICE) {
       envVars.PUSHOVER_DEVICE = PUSHOVER_DEVICE;
+    }
+    if (TELEGRAM_BOT_USERNAME) {
+      envVars.TELEGRAM_BOT_USERNAME = TELEGRAM_BOT_USERNAME;
     }
   }
 

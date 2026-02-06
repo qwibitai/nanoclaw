@@ -23,6 +23,10 @@ export interface PushoverOptions {
   device?: string;
   /** Sound to play. Use 'none' for silent. */
   sound?: string;
+  /** Supplementary URL to include in the notification. */
+  url?: string;
+  /** Title for the URL link. */
+  url_title?: string;
 }
 
 /**
@@ -51,6 +55,13 @@ export function sendNotification(
 
   if (options.sound) {
     body.append('sound', options.sound);
+  }
+
+  if (options.url) {
+    body.append('url', options.url);
+    if (options.url_title) {
+      body.append('url_title', options.url_title);
+    }
   }
 
   fetch(PUSHOVER_API_URL, {

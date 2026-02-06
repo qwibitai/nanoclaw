@@ -22,6 +22,7 @@ import {
   PUSHOVER_ENABLED,
   STORE_DIR,
   TELEGRAM_BOT_TOKEN,
+  TELEGRAM_BOT_USERNAME,
   TELEGRAM_ENABLED,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -53,9 +54,31 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup, Session } from './types.js';
 import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
-import { sendErrorNotification, sendNotification } from './pushover.js';
+import {
+  sendNotification,
+  type PushoverOptions,
+} from './pushover.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const TELEGRAM_DEEP_LINK = TELEGRAM_BOT_USERNAME
+  ? `https://t.me/${TELEGRAM_BOT_USERNAME}`
+  : undefined;
+
+function notify(
+  title: string,
+  message: string,
+  options: PushoverOptions = {},
+): void {
+  if (TELEGRAM_DEEP_LINK && !options.url) {
+    options.url = TELEGRAM_DEEP_LINK;
+    options.url_title = 'Open in Telegram';
+  }
+  sendNotification(title, message, options);
+}
+
+function notifyError(title: string, message: string): void {
+  notify(title, message, { priority: 1 as const });
+}
 
 let sock: WASocket;
 let whatsAppConnected = false;
@@ -239,17 +262,29 @@ async function processMessage(msg: NewMessage): Promise<void> {
   // on routine message processing. Only errors get notified.
   await sendReaction(msg, '\u{1F440}'); // 👀
   await setTyping(msg.chat_jid, true);
+
+  // Telegram typing status expires after 5s, so refresh it periodically
+  const typingInterval = msg.chat_jid.startsWith('tg:')
+    ? setInterval(() => setTyping(msg.chat_jid, true), 4000)
+    : null;
+
   const startTime = Date.now();
   const response = await runAgent(group, prompt, msg.chat_jid);
   const durationSec = Math.round((Date.now() - startTime) / 1000);
+
+  if (typingInterval) clearInterval(typingInterval);
   await setTyping(msg.chat_jid, false);
 
   if (response) {
     lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
-    await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    const isTelegram = msg.chat_jid.startsWith('tg:');
+    await sendMessage(
+      msg.chat_jid,
+      isTelegram ? response : `${ASSISTANT_NAME}: ${response}`,
+    );
   } else {
     // Only notify on failures - WhatsApp reactions handle success feedback
-    sendErrorNotification(
+    notifyError(
       `\u{274C} ${ASSISTANT_NAME} \u2014 ${group.name}`,
       `Failed after ${durationSec}s`,
     );
@@ -431,7 +466,7 @@ Example log entries:
   const emailSummaries = emails
     .map((e) => `• ${e.fromName || e.from}: ${e.subject}`)
     .join('\n');
-  sendNotification(
+  notify(
     `\u{1F4E7} ${ASSISTANT_NAME} \u2014 Email`,
     `Processing ${emails.length} email${emails.length > 1 ? 's' : ''}:\n${emailSummaries}`,
   );
@@ -487,7 +522,7 @@ Example log entries:
     // Ignore read errors
   }
 
-  sendNotification(
+  notify(
     `\u{2709}\u{FE0F} ${ASSISTANT_NAME} \u2014 Email`,
     actionSummary
       ? `Processed in ${durationSec}s:\n${actionSummary}`
@@ -593,12 +628,32 @@ function startIpcWatcher(): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await sendMessage(
-                    data.chatJid,
-                    `${ASSISTANT_NAME}: ${data.text}`,
-                  );
+                  const isTelegram = data.chatJid.startsWith('tg:');
+                  const text = isTelegram
+                    ? data.text
+                    : `${ASSISTANT_NAME}: ${data.text}`;
+
+                  if (data.buttons && isTelegram && telegramChannel) {
+                    await telegramChannel.sendMessageWithButtons(
+                      data.chatJid.slice(3),
+                      text,
+                      data.buttons,
+                    );
+                  } else {
+                    if (data.buttons && !isTelegram) {
+                      logger.warn(
+                        { chatJid: data.chatJid },
+                        'Buttons ignored for non-Telegram target',
+                      );
+                    }
+                    await sendMessage(data.chatJid, text);
+                  }
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      hasButtons: !!data.buttons,
+                    },
                     'IPC message sent',
                   );
                 } else {
@@ -966,7 +1021,7 @@ async function connectWhatsApp(): Promise<void> {
       whatsAppConnected = true;
       logger.info('Connected to WhatsApp');
 
-      sendNotification(
+      notify(
         `\u{1F7E2} ${ASSISTANT_NAME} Online`,
         `WhatsApp connected${PUSHOVER_ENABLED ? ', notifications enabled' : ''}`,
       );
@@ -1124,7 +1179,7 @@ async function main(): Promise<void> {
     });
     await telegramChannel.start();
     logger.info('Telegram channel started');
-    sendNotification(
+    notify(
       `\u{1F7E2} ${ASSISTANT_NAME} Online`,
       `Telegram connected${PUSHOVER_ENABLED ? ', notifications enabled' : ''}`,
     );
