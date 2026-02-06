@@ -31,6 +31,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
+export const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+export const CONTAINER_STOP_TIMEOUT = 15000; // Graceful stop timeout before SIGKILL
+export const CONTAINER_SYSTEM_START_TIMEOUT = 30000;
+export const EXIT_DELAY_MS = 1000; // Delay before process.exit to allow cleanup
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

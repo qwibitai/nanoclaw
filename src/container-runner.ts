@@ -10,6 +10,7 @@ import path from 'path';
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_STOP_TIMEOUT,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
@@ -277,7 +278,7 @@ export async function runContainerAgent(
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
       // Graceful stop: sends SIGTERM, waits, then SIGKILL — lets --rm fire
-      exec(`container stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`container stop ${containerName}`, { timeout: CONTAINER_STOP_TIMEOUT }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');

@@ -11,7 +11,10 @@ import makeWASocket, {
 
 import {
   ASSISTANT_NAME,
+  CONTAINER_SYSTEM_START_TIMEOUT,
   DATA_DIR,
+  EXIT_DELAY_MS,
+  GROUP_SYNC_INTERVAL_MS,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -42,8 +45,6 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup, Session } from './types.js';
 import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
-
-const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 let sock: WASocket;
 let lastTimestamp = '';
@@ -675,7 +676,7 @@ async function connectWhatsApp(): Promise<void> {
       exec(
         `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
       );
-      setTimeout(() => process.exit(1), 1000);
+      setTimeout(() => process.exit(1), EXIT_DELAY_MS);
     }
 
     if (connection === 'close') {
@@ -801,7 +802,7 @@ function ensureContainerSystemRunning(): void {
   } catch {
     logger.info('Starting Apple Container system...');
     try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
+      execSync('container system start', { stdio: 'pipe', timeout: CONTAINER_SYSTEM_START_TIMEOUT });
       logger.info('Apple Container system started');
     } catch (err) {
       logger.error({ err }, 'Failed to start Apple Container system');
