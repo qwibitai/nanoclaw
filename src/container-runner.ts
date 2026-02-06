@@ -54,6 +54,79 @@ interface VolumeMount {
   readonly?: boolean;
 }
 
+interface CredentialResult {
+  lines: string[];
+  source: 'dotenv' | 'claude-credentials' | 'none';
+}
+
+/**
+ * Resolve Claude auth credentials with fallback chain:
+ * 1. .env file (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY)
+ * 2. ~/.claude/.credentials.json (Claude Code's cached OAuth token)
+ */
+function resolveClaudeCredentials(): CredentialResult {
+  const projectRoot = process.cwd();
+  const homeDir = getHomeDir();
+
+  // Priority 1: .env file
+  const envFile = path.join(projectRoot, '.env');
+  if (fs.existsSync(envFile)) {
+    const envContent = fs.readFileSync(envFile, 'utf-8');
+    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+    const filteredLines = envContent.split('\n').filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) return false;
+      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
+    });
+
+    if (filteredLines.length > 0) {
+      // Quote values with single quotes so shell special chars (#, $, etc.) are preserved
+      const quotedLines = filteredLines.map((line) => {
+        const eqIdx = line.indexOf('=');
+        if (eqIdx === -1) return line;
+        const key = line.slice(0, eqIdx);
+        const val = line.slice(eqIdx + 1);
+        const escaped = val.replace(/'/g, "'\\''");
+        return `${key}='${escaped}'`;
+      });
+      return { lines: quotedLines, source: 'dotenv' };
+    }
+  }
+
+  // Priority 2: Claude Code credentials file
+  const credentialsPath = path.join(homeDir, '.claude', '.credentials.json');
+  try {
+    if (fs.existsSync(credentialsPath)) {
+      const raw = fs.readFileSync(credentialsPath, 'utf-8');
+      const credentials = JSON.parse(raw);
+      const accessToken = credentials?.claudeAiOauth?.accessToken;
+      if (!accessToken) {
+        logger.debug('Claude credentials file found but missing claudeAiOauth.accessToken');
+        return { lines: [], source: 'none' };
+      }
+
+      // Check expiration
+      const expiresAt = credentials?.claudeAiOauth?.expiresAt;
+      if (expiresAt) {
+        const expiresMs = typeof expiresAt === 'number' ? expiresAt : Date.parse(expiresAt);
+        const nowMs = Date.now();
+        if (expiresMs <= nowMs) {
+          logger.warn('Claude Code OAuth token has expired — Claude Code should auto-refresh it on next use');
+        } else if (expiresMs - nowMs < 10 * 60 * 1000) {
+          logger.warn({ expiresIn: Math.round((expiresMs - nowMs) / 1000) }, 'Claude Code OAuth token expires within 10 minutes');
+        }
+      }
+
+      const escaped = accessToken.replace(/'/g, "'\\''");
+      return { lines: [`CLAUDE_CODE_OAUTH_TOKEN='${escaped}'`], source: 'claude-credentials' };
+    }
+  } catch (err) {
+    logger.debug({ error: err, path: credentialsPath }, 'Failed to read Claude credentials file');
+  }
+
+  return { lines: [], source: 'none' };
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -107,7 +180,7 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   mounts.push({
     hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
+    containerPath: '/home/bun/.claude',
     readonly: false,
   });
 
@@ -126,27 +199,20 @@ function buildVolumeMounts(
   // Only expose specific auth variables needed by Claude Code, not the entire .env
   const envDir = path.join(DATA_DIR, 'env');
   fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
+  const credentials = resolveClaudeCredentials();
+  if (credentials.lines.length > 0) {
+    logger.debug({ source: credentials.source }, 'Container auth credentials resolved');
+    fs.writeFileSync(
+      path.join(envDir, 'env'),
+      credentials.lines.join('\n') + '\n',
+    );
+    mounts.push({
+      hostPath: envDir,
+      containerPath: '/workspace/env-dir',
+      readonly: true,
     });
-
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
-      });
-    }
+  } else {
+    logger.warn('No auth credentials found — check .env or Claude Code login (claude login)');
   }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
@@ -165,7 +231,7 @@ function buildVolumeMounts(
 function buildContainerArgs(mounts: VolumeMount[]): string[] {
   const args: string[] = ['run', '-i', '--rm'];
 
-  // Apple Container: --mount for readonly, -v for read-write
+  // Docker: --mount for readonly, -v for read-write
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(
@@ -219,7 +285,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('container', containerArgs, {
+    const container = spawn('docker', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 

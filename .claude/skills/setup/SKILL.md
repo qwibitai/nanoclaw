@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup. Use when user wants to install dependencies, configure Telegram, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
@@ -12,7 +12,7 @@ Run all commands automatically. Only pause when user action is required (scannin
 ## 1. Install Dependencies
 
 ```bash
-npm install
+bun install
 ```
 
 ## 2. Install Container Runtime
@@ -75,21 +75,34 @@ Tell the user:
 
 ## 3. Configure Claude Authentication
 
-Ask the user:
-> Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+First, check if Claude Code credentials are already available for auto-detection:
+
+```bash
+[ -f ~/.claude/.credentials.json ] && echo "FOUND" || echo "NOT_FOUND"
+```
+
+**If FOUND:** Tell the user:
+> Claude Code credentials detected at `~/.claude/.credentials.json`. NanoClaw will automatically use these — no manual token setup needed.
+>
+> This works because NanoClaw reads your Claude Code OAuth token at runtime when spawning agent containers. As long as you stay logged in to Claude Code (`claude login`), authentication is handled automatically.
+
+Skip to Section 4.
+
+**If NOT FOUND:** Ask the user:
+> No existing Claude Code credentials detected. Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
 
 ### Option 1: Claude Subscription (Recommended)
 
 Tell the user:
 > Open another terminal window and run:
 > ```
-> claude setup-token
+> claude login
 > ```
-> A browser window will open for you to log in. Once authenticated, the token will be displayed in your terminal. Either:
-> 1. Paste it here and I'll add it to `.env` for you, or
-> 2. Add it to `.env` yourself as `CLAUDE_CODE_OAUTH_TOKEN=<your-token>`
+> A browser window will open for you to log in. Once authenticated, NanoClaw will auto-detect the credentials — no need to copy tokens.
+>
+> **Alternative (manual):** If auto-detection doesn't work, you can run `claude setup-token`, copy the token, and add it to `.env` as `CLAUDE_CODE_OAUTH_TOKEN=<your-token>`.
 
-If they give you the token, add it to `.env`:
+If they need the manual path and give you the token, add it to `.env`:
 
 ```bash
 echo "CLAUDE_CODE_OAUTH_TOKEN=<token>" > .env
@@ -125,7 +138,7 @@ Build the NanoClaw agent container:
 ./container/build.sh
 ```
 
-This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
+This creates the `nanoclaw-agent:latest` image with Bun, Chromium, Claude Code CLI, and agent-browser.
 
 Verify the build succeeded by running a simple test (this auto-detects which runtime you're using):
 
@@ -137,25 +150,26 @@ else
 fi
 ```
 
-## 5. WhatsApp Authentication
+## 5. Verify Telegram Bot Token
 
-**USER ACTION REQUIRED**
-
-Run the authentication script:
+Verify that `TELEGRAM_BOT_TOKEN` is set in `.env`:
 
 ```bash
-npm run auth
+grep -q "^TELEGRAM_BOT_TOKEN=" .env && echo "Telegram bot token configured" || echo "MISSING - add TELEGRAM_BOT_TOKEN to .env"
 ```
 
-Tell the user:
-> A QR code will appear. On your phone:
-> 1. Open WhatsApp
-> 2. Tap **Settings → Linked Devices → Link a Device**
-> 3. Scan the QR code
+If missing, tell the user:
 
-Wait for the script to output "Successfully authenticated" then continue.
+> You need a Telegram bot token. To get one:
+> 1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+> 2. Send `/newbot` and follow the prompts
+> 3. Copy the bot token and paste it here, or add it to `.env` as `TELEGRAM_BOT_TOKEN=<your-token>`
 
-If it says "Already authenticated", skip to the next step.
+If they give you the token, add it to `.env`:
+
+```bash
+echo "TELEGRAM_BOT_TOKEN=<token>" >> .env
+```
 
 ## 6. Configure Assistant Name
 
@@ -185,13 +199,13 @@ Before registering your main channel, you need to understand an important securi
 > - Can write to global memory that all groups can read
 > - Has read-write access to the entire NanoClaw project
 >
-> **Recommendation:** Use your personal "Message Yourself" chat or a solo WhatsApp group as your main channel. This ensures only you have admin control.
+> **Recommendation:** Use a private Telegram chat (message your bot directly) as your main channel. This ensures only you have admin control.
 >
 > **Question:** Which setup will you use for your main channel?
 >
 > Options:
-> 1. Personal chat (Message Yourself) - Recommended
-> 2. Solo WhatsApp group (just me)
+> 1. Private chat (message your bot directly) - Recommended
+> 2. Telegram group (just me and the bot)
 > 3. Group with other people (I understand the security implications)
 
 If they choose option 3, ask a follow-up:
@@ -210,28 +224,24 @@ If they choose option 3, ask a follow-up:
 ## 8. Register Main Channel
 
 Ask the user:
-> Do you want to use your **personal chat** (message yourself) or a **WhatsApp group** as your main control channel?
+> Do you want to use your **private chat** (message the bot directly) or a **Telegram group** as your main control channel?
 
-For personal chat:
-> Send any message to yourself in WhatsApp (the "Message Yourself" chat). Tell me when done.
+For private chat:
+> Send any message to your bot in Telegram. Tell me when done.
 
 For group:
-> Send any message in the WhatsApp group you want to use as your main channel. Tell me when done.
+> Send any message in the Telegram group you want to use as your main channel. Tell me when done.
 
 After user confirms, start the app briefly to capture the message:
 
 ```bash
-timeout 10 npm run dev || true
+timeout 10 bun dev || true
 ```
 
 Then find the JID from the database:
 
 ```bash
-# For personal chat (ends with @s.whatsapp.net)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@s.whatsapp.net' ORDER BY timestamp DESC LIMIT 5"
-
-# For group (ends with @g.us)
-sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE '%@g.us' ORDER BY timestamp DESC LIMIT 5"
+sqlite3 store/messages.db "SELECT DISTINCT chat_jid FROM messages WHERE chat_jid LIKE 'tg:%' ORDER BY timestamp DESC LIMIT 5"
 ```
 
 Create/update `data/registered_groups.json` using the JID from above and the assistant name from step 5:
@@ -363,7 +373,7 @@ Tell the user:
 Generate the plist file with correct paths automatically:
 
 ```bash
-NODE_PATH=$(which node)
+BUN_PATH=$(which bun)
 PROJECT_PATH=$(pwd)
 HOME_PATH=$HOME
 
@@ -376,7 +386,7 @@ cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${NODE_PATH}</string>
+        <string>${BUN_PATH}</string>
         <string>${PROJECT_PATH}/dist/index.js</string>
     </array>
     <key>WorkingDirectory</key>
@@ -401,14 +411,14 @@ cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
 EOF
 
 echo "Created launchd plist with:"
-echo "  Node: ${NODE_PATH}"
+echo "  Bun: ${BUN_PATH}"
 echo "  Project: ${PROJECT_PATH}"
 ```
 
 Build and start the service:
 
 ```bash
-npm run build
+bun run build
 mkdir -p logs
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
@@ -428,7 +438,7 @@ Check the logs:
 tail -f logs/nanoclaw.log
 ```
 
-The user should receive a response in WhatsApp.
+The user should receive a response in Telegram.
 
 ## Troubleshooting
 
@@ -445,10 +455,9 @@ The user should receive a response in WhatsApp.
 - Check that the chat JID is in `data/registered_groups.json`
 - Check `logs/nanoclaw.log` for errors
 
-**WhatsApp disconnected**:
-- The service will show a macOS notification
-- Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+**Telegram not connecting**:
+- Verify `TELEGRAM_BOT_TOKEN` in `.env` is correct
+- Check `logs/nanoclaw.log` for Telegram-related errors
 
 **Unload service**:
 ```bash

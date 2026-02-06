@@ -20,17 +20,17 @@ src/container-runner.ts               container/agent-runner/
     ├── data/env/env ──────────────> /workspace/env-dir/env
     ├── groups/{folder} ───────────> /workspace/group
     ├── data/ipc/{folder} ────────> /workspace/ipc
-    ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
+    ├── data/sessions/{folder}/.claude/ ──> /home/bun/.claude/ (isolated per-group)
     └── (main only) project root ──> /workspace/project
 ```
 
-**Important:** The container runs as user `node` with `HOME=/home/node`. Session files must be mounted to `/home/node/.claude/` (not `/root/.claude/`) for session resumption to work.
+**Important:** The container runs as user `bun` with `HOME=/home/bun`. Session files must be mounted to `/home/bun/.claude/` (not `/root/.claude/`) for session resumption to work.
 
 ## Log Locations
 
 | Log | Location | Content |
 |-----|----------|---------|
-| **Main app logs** | `logs/nanoclaw.log` | Host-side WhatsApp, routing, container spawning |
+| **Main app logs** | `logs/nanoclaw.log` | Host-side routing, message handling, container spawning |
 | **Main app errors** | `logs/nanoclaw.error.log` | Host-side errors |
 | **Container run logs** | `groups/{folder}/logs/container-*.log` | Per-run: input, mounts, stderr, stdout |
 | **Claude sessions** | `~/.claude/projects/` | Claude Code session history |
@@ -41,7 +41,7 @@ Set `LOG_LEVEL=debug` for verbose output:
 
 ```bash
 # For development
-LOG_LEVEL=debug npm run dev
+LOG_LEVEL=debug bun dev
 
 # For launchd service, add to plist EnvironmentVariables:
 <key>LOG_LEVEL</key>
@@ -65,18 +65,29 @@ Common causes:
 ```
 Invalid API key · Please run /login
 ```
-**Fix:** Ensure `.env` file exists with either OAuth token or API key:
+**Fix:** NanoClaw resolves credentials in this order:
+
+1. **Auto-detected (recommended):** Log in to Claude Code on the host — NanoClaw reads `~/.claude/.credentials.json` automatically:
+   ```bash
+   claude login
+   ```
+2. **Manual `.env`:** Set either OAuth token or API key in `.env`:
+   ```bash
+   cat .env  # Should show one of:
+   # CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (subscription)
+   # ANTHROPIC_API_KEY=sk-ant-api03-...        (pay-per-use)
+   ```
+
+Check which source NanoClaw is using by looking for `Container auth credentials resolved` in the logs:
 ```bash
-cat .env  # Should show one of:
-# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (subscription)
-# ANTHROPIC_API_KEY=sk-ant-api03-...        (pay-per-use)
+grep "credentials resolved" logs/nanoclaw.log | tail -3
 ```
 
 #### Root User Restriction
 ```
 --dangerously-skip-permissions cannot be used with root/sudo privileges
 ```
-**Fix:** Container must run as non-root user. Check Dockerfile has `USER node`.
+**Fix:** Container must run as non-root user. Check Dockerfile has `USER bun`.
 
 ### 2. Environment Variables Not Passing
 
@@ -118,7 +129,7 @@ Expected structure:
 ├── project/              # Project root (main channel only)
 ├── global/               # Global CLAUDE.md (non-main only)
 ├── ipc/                  # Inter-process communication
-│   ├── messages/         # Outgoing WhatsApp messages
+│   ├── messages/         # Outgoing messages
 │   ├── tasks/            # Scheduled task commands
 │   ├── current_tasks.json    # Read-only: scheduled tasks visible to this group
 │   └── available_groups.json # Read-only: WhatsApp groups for activation (main only)
@@ -127,7 +138,7 @@ Expected structure:
 
 ### 4. Permission Issues
 
-The container runs as user `node` (uid 1000). Check ownership:
+The container runs as user `bun` (uid 1000). Check ownership:
 ```bash
 container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
   whoami
@@ -136,35 +147,35 @@ container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
 '
 ```
 
-All of `/workspace/` and `/app/` should be owned by `node`.
+All of `/workspace/` and `/app/` should be owned by `bun`.
 
 ### 5. Session Not Resuming / "Claude Code process exited with code 1"
 
 If sessions aren't being resumed (new session ID every time), or Claude Code exits with code 1 when resuming:
 
-**Root cause:** The SDK looks for sessions at `$HOME/.claude/projects/`. Inside the container, `HOME=/home/node`, so it looks at `/home/node/.claude/projects/`.
+**Root cause:** The SDK looks for sessions at `$HOME/.claude/projects/`. Inside the container, `HOME=/home/bun`, so it looks at `/home/bun/.claude/projects/`.
 
 **Check the mount path:**
 ```bash
-# In container-runner.ts, verify mount is to /home/node/.claude/, NOT /root/.claude/
+# In container-runner.ts, verify mount is to /home/bun/.claude/, NOT /root/.claude/
 grep -A3 "Claude sessions" src/container-runner.ts
 ```
 
 **Verify sessions are accessible:**
 ```bash
 container run --rm --entrypoint /bin/bash \
-  -v ~/.claude:/home/node/.claude \
+  -v ~/.claude:/home/bun/.claude \
   nanoclaw-agent:latest -c '
 echo "HOME=$HOME"
 ls -la $HOME/.claude/projects/ 2>&1 | head -5
 '
 ```
 
-**Fix:** Ensure `container-runner.ts` mounts to `/home/node/.claude/`:
+**Fix:** Ensure `container-runner.ts` mounts to `/home/bun/.claude/`:
 ```typescript
 mounts.push({
   hostPath: claudeDir,
-  containerPath: '/home/node/.claude',  // NOT /root/.claude
+  containerPath: '/home/bun/.claude',  // NOT /root/.claude
   readonly: false
 });
 ```
@@ -182,7 +193,7 @@ mkdir -p data/env groups/test
 cp .env data/env/env
 
 # Run test query
-echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
+echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"tg:-100000000","isMain":false}' | \
   container run -i \
   --mount "type=bind,source=$(pwd)/data/env,target=/workspace/env-dir,readonly" \
   -v $(pwd)/groups/test:/workspace/group \
@@ -229,7 +240,7 @@ query({
 
 ```bash
 # Rebuild main app
-npm run build
+bun run build
 
 # Rebuild container (use --no-cache for clean rebuild)
 ./container/build.sh
@@ -247,8 +258,8 @@ container images
 
 # Check what's in the image
 container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
-  echo "=== Node version ==="
-  node --version
+  echo "=== Bun version ==="
+  bun --version
 
   echo "=== Claude Code version ==="
   claude --version
@@ -263,9 +274,9 @@ container run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c '
 Claude sessions are stored per-group in `data/sessions/{group}/.claude/` for security isolation. Each group has its own session directory, preventing cross-group access to conversation history.
 
 **Critical:** The mount path must match the container user's HOME directory:
-- Container user: `node`
-- Container HOME: `/home/node`
-- Mount target: `/home/node/.claude/` (NOT `/root/.claude/`)
+- Container user: `bun`
+- Container HOME: `/home/bun`
+- Mount target: `/home/bun/.claude/` (NOT `/root/.claude/`)
 
 To clear sessions:
 
@@ -308,8 +319,8 @@ cat data/ipc/{groupFolder}/current_tasks.json
 ```
 
 **IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
+- `messages/*.json` - Agent writes: outgoing messages
+- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel)
 - `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
 - `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
 
@@ -321,7 +332,13 @@ Run this to check common issues:
 echo "=== Checking NanoClaw Container Setup ==="
 
 echo -e "\n1. Authentication configured?"
-[ -f .env ] && (grep -q "CLAUDE_CODE_OAUTH_TOKEN=sk-" .env || grep -q "ANTHROPIC_API_KEY=sk-" .env) && echo "OK" || echo "MISSING - add CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY to .env"
+if [ -f .env ] && (grep -q "CLAUDE_CODE_OAUTH_TOKEN=sk-" .env || grep -q "ANTHROPIC_API_KEY=sk-" .env); then
+  echo "OK (from .env)"
+elif [ -f ~/.claude/.credentials.json ] && grep -q '"accessToken"' ~/.claude/.credentials.json 2>/dev/null; then
+  echo "OK (auto-detected from ~/.claude/.credentials.json)"
+else
+  echo "MISSING - run 'claude login' or add CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY to .env"
+fi
 
 echo -e "\n2. Env file copied for container?"
 [ -f data/env/env ] && echo "OK" || echo "MISSING - will be created on first run"
@@ -333,7 +350,7 @@ echo -e "\n4. Container image exists?"
 echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
 echo -e "\n5. Session mount path correct?"
-grep -q "/home/node/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"
+grep -q "/home/bun/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/bun/.claude/, not /root/.claude/"
 
 echo -e "\n6. Groups directory?"
 ls -la groups/ 2>/dev/null || echo "MISSING - run setup"
