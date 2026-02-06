@@ -139,6 +139,16 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  // Send result message to group if there's output
+  if (result && result.trim()) {
+    try {
+      await deps.sendMessage(task.chat_id.toString(), result);
+      logger.info({ taskId: task.id, chatId: task.chat_id }, 'Task result sent to group');
+    } catch (err) {
+      logger.error({ taskId: task.id, err }, 'Failed to send task result');
+    }
+  }
 }
 
 let schedulerRunning = false;
