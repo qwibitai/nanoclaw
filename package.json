@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
+    "chokidar": "^5.0.0",
     "cron-parser": "^5.5.0",
     "dotenv": "^17.2.3",
     "pino": "^9.6.0",

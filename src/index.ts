@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import { exec, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import chokidar from 'chokidar';
 
 import { Telegraf, Context } from 'telegraf';
 import { Message } from 'telegraf/types';
@@ -94,13 +95,22 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   registeredGroups[jid] = group;
   saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
 
-  // Create group folder
+  // Create group folder and subdirectories
   const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
+  // Create IPC directories for the new group
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+
+  // Create session directory for the new group
+  const groupSessionDir = path.join(DATA_DIR, 'sessions', group.folder);
+  fs.mkdirSync(groupSessionDir, { recursive: true });
+
   logger.info(
     { jid, name: group.name, folder: group.folder },
-    'Group registered',
+    'Group registered with all directories created',
   );
 }
 
@@ -386,9 +396,14 @@ function startIpcWatcher(): void {
             const filePath = path.join(tasksDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              logger.debug(
+                { file, sourceGroup, type: data.type },
+                'Processing IPC task file',
+              );
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain);
               fs.unlinkSync(filePath);
+              logger.debug({ file, sourceGroup }, 'IPC task file processed');
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
@@ -627,6 +642,10 @@ async function processTaskIpc(
         break;
       }
       if (data.chatId && data.name && data.folder && data.trigger) {
+        logger.info(
+          { chatId: data.chatId, name: data.name, folder: data.folder },
+          'Processing register_group IPC request',
+        );
         registerGroup(data.chatId.toString(), {
           name: data.name,
           folder: data.folder,
@@ -634,6 +653,31 @@ async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
         });
+
+        // Immediately update available groups snapshot for all groups
+        const availableGroups = getAvailableGroups();
+        const registeredJids = new Set(Object.keys(registeredGroups));
+        writeGroupsSnapshot(
+          MAIN_GROUP_FOLDER,
+          true,
+          availableGroups,
+          registeredJids,
+        );
+        // Also update other groups' snapshots if needed
+        for (const [jid, group] of Object.entries(registeredGroups)) {
+          if (group.folder !== MAIN_GROUP_FOLDER) {
+            writeGroupsSnapshot(
+              group.folder,
+              false,
+              availableGroups,
+              registeredJids,
+            );
+          }
+        }
+        logger.info(
+          { chatId: data.chatId, folder: data.folder },
+          'Group registered and snapshots updated',
+        );
       } else {
         logger.warn(
           { data },
@@ -839,6 +883,41 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Watch for changes to registered_groups.json for hot reload using chokidar
+  const registeredGroupsPath = path.join(DATA_DIR, 'registered_groups.json');
+  const watcher = chokidar.watch(registeredGroupsPath, {
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      stabilityThreshold: 100,
+      pollInterval: 50,
+    },
+  });
+
+  watcher.on('change', (filePath) => {
+    logger.info({ filePath }, 'Detected change in registered_groups.json, reloading...');
+    try {
+      const newGroups = loadJson<Record<string, RegisteredGroup>>(
+        registeredGroupsPath,
+        {},
+      );
+      registeredGroups = newGroups;
+      logger.info(
+        { groupCount: Object.keys(registeredGroups).length },
+        'Groups reloaded successfully',
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to reload registered groups');
+    }
+  });
+
+  watcher.on('error', (error) => {
+    logger.error({ error }, 'File watcher error');
+  });
+
+  logger.info('Chokidar file watcher started for registered_groups.json');
+
   await connectTelegram();
 }
 

@@ -21,3 +21,10 @@ logs/
 .vscode/
 
 agents-sdk-docs
+
+# Groups runtime data (all folders and conversation/log files generated during execution)
+# Keep only the structure for deployment, exclude all runtime-generated content
+groups/*/
+!groups/global/
+groups/global/*
+!groups/global/.gitkeep
