@@ -368,6 +368,7 @@ Generate the plist file with correct paths automatically:
 NODE_PATH=$(which node)
 PROJECT_PATH=$(pwd)
 HOME_PATH=$HOME
+ASSISTANT_NAME_VAR="ASSISTANT_NAME_FROM_STEP_6"  # Use the name from step 6
 
 cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -393,6 +394,8 @@ cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
         <string>/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin</string>
         <key>HOME</key>
         <string>${HOME_PATH}</string>
+        <key>ASSISTANT_NAME</key>
+        <string>${ASSISTANT_NAME_VAR}</string>
     </dict>
     <key>StandardOutPath</key>
     <string>${PROJECT_PATH}/logs/nanoclaw.log</string>
@@ -405,6 +408,7 @@ EOF
 echo "Created launchd plist with:"
 echo "  Node: ${NODE_PATH}"
 echo "  Project: ${PROJECT_PATH}"
+echo "  Assistant: ${ASSISTANT_NAME_VAR}"
 ```
 
 Build and start the service:
