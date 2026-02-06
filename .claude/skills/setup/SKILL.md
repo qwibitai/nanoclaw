@@ -66,6 +66,8 @@ container --version
 
 **Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
 
+**DNS Configuration:** Apple Container runs in a Linux VM and requires DNS configuration for network access. NanoClaw automatically adds `--dns 192.168.64.1` to container runtime arguments, which routes DNS queries through the macOS host. This is required for web searches, API calls, and package installations within containers.
+
 #### Option B: Docker
 
 Tell the user:
