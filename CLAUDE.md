@@ -30,12 +30,12 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 Run commands directly—don't tell the user to run them.
 
 ```bash
-npm run dev          # Run with hot reload
-npm run build        # Compile TypeScript
-./container/build.sh # Rebuild agent container
+npm run dev                # Run with hot reload
+npm run build              # Compile TypeScript
+npm run build:container    # Build agent container (cross-platform)
 ```
 
-Service management:
+Service management (macOS):
 ```bash
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist

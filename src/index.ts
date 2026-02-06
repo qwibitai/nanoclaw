@@ -672,9 +672,7 @@ async function connectWhatsApp(): Promise<void> {
       const msg =
         'WhatsApp authentication required. Run /setup in Claude Code.';
       logger.error(msg);
-      exec(
-        `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-      );
+      console.error(`\n${'='.repeat(60)}\nERROR: ${msg}\n${'='.repeat(60)}\n`);
       setTimeout(() => process.exit(1), 1000);
     }
 
@@ -795,47 +793,84 @@ async function startMessageLoop(): Promise<void> {
 }
 
 function ensureContainerSystemRunning(): void {
-  try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-  } catch {
-    logger.info('Starting Apple Container system...');
+  const isAppleContainer = process.platform === 'darwin';
+  const runtime = isAppleContainer ? 'container' : 'docker';
+
+  if (isAppleContainer) {
     try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
+      execSync('container system status', { stdio: 'pipe' });
+      logger.debug('Apple Container system already running');
+    } catch {
+      logger.info('Starting Apple Container system...');
+      try {
+        execSync('container system start', { stdio: 'pipe', timeout: 30000 });
+        logger.info('Apple Container system started');
+      } catch (err) {
+        logger.error({ err }, 'Failed to start Apple Container system');
+        console.error(
+          '\n╔════════════════════════════════════════════════════════════════╗',
+        );
+        console.error(
+          '║  FATAL: Apple Container system failed to start                 ║',
+        );
+        console.error(
+          '║                                                                ║',
+        );
+        console.error(
+          '║  Agents cannot run without Apple Container. To fix:           ║',
+        );
+        console.error(
+          '║  1. Install from: https://github.com/apple/container/releases ║',
+        );
+        console.error(
+          '║  2. Run: container system start                               ║',
+        );
+        console.error(
+          '║  3. Restart NanoClaw                                          ║',
+        );
+        console.error(
+          '╚════════════════════════════════════════════════════════════════╝\n',
+        );
+        throw new Error('Apple Container system is required but failed to start');
+      }
+    }
+  } else {
+    try {
+      execSync('docker info', { stdio: 'pipe', timeout: 5000 });
+      logger.debug('Docker is running');
+    } catch {
+      logger.error('Docker is not running');
       console.error(
         '\n╔════════════════════════════════════════════════════════════════╗',
       );
       console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
+        '║  FATAL: Docker is not running                                  ║',
       );
       console.error(
         '║                                                                ║',
       );
       console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
+        '║  Agents cannot run without Docker. To fix:                    ║',
       );
       console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
+        '║  1. Install Docker: https://docker.com/get-started             ║',
       );
       console.error(
-        '║  2. Run: container system start                               ║',
+        '║  2. Start Docker                                               ║',
       );
       console.error(
-        '║  3. Restart NanoClaw                                          ║',
+        '║  3. Restart NanoClaw                                           ║',
       );
       console.error(
         '╚════════════════════════════════════════════════════════════════╝\n',
       );
-      throw new Error('Apple Container system is required but failed to start');
+      throw new Error('Docker is required but not running');
     }
   }
 
-  // Clean up stopped NanoClaw containers from previous runs
   try {
-    const output = execSync('container ls -a --format {{.Names}}', {
+    const lsCmd = `${runtime} ${isAppleContainer ? 'ls -a --format {{.Names}}' : 'ps -a --format "{{.Names}}"'}`;
+    const output = execSync(lsCmd, {
       stdio: ['pipe', 'pipe', 'pipe'],
       encoding: 'utf-8',
     });
@@ -844,11 +879,10 @@ function ensureContainerSystemRunning(): void {
       .map((n) => n.trim())
       .filter((n) => n.startsWith('nanoclaw-'));
     if (stale.length > 0) {
-      execSync(`container rm ${stale.join(' ')}`, { stdio: 'pipe' });
+      execSync(`${runtime} rm ${stale.join(' ')}`, { stdio: 'pipe' });
       logger.info({ count: stale.length }, 'Cleaned up stopped containers');
     }
   } catch {
-    // No stopped containers or ls/rm not supported
   }
 }
 

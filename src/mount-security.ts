@@ -121,8 +121,8 @@ export function loadMountAllowlist(): MountAllowlist | null {
  * Expand ~ to home directory and resolve to absolute path
  */
 function expandPath(p: string): string {
-  const homeDir = process.env.HOME || '/Users/user';
-  if (p.startsWith('~/')) {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || (process.platform === 'win32' ? 'C:\\Users\\user' : '/home/user');
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
     return path.join(homeDir, p.slice(2));
   }
   if (p === '~') {
