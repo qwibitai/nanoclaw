@@ -1,0 +1,14 @@
+- git clone https://github.com/wangsc2024/nanobot.git 
+- 參考 nanobot 提出將 nanoclaw 優化成為於 windows 11 docker 中執行
+- 參考 nanobot 將架構改為與 nanobot 類似
+- 參考 nanobot 加入24/7 Real-Time Market Analysis,Full-Stack Software Engineer, Smart Daily Routine Manager,Personal Knowledge Assistant 等功能
+- 必需專注於符合資訊安全
+
+- 審查 24/7 Real-Time Market Analysis,Full-Stack Software Engineer, Smart Daily Routine Manager,Personal Knowledge Assistant 等功能是否完整實作
+- 依系統目標，生成必要的測試程式
+- TDD 全部的模組，直至全部通過測試
+- 進行 E2E 測試
+- 深思本系統的功能，列出系統常用的情境，並實際執行這些情境，以測試系統是否能達到預期的效果，並於測試的過程找出優化的方向並逐一完成優化
+- TDD 全部的模組，直至全部通過測試
+- 完成後通知 wangsc2025 成果
+- 以 skill 深度審查 skill 是否符合格式及提出優化程式碼方案並落實
