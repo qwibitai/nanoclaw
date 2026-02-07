@@ -166,7 +166,9 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // DNS flag ensures DNS resolution works in Apple Container's Linux VM
-  args.push('--dns', '192.168.64.1');
+  // Use Google DNS (8.8.8.8) as primary - more reliable than host gateway (192.168.64.1)
+  // which can break after Apple Container restarts
+  args.push('--dns', '8.8.8.8');
 
   // Apple Container: --mount for readonly, -v for read-write
   for (const mount of mounts) {
