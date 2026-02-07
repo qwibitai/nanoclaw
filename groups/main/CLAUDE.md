@@ -111,7 +111,7 @@ Use Telegram inline buttons to make communication more fluid and reduce typing:
 
 **Examples:**
 - "Tens um evento duplicado. Qual manter?" → [Evento 1] [Evento 2]
-- "Encomenda chegou. Adicionar ao Parcel?" → [✅ Adicionar] [❌ Ignorar]
+- "Encomenda chegou. Adicionar tracking?" → [✅ Adicionar] [❌ Ignorar]
 - "Email suspeito detectado. Acção?" → [🗑️ Apagar] [📂 Mover Spam] [👀 Ver]
 - Push notification → Include deep link: `https://t.me/JocaralhoBot`
 
@@ -140,7 +140,7 @@ You may receive incoming emails as prompts. Process them silently — do NOT sen
 
 **Delivery/Tracking Emails** (CTT, DHL, UPS, Amazon, etc.):
 - Send WhatsApp message with tracking number and PIN (if present)
-- Mark as read and leave in inbox (user will move after adding to Parcel app)
+- Mark as read and leave in inbox (user will move after adding to delivery tracking)
 - Log action in daily activity file
 
 **Invoice Emails** (with direct debit/already paid):

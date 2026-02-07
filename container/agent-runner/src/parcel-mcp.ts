@@ -10,7 +10,7 @@ import { z } from 'zod';
 const PARCEL_API_BASE = 'https://api.parcel.app/external';
 
 function log(message: string): void {
-  console.error(`[parcel-mcp] ${message}`);
+  console.error(`[deliveries-mcp] ${message}`);
 }
 
 const STATUS_LABELS: Record<number, string> = {
@@ -62,12 +62,12 @@ export function createParcelMcp() {
   const apiKey = process.env.PARCEL_API_KEY;
 
   return createSdkMcpServer({
-    name: 'parcel',
+    name: 'deliveries',
     version: '1.0.0',
     tools: [
       tool(
         'get_deliveries',
-        `Get package deliveries from the Parcel app.
+        `Get tracked package deliveries.
 
 filter_mode:
 - "active": Only show deliveries that haven't been delivered yet
@@ -86,7 +86,7 @@ Rate limit: 20 requests/hour.`,
               content: [
                 {
                   type: 'text',
-                  text: 'Parcel API not configured (missing PARCEL_API_KEY)',
+                  text: 'Delivery tracking not configured',
                 },
               ],
               isError: true,
@@ -110,7 +110,7 @@ Rate limit: 20 requests/hour.`,
                 content: [
                   {
                     type: 'text',
-                    text: `Parcel API error: ${response.status}`,
+                    text: `Delivery API error: ${response.status}`,
                   },
                 ],
                 isError: true,
@@ -124,7 +124,7 @@ Rate limit: 20 requests/hour.`,
                 content: [
                   {
                     type: 'text',
-                    text: `Parcel API error: ${data.error_message || 'Unknown error'}`,
+                    text: `Delivery API error: ${data.error_message || 'Unknown error'}`,
                   },
                 ],
                 isError: true,
@@ -167,10 +167,9 @@ Rate limit: 20 requests/hour.`,
 
       tool(
         'add_delivery',
-        `Add a new package delivery to track in the Parcel app.
+        `Add a new package delivery to track.
 
-The carrier_code must be a valid code from the Parcel app's supported carriers list.
-Full list: https://api.parcel.app/carriers
+The carrier_code identifies the shipping carrier.
 
 Common codes for Portugal:
 - "ctt" (CTT), "ctt-express" (CTT Expresso), "dpd-portugal" (DPD Portugal)
@@ -182,7 +181,7 @@ Email-to-carrier mapping:
 - *@dhl.pt → "dhl", *@ups.com → "ups", *@fedex.com → "fedex"
 - *@dpd.pt → "dpd-portugal", *@amazon.* → "amazon"
 
-Rate limit: 20 requests/day for adding deliveries.`,
+Rate limit: 20 additions/day.`,
         {
           tracking_number: z.string().describe('The package tracking number'),
           carrier_code: z
@@ -196,7 +195,7 @@ Rate limit: 20 requests/day for adding deliveries.`,
           send_push_confirmation: z
             .boolean()
             .optional()
-            .describe('Send a push notification to Parcel app when added (default: false)'),
+            .describe('Send a push notification when added (default: false)'),
         },
         async (args) => {
           if (!apiKey) {
@@ -204,7 +203,7 @@ Rate limit: 20 requests/day for adding deliveries.`,
               content: [
                 {
                   type: 'text',
-                  text: 'Parcel API not configured (missing PARCEL_API_KEY)',
+                  text: 'Delivery tracking not configured',
                 },
               ],
               isError: true,
@@ -246,7 +245,7 @@ Rate limit: 20 requests/day for adding deliveries.`,
                 content: [
                   {
                     type: 'text',
-                    text: `Parcel API error: ${response.status}`,
+                    text: `Delivery API error: ${response.status}`,
                   },
                 ],
                 isError: true,

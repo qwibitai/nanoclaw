@@ -323,7 +323,7 @@ export function createCalendarMcp() {
     tools: [
       tool(
         'list_calendars',
-        'List all available iCloud calendars.',
+        'List all available calendars.',
         {},
         async () => {
           try {
@@ -340,7 +340,7 @@ export function createCalendarMcp() {
               .join('\n\n');
 
             return {
-              content: [{ type: 'text', text: `iCloud Calendars:\n\n${list}` }],
+              content: [{ type: 'text', text: `Calendars:\n\n${list}` }],
             };
           } catch (err) {
             return {

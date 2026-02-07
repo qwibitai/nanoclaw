@@ -260,7 +260,7 @@ async function main(): Promise<void> {
     process.env.ICLOUD_USERNAME && process.env.ICLOUD_APP_PASSWORD
   );
   if (calendarEnabled) {
-    log('iCloud calendar enabled');
+    log('Calendar integration enabled');
     mcpServers.calendar = createCalendarMcp();
   }
 
@@ -269,15 +269,15 @@ async function main(): Promise<void> {
     process.env.PUSHOVER_USER_KEY && process.env.PUSHOVER_APP_TOKEN
   );
   if (pushoverEnabled) {
-    log('Pushover notifications enabled');
-    mcpServers.pushover = createPushoverMcp();
+    log('Notifications integration enabled');
+    mcpServers.notifications = createPushoverMcp();
   }
 
   // Add Parcel MCP if API key is present
   const parcelEnabled = !!process.env.PARCEL_API_KEY;
   if (parcelEnabled) {
-    log('Parcel delivery tracking enabled');
-    mcpServers.parcel = createParcelMcp();
+    log('Delivery tracking enabled');
+    mcpServers.deliveries = createParcelMcp();
   }
 
   // Build allowed tools list
@@ -298,11 +298,11 @@ async function main(): Promise<void> {
   }
 
   if (pushoverEnabled) {
-    allowedTools.push('mcp__pushover__*');
+    allowedTools.push('mcp__notifications__*');
   }
 
   if (parcelEnabled) {
-    allowedTools.push('mcp__parcel__*');
+    allowedTools.push('mcp__deliveries__*');
   }
 
   let result: string | null = null;

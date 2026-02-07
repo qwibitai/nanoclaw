@@ -10,7 +10,7 @@ import { z } from 'zod';
 const PUSHOVER_API_URL = 'https://api.pushover.net/1/messages.json';
 
 function log(message: string): void {
-  console.error(`[pushover-mcp] ${message}`);
+  console.error(`[notifications-mcp] ${message}`);
 }
 
 export function createPushoverMcp() {
@@ -19,12 +19,12 @@ export function createPushoverMcp() {
   const defaultDevice = process.env.PUSHOVER_DEVICE;
 
   return createSdkMcpServer({
-    name: 'pushover',
+    name: 'notifications',
     version: '1.0.0',
     tools: [
       tool(
         'send_notification',
-        `Send a push notification to the user's device via Pushover.
+        `Send a push notification to the user's device.
 
 Use this to alert the user about important events, reminders, or when you need their attention outside of WhatsApp/chat.
 
@@ -51,7 +51,7 @@ Priority levels:
           sound: z
             .string()
             .optional()
-            .describe('Notification sound (e.g., "pushover", "bike", "none")'),
+            .describe('Notification sound (e.g., "default", "bike", "none")'),
         },
         async (args) => {
           if (!userKey || !appToken) {
@@ -59,7 +59,7 @@ Priority levels:
               content: [
                 {
                   type: 'text',
-                  text: 'Pushover not configured (missing PUSHOVER_USER_KEY or PUSHOVER_APP_TOKEN)',
+                  text: 'Push notifications not configured',
                 },
               ],
               isError: true,
@@ -99,12 +99,12 @@ Priority levels:
 
             if (!response.ok) {
               const text = await response.text();
-              log(`Pushover API error: ${response.status} - ${text}`);
+              log(`Notification API error: ${response.status} - ${text}`);
               return {
                 content: [
                   {
                     type: 'text',
-                    text: `Pushover API error: ${response.status}`,
+                    text: `Notification API error: ${response.status}`,
                   },
                 ],
                 isError: true,
