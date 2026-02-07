@@ -911,15 +911,21 @@ async function connectTelegram(): Promise<void> {
   // Launch bot (Long Polling)
   try {
     logger.info('Connecting to Telegram...');
-    bot.launch({
-      dropPendingUpdates: true,
-    }).then(() => {
-      logger.info('Connected to Telegram');
-      logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
-    }).catch((err) => {
-      logger.error({ err }, 'Failed to launch Telegram bot');
-      throw err;
-    });
+
+    // Launch bot asynchronously (don't wait for completion)
+    // The bot will start polling in the background
+    bot.launch({ dropPendingUpdates: true })
+      .then(() => {
+        logger.info('Bot polling started successfully');
+      })
+      .catch((err) => {
+        logger.error({ err }, 'Bot launch error (may still work)');
+      });
+
+    // Verify connection by calling getMe (this should work immediately)
+    const botInfo = await bot.telegram.getMe();
+    logger.info({ botId: botInfo.id, username: botInfo.username }, 'Connected to Telegram');
+    logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
     // Sync group metadata on startup (respects 24h cache)
     syncGroupMetadata().catch((err) =>
@@ -949,13 +955,25 @@ async function connectTelegram(): Promise<void> {
   }
 
   // Graceful shutdown
-  process.once('SIGINT', () => {
+  process.once('SIGINT', async () => {
     logger.info('SIGINT received, stopping bot');
-    bot.stop('SIGINT');
+    try {
+      await bot.stop('SIGINT');
+      logger.info('Bot stopped successfully');
+    } catch (err) {
+      logger.error({ err }, 'Error stopping bot');
+    }
+    process.exit(0);
   });
-  process.once('SIGTERM', () => {
+  process.once('SIGTERM', async () => {
     logger.info('SIGTERM received, stopping bot');
-    bot.stop('SIGTERM');
+    try {
+      await bot.stop('SIGTERM');
+      logger.info('Bot stopped successfully');
+    } catch (err) {
+      logger.error({ err }, 'Error stopping bot');
+    }
+    process.exit(0);
   });
 }
 

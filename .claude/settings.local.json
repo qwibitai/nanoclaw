@@ -30,7 +30,13 @@
       "Bash(find:*)",
       "Bash(./build.sh:*)",
       "Bash(brew install:*)",
-      "Bash(sudo rm:*)"
+      "Bash(sudo rm:*)",
+      "Bash(log show:*)",
+      "Bash(curl:*)",
+      "Bash(npm view:*)",
+      "Bash(env:*)",
+      "Bash(git stash:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
