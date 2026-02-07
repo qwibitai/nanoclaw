@@ -98,14 +98,19 @@ export class MemoryStore {
 
       try {
         if (fs.existsSync(filePath)) {
+          const stat = fs.statSync(filePath);
+          if (stat.size > 10 * 1024 * 1024) {
+            logger.warn({ file: filename, size: stat.size, group: this.groupFolder }, 'Memory file too large, skipping');
+            continue;
+          }
           const content = fs.readFileSync(filePath, 'utf-8');
           if (content.trim()) {
             const dateStr = date.toISOString().split('T')[0];
             parts.push(`## Notes from ${dateStr}\n${content}`);
           }
         }
-      } catch {
-        // Skip unreadable files
+      } catch (err) {
+        logger.warn({ file: filename, err, group: this.groupFolder }, 'Failed to read memory file, skipping');
       }
     }
 

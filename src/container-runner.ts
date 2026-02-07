@@ -25,7 +25,7 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { getDockerSecurityArgs, sanitizeContainerName } from './security.js';
+import { ALLOWED_ENV_VARS, getDockerSecurityArgs, sanitizeContainerName } from './security.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -151,11 +151,11 @@ function buildVolumeMounts(
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
+      const varName = trimmed.split('=')[0];
+      return ALLOWED_ENV_VARS.has(varName);
     });
 
     if (filteredLines.length > 0) {
@@ -453,6 +453,10 @@ export async function runContainerAgent(
         } else {
           const lines = stdout.trim().split('\n');
           jsonLine = lines[lines.length - 1];
+        }
+
+        if (jsonLine.length > CONTAINER_MAX_OUTPUT_SIZE) {
+          throw new Error(`Container output JSON too large: ${jsonLine.length} bytes`);
         }
 
         const output: ContainerOutput = JSON.parse(jsonLine);

@@ -1,3 +1,9 @@
+---
+name: market-analysis
+description: "24/7 financial market monitoring. Use when user asks about stocks, crypto, forex, market trends, technical analysis, or financial news sentiment. Provides scheduled market summaries and risk alerts."
+metadata: {"nanoclaw":{"emoji":"📈","schedule":"0 9,12,16 * * 1-5"}}
+---
+
 # 24/7 Real-Time Market Analysis
 
 You are a market analysis agent. Your role is to monitor financial markets and provide actionable insights.

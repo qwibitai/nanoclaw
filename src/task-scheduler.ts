@@ -132,16 +132,24 @@ async function runTask(
   });
 
   let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
+  try {
+    if (task.schedule_type === 'cron') {
+      const interval = CronExpressionParser.parse(task.schedule_value, {
+        tz: TIMEZONE,
+      });
+      nextRun = interval.next().toISOString();
+    } else if (task.schedule_type === 'interval') {
+      const ms = parseInt(task.schedule_value, 10);
+      if (isNaN(ms) || ms <= 0) {
+        logger.error({ taskId: task.id, value: task.schedule_value }, 'Invalid interval value');
+      } else {
+        nextRun = new Date(Date.now() + ms).toISOString();
+      }
+    }
+    // 'once' tasks have no next run
+  } catch (err) {
+    logger.error({ taskId: task.id, schedule: task.schedule_value, err }, 'Failed to calculate next run');
   }
-  // 'once' tasks have no next run
 
   const resultSummary = error
     ? `Error: ${error}`

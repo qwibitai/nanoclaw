@@ -27,7 +27,8 @@ export class WhatsAppChannel extends BaseChannel {
   private sock: WASocket | null = null;
   private whatsappConfig: WhatsAppChannelConfig;
   /** LID to phone number mapping (WhatsApp sends LID JIDs for self-chats) */
-  private lidToPhoneMap: Record<string, string> = {};
+  private lidToPhoneMap = new Map<string, string>();
+  private static readonly MAX_LID_MAP_SIZE = 10000;
 
   constructor(config: WhatsAppChannelConfig) {
     super('whatsapp', config);
@@ -82,10 +83,16 @@ export class WhatsAppChannel extends BaseChannel {
 
         // Build LID to phone mapping
         if (this.sock?.user) {
-          const phoneUser = this.sock.user.id.split(':')[0];
+          const parts = this.sock.user.id.split(':');
+          const phoneUser = parts.length > 0 ? parts[0] : undefined;
           const lidUser = this.sock.user.lid?.split(':')[0];
           if (lidUser && phoneUser) {
-            this.lidToPhoneMap[lidUser] = `${phoneUser}@s.whatsapp.net`;
+            // Evict oldest entries if map grows too large
+            if (this.lidToPhoneMap.size >= WhatsAppChannel.MAX_LID_MAP_SIZE) {
+              const firstKey = this.lidToPhoneMap.keys().next().value;
+              if (firstKey) this.lidToPhoneMap.delete(firstKey);
+            }
+            this.lidToPhoneMap.set(lidUser, `${phoneUser}@s.whatsapp.net`);
           }
         }
 
@@ -183,8 +190,9 @@ export class WhatsAppChannel extends BaseChannel {
 
   private translateJid(jid: string): string {
     if (!jid.endsWith('@lid')) return jid;
-    const lidUser = jid.split('@')[0].split(':')[0];
-    const phoneJid = this.lidToPhoneMap[lidUser];
-    return phoneJid || jid;
+    const parts = jid.split('@');
+    if (parts.length < 2) return jid;
+    const lidUser = parts[0].split(':')[0];
+    return this.lidToPhoneMap.get(lidUser) || jid;
   }
 }

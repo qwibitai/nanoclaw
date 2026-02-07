@@ -47,18 +47,18 @@ export function checkShellCommand(command: string): string | null {
 }
 
 /**
- * Patterns that indicate secrets/credentials in text.
- * Used to prevent accidental logging or exposure.
+ * Unified secret patterns with descriptions.
+ * Each entry pairs a detection regex with a human-readable description.
  */
-const SECRET_PATTERNS: RegExp[] = [
-  /\b(sk-[a-zA-Z0-9]{20,})\b/,             // API keys (generic)
-  /\b(ghp_[a-zA-Z0-9]{36})\b/,              // GitHub personal access tokens
-  /\b(gho_[a-zA-Z0-9]{36})\b/,              // GitHub OAuth tokens
-  /\b(xox[bprs]-[a-zA-Z0-9-]{10,})\b/,     // Slack tokens
-  /\bAIza[a-zA-Z0-9_-]{35}\b/,              // Google API keys
-  /\b(AKIA[A-Z0-9]{16})\b/,                 // AWS access keys
-  /-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----/, // Private keys
-  /-----BEGIN CERTIFICATE-----/,              // Certificates (warn only)
+const SECRET_ENTRIES: Array<{ pattern: RegExp; description: string }> = [
+  { pattern: /\b(sk-[a-zA-Z0-9]{20,})\b/, description: 'API key' },
+  { pattern: /\b(ghp_[a-zA-Z0-9]{36})\b/, description: 'GitHub personal access token' },
+  { pattern: /\b(gho_[a-zA-Z0-9]{36})\b/, description: 'GitHub OAuth token' },
+  { pattern: /\b(xox[bprs]-[a-zA-Z0-9-]{10,})\b/, description: 'Slack token' },
+  { pattern: /\bAIza[a-zA-Z0-9_-]{35}\b/, description: 'Google API key' },
+  { pattern: /\b(AKIA[A-Z0-9]{16})\b/, description: 'AWS access key' },
+  { pattern: /-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----/, description: 'Private key' },
+  { pattern: /-----BEGIN CERTIFICATE-----/, description: 'Certificate' },
 ];
 
 /**
@@ -66,26 +66,9 @@ const SECRET_PATTERNS: RegExp[] = [
  * Returns list of detected secret types.
  */
 export function detectSecrets(text: string): string[] {
-  const found: string[] = [];
-
-  const descriptions = [
-    'API key',
-    'GitHub personal access token',
-    'GitHub OAuth token',
-    'Slack token',
-    'Google API key',
-    'AWS access key',
-    'Private key',
-    'Certificate',
-  ];
-
-  for (let i = 0; i < SECRET_PATTERNS.length; i++) {
-    if (SECRET_PATTERNS[i].test(text)) {
-      found.push(descriptions[i]);
-    }
-  }
-
-  return found;
+  return SECRET_ENTRIES
+    .filter((entry) => entry.pattern.test(text))
+    .map((entry) => entry.description);
 }
 
 /**
@@ -93,8 +76,8 @@ export function detectSecrets(text: string): string[] {
  */
 export function redactSecrets(text: string): string {
   let redacted = text;
-  for (const pattern of SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, '[REDACTED]');
+  for (const entry of SECRET_ENTRIES) {
+    redacted = redacted.replace(entry.pattern, '[REDACTED]');
   }
   return redacted;
 }
@@ -102,16 +85,21 @@ export function redactSecrets(text: string): string {
 /**
  * Sanitize a container name to prevent command injection.
  * Only allows alphanumeric characters and hyphens.
+ * Throws if the result would be empty.
  */
 export function sanitizeContainerName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9-]/g, '');
+  const sanitized = name.replace(/[^a-zA-Z0-9-]/g, '');
+  if (sanitized.length === 0) {
+    throw new Error(`Invalid container name: sanitization of '${name.slice(0, 50)}' produced empty string`);
+  }
+  return sanitized;
 }
 
 /**
  * Validate environment variables before passing to containers.
  * Only allows explicitly listed variable names.
  */
-const ALLOWED_ENV_VARS = new Set([
+export const ALLOWED_ENV_VARS = new Set([
   'ANTHROPIC_API_KEY',
   'CLAUDE_CODE_OAUTH_TOKEN',
   'NODE_ENV',
@@ -133,15 +121,18 @@ export function filterEnvVars(
 /**
  * Simple rate limiter for channel messages.
  * Prevents abuse from external channels.
+ * Auto-cleans expired windows to prevent memory leaks.
  */
 export class RateLimiter {
   private windows = new Map<string, { count: number; resetAt: number }>();
   private maxRequests: number;
   private windowMs: number;
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(maxRequests: number = 30, windowMs: number = 60000) {
     this.maxRequests = maxRequests;
     this.windowMs = windowMs;
+    this.cleanupTimer = setInterval(() => this.cleanup(), 60000);
   }
 
   /** Check if a request should be allowed. Returns true if allowed. */
@@ -172,32 +163,45 @@ export class RateLimiter {
       }
     }
   }
+
+  /** Stop the auto-cleanup timer */
+  destroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
 }
 
 /**
  * Docker security flags for agent containers.
- * Applied when spawning containers to limit attack surface.
+ * Constant array to avoid re-allocation on each call.
  */
+export const DOCKER_SECURITY_ARGS: readonly string[] = Object.freeze([
+  '--network=none',
+  '--cap-drop=ALL',
+  '--security-opt=no-new-privileges:true',
+  '--read-only',
+  '--memory=1g',
+  '--memory-swap=1g',
+  '--cpus=1.0',
+  '--pids-limit=256',
+  '--tmpfs=/tmp:rw,noexec,nosuid,size=256m',
+]);
+
+/** @deprecated Use DOCKER_SECURITY_ARGS constant instead */
 export function getDockerSecurityArgs(): string[] {
-  return [
-    // No network access (agents communicate via filesystem IPC)
-    '--network=none',
-    // Drop all capabilities
-    '--cap-drop=ALL',
-    // No new privileges
-    '--security-opt=no-new-privileges:true',
-    // Read-only root filesystem (writable mounts are explicit)
-    '--read-only',
-    // Limit memory to prevent DoS
-    '--memory=1g',
-    '--memory-swap=1g',
-    // Limit CPU
-    '--cpus=1.0',
-    // Limit PIDs to prevent fork bombs
-    '--pids-limit=256',
-    // Tmpfs for /tmp (writable, but in-memory and limited)
-    '--tmpfs=/tmp:rw,noexec,nosuid,size=256m',
-  ];
+  return [...DOCKER_SECURITY_ARGS];
+}
+
+/**
+ * Escape LIKE wildcards in SQL parameters to prevent pattern injection.
+ */
+export function escapeLikePattern(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/%/g, '\\%')
+    .replace(/_/g, '\\_');
 }
 
 /**

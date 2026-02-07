@@ -50,11 +50,13 @@ export interface ChannelConfig {
 export abstract class BaseChannel extends EventEmitter {
   readonly channelType: string;
   protected config: ChannelConfig;
+  private allowedUsersSet: Set<string>;
 
   constructor(channelType: string, config: ChannelConfig) {
     super();
     this.channelType = channelType;
     this.config = config;
+    this.allowedUsersSet = new Set(config.allowedUsers);
   }
 
   /** Start listening for messages */
@@ -66,10 +68,10 @@ export abstract class BaseChannel extends EventEmitter {
   /** Send a message to a chat */
   abstract sendMessage(chatId: string, text: string): Promise<void>;
 
-  /** Check if a sender is allowed to interact */
+  /** Check if a sender is allowed to interact (O(1) Set lookup) */
   isAllowed(senderId: string): boolean {
-    if (this.config.allowedUsers.length === 0) return true;
-    return this.config.allowedUsers.includes(senderId);
+    if (this.allowedUsersSet.size === 0) return true;
+    return this.allowedUsersSet.has(senderId);
   }
 
   /** Emit an inbound message (called by subclass implementations) */

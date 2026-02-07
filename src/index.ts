@@ -210,7 +210,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const lines = missedMessages.map((m) => {
+  // Limit messages to prevent OOM with huge context windows
+  const MAX_CONTEXT_MESSAGES = 100;
+  const contextMessages = missedMessages.length > MAX_CONTEXT_MESSAGES
+    ? missedMessages.slice(-MAX_CONTEXT_MESSAGES)
+    : missedMessages;
+  if (missedMessages.length > MAX_CONTEXT_MESSAGES) {
+    logger.warn({ group: group.name, total: missedMessages.length, used: MAX_CONTEXT_MESSAGES }, 'Messages truncated for context');
+  }
+
+  const lines = contextMessages.map((m) => {
     return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`;
   });
   const prompt = `<messages>\n${lines.join('\n')}\n</messages>`;

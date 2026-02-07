@@ -5,6 +5,7 @@ import path from 'path';
 import { proto } from '@whiskeysockets/baileys';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
+import { escapeLikePattern } from './security.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
@@ -128,7 +129,10 @@ export function storeChatMetadata(
       INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
         name = excluded.name,
-        last_message_time = MAX(last_message_time, excluded.last_message_time)
+        last_message_time = CASE
+          WHEN excluded.last_message_time > last_message_time THEN excluded.last_message_time
+          ELSE last_message_time
+        END
     `,
     ).run(chatJid, name, timestamp);
   } else {
@@ -137,7 +141,10 @@ export function storeChatMetadata(
       `
       INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
-        last_message_time = MAX(last_message_time, excluded.last_message_time)
+        last_message_time = CASE
+          WHEN excluded.last_message_time > last_message_time THEN excluded.last_message_time
+          ELSE last_message_time
+        END
     `,
     ).run(chatJid, chatJid, timestamp);
   }
@@ -245,16 +252,19 @@ export function getNewMessages(
 
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
+  // Escape LIKE wildcards in botPrefix to prevent SQL pattern injection
+  const escapedPrefix = escapeLikePattern(botPrefix);
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ? ESCAPE '\\'
     ORDER BY timestamp
+    LIMIT 1000
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${escapedPrefix}:%`) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -270,15 +280,18 @@ export function getMessagesSince(
   botPrefix: string,
 ): NewMessage[] {
   // Filter out bot's own messages by checking content prefix
+  // Escape LIKE wildcards to prevent SQL pattern injection
+  const escapedPrefix = escapeLikePattern(botPrefix);
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ? ESCAPE '\\'
     ORDER BY timestamp
+    LIMIT 1000
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${escapedPrefix}:%`) as NewMessage[];
 }
 
 export function createTask(
