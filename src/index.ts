@@ -191,8 +191,11 @@ async function processMessage(msg: NewMessage): Promise<void> {
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
-  // Main group responds to all messages; other groups require trigger prefix
-  if (!isMainGroup && !TRIGGER_PATTERN.test(content)) return;
+  // Button clicks should always be processed (they start with [Button)
+  const isButtonClick = content.startsWith('[Button');
+
+  // Main group responds to all messages; other groups require trigger prefix (unless it's a button click)
+  if (!isMainGroup && !isButtonClick && !TRIGGER_PATTERN.test(content)) return;
 
   // Get all messages since last agent interaction so the session has full context
   const sinceTimestamp = lastAgentTimestamp[msg.chat_id.toString()] || '';
