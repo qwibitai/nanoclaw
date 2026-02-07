@@ -1,0 +1,23 @@
+{
+  "skill": "calculator",
+  "version": "1.0.0",
+  "description": "Basic math operations calculator",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "python": [],
+      "node": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": ["calculator.py"],
+      "target": "src/skills/calculator/"
+    }
+  },
+  "enabled": true,
+  "builtin": true,
+  "author": "nanoclaw",
+  "license": "MIT"
+}

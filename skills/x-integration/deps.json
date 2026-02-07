@@ -1,0 +1,50 @@
+{
+  "skill": "x-integration",
+  "version": "1.0.0",
+  "description": "X (Twitter) browser automation integration",
+  "dependencies": {
+    "system": [
+      {
+        "type": "apt",
+        "packages": ["chromium", "fonts-liberation"],
+        "description": "Browser for automation"
+      }
+    ],
+    "runtime": {
+      "node": [
+        {
+          "packages": ["playwright", "dotenv-cli"],
+          "global": false,
+          "description": "Browser automation library"
+        }
+      ],
+      "python": [],
+      "go": []
+    },
+    "host": {
+      "description": "Host-side dependencies for X integration",
+      "instructions": "npm install playwright dotenv-cli in project root"
+    }
+  },
+  "integration": {
+    "container": {
+      "files": ["agent.ts"],
+      "target": "src/skills/x-integration/",
+      "imports": "import { createXTools } from './skills/x-integration/agent.js';"
+    },
+    "host": {
+      "files": ["host.ts"],
+      "imports": "import { handleXIpc } from '../skills/x-integration/host.js';",
+      "modifications": [
+        {
+          "file": "src/index.ts",
+          "description": "Add IPC handler to processTaskIpc switch"
+        }
+      ]
+    }
+  },
+  "enabled": true,
+  "builtin": true,
+  "author": "nanoclaw",
+  "license": "MIT"
+}

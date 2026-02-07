@@ -1,0 +1,30 @@
+{
+  "skill": "add-voice-transcription",
+  "version": "1.0.0",
+  "description": "Add voice message transcription using OpenAI Whisper",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "node": [
+        {
+          "packages": ["openai"],
+          "global": false,
+          "description": "OpenAI API client for Whisper"
+        }
+      ],
+      "python": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": [],
+      "target": ""
+    }
+  },
+  "enabled": false,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}

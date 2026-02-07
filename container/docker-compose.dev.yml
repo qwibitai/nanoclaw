@@ -1,0 +1,28 @@
+# Development mode Docker Compose
+# Mounts skills directory directly for hot reload during development
+
+version: '3.8'
+
+services:
+  agent-dev:
+    image: nanoclaw-agent:dev
+    volumes:
+      # Direct mount skills for development (no rebuild needed)
+      - ../skills:/workspace/shared-skills:ro
+      # Mount groups for testing
+      - ../groups:/workspace/groups:rw
+      # Mount data directory
+      - ../data:/workspace/data:rw
+    environment:
+      - DEV_MODE=true
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - LOG_LEVEL=debug
+    stdin_open: true
+    tty: true
+    networks:
+      - nanoclaw-dev
+
+networks:
+  nanoclaw-dev:
+    driver: bridge

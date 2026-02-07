@@ -116,6 +116,21 @@ function buildVolumeMounts(
     }
   }
 
+  // Shared skills directory (read-only for all groups)
+  // This allows all groups to access common skills while maintaining isolation
+  const sharedSkillsDir = path.join(projectRoot, 'skills');
+  if (fs.existsSync(sharedSkillsDir)) {
+    mounts.push({
+      hostPath: sharedSkillsDir,
+      containerPath: '/workspace/shared-skills',
+      readonly: true,
+    });
+    logger.debug(
+      { group: group.name, path: sharedSkillsDir },
+      'Mounted shared skills directory',
+    );
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(

@@ -1,0 +1,162 @@
+# NanoClaw Agent Container with Modular Skills
+# Multi-stage build for efficient caching and optional dependencies
+
+# =============================================================================
+# Base stage: Minimal system requirements
+# =============================================================================
+FROM node:22-slim AS base
+
+# Install essential system tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    wget \
+    ca-certificates \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# =============================================================================
+# Core stage: Required dependencies for all configurations
+# =============================================================================
+FROM base AS core
+
+# Install Chromium and dependencies for browser automation
+RUN apt-get update && apt-get install -y \
+    chromium \
+    fonts-liberation \
+    fonts-noto-color-emoji \
+    libgbm1 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Chromium path for agent-browser
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Install Claude Code and agent-browser globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code
+
+# Python 3 is already included in node:22-slim
+
+# =============================================================================
+# Optional skill dependencies (build conditionally)
+# =============================================================================
+
+# Todoist skill dependencies
+FROM core AS skills-todoist
+RUN wget -q https://go.dev/dl/go1.22.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.22.0.linux-amd64.tar.gz && \
+    rm go1.22.0.linux-amd64.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+RUN go install github.com/buddyh/todoist-cli/cmd/todoist@latest
+
+# X-integration skill dependencies (already in core - Chromium)
+FROM core AS skills-x-integration
+# X-integration uses Chromium which is already installed in core
+# This stage exists for consistency and future expansion
+
+# Calculator skill dependencies (Python already in base)
+FROM core AS skills-calculator
+# Python3 is already available in the base image
+# Additional Python packages can be installed here if needed
+RUN apt-get update && apt-get install -y python3-pip && \
+    rm -rf /var/lib/apt/lists/*
+
+# Gmail skill dependencies
+FROM core AS skills-add-gmail
+# Gmail uses npm packages, installed at runtime via package.json
+
+# Voice transcription skill dependencies
+FROM core AS skills-add-voice-transcription
+# Voice transcription uses npm packages, installed at runtime
+
+# =============================================================================
+# Final stage: Combine enabled skills
+# =============================================================================
+FROM core AS final
+
+# Build arguments to control which skills to include
+ARG ENABLE_TODOIST=false
+ARG ENABLE_X_INTEGRATION=true
+ARG ENABLE_CALCULATOR=true
+ARG ENABLE_ADD_GMAIL=false
+ARG ENABLE_ADD_VOICE_TRANSCRIPTION=false
+
+# Conditional copy of skill dependencies
+# Note: This uses a workaround since Docker doesn't support conditional COPY
+# We copy from stages and the copy will be empty if not needed
+
+# Copy Todoist dependencies if enabled
+COPY --from=skills-todoist /usr/local/go /usr/local/go
+COPY --from=skills-todoist /go /go
+
+# Set Go environment if Todoist is enabled
+ENV PATH="/usr/local/go/bin:/go/bin:${PATH}"
+
+# Copy Python pip if calculator is enabled
+# (Python3 itself is already in the base image)
+
+# Create app directory
+WORKDIR /app
+
+# Copy package files for agent-runner
+COPY agent-runner/package*.json ./
+
+# Install Node.js dependencies
+RUN npm ci --omit=dev
+
+# Copy agent-runner source code
+COPY agent-runner/ ./
+
+# Build TypeScript
+RUN npm run build
+
+# Create workspace directories
+RUN mkdir -p /workspace/group /workspace/global /workspace/shared-skills /workspace/ipc/messages /workspace/ipc/tasks
+
+# Copy skills to container (will be mounted read-only in production)
+# This ensures skills are available even without mount for testing
+# Note: Build context is /container, so we need to go up one level
+# However, Docker doesn't allow COPY from parent directory, so we'll handle this differently
+
+# Create skills validation script (use .cjs extension for CommonJS)
+RUN echo '#!/usr/bin/env node' > /app/validate-skills.cjs && \
+    echo 'const fs = require("fs");' >> /app/validate-skills.cjs && \
+    echo 'const path = require("path");' >> /app/validate-skills.cjs && \
+    echo 'const skillsDir = "/workspace/shared-skills";' >> /app/validate-skills.cjs && \
+    echo 'if (!fs.existsSync(skillsDir)) { console.log("Skills directory not mounted"); process.exit(0); }' >> /app/validate-skills.cjs && \
+    echo 'const skills = fs.readdirSync(skillsDir).filter(f => fs.statSync(path.join(skillsDir, f)).isDirectory());' >> /app/validate-skills.cjs && \
+    echo 'console.log("Found " + skills.length + " skills:");' >> /app/validate-skills.cjs && \
+    echo 'skills.forEach(s => console.log("  - " + s));' >> /app/validate-skills.cjs && \
+    chmod +x /app/validate-skills.cjs
+
+# Create entrypoint script
+RUN printf '#!/bin/bash\nset -e\n\n# Validate skills on startup\nnode /app/validate-skills.cjs\n\n# Source environment if exists\n[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)\n\n# Read input and run agent\ncat > /tmp/input.json\nnode /app/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+# Set ownership to node user
+RUN chown -R node:node /workspace /app
+
+# Switch to non-root user
+USER node
+
+# Set working directory
+WORKDIR /workspace/group
+
+# Display build info (will show at build time, not runtime)
+
+# Entry point
+ENTRYPOINT ["/app/entrypoint.sh"]

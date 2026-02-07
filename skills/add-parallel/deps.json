@@ -1,0 +1,24 @@
+{
+  "skill": "add-parallel",
+  "version": "1.0.0",
+  "description": "Add parallel processing capabilities",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "node": [],
+      "python": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": [],
+      "target": ""
+    }
+  },
+  "enabled": false,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}

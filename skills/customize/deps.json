@@ -1,0 +1,24 @@
+{
+  "skill": "customize",
+  "version": "1.0.0",
+  "description": "Customize NanoClaw behavior and add new capabilities",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "node": [],
+      "python": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": [],
+      "target": ""
+    }
+  },
+  "enabled": true,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}

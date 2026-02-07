@@ -1,0 +1,30 @@
+{
+  "skill": "add-gmail",
+  "version": "1.0.0",
+  "description": "Add Gmail integration to NanoClaw",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "node": [
+        {
+          "packages": ["googleapis", "@google-cloud/local-auth"],
+          "global": false,
+          "description": "Google APIs client library"
+        }
+      ],
+      "python": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": [],
+      "target": ""
+    }
+  },
+  "enabled": false,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}

@@ -1,0 +1,24 @@
+{
+  "skill": "setup",
+  "version": "1.0.0",
+  "description": "Initial NanoClaw setup and configuration",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "node": [],
+      "python": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": [],
+      "target": ""
+    }
+  },
+  "enabled": true,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}

@@ -1,0 +1,24 @@
+{
+  "skill": "skill-discovery",
+  "version": "1.0.0",
+  "description": "Create new skills when requested functionality doesn't exist",
+  "dependencies": {
+    "system": [],
+    "runtime": {
+      "python": [],
+      "node": [],
+      "go": []
+    }
+  },
+  "integration": {
+    "container": {
+      "files": ["generator.py", "templates/"],
+      "target": "src/skills/skill-discovery/"
+    }
+  },
+  "enabled": true,
+  "builtin": true,
+  "type": "documentation",
+  "author": "nanoclaw",
+  "license": "MIT"
+}
