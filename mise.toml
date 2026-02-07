@@ -1,0 +1,25 @@
+[env]
+_.file = ".env"
+
+[tools]
+node = "24"
+
+[tasks]
+"build" = "mise run build:server ::: build:agent"
+"dev" = "pnpm dev"
+
+[tasks."build:server"]
+run = "pnpm build"
+
+[tasks."build:agent"]
+dir = "container"
+run = "${CONTAINER_RUNTIME} build -t ghcr.io/tiagojmartins/nanoclaw-agent:latest ."
+
+[tasks.deploy]
+depends = ["build"]
+description = "Build and restart the systemd service"
+run = """
+systemctl --user restart nanoclaw
+sleep 1
+systemctl --user status nanoclaw --no-pager
+"""
