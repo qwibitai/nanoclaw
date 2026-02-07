@@ -221,13 +221,72 @@ async function processMessage(msg: NewMessage): Promise<void> {
     'Processing message',
   );
 
-  await setTyping(msg.chat_id, true);
-  const response = await runAgent(group, prompt, msg.chat_id.toString(), msg.message_thread_id);
-  await setTyping(msg.chat_id, false);
+  // Status message tracking
+  let statusMessageId: number | null = null;
+  let statusTimer: NodeJS.Timeout | null = null;
+  let updateTimer: NodeJS.Timeout | null = null;
+  const startTime = Date.now();
 
-  if (response) {
-    lastAgentTimestamp[msg.chat_id.toString()] = msg.timestamp;
-    await sendMessage(msg.chat_id, `${ASSISTANT_NAME}: ${response}`, undefined, msg.message_thread_id);
+  // Send initial status message after 3 seconds if not completed
+  statusTimer = setTimeout(async () => {
+    statusMessageId = await sendMessage(
+      msg.chat_id,
+      '⏳ 正在處理你的請求...',
+      undefined,
+      msg.message_thread_id,
+    );
+
+    // Update status every 30 seconds
+    if (statusMessageId) {
+      updateTimer = setInterval(async () => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        if (statusMessageId) {
+          await editMessage(
+            msg.chat_id,
+            statusMessageId,
+            `⏳ 處理中，請稍候...（已執行 ${elapsed} 秒）`,
+          );
+        }
+      }, 30000);
+    }
+  }, 3000);
+
+  try {
+    await setTyping(msg.chat_id, true);
+    const response = await runAgent(group, prompt, msg.chat_id.toString(), msg.message_thread_id);
+    await setTyping(msg.chat_id, false);
+
+    // Clear timers
+    if (statusTimer) clearTimeout(statusTimer);
+    if (updateTimer) clearInterval(updateTimer);
+
+    // Delete status message if it was sent
+    if (statusMessageId) {
+      try {
+        await bot.telegram.deleteMessage(msg.chat_id, statusMessageId);
+      } catch (err) {
+        logger.warn({ chatId: msg.chat_id, messageId: statusMessageId }, 'Failed to delete status message');
+      }
+    }
+
+    if (response) {
+      lastAgentTimestamp[msg.chat_id.toString()] = msg.timestamp;
+      await sendMessage(msg.chat_id, `${ASSISTANT_NAME}: ${response}`, undefined, msg.message_thread_id);
+    }
+  } catch (err) {
+    // Clear timers on error
+    if (statusTimer) clearTimeout(statusTimer);
+    if (updateTimer) clearInterval(updateTimer);
+
+    // Update or send error message
+    const errorMsg = `❌ 處理失敗: ${err instanceof Error ? err.message : String(err)}`;
+    if (statusMessageId) {
+      await editMessage(msg.chat_id, statusMessageId, errorMsg);
+    } else {
+      await sendMessage(msg.chat_id, errorMsg, undefined, msg.message_thread_id);
+    }
+
+    logger.error({ err, group: group.name }, 'Error processing message');
   }
 }
 
@@ -285,13 +344,47 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return null;
+      // Throw error with detailed message
+      if (output.error?.includes('timed out')) {
+        throw new Error(`處理超時（超過 5 分鐘）`);
+      } else if (output.error?.includes('overloaded_error') || output.error?.includes('529')) {
+        throw new Error(`API 服務繁忙，請稍後再試`);
+      } else {
+        throw new Error(output.error || '處理過程發生錯誤');
+      }
     }
 
     return output.result;
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return null;
+
+    // Re-throw with user-friendly message
+    if (err instanceof Error) {
+      if (err.message.includes('API')) {
+        throw err; // Already user-friendly
+      } else if (err.message.includes('quota') || err.message.includes('429')) {
+        throw new Error('API 用量已達上限，請稍後再試');
+      } else if (err.message.includes('ECONNREFUSED') || err.message.includes('network')) {
+        throw new Error('網路連線失敗，請檢查網路狀態');
+      }
+    }
+    throw err;
+  }
+}
+
+async function editMessage(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+): Promise<void> {
+  try {
+    const chatIdNum = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
+    await bot.telegram.editMessageText(chatIdNum, messageId, undefined, text, {
+      parse_mode: 'Markdown',
+    });
+    logger.info({ chatId: chatIdNum, messageId }, 'Message edited');
+  } catch (err) {
+    logger.error({ chatId, messageId, err }, 'Failed to edit message');
   }
 }
 
@@ -300,7 +393,7 @@ async function sendMessage(
   text: string,
   buttons?: InlineKeyboardButton[][],
   messageThreadId?: number,
-): Promise<void> {
+): Promise<number | null> {
   try {
     const chatIdNum = typeof chatId === 'string' ? parseInt(chatId, 10) : chatId;
     const options: any = {
@@ -318,8 +411,9 @@ async function sendMessage(
     }
 
     try {
-      await bot.telegram.sendMessage(chatIdNum, text, options);
+      const sentMessage = await bot.telegram.sendMessage(chatIdNum, text, options);
       logger.info({ chatId: chatIdNum, length: text.length, hasButtons: !!buttons, messageThreadId }, 'Message sent');
+      return sentMessage.message_id;
     } catch (markdownErr: any) {
       // If Markdown parsing fails, retry without parse_mode (plain text)
       if (markdownErr.description?.includes('parse entities')) {
@@ -331,14 +425,16 @@ async function sendMessage(
         if (messageThreadId) {
           plainOptions.message_thread_id = messageThreadId;
         }
-        await bot.telegram.sendMessage(chatIdNum, text, plainOptions);
+        const sentMessage = await bot.telegram.sendMessage(chatIdNum, text, plainOptions);
         logger.info({ chatId: chatIdNum, length: text.length, hasButtons: !!buttons, messageThreadId }, 'Message sent (plain text fallback)');
+        return sentMessage.message_id;
       } else {
         throw markdownErr;
       }
     }
   } catch (err) {
     logger.error({ chatId, err }, 'Failed to send message');
+    return null;
   }
 }
 
