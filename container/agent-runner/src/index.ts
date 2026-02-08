@@ -279,6 +279,7 @@ async function main(): Promise<void> {
           'Bash',
           'Read', 'Write', 'Edit', 'Glob', 'Grep',
           'WebSearch', 'WebFetch',
+          'Skill',
           'mcp__nanoclaw__*'
         ],
         permissionMode: 'bypassPermissions',
