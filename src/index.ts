@@ -113,10 +113,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -304,7 +301,8 @@ async function runAgent(
         chatJid,
         isMain,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName),
+      (proc, containerName) =>
+        queue.registerProcess(chatJid, proc, containerName),
     );
 
     if (output.newSessionId) {
@@ -752,7 +750,8 @@ async function connectWhatsApp(): Promise<void> {
         registeredGroups: () => registeredGroups,
         getSessions: () => sessions,
         queue,
-        onProcess: (groupJid, proc, containerName) => queue.registerProcess(groupJid, proc, containerName),
+        onProcess: (groupJid, proc, containerName) =>
+          queue.registerProcess(groupJid, proc, containerName),
       });
       startIpcWatcher();
       queue.setProcessMessagesFn(processGroupMessages);

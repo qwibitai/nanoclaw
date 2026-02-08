@@ -27,7 +27,11 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ChildProcess, containerName: string) => void;
+  onProcess: (
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+  ) => void;
 }
 
 async function runTask(
@@ -99,14 +103,18 @@ async function runTask(
         chatJid: task.chat_jid,
         isMain,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName),
+      (proc, containerName) =>
+        deps.onProcess(task.chat_jid, proc, containerName),
     );
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
       if (output.result.outputType === 'message' && output.result.userMessage) {
-        await deps.sendMessage(task.chat_jid, `${ASSISTANT_NAME}: ${output.result.userMessage}`);
+        await deps.sendMessage(
+          task.chat_jid,
+          `${ASSISTANT_NAME}: ${output.result.userMessage}`,
+        );
       }
       result = output.result.userMessage || output.result.internalLog || null;
     }
@@ -175,10 +183,8 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
-        deps.queue.enqueueTask(
-          currentTask.chat_jid,
-          currentTask.id,
-          () => runTask(currentTask, deps),
+        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
+          runTask(currentTask, deps),
         );
       }
     } catch (err) {

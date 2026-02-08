@@ -5,7 +5,12 @@ import path from 'path';
 import { proto } from '@whiskeysockets/baileys';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
-import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
+import {
+  NewMessage,
+  RegisteredGroup,
+  ScheduledTask,
+  TaskRunLog,
+} from './types.js';
 
 let db: Database.Database;
 
@@ -483,14 +488,12 @@ export function getRegisteredGroup(
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
-    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    requiresTrigger:
+      row.requires_trigger === null ? undefined : row.requires_trigger === 1,
   };
 }
 
-export function setRegisteredGroup(
-  jid: string,
-  group: RegisteredGroup,
-): void {
+export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -506,9 +509,7 @@ export function setRegisteredGroup(
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db
-    .prepare('SELECT * FROM registered_groups')
-    .all() as Array<{
+  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
     name: string;
     folder: string;
@@ -527,7 +528,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,
-      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      requiresTrigger:
+        row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     };
   }
   return result;

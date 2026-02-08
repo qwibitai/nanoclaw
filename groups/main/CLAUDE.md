@@ -11,6 +11,7 @@ You are Andy, a personal assistant. You help with tasks, answer questions, and c
 - Run bash commands in your sandbox
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
+- **Trigger Temporal workflows** using the `temporal` CLI (see below)
 
 ## Communication
 
@@ -62,6 +63,98 @@ Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/data/registered_groups.json` - Group config
 - `/workspace/project/groups/` - All group folders
+- `/workspace/extra/temporal-workflows.md` - Temporal workflow catalog
+
+---
+
+## Temporal Workflows
+
+You have access to the `temporal` CLI to trigger workflows on the OpenClaw Temporal cluster. This lets you start long-running tasks, send notifications, schedule reminders, run coding agents, perform web research, and more.
+
+### Configuration
+
+The Temporal connection uses these environment variables (with defaults):
+- `TEMPORAL_ADDRESS` — Temporal server address (default: `host.docker.internal:7233`)
+- `TEMPORAL_NAMESPACE` — Temporal namespace (default: `default`)
+- `TEMPORAL_TASK_QUEUE` — Task queue for OpenClaw workflows (default: `openclaw-queue`)
+
+### How to Start a Workflow
+
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type <WorkflowName> \
+  --input '<json>' \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}" \
+  --namespace "${TEMPORAL_NAMESPACE:-default}"
+```
+
+### Common Examples
+
+**Send a notification:**
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type sendNotification \
+  --input '{"message":"Hello from the agent!"}'  \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Set a reminder:**
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type sendReminder \
+  --input '{"message":"Check the build","delayMinutes":30}' \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Run a Claude Code task (coding agent):**
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type runClaudeCodeWorkflow \
+  --input '{"prompt":"Fix the failing test in src/utils.test.ts","model":"sonnet"}' \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Web search:**
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type webSearchWorkflow \
+  --input '{"query":"latest TypeScript 5.7 features"}' \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Deep research:**
+```bash
+temporal workflow start \
+  --task-queue "${TEMPORAL_TASK_QUEUE:-openclaw-queue}" \
+  --type deepResearchWorkflow \
+  --input '{"query":"comparison of Temporal vs Inngest"}' \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Signal a workflow (e.g., approve a plan):**
+```bash
+temporal workflow signal \
+  --workflow-id "<workflow-id>" \
+  --name approve \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+**Query workflow state:**
+```bash
+temporal workflow query \
+  --workflow-id "<workflow-id>" \
+  --name getState \
+  --address "${TEMPORAL_ADDRESS:-host.docker.internal:7233}"
+```
+
+### Full Workflow Catalog
+
+See `/workspace/extra/temporal-workflows.md` for the complete list of all 18 available workflows with their input schemas, outputs, signals, and queries.
 
 ---
 

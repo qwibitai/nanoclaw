@@ -45,6 +45,13 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// Temporal connection configuration
+export const TEMPORAL_ADDRESS =
+  process.env.TEMPORAL_ADDRESS || 'host.docker.internal:7233';
+export const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || 'default';
+export const TEMPORAL_TASK_QUEUE =
+  process.env.TEMPORAL_TASK_QUEUE || 'openclaw-queue';
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

@@ -154,6 +154,21 @@ function buildVolumeMounts(
     }
   }
 
+  // Temporal workflow catalog — mount into all containers as readonly
+  const temporalCatalogPath = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'temporal-workflows.md',
+  );
+  if (fs.existsSync(temporalCatalogPath)) {
+    mounts.push({
+      hostPath: temporalCatalogPath,
+      containerPath: '/workspace/extra/temporal-workflows.md',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -167,7 +182,10 @@ function buildVolumeMounts(
   return mounts;
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Apple Container: --mount for readonly, -v for read-write
@@ -283,11 +301,17 @@ export async function runContainerAgent(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
+      logger.error(
+        { group: group.name, containerName },
+        'Container timeout, stopping gracefully',
+      );
       // Graceful stop: sends SIGTERM, waits, then SIGKILL — lets --rm fire
       exec(`container stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
-          logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
+          logger.warn(
+            { group: group.name, containerName, err },
+            'Graceful stop failed, force killing',
+          );
           container.kill('SIGKILL');
         }
       });
@@ -300,14 +324,17 @@ export async function runContainerAgent(
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(timeoutLog, [
-          `=== Container Run Log (TIMEOUT) ===`,
-          `Timestamp: ${new Date().toISOString()}`,
-          `Group: ${group.name}`,
-          `Container: ${containerName}`,
-          `Duration: ${duration}ms`,
-          `Exit Code: ${code}`,
-        ].join('\n'));
+        fs.writeFileSync(
+          timeoutLog,
+          [
+            `=== Container Run Log (TIMEOUT) ===`,
+            `Timestamp: ${new Date().toISOString()}`,
+            `Group: ${group.name}`,
+            `Container: ${containerName}`,
+            `Duration: ${duration}ms`,
+            `Exit Code: ${code}`,
+          ].join('\n'),
+        );
 
         logger.error(
           { group: group.name, containerName, duration, code },
@@ -451,7 +478,10 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
+      logger.error(
+        { group: group.name, containerName, error: err },
+        'Container spawn error',
+      );
       resolve({
         status: 'error',
         result: null,

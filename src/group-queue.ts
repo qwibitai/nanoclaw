@@ -108,7 +108,11 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
@@ -244,10 +248,18 @@ export class GroupQueue {
     );
 
     // Collect all active processes
-    const activeProcs: Array<{ jid: string; proc: ChildProcess; containerName: string | null }> = [];
+    const activeProcs: Array<{
+      jid: string;
+      proc: ChildProcess;
+      containerName: string | null;
+    }> = [];
     for (const [jid, state] of this.groups) {
       if (state.process && !state.process.killed) {
-        activeProcs.push({ jid, proc: state.process, containerName: state.containerName });
+        activeProcs.push({
+          jid,
+          proc: state.process,
+          containerName: state.containerName,
+        });
       }
     }
 
@@ -263,7 +275,10 @@ export class GroupQueue {
         logger.info({ jid, containerName: safeName }, 'Stopping container');
         exec(`container stop ${safeName}`, (err) => {
           if (err) {
-            logger.warn({ jid, containerName: safeName, err: err.message }, 'container stop failed');
+            logger.warn(
+              { jid, containerName: safeName, err: err.message },
+              'container stop failed',
+            );
           }
         });
       } else {

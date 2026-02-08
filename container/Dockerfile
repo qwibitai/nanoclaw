@@ -47,8 +47,17 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Install Temporal CLI (as root, before switching to node user)
+RUN curl -sSf https://temporal.download/cli.sh | sh \
+    && mv /root/.temporalio/bin/temporal /usr/local/bin/temporal \
+    && rm -rf /root/.temporalio \
+    && temporal --version
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks
+
+# Copy workflow catalog to /workspace/extra/ (available to all agents)
+COPY agent-runner/temporal-workflows.md /workspace/extra/temporal-workflows.md
 
 # Create entrypoint script
 # Sources env from mounted /workspace/env-dir/env if it exists (workaround for Apple Container -i bug)
