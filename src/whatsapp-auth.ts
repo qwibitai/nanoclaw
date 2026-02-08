@@ -38,50 +38,56 @@ async function authenticate(): Promise<void> {
 
   console.log('Starting WhatsApp authentication...\n');
 
-  const sock = makeWASocket({
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    printQRInTerminal: false,
-    logger,
-    browser: ['NanoClaw', 'Chrome', '1.0.0'],
-  });
+  async function startSocket(): Promise<void> {
+    const { state: currentState, saveCreds: saveCurrentCreds } =
+      await useMultiFileAuthState(AUTH_DIR);
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const sock = makeWASocket({
+      auth: {
+        creds: currentState.creds,
+        keys: makeCacheableSignalKeyStore(currentState.keys, logger),
+      },
+      printQRInTerminal: false,
+      logger,
+      browser: ['NanoClaw', 'Chrome', '1.0.0'],
+    });
 
-    if (qr) {
-      console.log('Scan this QR code with WhatsApp:\n');
-      console.log('  1. Open WhatsApp on your phone');
-      console.log('  2. Tap Settings → Linked Devices → Link a Device');
-      console.log('  3. Point your camera at the QR code below\n');
-      qrcode.generate(qr, { small: true });
-    }
+    sock.ev.on('connection.update', (update) => {
+      const { connection, lastDisconnect, qr } = update;
 
-    if (connection === 'close') {
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-
-      if (reason === DisconnectReason.loggedOut) {
-        console.log('\n✗ Logged out. Delete store/auth and try again.');
-        process.exit(1);
-      } else {
-        console.log('\n✗ Connection failed. Please try again.');
-        process.exit(1);
+      if (qr) {
+        console.log('Scan this QR code with WhatsApp:\n');
+        console.log('  1. Open WhatsApp on your phone');
+        console.log('  2. Tap Settings → Linked Devices → Link a Device');
+        console.log('  3. Point your camera at the QR code below\n');
+        qrcode.generate(qr, { small: true });
       }
-    }
 
-    if (connection === 'open') {
-      console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      if (connection === 'close') {
+        const reason = (lastDisconnect?.error as any)?.output?.statusCode;
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
-    }
-  });
+        if (reason === DisconnectReason.loggedOut) {
+          console.log('\n✗ Logged out. Delete store/auth and try again.');
+          process.exit(1);
+        } else {
+          console.log(`  Reconnecting (reason: ${reason})...`);
+          setTimeout(() => startSocket(), 2000);
+        }
+      }
 
-  sock.ev.on('creds.update', saveCreds);
+      if (connection === 'open') {
+        console.log('\n✓ Successfully authenticated with WhatsApp!');
+        console.log('  Credentials saved to store/auth/');
+        console.log('  You can now start the NanoClaw service.\n');
+
+        setTimeout(() => process.exit(0), 1000);
+      }
+    });
+
+    sock.ev.on('creds.update', saveCurrentCreds);
+  }
+
+  await startSocket();
 }
 
 authenticate().catch((err) => {
