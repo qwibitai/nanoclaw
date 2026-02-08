@@ -170,6 +170,9 @@ function buildVolumeMounts(
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Resource limits: prevent CPU/memory exhaustion from runaway or malicious processes
+  args.push('--cpus', '2', '--memory', '512M');
+
   // Apple Container: --mount for readonly, -v for read-write
   for (const mount of mounts) {
     if (mount.readonly) {
