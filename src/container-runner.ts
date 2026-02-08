@@ -316,10 +316,9 @@ export async function runContainerAgent(
             }
             // Activity detected — reset the hard timeout
             resetTimeout();
-            // Only call onOutput for results with actual content
-            if (parsed.result !== null) {
-              outputChain = outputChain.then(() => onOutput(parsed));
-            }
+            // Call onOutput for all markers (including null results)
+            // so idle timers start even for "silent" query completions.
+            outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },

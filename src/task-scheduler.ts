@@ -26,7 +26,7 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ChildProcess, containerName: string) => void;
+  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
 }
 
 async function runTask(
@@ -111,7 +111,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName),
+      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         // Reset idle timer on each streamed result
         resetIdleTimer();

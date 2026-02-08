@@ -826,7 +826,7 @@ async function connectWhatsApp(): Promise<void> {
         registeredGroups: () => registeredGroups,
         getSessions: () => sessions,
         queue,
-        onProcess: (groupJid, proc, containerName) => queue.registerProcess(groupJid, proc, containerName),
+        onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
       });
       startIpcWatcher();
       queue.setProcessMessagesFn(processGroupMessages);
