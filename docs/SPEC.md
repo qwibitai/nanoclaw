@@ -98,11 +98,13 @@ nanoclaw/
 ├── .gitignore
 │
 ├── src/
-│   ├── index.ts                   # Main application (Discord + routing)
+│   ├── index.ts                   # Main application (Discord + routing + message loop)
 │   ├── config.ts                  # Configuration constants
 │   ├── types.ts                   # TypeScript interfaces
-│   ├── utils.ts                   # Generic utility functions
-│   ├── db.ts                      # Database initialization and queries
+│   ├── logger.ts                  # Pino logger setup
+│   ├── db.ts                      # SQLite database initialization and queries
+│   ├── group-queue.ts             # Per-group queue with global concurrency limit
+│   ├── mount-security.ts          # Mount allowlist validation for containers
 │   ├── task-scheduler.ts          # Runs scheduled tasks when due
 │   └── container-runner.ts        # Spawns agents in Docker
 │
@@ -113,8 +115,8 @@ nanoclaw/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── index.ts           # Entry point (reads JSON, runs agent)
-│   │       └── ipc-mcp.ts         # MCP server for host communication
+│   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
+│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
 │   └── skills/
 │       └── agent-browser.md       # Browser automation skill
 │
@@ -122,12 +124,15 @@ nanoclaw/
 │
 ├── .claude/
 │   └── skills/
-│       ├── setup/
-│       │   └── SKILL.md           # /setup skill
-│       ├── customize/
-│       │   └── SKILL.md           # /customize skill
-│       └── debug/
-│           └── SKILL.md           # /debug skill (container debugging)
+│       ├── setup/SKILL.md              # /setup - First-time installation
+│       ├── customize/SKILL.md          # /customize - Add capabilities
+│       ├── debug/SKILL.md              # /debug - Container debugging
+│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram channel
+│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail integration
+│       ├── add-voice-transcription/    # /add-voice-transcription - Whisper
+│       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
+│       ├── convert-to-docker/SKILL.md  # /convert-to-docker - Docker runtime
+│       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
 │
 ├── groups/
 │   ├── CLAUDE.md                  # Global memory (all groups read this)
@@ -141,12 +146,10 @@ nanoclaw/
 │
 ├── store/                         # Local data (gitignored)
 │   ├── auth/                      # WhatsApp authentication state
-│   └── messages.db                # SQLite database (messages, scheduled_tasks, task_run_logs)
+│   └── messages.db                # SQLite database (messages, chats, scheduled_tasks, task_run_logs, registered_groups, sessions, router_state)
 │
 ├── data/                          # Application state (gitignored)
-│   ├── sessions.json              # Active session IDs per group
-│   ├── registered_groups.json     # Group JID → folder mapping
-│   ├── router_state.json          # Last processed timestamp + last agent timestamps
+│   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
 │   ├── env/env                    # Copy of .env for container mounting
 │   └── ipc/                       # Container IPC (messages/, tasks/)
 │
@@ -179,13 +182,11 @@ export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
 // Container configuration
-export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(
-  process.env.CONTAINER_TIMEOUT || '300000',
-  10,
-);
+export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
 export const IPC_POLL_INTERVAL = 1000;
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
+export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
 
 export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 ```
@@ -194,27 +195,25 @@ export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 
 ### Container Configuration
 
-Groups can have additional directories mounted via `containerConfig` in `data/registered_groups.json`:
+Groups can have additional directories mounted via `containerConfig` in the SQLite `registered_groups` table (stored as JSON in the `container_config` column). Example registration:
 
-```json
-{
-  "1234567890@g.us": {
-    "name": "Dev Team",
-    "folder": "dev-team",
-    "trigger": "@nano",
-    "added_at": "2026-01-31T12:00:00Z",
-    "containerConfig": {
-      "additionalMounts": [
-        {
-          "hostPath": "~/projects/webapp",
-          "containerPath": "webapp",
-          "readonly": false
-        }
-      ],
-      "timeout": 600000
-    }
-  }
-}
+```typescript
+registerGroup("1234567890@g.us", {
+  name: "Dev Team",
+  folder: "dev-team",
+  trigger: "@nano",
+  added_at: new Date().toISOString(),
+  containerConfig: {
+    additionalMounts: [
+      {
+        hostPath: "~/projects/webapp",
+        containerPath: "webapp",
+        readonly: false,
+      },
+    ],
+    timeout: 600000,
+  },
+});
 ```
 
 Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
@@ -237,7 +236,7 @@ The token can be extracted from `~/.claude/.credentials.json` if you're logged i
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and mounted into the container at `/workspace/env-dir/env`, then sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent.
+Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent.
 
 ### Changing the Assistant Name
 
@@ -301,18 +300,10 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### How Sessions Work
 
-1. Each group has a session ID stored in `data/sessions.json`
+1. Each group has a session ID stored in SQLite (`sessions` table, keyed by `group_folder`)
 2. Session ID is passed to Claude Agent SDK's `resume` option
 3. Claude continues the conversation with full context
-
-**data/sessions.json:**
-
-```json
-{
-  "main": "session-abc123",
-  "Family Chat": "session-def456"
-}
-```
+4. Session transcripts are stored as JSONL files in `data/sessions/{group}/.claude/`
 
 ---
 
@@ -334,8 +325,8 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    │
    ▼
 5. Router checks:
-   ├── Is chat_jid in registered_groups.json? → No: ignore
-   └── Does message start with @Assistant? → No: ignore
+   ├── Is chat_jid in registered groups (SQLite)? → No: ignore
+   └── Does message match trigger pattern? → No: store but don't process
    │
    ▼
 6. Router catches up conversation:
@@ -494,14 +485,15 @@ NanoClaw runs as a systemd service.
 ### Startup Sequence
 
 When NanoClaw starts, it:
-
 1. **Ensures Docker is running**
-2. Initializes the SQLite database
-3. Loads state (registered groups, sessions, router state)
-4. Connects to Discord
-5. Starts the message polling loop
-6. Starts the scheduler loop
-7. Starts the IPC watcher for container messages
+2. Initializes the SQLite database (migrates from JSON files if they exist)
+3. Loads state from SQLite (registered groups, sessions, router state)
+4. Connects to Discord (on `ready`):
+   - Starts the scheduler loop
+   - Starts the IPC watcher for container messages
+   - Sets up the per-group queue with `processGroupMessages`
+   - Recovers any unprocessed messages from before shutdown
+   - Starts the message polling loop
 
 ### Service: nanoclaw.service
 
@@ -620,14 +612,14 @@ chmod 700 groups/
 
 ### Common Issues
 
-| Issue                                    | Cause                            | Solution                                                                                 |
-| ---------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------- |
-| No response to messages                  | Service not running              | Check `systemctl --user status nanoclaw`                                                 |
-| "Claude Code process exited with code 1" | Docker container failed to start | Check logs; Ensure Docker is running                                                     |
-| "Claude Code process exited with code 1" | Session mount path wrong         | Ensure mount is to `/home/node/.claude/` not `/root/.claude/`                            |
-| Session not continuing                   | Session ID not saved             | Check `data/sessions.json`                                                               |
-| Session not continuing                   | Mount path mismatch              | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
-| "No groups registered"                   | Haven't added groups             | Use `@nano add group "Name"` in main                                                     |
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| No response to messages | Service not running | Check `systemctl --user status nanoclaw` |
+| "Claude Code process exited with code 1" | Docker container failed to start | Check logs; Ensure Docker is running |
+| "Claude Code process exited with code 1" | Session mount path wrong | Ensure mount is to `/home/node/.claude/` not `/root/.claude/` |
+| Session not continuing | Session ID not saved | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
+| Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
+| "No groups registered" | Haven't added groups | Use `@nano add group "Name"` in main |
 
 ### Log Location
 
