@@ -33,12 +33,23 @@ echo "   (Press Ctrl+C to cancel)"
 echo ""
 
 # Wait for user to send message
-DB_FILE="$PROJECT_ROOT/data/nanoclaw.db"
-
-if [ ! -f "$DB_FILE" ]; then
-    echo "❌ Database not found: $DB_FILE"
+# Auto-detect database location (data/ for local, data-bot1/ for VPS)
+if [ -f "$PROJECT_ROOT/data-bot1/nanoclaw.db" ]; then
+    DB_FILE="$PROJECT_ROOT/data-bot1/nanoclaw.db"
+elif [ -f "$PROJECT_ROOT/data/nanoclaw.db" ]; then
+    DB_FILE="$PROJECT_ROOT/data/nanoclaw.db"
+else
+    echo "❌ Database not found in:"
+    echo "   - $PROJECT_ROOT/data/nanoclaw.db"
+    echo "   - $PROJECT_ROOT/data-bot1/nanoclaw.db"
+    echo ""
+    echo "Please ensure the service has been started at least once:"
+    echo "   docker compose -f docker-compose.vps.yml up -d"
     exit 1
 fi
+
+echo "📂 Using database: $DB_FILE"
+echo ""
 
 # Function to get latest chat
 get_latest_chat() {
@@ -82,8 +93,9 @@ You are the AI assistant configured in ASSISTANT_NAME.
 This is the main administrative group with full privileges.
 EOF
 
-            # Create registered_groups.json
-            cat > data/registered_groups.json << EOF
+            # Create registered_groups.json (in same directory as database)
+            REGISTERED_GROUPS_FILE="$(dirname "$DB_FILE")/registered_groups.json"
+            cat > "$REGISTERED_GROUPS_FILE" << EOF
 {
   "$CHAT_ID": {
     "name": "Main",
