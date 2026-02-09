@@ -61,7 +61,7 @@ echo ""
 
 # Function to get latest chat
 get_latest_chat() {
-    sqlite3 "$DB_FILE" "SELECT chat_id, chat_name FROM chats WHERE chat_id > 0 ORDER BY last_activity DESC LIMIT 1" 2>/dev/null || echo ""
+    sqlite3 "$DB_FILE" "SELECT chat_id, name FROM chats WHERE chat_id > 0 ORDER BY last_message_time DESC LIMIT 1" 2>/dev/null || echo ""
 }
 
 INITIAL_CHAT=$(get_latest_chat)
