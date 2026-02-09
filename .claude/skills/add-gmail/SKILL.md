@@ -19,7 +19,7 @@ Ask the user:
 > **Option 1: Tool Mode**
 >
 > - Agent can read and send emails when you ask it to
-> - Triggered only from Discord (e.g., "@Andy check my email" or "@Andy send an email to...")
+> - Triggered only from Discord (e.g., "@nano check my email" or "@nano send an email to...")
 > - Simpler setup, no email polling
 >
 > **Option 2: Channel Mode**
@@ -264,11 +264,11 @@ Tell the user:
 
 > Gmail integration is set up! Test it by sending this message in your Discord main channel:
 >
-> `@Andy check my recent emails`
+> `@nano check my recent emails`
 >
 > Or:
 >
-> `@Andy list my Gmail labels`
+> `@nano list my Gmail labels`
 
 Watch the logs for any errors:
 
@@ -296,12 +296,12 @@ Ask the user:
 >
 > **Option B: Email Address Pattern**
 >
-> - Emails to a specific address pattern (e.g., andy+task@gmail.com)
+> - Emails to a specific address pattern (e.g., nano+task@gmail.com)
 > - Uses Gmail's plus-addressing feature
 >
 > **Option C: Subject Prefix**
 >
-> - Emails with a subject starting with a keyword (e.g., "[Andy]")
+> - Emails with a subject starting with a keyword (e.g., "[Nano]")
 > - Anyone can trigger the agent by using the prefix
 
 Also ask:
@@ -327,7 +327,7 @@ Store their choices for implementation.
 
 ### Step 1: Complete Tool Mode First
 
-Complete all Tool Mode steps above before continuing. Verify Gmail tools work by having the user test `@Andy check my recent emails`.
+Complete all Tool Mode steps above before continuing. Verify Gmail tools work by having the user test `@nano check my recent emails`.
 
 ### Step 2: Add Email Polling Configuration
 
@@ -353,7 +353,7 @@ export const EMAIL_CHANNEL: EmailChannelConfig = {
   triggerValue: 'NanoClaw', // the label name, address pattern, or prefix
   contextMode: 'thread',
   pollIntervalMs: 60000, // Check every minute
-  replyPrefix: '[Andy] ',
+  replyPrefix: '[Nano] ',
 };
 ```
 

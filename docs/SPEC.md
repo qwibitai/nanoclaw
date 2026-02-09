@@ -168,7 +168,7 @@ Configuration constants are in `src/config.ts`:
 ```typescript
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Nano';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -201,7 +201,7 @@ Groups can have additional directories mounted via `containerConfig` in `data/re
   "1234567890@g.us": {
     "name": "Dev Team",
     "folder": "dev-team",
-    "trigger": "@Andy",
+    "trigger": "@nano",
     "added_at": "2026-01-31T12:00:00Z",
     "containerConfig": {
       "additionalMounts": [
@@ -364,11 +364,11 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### Trigger Word Matching
 
-Messages must start with the trigger pattern (default: `@Andy`):
+Messages must start with the trigger pattern (default: `@nano`):
 
-- `@Andy what's the weather?` → ✅ Triggers Claude
-- `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
+- `@nano what's the weather?` → ✅ Triggers Claude
+- `@nano help me` → ✅ Triggers (case insensitive)
+- `Hey @nano` → ❌ Ignored (trigger not at start)
 - `What's up?` → ❌ Ignored (no trigger)
 
 ### Conversation Catch-Up
@@ -378,7 +378,7 @@ When a triggered message arrives, the agent receives all messages since its last
 ```
 [Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
 [Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
+[Jan 31 2:35 PM] John: @nano what toppings do you recommend?
 ```
 
 This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
@@ -391,16 +391,16 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 | Command                | Example                     | Effect         |
 | ---------------------- | --------------------------- | -------------- |
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| `@Assistant [message]` | `@nano what's the weather?` | Talk to Claude |
 
 ### Commands Available in Main Channel Only
 
 | Command                          | Example                             | Effect                 |
 | -------------------------------- | ----------------------------------- | ---------------------- |
-| `@Assistant add group "Name"`    | `@Andy add group "Family Chat"`     | Register a new group   |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"`    | Unregister a group     |
-| `@Assistant list groups`         | `@Andy list groups`                 | Show registered groups |
-| `@Assistant remember [fact]`     | `@Andy remember I prefer dark mode` | Add to global memory   |
+| `@Assistant add group "Name"`    | `@nano add group "Family Chat"`     | Register a new group   |
+| `@Assistant remove group "Name"` | `@nano remove group "Work Team"`    | Unregister a group     |
+| `@Assistant list groups`         | `@nano list groups`                 | Show registered groups |
+| `@Assistant remember [fact]`     | `@nano remember I prefer dark mode` | Add to global memory   |
 
 ---
 
@@ -426,7 +426,7 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 ### Creating a Task
 
 ```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
+User: @nano remind me every Monday at 9am to review the weekly metrics
 
 Claude: [calls mcp__nanoclaw__schedule_task]
         {
@@ -441,7 +441,7 @@ Claude: Done! I'll remind you every Monday at 9am.
 ### One-Time Tasks
 
 ```
-User: @Andy at 5pm today, send me a summary of today's emails
+User: @nano at 5pm today, send me a summary of today's emails
 
 Claude: [calls mcp__nanoclaw__schedule_task]
         {
@@ -455,15 +455,15 @@ Claude: [calls mcp__nanoclaw__schedule_task]
 
 From any group:
 
-- `@Andy list my scheduled tasks` - View tasks for this group
-- `@Andy pause task [id]` - Pause a task
-- `@Andy resume task [id]` - Resume a paused task
-- `@Andy cancel task [id]` - Delete a task
+- `@nano list my scheduled tasks` - View tasks for this group
+- `@nano pause task [id]` - Pause a task
+- `@nano resume task [id]` - Resume a paused task
+- `@nano cancel task [id]` - Delete a task
 
 From main channel:
 
-- `@Andy list all tasks` - View tasks from all groups
-- `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+- `@nano list all tasks` - View tasks from all groups
+- `@nano schedule task for "Family Chat": [prompt]` - Schedule for another group
 
 ---
 
@@ -520,7 +520,7 @@ ExecStart=%h/.nvm/versions/node/v20.0.0/bin/node dist/index.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
-Environment=ASSISTANT_NAME=Andy
+Environment=ASSISTANT_NAME=Nano
 
 [Install]
 WantedBy=default.target
@@ -627,7 +627,7 @@ chmod 700 groups/
 | "Claude Code process exited with code 1" | Session mount path wrong         | Ensure mount is to `/home/node/.claude/` not `/root/.claude/`                            |
 | Session not continuing                   | Session ID not saved             | Check `data/sessions.json`                                                               |
 | Session not continuing                   | Mount path mismatch              | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
-| "No groups registered"                   | Haven't added groups             | Use `@Andy add group "Name"` in main                                                     |
+| "No groups registered"                   | Haven't added groups             | Use `@nano add group "Name"` in main                                                     |
 
 ### Log Location
 

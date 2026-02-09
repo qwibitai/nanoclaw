@@ -108,7 +108,7 @@ systemctl --user restart nanoclaw
 
 User: "Add Telegram as an input channel"
 
-1. Ask: "Should Telegram use the same @Andy trigger, or a different one?"
+1. Ask: "Should Telegram use the same @nano trigger, or a different one?"
 2. Ask: "Should Telegram messages create separate conversation contexts, or share with Discord groups?"
 3. Find Telegram library
 4. Add connection handling in index.ts

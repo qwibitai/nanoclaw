@@ -208,8 +208,8 @@ Prompt: "Check Parallel AI task run [run_id] and send results when ready.
 
 1.  Use the Parallel Task MCP to check the task status
 2.  If status is 'completed', extract the results
-3.  Send results to user with mcp**nanoclaw**send_message
-4.  Use mcp**nanoclaw**complete_scheduled_task to mark this task as done
+3.  Send results to user with `mcp__nanoclaw__send_message`
+4.  Use `mcp__nanoclaw__complete_scheduled_task` to mark this task as done
 
 If status is still 'running' or 'pending', do nothing (task will run again in 30s).
 If status is 'failed', send error message and complete the task."
@@ -273,11 +273,11 @@ systemctl --user status nanoclaw
 
 Tell the user to test:
 
-> Send a message to your assistant: `@[YourAssistantName] what's the latest news about AI?`
+> Send a message to your assistant: `@nano what's the latest news about AI?`
 >
 > The assistant should use Parallel Search API to find current information.
 >
-> Then try: `@[YourAssistantName] can you research the history of artificial intelligence?`
+> Then try: `@nano can you research the history of artificial intelligence?`
 >
 > The assistant should ask for permission before using the Task API.
 

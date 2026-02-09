@@ -68,13 +68,13 @@ docker images | grep nanoclaw-agent
 
 Ask the user:
 
-> What trigger word do you want to use? (default: `Andy`)
+> What trigger word do you want to use? (default: `Nano`)
 >
 > Messages starting with `@TriggerWord` will be sent to Claude.
 
-If they choose something other than `Andy`, update it in:
+If they choose something other than `Nano`, update it in:
 
-1. `groups/CLAUDE.md` - Change "# Andy" and "You are Andy" to the new name
+1. `groups/CLAUDE.md` - Change "# Nano" and "You are Nano" to the new name
 2. `groups/main/CLAUDE.md` - Same changes at the top
 3. `data/registered_groups.json` - Use `@NewName` as the trigger when registering groups
 4. `.env` - Add `ASSISTANT_NAME=NewName`
