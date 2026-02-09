@@ -66,9 +66,6 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 let ipcWatcherRunning = false;
 let groupSyncTimerStarted = false;
-// WhatsApp connection state and outgoing message queue
-let waConnected = false;
-const outgoingQueue: Array<{ jid: string; text: string }> = [];
 
 const queue = new GroupQueue();
 
@@ -199,7 +196,7 @@ function formatMessages(messages: NewMessage[]): string {
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  *
- * Uses streaming output: agent results are sent to WhatsApp as they arrive.
+ * Uses streaming output: agent results are sent to Discord as they arrive.
  * The container stays alive for IDLE_TIMEOUT after each result, allowing
  * rapid-fire messages to be piped in without spawning a new container.
  */
@@ -252,7 +249,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Start continuous typing indicator (Discord auto-expires after ~10s)
   await setTyping(chatJid, true);
+  const typingInterval = setInterval(() => setTyping(chatJid, true), 8000);
   let hadError = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
@@ -263,7 +262,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
+        await sendMessage(chatJid, text);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -274,7 +273,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await setTyping(chatJid, false);
+  clearInterval(typingInterval);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
