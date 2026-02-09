@@ -20,11 +20,11 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Apple Container). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers (Docker). The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
 ### Built for One User
 
-This isn't a framework or a platform. It's working software for my specific needs. I use WhatsApp and Email, so it supports WhatsApp and Email. I don't use Telegram, so it doesn't support Telegram. I add the integrations I actually want, not every possible integration.
+This isn't a framework or a platform. It's working software for my specific needs. I use Discord and Email, so it supports Discord and Email. I don't use Telegram, so it doesn't support Telegram. I add the integrations I actually want, not every possible integration.
 
 ### Customization = Code Changes
 
@@ -47,20 +47,16 @@ When people contribute, they shouldn't add "Telegram support alongside WhatsApp.
 Skills we'd love contributors to build:
 
 ### Communication Channels
+
 Skills to add or switch to different messaging platforms:
+
 - `/add-telegram` - Add Telegram as an input channel
 - `/add-slack` - Add Slack as an input channel
-- `/add-discord` - Add Discord as an input channel
+- `/add-whatsapp` - Re-add WhatsApp support
 - `/add-sms` - Add SMS via Twilio or similar
-- `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
-
-### Container Runtime
-The project currently uses Apple Container (macOS-only). We need:
-- `/convert-to-docker` - Replace Apple Container with standard Docker
-- This unlocks Linux support and broader deployment options
 
 ### Platform Support
-- `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
+
 - `/setup-windows` - Windows support via WSL2 + Docker
 
 ---
@@ -70,15 +66,17 @@ The project currently uses Apple Container (macOS-only). We need:
 A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 **Core components:**
+
 - **Claude Agent SDK** as the core agent
-- **Apple Container** for isolated agent execution (Linux VMs)
-- **WhatsApp** as the primary I/O channel
+- **Docker** for isolated agent execution
+- **Discord** as the primary I/O channel
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
 - **Web access** for search and browsing
 - **Browser automation** via agent-browser
 
 **Implementation approach:**
+
 - Use existing tools (WhatsApp connector, Claude Agent SDK, MCP servers)
 - Minimal glue code
 - File-based systems where possible (CLAUDE.md for memory, folders for groups)
@@ -88,29 +86,34 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ## Architecture Decisions
 
 ### Message Routing
-- A router listens to WhatsApp and routes messages based on configuration
+
+- A router listens to Discord and routes messages based on configuration
 - Only messages from registered groups are processed
 - Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
 - Unregistered groups are ignored completely
 
 ### Memory System
+
 - **Per-group memory**: Each group has a folder with its own `CLAUDE.md`
 - **Global memory**: Root `CLAUDE.md` is read by all groups, but only writable from "main" (self-chat)
 - **Files**: Groups can create/read files in their folder and reference them
 - Agent runs in the group's folder, automatically inherits both CLAUDE.md files
 
 ### Session Management
+
 - Each group maintains a conversation session (via Claude Agent SDK)
 - Sessions auto-compact when context gets too long, preserving critical information
 
 ### Container Isolation
-- All agents run inside Apple Container (lightweight Linux VMs)
+
+- All agents run inside Docker containers
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
 - Browser automation via agent-browser with Chromium in the container
 
 ### Scheduled Tasks
+
 - Users can ask Claude to schedule recurring or one-time tasks from any group
 - Tasks run as full agents in the context of the group that created them
 - Tasks have access to all tools including Bash (safe in container)
@@ -121,12 +124,14 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - From other groups: can only manage that group's tasks
 
 ### Group Management
+
 - New groups are added explicitly via the main channel
 - Groups are registered by editing `data/registered_groups.json`
 - Each group gets a dedicated folder under `groups/`
 - Groups can have additional directories mounted via `containerConfig`
 
 ### Main Channel Privileges
+
 - Main channel is the admin/control group (typically self-chat)
 - Can write to global memory (`groups/CLAUDE.md`)
 - Can schedule tasks for any group
@@ -137,12 +142,14 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ## Integration Points
 
-### WhatsApp
-- Using baileys library for WhatsApp Web connection
+### Discord
+
+- Using discord.js library for Discord connection
 - Messages stored in SQLite, polled by router
-- QR code authentication during setup
+- Token based authentication
 
 ### Scheduler
+
 - Built-in scheduler runs on the host, spawns containers for task execution
 - Custom `nanoclaw` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
@@ -151,10 +158,12 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Tasks execute Claude Agent SDK in containerized group context
 
 ### Web Access
+
 - Built-in WebSearch and WebFetch tools
 - Standard Claude Agent SDK capabilities
 
 ### Browser Automation
+
 - agent-browser CLI with Chromium in container
 - Snapshot-based interaction with element references (@e1, @e2, etc.)
 - Screenshots, PDFs, video recording
@@ -165,17 +174,20 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ## Setup & Customization
 
 ### Philosophy
+
 - Minimal configuration files
 - Setup and customization done via Claude Code
 - Users clone the repo and run Claude Code to configure
 - Each user gets a custom setup matching their exact needs
 
 ### Skills
-- `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
+
+- `/setup` - Install dependencies, authenticate (Discord Token), configure scheduler, start services
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
 
 ### Deployment
-- Runs on local Mac via launchd
+
+- Runs on Linux via systemd
 - Single Node.js process handles everything
 
 ---
@@ -187,7 +199,7 @@ These are the creator's settings, stored here for reference:
 - **Trigger**: `@Andy` (case insensitive)
 - **Response prefix**: `Andy:`
 - **Persona**: Default Claude (no custom personality)
-- **Main channel**: Self-chat (messaging yourself in WhatsApp)
+- **Main channel**: Self-chat (DM or private channel in Discord)
 
 ---
 

@@ -5,41 +5,39 @@ description: X (Twitter) integration for NanoClaw. Post tweets, like, reply, ret
 
 # X (Twitter) Integration
 
-Browser automation for X interactions via WhatsApp.
+Browser automation for X interactions via Discord.
 
 > **Compatibility:** NanoClaw v1.0.0. Directory structure may change in future versions.
 
 ## Features
 
-| Action | Tool | Description |
-|--------|------|-------------|
-| Post | `x_post` | Publish new tweets |
-| Like | `x_like` | Like any tweet |
-| Reply | `x_reply` | Reply to tweets |
-| Retweet | `x_retweet` | Retweet without comment |
-| Quote | `x_quote` | Quote tweet with comment |
+| Action  | Tool        | Description              |
+| ------- | ----------- | ------------------------ |
+| Post    | `x_post`    | Publish new tweets       |
+| Like    | `x_like`    | Like any tweet           |
+| Reply   | `x_reply`   | Reply to tweets          |
+| Retweet | `x_retweet` | Retweet without comment  |
+| Quote   | `x_quote`   | Quote tweet with comment |
 
 ## Prerequisites
 
 Before using this skill, ensure:
 
-1. **NanoClaw is installed and running** - WhatsApp connected, service active
+1. **NanoClaw is installed and running** - Discord connected, service active
 2. **Dependencies installed**:
    ```bash
    npm ls playwright dotenv-cli || npm install playwright dotenv-cli
    ```
 3. **CHROME_PATH configured** in `.env` (if Chrome is not at default location):
    ```bash
-   # Find your Chrome path
-   mdfind "kMDItemCFBundleIdentifier == 'com.google.Chrome'" 2>/dev/null | head -1
    # Add to .env
-   CHROME_PATH=/path/to/Google Chrome.app/Contents/MacOS/Google Chrome
+   CHROME_PATH=/usr/bin/google-chrome
    ```
 
 ## Quick Start
 
 ```bash
-# 1. Setup authentication (interactive)
+# 1. Setup authentication (interactive - requires GUI or X11 forwarding)
 npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: data/x-auth.json should exist after successful login
 
@@ -49,25 +47,25 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 
 # 3. Rebuild host and restart service
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
-# Verify: launchctl list | grep nanoclaw shows PID and exit code 0
+systemctl --user restart nanoclaw
+# Verify: systemctl --user status nanoclaw
 ```
 
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CHROME_PATH` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome executable path |
-| `NANOCLAW_ROOT` | `process.cwd()` | Project root directory |
-| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| Variable        | Default             | Description                              |
+| --------------- | ------------------- | ---------------------------------------- |
+| `CHROME_PATH`   | (Platform specific) | Chrome executable path                   |
+| `NANOCLAW_ROOT` | `process.cwd()`     | Project root directory                   |
+| `LOG_LEVEL`     | `info`              | Logging level (debug, info, warn, error) |
 
 Set in `.env` file (loaded via `dotenv-cli` at runtime):
 
 ```bash
 # .env
-CHROME_PATH=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+CHROME_PATH=/usr/bin/google-chrome
 ```
 
 ### Configuration File
@@ -76,23 +74,23 @@ Edit `lib/config.ts` to modify defaults:
 
 ```typescript
 export const config = {
-    // Browser viewport
-    viewport: { width: 1280, height: 800 },
+  // Browser viewport
+  viewport: { width: 1280, height: 800 },
 
-    // Timeouts (milliseconds)
-    timeouts: {
-        navigation: 30000,    // Page navigation
-        elementWait: 5000,    // Wait for element
-        afterClick: 1000,     // Delay after click
-        afterFill: 1000,      // Delay after form fill
-        afterSubmit: 3000,    // Delay after submit
-        pageLoad: 3000,       // Initial page load
-    },
+  // Timeouts (milliseconds)
+  timeouts: {
+    navigation: 30000, // Page navigation
+    elementWait: 5000, // Wait for element
+    afterClick: 1000, // Delay after click
+    afterFill: 1000, // Delay after form fill
+    afterSubmit: 3000, // Delay after submit
+    pageLoad: 3000, // Initial page load
+  },
 
-    // Tweet limits
-    limits: {
-        tweetMaxLength: 280,
-    },
+  // Tweet limits
+  limits: {
+    tweetMaxLength: 280,
+  },
 };
 ```
 
@@ -100,24 +98,24 @@ export const config = {
 
 Paths relative to project root:
 
-| Path | Purpose | Git |
-|------|---------|-----|
-| `data/x-browser-profile/` | Chrome profile with X session | Ignored |
-| `data/x-auth.json` | Auth state marker | Ignored |
-| `logs/nanoclaw.log` | Service logs (contains X operation logs) | Ignored |
+| Path                      | Purpose                                  | Git     |
+| ------------------------- | ---------------------------------------- | ------- |
+| `data/x-browser-profile/` | Chrome profile with X session            | Ignored |
+| `data/x-auth.json`        | Auth state marker                        | Ignored |
+| `logs/nanoclaw.log`       | Service logs (contains X operation logs) | Ignored |
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Container (Linux VM)                                       │
+│  Container (Linux)                                          │
 │  └── agent.ts → MCP tool definitions (x_post, etc.)    │
 │      └── Writes IPC request to /workspace/ipc/tasks/       │
 └──────────────────────┬──────────────────────────────────────┘
                        │ IPC (file system)
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Host (macOS)                                               │
+│  Host (Linux)                                               │
 │  └── src/index.ts → processTaskIpc()                       │
 │      └── host.ts → handleXIpc()                         │
 │          └── spawn subprocess → scripts/*.ts               │
@@ -160,11 +158,13 @@ To integrate this skill into NanoClaw, make the following modifications:
 **1. Host side: `src/index.ts`**
 
 Add import after other local imports (look for `import { loadJson, saveJson, acquirePidLock } from './utils.js';`):
+
 ```typescript
 import { handleXIpc } from '../.claude/skills/x-integration/host.js';
 ```
 
 Modify `processTaskIpc` function's switch statement default case:
+
 ```typescript
 // Find:
 default:
@@ -183,12 +183,14 @@ if (!handled) {
 **2. Container side: `container/agent-runner/src/ipc-mcp.ts`**
 
 Add import after `cron-parser` import:
+
 ```typescript
 // @ts-ignore - Copied during Docker build from .claude/skills/x-integration/
 import { createXTools } from './skills/x-integration/agent.js';
 ```
 
 Add to the end of tools array (before the closing `]`):
+
 ```typescript
     ...createXTools({ groupFolder, isMain })
 ```
@@ -198,13 +200,14 @@ Add to the end of tools array (before the closing `]`):
 **3. Build script: `container/build.sh`**
 
 Change build context from `container/` to project root (required to access `.claude/skills/`):
+
 ```bash
 # Find:
 container build -t "${IMAGE_NAME}:${TAG}" .
 
 # Replace with:
 cd "$SCRIPT_DIR/.."
-container build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
+docker build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
 ```
 
 ---
@@ -212,6 +215,7 @@ container build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
 **4. Dockerfile: `container/Dockerfile`**
 
 First, update the build context paths (required to access `.claude/skills/` from project root):
+
 ```dockerfile
 # Find:
 COPY agent-runner/package*.json ./
@@ -225,6 +229,7 @@ COPY container/agent-runner/ ./
 ```
 
 Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN npm run build`:
+
 ```dockerfile
 # Copy skill MCP tools
 COPY .claude/skills/x-integration/agent.ts ./src/skills/x-integration/
@@ -252,6 +257,7 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 This opens Chrome for manual X login. Session saved to `data/x-browser-profile/`.
 
 **Verify success:**
+
 ```bash
 cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ```
@@ -263,6 +269,7 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ```
 
 **Verify success:**
+
 ```bash
 ./container/build.sh 2>&1 | grep -i "agent.ts"  # Should show COPY line
 ```
@@ -271,15 +278,16 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+systemctl --user restart nanoclaw
 ```
 
 **Verify success:**
+
 ```bash
-launchctl list | grep nanoclaw  # Should show PID and exit code 0 or -
+systemctl --user status nanoclaw
 ```
 
-## Usage via WhatsApp
+## Usage via Discord
 
 Replace `@Assistant` with your configured trigger name (`ASSISTANT_NAME` in `.env`):
 
@@ -342,7 +350,7 @@ echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
 
 ```bash
 npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+systemctl --user restart nanoclaw
 ```
 
 ### Browser Lock Files
@@ -359,10 +367,10 @@ rm -f data/x-browser-profile/SingletonCookie
 
 ```bash
 # Host logs (relative to project root)
-grep -i "x_post\|x_like\|x_reply\|handleXIpc" logs/nanoclaw.log | tail -20
+journalctl --user -u nanoclaw -f | grep -i "x_post\|x_like\|x_reply\|handleXIpc"
 
 # Script errors
-grep -i "error\|failed" logs/nanoclaw.log | tail -20
+journalctl --user -u nanoclaw -f | grep -i "error\|failed"
 ```
 
 ### Script Timeout
@@ -373,25 +381,25 @@ Default timeout is 2 minutes (120s). Increase in `host.ts`:
 const timer = setTimeout(() => {
   proc.kill('SIGTERM');
   resolve({ success: false, message: 'Script timed out (120s)' });
-}, 120000);  // ← Increase this value
+}, 120000); // ← Increase this value
 ```
 
 ### X UI Selector Changes
 
 If X updates their UI, selectors in scripts may break. Current selectors:
 
-| Element | Selector |
-|---------|----------|
-| Tweet input | `[data-testid="tweetTextarea_0"]` |
-| Post button | `[data-testid="tweetButtonInline"]` |
-| Reply button | `[data-testid="reply"]` |
-| Like | `[data-testid="like"]` |
-| Unlike | `[data-testid="unlike"]` |
-| Retweet | `[data-testid="retweet"]` |
-| Unretweet | `[data-testid="unretweet"]` |
-| Confirm retweet | `[data-testid="retweetConfirm"]` |
-| Modal dialog | `[role="dialog"][aria-modal="true"]` |
-| Modal submit | `[data-testid="tweetButton"]` |
+| Element         | Selector                             |
+| --------------- | ------------------------------------ |
+| Tweet input     | `[data-testid="tweetTextarea_0"]`    |
+| Post button     | `[data-testid="tweetButtonInline"]`  |
+| Reply button    | `[data-testid="reply"]`              |
+| Like            | `[data-testid="like"]`               |
+| Unlike          | `[data-testid="unlike"]`             |
+| Retweet         | `[data-testid="retweet"]`            |
+| Unretweet       | `[data-testid="unretweet"]`          |
+| Confirm retweet | `[data-testid="retweetConfirm"]`     |
+| Modal dialog    | `[role="dialog"][aria-modal="true"]` |
+| Modal submit    | `[data-testid="tweetButton"]`        |
 
 ### Container Build Issues
 
@@ -402,7 +410,7 @@ If MCP tools not found in container:
 ./container/build.sh 2>&1 | grep -i skill
 
 # Check container has the file
-container run nanoclaw-agent ls -la /app/src/skills/
+docker run nanoclaw-agent ls -la /app/src/skills/
 ```
 
 ## Security
