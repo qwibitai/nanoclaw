@@ -300,25 +300,29 @@ npm run build
 cp .env.vps.example .env
 nano .env  # 填入 BOT1_TOKEN, ANTHROPIC_API_KEY 等
 
-# 4. 建置 agent 容器映像（首次執行前必須）
+# 4. 初始化目錄結構（首次部署時必須）
+./init-vps-dirs.sh
+
+# 5. 建置 agent 容器映像（首次執行前必須）
 cd container
 ./build.sh
 cd ..
 
-# 5. 使用 Docker Compose 啟動所有機器人
+# 6. 使用 Docker Compose 啟動所有機器人
 docker compose -f docker-compose.vps.yml up -d --build
 
-# 6. 配對你的 Telegram 聊天為主群組
+# 7. 配對你的 Telegram 聊天為主群組
 ./pair-main-group.sh
 # 依照提示：在 Telegram 發送訊息給 bot，然後確認
 
-# 7. 檢查狀態和日誌
+# 8. 檢查狀態和日誌
 docker compose -f docker-compose.vps.yml ps
 docker compose -f docker-compose.vps.yml logs -f nanoclaw-bot1
 ```
 
 **注意**：
-- agent 映像建置（步驟 4）只需執行一次，或當你更新 skills/依賴時執行
+- 目錄初始化（步驟 4）只需執行一次，為 agent 容器準備掛載目錄
+- agent 映像建置（步驟 5）只需執行一次，或當你更新 skills/依賴時執行
 - 配對腳本（步驟 6）會註冊你的 Telegram 聊天，讓 bot 可以回應你的訊息
 - 配對後，可以直接與 bot 對話，不需要觸發詞
 

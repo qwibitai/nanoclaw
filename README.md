@@ -300,26 +300,30 @@ npm run build
 cp .env.vps.example .env
 nano .env  # Fill in BOT1_TOKEN, ANTHROPIC_API_KEY, etc.
 
-# 4. Build agent container image (required before first run)
+# 4. Initialize directory structure (required for first deployment)
+./init-vps-dirs.sh
+
+# 5. Build agent container image (required before first run)
 cd container
 ./build.sh
 cd ..
 
-# 5. Start all bots with Docker Compose
+# 6. Start all bots with Docker Compose
 docker compose -f docker-compose.vps.yml up -d --build
 
-# 6. Pair your Telegram chat as the main group
+# 7. Pair your Telegram chat as the main group
 ./pair-main-group.sh
 # Follow prompts: send a message to your bot in Telegram, then confirm
 
-# 7. Check status and logs
+# 8. Check status and logs
 docker compose -f docker-compose.vps.yml ps
 docker compose -f docker-compose.vps.yml logs -f nanoclaw-bot1
 ```
 
 **Note**:
-- The agent image build (step 4) only needs to run once, or when you update skills/dependencies
-- The pairing script (step 6) registers your Telegram chat so the bot can respond to your messages
+- Directory initialization (step 4) only needs to run once, preparing mount directories for agent containers
+- The agent image build (step 5) only needs to run once, or when you update skills/dependencies
+- The pairing script (step 7) registers your Telegram chat so the bot can respond to your messages
 - After pairing, you can chat with the bot directly without trigger words
 
 ---

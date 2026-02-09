@@ -69,17 +69,19 @@ function buildVolumeMounts(
   const groupsDir = process.env.HOST_GROUPS_DIR || GROUPS_DIR;
   const dataDir = process.env.HOST_DATA_DIR || DATA_DIR;
 
-  if (isMain) {
-    // Main gets selective project directories (excluding node_modules to prevent
-    // Docker VirtioFS from corrupting native binaries like better-sqlite3.node)
+  // When HOST_* env vars are set, we're in VPS mode (main container spawning agents)
+  // In this case, paths are for Docker daemon, not our container's filesystem
+  const isVpsMode = !!process.env.HOST_PROJECT_ROOT;
+
+  if (isMain && !isVpsMode) {
+    // Local dev mode only: Main gets selective project directories
+    // (excluding node_modules to prevent Docker VirtioFS from corrupting native binaries)
+    // In VPS mode, skip this section since paths don't exist in main container's filesystem
     const projectDirs = ['src', 'container', 'groups', 'skills', 'docs'];
 
     for (const dir of projectDirs) {
       const dirPath = path.join(projectRoot, dir);
-      // Check if path exists AND is not inside a Docker container
-      // In VPS deployment, projectRoot is /app (inside container), so these paths
-      // don't exist on the host and shouldn't be mounted
-      if (fs.existsSync(dirPath) && !projectRoot.startsWith('/app')) {
+      if (fs.existsSync(dirPath)) {
         mounts.push({
           hostPath: dirPath,
           containerPath: `/workspace/project/${dir}`,
@@ -116,7 +118,9 @@ function buildVolumeMounts(
     // Global memory directory (read-only for non-main)
     // Apple Container only supports directory mounts, not file mounts
     const globalDir = path.join(groupsDir, 'global');
-    if (fs.existsSync(globalDir)) {
+    // In VPS mode, assume directory exists on host
+    // In local mode, check first
+    if (isVpsMode || fs.existsSync(globalDir)) {
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
@@ -128,7 +132,9 @@ function buildVolumeMounts(
   // Shared skills directory (read-only for all groups)
   // This allows all groups to access common skills while maintaining isolation
   const sharedSkillsDir = path.join(projectRoot, 'skills');
-  if (fs.existsSync(sharedSkillsDir)) {
+  // In VPS mode, always mount (path verified on host, not in container)
+  // In local mode, check if path exists first
+  if (isVpsMode || fs.existsSync(sharedSkillsDir)) {
     mounts.push({
       hostPath: sharedSkillsDir,
       containerPath: '/workspace/shared-skills',
@@ -148,7 +154,10 @@ function buildVolumeMounts(
     group.folder,
     '.claude',
   );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // In local mode, create directory; in VPS mode, assume host has it
+  if (!isVpsMode) {
+    fs.mkdirSync(groupSessionsDir, { recursive: true });
+  }
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -158,7 +167,9 @@ function buildVolumeMounts(
   // Per-group skills directory for persistent custom skills
   // Skills created by the agent will be saved here and survive container restarts
   const groupSkillsDir = path.join(groupsDir, group.folder, '.claude', 'skills');
-  fs.mkdirSync(groupSkillsDir, { recursive: true });
+  if (!isVpsMode) {
+    fs.mkdirSync(groupSkillsDir, { recursive: true });
+  }
   mounts.push({
     hostPath: groupSkillsDir,
     containerPath: '/workspace/group/.claude/skills',
@@ -168,8 +179,10 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = path.join(dataDir, 'ipc', group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  if (!isVpsMode) {
+    fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
+    fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -177,29 +190,31 @@ function buildVolumeMounts(
   });
 
   // Environment file directory (workaround for Apple Container -i env var bug)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
-  fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
-    });
-
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
+  // Only needed in local dev mode; VPS mode passes auth via -e flags
+  if (!isVpsMode) {
+    const envDir = path.join(DATA_DIR, 'env');
+    fs.mkdirSync(envDir, { recursive: true });
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      const envContent = fs.readFileSync(envFile, 'utf-8');
+      const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+      const filteredLines = envContent.split('\n').filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) return false;
+        return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
       });
+
+      if (filteredLines.length > 0) {
+        fs.writeFileSync(
+          path.join(envDir, 'env'),
+          filteredLines.join('\n') + '\n',
+        );
+        mounts.push({
+          hostPath: envDir,
+          containerPath: '/workspace/env-dir',
+          readonly: true,
+        });
+      }
     }
   }
 
