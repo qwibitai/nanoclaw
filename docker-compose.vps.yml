@@ -28,9 +28,11 @@ services:
       # 共用的 container 目錄（用於 build agent image）
       - ./container:/app/container
     environment:
+      # 映射 BOT1_TOKEN -> TELEGRAM_BOT_TOKEN (程式碼實際讀取的變數名稱)
       - TELEGRAM_BOT_TOKEN=${BOT1_TOKEN}
       - ASSISTANT_NAME=${BOT1_NAME:-Andy}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
       - CONTAINER_IMAGE=${CONTAINER_IMAGE:-nanoclaw-agent:latest}
       - CONTAINER_TIMEOUT=${CONTAINER_TIMEOUT:-300000}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -53,9 +55,11 @@ services:
   #     - ./store-bot2:/app/store
   #     - ./container:/app/container
   #   environment:
+  #     # 映射 BOT2_TOKEN -> TELEGRAM_BOT_TOKEN (程式碼實際讀取的變數名稱)
   #     - TELEGRAM_BOT_TOKEN=${BOT2_TOKEN}
   #     - ASSISTANT_NAME=${BOT2_NAME:-Bob}
   #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+  #     - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
   #     - CONTAINER_IMAGE=${CONTAINER_IMAGE:-nanoclaw-agent:latest}
   #     - CONTAINER_TIMEOUT=${CONTAINER_TIMEOUT:-300000}
   #     - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -79,9 +83,11 @@ services:
   #     - ./store-bot3:/app/store
   #     - ./container:/app/container
   #   environment:
+  #     # 映射 BOT3_TOKEN -> TELEGRAM_BOT_TOKEN (程式碼實際讀取的變數名稱)
   #     - TELEGRAM_BOT_TOKEN=${BOT3_TOKEN}
   #     - ASSISTANT_NAME=${BOT3_NAME:-Charlie}
   #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+  #     - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
   #     - CONTAINER_IMAGE=${CONTAINER_IMAGE:-nanoclaw-agent:latest}
   #     - CONTAINER_TIMEOUT=${CONTAINER_TIMEOUT:-300000}
   #     - LOG_LEVEL=${LOG_LEVEL:-info}
