@@ -70,7 +70,10 @@ function buildVolumeMounts(
 
     for (const dir of projectDirs) {
       const dirPath = path.join(projectRoot, dir);
-      if (fs.existsSync(dirPath)) {
+      // Check if path exists AND is not inside a Docker container
+      // In VPS deployment, projectRoot is /app (inside container), so these paths
+      // don't exist on the host and shouldn't be mounted
+      if (fs.existsSync(dirPath) && !projectRoot.startsWith('/app')) {
         mounts.push({
           hostPath: dirPath,
           containerPath: `/workspace/project/${dir}`,
