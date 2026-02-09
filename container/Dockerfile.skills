@@ -115,14 +115,17 @@ WORKDIR /app
 # Copy package files for agent-runner
 COPY agent-runner/package*.json ./
 
-# Install Node.js dependencies
-RUN npm ci --omit=dev
+# Install ALL Node.js dependencies (including dev dependencies for TypeScript compiler)
+RUN npm ci
 
 # Copy agent-runner source code
 COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Remove dev dependencies after build to reduce image size
+RUN npm prune --production
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/shared-skills /workspace/ipc/messages /workspace/ipc/tasks
