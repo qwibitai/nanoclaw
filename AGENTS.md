@@ -47,12 +47,6 @@ This project is a Node.js application using TypeScript (ESM) and Docker.
 
   Uses Prettier. Ensure code is formatted before finishing a task.
 
-- **Authentication:**
-  ```bash
-  npm run auth
-  ```
-  Runs the WhatsApp authentication flow.
-
 ## 2. Testing
 
 **Current Status:** No formal test runner (Jest/Vitest) is currently configured in `package.json`.
@@ -116,7 +110,7 @@ Adhere strictly to the following conventions to match the existing codebase.
 
 ## 4. Architecture Overview
 
-- **Entry Point:** `src/index.ts` manages the WhatsApp connection (`@whiskeysockets/baileys`) and the main event loop.
+- **Entry Point:** `src/index.ts` manages the Discord connection (`discord.js`) and the main event loop.
 - **Agent Runner:** `src/container-runner.ts` spawns Docker containers for agents.
 - **Data:**
   - `groups/`: Isolated filesystem for each agent group.
@@ -128,3 +122,24 @@ Adhere strictly to the following conventions to match the existing codebase.
 1. **Docker Requirement:** The system relies on Docker. Do not modify container logic unless you understand the security implications (mounts, isolation).
 2. **Database Integrity:** Always use the exported functions in `src/db.ts`. Do not write raw SQL in other files.
 3. **Safety:** When modifying `src/index.ts`, ensure the message loop (`startMessageLoop`) and IPC watcher (`startIpcWatcher`) are preserved to maintain system liveness.
+
+## 6. Service Management
+
+If running as a systemd service (Linux):
+
+- **Restart Service:**
+
+  ```bash
+  systemctl --user restart nanoclaw
+  ```
+
+- **Check Status:**
+
+  ```bash
+  systemctl --user status nanoclaw
+  ```
+
+- **View Logs:**
+  ```bash
+  journalctl --user -u nanoclaw -f
+  ```
