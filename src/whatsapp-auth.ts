@@ -5,11 +5,14 @@
  * Displays QR code, waits for scan, saves credentials, then exits.
  *
  * Usage: npx tsx src/whatsapp-auth.ts
+ *
+ * Proxy support: Set HTTPS_PROXY=http://host:port to use a proxy
  */
 import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
+import { HttpsProxyAgent } from 'https-proxy-agent';
 
 import makeWASocket, {
   DisconnectReason,
@@ -18,6 +21,15 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 const AUTH_DIR = './store/auth';
+
+function getProxyAgent() {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy;
+  if (proxyUrl) {
+    console.log(`Using proxy: ${proxyUrl}`);
+    return new HttpsProxyAgent(proxyUrl);
+  }
+  return undefined;
+}
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
@@ -38,6 +50,7 @@ async function authenticate(): Promise<void> {
 
   console.log('Starting WhatsApp authentication...\n');
 
+  const agent = getProxyAgent();
   const sock = makeWASocket({
     auth: {
       creds: state.creds,
@@ -46,6 +59,8 @@ async function authenticate(): Promise<void> {
     printQRInTerminal: false,
     logger,
     browser: ['NanoClaw', 'Chrome', '1.0.0'],
+    agent,
+    fetchAgent: agent,
   });
 
   sock.ev.on('connection.update', (update) => {
