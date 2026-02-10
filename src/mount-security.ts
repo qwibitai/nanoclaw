@@ -7,11 +7,12 @@
  * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
 import { MOUNT_ALLOWLIST_PATH } from './config.js';
-import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
+import { AdditionalMount, AllowedRoot, ContextTier, MountAllowlist } from './types.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -83,10 +84,6 @@ export function loadMountAllowlist(): MountAllowlist | null {
       throw new Error('blockedPatterns must be an array');
     }
 
-    if (typeof allowlist.nonMainReadOnly !== 'boolean') {
-      throw new Error('nonMainReadOnly must be a boolean');
-    }
-
     // Merge with default blocked patterns
     const mergedBlockedPatterns = [
       ...new Set([...DEFAULT_BLOCKED_PATTERNS, ...allowlist.blockedPatterns]),
@@ -120,8 +117,8 @@ export function loadMountAllowlist(): MountAllowlist | null {
 /**
  * Expand ~ to home directory and resolve to absolute path
  */
-function expandPath(p: string): string {
-  const homeDir = process.env.HOME || '/Users/user';
+export function expandPath(p: string): string {
+  const homeDir = process.env.HOME || os.homedir();
   if (p.startsWith('~/')) {
     return path.join(homeDir, p.slice(2));
   }
@@ -221,18 +218,26 @@ export interface MountValidationResult {
   allowed: boolean;
   reason: string;
   realHostPath?: string;
-  resolvedContainerPath?: string;
   effectiveReadonly?: boolean;
 }
 
 /**
  * Validate a single additional mount against the allowlist.
- * Returns validation result with reason.
+ * Access is determined by the tier's entry in the allowed root's access map.
+ * Strangers never get access. Friends can only get read-only.
  */
 export function validateMount(
   mount: AdditionalMount,
-  isMain: boolean,
+  tier: ContextTier | 'stranger',
 ): MountValidationResult {
+  // Strangers never get external mount access
+  if (tier === 'stranger') {
+    return {
+      allowed: false,
+      reason: 'Strangers have no access to external directories',
+    };
+  }
+
   const allowlist = loadMountAllowlist();
 
   // If no allowlist, block all additional mounts
@@ -243,14 +248,11 @@ export function validateMount(
     };
   }
 
-  // Derive containerPath from hostPath basename if not specified
-  const containerPath = mount.containerPath || path.basename(mount.hostPath);
-
-  // Validate container path (cheap check)
-  if (!isValidContainerPath(containerPath)) {
+  // Validate container path first (cheap check)
+  if (!isValidContainerPath(mount.containerPath)) {
     return {
       allowed: false,
-      reason: `Invalid container path: "${containerPath}" - must be relative, non-empty, and not contain ".."`,
+      reason: `Invalid container path: "${mount.containerPath}" - must be relative, non-empty, and not contain ".."`,
     };
   }
 
@@ -288,41 +290,29 @@ export function validateMount(
     };
   }
 
-  // Determine effective readonly status
-  const requestedReadWrite = mount.readonly === false;
-  let effectiveReadonly = true; // Default to readonly
+  // Check tier-specific access on the allowed root
+  const tierAccess = allowedRoot.access[tier];
+  if (!tierAccess) {
+    return {
+      allowed: false,
+      reason: `Tier "${tier}" has no access to root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ''}`,
+    };
+  }
 
-  if (requestedReadWrite) {
-    if (!isMain && allowlist.nonMainReadOnly) {
-      // Non-main groups forced to read-only
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-        },
-        'Mount forced to read-only for non-main group',
-      );
-    } else if (!allowedRoot.allowReadWrite) {
-      // Root doesn't allow read-write
-      effectiveReadonly = true;
-      logger.info(
-        {
-          mount: mount.hostPath,
-          root: allowedRoot.path,
-        },
-        'Mount forced to read-only - root does not allow read-write',
-      );
-    } else {
-      // Read-write allowed
-      effectiveReadonly = false;
-    }
+  // Determine effective readonly from the tier's access level
+  const effectiveReadonly = tierAccess === 'ro';
+
+  if (!effectiveReadonly) {
+    logger.debug(
+      { mount: mount.hostPath, tier, root: allowedRoot.path },
+      'Read-write access granted for tier',
+    );
   }
 
   return {
     allowed: true,
-    reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ''}`,
+    reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ''} [${tier}:${tierAccess}]`,
     realHostPath: realPath,
-    resolvedContainerPath: containerPath,
     effectiveReadonly,
   };
 }
@@ -335,7 +325,7 @@ export function validateMount(
 export function validateAdditionalMounts(
   mounts: AdditionalMount[],
   groupName: string,
-  isMain: boolean,
+  tier: ContextTier,
 ): Array<{
   hostPath: string;
   containerPath: string;
@@ -348,12 +338,12 @@ export function validateAdditionalMounts(
   }> = [];
 
   for (const mount of mounts) {
-    const result = validateMount(mount, isMain);
+    const result = validateMount(mount, tier);
 
     if (result.allowed) {
       validatedMounts.push({
         hostPath: result.realHostPath!,
-        containerPath: `/workspace/extra/${result.resolvedContainerPath}`,
+        containerPath: `/workspace/extra/${mount.containerPath}`,
         readonly: result.effectiveReadonly!,
       });
 
@@ -361,7 +351,7 @@ export function validateAdditionalMounts(
         {
           group: groupName,
           hostPath: result.realHostPath,
-          containerPath: result.resolvedContainerPath,
+          containerPath: mount.containerPath,
           readonly: result.effectiveReadonly,
           reason: result.reason,
         },
@@ -391,27 +381,16 @@ export function generateAllowlistTemplate(): string {
     allowedRoots: [
       {
         path: '~/projects',
-        allowReadWrite: true,
+        access: { owner: 'rw', family: 'rw' },
         description: 'Development projects',
       },
       {
-        path: '~/repos',
-        allowReadWrite: true,
-        description: 'Git repositories',
-      },
-      {
-        path: '~/Documents/work',
-        allowReadWrite: false,
-        description: 'Work documents (read-only)',
+        path: '~/Documents',
+        access: { owner: 'rw', family: 'ro' },
+        description: 'Documents',
       },
     ],
-    blockedPatterns: [
-      // Additional patterns beyond defaults
-      'password',
-      'secret',
-      'token',
-    ],
-    nonMainReadOnly: true,
+    blockedPatterns: [],
   };
 
   return JSON.stringify(template, null, 2);

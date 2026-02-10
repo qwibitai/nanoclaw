@@ -7,6 +7,7 @@ dist/
 # Local data & auth
 store/
 data/
+!data/vault-config.json
 logs/
 
 # Groups - only track base structure and specific CLAUDE.md files

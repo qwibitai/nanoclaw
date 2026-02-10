@@ -1,6 +1,6 @@
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
-  containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
+  containerPath: string; // Path inside container (under /workspace/extra/)
   readonly?: boolean; // Default: true for safety
 }
 
@@ -14,15 +14,21 @@ export interface MountAllowlist {
   allowedRoots: AllowedRoot[];
   // Glob patterns for paths that should never be mounted (e.g., ".ssh", ".gnupg")
   blockedPatterns: string[];
-  // If true, non-main groups can only mount read-only regardless of config
-  nonMainReadOnly: boolean;
 }
+
+export type MountAccess = 'rw' | 'ro';
 
 export interface AllowedRoot {
   // Absolute path or ~ for home (e.g., "~/projects", "/var/repos")
   path: string;
-  // Whether read-write mounts are allowed under this root
-  allowReadWrite: boolean;
+  // Per-tier access: "rw" = read-write, "ro" = read-only, absent = no access
+  // Strangers never get access regardless of config
+  // Friends can only have "ro" (enforced in validation)
+  access: {
+    owner?: MountAccess;
+    family?: MountAccess;
+    friend?: 'ro';
+  };
   // Optional description for documentation
   description?: string;
 }
@@ -102,4 +108,15 @@ export interface AuthorizationResult {
 export interface GroupParticipant {
   jid: string;
   tier: UserTier;
+}
+
+// Vault Configuration Types
+export interface VaultSettings {
+  path: string;
+  enabled: boolean;
+}
+
+export interface VaultConfig {
+  mainVault?: VaultSettings;
+  privateVault?: VaultSettings;
 }

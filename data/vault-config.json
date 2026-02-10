@@ -1,0 +1,10 @@
+{
+  "mainVault": {
+    "path": "~/path/to/your/main/vault",
+    "enabled": false
+  },
+  "privateVault": {
+    "path": "~/path/to/your/private/vault",
+    "enabled": false
+  }
+}
