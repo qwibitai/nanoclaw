@@ -13,10 +13,12 @@ import { CronExpressionParser } from 'cron-parser';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  PROJECT_ROOT,
   STORE_DIR,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -164,7 +166,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   setRegisteredGroup(jid, group);
 
   // Create group folder
-  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
+  const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   logger.info(
@@ -1139,7 +1141,27 @@ function ensureContainerSystemRunning(): void {
   }
 }
 
+/**
+ * Copy template CLAUDE.md files from source tree to NANOCLAW_HOME/groups/
+ * on first run, so new installs start with sensible defaults.
+ */
+function ensureGroupTemplates(): void {
+  const sourceGroups = path.join(PROJECT_ROOT, 'groups');
+  for (const name of ['main', 'global']) {
+    const target = path.join(GROUPS_DIR, name, 'CLAUDE.md');
+    if (!fs.existsSync(target)) {
+      const source = path.join(sourceGroups, name, 'CLAUDE.md');
+      if (fs.existsSync(source)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(source, target);
+        logger.info({ name, target }, 'Copied group template');
+      }
+    }
+  }
+}
+
 async function main(): Promise<void> {
+  ensureGroupTemplates();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');

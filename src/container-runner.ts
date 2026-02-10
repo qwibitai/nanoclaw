@@ -4,7 +4,6 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
@@ -12,7 +11,9 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
+  ENV_FILE_PATH,
   GROUPS_DIR,
+  PROJECT_ROOT,
   loadVaultConfig,
   expandPath,
 } from './config.js';
@@ -23,16 +24,6 @@ import { ContextTier, RegisteredGroup } from './types.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-function getHomeDir(): string {
-  const home = process.env.HOME || os.homedir();
-  if (!home) {
-    throw new Error(
-      'Unable to determine home directory: HOME environment variable is not set and os.homedir() returned empty',
-    );
-  }
-  return home;
-}
 
 export interface ContainerInput {
   prompt: string;
@@ -127,7 +118,7 @@ function buildVolumeMounts(
   effectiveTier?: ContextTier,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const projectRoot = process.cwd();
+  const projectRoot = PROJECT_ROOT;
 
   // Determine context tier: use effectiveTier if provided (from authorization),
   // otherwise fall back to group's contextTier, or isMain logic for legacy behavior
@@ -305,12 +296,11 @@ function buildVolumeMounts(
   });
 
   // Environment file directory (workaround for Apple Container -i env var bug)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
+  // Only expose specific auth variables needed by Claude Code, not the entire env file
   const envDir = path.join(DATA_DIR, 'env');
   fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
+  if (fs.existsSync(ENV_FILE_PATH)) {
+    const envContent = fs.readFileSync(ENV_FILE_PATH, 'utf-8');
     const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();

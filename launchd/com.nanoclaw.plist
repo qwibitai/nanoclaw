@@ -25,8 +25,8 @@
         <string>Andy</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
+    <string>{{HOME}}/.nanoclaw/logs/nanoclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>{{PROJECT_ROOT}}/logs/nanoclaw.error.log</string>
+    <string>{{HOME}}/.nanoclaw/logs/nanoclaw.error.log</string>
 </dict>
 </plist>

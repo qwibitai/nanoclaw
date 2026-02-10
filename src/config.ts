@@ -8,23 +8,19 @@ export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+export const PROJECT_ROOT = process.cwd();
 export const HOME_DIR = process.env.HOME || os.homedir();
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'nanoclaw',
-  'mount-allowlist.json',
-);
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+// All runtime data lives outside the source tree
+export const NANOCLAW_HOME = process.env.NANOCLAW_HOME || path.join(HOME_DIR, '.nanoclaw');
+export const STORE_DIR = path.join(NANOCLAW_HOME, 'store');
+export const DATA_DIR = path.join(NANOCLAW_HOME, 'data');
+export const GROUPS_DIR = path.join(NANOCLAW_HOME, 'groups');
+export const LOGS_DIR = path.join(NANOCLAW_HOME, 'logs');
+export const MOUNT_ALLOWLIST_PATH = path.join(NANOCLAW_HOME, 'mount-allowlist.json');
+export const VAULT_CONFIG_PATH = path.join(NANOCLAW_HOME, 'vault-config.json');
+export const ENV_FILE_PATH = path.join(NANOCLAW_HOME, 'env');
 export const MAIN_GROUP_FOLDER = 'main';
-// User configs stored outside project root — immune to rebases/checkouts
-const USER_CONFIG_DIR = path.join(HOME_DIR, '.config', 'nanoclaw');
-export const VAULT_CONFIG_PATH = path.join(USER_CONFIG_DIR, 'vault-config.json');
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';

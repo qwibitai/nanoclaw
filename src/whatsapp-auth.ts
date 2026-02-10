@@ -17,7 +17,9 @@ import makeWASocket, {
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-const AUTH_DIR = './store/auth';
+import { STORE_DIR } from './config.js';
+
+const AUTH_DIR = path.join(STORE_DIR, 'auth');
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
@@ -31,7 +33,7 @@ async function authenticate(): Promise<void> {
   if (state.creds.registered) {
     console.log('✓ Already authenticated with WhatsApp');
     console.log(
-      '  To re-authenticate, delete the store/auth folder and run again.',
+      `  To re-authenticate, delete ${AUTH_DIR} and run again.`,
     );
     process.exit(0);
   }
@@ -63,7 +65,7 @@ async function authenticate(): Promise<void> {
       const reason = (lastDisconnect?.error as any)?.output?.statusCode;
 
       if (reason === DisconnectReason.loggedOut) {
-        console.log('\n✗ Logged out. Delete store/auth and try again.');
+        console.log(`\n✗ Logged out. Delete ${AUTH_DIR} and try again.`);
         process.exit(1);
       } else {
         console.log('\n✗ Connection failed. Please try again.');
@@ -73,7 +75,7 @@ async function authenticate(): Promise<void> {
 
     if (connection === 'open') {
       console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
+      console.log(`  Credentials saved to ${AUTH_DIR}/`);
       console.log('  You can now start the NanoClaw service.\n');
 
       // Give it a moment to save credentials, then exit
