@@ -48,7 +48,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 - **WhatsApp I/O** - Message Claude from your phone
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
-- **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
+- **Main channel** - Your private admin control channel; every other group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content
 - **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
@@ -57,19 +57,19 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Andy`):
+Talk to your assistant with the trigger word (default: `@Jarvis`):
 
 ```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+@Jarvis send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
+@Jarvis review the git history for the past week each Friday and update the README if there's drift
+@Jarvis every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+From the main channel, you can manage groups and tasks:
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@Jarvis list all scheduled tasks across groups
+@Jarvis pause the Monday briefing task
+@Jarvis join the Family Chat group
 ```
 
 ## Customizing
