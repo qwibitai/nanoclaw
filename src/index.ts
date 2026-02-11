@@ -20,7 +20,6 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { loadSecrets, redactSecrets } from './secret-redact.js';
 import {
   AgentResponse,
   AvailableGroup,
@@ -329,10 +328,9 @@ async function runAgent(
 }
 
 async function sendMessage(jid: string, text: string): Promise<void> {
-  const safe = redactSecrets(text);
   try {
-    await sock.sendMessage(jid, { text: safe });
-    logger.info({ jid, length: safe.length }, 'Message sent');
+    await sock.sendMessage(jid, { text });
+    logger.info({ jid, length: text.length }, 'Message sent');
   } catch (err) {
     logger.error({ jid, err }, 'Failed to send message');
   }
@@ -910,7 +908,6 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
-  loadSecrets();
   initDatabase();
   logger.info('Database initialized');
   loadState();
