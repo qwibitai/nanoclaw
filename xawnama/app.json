@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Xawnama - خەوننامە",
+    "slug": "xawnama",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "xawnama",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0A0A2E",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.xawnama.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0A2E"
+      },
+      "package": "com.xawnama.app"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-av"
+    ],
+    "extra": {
+      "geminiApiKey": "YOUR_GEMINI_API_KEY"
+    }
+  }
+}
