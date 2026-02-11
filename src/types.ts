@@ -95,6 +95,77 @@ export interface Channel {
 // Callback type that channels use to deliver inbound messages
 export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
+// --- Complaint domain types ---
+
+export type ComplaintStatus =
+  | 'registered'
+  | 'acknowledged'
+  | 'in_progress'
+  | 'action_taken'
+  | 'resolved'
+  | 'on_hold'
+  | 'escalated';
+
+export type ComplaintPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export interface Complaint {
+  id: string;
+  phone: string;
+  category: string | null;
+  subcategory: string | null;
+  description: string;
+  location: string | null;
+  language: string;
+  status: ComplaintStatus;
+  status_reason: string | null;
+  priority: ComplaintPriority;
+  source: 'text' | 'voice';
+  voice_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  days_open: number;
+}
+
+export interface ComplaintUpdate {
+  id: number;
+  complaint_id: string;
+  old_status: string | null;
+  new_status: string | null;
+  note: string | null;
+  updated_by: string;
+  created_at: string;
+}
+
+export interface User {
+  phone: string;
+  name: string | null;
+  language: string;
+  first_seen: string;
+  last_seen: string;
+  total_complaints: number;
+  is_blocked: number;
+}
+
+export interface Conversation {
+  id: number;
+  phone: string;
+  role: 'user' | 'assistant';
+  content: string;
+  complaint_id: string | null;
+  created_at: string;
+}
+
+export interface Category {
+  name: string;
+  display_name_en: string | null;
+  display_name_mr: string | null;
+  display_name_hi: string | null;
+  complaint_count: number;
+  first_seen: string;
+  is_active: number;
+}
+
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.

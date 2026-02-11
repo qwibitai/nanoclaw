@@ -1,4 +1,8 @@
 import { ASSISTANT_NAME } from './config.js';
+import {
+  isIndividualChat,
+  VIRTUAL_COMPLAINT_GROUP_JID,
+} from './channels/whatsapp.js';
 import { Channel, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
@@ -43,4 +47,32 @@ export function findChannel(
   jid: string,
 ): Channel | undefined {
   return channels.find((c) => c.ownsJid(jid));
+}
+
+/**
+ * Resolve the routing JID for a chat.
+ * 1:1 individual chats route to the virtual complaint group.
+ * Group chats and other JIDs route to themselves.
+ */
+export function resolveRouteJid(chatJid: string): string {
+  if (isIndividualChat(chatJid)) {
+    return VIRTUAL_COMPLAINT_GROUP_JID;
+  }
+  return chatJid;
+}
+
+/**
+ * Format messages with user context for 1:1 chats.
+ * Wraps the standard message XML with a <user-context> block containing
+ * the sender's phone number and push name, so the container agent knows
+ * who it's talking to.
+ */
+export function formatMessagesWithUserContext(
+  messages: NewMessage[],
+  phone: string,
+  pushName: string,
+): string {
+  const userContext = `<user-context phone="${escapeXml(phone)}" name="${escapeXml(pushName)}" />`;
+  const messagesXml = formatMessages(messages);
+  return `${userContext}\n${messagesXml}`;
 }

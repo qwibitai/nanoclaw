@@ -1,0 +1,28 @@
+# Local Development Docker Compose
+#
+# The orchestrator runs on the host via `npm run dev` (requires Apple Container CLI).
+# This file is for building the agent container image and documenting the dev setup.
+#
+# Usage:
+#   Build agent image:  docker compose -f docker-compose.dev.yaml build
+#   Or with Apple Container:  cd container && container build -t constituency-bot-agent:latest .
+#
+# Full dev workflow:
+#   1. cp .env.example .env  (then fill in CLAUDE_CODE_OAUTH_TOKEN)
+#   2. npm install
+#   3. Build agent image (see above)
+#   4. npm run auth  (WhatsApp QR code authentication)
+#   5. npm run dev   (starts orchestrator on host)
+
+services:
+  agent-build:
+    build:
+      context: ./container
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
+    image: constituency-bot-agent:latest
+    # Build-only service. The orchestrator spawns agent containers dynamically
+    # via Apple Container at runtime. This service does not run.
+    profiles:
+      - build

@@ -374,6 +374,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: 'claude-sonnet-4-5-20250929',
       cwd: '/workspace/group',
       resume: sessionId,
       resumeSessionAt: resumeAt,

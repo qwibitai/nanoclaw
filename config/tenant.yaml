@@ -1,0 +1,15 @@
+mla_name: "Rahul Kul"
+constituency: "Daund"
+complaint_id_prefix: "RK"
+# Optional until admin notifications are enabled in Phase 2.
+wa_admin_group_jid: ""
+admin_phones:
+  - "918600822444"
+languages:
+  - mr
+  - hi
+  - en
+daily_msg_limit: 20
+office_phone: ""
+office_address: ""
+website_domain: "rahulkul.udyami.ai"

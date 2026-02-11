@@ -13,6 +13,7 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  STORE_DIR,
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -36,6 +37,8 @@ export interface ContainerInput {
   prompt: string;
   sessionId?: string;
   groupFolder: string;
+  /** Per-user session folder for 1:1 chats (e.g., "complaint-919876543210"). Falls back to groupFolder for group chats. */
+  sessionFolder?: string;
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
@@ -57,6 +60,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  sessionFolder?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -77,9 +81,13 @@ function buildVolumeMounts(
       readonly: false,
     });
   } else {
-    // Other groups only get their own folder
+    // Non-main groups: prefer the runtime directory (has injected CLAUDE.md)
+    // Falls back to source groups/ directory if runtime doesn't exist
+    const runtimeGroupDir = path.join(DATA_DIR, 'runtime', group.folder);
+    const sourceGroupDir = path.join(GROUPS_DIR, group.folder);
+    const groupDir = fs.existsSync(runtimeGroupDir) ? runtimeGroupDir : sourceGroupDir;
     mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
+      hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -94,14 +102,43 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
+
+    // Complaint tools (shell scripts for DB operations)
+    const toolsDir = path.join(projectRoot, 'tools');
+    if (fs.existsSync(toolsDir)) {
+      mounts.push({
+        hostPath: toolsDir,
+        containerPath: '/workspace/tools',
+        readonly: true,
+      });
+    }
+
+    // SQLite database (read-write for complaint creation/updates)
+    fs.mkdirSync(STORE_DIR, { recursive: true });
+    mounts.push({
+      hostPath: STORE_DIR,
+      containerPath: '/workspace/store',
+      readonly: false,
+    });
+
+    // Tenant config (for shell scripts to read complaint_id_prefix, etc.)
+    const configDir = path.join(projectRoot, 'config');
+    if (fs.existsSync(configDir)) {
+      mounts.push({
+        hostPath: configDir,
+        containerPath: '/workspace/config',
+        readonly: true,
+      });
+    }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
+  // Per-user Claude sessions directory for 1:1 chats, per-group for group chats.
+  // Each user gets their own .claude/ so conversations don't bleed between users.
+  const effectiveSessionFolder = sessionFolder || group.folder;
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
-    group.folder,
+    effectiveSessionFolder,
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -236,7 +273,7 @@ export async function runContainerAgent(
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.sessionFolder);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);

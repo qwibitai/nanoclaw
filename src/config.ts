@@ -1,12 +1,6 @@
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
-export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-export const TELEGRAM_ONLY = process.env.TELEGRAM_ONLY === 'true';
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
-  .split(',')
-  .map((t) => t.trim())
-  .filter(Boolean);
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'ComplaintBot';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -14,11 +8,16 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || '/Users/user';
 
+// Tenant configuration
+export const TENANT_CONFIG_PATH =
+  process.env.TENANT_CONFIG_PATH || path.resolve(PROJECT_ROOT, 'config', 'tenant.yaml');
+export const CLAUDE_CODE_OAUTH_TOKEN = process.env.CLAUDE_CODE_OAUTH_TOKEN || '';
+
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
-  'nanoclaw',
+  'constituency-bot',
   'mount-allowlist.json',
 );
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
@@ -27,7 +26,7 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+  process.env.CONTAINER_IMAGE || 'constituency-bot-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,
@@ -54,6 +53,10 @@ export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+// Complaint handler (in-process Agent SDK, no container)
+export const COMPLAINT_MODEL = process.env.COMPLAINT_MODEL || 'claude-sonnet-4-5-20250929';
+export const COMPLAINT_MAX_TURNS = parseInt(process.env.COMPLAINT_MAX_TURNS || '10', 10);
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

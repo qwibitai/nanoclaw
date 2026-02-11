@@ -10,7 +10,12 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import {
+  WhatsAppChannel,
+  isIndividualChat,
+  extractPhoneNumber,
+  VIRTUAL_COMPLAINT_GROUP_JID,
+} from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -22,10 +27,12 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getDb,
   getMessagesSince,
   getNewMessages,
   getRouterState,
   initDatabase,
+  isUserBlocked,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -34,8 +41,25 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
-import { formatMessages, formatOutbound } from './router.js';
+import {
+  formatMessages,
+  formatMessagesWithUserContext,
+  formatOutbound,
+  resolveRouteJid,
+  stripInternalTags,
+} from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import {
+  loadTenantConfig,
+  injectTemplateVariables,
+  cacheTenantConfigToDb,
+} from './tenant-config.js';
+import { handleComplaintMessage } from './complaint-handler.js';
+import {
+  detectLanguageFromText,
+  getFallbackErrorMessage,
+  getPreferredLanguage,
+} from './error-fallback.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -47,6 +71,34 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+/** Extract phone number from JID, falling back to the JID prefix if extraction fails. */
+function phoneFromJid(jid: string): string {
+  return extractPhoneNumber(jid) || jid.split('@')[0];
+}
+
+function resolveFallbackErrorMessage(phone: string, text: string): string {
+  const preferredLanguage = getPreferredLanguage(phone, (phoneNumber) => {
+    const row = getDb()
+      .prepare('SELECT language FROM users WHERE phone = ?')
+      .get(phoneNumber) as { language?: string } | undefined;
+    return row?.language;
+  });
+  const language = preferredLanguage ?? detectLanguageFromText(text);
+  return getFallbackErrorMessage(language);
+}
+
+/**
+ * Compute a per-user session folder for 1:1 chats.
+ * Each user gets their own Claude session + session directory so conversations
+ * don't bleed between users. Group chats use the group folder directly.
+ */
+function getSessionFolder(groupFolder: string, chatJid: string): string {
+  if (isIndividualChat(chatJid)) {
+    return `${groupFolder}-${phoneFromJid(chatJid)}`;
+  }
+  return groupFolder;
+}
 
 let whatsapp: WhatsAppChannel;
 const queue = new GroupQueue();
@@ -114,11 +166,15 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
 }
 
 /**
- * Process all pending messages for a group.
- * Called by the GroupQueue when it's this group's turn.
+ * Process all pending messages for a group or individual chat.
+ * Called by the GroupQueue when it's this JID's turn.
+ * For 1:1 chats (individual JIDs), routes through the virtual complaint group.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
+  // Resolve the group config: 1:1 chats use the virtual complaint group
+  const isIndividual = isIndividualChat(chatJid);
+  const routeJid = resolveRouteJid(chatJid);
+  const group = registeredGroups[isIndividual ? routeJid : chatJid];
   if (!group) return true;
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
@@ -140,7 +196,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  // For 1:1 chats, include user context (phone + push name) in the prompt
+  let prompt: string;
+  if (isIndividual) {
+    const phone = phoneFromJid(chatJid);
+    const pushName = missedMessages[0]?.sender_name || phone;
+    prompt = formatMessagesWithUserContext(missedMessages, phone, pushName);
+  } else {
+    prompt = formatMessages(missedMessages);
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -150,7 +214,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, chatJid, messageCount: missedMessages.length, isIndividual },
     'Processing messages',
   );
 
@@ -168,12 +232,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await whatsapp.setTyping(chatJid, true);
   let hadError = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const sessionFolder = getSessionFolder(group.folder, chatJid);
+  const output = await runAgent(group, prompt, chatJid, sessionFolder, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const text = stripInternalTags(raw);
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
         await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
@@ -205,10 +270,11 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  sessionFolder: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionId = sessions[group.folder];
+  const sessionId = sessions[sessionFolder];
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -239,8 +305,8 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          sessions[sessionFolder] = output.newSessionId;
+          setSession(sessionFolder, output.newSessionId);
         }
         await onOutput(output);
       }
@@ -253,6 +319,7 @@ async function runAgent(
         prompt,
         sessionId,
         groupFolder: group.folder,
+        sessionFolder,
         chatJid,
         isMain,
       },
@@ -261,8 +328,8 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      sessions[sessionFolder] = output.newSessionId;
+      setSession(sessionFolder, output.newSessionId);
     }
 
     if (output.status === 'error') {
@@ -287,7 +354,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`Constituency bot running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -366,21 +433,86 @@ async function startMessageLoop(): Promise<void> {
 }
 
 /**
- * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
+ * Startup recovery: check for unprocessed messages in registered groups AND
+ * individual chats. 1:1 chats store messages under their phone JID, not the
+ * virtual group JID, so we also scan for those.
  */
 function recoverPendingMessages(): void {
+  // Recover group messages
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if (chatJid === VIRTUAL_COMPLAINT_GROUP_JID) continue; // virtual, no direct messages
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
+        'Recovery: found unprocessed group messages',
       );
       queue.enqueueMessageCheck(chatJid);
     }
   }
+
+  // Recover 1:1 individual chat messages: find distinct chat_jids for individual
+  // chats that have messages newer than their last agent cursor.
+  // Uses the direct in-process handler (no container/queue).
+  if (registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]) {
+    const allChats = getAllChats();
+    for (const chat of allChats) {
+      if (!isIndividualChat(chat.jid)) continue;
+      const sinceTimestamp = lastAgentTimestamp[chat.jid] || '';
+      const pending = getMessagesSince(chat.jid, sinceTimestamp, ASSISTANT_NAME);
+      if (pending.length > 0) {
+        logger.info(
+          { chatJid: chat.jid, pendingCount: pending.length },
+          'Recovery: found unprocessed 1:1 messages',
+        );
+        // Process each pending message directly (last one is most relevant)
+        const lastMsg = pending[pending.length - 1];
+        handleComplaintDirect(chat.jid, lastMsg);
+      }
+    }
+  }
+}
+
+/**
+ * Handle a 1:1 complaint message directly via the in-process Agent SDK.
+ * No containers, no queue — fires and forgets (response sent asynchronously).
+ */
+function handleComplaintDirect(chatJid: string, msg: NewMessage): void {
+  const phone = phoneFromJid(chatJid);
+  const userName = msg.sender_name || phone;
+
+  // Block check — skip LLM call entirely for blocked users
+  if (isUserBlocked(phone)) {
+    logger.info({ phone, chatJid }, 'Blocked user message ignored');
+    return;
+  }
+
+  // Fire-and-forget: handle asynchronously, don't block the message callback
+  (async () => {
+    try {
+      await whatsapp.setTyping(chatJid, true);
+      const result = await handleComplaintMessage(phone, userName, msg.content);
+      const text = stripInternalTags(result);
+      if (text) {
+        // 1:1 chats don't need the bot name prefix — WhatsApp already shows the sender
+        await whatsapp.sendMessage(chatJid, text);
+        // Only advance cursor after a reply was actually sent
+        lastAgentTimestamp[chatJid] = msg.timestamp;
+        saveState();
+      } else {
+        logger.warn({ chatJid, phone }, 'Complaint handler returned empty result, NOT advancing cursor — message will be retried');
+      }
+    } catch (err) {
+      logger.error({ chatJid, err }, 'Direct complaint handler error');
+      // Send fallback error message so user isn't left without a response
+      try {
+        await whatsapp.sendMessage(chatJid, resolveFallbackErrorMessage(phone, msg.content));
+      } catch { /* best-effort */ }
+    } finally {
+      await whatsapp.setTyping(chatJid, false);
+    }
+  })();
 }
 
 function ensureContainerSystemRunning(): void {
@@ -413,7 +545,7 @@ function ensureContainerSystemRunning(): void {
         '║  2. Run: container system start                               ║',
       );
       console.error(
-        '║  3. Restart NanoClaw                                          ║',
+        '║  3. Restart the bot                                            ║',
       );
       console.error(
         '╚════════════════════════════════════════════════════════════════╝\n',
@@ -422,7 +554,7 @@ function ensureContainerSystemRunning(): void {
     }
   }
 
-  // Kill and clean up orphaned NanoClaw containers from previous runs
+  // Kill and clean up orphaned bot containers from previous runs
   try {
     const output = execSync('container ls --format json', {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -451,6 +583,47 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Load tenant config, cache to DB, and inject template variables into CLAUDE.md
+  const tenantConfig = loadTenantConfig();
+  cacheTenantConfigToDb(getDb(), tenantConfig);
+  logger.info(
+    { mla: tenantConfig.mla_name, constituency: tenantConfig.constituency },
+    'Tenant config loaded and cached to DB',
+  );
+
+  // Process CLAUDE.md template variables for the complaint group.
+  // Write the injected version to data/runtime/ so the source template stays intact.
+  const complaintGroupDir = path.join(process.cwd(), 'groups', 'complaint');
+  const runtimeGroupDir = path.join(DATA_DIR, 'runtime', 'complaint');
+  if (fs.existsSync(complaintGroupDir)) {
+    fs.mkdirSync(runtimeGroupDir, { recursive: true });
+    // Copy all files from source group dir to runtime dir
+    for (const file of fs.readdirSync(complaintGroupDir)) {
+      const srcFile = path.join(complaintGroupDir, file);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      let content = fs.readFileSync(srcFile, 'utf-8');
+      if (file === 'CLAUDE.md') {
+        content = injectTemplateVariables(content, tenantConfig);
+      }
+      fs.writeFileSync(path.join(runtimeGroupDir, file), content);
+    }
+    // Also create logs dir in runtime
+    fs.mkdirSync(path.join(runtimeGroupDir, 'logs'), { recursive: true });
+    logger.info('Injected tenant config into runtime complaint CLAUDE.md');
+  }
+
+  // Auto-register the virtual complaint group for 1:1 message routing
+  if (!registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]) {
+    registerGroup(VIRTUAL_COMPLAINT_GROUP_JID, {
+      name: 'Complaint',
+      folder: 'complaint',
+      trigger: '',
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+    });
+    logger.info('Registered virtual complaint group for 1:1 message routing');
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -463,8 +636,16 @@ async function main(): Promise<void> {
 
   // Create WhatsApp channel
   whatsapp = new WhatsAppChannel({
-    onMessage: (chatJid, msg) => storeMessage(msg),
-    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
+    onMessage: (chatJid, msg) => {
+      storeMessage(msg);
+      // Skip bot's own outgoing messages — WhatsApp echoes them back via messages.upsert
+      if (msg.is_from_me) return;
+      // For 1:1 chats, use the direct in-process handler (no container)
+      if (isIndividualChat(chatJid) && registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]) {
+        handleComplaintDirect(chatJid, msg);
+      }
+    },
+    onChatMetadata: (chatJid, timestamp, name) => storeChatMetadata(chatJid, timestamp, name),
     registeredGroups: () => registeredGroups,
   });
 
@@ -502,7 +683,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClaw');
+    logger.error({ err }, 'Failed to start bot');
     process.exit(1);
   });
 }

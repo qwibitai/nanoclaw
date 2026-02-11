@@ -1,10 +1,10 @@
-# NanoClaw
+# Constituency Bot
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in Apple Container (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that connects to WhatsApp. Group chats use containerized agents (Apple Container), while 1:1 complaint chats use the in-process Agent SDK path in `src/complaint-handler.ts`.
 
 ## Key Files
 
@@ -54,4 +54,4 @@ container builder stop && container builder rm && container builder start
 ./container/build.sh
 ```
 
-Always verify after rebuild: `container run -i --rm --entrypoint wc nanoclaw-agent:latest -l /app/src/index.ts`
+Always verify after rebuild: `container run -i --rm --entrypoint wc constituency-bot-agent:latest -l /app/src/index.ts`

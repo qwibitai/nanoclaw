@@ -20,6 +20,34 @@ import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../t
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/** Well-known JID for the virtual complaint group that all 1:1 messages route to. */
+export const VIRTUAL_COMPLAINT_GROUP_JID = 'complaint@virtual';
+
+/** Returns true if the JID represents an individual (1:1) chat.
+ * Matches both phone JIDs (@s.whatsapp.net) and LID JIDs (@lid).
+ * LID (Linked Device ID) is WhatsApp's newer addressing scheme — messages from
+ * contacts not yet in the phone's address book often arrive with @lid JIDs.
+ */
+export function isIndividualChat(jid: string): boolean {
+  return jid.endsWith('@s.whatsapp.net') || jid.endsWith('@lid');
+}
+
+/** Returns true if the JID represents a group chat. */
+export function isGroupChat(jid: string): boolean {
+  return jid.endsWith('@g.us');
+}
+
+/** Extracts the phone number from an individual JID, or null if not an individual JID.
+ * For @lid JIDs, returns the LID user part (not a phone number, but unique per contact).
+ * The LID part strips the device suffix (e.g., "186410254491803:0" → "186410254491803").
+ */
+export function extractPhoneNumber(jid: string): string | null {
+  if (!isIndividualChat(jid)) return null;
+  const user = jid.split('@')[0];
+  // Strip device suffix (e.g., "918600822444:12" → "918600822444")
+  return user.split(':')[0];
+}
+
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -32,6 +60,7 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  /** Maps LID user part → phone JID (e.g., "186410254491803" → "918600822444@s.whatsapp.net") */
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -41,6 +70,14 @@ export class WhatsAppChannel implements Channel {
 
   constructor(opts: WhatsAppChannelOpts) {
     this.opts = opts;
+  }
+
+  /** Register a LID-to-phone mapping discovered from Baileys events or auth state. */
+  addLidMapping(lidUser: string, phoneJid: string): void {
+    if (lidUser && phoneJid && !this.lidToPhoneMap[lidUser]) {
+      this.lidToPhoneMap[lidUser] = phoneJid;
+      logger.info({ lidUser, phoneJid }, 'New LID-to-phone mapping registered');
+    }
   }
 
   async connect(): Promise<void> {
@@ -62,7 +99,7 @@ export class WhatsAppChannel implements Channel {
       },
       printQRInTerminal: false,
       logger,
-      browser: ['NanoClaw', 'Chrome', '1.0.0'],
+      browser: ['ConstituencyBot', 'Chrome', '1.0.0'],
     });
 
     this.sock.ev.on('connection.update', (update) => {
@@ -73,7 +110,7 @@ export class WhatsAppChannel implements Channel {
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
         exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          `osascript -e 'display notification "${msg}" with title "ConstituencyBot" sound name "Basso"'`,
         );
         setTimeout(() => process.exit(1), 1000);
       }
@@ -141,11 +178,44 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('creds.update', saveCreds);
 
+    // Capture LID-to-phone mappings from contact events.
+    // When Baileys processes device migration for a new contact, it emits contacts.update
+    // or contacts.upsert with the LID and phone number.
+    this.sock.ev.on('contacts.update', (updates) => {
+      for (const contact of updates) {
+        if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+          const lidUser = contact.lid.split('@')[0].split(':')[0];
+          this.addLidMapping(lidUser, contact.id);
+        }
+      }
+    });
+    this.sock.ev.on('contacts.upsert', (contacts) => {
+      for (const contact of contacts) {
+        if ((contact as any).lid && contact.id?.endsWith('@s.whatsapp.net')) {
+          const lidUser = (contact as any).lid.split('@')[0].split(':')[0];
+          this.addLidMapping(lidUser, contact.id);
+        }
+      }
+    });
+
     this.sock.ev.on('messages.upsert', ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
+
+        // Debug: log ALL incoming messages so we can diagnose delivery issues
+        logger.debug(
+          {
+            rawJid,
+            fromMe: msg.key.fromMe,
+            pushName: msg.pushName,
+            hasConversation: !!msg.message?.conversation,
+            hasExtended: !!msg.message?.extendedTextMessage,
+            messageType: Object.keys(msg.message || {}).join(','),
+          },
+          'WhatsApp message received',
+        );
 
         // Translate LID JID to phone JID if applicable
         const chatJid = this.translateJid(rawJid);
@@ -154,18 +224,39 @@ export class WhatsAppChannel implements Channel {
           Number(msg.messageTimestamp) * 1000,
         ).toISOString();
 
-        // Always notify about chat metadata for group discovery
-        this.opts.onChatMetadata(chatJid, timestamp);
+        // For 1:1 chats, store metadata with push name for user identification
+        if (isIndividualChat(chatJid)) {
+          this.opts.onChatMetadata(chatJid, timestamp, msg.pushName || undefined);
+        } else {
+          // Group or other chat — notify without name (group names come from syncGroupMetadata)
+          this.opts.onChatMetadata(chatJid, timestamp);
+        }
 
-        // Only deliver full message for registered groups
+        // Determine which registered group to route this message to
         const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
+        let routeJid = chatJid;
+
+        // 1:1 messages route to the virtual complaint group
+        if (isIndividualChat(chatJid)) {
+          routeJid = VIRTUAL_COMPLAINT_GROUP_JID;
+        }
+
+        // Deliver full message if the route target is a registered group
+        if (!groups[routeJid]) {
+          logger.debug(
+            { chatJid, routeJid, registeredJids: Object.keys(groups) },
+            'Message from unregistered route, skipping',
+          );
+        }
+        if (groups[routeJid]) {
           const content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+          // For 1:1 chats: sender is the JID itself (no participant); name from pushName
+          // For groups: sender is the participant
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
@@ -256,6 +347,14 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
+  /**
+   * Translate a @lid JID to a @s.whatsapp.net phone JID if possible.
+   * LID (Linked Device ID) is WhatsApp's newer addressing scheme. Messages from
+   * contacts not in the phone's address book often arrive with @lid JIDs.
+   *
+   * Falls back to the original JID if no mapping is found (the JID is still
+   * routable since isIndividualChat now accepts @lid).
+   */
   private translateJid(jid: string): string {
     if (!jid.endsWith('@lid')) return jid;
     const lidUser = jid.split('@')[0].split(':')[0];
@@ -264,6 +363,42 @@ export class WhatsAppChannel implements Channel {
       logger.debug({ lidJid: jid, phoneJid }, 'Translated LID to phone JID');
       return phoneJid;
     }
+
+    // Try to resolve by scanning auth state for matching sessions.
+    // Baileys stores signal sessions keyed by JID — if there's a phone JID session
+    // that was migrated from this LID, the auth state directory will have both.
+    try {
+      const authDir = path.join(STORE_DIR, 'auth');
+      if (fs.existsSync(authDir)) {
+        const files = fs.readdirSync(authDir);
+        // Look for a session file that maps to this LID
+        // Baileys v7 stores: pre-key-PHONE.json and pre-key-LID.json etc.
+        // Look for any file containing the LID user to find the paired phone
+        for (const file of files) {
+          if (file.includes(lidUser) && file.endsWith('.json')) {
+            // Found a file for this LID — now check for phone-based sessions
+            // by looking at the sender-key-memory or session files
+            const prefix = file.split('-')[0]; // e.g., "session", "pre-key"
+            const phoneSessions = files.filter(
+              (f) => f.startsWith(prefix) && f.endsWith('.json') && !f.includes(lidUser) && !f.includes('@lid')
+            );
+            // This heuristic is imperfect; just log for now
+            logger.debug(
+              { lidUser, lidJid: jid, authFiles: phoneSessions.length },
+              'LID JID not in map, checked auth state',
+            );
+            break;
+          }
+        }
+      }
+    } catch {
+      // Auth state scan failed, continue with original JID
+    }
+
+    logger.info(
+      { lidJid: jid, lidUser },
+      'Could not translate LID to phone JID — using LID as individual chat',
+    );
     return jid;
   }
 

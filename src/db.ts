@@ -7,6 +7,41 @@ import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.
 
 let db: Database.Database;
 
+/**
+ * Run SQL migration files from src/migrations/ directory.
+ * Each migration uses IF NOT EXISTS so it is safe to run multiple times.
+ */
+export function runMigrations(database: Database.Database): void {
+  const migrationsDir = path.join(path.dirname(new URL(import.meta.url).pathname), 'migrations');
+  if (!fs.existsSync(migrationsDir)) return;
+
+  // Track applied migrations to avoid re-running ALTER TABLE statements
+  database.exec('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)');
+
+  const files = fs.readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+
+  for (const file of files) {
+    const applied = database.prepare('SELECT 1 FROM _migrations WHERE name = ?').get(file);
+    if (applied) continue;
+
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+    try {
+      database.exec(sql);
+    } catch (err: any) {
+      // Tolerate "duplicate column" errors — column already exists from a previous run
+      // whose _migrations record was lost (e.g., DB flush without schema reset).
+      if (err?.code === 'SQLITE_ERROR' && /duplicate column/i.test(err.message)) {
+        // Column already exists; migration is effectively applied
+      } else {
+        throw err;
+      }
+    }
+    database.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(file, new Date().toISOString());
+  }
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -90,6 +125,7 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  runMigrations(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -99,6 +135,16 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+}
+
+/** Returns the active database instance. Must call initDatabase() first. */
+export function getDb(): Database.Database {
+  return db;
+}
+
+/** @internal - for tests only. Returns the current database instance. */
+export function _getTestDatabase(): Database.Database {
+  return db;
 }
 
 /**
@@ -448,6 +494,31 @@ export function getAllSessions(): Record<string, string> {
     result[row.group_folder] = row.session_id;
   }
   return result;
+}
+
+// --- Complaint session accessors ---
+
+/** Get Agent SDK session ID for a complaint user (keyed by phone). */
+export function getComplaintSession(phone: string): string | undefined {
+  const row = db
+    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
+    .get(`complaint-direct-${phone}`) as { session_id: string } | undefined;
+  return row?.session_id;
+}
+
+/** Save Agent SDK session ID for a complaint user. */
+export function setComplaintSession(phone: string, sessionId: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
+  ).run(`complaint-direct-${phone}`, sessionId);
+}
+
+/** Check if a user is blocked. Returns false for unknown users. */
+export function isUserBlocked(phone: string): boolean {
+  const row = db
+    .prepare('SELECT is_blocked FROM users WHERE phone = ?')
+    .get(phone) as { is_blocked: number } | undefined;
+  return row?.is_blocked === 1;
 }
 
 // --- Registered group accessors ---

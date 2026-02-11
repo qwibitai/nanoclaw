@@ -1,15 +1,15 @@
 #!/bin/bash
-# Build the NanoClaw agent container image
+# Build the constituency-bot-agent container image
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-IMAGE_NAME="nanoclaw-agent"
+IMAGE_NAME="constituency-bot-agent"
 TAG="${1:-latest}"
 
-echo "Building NanoClaw agent container image..."
+echo "Building constituency-bot-agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
 # Build with Apple Container
