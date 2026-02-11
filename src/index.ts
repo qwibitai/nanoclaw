@@ -191,6 +191,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const channel = findChannel(channels, chatJid);
   if (channel?.setTyping) await channel.setTyping(chatJid, true);
   let hadError = false;
+  let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -201,7 +202,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text && channel) {
         const formatted = formatOutbound(channel, text);
-        if (formatted) await channel.sendMessage(chatJid, formatted);
+        if (formatted) {
+          await channel.sendMessage(chatJid, formatted);
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -216,6 +220,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    // If we already sent output to the user, don't roll back the cursor —
+    // the user got their response and re-processing would send duplicates.
+    if (outputSentToUser) {
+      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      return true;
+    }
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
