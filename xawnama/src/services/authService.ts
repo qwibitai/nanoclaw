@@ -9,6 +9,20 @@ import { UserProfile } from '../types';
 let currentUser: UserProfile | null = null;
 const users: Map<string, { email: string; password: string; profile: UserProfile }> = new Map();
 
+// Seed a default demo account so login works out of the box
+users.set('demo@xawnama.com', {
+  email: 'demo@xawnama.com',
+  password: 'demo1234',
+  profile: {
+    id: 'user_default_demo',
+    fullName: 'بەکارهێنەری تاقیکردنەوە',
+    dateOfBirth: { day: 1, month: 1, year: 2000 },
+    gender: 'male',
+    maritalStatus: 'single',
+    createdAt: Date.now(),
+  },
+});
+
 function generateId(): string {
   return `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }

@@ -46,7 +46,7 @@ const MARITAL_OPTIONS: { value: MaritalStatus; label: string }[] = [
 
 export default function AuthScreen() {
   const { signUp, signIn, loading } = useAuth();
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>('signup');
   const [error, setError] = useState('');
 
   // Login fields
