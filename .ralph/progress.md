@@ -141,3 +141,15 @@
   - crates/microclaw-core/Cargo.toml updated (regex)
 - Notes:
   - Ported createTriggerPattern and requiresTrigger gating from NanoClaw
+
+## 2026-02-12T23:52:00Z S14 Store schema parity
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-store -> fail (schema_parity tests)
+  - cargo test -p microclaw-store -> pass
+- Key diffs:
+  - crates/microclaw-store/src/lib.rs updated
+  - crates/microclaw-store/migrations/0001_init.sql updated
+  - crates/microclaw-store/tests/schema_parity.rs added
+- Notes:
+  - Added NanoClaw table parity and context_mode column
