@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:41:22Z",
+    "updatedAt": "2026-02-12T23:49:06Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -189,6 +189,22 @@
       "dependencies": ["S11"],
       "risks": ["None"],
       "notes": "Housekeeping after Rust workspace expansion"
+    },
+    {
+      "id": "S13",
+      "title": "Core routing + trigger policy",
+      "intent": "Implement trigger pattern creation and trigger gating logic in microclaw-core",
+      "acceptance": [
+        "cargo test -p microclaw-core passes",
+        "Trigger pattern and gating tests mirror NanoClaw behavior"
+      ],
+      "gates": ["cargo test -p microclaw-core"],
+      "status": "done",
+      "startedAt": "2026-02-12T23:47:48Z",
+      "completedAt": "2026-02-12T23:49:06Z",
+      "dependencies": ["S12"],
+      "risks": ["Trigger semantics must match NanoClaw formatting tests"],
+      "notes": "Port createTriggerPattern + requiresTrigger gating"
     }
   ]
 }

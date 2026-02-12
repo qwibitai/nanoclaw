@@ -129,3 +129,15 @@
   - .gitignore now ignores target/
 - Notes:
   - Keeps worktree clean after Rust builds
+
+## 2026-02-12T23:49:06Z S13 Core routing + trigger policy
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-core -> fail (missing trigger APIs)
+  - cargo test -p microclaw-core -> pass
+- Key diffs:
+  - crates/microclaw-core/src/lib.rs updated
+  - crates/microclaw-core/tests/trigger_policy.rs added
+  - crates/microclaw-core/Cargo.toml updated (regex)
+- Notes:
+  - Ported createTriggerPattern and requiresTrigger gating from NanoClaw
