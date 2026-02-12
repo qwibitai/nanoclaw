@@ -115,6 +115,19 @@ Skills we'd love to see:
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
+### Container Backend Selection
+
+NanoClaw can run agent containers via either Apple Container or Docker.
+
+- Default: Apple Container
+- To use Docker: set `CONTAINER_BACKEND=docker`
+
+**Note:** the repo's container image build script (`container/build.sh`) uses Apple Container (`container build`). For Docker, build the image with:
+
+```bash
+docker build -t nanoclaw-agent:latest container
+```
+
 ## Architecture
 
 ```
