@@ -309,13 +309,17 @@ server.tool(
   'register_group',
   `Register a new group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id to enable server-level shared context.`,
+Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat"). For Discord channels, provide the discord_guild_id to enable server-level shared context.
+
+Backend options: "apple-container" (local VM, default), "sprites" (cloud VM on Fly.io — persistent, always-on).`,
   {
     jid: z.string().describe('The group JID (e.g., "120363336345536173@g.us" for WhatsApp, "dc:123456" for Discord)'),
     name: z.string().describe('Display name for the group'),
     folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
     discord_guild_id: z.string().optional().describe('Discord guild/server ID — enables server-level shared context across channels'),
+    backend: z.enum(['apple-container', 'docker', 'sprites']).optional().describe('Backend to run this agent on (default: apple-container)'),
+    description: z.string().optional().describe('What this agent does (shown in agent registry, helps other agents route requests)'),
   },
   async (args) => {
     if (!isMain) {
@@ -332,30 +336,44 @@ Use available_groups.json to find the JID for a group. The folder name should be
       folder: args.folder,
       trigger: args.trigger,
       discord_guild_id: args.discord_guild_id,
+      backend: args.backend,
+      group_description: args.description,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(TASKS_DIR, data);
 
+    const backendInfo = args.backend ? ` (backend: ${args.backend})` : '';
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [{ type: 'text' as const, text: `Group "${args.name}" registered${backendInfo}. It will start receiving messages immediately.` }],
     };
   },
 );
 
 server.tool(
   'share_request',
-  'Request context or information from the admin. Use this when you need information that you don\'t have access to — for example, files from another project, context from a different group, credentials, or any data outside your workspace. The request is sent to the admin who can then share the relevant context with you.',
+  `Request context from another agent or the admin. Use this when you need information from another project, context from a different group, or data outside your workspace.
+
+If you know which agent has the context (check /workspace/ipc/agent_registry.json), specify target_agent to route directly to them.
+You can also share files to another agent or request files from them.
+
+The request is sent to the target agent (or admin if no target specified) who can then share the relevant context.`,
   {
     description: z.string().describe('What context or information you need and why'),
+    target_agent: z.string().optional().describe('Agent ID to request from (e.g., "main", "ditto-discord"). Check agent_registry.json for available agents.'),
     scope: z.enum(['channel', 'server', 'auto']).default('auto')
       .describe('Where the shared context should go: channel (just this channel), server (all channels in this Discord server), or auto (let admin decide)'),
+    files: z.array(z.string()).optional().describe('Paths to SHARE (send TO target agent). Relative to /workspace/group/.'),
+    request_files: z.array(z.string()).optional().describe('Paths to REQUEST (ask target agent to send back). Relative to their /workspace/group/.'),
   },
   async (args) => {
     writeIpcFile(TASKS_DIR, {
       type: 'share_request',
       description: args.description,
+      target_agent: args.target_agent,
       scope: args.scope,
+      files: args.files,
+      request_files: args.request_files,
       sourceGroup: groupFolder,
       chatJid,
       serverFolder,
@@ -363,7 +381,11 @@ server.tool(
       timestamp: new Date().toISOString(),
     });
 
-    return { content: [{ type: 'text' as const, text: 'Context request sent to admin. They\'ll review it and share relevant information if approved.' }] };
+    const targetInfo = args.target_agent ? ` to agent "${args.target_agent}"` : ' to admin';
+    const filesInfo = args.files?.length ? ` Sharing ${args.files.length} file(s).` : '';
+    const requestInfo = args.request_files?.length ? ` Requesting ${args.request_files.length} file(s).` : '';
+
+    return { content: [{ type: 'text' as const, text: `Context request sent${targetInfo}.${filesInfo}${requestInfo} They'll review it and share relevant information if approved.` }] };
   },
 );
 

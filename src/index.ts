@@ -1,10 +1,8 @@
-import { $ } from 'bun';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  CONTAINER_IMAGE,
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
@@ -16,8 +14,12 @@ import {
 import { DiscordChannel } from './channels/discord.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
-  ContainerOutput,
-  runContainerAgent,
+  initializeBackends,
+  resolveBackend,
+  shutdownBackends,
+} from './backends/index.js';
+import type { ContainerOutput } from './backends/types.js';
+import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -394,6 +396,9 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Update agent registry for all groups
+  buildAgentRegistry();
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -406,7 +411,8 @@ async function runAgent(
     : undefined;
 
   try {
-    const output = await runContainerAgent(
+    const backend = resolveBackend(group);
+    const output = await backend.runAgent(
       group,
       {
         prompt,
@@ -417,7 +423,7 @@ async function runAgent(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend),
       wrappedOnOutput,
     );
 
@@ -544,96 +550,38 @@ function recoverPendingMessages(): void {
   }
 }
 
-async function ensureContainerSystemRunning(): Promise<void> {
-  // Always cycle the Apple Container system on startup to flush stale state.
-  // After a Mac restart, the system reports OK but stale containers prevent
-  // new ones from starting. Cycling is safe since NanoClaw owns all nanoclaw-* containers.
-  logger.info('Restarting Apple Container system (flushing stale state)...');
+/**
+ * Build agent registry and write it to all groups' IPC dirs.
+ * Every agent can discover every other agent's name, purpose, backend, and dev URL.
+ */
+function buildAgentRegistry(): void {
+  const registry = Object.entries(registeredGroups).map(([jid, group]) => ({
+    id: group.folder,
+    name: group.name,
+    description: group.description || '',
+    backend: group.backend || 'apple-container',
+    devUrl: group.devUrl,
+    isMain: group.folder === MAIN_GROUP_FOLDER,
+    trigger: group.trigger,
+  }));
 
-  // Kill any lingering nanoclaw container processes from a previous run
-  await $`pkill -f 'container run.*nanoclaw-'`.quiet().nothrow();
+  const registryJson = JSON.stringify(registry, null, 2);
 
-  // Stop the container system to flush all stale state
-  await $`container system stop`.quiet().nothrow();
-
-  // Wait for launchd services to fully tear down before restarting
-  await Bun.sleep(3000);
-
-  // Start fresh
-  const start = await $`container system start`.quiet().nothrow();
-  if (start.exitCode !== 0) {
-    logger.error({ stderr: start.stderr.toString() }, 'Failed to start Apple Container system');
-    console.error(
-      '\n╔════════════════════════════════════════════════════════════════╗',
-    );
-    console.error(
-      '║  FATAL: Apple Container system failed to start                 ║',
-    );
-    console.error(
-      '║                                                                ║',
-    );
-    console.error(
-      '║  Agents cannot run without Apple Container. To fix:           ║',
-    );
-    console.error(
-      '║  1. Install from: https://github.com/apple/container/releases ║',
-    );
-    console.error(
-      '║  2. Run: container system start                               ║',
-    );
-    console.error(
-      '║  3. Restart NanoClaw                                          ║',
-    );
-    console.error(
-      '╚════════════════════════════════════════════════════════════════╝\n',
-    );
-    throw new Error('Apple Container system is required but failed to start');
-  }
-  logger.info('Apple Container system started');
-
-  // Verify containers actually work (system can report OK but be broken)
-  const probe = await $`container run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
-  if (probe.exitCode !== 0 || probe.text().trim() !== 'ok') {
-    logger.warn({ exitCode: probe.exitCode, output: probe.text().trim() }, 'Container probe failed after system start, retrying cycle...');
-    await $`container system stop`.quiet().nothrow();
-    await Bun.sleep(5000);
-    const retry = await $`container system start`.quiet().nothrow();
-    if (retry.exitCode !== 0) {
-      throw new Error('Apple Container system failed to start on retry');
-    }
-    const probe2 = await $`container run --rm --entrypoint /bin/echo ${CONTAINER_IMAGE} ok`.quiet().nothrow();
-    if (probe2.exitCode !== 0 || probe2.text().trim() !== 'ok') {
-      logger.error('Container probe still failing after retry — containers may not work');
-    } else {
-      logger.info('Container probe succeeded on retry');
-    }
-  } else {
-    logger.info('Container probe passed');
-  }
-
-  // Safety net: stop any orphaned containers that survived the system cycle
-  try {
-    const lsResult = await $`container ls --format json`.quiet();
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(lsResult.text() || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
-    for (const name of orphans) {
-      await $`container stop ${name}`.quiet().nothrow();
-    }
-    if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
-    }
-  } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
+  // Write to ALL groups' IPC dirs (every agent can see the full registry)
+  for (const group of Object.values(registeredGroups)) {
+    const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+    fs.mkdirSync(groupIpcDir, { recursive: true });
+    fs.writeFileSync(path.join(groupIpcDir, 'agent_registry.json'), registryJson);
   }
 }
 
 async function main(): Promise<void> {
-  await ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Initialize all backends needed by registered groups
+  await initializeBackends(registeredGroups);
 
   // Expire stale sessions on startup to prevent unbounded context growth
   const expired = expireStaleSessions(SESSION_MAX_AGE);
@@ -648,6 +596,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
+    await shutdownBackends();
     for (const ch of channels) {
       await ch.disconnect();
     }

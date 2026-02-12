@@ -46,6 +46,8 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
+export type BackendType = 'apple-container' | 'docker' | 'sprites';
+
 export interface RegisteredGroup {
   name: string;
   folder: string;
@@ -56,6 +58,9 @@ export interface RegisteredGroup {
   heartbeat?: HeartbeatConfig;
   discordGuildId?: string;  // Discord guild/server ID (for server-level context)
   serverFolder?: string;    // e.g., "servers/omniaura-discord" (shared across channels in same server)
+  backend?: BackendType;     // Which backend runs this group's agent (default: apple-container)
+  description?: string;      // What this agent does (for agent registry)
+  devUrl?: string;           // Sprites dev URL (auto-populated for sprites backend)
 }
 
 export interface NewMessage {

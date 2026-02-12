@@ -11,9 +11,13 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, setRegisteredGroup, updateTask } from './db.js';
+import { transferFiles } from './file-transfer.js';
 import { logger } from './logger.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
-import { HeartbeatConfig, RegisteredGroup } from './types.js';
+import { BackendType, HeartbeatConfig, RegisteredGroup } from './types.js';
+import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
+import { SpritesBackend } from './backends/sprites-backend.js';
+import { getBackend } from './backends/index.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<string | void>;
@@ -190,6 +194,35 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
   processIpcFiles();
   logger.info('IPC watcher started (per-group namespaces)');
+
+  // Also start Sprites IPC poller for cloud-backed groups
+  startSpritesIpcPoller({
+    spritesBackend: (() => {
+      try {
+        return getBackend('sprites') as SpritesBackend;
+      } catch {
+        return new SpritesBackend();
+      }
+    })(),
+    registeredGroups: deps.registeredGroups,
+    processMessage: async (sourceGroup, data) => {
+      const registeredGroups = deps.registeredGroups();
+      const isMain = sourceGroup === MAIN_GROUP_FOLDER;
+      if (data.type === 'message' && data.chatJid && data.text) {
+        const targetGroup = registeredGroups[data.chatJid];
+        if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+          await deps.sendMessage(data.chatJid, data.text);
+          if (isMain && targetGroup && targetGroup.folder !== sourceGroup) {
+            deps.notifyGroup(data.chatJid, data.text);
+          }
+          logger.info({ chatJid: data.chatJid, sourceGroup }, 'Sprites IPC message sent');
+        }
+      }
+    },
+    processTask: async (sourceGroup, isMain, data) => {
+      await processTaskIpc(data, sourceGroup, isMain, deps);
+    },
+  });
 }
 
 export async function processTaskIpc(
@@ -221,6 +254,12 @@ export async function processTaskIpc(
     scope?: string;
     serverFolder?: string;
     discordGuildId?: string;
+    target_agent?: string;
+    files?: string[];
+    request_files?: string[];
+    // For register_group: backend config
+    backend?: BackendType;
+    group_description?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -415,13 +454,13 @@ export async function processTaskIpc(
           trigger: data.trigger,
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
+          backend: data.backend,
+          description: data.group_description,
         };
 
         // If a Discord guild ID is provided, set it and compute serverFolder
         if (data.discord_guild_id) {
           groupToRegister.discordGuildId = data.discord_guild_id;
-          // Derive server folder from guild ID — the backfill on next startup
-          // will resolve the guild name for a nicer slug
           groupToRegister.serverFolder = `servers/${data.discord_guild_id}`;
         }
 
@@ -487,16 +526,6 @@ export async function processTaskIpc(
         break;
       }
 
-      // Find the main group's JID to send the request to
-      const mainJid = Object.entries(registeredGroups).find(
-        ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-      )?.[0];
-
-      if (!mainJid) {
-        logger.warn('share_request: could not find main group JID');
-        break;
-      }
-
       // Find the source group's display name and JID
       const sourceGroupEntry = Object.entries(registeredGroups).find(
         ([, g]) => g.folder === sourceGroup,
@@ -504,7 +533,64 @@ export async function processTaskIpc(
       const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
       const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
 
-      // Build path guidance so the admin knows exactly where to write context
+      // If files are specified with a target_agent, do the file transfer
+      if (data.target_agent && data.files && data.files.length > 0) {
+        const targetGroupEntry = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === data.target_agent,
+        );
+        if (targetGroupEntry && sourceGroupEntry) {
+          const result = await transferFiles({
+            sourceGroup: sourceGroupEntry[1],
+            targetGroup: targetGroupEntry[1],
+            files: data.files,
+            direction: 'push',
+          });
+          logger.info(
+            { sourceGroup, targetAgent: data.target_agent, transferred: result.transferred, errors: result.errors },
+            'Share request file transfer completed',
+          );
+        }
+      }
+
+      // If request_files are specified, pull files from target to source
+      if (data.target_agent && data.request_files && data.request_files.length > 0) {
+        const targetGroupEntry = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === data.target_agent,
+        );
+        if (targetGroupEntry && sourceGroupEntry) {
+          const result = await transferFiles({
+            sourceGroup: targetGroupEntry[1],
+            targetGroup: sourceGroupEntry[1],
+            files: data.request_files,
+            direction: 'push',
+          });
+          logger.info(
+            { sourceGroup, targetAgent: data.target_agent, transferred: result.transferred },
+            'Share request file pull completed',
+          );
+        }
+      }
+
+      // Determine target JID: specific agent or main
+      let targetJid: string | undefined;
+      if (data.target_agent) {
+        targetJid = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === data.target_agent,
+        )?.[0];
+      }
+      if (!targetJid) {
+        // Fall back to main group
+        targetJid = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+        )?.[0];
+      }
+
+      if (!targetJid) {
+        logger.warn('share_request: could not find target group JID');
+        break;
+      }
+
+      // Build path guidance
       const serverFolder = data.serverFolder;
       const scope = data.scope || 'auto';
       let pathGuidance: string;
@@ -519,8 +605,12 @@ export async function processTaskIpc(
         pathGuidance = `\n\n*Write context to:* \`groups/${sourceGroup}/CLAUDE.md\``;
       }
 
-      const message = `*Context Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${pathGuidance}\n\n_React 👍 to approve, or reply manually._`;
-      const sentId = await deps.sendMessage(mainJid, message);
+      const filesInfo = data.files?.length ? `\n\n*Files shared:* ${data.files.join(', ')}` : '';
+      const requestFilesInfo = data.request_files?.length ? `\n\n*Files requested:* ${data.request_files.join(', ')}` : '';
+      const targetInfo = data.target_agent ? ` (targeted to ${data.target_agent})` : '';
+
+      const message = `*Context Request* from _${sourceName}_ (${sourceJid})${targetInfo}:\n\n${data.description}${pathGuidance}${filesInfo}${requestFilesInfo}\n\n_React 👍 to approve, or reply manually._`;
+      const sentId = await deps.sendMessage(targetJid, message);
 
       // Track for reaction-based approval
       if (sentId) {
@@ -535,8 +625,8 @@ export async function processTaskIpc(
       }
 
       logger.info(
-        { sourceGroup, sourceJid, mainJid, scope, serverFolder, trackedMessageId: sentId },
-        'Share request forwarded to main group',
+        { sourceGroup, sourceJid, targetJid, scope, serverFolder, targetAgent: data.target_agent, trackedMessageId: sentId },
+        'Share request forwarded',
       );
       break;
     }

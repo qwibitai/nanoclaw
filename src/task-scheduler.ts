@@ -9,7 +9,9 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { resolveBackend } from './backends/index.js';
+import type { ContainerOutput } from './backends/types.js';
+import { writeTasksSnapshot } from './container-runner.js';
 import {
   createTask,
   deleteTask,
@@ -253,7 +255,8 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
+    const backend = resolveBackend(group);
+    const output = await backend.runAgent(
       group,
       {
         prompt,

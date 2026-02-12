@@ -68,3 +68,8 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Sprites cloud backend configuration
+export const SPRITES_TOKEN = process.env.SPRITES_TOKEN || '';
+export const SPRITES_REGION = process.env.SPRITES_REGION || '';
+export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;

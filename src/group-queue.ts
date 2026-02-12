@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import type { AgentBackend } from './backends/types.js';
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 import { ContainerProcess } from './types.js';
@@ -21,6 +22,7 @@ interface GroupState {
   process: ContainerProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  backend: AgentBackend | null;
   retryCount: number;
 }
 
@@ -42,6 +44,7 @@ export class GroupQueue {
         process: null,
         containerName: null,
         groupFolder: null,
+        backend: null,
         retryCount: 0,
       };
       this.groups.set(groupJid, state);
@@ -112,21 +115,29 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ContainerProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(groupJid: string, proc: ContainerProcess, containerName: string, groupFolder?: string, backend?: AgentBackend): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (backend) state.backend = backend;
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
+   * Send a follow-up message to the active container via IPC.
+   * Delegates to the backend if one is registered (supports local + cloud).
    * Returns true if the message was written, false if no active container.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return false;
 
+    // Delegate to backend if available (handles both local and cloud)
+    if (state.backend) {
+      return state.backend.sendMessage(state.groupFolder, text);
+    }
+
+    // Fallback: direct local filesystem write
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
@@ -143,11 +154,19 @@ export class GroupQueue {
 
   /**
    * Signal the active container to wind down by writing a close sentinel.
+   * Delegates to the backend if one is registered.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
+    // Delegate to backend if available
+    if (state.backend) {
+      state.backend.closeStdin(state.groupFolder);
+      return;
+    }
+
+    // Fallback: direct local filesystem write
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
@@ -188,6 +207,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.backend = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -212,6 +232,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.backend = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
