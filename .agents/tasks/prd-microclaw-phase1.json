@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:29:39Z",
+    "updatedAt": "2026-02-12T23:30:54Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -73,9 +73,9 @@
       "intent": "Add microclaw-store with schema_version and in-memory store",
       "acceptance": ["cargo test -p microclaw-store passes"],
       "gates": ["cargo test -p microclaw-store"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-12T23:30:04Z",
+      "completedAt": "2026-02-12T23:30:54Z",
       "dependencies": ["S3"],
       "risks": ["Migration layout may change"],
       "notes": "Start with minimal schema_version"

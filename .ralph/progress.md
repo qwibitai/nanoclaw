@@ -23,3 +23,15 @@
   - crates/microclaw-config added
 - Notes:
   - Added HostConfig default for apple backend
+
+## 2026-02-12T23:30:54Z S4 Store schema + migrations
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-store -> fail (package not found)
+  - cargo test -p microclaw-store -> fail (Store missing)
+  - cargo test -p microclaw-store -> pass
+- Key diffs:
+  - Cargo.toml updated (workspace members)
+  - crates/microclaw-store added
+- Notes:
+  - Added schema_version table and Store open_in_memory

@@ -2,6 +2,7 @@
 members = [
   "crates/microclaw-core",
   "crates/microclaw-protocol",
-  "crates/microclaw-config"
+  "crates/microclaw-config",
+  "crates/microclaw-store"
 ]
 resolver = "2"
