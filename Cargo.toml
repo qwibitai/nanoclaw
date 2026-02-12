@@ -6,6 +6,7 @@ members = [
   "crates/microclaw-store",
   "crates/microclaw-queue",
   "crates/microclaw-scheduler",
-  "crates/microclaw-bus"
+  "crates/microclaw-bus",
+  "crates/microclaw-sandbox"
 ]
 resolver = "2"

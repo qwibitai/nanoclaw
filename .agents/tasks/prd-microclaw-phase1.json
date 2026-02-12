@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:34:52Z",
+    "updatedAt": "2026-02-12T23:35:58Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -125,9 +125,9 @@
       "intent": "Add microclaw-sandbox with Apple Container backend stub",
       "acceptance": ["cargo test -p microclaw-sandbox passes"],
       "gates": ["cargo test -p microclaw-sandbox"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-12T23:35:20Z",
+      "completedAt": "2026-02-12T23:35:58Z",
       "dependencies": ["S7"],
       "risks": ["Real exec not implemented"],
       "notes": "Interface only"

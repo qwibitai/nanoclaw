@@ -71,3 +71,15 @@
   - crates/microclaw-bus added
 - Notes:
   - Idempotency key uses device_id + Debug(message_id)
+
+## 2026-02-12T23:35:58Z S8 Sandbox apple backend stub
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-sandbox -> fail (package not found)
+  - cargo test -p microclaw-sandbox -> fail (AppleContainer missing)
+  - cargo test -p microclaw-sandbox -> pass
+- Key diffs:
+  - Cargo.toml updated (workspace members)
+  - crates/microclaw-sandbox added
+- Notes:
+  - Added ContainerBackend trait and AppleContainer stub
