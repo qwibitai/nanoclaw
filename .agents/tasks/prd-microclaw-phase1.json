@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:36:59Z",
+    "updatedAt": "2026-02-12T23:38:13Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -151,9 +151,9 @@
       "intent": "Add microclaw-connectors trait",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-12T23:37:27Z",
+      "completedAt": "2026-02-12T23:38:13Z",
       "dependencies": ["S9"],
       "risks": ["Trait shape may evolve"],
       "notes": "Minimal id only"
