@@ -49,6 +49,7 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  quotedText?: string;
 }
 
 export interface ScheduledTask {

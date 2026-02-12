@@ -282,23 +282,27 @@ export class WhatsAppChannel implements Channel {
         }
         if (groups[routeJid]) {
           // Audio message detection: route to onAudioMessage for 1:1 chats
+          // and for group audio replies (audio messages that quote another message)
           const audioMsg = msg.message?.audioMessage;
-          if (audioMsg && isIndividualChat(chatJid) && this.opts.onAudioMessage) {
-            const rawSender = msg.key.participant || msg.key.remoteJid || '';
-            const sender = this.translateJid(rawSender);
-            const senderName = msg.pushName || sender.split('@')[0];
+          if (audioMsg && this.opts.onAudioMessage) {
+            const isReply = !!audioMsg.contextInfo?.quotedMessage;
+            if (isIndividualChat(chatJid) || isReply) {
+              const rawSender = msg.key.participant || msg.key.remoteJid || '';
+              const sender = this.translateJid(rawSender);
+              const senderName = msg.pushName || sender.split('@')[0];
 
-            this.opts.onAudioMessage(chatJid, msg, {
-              messageId: msg.key.id || '',
-              senderJid: sender,
-              senderName,
-              timestamp,
-              fileLength: Number(audioMsg.fileLength || 0),
-              seconds: audioMsg.seconds || 0,
-              mimetype: audioMsg.mimetype || 'audio/ogg; codecs=opus',
-              ptt: audioMsg.ptt || false,
-            });
-            continue; // Don't process as text message
+              this.opts.onAudioMessage(chatJid, msg, {
+                messageId: msg.key.id || '',
+                senderJid: sender,
+                senderName,
+                timestamp,
+                fileLength: Number(audioMsg.fileLength || 0),
+                seconds: audioMsg.seconds || 0,
+                mimetype: audioMsg.mimetype || 'audio/ogg; codecs=opus',
+                ptt: audioMsg.ptt || false,
+              });
+              continue; // Don't process as text message
+            }
           }
 
           const content =
@@ -307,6 +311,19 @@ export class WhatsAppChannel implements Channel {
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // Extract quoted message text from reply context
+          // Check both extendedTextMessage and imageMessage/videoMessage contextInfo
+          const contextInfo =
+            msg.message?.extendedTextMessage?.contextInfo ||
+            msg.message?.imageMessage?.contextInfo ||
+            msg.message?.videoMessage?.contextInfo;
+          const quotedMsg = contextInfo?.quotedMessage;
+          const quotedText =
+            quotedMsg?.conversation ||
+            quotedMsg?.extendedTextMessage?.text ||
+            undefined;
+
           // For 1:1 chats: sender is the JID itself (no participant); name from pushName
           // For groups: sender is the participant (may be LID — translate to phone JID)
           const rawSender = msg.key.participant || msg.key.remoteJid || '';
@@ -321,6 +338,7 @@ export class WhatsAppChannel implements Channel {
             content,
             timestamp,
             is_from_me: msg.key.fromMe || false,
+            quotedText,
           });
         }
       }

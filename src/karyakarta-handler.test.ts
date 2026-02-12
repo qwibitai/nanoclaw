@@ -18,6 +18,7 @@ import { getValidationsForComplaint } from './area-db.js';
 import { eventBus } from './event-bus.js';
 import {
   handleKaryakartaCommand,
+  handleKaryakartaReply,
   initKaryakartaNotifications,
   type KaryakartaHandlerDeps,
 } from './karyakarta-handler.js';
@@ -544,5 +545,255 @@ describe('initKaryakartaNotifications', () => {
 
     await new Promise((r) => setTimeout(r, 50));
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// --- handleKaryakartaReply tests ---
+
+// Mock admin-reply module
+vi.mock('./admin-reply.js', () => ({
+  extractComplaintId: vi.fn(),
+  interpretReply: vi.fn(),
+}));
+
+import { extractComplaintId, interpretReply } from './admin-reply.js';
+import type { ReplyResult } from './admin-reply.js';
+
+const mockedExtractId = vi.mocked(extractComplaintId);
+const mockedInterpret = vi.mocked(interpretReply);
+
+describe('handleKaryakartaReply', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('approves complaint via natural language reply', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    const cid = seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: areaId,
+      id: 'RK-20260212-0050',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0050');
+    mockedInterpret.mockResolvedValue({
+      action: 'approve',
+      note: 'Genuine complaint',
+      confidence: 0.95,
+    });
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Approved, genuine complaint',
+      `New complaint pending validation\nID: RK-20260212-0050`,
+    );
+
+    expect(result).toContain('approved');
+
+    const complaint = db
+      .prepare('SELECT status FROM complaints WHERE id = ?')
+      .get(cid) as { status: string };
+    expect(complaint.status).toBe('validated');
+  });
+
+  it('rejects complaint via natural language reply', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    const cid = seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: areaId,
+      id: 'RK-20260212-0051',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0051');
+    mockedInterpret.mockResolvedValue({
+      action: 'reject',
+      rejectionReason: 'duplicate',
+      note: 'Same as previous complaint',
+      confidence: 0.9,
+    });
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'This is duplicate',
+      `ID: RK-20260212-0051`,
+    );
+
+    expect(result).toContain('rejected');
+
+    const complaint = db
+      .prepare('SELECT status FROM complaints WHERE id = ?')
+      .get(cid) as { status: string };
+    expect(complaint.status).toBe('rejected');
+  });
+
+  it('adds note via natural language reply', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: areaId,
+      id: 'RK-20260212-0052',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0052');
+    mockedInterpret.mockResolvedValue({
+      action: 'add_note',
+      note: 'Will check tomorrow',
+      confidence: 0.85,
+    });
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Will check tomorrow',
+      `ID: RK-20260212-0052`,
+    );
+
+    expect(result).toContain('RK-20260212-0052');
+  });
+
+  it('returns null when no complaint ID found', async () => {
+    mockedExtractId.mockReturnValue(null);
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Approved',
+      'Hello there',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when complaint not found', async () => {
+    mockedExtractId.mockReturnValue('RK-99999999-9999');
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Approved',
+      'ID: RK-99999999-9999',
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('rejects when complaint is not pending_validation', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'registered',
+      area_id: areaId,
+      id: 'RK-20260212-0053',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0053');
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Approved',
+      `ID: RK-20260212-0053`,
+    );
+
+    expect(result).toContain('pending_validation');
+  });
+
+  it('rejects when karyakarta not assigned to area', async () => {
+    const area1 = seedArea(db, { name: 'Shivaji Nagar' });
+    const area2 = seedArea(db, { name: 'Kothrud' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [area1]);
+    seedUser(db, CONSTITUENT_PHONE);
+    seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: area2,
+      id: 'RK-20260212-0054',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0054');
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Approved',
+      `ID: RK-20260212-0054`,
+    );
+
+    expect(result).toContain('area');
+  });
+
+  it('returns message for unrecognized intent', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: areaId,
+      id: 'RK-20260212-0055',
+    });
+
+    mockedExtractId.mockReturnValue('RK-20260212-0055');
+    mockedInterpret.mockResolvedValue({
+      action: 'unrecognized',
+      confidence: 0,
+    });
+
+    const result = await handleKaryakartaReply(
+      deps,
+      KARYAKARTA_PHONE,
+      'Good morning',
+      `ID: RK-20260212-0055`,
+    );
+
+    expect(result).toContain('approve');
+  });
+});
+
+// --- notification reply hints ---
+
+describe('karyakarta notification reply hints', () => {
+  it('notification includes reply hint', async () => {
+    const areaId = seedArea(db, { name: 'Shivaji Nagar' });
+    seedKaryakarta(db, KARYAKARTA_PHONE, [areaId]);
+    seedUser(db, CONSTITUENT_PHONE);
+    seedComplaint(db, {
+      phone: CONSTITUENT_PHONE,
+      status: 'pending_validation',
+      area_id: areaId,
+      id: 'RK-20260212-0060',
+      category: 'roads',
+    });
+
+    initKaryakartaNotifications(deps);
+
+    eventBus.emit('complaint:created', {
+      complaintId: 'RK-20260212-0060',
+      phone: CONSTITUENT_PHONE,
+      category: 'roads',
+      description: 'Pothole on main road',
+      language: 'mr',
+      status: 'pending_validation',
+    });
+
+    await vi.waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    const msg = sendMessage.mock.calls[0][1];
+    expect(msg).toContain('Reply to this message');
   });
 });

@@ -6,11 +6,13 @@
  */
 import type Database from 'better-sqlite3';
 
+import { extractComplaintId, interpretReply } from './admin-reply.js';
 import {
   getAreasForKaryakarta,
   getKaryakartasForArea,
   createValidation,
 } from './area-db.js';
+import { addComplaintNote } from './complaint-utils.js';
 import { eventBus, type ComplaintEvent } from './event-bus.js';
 import { logger } from './logger.js';
 import type { Complaint, RejectionReason } from './types.js';
@@ -30,6 +32,70 @@ const VALID_REJECTION_REASONS: RejectionReason[] = [
   'insufficient_info',
   'other',
 ];
+
+/**
+ * Handle a natural language reply to a karyakarta notification message.
+ * Returns response string, or null if the reply couldn't be matched to a complaint.
+ */
+export async function handleKaryakartaReply(
+  deps: KaryakartaHandlerDeps,
+  senderPhone: string,
+  replyText: string,
+  quotedText: string,
+): Promise<string | null> {
+  const complaintId = extractComplaintId(quotedText);
+  if (!complaintId) return null;
+
+  const { db } = deps;
+  const complaint = db
+    .prepare('SELECT * FROM complaints WHERE id = ?')
+    .get(complaintId) as Complaint | undefined;
+  if (!complaint) return null;
+
+  if (complaint.status !== 'pending_validation') {
+    return `Complaint ${complaintId} is in '${complaint.status}' status, not pending_validation. Only pending_validation complaints can be acted on.`;
+  }
+
+  // Verify karyakarta is assigned to complaint's area
+  const areas = getAreasForKaryakarta(db, senderPhone);
+  const areaIds = areas.map((a) => a.id);
+  if (!complaint.area_id || !areaIds.includes(complaint.area_id)) {
+    return `Complaint ${complaintId} is not in your assigned area.`;
+  }
+
+  const result = await interpretReply(
+    replyText,
+    complaint,
+    'karyakarta',
+    [],
+  );
+
+  switch (result.action) {
+    case 'approve':
+      return handleApprove(deps, senderPhone, `#approve ${complaintId}${result.note ? ': ' + result.note : ''}`);
+
+    case 'reject': {
+      const reason = result.rejectionReason ?? 'other';
+      const note = result.note ? `: ${result.note}` : '';
+      return handleReject(deps, senderPhone, `#reject ${complaintId} ${reason}${note}`);
+    }
+
+    case 'add_note': {
+      addComplaintNote(db, complaintId, result.note ?? replyText, senderPhone);
+      const lang = complaint.language || 'mr';
+      return lang === 'hi' ? `शिकायत ${complaintId} पर नोट जोड़ी गई.`
+        : lang === 'mr' ? `तक्रार ${complaintId} वर टीप जोडली.`
+        : `Note added to ${complaintId}.`;
+    }
+
+    default: {
+      const lang = complaint.language || 'mr';
+      return lang === 'hi' ? 'आपका जवाब समझ नहीं आया. "approve" या "reject" लिखकर जवाब दें.'
+        : lang === 'mr' ? 'तुमचा प्रतिसाद समजला नाही. "approve" किंवा "reject" लिहून पाठवा.'
+        : 'Could not understand your reply. Reply with "approve", "reject", or a clear action.';
+    }
+  }
+}
 
 /**
  * Handle a karyakarta command (#approve, #reject, #my-complaints).
@@ -295,7 +361,8 @@ export function initKaryakartaNotifications(deps: KaryakartaHandlerDeps): void {
       `Category: ${event.category ?? 'N/A'}`,
       `Description: ${event.description.slice(0, 100)}`,
       '',
-      'To validate:',
+      'Reply to this message to approve or reject.',
+      'Or use commands:',
       `#approve ${event.complaintId}: optional note`,
       `#reject ${event.complaintId} <reason_code>: optional note`,
     ].join('\n');

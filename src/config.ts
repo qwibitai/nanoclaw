@@ -88,6 +88,10 @@ export const RECONNECT_MAX_DELAY_MS = safeParseInt(
 // Complaint handler (in-process Agent SDK, no container)
 export const COMPLAINT_MODEL =
   process.env.COMPLAINT_MODEL || 'claude-sonnet-4-5-20250929';
+
+// Reply interpreter (lightweight Sonnet call for intent classification)
+export const REPLY_INTERPRETER_MODEL =
+  process.env.REPLY_INTERPRETER_MODEL || 'claude-sonnet-4-5-20250929';
 export const COMPLAINT_MAX_TURNS = safeParseInt(
   process.env.COMPLAINT_MAX_TURNS,
   10,

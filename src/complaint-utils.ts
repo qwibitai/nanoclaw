@@ -51,3 +51,33 @@ export function transitionComplaintStatus(
 
   return current.status;
 }
+
+/**
+ * Add a note/remark to a complaint without changing its status.
+ *
+ * Inserts a complaint_updates row with old_status = new_status (current status).
+ * Does NOT emit complaint:status-changed — internal notes don't notify users.
+ *
+ * Returns true on success, false if the complaint was not found.
+ */
+export function addComplaintNote(
+  db: Database.Database,
+  id: string,
+  note: string,
+  updatedBy: string,
+): boolean {
+  const current = db
+    .prepare('SELECT status FROM complaints WHERE id = ?')
+    .get(id) as { status: string } | undefined;
+
+  if (!current) return false;
+
+  const now = nowISO();
+
+  db.prepare(
+    `INSERT INTO complaint_updates (complaint_id, old_status, new_status, note, updated_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(id, current.status, current.status, note, updatedBy, now);
+
+  return true;
+}
