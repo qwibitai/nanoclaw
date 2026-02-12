@@ -14,6 +14,7 @@ import {
 import { eventBus, type ComplaintEvent } from './event-bus.js';
 import { logger } from './logger.js';
 import type { Complaint, RejectionReason } from './types.js';
+import { nowISO } from './utils.js';
 
 export interface KaryakartaHandlerDeps {
   db: Database.Database;
@@ -96,7 +97,7 @@ async function handleApprove(
   }
 
   // Update status
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const now = nowISO();
   db.prepare(
     'UPDATE complaints SET status = ?, updated_at = ? WHERE id = ?',
   ).run('validated', now, complaintId);
@@ -197,7 +198,7 @@ async function handleReject(
   }
 
   // Update status
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const now = nowISO();
   db.prepare(
     'UPDATE complaints SET status = ?, status_reason = ?, updated_at = ? WHERE id = ?',
   ).run('rejected', reasonCode, now, complaintId);

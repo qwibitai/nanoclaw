@@ -84,7 +84,7 @@ export async function checkPendingValidations(
       );
 
       await sendMessage(
-        c.phone,
+        `${c.phone}@s.whatsapp.net`,
         `Your complaint ${c.id} has been escalated for faster attention. We apologize for the delay.`,
       );
 
@@ -106,7 +106,7 @@ export async function checkPendingValidations(
 
       for (const k of karyakartas) {
         await sendMessage(
-          k.phone,
+          `${k.phone}@s.whatsapp.net`,
           `Reminder: Complaint ${c.id} is awaiting your validation. Please review it at your earliest convenience.`,
         );
       }

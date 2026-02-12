@@ -336,3 +336,23 @@ describe('DB state tracking', () => {
     expect(row.message_count).toBe(20); // unchanged
   });
 });
+
+// ============================================================
+// JSON parse safety
+// ============================================================
+
+describe('malformed recent_timestamps JSON', () => {
+  it('treats malformed JSON as empty array and allows message', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    db.prepare(
+      `INSERT INTO rate_limits (phone, date, message_count, recent_timestamps)
+       VALUES (?, ?, 2, 'not-valid-json')`,
+    ).run('919876543210', today);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = checkRateLimit(db, '919876543210', { daily_msg_limit: 20 });
+    expect(result.allowed).toBe(true);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});

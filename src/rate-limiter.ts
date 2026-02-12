@@ -5,6 +5,7 @@
  * Self-contained module: only depends on better-sqlite3 Database type.
  */
 import type Database from 'better-sqlite3';
+import { getUserLanguage } from './db.js';
 import { nowISO } from './utils.js';
 
 export interface RateLimitResult {
@@ -62,10 +63,7 @@ export function checkRateLimit(
   const today = now.slice(0, 10);
 
   // Look up user language (default to Marathi)
-  const user = db
-    .prepare('SELECT language FROM users WHERE phone = ?')
-    .get(phone) as { language: string } | undefined;
-  const lang = user?.language ?? 'mr';
+  const lang = getUserLanguage(db, phone) ?? 'mr';
 
   // Get or create today's rate limit row
   let row = db
@@ -91,9 +89,17 @@ export function checkRateLimit(
   }
 
   // 2. Check burst (5 messages within 60 seconds)
-  const recentTimestamps: string[] = row.recent_timestamps
-    ? JSON.parse(row.recent_timestamps)
-    : [];
+  let recentTimestamps: string[] = [];
+  if (row.recent_timestamps) {
+    try {
+      recentTimestamps = JSON.parse(row.recent_timestamps);
+    } catch (err) {
+      console.warn(
+        'Failed to parse recent_timestamps:',
+        (err as Error).message,
+      );
+    }
+  }
 
   const recentWithinWindow = recentTimestamps.filter((ts) => {
     const tsMs = new Date(ts).getTime();

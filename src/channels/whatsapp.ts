@@ -1,4 +1,4 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -132,15 +132,16 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "ConstituencyBot" sound name "Basso"'`,
-        );
+        execFile('osascript', [
+          '-e',
+          `display notification "${msg}" with title "ConstituencyBot" sound name "Basso"`,
+        ]);
         setTimeout(() => process.exit(1), 1000);
       }
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info(
           {
@@ -345,6 +346,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   private enqueueOutgoing(jid: string, text: string): void {
+    if (this.flushing) {
+      logger.warn({ jid }, 'Dropping re-enqueue during flush to prevent loop');
+      return;
+    }
     this.outgoingQueue.push({ jid, text });
     if (this.outgoingQueue.length > MAX_OUTGOING_QUEUE_SIZE) {
       const dropped = this.outgoingQueue.length - MAX_OUTGOING_QUEUE_SIZE;

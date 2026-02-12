@@ -11,7 +11,6 @@ import {
   query,
   tool,
   createSdkMcpServer,
-  type SDKMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 

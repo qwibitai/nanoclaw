@@ -5,6 +5,7 @@
  * Singleton instance shared across the process.
  */
 import { EventEmitter } from 'events';
+import { logger } from './logger.js';
 
 export interface ComplaintEvent {
   complaintId: string;
@@ -38,8 +39,19 @@ class TypedEventEmitter extends EventEmitter {
     return super.on(event, listener as (...args: unknown[]) => void);
   }
   emit<K extends keyof EventMap>(event: K, ...args: EventMap[K]): boolean {
-    return super.emit(event, ...args);
+    const listeners = this.listeners(event);
+    let emitted = false;
+    for (const listener of listeners) {
+      try {
+        (listener as (...a: EventMap[K]) => void)(...args);
+        emitted = true;
+      } catch (err) {
+        logger.error({ event, err }, 'Event listener threw an error');
+      }
+    }
+    return emitted;
   }
 }
 
 export const eventBus = new TypedEventEmitter();
+eventBus.setMaxListeners(20);

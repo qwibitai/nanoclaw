@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
 
-import { matchArea, type AreaMatch } from './area-matcher.js';
+import { matchArea, clearAreaCache, type AreaMatch } from './area-matcher.js';
 import { resolveArea } from './complaint-mcp-server.js';
 import { createTestDb, seedArea } from './test-helpers.js';
 
 let db: Database.Database;
 
 beforeEach(() => {
+  clearAreaCache();
   db = createTestDb();
   seedArea(db, { name: 'Shivaji Nagar', name_mr: 'शिवाजी नगर' });
   seedArea(db, { name: 'Kothrud' });

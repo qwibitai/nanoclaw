@@ -8,26 +8,15 @@
 import type Database from 'better-sqlite3';
 
 import { executeAdminCommand, isKaryakartaCommand } from './admin-commands.js';
+import { transitionComplaintStatus } from './complaint-utils.js';
 import { eventBus } from './event-bus.js';
 import type { ComplaintEvent, StatusChangeEvent } from './event-bus.js';
 import { logger } from './logger.js';
 import { escalateToMla } from './mla-escalation.js';
 import { getUserRole, setUserRole } from './roles.js';
 import type { UserRole } from './types.js';
-import { nowISO } from './utils.js';
-
-/** Format a status string for display (e.g. "in_progress" -> "In Progress"). */
-function formatStatus(status: string): string {
-  return status
-    .split('_')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
-
-/** Normalize a phone string by stripping leading + and spaces. */
-function normalizePhone(raw: string): string {
-  return raw.replace(/[+\s-]/g, '');
-}
+import { VALID_COMPLAINT_STATUSES } from './types.js';
+import { formatStatus, normalizePhone } from './utils.js';
 
 export interface AdminServiceDeps {
   db: Database.Database;
@@ -37,15 +26,7 @@ export interface AdminServiceDeps {
   mlaPhone: string;
 }
 
-const VALID_STATUSES = [
-  'registered',
-  'acknowledged',
-  'in_progress',
-  'action_taken',
-  'resolved',
-  'on_hold',
-  'escalated',
-];
+const VALID_STATUSES = VALID_COMPLAINT_STATUSES as readonly string[];
 
 const VALID_ROLES = ['user', 'karyakarta', 'admin', 'superadmin'];
 
@@ -214,44 +195,26 @@ export class AdminService {
     status: string,
     note?: string,
   ): string {
+    // S-4: Validate complaint ID format
+    if (!/^[A-Z]{1,5}-\d{8}-\d{4}$/.test(id)) {
+      return `Invalid complaint ID format '${id}'.`;
+    }
+
     if (!VALID_STATUSES.includes(status)) {
       return `Invalid status '${status}'. Valid: ${VALID_STATUSES.join(', ')}`;
     }
 
-    const current = this.deps.db
-      .prepare('SELECT status, phone FROM complaints WHERE id = ?')
-      .get(id) as { status: string; phone: string } | undefined;
-
-    if (!current) {
-      return `Complaint '${id}' not found.`;
-    }
-
-    const now = nowISO();
-
-    this.deps.db
-      .prepare(
-        `UPDATE complaints SET status = ?, updated_at = ?,
-         resolved_at = CASE WHEN ? = 'resolved' THEN ? ELSE resolved_at END
-       WHERE id = ?`,
-      )
-      .run(status, now, status, now, id);
-
-    this.deps.db
-      .prepare(
-        `INSERT INTO complaint_updates (complaint_id, old_status, new_status, note, updated_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(id, current.status, status, note ?? null, updatedBy, now);
-
-    // Emit status change event
-    eventBus.emit('complaint:status-changed', {
-      complaintId: id,
-      phone: current.phone,
-      oldStatus: current.status,
-      newStatus: status,
+    const oldStatus = transitionComplaintStatus(
+      this.deps.db,
+      id,
+      status,
       note,
       updatedBy,
-    });
+    );
+
+    if (oldStatus === null) {
+      return `Complaint '${id}' not found.`;
+    }
 
     return `Complaint ${id} updated to ${status}.`;
   }
@@ -259,6 +222,11 @@ export class AdminService {
   private handleStatus(rest: string): string {
     const id = rest.trim();
     if (!id) return 'Usage: #status <ID>';
+
+    // S-4: Validate complaint ID format
+    if (!/^[A-Z]{1,5}-\d{8}-\d{4}$/.test(id)) {
+      return `Invalid complaint ID format '${id}'.`;
+    }
 
     const complaint = this.deps.db
       .prepare('SELECT * FROM complaints WHERE id = ?')
@@ -296,8 +264,12 @@ export class AdminService {
   }
 
   private handleUnblock(rest: string): string {
-    const phone = normalizePhone(rest.trim());
-    if (!phone) return 'Usage: #unblock <phone>';
+    let phone: string;
+    try {
+      phone = normalizePhone(rest.trim());
+    } catch {
+      return 'Usage: #unblock <phone>';
+    }
 
     const user = this.deps.db
       .prepare('SELECT phone FROM users WHERE phone = ?')
@@ -313,6 +285,8 @@ export class AdminService {
       )
       .run(phone);
 
+    logger.info({ admin: rest.trim(), target: phone, action: 'unblock' }, 'Admin action');
+
     return `User ${phone} unblocked.`;
   }
 
@@ -321,10 +295,13 @@ export class AdminService {
     const match = rest.match(/^(\S+)(?:\s*:\s*(.+))?$/s);
     if (!match) return 'Usage: #block <phone>: <reason>';
 
-    const phone = normalizePhone(match[1]);
+    let phone: string;
+    try {
+      phone = normalizePhone(match[1]);
+    } catch {
+      return 'Usage: #block <phone>: <reason>';
+    }
     const reason = match[2]?.trim() ?? 'Blocked by admin';
-
-    if (!phone) return 'Usage: #block <phone>: <reason>';
 
     const user = this.deps.db
       .prepare('SELECT phone FROM users WHERE phone = ?')
@@ -334,13 +311,26 @@ export class AdminService {
       return `User ${phone} not found.`;
     }
 
+    // Use block_duration_hours from tenant config for admin blocks too
+    const configRow = this.deps.db
+      .prepare(
+        "SELECT value FROM tenant_config WHERE key = 'block_duration_hours'",
+      )
+      .get() as { value: string } | undefined;
+    const hours = configRow ? Number(configRow.value) : 24;
+    const blockedUntil = new Date(Date.now() + hours * 60 * 60 * 1000)
+      .toISOString()
+      .replace(/\.\d{3}Z$/, 'Z');
+
     this.deps.db
       .prepare(
-        'UPDATE users SET is_blocked = 1, block_reason = ? WHERE phone = ?',
+        'UPDATE users SET is_blocked = 1, block_reason = ?, blocked_until = ? WHERE phone = ?',
       )
-      .run(reason, phone);
+      .run(reason, blockedUntil, phone);
 
-    return `User ${phone} blocked. Reason: ${reason}`;
+    logger.info({ admin: match[1], target: phone, action: 'block' }, 'Admin action');
+
+    return `User ${phone} blocked for ${hours}h. Reason: ${reason}`;
   }
 
   private handleRole(senderPhone: string, rest: string): string {
@@ -348,7 +338,12 @@ export class AdminService {
     const match = rest.match(/^(\S+)\s+(\S+)$/);
     if (!match) return 'Usage: #role <phone> <role>';
 
-    const phone = normalizePhone(match[1]);
+    let phone: string;
+    try {
+      phone = normalizePhone(match[1]);
+    } catch {
+      return 'Usage: #role <phone> <role>';
+    }
     const role = match[2].toLowerCase();
 
     if (!VALID_ROLES.includes(role)) {
@@ -374,6 +369,8 @@ export class AdminService {
     if (result !== 'OK') {
       return result;
     }
+
+    logger.info({ admin: senderPhone, target: phone, action: 'role', role }, 'Admin action');
 
     return `User ${phone} role set to ${role}.`;
   }

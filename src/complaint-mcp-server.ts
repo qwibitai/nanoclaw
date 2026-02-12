@@ -7,8 +7,9 @@
  */
 import type Database from 'better-sqlite3';
 import { matchArea } from './area-matcher.js';
-import { setUserRole } from './roles.js';
+import { setUserRole, tempBlockUser } from './roles.js';
 import type { UserRole } from './types.js';
+import { VALID_COMPLAINT_STATUSES } from './types.js';
 import { eventBus } from './event-bus.js';
 import { nowISO } from './utils.js';
 
@@ -161,22 +162,9 @@ export function updateComplaint(
   db: Database.Database,
   params: { id: string; status: string; note?: string },
 ): string {
-  const validStatuses = [
-    'registered',
-    'pending_validation',
-    'validated',
-    'rejected',
-    'escalated_timeout',
-    'acknowledged',
-    'in_progress',
-    'action_taken',
-    'resolved',
-    'on_hold',
-    'escalated',
-  ];
-  if (!validStatuses.includes(params.status)) {
+  if (!VALID_COMPLAINT_STATUSES.includes(params.status as never)) {
     throw new Error(
-      `Invalid status '${params.status}'. Valid: ${validStatuses.join(', ')}`,
+      `Invalid status '${params.status}'. Valid: ${VALID_COMPLAINT_STATUSES.join(', ')}`,
     );
   }
 
@@ -281,15 +269,6 @@ export function blockUser(
   db: Database.Database,
   params: { phone: string; reason: string },
 ): string {
-  // Check if target has admin/superadmin role — refuse to block
-  const user = db
-    .prepare('SELECT role FROM users WHERE phone = ?')
-    .get(params.phone) as { role: string | null } | undefined;
-  const role = user?.role ?? 'user';
-  if (role === 'admin' || role === 'superadmin') {
-    return 'This user is an admin and cannot be blocked.';
-  }
-
   // Read block_duration_hours from tenant config
   const configRow = db
     .prepare(
@@ -298,27 +277,7 @@ export function blockUser(
     .get() as { value: string } | undefined;
   const hours = configRow ? Number(configRow.value) : 24;
 
-  const now = nowISO();
-  const blockedUntil = new Date(Date.now() + hours * 60 * 60 * 1000)
-    .toISOString()
-    .replace(/\.\d{3}Z$/, 'Z');
-
-  db.prepare(
-    `INSERT INTO users (phone, is_blocked, block_reason, blocked_until, first_seen, last_seen)
-     VALUES (?, 1, ?, ?, ?, ?)
-     ON CONFLICT(phone) DO UPDATE SET is_blocked = 1, block_reason = ?, blocked_until = ?, last_seen = ?`,
-  ).run(
-    params.phone,
-    params.reason,
-    blockedUntil,
-    now,
-    now,
-    params.reason,
-    blockedUntil,
-    now,
-  );
-
-  return 'OK';
+  return tempBlockUser(db, params.phone, params.reason, hours);
 }
 
 export function setUserRoleTool(

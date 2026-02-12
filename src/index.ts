@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -30,6 +30,7 @@ import {
   getAllSessions,
   getAllTasks,
   getDb,
+  getUserLanguage,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -75,13 +76,17 @@ import {
   detectLanguageFromText,
   getFallbackErrorMessage,
   getPreferredLanguage,
+  type SupportedLanguage,
 } from './error-fallback.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { Semaphore } from './semaphore.js';
 
-// Re-export for backwards compatibility during refactor
-export { escapeXml, formatMessages } from './router.js';
+/** Hourly interval for validation checks and daily summary (1 hour). */
+const HOURLY_INTERVAL_MS = 3_600_000;
+
+/** Hour (IST, 24h) at which the daily summary runs — matches daily_summary_cron. */
+const DAILY_SUMMARY_HOUR_IST = 9;
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -101,15 +106,16 @@ function advanceCursor(chatJid: string, timestamp: string): void {
   saveState();
 }
 
+/** Resolve the user's preferred language, falling back to text detection. */
+function resolveUserLanguage(phone: string, fallbackText: string): SupportedLanguage {
+  const preferredLanguage = getPreferredLanguage(phone, (phoneNumber) =>
+    getUserLanguage(getDb(), phoneNumber),
+  );
+  return preferredLanguage ?? detectLanguageFromText(fallbackText);
+}
+
 function resolveFallbackErrorMessage(phone: string, text: string): string {
-  const preferredLanguage = getPreferredLanguage(phone, (phoneNumber) => {
-    const row = getDb()
-      .prepare('SELECT language FROM users WHERE phone = ?')
-      .get(phoneNumber) as { language?: string } | undefined;
-    return row?.language;
-  });
-  const language = preferredLanguage ?? detectLanguageFromText(text);
-  return getFallbackErrorMessage(language);
+  return getFallbackErrorMessage(resolveUserLanguage(phone, text));
 }
 
 /**
@@ -132,13 +138,7 @@ const directHandlerSemaphore = new Semaphore(MAX_CONCURRENT_DIRECT_HANDLERS);
 export { directHandlerSemaphore as _directHandlerSemaphore };
 
 function getBusyMessage(phone: string, text: string): string {
-  const preferredLanguage = getPreferredLanguage(phone, (phoneNumber) => {
-    const row = getDb()
-      .prepare('SELECT language FROM users WHERE phone = ?')
-      .get(phoneNumber) as { language?: string } | undefined;
-    return row?.language;
-  });
-  const language = preferredLanguage ?? detectLanguageFromText(text);
+  const language = resolveUserLanguage(phone, text);
   if (language === 'hi')
     return 'सर्वर पर अभी बहुत अधिक अनुरोध आ रहे हैं। कृपया कुछ मिनट बाद पुन: प्रयास करें।';
   if (language === 'en')
@@ -674,10 +674,7 @@ function handleVoiceDirect(
       await whatsapp.setTyping(chatJid, true);
 
       // Look up user language for Whisper hint + error messages
-      const userRow = getDb()
-        .prepare('SELECT language FROM users WHERE phone = ?')
-        .get(phone) as { language?: string } | undefined;
-      const language = userRow?.language || 'mr';
+      const language = getUserLanguage(getDb(), phone) || 'mr';
 
       // Download audio from WhatsApp servers
       let audioBuffer: Buffer;
@@ -723,9 +720,12 @@ function handleVoiceDirect(
           phone,
           messageId: metadata.messageId,
           transcriptLength: transcript.length,
-          transcript,
         },
         'Voice note transcribed, routing to complaint handler',
+      );
+      logger.debug(
+        { phone, messageId: metadata.messageId, transcript },
+        'Voice transcript content',
       );
 
       const voiceContent = `[Voice note transcribed — user spoke this message]\n${transcript}`;
@@ -807,7 +807,7 @@ function ensureContainerSystemRunning(): void {
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
-        execSync(`container stop ${name}`, { stdio: 'pipe' });
+        execFileSync('container', ['stop', name], { stdio: 'pipe' });
       } catch {
         /* already stopped */
       }
@@ -821,6 +821,194 @@ function ensureContainerSystemRunning(): void {
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
   }
+}
+
+/**
+ * Copy complaint group files to data/runtime/ with template variables injected.
+ */
+function prepareRuntimeComplaintDir(config: TenantConfig): void {
+  const complaintGroupDir = path.join(process.cwd(), 'groups', 'complaint');
+  const runtimeGroupDir = path.join(DATA_DIR, 'runtime', 'complaint');
+  if (!fs.existsSync(complaintGroupDir)) return;
+
+  fs.mkdirSync(runtimeGroupDir, { recursive: true });
+  for (const file of fs.readdirSync(complaintGroupDir)) {
+    const srcFile = path.join(complaintGroupDir, file);
+    if (!fs.statSync(srcFile).isFile()) continue;
+    let content = fs.readFileSync(srcFile, 'utf-8');
+    if (file === 'CLAUDE.md') {
+      content = injectTemplateVariables(content, config);
+    }
+    fs.writeFileSync(path.join(runtimeGroupDir, file), content);
+  }
+  fs.mkdirSync(path.join(runtimeGroupDir, 'logs'), { recursive: true });
+  logger.info('Injected tenant config into runtime complaint CLAUDE.md');
+}
+
+/**
+ * Handle an inbound WhatsApp message: routes admin commands, MLA replies,
+ * karyakarta commands, and complaint messages to the appropriate handler.
+ */
+function handleInboundMessage(
+  chatJid: string,
+  msg: NewMessage,
+  adminService: AdminService,
+): void {
+  storeMessage(msg);
+  if (msg.is_from_me) return;
+
+  // Admin group: handle #commands, ignore non-command messages
+  if (
+    tenantConfig.wa_admin_group_jid &&
+    chatJid === tenantConfig.wa_admin_group_jid
+  ) {
+    if (msg.content.trim().startsWith('#')) {
+      (async () => {
+        try {
+          const response = await adminService.handleCommand(
+            phoneFromJid(msg.sender),
+            msg.content,
+          );
+          if (response) {
+            await whatsapp.sendMessage(chatJid, response);
+          }
+        } catch (err) {
+          logger.error({ err }, 'Admin command error');
+          try {
+            await whatsapp.sendMessage(chatJid, 'Internal error processing admin command.');
+          } catch { /* best-effort */ }
+        }
+      })();
+    }
+    return;
+  }
+
+  // 1:1 chats: role-aware routing
+  if (
+    isIndividualChat(chatJid) &&
+    registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]
+  ) {
+    const phone = phoneFromJid(chatJid);
+    const text = msg.content.trim();
+
+    // MLA replies -> forward to admin group
+    if (tenantConfig.mla_phone && phone === tenantConfig.mla_phone) {
+      (async () => {
+        try {
+          const result = await handleMlaReply(
+            {
+              db: getDb(),
+              sendMessage: async (jid, t) => whatsapp.sendMessage(jid, t),
+              adminGroupJid: tenantConfig.wa_admin_group_jid,
+              mlaPhone: tenantConfig.mla_phone,
+            },
+            phone,
+            text,
+          );
+          if (result) {
+            await whatsapp.sendMessage(chatJid, result);
+            advanceCursor(chatJid, msg.timestamp);
+          }
+        } catch (err) {
+          logger.error({ err, chatJid }, 'MLA reply handler error');
+          try {
+            await whatsapp.sendMessage(
+              chatJid,
+              resolveFallbackErrorMessage(phone, text),
+            );
+          } catch { /* best-effort */ }
+        }
+      })();
+      return;
+    }
+
+    // Karyakarta #commands (#approve, #reject, #my-complaints)
+    if (text.startsWith('#')) {
+      const role = getUserRole(getDb(), phone);
+      if (role === 'karyakarta') {
+        (async () => {
+          try {
+            const result = await handleKaryakartaCommand(
+              {
+                db: getDb(),
+                sendMessage: async (jid, t) => whatsapp.sendMessage(jid, t),
+                adminGroupJid: tenantConfig.wa_admin_group_jid,
+              },
+              phone,
+              text,
+            );
+            if (result) {
+              await whatsapp.sendMessage(chatJid, result);
+              advanceCursor(chatJid, msg.timestamp);
+            } else {
+              // Unrecognized command -- treat as complaint message
+              handleComplaintDirect(chatJid, msg);
+            }
+          } catch (err) {
+            logger.error({ err, chatJid }, 'Karyakarta command error');
+            try {
+              await whatsapp.sendMessage(
+                chatJid,
+                resolveFallbackErrorMessage(phone, text),
+              );
+            } catch { /* best-effort */ }
+          }
+        })();
+        return;
+      }
+    }
+
+    // Default: complaint handler (includes block check + rate limiting)
+    handleComplaintDirect(chatJid, msg);
+  }
+}
+
+/**
+ * Start the hourly interval for validation reminders and daily summary.
+ * Returns the timer handle for cleanup on shutdown.
+ */
+function startHourlyTasks(): ReturnType<typeof setInterval> {
+  let lastDailySummaryDate = '';
+  return setInterval(async () => {
+    if (!tenantConfig.wa_admin_group_jid) return;
+
+    // Validation check: reminders and auto-escalation for pending complaints
+    try {
+      const result = await checkPendingValidations({
+        db: getDb(),
+        sendMessage: async (jid, text) => whatsapp.sendMessage(jid, text),
+        adminGroupJid: tenantConfig.wa_admin_group_jid,
+      });
+      if (result.reminders > 0 || result.escalated > 0) {
+        logger.info(result, 'Validation check completed');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Validation check failed');
+    }
+
+    // Daily summary at configured IST hour
+    try {
+      const istHour = parseInt(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Kolkata',
+          hour: 'numeric',
+          hour12: false,
+        }).format(new Date()),
+      );
+      const today = new Date().toISOString().slice(0, 10);
+      if (istHour === DAILY_SUMMARY_HOUR_IST && lastDailySummaryDate !== today) {
+        lastDailySummaryDate = today;
+        await runDailySummary(
+          getDb(),
+          async (jid, text) => whatsapp.sendMessage(jid, text),
+          tenantConfig.wa_admin_group_jid,
+        );
+        logger.info('Daily summary sent');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Daily summary failed');
+    }
+  }, HOURLY_INTERVAL_MS);
 }
 
 async function main(): Promise<void> {
@@ -864,26 +1052,7 @@ async function main(): Promise<void> {
     },
   });
 
-  // Process CLAUDE.md template variables for the complaint group.
-  // Write the injected version to data/runtime/ so the source template stays intact.
-  const complaintGroupDir = path.join(process.cwd(), 'groups', 'complaint');
-  const runtimeGroupDir = path.join(DATA_DIR, 'runtime', 'complaint');
-  if (fs.existsSync(complaintGroupDir)) {
-    fs.mkdirSync(runtimeGroupDir, { recursive: true });
-    // Copy all files from source group dir to runtime dir
-    for (const file of fs.readdirSync(complaintGroupDir)) {
-      const srcFile = path.join(complaintGroupDir, file);
-      if (!fs.statSync(srcFile).isFile()) continue;
-      let content = fs.readFileSync(srcFile, 'utf-8');
-      if (file === 'CLAUDE.md') {
-        content = injectTemplateVariables(content, tenantConfig);
-      }
-      fs.writeFileSync(path.join(runtimeGroupDir, file), content);
-    }
-    // Also create logs dir in runtime
-    fs.mkdirSync(path.join(runtimeGroupDir, 'logs'), { recursive: true });
-    logger.info('Injected tenant config into runtime complaint CLAUDE.md');
-  }
+  prepareRuntimeComplaintDir(tenantConfig);
 
   // Auto-register the virtual complaint group for 1:1 message routing
   if (!registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]) {
@@ -904,10 +1073,13 @@ async function main(): Promise<void> {
   }
 
   // Graceful shutdown handlers
+  let hourlyTimer: ReturnType<typeof setInterval> | undefined;
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (hourlyTimer) clearInterval(hourlyTimer);
     await queue.shutdown(10000);
     await whatsapp.disconnect();
+    getDb().close();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -915,103 +1087,8 @@ async function main(): Promise<void> {
 
   // Create WhatsApp channel
   whatsapp = new WhatsAppChannel({
-    onMessage: (chatJid, msg) => {
-      storeMessage(msg);
-      // Skip bot's own outgoing messages — WhatsApp echoes them back via messages.upsert
-      if (msg.is_from_me) return;
-
-      // Admin group: handle #commands, ignore non-command messages
-      if (
-        tenantConfig.wa_admin_group_jid &&
-        chatJid === tenantConfig.wa_admin_group_jid
-      ) {
-        if (msg.content.trim().startsWith('#')) {
-          (async () => {
-            try {
-              const response = await adminService.handleCommand(
-                phoneFromJid(msg.sender),
-                msg.content,
-              );
-              if (response) {
-                await whatsapp.sendMessage(chatJid, response);
-              }
-            } catch (err) {
-              logger.error({ err }, 'Admin command error');
-            }
-          })();
-        }
-        return;
-      }
-
-      // 1:1 chats: role-aware routing
-      if (
-        isIndividualChat(chatJid) &&
-        registeredGroups[VIRTUAL_COMPLAINT_GROUP_JID]
-      ) {
-        const phone = phoneFromJid(chatJid);
-        const text = msg.content.trim();
-
-        // MLA replies → forward to admin group
-        if (tenantConfig.mla_phone && phone === tenantConfig.mla_phone) {
-          (async () => {
-            try {
-              const result = await handleMlaReply(
-                {
-                  db: getDb(),
-                  sendMessage: async (jid, t) =>
-                    whatsapp.sendMessage(jid, t),
-                  adminGroupJid: tenantConfig.wa_admin_group_jid,
-                  mlaPhone: tenantConfig.mla_phone,
-                },
-                phone,
-                text,
-              );
-              if (result) {
-                await whatsapp.sendMessage(chatJid, result);
-                advanceCursor(chatJid, msg.timestamp);
-              }
-            } catch (err) {
-              logger.error({ err, chatJid }, 'MLA reply handler error');
-            }
-          })();
-          return;
-        }
-
-        // Karyakarta #commands (#approve, #reject, #my-complaints)
-        if (text.startsWith('#')) {
-          const role = getUserRole(getDb(), phone);
-          if (role === 'karyakarta') {
-            (async () => {
-              try {
-                const result = await handleKaryakartaCommand(
-                  {
-                    db: getDb(),
-                    sendMessage: async (jid, t) =>
-                      whatsapp.sendMessage(jid, t),
-                    adminGroupJid: tenantConfig.wa_admin_group_jid,
-                  },
-                  phone,
-                  text,
-                );
-                if (result) {
-                  await whatsapp.sendMessage(chatJid, result);
-                  advanceCursor(chatJid, msg.timestamp);
-                } else {
-                  // Unrecognized command — treat as complaint message
-                  handleComplaintDirect(chatJid, msg);
-                }
-              } catch (err) {
-                logger.error({ err, chatJid }, 'Karyakarta command error');
-              }
-            })();
-            return;
-          }
-        }
-
-        // Default: complaint handler (includes block check + rate limiting)
-        handleComplaintDirect(chatJid, msg);
-      }
-    },
+    onMessage: (chatJid, msg) =>
+      handleInboundMessage(chatJid, msg, adminService),
     onAudioMessage: (chatJid, msg, metadata) => {
       storeChatMetadata(chatJid, metadata.timestamp, metadata.senderName);
 
@@ -1081,47 +1158,7 @@ async function main(): Promise<void> {
   startMessageLoop();
 
   // Phase 2: Hourly scheduled tasks (validation reminders + daily summary)
-  let lastDailySummaryDate = '';
-  setInterval(async () => {
-    if (!tenantConfig.wa_admin_group_jid) return;
-
-    // Validation check: reminders and auto-escalation for pending complaints
-    try {
-      const result = await checkPendingValidations({
-        db: getDb(),
-        sendMessage: async (jid, text) => whatsapp.sendMessage(jid, text),
-        adminGroupJid: tenantConfig.wa_admin_group_jid,
-      });
-      if (result.reminders > 0 || result.escalated > 0) {
-        logger.info(result, 'Validation check completed');
-      }
-    } catch (err) {
-      logger.error({ err }, 'Validation check failed');
-    }
-
-    // Daily summary at 9 AM IST
-    try {
-      const istHour = parseInt(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: 'Asia/Kolkata',
-          hour: 'numeric',
-          hour12: false,
-        }).format(new Date()),
-      );
-      const today = new Date().toISOString().slice(0, 10);
-      if (istHour === 9 && lastDailySummaryDate !== today) {
-        lastDailySummaryDate = today;
-        await runDailySummary(
-          getDb(),
-          async (jid, text) => whatsapp.sendMessage(jid, text),
-          tenantConfig.wa_admin_group_jid,
-        );
-        logger.info('Daily summary sent');
-      }
-    } catch (err) {
-      logger.error({ err }, 'Daily summary failed');
-    }
-  }, 3600_000);
+  hourlyTimer = startHourlyTasks();
 }
 
 // Guard: only run when executed directly, not when imported by tests

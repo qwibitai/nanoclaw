@@ -12,6 +12,35 @@ export interface AreaMatch {
   confidence: number; // 0.0 to 1.0
 }
 
+interface AreaRow {
+  id: string;
+  name: string;
+  name_mr: string | null;
+  name_hi: string | null;
+}
+
+const AREA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let areaCache: AreaRow[] | null = null;
+let areaCacheTime = 0;
+
+function getAreas(db: Database.Database): AreaRow[] {
+  const now = Date.now();
+  if (areaCache && now - areaCacheTime < AREA_CACHE_TTL_MS) {
+    return areaCache;
+  }
+  areaCache = db
+    .prepare('SELECT id, name, name_mr, name_hi FROM areas WHERE is_active = 1')
+    .all() as AreaRow[];
+  areaCacheTime = now;
+  return areaCache;
+}
+
+/** Clear the area cache. Exported for testing. */
+export function clearAreaCache(): void {
+  areaCache = null;
+  areaCacheTime = 0;
+}
+
 /** Compute Levenshtein edit distance between two strings. */
 function levenshteinDistance(a: string, b: string): number {
   const matrix: number[][] = [];
@@ -44,14 +73,7 @@ export function matchArea(
 ): AreaMatch[] {
   if (!locationText.trim()) return [];
 
-  const areas = db
-    .prepare('SELECT id, name, name_mr, name_hi FROM areas WHERE is_active = 1')
-    .all() as Array<{
-    id: string;
-    name: string;
-    name_mr: string | null;
-    name_hi: string | null;
-  }>;
+  const areas = getAreas(db);
 
   const locationLower = locationText.toLowerCase();
   const seen = new Map<string, AreaMatch>();

@@ -112,6 +112,21 @@ export type ComplaintStatus =
   | 'on_hold'
   | 'escalated';
 
+/** Canonical list of all valid complaint statuses, derived from ComplaintStatus. */
+export const VALID_COMPLAINT_STATUSES: ComplaintStatus[] = [
+  'registered',
+  'pending_validation',
+  'validated',
+  'rejected',
+  'escalated_timeout',
+  'acknowledged',
+  'in_progress',
+  'action_taken',
+  'resolved',
+  'on_hold',
+  'escalated',
+];
+
 export type ComplaintPriority = 'low' | 'normal' | 'high' | 'urgent';
 
 export type RejectionReason =

@@ -78,9 +78,9 @@ describe('checkPendingValidations', () => {
 
     expect(result.reminders).toBe(1);
     expect(result.escalated).toBe(0);
-    // Should send DM to karyakarta
+    // Should send DM to karyakarta (JID format)
     expect(sendMessage).toHaveBeenCalledWith(
-      '919999000020',
+      '919999000020@s.whatsapp.net',
       expect.stringContaining('RK-REM-01'),
     );
   });
@@ -269,17 +269,17 @@ describe('checkPendingValidations', () => {
     const result = await checkPendingValidations(deps());
 
     expect(result.reminders).toBe(1);
-    // All three karyakartas should receive a DM
+    // All three karyakartas should receive a DM (JID format)
     expect(sendMessage).toHaveBeenCalledWith(
-      '919999000101',
+      '919999000101@s.whatsapp.net',
       expect.stringContaining('RK-MULTI-01'),
     );
     expect(sendMessage).toHaveBeenCalledWith(
-      '919999000102',
+      '919999000102@s.whatsapp.net',
       expect.stringContaining('RK-MULTI-01'),
     );
     expect(sendMessage).toHaveBeenCalledWith(
-      '919999000103',
+      '919999000103@s.whatsapp.net',
       expect.stringContaining('RK-MULTI-01'),
     );
   });
@@ -367,9 +367,9 @@ describe('checkPendingValidations', () => {
 
     await checkPendingValidations(deps());
 
-    // Should notify the constituent
+    // Should notify the constituent (JID format)
     expect(sendMessage).toHaveBeenCalledWith(
-      '919999000001',
+      '919999000001@s.whatsapp.net',
       expect.stringContaining('RK-CONST-01'),
     );
   });

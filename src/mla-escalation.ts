@@ -6,7 +6,7 @@
  */
 import type Database from 'better-sqlite3';
 
-import { eventBus } from './event-bus.js';
+import { transitionComplaintStatus } from './complaint-utils.js';
 
 export interface MlaEscalationDeps {
   db: Database.Database;
@@ -71,41 +71,23 @@ export async function escalateToMla(
     return `Complaint '${complaintId}' not found.`;
   }
 
-  const oldStatus = complaint.status;
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  // Transition status (handles UPDATE, audit record, and event emission)
+  const note = `Escalated to MLA: ${reason}`;
+  const oldStatus = transitionComplaintStatus(
+    deps.db,
+    complaintId,
+    'escalated',
+    note,
+    senderPhone,
+  );
 
-  // Update status to escalated
-  deps.db
-    .prepare('UPDATE complaints SET status = ?, updated_at = ? WHERE id = ?')
-    .run('escalated', now, complaintId);
-
-  // Insert audit record
-  deps.db
-    .prepare(
-      'INSERT INTO complaint_updates (complaint_id, old_status, new_status, note, updated_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-    )
-    .run(
-      complaintId,
-      oldStatus,
-      'escalated',
-      `Escalated to MLA: ${reason}`,
-      senderPhone,
-      now,
-    );
+  if (oldStatus === null) {
+    return `Complaint '${complaintId}' not found.`;
+  }
 
   // Format and send MLA DM
   const message = formatMlaEscalation(complaint, reason);
   await deps.sendMessage(`${deps.mlaPhone}@s.whatsapp.net`, message);
-
-  // Emit event
-  eventBus.emit('complaint:status-changed', {
-    complaintId,
-    phone: complaint.phone,
-    oldStatus,
-    newStatus: 'escalated',
-    note: `Escalated to MLA: ${reason}`,
-    updatedBy: senderPhone,
-  });
 
   return `Complaint ${complaintId} escalated to MLA.`;
 }

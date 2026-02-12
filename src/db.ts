@@ -4,6 +4,7 @@ import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
 import {
+  ContainerConfig,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
@@ -11,6 +12,16 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+
+/** Parse JSON safely, returning undefined on error. */
+function safeJsonParse<T = unknown>(text: string): T | undefined {
+  try {
+    return JSON.parse(text) as T;
+  } catch (err) {
+    console.warn('Failed to parse JSON from DB:', (err as Error).message);
+    return undefined;
+  }
+}
 
 /**
  * Run SQL migration files from src/migrations/ directory.
@@ -499,6 +510,19 @@ export function getAllSessions(): Record<string, string> {
   return result;
 }
 
+// --- User language accessor ---
+
+/** Get a user's preferred language by phone number. */
+export function getUserLanguage(
+  database: Database.Database,
+  phone: string,
+): string | undefined {
+  const row = database
+    .prepare('SELECT language FROM users WHERE phone = ?')
+    .get(phone) as { language: string } | undefined;
+  return row?.language;
+}
+
 // --- Complaint session accessors ---
 
 /** Get Agent SDK session ID for a complaint user (keyed by phone). */
@@ -573,7 +597,7 @@ export function getRegisteredGroup(
     trigger: row.trigger_pattern,
     added_at: row.added_at,
     containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
+      ? safeJsonParse<ContainerConfig>(row.container_config)
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
@@ -613,7 +637,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       trigger: row.trigger_pattern,
       added_at: row.added_at,
       containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
+        ? safeJsonParse<ContainerConfig>(row.container_config)
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,
@@ -675,4 +699,29 @@ function migrateJsonState(): void {
       setRegisteredGroup(jid, group);
     }
   }
+}
+
+// --- Table cleanup ---
+
+/**
+ * Delete stale rows from messages, rate_limits, and conversations tables.
+ * Intended to be called periodically (e.g., hourly from index.ts).
+ */
+export function cleanupStaleTables(
+  database: Database.Database,
+  retentionDays = 30,
+): void {
+  const msgCutoff = new Date(
+    Date.now() - retentionDays * 86_400_000,
+  ).toISOString();
+  const rateCutoff = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const convCutoff = new Date(Date.now() - 90 * 86_400_000).toISOString();
+
+  database.prepare('DELETE FROM messages WHERE timestamp < ?').run(msgCutoff);
+  database.prepare('DELETE FROM rate_limits WHERE date < ?').run(
+    rateCutoff.slice(0, 10),
+  );
+  database
+    .prepare('DELETE FROM conversations WHERE created_at < ?')
+    .run(convCutoff);
 }

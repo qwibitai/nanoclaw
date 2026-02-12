@@ -6,6 +6,8 @@
  */
 import type Database from 'better-sqlite3';
 
+import { formatStatus } from './utils.js';
+
 export interface SummaryData {
   totalOpen: number;
   byStatus: Record<string, number>;
@@ -116,14 +118,6 @@ export function generateSummaryData(db: Database.Database): SummaryData {
   };
 }
 
-/** Convert snake_case status to Title Case display name. */
-function formatStatusName(status: string): string {
-  return status
-    .split('_')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
 export function formatSummaryMessage(data: SummaryData): string {
   if (data.totalOpen === 0) {
     return 'No open complaints.';
@@ -137,7 +131,7 @@ export function formatSummaryMessage(data: SummaryData): string {
   // Open complaints by status
   lines.push(`\u{1F4CB} Open Complaints: ${data.totalOpen}`);
   for (const [status, count] of Object.entries(data.byStatus)) {
-    lines.push(`  - ${formatStatusName(status)}: ${count}`);
+    lines.push(`  - ${formatStatus(status)}: ${count}`);
   }
 
   // New today

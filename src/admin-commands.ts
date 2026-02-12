@@ -23,6 +23,7 @@ import {
   updateArea,
 } from './area-db.js';
 import { eventBus } from './event-bus.js';
+import { normalizePhone, nowISO } from './utils.js';
 
 export interface CommandResult {
   response: string;
@@ -43,11 +44,6 @@ const KARYAKARTA_COMMANDS = [
 
 export function isKaryakartaCommand(command: string): boolean {
   return KARYAKARTA_COMMANDS.includes(command);
-}
-
-/** Normalize a phone string by stripping +, spaces, and dashes. */
-function normalizePhone(raw: string): string {
-  return raw.replace(/[+\s-]/g, '');
 }
 
 export function executeAdminCommand(
@@ -94,7 +90,12 @@ function handleAddKaryakarta(
     return { response: 'Usage: #add-karyakarta <phone> <area-slug>' };
   }
 
-  const phone = normalizePhone(match[1]);
+  let phone: string;
+  try {
+    phone = normalizePhone(match[1]);
+  } catch {
+    return { response: 'Usage: #add-karyakarta <phone> <area-slug>' };
+  }
   const areaSlug = match[2];
 
   // Verify area exists
@@ -121,8 +122,10 @@ function handleRemoveKaryakarta(
   db: Database.Database,
   args: string,
 ): CommandResult {
-  const phone = normalizePhone(args.trim());
-  if (!phone) {
+  let phone: string;
+  try {
+    phone = normalizePhone(args.trim());
+  } catch {
     return { response: 'Usage: #remove-karyakarta <phone>' };
   }
 
@@ -144,7 +147,12 @@ function handleAssignArea(
     return { response: 'Usage: #assign-area <phone> <area-slug>' };
   }
 
-  const phone = normalizePhone(match[1]);
+  let phone: string;
+  try {
+    phone = normalizePhone(match[1]);
+  } catch {
+    return { response: 'Usage: #assign-area <phone> <area-slug>' };
+  }
   const areaSlug = match[2];
 
   const area = getArea(db, areaSlug);
@@ -169,7 +177,12 @@ function handleUnassignArea(
     return { response: 'Usage: #unassign-area <phone> <area-slug>' };
   }
 
-  const phone = normalizePhone(match[1]);
+  let phone: string;
+  try {
+    phone = normalizePhone(match[1]);
+  } catch {
+    return { response: 'Usage: #unassign-area <phone> <area-slug>' };
+  }
   const areaSlug = match[2];
 
   unassignKaryakartaFromArea(db, phone, areaSlug);
@@ -312,7 +325,7 @@ function handleOverrideReject(
   }
 
   // Update status to validated
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const now = nowISO();
   db.prepare(
     'UPDATE complaints SET status = ?, updated_at = ? WHERE id = ?',
   ).run('validated', now, complaintId);

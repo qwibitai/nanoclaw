@@ -1,13 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
+  _getTestDatabase,
+  cleanupStaleTables,
   createTask,
   deleteTask,
   getAllChats,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
+  getAllRegisteredGroups,
   getTaskById,
+  getUserLanguage,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -375,5 +381,221 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- getUserLanguage ---
+
+describe('getUserLanguage', () => {
+  it('returns undefined for unknown phone', () => {
+    const database = _getTestDatabase();
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'mr',
+        first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+        total_complaints INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0
+      );
+    `);
+    expect(getUserLanguage(database, '919999999999')).toBeUndefined();
+  });
+
+  it('returns stored language', () => {
+    const database = _getTestDatabase();
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'mr',
+        first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+        total_complaints INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0
+      );
+    `);
+    database
+      .prepare(
+        `INSERT INTO users (phone, language, first_seen, last_seen) VALUES (?, ?, ?, ?)`,
+      )
+      .run('919876543210', 'hi', '2024-01-01', '2024-01-01');
+    expect(getUserLanguage(database, '919876543210')).toBe('hi');
+  });
+});
+
+// --- JSON parse safety (registered groups) ---
+
+describe('JSON parse safety for container_config', () => {
+  it('returns undefined containerConfig for malformed JSON', () => {
+    const database = _getTestDatabase();
+    // Insert a group with bad JSON directly
+    database
+      .prepare(
+        `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'bad@g.us',
+        'Bad Group',
+        'bad',
+        '^!',
+        '2024-01-01',
+        '{broken json',
+        1,
+      );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const group = getRegisteredGroup('bad@g.us');
+    expect(group).toBeDefined();
+    expect(group!.containerConfig).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('returns undefined containerConfig in getAllRegisteredGroups for malformed JSON', () => {
+    const database = _getTestDatabase();
+    database
+      .prepare(
+        `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        'bad2@g.us',
+        'Bad Group 2',
+        'bad2',
+        '^!',
+        '2024-01-01',
+        'not-json',
+        1,
+      );
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const groups = getAllRegisteredGroups();
+    expect(groups['bad2@g.us']).toBeDefined();
+    expect(groups['bad2@g.us'].containerConfig).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
+// --- cleanupStaleTables ---
+
+describe('cleanupStaleTables', () => {
+  /** Create all tables that cleanupStaleTables touches. */
+  function createCleanupTables(database: ReturnType<typeof _getTestDatabase>) {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS rate_limits (
+        phone TEXT NOT NULL, date TEXT NOT NULL,
+        message_count INTEGER DEFAULT 0,
+        last_message_at TEXT, recent_timestamps TEXT,
+        PRIMARY KEY (phone, date)
+      );
+      CREATE TABLE IF NOT EXISTS users (
+        phone TEXT PRIMARY KEY, name TEXT, language TEXT DEFAULT 'mr',
+        first_seen TEXT NOT NULL, last_seen TEXT NOT NULL,
+        total_complaints INTEGER DEFAULT 0, is_blocked INTEGER DEFAULT 0
+      );
+      CREATE TABLE IF NOT EXISTS conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT NOT NULL, role TEXT NOT NULL,
+        content TEXT NOT NULL, complaint_id TEXT,
+        created_at TEXT NOT NULL, FOREIGN KEY (phone) REFERENCES users(phone)
+      );
+    `);
+  }
+
+  it('deletes messages older than retentionDays', () => {
+    const database = _getTestDatabase();
+    createCleanupTables(database);
+
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    // Insert old message (60 days ago)
+    const oldTs = new Date(Date.now() - 60 * 86_400_000).toISOString();
+    storeMessage({
+      id: 'old-msg',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'old message',
+      timestamp: oldTs,
+      is_from_me: false,
+    });
+
+    // Insert recent message
+    const recentTs = new Date().toISOString();
+    storeMessage({
+      id: 'new-msg',
+      chat_jid: 'group@g.us',
+      sender: 'user@s.whatsapp.net',
+      sender_name: 'User',
+      content: 'new message',
+      timestamp: recentTs,
+      is_from_me: false,
+    });
+
+    cleanupStaleTables(database, 30);
+
+    const rows = database
+      .prepare('SELECT id FROM messages')
+      .all() as Array<{ id: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('new-msg');
+  });
+
+  it('deletes rate_limits older than 7 days', () => {
+    const database = _getTestDatabase();
+    createCleanupTables(database);
+
+    const oldDate = new Date(Date.now() - 10 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    const recentDate = new Date().toISOString().slice(0, 10);
+
+    database
+      .prepare(
+        `INSERT INTO rate_limits (phone, date, message_count, recent_timestamps) VALUES (?, ?, 5, '[]')`,
+      )
+      .run('919876543210', oldDate);
+    database
+      .prepare(
+        `INSERT INTO rate_limits (phone, date, message_count, recent_timestamps) VALUES (?, ?, 2, '[]')`,
+      )
+      .run('919876543210', recentDate);
+
+    cleanupStaleTables(database, 30);
+
+    const rows = database
+      .prepare('SELECT date FROM rate_limits')
+      .all() as Array<{ date: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].date).toBe(recentDate);
+  });
+
+  it('deletes conversations older than 90 days', () => {
+    const database = _getTestDatabase();
+    createCleanupTables(database);
+
+    database
+      .prepare(
+        `INSERT INTO users (phone, first_seen, last_seen) VALUES (?, ?, ?)`,
+      )
+      .run('919876543210', '2024-01-01', '2024-01-01');
+
+    const oldTs = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    const recentTs = new Date().toISOString();
+
+    database
+      .prepare(
+        `INSERT INTO conversations (phone, role, content, created_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run('919876543210', 'user', 'old convo', oldTs);
+    database
+      .prepare(
+        `INSERT INTO conversations (phone, role, content, created_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run('919876543210', 'user', 'recent convo', recentTs);
+
+    cleanupStaleTables(database, 30);
+
+    const rows = database
+      .prepare('SELECT content FROM conversations')
+      .all() as Array<{ content: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].content).toBe('recent convo');
   });
 });
