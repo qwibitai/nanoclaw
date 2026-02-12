@@ -1,10 +1,10 @@
 # Core code - maintainer only
-/src/ @gavrielc
-/container/ @gavrielc
-/groups/ @gavrielc
-/launchd/ @gavrielc
-/package.json @gavrielc
-/package-lock.json @gavrielc
+/src/ @peyton-spencer
+/container/ @peyton-spencer
+/groups/ @peyton-spencer
+/launchd/ @peyton-spencer
+/package.json @peyton-spencer
+/package-lock.json @peyton-spencer
 
 # Skills - open to contributors
 /.claude/skills/
