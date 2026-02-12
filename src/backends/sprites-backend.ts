@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  SPRITES_ORG,
   SPRITES_RAM_MB,
   SPRITES_REGION,
   SPRITES_TOKEN,
@@ -84,7 +85,7 @@ class SpriteClient {
   /** Execute a command and return stdout/stderr via the sprite CLI. */
   async exec(cmd: string, opts?: { timeout?: number }): Promise<{ stdout: string; stderr: string }> {
     const proc = Bun.spawn(
-      ['sprite', 'exec', '-o', 'peyton-spencer', '-s', this.spriteName, '--', 'bash', '-c', cmd],
+      ['sprite', 'exec', '-o', SPRITES_ORG, '-s', this.spriteName, '--', 'bash', '-c', cmd],
       { stdout: 'pipe', stderr: 'pipe' },
     );
 
@@ -252,7 +253,7 @@ export class SpritesBackend implements AgentBackend {
     // Spawn the agent via `sprite exec` CLI (uses WebSocket for real-time streaming)
     const proc = Bun.spawn(
       [
-        'sprite', 'exec', '-o', 'peyton-spencer', '-s', sprite.name,
+        'sprite', 'exec', '-o', SPRITES_ORG, '-s', sprite.name,
         '--', 'bash', '-c',
         'bash /app/entrypoint.sh < /tmp/input.json',
       ],

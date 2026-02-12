@@ -71,5 +71,6 @@ export const TIMEZONE =
 
 // Sprites cloud backend configuration
 export const SPRITES_TOKEN = process.env.SPRITES_TOKEN || '';
+export const SPRITES_ORG = process.env.SPRITES_ORG || '';
 export const SPRITES_REGION = process.env.SPRITES_REGION || '';
 export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) || 0;

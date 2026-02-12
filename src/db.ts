@@ -112,6 +112,14 @@ function createSchema(database: Database): void {
   try {
     database.exec(`ALTER TABLE sessions ADD COLUMN created_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'`);
   } catch { /* column already exists */ }
+
+  // Add backend and description columns to registered_groups (sprites backend support)
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN backend TEXT`);
+  } catch { /* column already exists */ }
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
+  } catch { /* column already exists */ }
 }
 
 export function initDatabase(): void {
@@ -535,6 +543,8 @@ export function getRegisteredGroup(
         heartbeat: string | null;
         discord_guild_id: string | null;
         server_folder: string | null;
+        backend: string | null;
+        description: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -553,6 +563,8 @@ export function getRegisteredGroup(
       : undefined,
     discordGuildId: row.discord_guild_id || undefined,
     serverFolder: row.server_folder || undefined,
+    backend: (row.backend as any) || undefined,
+    description: row.description || undefined,
   };
 }
 
@@ -561,8 +573,8 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.query(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, heartbeat, discord_guild_id, server_folder, backend, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -574,6 +586,8 @@ export function setRegisteredGroup(
     group.heartbeat ? JSON.stringify(group.heartbeat) : null,
     group.discordGuildId || null,
     group.serverFolder || null,
+    group.backend || null,
+    group.description || null,
   );
 }
 
@@ -591,6 +605,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     heartbeat: string | null;
     discord_guild_id: string | null;
     server_folder: string | null;
+    backend: string | null;
+    description: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -608,6 +624,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         : undefined,
       discordGuildId: row.discord_guild_id || undefined,
       serverFolder: row.server_folder || undefined,
+      backend: (row.backend as any) || undefined,
+      description: row.description || undefined,
     };
   }
   return result;

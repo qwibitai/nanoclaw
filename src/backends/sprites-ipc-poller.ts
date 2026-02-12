@@ -77,9 +77,10 @@ export function startSpritesIpcPoller(deps: SpritesIpcPollerDeps): void {
         );
       } catch (err) {
         // Only warn on non-404 errors (sprite may be hibernating)
-        if (!(err instanceof Error && err.message.includes('404'))) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!msg.includes('404')) {
           logger.warn(
-            { group: group.folder, sprite: spriteName, error: err },
+            { group: group.folder, sprite: spriteName, error: msg },
             'Error polling Sprite IPC',
           );
         }
@@ -113,7 +114,8 @@ async function pollDirectory(
     throw new Error(`List failed: ${listResp.status}`);
   }
 
-  const entries = await listResp.json() as Array<{ name: string; type: string }>;
+  const body = await listResp.json() as { entries: Array<{ name: string; type: string }> | null };
+  const entries = body.entries || [];
   const jsonFiles = entries.filter((e) => e.type === 'file' && e.name.endsWith('.json'));
 
   for (const entry of jsonFiles) {
