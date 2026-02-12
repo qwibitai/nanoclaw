@@ -18,13 +18,15 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 const AUTH_DIR = './store/auth';
+const MAX_RESTARTS = 5;
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
 });
 
-async function authenticate(): Promise<void> {
+async function authenticate(restartCount = 0): Promise<void> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
+  let restarting = false;
 
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
@@ -65,6 +67,21 @@ async function authenticate(): Promise<void> {
       if (reason === DisconnectReason.loggedOut) {
         console.log('\n✗ Logged out. Delete store/auth and try again.');
         process.exit(1);
+      } else if (reason === DisconnectReason.restartRequired) {
+        if (restarting) {
+          return;
+        }
+        if (restartCount >= MAX_RESTARTS) {
+          console.log(`\n✗ Restart limit reached (${MAX_RESTARTS}). Please try again later.`);
+          process.exit(1);
+        }
+        restarting = true;
+        // Server requested restart (515) - reconnect automatically
+        console.log('\n⚠ Server requested restart, reconnecting...');
+        sock.ev.removeAllListeners('connection.update');
+        sock.ev.removeAllListeners('creds.update');
+        sock.end?.(undefined);
+        return authenticate(restartCount + 1);
       } else {
         console.log('\n✗ Connection failed. Please try again.');
         process.exit(1);
