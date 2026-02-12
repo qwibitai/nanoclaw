@@ -12,11 +12,9 @@ import { eventBus } from './event-bus.js';
 import type { ComplaintEvent, StatusChangeEvent } from './event-bus.js';
 import { logger } from './logger.js';
 import { escalateToMla } from './mla-escalation.js';
-
-/** ISO timestamp without milliseconds. */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { getUserRole, setUserRole } from './roles.js';
+import type { UserRole } from './types.js';
+import { nowISO } from './utils.js';
 
 /** Format a status string for display (e.g. "in_progress" -> "In Progress"). */
 function formatStatus(status: string): string {
@@ -168,7 +166,7 @@ export class AdminService {
       case 'block':
         return this.handleBlock(rest);
       case 'role':
-        return this.handleRole(rest);
+        return this.handleRole(senderPhone, rest);
       case 'escalate-to-mla':
         return this.handleEscalateToMla(senderPhone, rest);
       default:
@@ -345,7 +343,7 @@ export class AdminService {
     return `User ${phone} blocked. Reason: ${reason}`;
   }
 
-  private handleRole(rest: string): string {
+  private handleRole(senderPhone: string, rest: string): string {
     // Format: <phone> <role>
     const match = rest.match(/^(\S+)\s+(\S+)$/);
     if (!match) return 'Usage: #role <phone> <role>';
@@ -365,9 +363,17 @@ export class AdminService {
       return `User ${phone} not found.`;
     }
 
-    this.deps.db
-      .prepare('UPDATE users SET role = ? WHERE phone = ?')
-      .run(role, phone);
+    const callerRole = getUserRole(this.deps.db, senderPhone);
+    const result = setUserRole(
+      this.deps.db,
+      phone,
+      role as UserRole,
+      callerRole,
+    );
+
+    if (result !== 'OK') {
+      return result;
+    }
 
     return `User ${phone} role set to ${role}.`;
   }

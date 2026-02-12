@@ -4,12 +4,19 @@ import path from 'path';
 
 import makeWASocket, {
   DisconnectReason,
+  WAMessage,
   WASocket,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-import { STORE_DIR } from '../config.js';
+import {
+  MAX_OUTGOING_QUEUE_SIZE,
+  RECONNECT_INITIAL_DELAY_MS,
+  RECONNECT_MAX_ATTEMPTS,
+  RECONNECT_MAX_DELAY_MS,
+  STORE_DIR,
+} from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import {
@@ -66,7 +73,7 @@ export interface WhatsAppChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   /** Called when an audio message is received in a 1:1 chat. */
-  onAudioMessage?: (chatJid: string, msg: any, metadata: AudioMetadata) => void;
+  onAudioMessage?: (chatJid: string, msg: WAMessage, metadata: AudioMetadata) => void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -80,6 +87,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempts = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -144,21 +152,14 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.reconnectWithBackoff();
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempts = 0;
         logger.info('Connected to WhatsApp');
 
         // Build LID to phone mappings from auth state files.
@@ -217,8 +218,8 @@ export class WhatsAppChannel implements Channel {
     });
     this.sock.ev.on('contacts.upsert', (contacts) => {
       for (const contact of contacts) {
-        if ((contact as any).lid && contact.id?.endsWith('@s.whatsapp.net')) {
-          const lidUser = (contact as any).lid.split('@')[0].split(':')[0];
+        if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+          const lidUser = contact.lid.split('@')[0].split(':')[0];
           this.addLidMapping(lidUser, contact.id);
         }
       }
@@ -327,11 +328,7 @@ export class WhatsAppChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text });
-      logger.info(
-        { jid, length: text.length, queueSize: this.outgoingQueue.length },
-        'WA disconnected, message queued',
-      );
+      this.enqueueOutgoing(jid, text);
       return;
     }
     try {
@@ -339,10 +336,27 @@ export class WhatsAppChannel implements Channel {
       logger.info({ jid, length: text.length }, 'Message sent');
     } catch (err) {
       // If send fails, queue it for retry on reconnect
-      this.outgoingQueue.push({ jid, text });
+      this.enqueueOutgoing(jid, text);
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
+      );
+    }
+  }
+
+  private enqueueOutgoing(jid: string, text: string): void {
+    this.outgoingQueue.push({ jid, text });
+    if (this.outgoingQueue.length > MAX_OUTGOING_QUEUE_SIZE) {
+      const dropped = this.outgoingQueue.length - MAX_OUTGOING_QUEUE_SIZE;
+      this.outgoingQueue.splice(0, dropped);
+      logger.warn(
+        { dropped, queueSize: this.outgoingQueue.length },
+        'Outgoing queue exceeded max size, dropped oldest messages',
+      );
+    } else {
+      logger.info(
+        { jid, length: text.length, queueSize: this.outgoingQueue.length },
+        'Message queued',
       );
     }
   }
@@ -518,6 +532,31 @@ export class WhatsAppChannel implements Channel {
       'Could not translate LID to phone JID — using LID as individual chat',
     );
     return jid;
+  }
+
+  private reconnectWithBackoff(): void {
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > RECONNECT_MAX_ATTEMPTS) {
+      logger.error(
+        { attempts: this.reconnectAttempts - 1 },
+        'Exhausted all reconnection attempts, exiting for launchd restart',
+      );
+      process.exit(1);
+    }
+    const delay = Math.min(
+      RECONNECT_INITIAL_DELAY_MS * Math.pow(2, this.reconnectAttempts - 1),
+      RECONNECT_MAX_DELAY_MS,
+    );
+    logger.info(
+      { attempt: this.reconnectAttempts, maxAttempts: RECONNECT_MAX_ATTEMPTS, delayMs: delay },
+      'Reconnecting with backoff',
+    );
+    setTimeout(() => {
+      this.connectInternal().catch((err) => {
+        logger.error({ err, attempt: this.reconnectAttempts }, 'Reconnection attempt failed');
+        this.reconnectWithBackoff();
+      });
+    }, delay);
   }
 
   private async flushOutgoingQueue(): Promise<void> {

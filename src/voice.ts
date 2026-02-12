@@ -1,8 +1,8 @@
 /**
  * voice.ts — Voice note preprocessing and validation.
  *
- * Pure function module: validates audio size/duration, calls Whisper for
- * transcription, returns result. No DB access or side effects.
+ * Pure function module: validates audio size/duration, calls Sarvam AI
+ * for transcription, returns result. No DB access or side effects.
  */
 import { logger } from './logger.js';
 
@@ -15,7 +15,8 @@ export interface VoiceResult {
 
 /** Configuration for voice processing. */
 export interface VoiceConfig {
-  whisperUrl: string;
+  sarvamApiKey: string;
+  sarvamUrl: string;
   maxSizeBytes: number;
   maxDurationSeconds: number;
 }
@@ -23,7 +24,9 @@ export interface VoiceConfig {
 /** Get the default VoiceConfig. */
 export function getDefaultVoiceConfig(): VoiceConfig {
   return {
-    whisperUrl: process.env.WHISPER_URL || 'http://whisper-svc:9000',
+    sarvamApiKey: process.env.SARVAM_API_KEY || '',
+    sarvamUrl:
+      process.env.SARVAM_URL || 'https://api.sarvam.ai/speech-to-text',
     maxSizeBytes: 1_048_576,
     maxDurationSeconds: 120,
   };
@@ -89,35 +92,54 @@ function getErrorMessage(language: string): string {
   return 'मला तुमचा आवाज समजला नाही. कृपया लिहून पाठवा.';
 }
 
-// --- Whisper HTTP integration ---
+// --- Language code mapping (our codes → Sarvam BCP-47) ---
+
+function toSarvamLanguageCode(lang: string): string {
+  const map: Record<string, string> = {
+    mr: 'mr-IN',
+    hi: 'hi-IN',
+    en: 'en-IN',
+  };
+  return map[lang] || 'unknown';
+}
+
+// --- Sarvam AI transcription ---
 
 async function transcribeAudio(
   audioBuffer: Buffer,
   language: string,
   config: VoiceConfig,
-): Promise<{ text: string } | { error: string }> {
+): Promise<{ text: string; detectedLanguage?: string } | { error: string }> {
   const formData = new FormData();
   formData.append('file', new Blob([audioBuffer]), 'voice.ogg');
-  formData.append('model', 'Systran/faster-whisper-small');
-  if (language) {
-    formData.append('language', language);
+  formData.append('model', 'saaras:v3');
+
+  const sarvamLang = toSarvamLanguageCode(language);
+  if (sarvamLang !== 'unknown') {
+    formData.append('language_code', sarvamLang);
   }
 
-  const response = await fetch(
-    `${config.whisperUrl}/v1/audio/transcriptions`,
-    {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(30_000),
+  const response = await fetch(config.sarvamUrl, {
+    method: 'POST',
+    headers: {
+      'api-subscription-key': config.sarvamApiKey,
     },
-  );
+    body: formData,
+    signal: AbortSignal.timeout(30_000),
+  });
 
   if (!response.ok) {
-    return { error: `Whisper HTTP ${response.status}: ${response.statusText}` };
+    const body = await response.text().catch(() => '');
+    return {
+      error: `Sarvam HTTP ${response.status}: ${response.statusText} ${body}`,
+    };
   }
 
-  const result = (await response.json()) as { text: string };
-  return { text: result.text };
+  const result = (await response.json()) as {
+    transcript: string;
+    language_code?: string;
+  };
+  return { text: result.transcript, detectedLanguage: result.language_code };
 }
 
 /**
@@ -140,23 +162,41 @@ export async function processVoiceNote(
     return { status: 'rejected', message: getRejectionMessage(language) };
   }
 
-  // Transcribe via Whisper
+  // API key check
+  if (!config.sarvamApiKey) {
+    logger.error({ messageId }, 'SARVAM_API_KEY not configured');
+    return { status: 'error', message: getErrorMessage(language) };
+  }
+
+  // Transcribe via Sarvam AI
   try {
     const result = await transcribeAudio(audioBuffer, language, config);
 
     if ('error' in result) {
-      logger.error({ messageId, error: result.error }, 'Whisper transcription HTTP error');
+      logger.error(
+        { messageId, error: result.error },
+        'Sarvam transcription HTTP error',
+      );
       return { status: 'error', message: getErrorMessage(language) };
     }
 
     if (!result.text || result.text.trim() === '') {
-      logger.warn({ messageId }, 'Whisper returned empty transcript');
+      logger.warn({ messageId }, 'Sarvam returned empty transcript');
       return { status: 'error', message: getErrorMessage(language) };
     }
 
+    logger.info(
+      {
+        messageId,
+        transcript: result.text,
+        language,
+        detectedLanguage: result.detectedLanguage,
+      },
+      'Sarvam transcription result',
+    );
     return { status: 'transcript', text: result.text };
   } catch (err) {
-    logger.error({ err, messageId }, 'Whisper transcription failed');
+    logger.error({ err, messageId }, 'Sarvam transcription failed');
     return { status: 'error', message: getErrorMessage(language) };
   }
 }

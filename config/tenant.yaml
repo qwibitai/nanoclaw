@@ -6,7 +6,6 @@ complaint_id_prefix: "RK"
 admin_group_name: "Daund Complaints Admin"
 wa_admin_group_jid: ""
 admin_phones:
-  - "918600822444"
   - "918282830830"
 languages:
   - mr

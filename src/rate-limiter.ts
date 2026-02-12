@@ -5,11 +5,7 @@
  * Self-contained module: only depends on better-sqlite3 Database type.
  */
 import type Database from 'better-sqlite3';
-
-/** ISO timestamp without milliseconds (matches project convention). */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 export interface RateLimitResult {
   allowed: boolean;

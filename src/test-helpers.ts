@@ -10,11 +10,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { slugify } from './area-db.js';
-
-/** ISO timestamp without milliseconds. */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 /**
  * Create a fresh in-memory DB with all tables and migrations applied.

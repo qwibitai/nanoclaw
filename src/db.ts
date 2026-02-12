@@ -42,12 +42,13 @@ export function runMigrations(database: Database.Database): void {
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
     try {
       database.exec(sql);
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Tolerate "duplicate column" errors — column already exists from a previous run
       // whose _migrations record was lost (e.g., DB flush without schema reset).
+      const sqliteErr = err as { code?: string; message?: string };
       if (
-        err?.code === 'SQLITE_ERROR' &&
-        /duplicate column/i.test(err.message)
+        sqliteErr.code === 'SQLITE_ERROR' &&
+        /duplicate column/i.test(sqliteErr.message ?? '')
       ) {
         // Column already exists; migration is effectively applied
       } else {
@@ -142,6 +143,7 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
   createSchema(db);
   runMigrations(db);
 
@@ -272,31 +274,6 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
-  db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    msg.id,
-    msg.chat_jid,
-    msg.sender,
-    msg.sender_name,
-    msg.content,
-    msg.timestamp,
-    msg.is_from_me ? 1 : 0,
-  );
-}
-
-/**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
- */
-export function storeMessageDirect(msg: {
-  id: string;
-  chat_jid: string;
-  sender: string;
-  sender_name: string;
-  content: string;
-  timestamp: string;
-  is_from_me: boolean;
-}): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -504,13 +481,6 @@ export function setRouterState(key: string, value: string): void {
 }
 
 // --- Session accessors ---
-
-export function getSession(groupFolder: string): string | undefined {
-  const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
-    .get(groupFolder) as { session_id: string } | undefined;
-  return row?.session_id;
-}
 
 export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(

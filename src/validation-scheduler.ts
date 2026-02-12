@@ -7,11 +7,7 @@ import type Database from 'better-sqlite3';
 
 import { getKaryakartasForArea, createValidation } from './area-db.js';
 import { eventBus } from './event-bus.js';
-
-/** ISO timestamp without milliseconds. */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 export interface ValidationSchedulerDeps {
   db: Database.Database;

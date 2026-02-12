@@ -6,11 +6,7 @@
  */
 import type Database from 'better-sqlite3';
 import type { UserRole } from './types.js';
-
-/** ISO timestamp without milliseconds. */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 const ADMIN_ROLES: UserRole[] = ['admin', 'superadmin'];
 

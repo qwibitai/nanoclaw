@@ -10,11 +10,7 @@ import { matchArea } from './area-matcher.js';
 import { setUserRole } from './roles.js';
 import type { UserRole } from './types.js';
 import { eventBus } from './event-bus.js';
-
-/** ISO timestamp without milliseconds (matches shell script format). */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 /** Shared SELECT columns for complaint queries (uses view for days_open). */
 const COMPLAINT_SELECT = `SELECT id, phone, category, description, location, language, status, priority,
@@ -38,6 +34,10 @@ export function createComplaint(
   },
 ): string {
   const { phone, category, description, location, language, area_id } = params;
+
+  if (description.length > 5000) {
+    throw new Error('description exceeds 5000 character limit');
+  }
 
   // Read tracking ID prefix from tenant_config
   const prefixRow = db

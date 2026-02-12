@@ -26,7 +26,6 @@ import {
   getCategories,
   getUser,
   updateUser,
-  blockUser,
   resolveArea,
 } from './complaint-mcp-server.js';
 
@@ -110,10 +109,6 @@ Parameters: phone
 Save or update user details — name, date of birth, language preference.
 Parameters: phone, name (optional), date_of_birth (optional, YYYY-MM-DD), language (optional)
 
-### block_user
-Block a user for repeated off-topic, abusive, or nonsensical messages. Once blocked, the system will silently reject all future messages from this number — no LLM call will be made.
-Parameters: phone, reason
-
 ### resolve_area
 Fuzzy-match a location text against known areas. Returns ranked matches with confidence scores.
 Parameters: location_text
@@ -140,7 +135,7 @@ function buildMcpServer() {
             .string()
             .optional()
             .describe('Complaint category (e.g. water_supply, roads)'),
-          description: z.string().describe('Full description of the complaint'),
+          description: z.string().max(5000).describe('Full description of the complaint'),
           location: z
             .string()
             .optional()
@@ -219,15 +214,6 @@ function buildMcpServer() {
             .describe('Preferred language code: mr, hi, or en'),
         },
         wrapToolHandler((params) => updateUser(db, params)),
-      ),
-      tool(
-        'block_user',
-        'Block a user for repeated off-topic, abusive, or nonsensical messages',
-        {
-          phone: z.string().describe('Phone number of the user to block'),
-          reason: z.string().describe('Reason for blocking (logged for audit)'),
-        },
-        wrapToolHandler((params) => blockUser(db, params)),
       ),
       tool(
         'resolve_area',

@@ -6,11 +6,7 @@
  */
 import type Database from 'better-sqlite3';
 import type { Area, Karyakarta, ComplaintValidation } from './types.js';
-
-/** ISO timestamp without milliseconds. */
-function nowISO(): string {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-}
+import { nowISO } from './utils.js';
 
 /** Auto-generate slug from name: "Shivaji Nagar" -> "shivaji-nagar" */
 export function slugify(name: string): string {

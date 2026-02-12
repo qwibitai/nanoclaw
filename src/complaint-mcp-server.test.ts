@@ -238,6 +238,17 @@ describe('createComplaint', () => {
     expect(complaint.voice_message_id).toBe('wmsg-abc123');
   });
 
+  it('rejects description exceeding 5000 characters', () => {
+    const longDescription = 'x'.repeat(5001);
+    expect(() =>
+      createComplaint(db, {
+        phone: '919876543210',
+        description: longDescription,
+        language: 'mr',
+      }),
+    ).toThrow('description exceeds 5000 character limit');
+  });
+
   it('defaults source to text when not specified', () => {
     const id = createComplaint(db, {
       phone: '919876543210',

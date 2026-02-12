@@ -41,7 +41,8 @@ describe('P1-S4: CLAUDE.md — the bot brain', () => {
     expect(content).toContain('get_categories');
     expect(content).toContain('get_user');
     expect(content).toContain('update_user');
-    expect(content).toContain('block_user');
+    // block_user removed from LLM tools — blocking is admin-only via #block command
+    expect(content).not.toContain('block_user');
   });
 
   it('contains language detection instructions for Marathi, Hindi, English', () => {

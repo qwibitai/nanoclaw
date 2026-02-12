@@ -284,7 +284,7 @@ describe('handleComplaintMessage', () => {
     expect(callArgs.options.systemPrompt).toContain('create_complaint');
     expect(callArgs.options.systemPrompt).toContain('query_complaints');
     expect(callArgs.options.systemPrompt).toContain('get_user');
-    expect(callArgs.options.systemPrompt).toContain('block_user');
+    expect(callArgs.options.systemPrompt).not.toContain('block_user');
     expect(callArgs.options.systemPrompt).not.toContain('create-complaint.sh');
   });
 

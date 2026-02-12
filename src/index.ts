@@ -7,6 +7,7 @@ import {
   DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MAX_CONCURRENT_DIRECT_HANDLERS,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -56,7 +57,7 @@ import {
   cacheTenantConfigToDb,
   type TenantConfig,
 } from './tenant-config.js';
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
+import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys';
 import { handleComplaintMessage } from './complaint-handler.js';
 import { processVoiceNote, getDefaultVoiceConfig } from './voice.js';
 import { AdminService } from './admin-handler.js';
@@ -77,6 +78,7 @@ import {
 } from './error-fallback.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { Semaphore } from './semaphore.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -91,6 +93,12 @@ let tenantConfig: TenantConfig;
 /** Extract phone number from JID, falling back to the JID prefix if extraction fails. */
 function phoneFromJid(jid: string): string {
   return extractPhoneNumber(jid) || jid.split('@')[0];
+}
+
+/** Advance the per-chat message cursor and persist state. */
+function advanceCursor(chatJid: string, timestamp: string): void {
+  lastAgentTimestamp[chatJid] = timestamp;
+  saveState();
 }
 
 function resolveFallbackErrorMessage(phone: string, text: string): string {
@@ -118,6 +126,25 @@ function getSessionFolder(groupFolder: string, chatJid: string): string {
 
 let whatsapp: WhatsAppChannel;
 const queue = new GroupQueue();
+const directHandlerSemaphore = new Semaphore(MAX_CONCURRENT_DIRECT_HANDLERS);
+
+/** @internal - exported for testing */
+export { directHandlerSemaphore as _directHandlerSemaphore };
+
+function getBusyMessage(phone: string, text: string): string {
+  const preferredLanguage = getPreferredLanguage(phone, (phoneNumber) => {
+    const row = getDb()
+      .prepare('SELECT language FROM users WHERE phone = ?')
+      .get(phoneNumber) as { language?: string } | undefined;
+    return row?.language;
+  });
+  const language = preferredLanguage ?? detectLanguageFromText(text);
+  if (language === 'hi')
+    return 'सर्वर पर अभी बहुत अधिक अनुरोध आ रहे हैं। कृपया कुछ मिनट बाद पुन: प्रयास करें।';
+  if (language === 'en')
+    return 'The server is currently handling too many requests. Please try again in a few minutes.';
+  return 'सर्व्हरवर सध्या खूप विनंत्या आहेत. कृपया काही मिनिटांनी पुन्हा प्रयत्न करा.';
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -236,9 +263,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
+  advanceCursor(chatJid, missedMessages[missedMessages.length - 1].timestamp);
 
   logger.info(
     {
@@ -304,8 +329,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (output === 'error' || hadError) {
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
+    advanceCursor(chatJid, previousCursor);
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -467,9 +491,7 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
+            advanceCursor(chatJid, messagesToSend[messagesToSend.length - 1].timestamp);
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
@@ -500,8 +522,7 @@ function skipPendingMessages(): void {
       ASSISTANT_NAME,
     );
     if (pending.length > 0) {
-      lastAgentTimestamp[chatJid] =
-        pending[pending.length - 1].timestamp;
+      lastAgentTimestamp[chatJid] = pending[pending.length - 1].timestamp;
       skipped += pending.length;
     }
   }
@@ -517,8 +538,7 @@ function skipPendingMessages(): void {
         ASSISTANT_NAME,
       );
       if (pending.length > 0) {
-        lastAgentTimestamp[chat.jid] =
-          pending[pending.length - 1].timestamp;
+        lastAgentTimestamp[chat.jid] = pending[pending.length - 1].timestamp;
         skipped += pending.length;
       }
     }
@@ -534,6 +554,76 @@ function skipPendingMessages(): void {
 }
 
 /**
+ * Gate check for direct (1:1) message handlers.
+ * Returns true if the message should be processed, false if it was rejected
+ * (blocked, rate-limited, or over concurrency limit).
+ */
+function acquireDirectHandler(
+  chatJid: string,
+  phone: string,
+  fallbackText: string,
+): boolean {
+  if (isUserBlocked(phone)) {
+    logger.info({ phone, chatJid }, 'Blocked user message ignored');
+    return false;
+  }
+
+  const userRole = getUserRole(getDb(), phone);
+  if (userRole === 'user') {
+    const rateResult = checkRateLimit(getDb(), phone, tenantConfig);
+    if (!rateResult.allowed) {
+      whatsapp.sendMessage(chatJid, rateResult.reason!);
+      return false;
+    }
+  }
+
+  if (!directHandlerSemaphore.tryAcquire()) {
+    logger.warn(
+      { chatJid, phone, active: directHandlerSemaphore.active },
+      'Direct handler concurrency limit reached, sending busy message',
+    );
+    whatsapp.sendMessage(chatJid, getBusyMessage(phone, fallbackText));
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Send the agent result to the user, handling empty/internal-only responses.
+ * Advances the cursor on success; skips cursor advance on empty result so
+ * the message will be retried.
+ */
+async function sendAgentResult(
+  chatJid: string,
+  phone: string,
+  timestamp: string,
+  agentResult: string,
+  fallbackText: string,
+): Promise<void> {
+  const text = stripInternalTags(agentResult);
+  if (text) {
+    await whatsapp.sendMessage(chatJid, text);
+    advanceCursor(chatJid, timestamp);
+  } else if (agentResult.length > 0) {
+    logger.warn(
+      { chatJid, phone, resultLength: agentResult.length },
+      'Agent response was entirely internal tags — sending fallback',
+    );
+    await whatsapp.sendMessage(
+      chatJid,
+      resolveFallbackErrorMessage(phone, fallbackText),
+    );
+    advanceCursor(chatJid, timestamp);
+  } else {
+    logger.warn(
+      { chatJid, phone },
+      'Handler returned empty result, NOT advancing cursor — message will be retried',
+    );
+  }
+}
+
+/**
  * Handle a 1:1 complaint message directly via the in-process Agent SDK.
  * No containers, no queue — fires and forgets (response sent asynchronously).
  */
@@ -541,55 +631,15 @@ function handleComplaintDirect(chatJid: string, msg: NewMessage): void {
   const phone = phoneFromJid(chatJid);
   const userName = msg.sender_name || phone;
 
-  // Block check — skip LLM call entirely for blocked users
-  if (isUserBlocked(phone)) {
-    logger.info({ phone, chatJid }, 'Blocked user message ignored');
-    return;
-  }
+  if (!acquireDirectHandler(chatJid, phone, msg.content)) return;
 
-  // Rate limit check (skip for karyakartas and admins — they're trusted)
-  const userRole = getUserRole(getDb(), phone);
-  if (userRole === 'user') {
-    const rateResult = checkRateLimit(getDb(), phone, tenantConfig);
-    if (!rateResult.allowed) {
-      whatsapp.sendMessage(chatJid, rateResult.reason!);
-      return;
-    }
-  }
-
-  // Fire-and-forget: handle asynchronously, don't block the message callback
   (async () => {
     try {
       await whatsapp.setTyping(chatJid, true);
       const result = await handleComplaintMessage(phone, userName, msg.content);
-      const text = stripInternalTags(result);
-      if (text) {
-        // 1:1 chats don't need the bot name prefix — WhatsApp already shows the sender
-        await whatsapp.sendMessage(chatJid, text);
-        lastAgentTimestamp[chatJid] = msg.timestamp;
-        saveState();
-      } else if (result.length > 0) {
-        // Agent produced output but it was all <internal> tags — don't retry
-        // forever, send fallback and advance cursor
-        logger.warn(
-          { chatJid, phone, resultLength: result.length },
-          'Agent response was entirely internal tags — sending fallback',
-        );
-        await whatsapp.sendMessage(
-          chatJid,
-          resolveFallbackErrorMessage(phone, msg.content),
-        );
-        lastAgentTimestamp[chatJid] = msg.timestamp;
-        saveState();
-      } else {
-        logger.warn(
-          { chatJid, phone },
-          'Complaint handler returned empty result, NOT advancing cursor — message will be retried',
-        );
-      }
+      await sendAgentResult(chatJid, phone, msg.timestamp, result, msg.content);
     } catch (err) {
       logger.error({ chatJid, err }, 'Direct complaint handler error');
-      // Send fallback error message so user isn't left without a response
       try {
         await whatsapp.sendMessage(
           chatJid,
@@ -599,6 +649,7 @@ function handleComplaintDirect(chatJid: string, msg: NewMessage): void {
         /* best-effort */
       }
     } finally {
+      directHandlerSemaphore.release();
       await whatsapp.setTyping(chatJid, false);
     }
   })();
@@ -611,28 +662,13 @@ function handleComplaintDirect(chatJid: string, msg: NewMessage): void {
  */
 function handleVoiceDirect(
   chatJid: string,
-  msg: any,
+  msg: WAMessage,
   metadata: import('./channels/whatsapp.js').AudioMetadata,
 ): void {
   const phone = phoneFromJid(chatJid);
 
-  // Block check — skip download entirely for blocked users
-  if (isUserBlocked(phone)) {
-    logger.info({ phone, chatJid }, 'Blocked user voice message ignored');
-    return;
-  }
+  if (!acquireDirectHandler(chatJid, phone, '')) return;
 
-  // Rate limit check (skip for karyakartas and admins)
-  const userRole = getUserRole(getDb(), phone);
-  if (userRole === 'user') {
-    const rateResult = checkRateLimit(getDb(), phone, tenantConfig);
-    if (!rateResult.allowed) {
-      whatsapp.sendMessage(chatJid, rateResult.reason!);
-      return;
-    }
-  }
-
-  // Fire-and-forget
   (async () => {
     try {
       await whatsapp.setTyping(chatJid, true);
@@ -660,14 +696,13 @@ function handleVoiceDirect(
           chatJid,
           resolveFallbackErrorMessage(phone, ''),
         );
-        lastAgentTimestamp[chatJid] = metadata.timestamp;
-        saveState();
+        advanceCursor(chatJid, metadata.timestamp);
         return;
       }
 
       // Validate + transcribe via voice.ts
       const voiceConfig = getDefaultVoiceConfig();
-      const result = await processVoiceNote(
+      const voiceResult = await processVoiceNote(
         audioBuffer,
         language,
         metadata.messageId,
@@ -675,35 +710,31 @@ function handleVoiceDirect(
       );
 
       // Handle rejection/error
-      if (result.status === 'rejected' || result.status === 'error') {
-        await whatsapp.sendMessage(chatJid, result.message!);
-        lastAgentTimestamp[chatJid] = metadata.timestamp;
-        saveState();
+      if (voiceResult.status === 'rejected' || voiceResult.status === 'error') {
+        await whatsapp.sendMessage(chatJid, voiceResult.message!);
+        advanceCursor(chatJid, metadata.timestamp);
         return;
       }
 
-      // Pass transcript to complaint handler
-      const transcript = result.text!;
+      // Pass transcript to complaint handler with voice context prefix
+      const transcript = voiceResult.text!;
       logger.info(
         {
           phone,
           messageId: metadata.messageId,
           transcriptLength: transcript.length,
+          transcript,
         },
         'Voice note transcribed, routing to complaint handler',
       );
 
+      const voiceContent = `[Voice note transcribed — user spoke this message]\n${transcript}`;
       const agentResult = await handleComplaintMessage(
         phone,
         metadata.senderName,
-        transcript,
+        voiceContent,
       );
-      const text = stripInternalTags(agentResult);
-      if (text) {
-        await whatsapp.sendMessage(chatJid, text);
-        lastAgentTimestamp[chatJid] = metadata.timestamp;
-        saveState();
-      }
+      await sendAgentResult(chatJid, phone, metadata.timestamp, agentResult, transcript);
     } catch (err) {
       logger.error({ chatJid, err }, 'Voice message handler error');
       try {
@@ -715,6 +746,7 @@ function handleVoiceDirect(
         /* best-effort */
       }
     } finally {
+      directHandlerSemaphore.release();
       await whatsapp.setTyping(chatJid, false);
     }
   })();
@@ -936,8 +968,7 @@ async function main(): Promise<void> {
               );
               if (result) {
                 await whatsapp.sendMessage(chatJid, result);
-                lastAgentTimestamp[chatJid] = msg.timestamp;
-                saveState();
+                advanceCursor(chatJid, msg.timestamp);
               }
             } catch (err) {
               logger.error({ err, chatJid }, 'MLA reply handler error');
@@ -964,8 +995,7 @@ async function main(): Promise<void> {
                 );
                 if (result) {
                   await whatsapp.sendMessage(chatJid, result);
-                  lastAgentTimestamp[chatJid] = msg.timestamp;
-                  saveState();
+                  advanceCursor(chatJid, msg.timestamp);
                 } else {
                   // Unrecognized command — treat as complaint message
                   handleComplaintDirect(chatJid, msg);

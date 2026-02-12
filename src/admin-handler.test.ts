@@ -506,10 +506,19 @@ describe('handleCommand — #block', () => {
 // ============================================================
 
 describe('handleCommand — #role', () => {
-  it('sets user role', async () => {
+  beforeEach(() => {
+    // Create the target user
     db.prepare(
       `INSERT INTO users (phone, role, first_seen, last_seen)
        VALUES ('919876543210', 'user', datetime('now'), datetime('now'))`,
+    ).run();
+  });
+
+  it('superadmin caller can promote to admin', async () => {
+    // Make the caller a superadmin
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'superadmin', datetime('now'), datetime('now'))`,
     ).run();
 
     const service = createTestService();
@@ -524,6 +533,115 @@ describe('handleCommand — #role', () => {
       .prepare('SELECT role FROM users WHERE phone = ?')
       .get('919876543210') as { role: string };
     expect(user.role).toBe('admin');
+  });
+
+  it('admin caller can set user/karyakarta role', async () => {
+    // Make the caller an admin
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'admin', datetime('now'), datetime('now'))`,
+    ).run();
+
+    const service = createTestService();
+    const result = await service.handleCommand(
+      ADMIN_PHONES[0],
+      '#role +919876543210 karyakarta',
+    );
+
+    expect(result).toContain('karyakarta');
+
+    const user = db
+      .prepare('SELECT role FROM users WHERE phone = ?')
+      .get('919876543210') as { role: string };
+    expect(user.role).toBe('karyakarta');
+  });
+
+  it('admin caller CANNOT promote to admin (hierarchy bypass)', async () => {
+    // Make the caller an admin (not superadmin)
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'admin', datetime('now'), datetime('now'))`,
+    ).run();
+
+    const service = createTestService();
+    const result = await service.handleCommand(
+      ADMIN_PHONES[0],
+      '#role +919876543210 admin',
+    );
+
+    expect(result).toContain('Only superadmin');
+
+    // Verify role was NOT changed
+    const user = db
+      .prepare('SELECT role FROM users WHERE phone = ?')
+      .get('919876543210') as { role: string };
+    expect(user.role).toBe('user');
+  });
+
+  it('admin caller CANNOT promote to superadmin', async () => {
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'admin', datetime('now'), datetime('now'))`,
+    ).run();
+
+    const service = createTestService();
+    const result = await service.handleCommand(
+      ADMIN_PHONES[0],
+      '#role +919876543210 superadmin',
+    );
+
+    expect(result).toContain('Only superadmin');
+
+    const user = db
+      .prepare('SELECT role FROM users WHERE phone = ?')
+      .get('919876543210') as { role: string };
+    expect(user.role).toBe('user');
+  });
+
+  it('non-admin caller cannot change roles', async () => {
+    // Caller has no user record (defaults to 'user' role)
+    const service = createTestService();
+    const result = await service.handleCommand(
+      '910000000000',
+      '#role +919876543210 karyakarta',
+    );
+
+    expect(result).toContain('Only admin or superadmin');
+
+    const user = db
+      .prepare('SELECT role FROM users WHERE phone = ?')
+      .get('919876543210') as { role: string };
+    expect(user.role).toBe('user');
+  });
+
+  it('returns error for non-existent target user', async () => {
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'superadmin', datetime('now'), datetime('now'))`,
+    ).run();
+
+    const service = createTestService();
+    const result = await service.handleCommand(
+      ADMIN_PHONES[0],
+      '#role +910000000000 admin',
+    );
+
+    expect(result).toContain('not found');
+  });
+
+  it('returns error for invalid role', async () => {
+    db.prepare(
+      `INSERT INTO users (phone, role, first_seen, last_seen)
+       VALUES ('${ADMIN_PHONES[0]}', 'superadmin', datetime('now'), datetime('now'))`,
+    ).run();
+
+    const service = createTestService();
+    const result = await service.handleCommand(
+      ADMIN_PHONES[0],
+      '#role +919876543210 moderator',
+    );
+
+    expect(result).toContain('Invalid role');
   });
 });
 
