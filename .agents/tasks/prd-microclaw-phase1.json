@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:30:54Z",
+    "updatedAt": "2026-02-12T23:32:26Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -86,9 +86,9 @@
       "intent": "Add microclaw-queue GroupQueue with per-group FIFO",
       "acceptance": ["cargo test -p microclaw-queue passes"],
       "gates": ["cargo test -p microclaw-queue"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-12T23:31:24Z",
+      "completedAt": "2026-02-12T23:32:26Z",
       "dependencies": ["S4"],
       "risks": ["Capacity semantics may evolve"],
       "notes": "In-memory only"

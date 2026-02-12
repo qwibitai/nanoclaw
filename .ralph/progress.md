@@ -35,3 +35,15 @@
   - crates/microclaw-store added
 - Notes:
   - Added schema_version table and Store open_in_memory
+
+## 2026-02-12T23:32:26Z S5 Queue per-group FIFO
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-queue -> fail (package not found)
+  - cargo test -p microclaw-queue -> fail (GroupQueue missing)
+  - cargo test -p microclaw-queue -> pass
+- Key diffs:
+  - Cargo.toml updated (workspace members)
+  - crates/microclaw-queue added
+- Notes:
+  - Added bounded per-group FIFO queue

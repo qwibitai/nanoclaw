@@ -1,3 +1,4 @@
 2026-02-12T23:28:22Z S0 initialized ralph state and PRD
 2026-02-12T23:29:39Z S3 config crate default backend
 2026-02-12T23:30:54Z S4 store schema and in-memory store
+2026-02-12T23:32:26Z S5 queue per-group FIFO
