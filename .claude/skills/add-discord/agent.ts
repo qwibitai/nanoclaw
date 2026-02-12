@@ -64,10 +64,10 @@ function checkPermission(
   isMain: boolean,
   isScheduledTask?: boolean,
 ): string | null {
-  if (!isScheduledTask && !isMain) {
-    return 'Only the main group can use Discord tools interactively. Scheduled tasks can use any tool.';
+  if (isScheduledTask || isMain) {
+    return null;
   }
-  return null;
+  return 'Discord tools require main group access or scheduled task context.';
 }
 
 function validateSnowflake(id: string, fieldName: string): string | null {
