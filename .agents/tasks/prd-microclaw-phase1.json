@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-12T23:28:22Z",
+    "updatedAt": "2026-02-12T23:29:39Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -60,9 +60,9 @@
       "intent": "Add microclaw-config HostConfig with default backend",
       "acceptance": ["cargo test -p microclaw-config passes"],
       "gates": ["cargo test -p microclaw-config"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-12T23:29:04Z",
+      "completedAt": "2026-02-12T23:29:39Z",
       "dependencies": ["S2"],
       "risks": ["Config shape may change"],
       "notes": "Keep minimal"

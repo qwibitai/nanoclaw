@@ -1,3 +1,7 @@
 [workspace]
-members = ["crates/microclaw-core", "crates/microclaw-protocol"]
+members = [
+  "crates/microclaw-core",
+  "crates/microclaw-protocol",
+  "crates/microclaw-config"
+]
 resolver = "2"
