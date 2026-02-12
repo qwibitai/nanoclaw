@@ -7,7 +7,7 @@ import {
   getReadyDiscordClient,
   splitMessage,
 } from '../lib/discord.js';
-import type { SkillResult } from '../lib/types.js';
+import { formatDiscordError, type SkillResult } from '../lib/types.js';
 
 export interface SendInput {
   channelId: string;
@@ -39,7 +39,6 @@ export async function sendDiscordMessage(
       message: `Message sent to channel ${input.channelId}`,
     };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `Failed to send message: ${errorMsg}` };
+    return formatDiscordError(err, 'Failed to send message');
   }
 }

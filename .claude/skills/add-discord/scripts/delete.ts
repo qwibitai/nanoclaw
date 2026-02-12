@@ -3,7 +3,7 @@
  */
 
 import { fetchTextChannel, getReadyDiscordClient } from '../lib/discord.js';
-import type { SkillResult } from '../lib/types.js';
+import { formatDiscordError, type SkillResult } from '../lib/types.js';
 
 export interface DeleteInput {
   channelId: string;
@@ -32,7 +32,6 @@ export async function deleteDiscordMessage(
     await message.delete();
     return { success: true, message: `Message ${input.messageId} deleted` };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `Failed to delete message: ${errorMsg}` };
+    return formatDiscordError(err, 'Failed to delete message');
   }
 }

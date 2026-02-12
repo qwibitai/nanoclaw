@@ -3,7 +3,7 @@
  */
 
 import { fetchTextChannel, getReadyDiscordClient } from '../lib/discord.js';
-import type { SkillResult } from '../lib/types.js';
+import { formatDiscordError, type SkillResult } from '../lib/types.js';
 
 export interface EditInput {
   channelId: string;
@@ -33,7 +33,6 @@ export async function editDiscordMessage(
     await message.edit(input.content.slice(0, 2000));
     return { success: true, message: `Message ${input.messageId} edited` };
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, message: `Failed to edit message: ${errorMsg}` };
+    return formatDiscordError(err, 'Failed to edit message');
   }
 }
