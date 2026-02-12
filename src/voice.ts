@@ -111,7 +111,11 @@ async function transcribeAudio(
   config: VoiceConfig,
 ): Promise<{ text: string; detectedLanguage?: string } | { error: string }> {
   const formData = new FormData();
-  formData.append('file', new Blob([audioBuffer]), 'voice.ogg');
+  formData.append(
+    'file',
+    new Blob([audioBuffer], { type: 'audio/ogg' }),
+    'voice.ogg',
+  );
   formData.append('model', 'saaras:v3');
 
   const sarvamLang = toSarvamLanguageCode(language);
