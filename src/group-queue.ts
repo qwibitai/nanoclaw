@@ -1,6 +1,6 @@
-import { ChildProcess } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
@@ -112,7 +112,12 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;

@@ -35,7 +35,11 @@ describe('JID ownership patterns', () => {
 describe('getAvailableGroups', () => {
   it('returns only @g.us JIDs', () => {
     storeChatMetadata('group1@g.us', '2024-01-01T00:00:01.000Z', 'Group 1');
-    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM');
+    storeChatMetadata(
+      'user@s.whatsapp.net',
+      '2024-01-01T00:00:02.000Z',
+      'User DM',
+    );
     storeChatMetadata('group2@g.us', '2024-01-01T00:00:03.000Z', 'Group 2');
 
     const groups = getAvailableGroups();

@@ -6,8 +6,8 @@
  *
  * Usage: npx tsx src/whatsapp-auth.ts
  */
-import fs from 'fs';
-import path from 'path';
+import fs from 'node:fs';
+import path from 'node:path';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 

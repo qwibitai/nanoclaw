@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 
 // --- Mocks ---
 
@@ -26,8 +26,8 @@ vi.mock('../db.js', () => ({
 }));
 
 // Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
     default: {
@@ -39,7 +39,7 @@ vi.mock('fs', async () => {
 });
 
 // Mock child_process (used for osascript notification)
-vi.mock('child_process', () => ({
+vi.mock('node:child_process', () => ({
   exec: vi.fn(),
 }));
 
@@ -97,7 +97,9 @@ import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
 
 // --- Test helpers ---
 
-function createTestOpts(overrides?: Partial<WhatsAppChannelOpts>): WhatsAppChannelOpts {
+function createTestOpts(
+  overrides?: Partial<WhatsAppChannelOpts>,
+): WhatsAppChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
@@ -194,10 +196,9 @@ describe('WhatsAppChannel', () => {
       (channel as any).connected = true;
       await (channel as any).flushOutgoingQueue();
 
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
-        'test@g.us',
-        { text: 'Queued message' },
-      );
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        text: 'Queued message',
+      });
     });
 
     it('disconnects cleanly', async () => {
@@ -217,7 +218,9 @@ describe('WhatsAppChannel', () => {
   describe('authentication', () => {
     it('exits process when QR code is emitted (no auth state)', async () => {
       vi.useFakeTimers();
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const mockExit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -259,7 +262,9 @@ describe('WhatsAppChannel', () => {
     });
 
     it('exits on loggedOut disconnect', async () => {
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+      const mockExit = vi
+        .spyOn(process, 'exit')
+        .mockImplementation(() => undefined as never);
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -439,7 +444,10 @@ describe('WhatsAppChannel', () => {
             fromMe: false,
           },
           message: {
-            imageMessage: { caption: 'Check this photo', mimetype: 'image/jpeg' },
+            imageMessage: {
+              caption: 'Check this photo',
+              mimetype: 'image/jpeg',
+            },
           },
           pushName: 'Diana',
           messageTimestamp: Math.floor(Date.now() / 1000),
@@ -639,7 +647,9 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       await channel.sendMessage('test@g.us', 'Hello');
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', { text: 'Hello' });
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
+        text: 'Hello',
+      });
     });
 
     it('queues message when disconnected', async () => {
@@ -682,9 +692,15 @@ describe('WhatsAppChannel', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledTimes(3);
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', { text: 'First' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', { text: 'Second' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', { text: 'Third' });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', {
+        text: 'First',
+      });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', {
+        text: 'Second',
+      });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', {
+        text: 'Third',
+      });
     });
   });
 
@@ -817,7 +833,10 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       await channel.setTyping('test@g.us', true);
-      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith('composing', 'test@g.us');
+      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith(
+        'composing',
+        'test@g.us',
+      );
     });
 
     it('sends paused presence when stopping', async () => {
@@ -827,7 +846,10 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       await channel.setTyping('test@g.us', false);
-      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith('paused', 'test@g.us');
+      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith(
+        'paused',
+        'test@g.us',
+      );
     });
 
     it('handles typing indicator failure gracefully', async () => {
@@ -839,7 +861,9 @@ describe('WhatsAppChannel', () => {
       fakeSocket.sendPresenceUpdate.mockRejectedValueOnce(new Error('Failed'));
 
       // Should not throw
-      await expect(channel.setTyping('test@g.us', true)).resolves.toBeUndefined();
+      await expect(
+        channel.setTyping('test@g.us', true),
+      ).resolves.toBeUndefined();
     });
   });
 

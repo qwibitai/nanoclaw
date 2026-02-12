@@ -53,7 +53,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'BotName',
+    );
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('msg-1');
     expect(messages[0].sender).toBe('123@s.whatsapp.net');
@@ -73,7 +77,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:04.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'BotName',
+    );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('');
   });
@@ -92,7 +100,11 @@ describe('storeMessage', () => {
     });
 
     // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'BotName',
+    );
     expect(messages).toHaveLength(1);
   });
 
@@ -117,7 +129,11 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'BotName');
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'BotName',
+    );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
   });
@@ -130,10 +146,30 @@ describe('getMessagesSince', () => {
     storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
 
     const msgs = [
-      { id: 'm1', content: 'first', ts: '2024-01-01T00:00:01.000Z', sender: 'Alice' },
-      { id: 'm2', content: 'second', ts: '2024-01-01T00:00:02.000Z', sender: 'Bob' },
-      { id: 'm3', content: 'Andy: bot reply', ts: '2024-01-01T00:00:03.000Z', sender: 'Bot' },
-      { id: 'm4', content: 'third', ts: '2024-01-01T00:00:04.000Z', sender: 'Carol' },
+      {
+        id: 'm1',
+        content: 'first',
+        ts: '2024-01-01T00:00:01.000Z',
+        sender: 'Alice',
+      },
+      {
+        id: 'm2',
+        content: 'second',
+        ts: '2024-01-01T00:00:02.000Z',
+        sender: 'Bob',
+      },
+      {
+        id: 'm3',
+        content: 'Andy: bot reply',
+        ts: '2024-01-01T00:00:03.000Z',
+        sender: 'Bot',
+      },
+      {
+        id: 'm4',
+        content: 'third',
+        ts: '2024-01-01T00:00:04.000Z',
+        sender: 'Carol',
+      },
     ];
     for (const m of msgs) {
       store({
@@ -148,14 +184,22 @@ describe('getMessagesSince', () => {
   });
 
   it('returns messages after the given timestamp', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:02.000Z', 'Andy');
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'Andy',
+    );
     // Should exclude m1, m2 (before/at timestamp), m3 (bot message)
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('third');
   });
 
   it('excludes messages from the assistant (content prefix)', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const msgs = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
     const botMsgs = msgs.filter((m) => m.content.startsWith('Andy:'));
     expect(botMsgs).toHaveLength(0);
   });
@@ -175,10 +219,30 @@ describe('getNewMessages', () => {
     storeChatMetadata('group2@g.us', '2024-01-01T00:00:00.000Z');
 
     const msgs = [
-      { id: 'a1', chat: 'group1@g.us', content: 'g1 msg1', ts: '2024-01-01T00:00:01.000Z' },
-      { id: 'a2', chat: 'group2@g.us', content: 'g2 msg1', ts: '2024-01-01T00:00:02.000Z' },
-      { id: 'a3', chat: 'group1@g.us', content: 'Andy: reply', ts: '2024-01-01T00:00:03.000Z' },
-      { id: 'a4', chat: 'group1@g.us', content: 'g1 msg2', ts: '2024-01-01T00:00:04.000Z' },
+      {
+        id: 'a1',
+        chat: 'group1@g.us',
+        content: 'g1 msg1',
+        ts: '2024-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'a2',
+        chat: 'group2@g.us',
+        content: 'g2 msg1',
+        ts: '2024-01-01T00:00:02.000Z',
+      },
+      {
+        id: 'a3',
+        chat: 'group1@g.us',
+        content: 'Andy: reply',
+        ts: '2024-01-01T00:00:03.000Z',
+      },
+      {
+        id: 'a4',
+        chat: 'group1@g.us',
+        content: 'g1 msg2',
+        ts: '2024-01-01T00:00:04.000Z',
+      },
     ];
     for (const m of msgs) {
       store({
