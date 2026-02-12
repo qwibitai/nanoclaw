@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/microclaw-core"]
+resolver = "2"
