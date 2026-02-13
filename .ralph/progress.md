@@ -501,3 +501,12 @@
   - .gitignore updated (.embuild/)
 - Notes:
   - Keeps espup/IDF downloads out of git status
+## 2026-02-13T05:07:09Z S46 Reproducible ESP check script
+- Outcome: pass
+- Commands:
+  - test -x scripts/esp-check.sh -> fail
+  - test -x scripts/esp-check.sh -> pass
+- Key diffs:
+  - scripts/esp-check.sh added (encapsulates ESP_IDF_VERSION + build-std)
+- Notes:
+  - Uses $HOME/export-esp.sh if available for toolchain setup

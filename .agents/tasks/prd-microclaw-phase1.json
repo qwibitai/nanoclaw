@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T05:06:09Z",
+    "updatedAt": "2026-02-13T05:07:09Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -632,9 +632,9 @@
       "intent": "Add a scripted esp check command with required env flags",
       "acceptance": ["scripts/esp-check.sh exists and is executable"],
       "gates": ["test -x scripts/esp-check.sh"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T05:06:40Z",
+      "completedAt": "2026-02-13T05:07:09Z",
       "dependencies": ["S45"],
       "risks": ["None"],
       "notes": "Encapsulates ESP_IDF_VERSION + build-std flags"

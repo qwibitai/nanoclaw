@@ -44,3 +44,4 @@
 2026-02-13T05:02:24Z S43 device runtime esp integration
 2026-02-13T05:04:38Z S36 esp-idf toolchain check done
 2026-02-13T05:06:09Z S45 ignore .embuild in gitignore
+2026-02-13T05:07:09Z S46 add esp-check script
