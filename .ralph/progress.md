@@ -427,3 +427,12 @@
   - crates/microclaw-bus/tests/persistence.rs added
 - Notes:
   - Bus now persists to file and assigns sequences when missing
+## 2026-02-13T03:42:53Z S40 Store accessors parity - Outcome: pass
+- Commands:
+  - cargo test -p microclaw-store -> fail (syntax error, FK violation)
+  - cargo test -p microclaw-store -> pass
+- Key diffs:
+  - crates/microclaw-store/src/lib.rs updated (registered_groups + message accessors)
+  - crates/microclaw-store/tests/accessors.rs added
+- Notes:
+  - store_message now inserts chat row to satisfy FK

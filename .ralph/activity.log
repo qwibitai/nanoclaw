@@ -36,3 +36,4 @@
 2026-02-13T03:32:17Z S37 expanded PRD with remaining parity stories
 2026-02-13T03:34:30Z S38 core router parity implemented
 2026-02-13T03:40:59Z S39 bus persistence and seq assignment
+2026-02-13T03:42:53Z S40 store accessors implemented

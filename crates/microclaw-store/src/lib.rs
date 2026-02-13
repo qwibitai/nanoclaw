@@ -1,5 +1,7 @@
+use rusqlite::{params, Connection, Result as SqlResult};
+
 pub struct Store {
-    conn: rusqlite::Connection,
+    conn: Connection,
 }
 
 const SCHEMA_SQL: &str = r#"
@@ -102,4 +104,141 @@ impl Store {
         self.conn
             .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| row.get(0))
     }
+
+    pub fn upsert_registered_group(&self, group: &RegisteredGroup) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(jid) DO UPDATE SET
+               name = excluded.name,
+               folder = excluded.folder,
+               trigger_pattern = excluded.trigger_pattern,
+               added_at = excluded.added_at,
+               container_config = excluded.container_config,
+               requires_trigger = excluded.requires_trigger",
+            params![
+                group.jid,
+                group.name,
+                group.folder,
+                group.trigger_pattern,
+                group.added_at,
+                group.container_config,
+                if group.requires_trigger { 1 } else { 0 }
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_registered_groups(&self) -> SqlResult<Vec<RegisteredGroup>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger
+             FROM registered_groups
+             ORDER BY added_at ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(RegisteredGroup {
+                jid: row.get(0)?,
+                name: row.get(1)?,
+                folder: row.get(2)?,
+                trigger_pattern: row.get(3)?,
+                added_at: row.get(4)?,
+                container_config: row.get(5)?,
+                requires_trigger: row.get::<_, i64>(6)? != 0,
+            })
+        })?;
+        let mut groups = Vec::new();
+        for row in rows {
+            groups.push(row?);
+        }
+        Ok(groups)
+    }
+
+    pub fn store_message(&self, msg: &StoredMessage) -> SqlResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)",
+            params![msg.chat_jid, msg.chat_jid, msg.timestamp],
+        )?;
+        self.conn.execute(
+            "INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![
+                msg.id,
+                msg.chat_jid,
+                msg.sender,
+                msg.sender_name,
+                msg.content,
+                msg.timestamp,
+                if msg.is_from_me { 1 } else { 0 }
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_new_messages(
+        &self,
+        jids: &[String],
+        last_timestamp: &str,
+        bot_prefix: &str,
+    ) -> SqlResult<Vec<StoredMessage>> {
+        if jids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = std::iter::repeat("?")
+            .take(jids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+             FROM messages
+             WHERE timestamp > ? AND chat_jid IN ({}) AND content NOT LIKE ?
+             ORDER BY timestamp",
+            placeholders
+        );
+        let mut params_vec: Vec<String> = Vec::with_capacity(jids.len() + 2);
+        params_vec.push(last_timestamp.to_string());
+        params_vec.extend(jids.iter().cloned());
+        params_vec.push(format!("{}:%", bot_prefix));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params_vec.iter()),
+            |row| {
+                Ok(StoredMessage {
+                    id: row.get(0)?,
+                    chat_jid: row.get(1)?,
+                    sender: row.get(2)?,
+                    sender_name: row.get(3)?,
+                    content: row.get(4)?,
+                    timestamp: row.get(5)?,
+                    is_from_me: row.get::<_, i64>(6)? != 0,
+                })
+            },
+        )?;
+        let mut messages = Vec::new();
+        for row in rows {
+            messages.push(row?);
+        }
+        Ok(messages)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredGroup {
+    pub jid: String,
+    pub name: String,
+    pub folder: String,
+    pub trigger_pattern: String,
+    pub added_at: String,
+    pub container_config: Option<String>,
+    pub requires_trigger: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredMessage {
+    pub id: String,
+    pub chat_jid: String,
+    pub sender: String,
+    pub sender_name: String,
+    pub content: String,
+    pub timestamp: String,
+    pub is_from_me: bool,
 }

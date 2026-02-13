@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T03:40:59Z",
+    "updatedAt": "2026-02-13T03:42:53Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -550,9 +550,9 @@
       "intent": "Add registered group and message accessors to microclaw-store",
       "acceptance": ["cargo test -p microclaw-store passes"],
       "gates": ["cargo test -p microclaw-store"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T03:42:53Z",
+      "completedAt": "2026-02-13T03:42:53Z",
       "dependencies": ["S39"],
       "risks": ["Schema drift vs NanoClaw"],
       "notes": "Port minimal insert/update/load for registered_groups and messages"
