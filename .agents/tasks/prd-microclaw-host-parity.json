@@ -1,0 +1,102 @@
+{
+  "meta": {
+    "title": "MicroClaw Host Parity Phase 1",
+    "createdAt": "2026-02-13T22:05:00Z",
+    "updatedAt": "2026-02-13T21:05:53Z",
+    "minCycles": 5,
+    "staleSeconds": 14400
+  },
+  "stories": [
+    {
+      "id": "S1",
+      "title": "Host binary scaffold",
+      "intent": "Add microclaw-host app with config, logging, and basic wiring stubs for store/bus/scheduler/queue/sandbox",
+      "acceptance": ["cargo test -p microclaw-host passes"],
+      "gates": ["cargo test -p microclaw-host"],
+      "status": "done",
+      "startedAt": "2026-02-13T21:04:14Z",
+      "completedAt": "2026-02-13T21:05:53Z",
+      "dependencies": [],
+      "risks": ["Host runtime still stubbed"],
+      "notes": "Ensure host app compiles without ESP toolchain"
+    },
+    {
+      "id": "S2",
+      "title": "Store schema parity",
+      "intent": "Expand microclaw-store schema to match NanoClaw core tables and add minimal query helpers",
+      "acceptance": ["cargo test -p microclaw-store passes"],
+      "gates": ["cargo test -p microclaw-store"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S1"],
+      "risks": ["Schema may evolve"],
+      "notes": "Mirror src/db.ts tables in Rust"
+    },
+    {
+      "id": "S3",
+      "title": "Bus WAL spool + replay",
+      "intent": "Implement durable bus append + replay semantics using SQLite",
+      "acceptance": ["cargo test -p microclaw-bus passes"],
+      "gates": ["cargo test -p microclaw-bus"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S2"],
+      "risks": ["Replay semantics need refinement"],
+      "notes": "Use SQLite WAL for durability"
+    },
+    {
+      "id": "S4",
+      "title": "Scheduler recurrence",
+      "intent": "Add cron/interval/once scheduling logic and next-run calculation",
+      "acceptance": ["cargo test -p microclaw-scheduler passes"],
+      "gates": ["cargo test -p microclaw-scheduler"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S3"],
+      "risks": ["Cron library compatibility"],
+      "notes": "Match src/task-scheduler.ts semantics"
+    },
+    {
+      "id": "S5",
+      "title": "Queue concurrency + retry",
+      "intent": "Add per-group concurrency gates and retry/backoff for queued work",
+      "acceptance": ["cargo test -p microclaw-queue passes"],
+      "gates": ["cargo test -p microclaw-queue"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S4"],
+      "risks": ["Behavior tuning"],
+      "notes": "Keep bounded queues"
+    },
+    {
+      "id": "S6",
+      "title": "Sandbox execution",
+      "intent": "Implement Apple Container runner with Docker parity and mount allowlist enforcement",
+      "acceptance": ["cargo test -p microclaw-sandbox passes"],
+      "gates": ["cargo test -p microclaw-sandbox"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S5"],
+      "risks": ["Command execution differences"],
+      "notes": "Focus on CLI arg building and policy checks"
+    },
+    {
+      "id": "S7",
+      "title": "Connector runtime loops",
+      "intent": "Add basic runtime loops for Discord/Telegram/Email/iMessage connectors (no network calls yet)",
+      "acceptance": ["cargo test -p microclaw-connectors passes"],
+      "gates": ["cargo test -p microclaw-connectors"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S6"],
+      "risks": ["API shapes may change"],
+      "notes": "Scaffold only, keep deterministic behavior"
+    }
+  ]
+}

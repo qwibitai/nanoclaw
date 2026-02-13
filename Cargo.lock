@@ -1862,6 +1862,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "microclaw-host"
+version = "0.1.0"
+dependencies = [
+ "microclaw-bus",
+ "microclaw-config",
+ "microclaw-queue",
+ "microclaw-sandbox",
+ "microclaw-scheduler",
+ "microclaw-store",
+]
+
+[[package]]
 name = "microclaw-protocol"
 version = "0.1.0"
 dependencies = [

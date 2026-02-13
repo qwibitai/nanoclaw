@@ -527,3 +527,15 @@
   - .agents/tasks/prd-microclaw-phase1.json updated (S48 done)
 - Notes:
   - Full host test suite green after ESP dependency updates
+## 2026-02-13T21:05:53Z S1 Host binary scaffold
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-host -> fail (package missing)
+  - cargo test -p microclaw-host -> fail (Bus::new missing)
+  - cargo test -p microclaw-host -> pass
+- Key diffs:
+  - Cargo.toml updated (workspace members)
+  - apps/microclaw-host added (Cargo.toml, lib.rs, main.rs, tests)
+  - .agents/tasks/prd-microclaw-host-parity.json updated
+- Notes:
+  - Host initializes in-memory store and bus

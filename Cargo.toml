@@ -9,6 +9,7 @@ members = [
   "crates/microclaw-bus",
   "crates/microclaw-sandbox",
   "crates/microclaw-connectors",
-  "apps/microclaw-device"
+  "apps/microclaw-device",
+  "apps/microclaw-host"
 ]
 resolver = "2"

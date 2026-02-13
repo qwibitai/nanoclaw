@@ -1,0 +1,12 @@
+[package]
+name = "microclaw-host"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+microclaw-config = { path = "../../crates/microclaw-config" }
+microclaw-store = { path = "../../crates/microclaw-store" }
+microclaw-bus = { path = "../../crates/microclaw-bus" }
+microclaw-scheduler = { path = "../../crates/microclaw-scheduler" }
+microclaw-queue = { path = "../../crates/microclaw-queue" }
+microclaw-sandbox = { path = "../../crates/microclaw-sandbox" }
