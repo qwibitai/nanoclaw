@@ -86,7 +86,7 @@ pub struct HostTouchEvent {
 
 #[cfg(not(feature = "esp"))]
 pub mod host {
-    use super::{DisplayDriver, DisplayPoint, DriverError, HostTouchEvent, Rect, TouchDriver, TouchTransform};
+    use super::{DisplayDriver, DriverError, HostTouchEvent, Rect, TouchDriver, TouchTransform};
     use crate::display::{DISPLAY_HEIGHT, DISPLAY_WIDTH};
     use microclaw_protocol::TouchEventPayload;
     use std::collections::VecDeque;
@@ -335,25 +335,9 @@ pub mod esp {
 
         fn read_event(&mut self) -> Option<TouchEventPayload> {
             let mut event = self.queue.pop_front()?;
-            let (mut transformed_x, mut transformed_y) = self
-                .transform
-                .apply(event.x, event.y, 360, 360);
-            if let Some(width) = self.queue.front().map(|_| ()) {
-                // Keep sample path explicit for future per-board width/height overrides.
-                // Width/height are currently fixed at 360x360 for the 1.85C board.
-                let (x, y) = if width.is_some() {
-                    (
-                        transformed_x.min(359),
-                        transformed_y.min(359),
-                    )
-                } else {
-                    (transformed_x, transformed_y)
-                };
-                transformed_x = x;
-                transformed_y = y;
-            }
-            event.x = transformed_x;
-            event.y = transformed_y;
+            let (transformed_x, transformed_y) = self.transform.apply(event.x, event.y, 360, 360);
+            event.x = transformed_x.min(359);
+            event.y = transformed_y.min(359);
             Some(event)
         }
     }

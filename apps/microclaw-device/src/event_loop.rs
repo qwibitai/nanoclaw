@@ -3,6 +3,7 @@ use crate::pipeline::TouchPipeline;
 use crate::renderer::SceneRenderer;
 use crate::runtime::{RuntimeAction, RuntimeState};
 use microclaw_protocol::TransportMessage;
+use crate::pipeline::TOUCH_EVENT_STALE_MS;
 
 #[derive(Clone, Debug)]
 pub struct LoopOutput {
@@ -43,6 +44,7 @@ impl Default for EventLoopConfig {
 pub struct DeviceEventLoop {
     config: EventLoopConfig,
     last_render_ms: Option<u64>,
+    last_touch_ms: Option<u64>,
     scene_cache: Option<crate::ui::Scene>,
 }
 
@@ -51,6 +53,7 @@ impl DeviceEventLoop {
         Self {
             config,
             last_render_ms: None,
+            last_touch_ms: None,
             scene_cache: None,
         }
     }
@@ -94,6 +97,7 @@ impl DeviceEventLoop {
             let drained = touch_pipeline.drain_from_driver(driver);
             frame_dirty |= drained > 0;
         }
+        touch_pipeline.purge_stale(now_ms, TOUCH_EVENT_STALE_MS, &mut self.last_touch_ms);
 
         while let Some(event) = touch_pipeline.next_frame() {
             let payload = microclaw_protocol::TouchEventPayload {
@@ -106,6 +110,7 @@ impl DeviceEventLoop {
             };
             let action = state.apply_touch_event(&payload);
             frame_dirty |= self.process_action(state, action, &mut out);
+            self.last_touch_ms = Some(now_ms);
         }
 
         if state.mark_offline_if_stale(now_ms, self.config.offline_timeout_ms) {

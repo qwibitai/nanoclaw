@@ -1,5 +1,6 @@
 pub mod display;
 pub mod drivers;
+pub mod boards;
 pub mod event_loop;
 pub mod pipeline;
 pub mod renderer;
