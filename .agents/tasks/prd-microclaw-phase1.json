@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T03:30:16Z",
+    "updatedAt": "2026-02-13T03:32:17Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -504,6 +504,101 @@
       "dependencies": ["S35"],
       "risks": ["Toolchain install may fail in this environment"],
       "notes": "cargo check fails without esp toolchain; espup install attempted (hang). Requires xtensa target (xtensa-esp32s3-espidf) with ESP-IDF env."
+    },
+    {
+      "id": "S37",
+      "title": "Phase1 completion PRD expansion",
+      "intent": "Add full-implementation stories for core parity, sandbox, connectors, and device runtime",
+      "acceptance": ["PRD includes stories S38 through S43"],
+      "gates": ["rg -n '\"S38\"' .agents/tasks/prd-microclaw-phase1.json"],
+      "status": "done",
+      "startedAt": "2026-02-13T03:32:17Z",
+      "completedAt": "2026-02-13T03:32:17Z",
+      "dependencies": ["S36"],
+      "risks": ["Scope expansion"],
+      "notes": "Records remaining work to reach full parity"
+    },
+    {
+      "id": "S38",
+      "title": "Core router parity",
+      "intent": "Port router formatting and outbound routing logic into microclaw-core",
+      "acceptance": ["cargo test -p microclaw-core passes"],
+      "gates": ["cargo test -p microclaw-core"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S37"],
+      "risks": ["Formatting parity"],
+      "notes": "Implement escapeXml, formatMessages, stripInternalTags, formatOutbound, routeOutbound"
+    },
+    {
+      "id": "S39",
+      "title": "Bus persistence path",
+      "intent": "Persist bus events to a durable SQLite file and support replay on reopen",
+      "acceptance": ["cargo test -p microclaw-bus passes"],
+      "gates": ["cargo test -p microclaw-bus"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S38"],
+      "risks": ["Replay semantics"],
+      "notes": "Add open(path) and sequence assignment"
+    },
+    {
+      "id": "S40",
+      "title": "Store accessors parity",
+      "intent": "Add registered group and message accessors to microclaw-store",
+      "acceptance": ["cargo test -p microclaw-store passes"],
+      "gates": ["cargo test -p microclaw-store"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S39"],
+      "risks": ["Schema drift vs NanoClaw"],
+      "notes": "Port minimal insert/update/load for registered_groups and messages"
+    },
+    {
+      "id": "S41",
+      "title": "Sandbox runtime enforcement",
+      "intent": "Enforce network isolation and policy defaults at execution time",
+      "acceptance": ["cargo test -p microclaw-sandbox passes"],
+      "gates": ["cargo test -p microclaw-sandbox"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S40"],
+      "risks": ["Platform differences"],
+      "notes": "Deny network by default and allow explicit network opt-in"
+    },
+    {
+      "id": "S42",
+      "title": "Connector runtime parity",
+      "intent": "Add live send/receive loops with retry/backoff for iMessage, Discord, Telegram, Email",
+      "acceptance": ["cargo test -p microclaw-connectors passes"],
+      "gates": ["cargo test -p microclaw-connectors"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S41"],
+      "risks": ["Rate limits, polling load"],
+      "notes": "Include reconnection logic and idempotent delivery"
+    },
+    {
+      "id": "S43",
+      "title": "Device runtime ESP integration",
+      "intent": "Compile ESP-IDF WS client and UI shell with the xtensa target",
+      "acceptance": [
+        "cargo check -p microclaw-device --features esp --target xtensa-esp32s3-espidf passes"
+      ],
+      "gates": [
+        "cargo check -p microclaw-device --features esp --target xtensa-esp32s3-espidf"
+      ],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S42"],
+      "risks": ["Toolchain availability"],
+      "notes": "Requires espup toolchain + IDF setup"
     }
   ]
 }

@@ -401,3 +401,10 @@
   - .agents/tasks/prd-microclaw-phase1.json updated (S36 notes, meta.updatedAt)
 - Notes:
   - Need xtensa-esp32s3-espidf target + ESP-IDF env; rerun espup install with sufficient time
+## 2026-02-13T03:32:17Z S37 Phase1 completion PRD expansion - Outcome: pass
+- Commands:
+  - rg -n '"S38"' .agents/tasks/prd-microclaw-phase1.json -> pass
+- Key diffs:
+  - .agents/tasks/prd-microclaw-phase1.json updated (S37 done, S38-S43 added)
+- Notes:
+  - Added open stories for core parity, sandbox, connectors, device runtime
