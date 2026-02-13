@@ -9,6 +9,7 @@ use std::path::Path;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
+use lettre::Transport;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandResult {
@@ -267,11 +268,102 @@ impl EmailConnector {
     pub fn imap_idle_command() -> &'static str {
         "IDLE"
     }
+
+    pub fn build_message(
+        from: &str,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> EmailMessage {
+        EmailMessage {
+            from: from.to_string(),
+            to: to.to_string(),
+            subject: subject.to_string(),
+            body: body.to_string(),
+        }
+    }
+
+    pub fn smtp_send_with_transport<T: EmailTransport>(
+        transport: &T,
+        message: &EmailMessage,
+    ) -> Result<(), String> {
+        transport.send(message)
+    }
+
+    pub fn smtp_send(
+        server: &str,
+        from: &str,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<(), String> {
+        let email = lettre::Message::builder()
+            .from(from.parse().map_err(|err| format!("from error: {}", err))?)
+            .to(to.parse().map_err(|err| format!("to error: {}", err))?)
+            .subject(subject)
+            .body(body.to_string())
+            .map_err(|err| format!("build error: {}", err))?;
+        let mailer = lettre::SmtpTransport::relay(server)
+            .map_err(|err| format!("smtp error: {}", err))?
+            .build();
+        mailer
+            .send(&email)
+            .map_err(|err| format!("send error: {}", err))?;
+        Ok(())
+    }
+
+    pub fn imap_idle_with_client<C: ImapClient>(client: &mut C) -> Result<(), String> {
+        client.idle()
+    }
+
+    pub fn connect_imap(
+        server: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+    ) -> Result<ImapSession, String> {
+        let client = imap::ClientBuilder::new(server, port)
+            .connect()
+            .map_err(|err| format!("imap connect error: {}", err))?;
+        let session = client
+            .login(username, password)
+            .map_err(|(err, _)| format!("imap login error: {}", err))?;
+        Ok(ImapSession { session })
+    }
 }
 
 impl Connector for EmailConnector {
     fn id(&self) -> ConnectorId {
         ConnectorId("email".to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmailMessage {
+    pub from: String,
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+}
+
+pub trait EmailTransport {
+    fn send(&self, message: &EmailMessage) -> Result<(), String>;
+}
+
+pub trait ImapClient {
+    fn idle(&mut self) -> Result<(), String>;
+}
+
+pub struct ImapSession {
+    session: imap::Session<imap::Connection>,
+}
+
+impl ImapClient for ImapSession {
+    fn idle(&mut self) -> Result<(), String> {
+        self.session
+            .noop()
+            .map(|_| ())
+            .map_err(|err| format!("imap noop error: {}", err))
     }
 }
 

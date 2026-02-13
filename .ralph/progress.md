@@ -346,3 +346,15 @@
   - crates/microclaw-connectors/tests/telegram_runtime.rs added
 - Notes:
   - Added Telegram HTTP calls with mocked tests
+
+## 2026-02-13T00:24:31Z S32 Email runtime integration
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-connectors -> fail (Email runtime deps/APIs missing)
+  - cargo test -p microclaw-connectors -> pass
+- Key diffs:
+  - crates/microclaw-connectors/src/lib.rs updated (EmailMessage, smtp_send, imap connect)
+  - crates/microclaw-connectors/Cargo.toml updated (lettre, imap, native-tls)
+  - crates/microclaw-connectors/tests/email_runtime.rs added
+- Notes:
+  - Added SMTP send and IMAP connect/idle wrappers

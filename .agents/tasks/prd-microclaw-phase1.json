@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:21:02Z",
+    "updatedAt": "2026-02-13T00:24:31Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -446,9 +446,9 @@
       "intent": "Implement SMTP send + IMAP idle/poll wrappers",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:22:05Z",
+      "completedAt": "2026-02-13T00:24:31Z",
       "dependencies": ["S31"],
       "risks": ["Provider quirks"],
       "notes": "Abstract transport for tests"
