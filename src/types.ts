@@ -1,6 +1,6 @@
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
-  containerPath: string; // Path inside container (under /workspace/extra/)
+  containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
   readonly?: boolean; // Default: true for safety
 }
 
@@ -30,7 +30,6 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
-  env?: Record<string, string>;
 }
 
 export interface RegisteredGroup {
@@ -39,10 +38,7 @@ export interface RegisteredGroup {
   trigger: string;
   added_at: string;
   containerConfig?: ContainerConfig;
-}
-
-export interface Session {
-  [folder: string]: string;
+  requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
 export interface NewMessage {
@@ -52,6 +48,7 @@ export interface NewMessage {
   sender_name: string;
   content: string;
   timestamp: string;
+  is_from_me?: boolean;
 }
 
 export interface ScheduledTask {
@@ -77,3 +74,28 @@ export interface TaskRunLog {
   result: string | null;
   error: string | null;
 }
+
+// --- Channel abstraction ---
+
+export interface Channel {
+  name: string;
+  connect(): Promise<void>;
+  sendMessage(jid: string, text: string): Promise<void>;
+  isConnected(): boolean;
+  ownsJid(jid: string): boolean;
+  disconnect(): Promise<void>;
+  // Optional: typing indicator. Channels that support it implement it.
+  setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Whether to prefix outbound messages with the assistant name.
+  // Telegram bots already display their name, so they return false.
+  // WhatsApp returns true. Default true if not implemented.
+  prefixAssistantName?: boolean;
+}
+
+// Callback type that channels use to deliver inbound messages
+export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
+
+// Callback for chat metadata discovery.
+// name is optional — channels that deliver names inline (Telegram) pass it here;
+// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
+export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;

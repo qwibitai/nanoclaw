@@ -122,7 +122,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ### Group Management
 - New groups are added explicitly via the main channel
-- Groups are registered by editing `data/registered_groups.json`
+- Groups are registered in SQLite (via the main channel or IPC `register_group` command)
 - Each group gets a dedicated folder under `groups/`
 - Groups can have additional directories mounted via `containerConfig`
 
