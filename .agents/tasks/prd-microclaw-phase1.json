@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:16:59Z",
+    "updatedAt": "2026-02-13T00:18:21Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -407,9 +407,9 @@
       "intent": "Implement send via osascript and receive via chat.db polling",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:17:10Z",
+      "completedAt": "2026-02-13T00:18:21Z",
       "dependencies": ["S28"],
       "risks": ["chat.db schema drift"],
       "notes": "Use rusqlite and rowid cursor"

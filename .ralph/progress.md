@@ -311,3 +311,15 @@
   - crates/microclaw-sandbox/tests/policy_exec.rs added
 - Notes:
   - Enforced mount allowlist + egress allowlist at runtime
+
+## 2026-02-13T00:18:21Z S29 iMessage runtime integration
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-connectors -> fail (executor/message types missing)
+  - cargo test -p microclaw-connectors -> pass
+- Key diffs:
+  - crates/microclaw-connectors/src/lib.rs updated (CommandExecutor, IMessageMessage, fetch_since)
+  - crates/microclaw-connectors/Cargo.toml updated (rusqlite, tempfile)
+  - crates/microclaw-connectors/tests/imessage_runtime.rs added
+- Notes:
+  - Added osascript send path + chat.db polling helper
