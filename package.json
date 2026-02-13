@@ -17,10 +17,12 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.39",
+    "@hono/node-server": "^1.19.9",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "hono": "^4.11.9",
     "js-yaml": "^4.1.1",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",

@@ -1,6 +1,8 @@
 import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { serve } from '@hono/node-server';
+import { createApiApp } from './api/index.js';
 
 import {
   ASSISTANT_NAME,
@@ -1246,6 +1248,12 @@ async function main(): Promise<void> {
     'Tenant config loaded and cached to DB',
   );
 
+  // Phase 4: Start Dashboard API server
+  const apiApp = createApiApp({ db: getDb });
+  const apiPort = Number(process.env.API_PORT ?? 3000);
+  const apiServer = serve({ fetch: apiApp.fetch, port: apiPort });
+  logger.info({ port: apiPort }, 'Dashboard API server started');
+
   // Phase 2: Initialize admin service and notification listeners
   // adminDeps is kept as a mutable reference — wa_admin_group_jid may be
   // auto-discovered after WhatsApp connects and group metadata syncs.
@@ -1298,6 +1306,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     if (hourlyTimer) clearInterval(hourlyTimer);
+    apiServer.close();
     await queue.shutdown(10000);
     await whatsapp.disconnect();
     getDb().close();
