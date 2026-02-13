@@ -38,3 +38,4 @@
 2026-02-13T03:40:59Z S39 bus persistence and seq assignment
 2026-02-13T03:42:53Z S40 store accessors implemented
 2026-02-13T03:44:05Z S44 lockfile update
+2026-02-13T04:09:58Z S36 esp toolchain check failed (esp-idf-sys time64 mismatch, IDF v4.4 cmake error)

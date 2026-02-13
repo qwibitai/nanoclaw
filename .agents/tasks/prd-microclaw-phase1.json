@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T03:44:05Z",
+    "updatedAt": "2026-02-13T04:09:58Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -503,7 +503,7 @@
       "completedAt": null,
       "dependencies": ["S35"],
       "risks": ["Toolchain install may fail in this environment"],
-      "notes": "cargo check fails without esp toolchain; espup install attempted (hang). Requires xtensa target (xtensa-esp32s3-espidf) with ESP-IDF env."
+      "notes": "cargo check fails without esp toolchain; espup install completed. xtensa target build fails with esp-idf-sys time64 mismatch (v5) and IDF v4.4 build fails at cmake build step even after python deps installed via filtered requirements."
     },
     {
       "id": "S37",

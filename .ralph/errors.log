@@ -1,1 +1,2 @@
 2026-02-13T03:30:16Z S36 espup install hung; esp-idf-sys failed on aarch64-apple-darwin without xtensa target/env
+2026-02-13T04:09:58Z S36 esp-idf-sys build failed: time64 mismatch with v5; IDF v4.4 cmake build failure after deps installed

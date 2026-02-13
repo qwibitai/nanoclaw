@@ -444,3 +444,13 @@
   - Cargo.lock updated (tempfile dep for microclaw-bus)
 - Notes:
   - Lockfile kept in sync with crate updates
+## 2026-02-13T04:09:58Z S36 ESP-IDF toolchain check - Outcome: blocked
+- Commands:
+  - espup install --targets esp32s3 --log-level info -> pass
+  - cargo +esp check -p microclaw-device --features esp -Zbuild-std=std,panic_abort --target xtensa-esp32s3-espidf -> fail (time64 mismatch)
+  - cargo +esp check with ESP_IDF_VERSION=release/v4.4 -> fail (ESP-IDF cmake build error)
+  - pip install -r requirements.txt (filtered) -> pass
+- Key diffs:
+  - .agents/tasks/prd-microclaw-phase1.json updated (S36 notes)
+- Notes:
+  - IDF v4.4 dependencies installed; build still fails in cmake/ninja step
