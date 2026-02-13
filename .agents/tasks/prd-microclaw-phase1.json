@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:06:35Z",
+    "updatedAt": "2026-02-13T00:07:49Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -316,9 +316,9 @@
       "intent": "Implement iMessage send + receive via Messages app",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:06:55Z",
+      "completedAt": "2026-02-13T00:07:49Z",
       "dependencies": ["S21"],
       "risks": ["chat.db schema drift"],
       "notes": "AppleScript send, chat.db tail for receive"

@@ -233,3 +233,14 @@
   - crates/microclaw-sandbox/tests/secrets.rs added
 - Notes:
   - Added allowlist-based secret broker with audit events
+
+## 2026-02-13T00:07:49Z S22 iMessage connector
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-connectors -> fail (IMessageConnector missing)
+  - cargo test -p microclaw-connectors -> pass
+- Key diffs:
+  - crates/microclaw-connectors/src/lib.rs updated (IMessageConnector helpers)
+  - crates/microclaw-connectors/tests/imessage.rs added
+- Notes:
+  - Added AppleScript send + chat.db query builder
