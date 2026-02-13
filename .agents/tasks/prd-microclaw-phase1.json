@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:09:45Z",
+    "updatedAt": "2026-02-13T00:10:39Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -355,9 +355,9 @@
       "intent": "Implement IMAP/SMTP connector (Gmail API later)",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:10:11Z",
+      "completedAt": "2026-02-13T00:10:39Z",
       "dependencies": ["S24"],
       "risks": ["Provider quirks"],
       "notes": "IMAP IDLE + SMTP send"

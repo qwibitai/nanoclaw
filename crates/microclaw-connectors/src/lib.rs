@@ -72,3 +72,25 @@ impl Connector for TelegramConnector {
         ConnectorId("telegram".to_string())
     }
 }
+
+pub struct EmailConnector;
+
+impl EmailConnector {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn smtp_mail_from(address: &str) -> String {
+        format!("MAIL FROM:<{}>", address)
+    }
+
+    pub fn imap_idle_command() -> &'static str {
+        "IDLE"
+    }
+}
+
+impl Connector for EmailConnector {
+    fn id(&self) -> ConnectorId {
+        ConnectorId("email".to_string())
+    }
+}

@@ -266,3 +266,14 @@
   - crates/microclaw-connectors/tests/telegram.rs added
 - Notes:
   - Added Telegram API sendMessage URL helper
+
+## 2026-02-13T00:10:39Z S25 Email connector
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-connectors -> fail (EmailConnector missing)
+  - cargo test -p microclaw-connectors -> pass
+- Key diffs:
+  - crates/microclaw-connectors/src/lib.rs updated (EmailConnector helpers)
+  - crates/microclaw-connectors/tests/email.rs added
+- Notes:
+  - Added SMTP MAIL FROM + IMAP IDLE command helpers
