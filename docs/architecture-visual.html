@@ -1,0 +1,736 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NanoClaw Architecture</title>
+    <style>
+      :root {
+        --bg: #0a0e17;
+        --surface: #111827;
+        --surface-2: #1a2332;
+        --border: #1e293b;
+        --border-light: #334155;
+        --text: #e2e8f0;
+        --text-muted: #94a3b8;
+        --text-dim: #64748b;
+        --accent-blue: #38bdf8;
+        --accent-green: #34d399;
+        --accent-amber: #fbbf24;
+        --accent-purple: #a78bfa;
+        --accent-rose: #fb7185;
+        --zone-external: rgba(251, 191, 36, 0.06);
+        --zone-external-border: rgba(251, 191, 36, 0.2);
+        --zone-host: rgba(56, 189, 248, 0.06);
+        --zone-host-border: rgba(56, 189, 248, 0.2);
+        --zone-container: rgba(52, 211, 153, 0.06);
+        --zone-container-border: rgba(52, 211, 153, 0.2);
+        --glow-blue: 0 0 20px rgba(56, 189, 248, 0.15);
+        --glow-green: 0 0 20px rgba(52, 211, 153, 0.15);
+        --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+      }
+
+      * { box-sizing: border-box; margin: 0; }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        min-height: 100vh;
+      }
+
+      /* Subtle grid background */
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(56, 189, 248, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(56, 189, 248, 0.03) 1px, transparent 1px);
+        background-size: 40px 40px;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      main {
+        position: relative;
+        z-index: 1;
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 48px 24px 40px;
+      }
+
+      /* Header */
+      .header {
+        margin-bottom: 36px;
+      }
+
+      .header h1 {
+        font-size: 1.75rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        color: var(--text);
+        margin-bottom: 8px;
+      }
+
+      .header h1 span {
+        color: var(--accent-blue);
+      }
+
+      .header p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        line-height: 1.5;
+        max-width: 680px;
+      }
+
+      /* Tags row */
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 32px;
+      }
+
+      .tag {
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text-muted);
+        letter-spacing: 0.02em;
+      }
+
+      .tag.blue { border-color: rgba(56, 189, 248, 0.3); color: var(--accent-blue); }
+      .tag.green { border-color: rgba(52, 211, 153, 0.3); color: var(--accent-green); }
+      .tag.amber { border-color: rgba(251, 191, 36, 0.3); color: var(--accent-amber); }
+      .tag.purple { border-color: rgba(167, 139, 250, 0.3); color: var(--accent-purple); }
+
+      /* Diagram container */
+      .diagram {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 32px;
+        overflow-x: auto;
+      }
+
+      /* Three-column layout */
+      .columns {
+        display: grid;
+        grid-template-columns: 200px 1fr 1fr;
+        gap: 20px;
+        min-width: 1000px;
+      }
+
+      /* Zone containers */
+      .zone {
+        border-radius: 12px;
+        padding: 20px 16px;
+        position: relative;
+      }
+
+      .zone-external {
+        background: var(--zone-external);
+        border: 1px solid var(--zone-external-border);
+      }
+
+      .zone-host {
+        background: var(--zone-host);
+        border: 1px solid var(--zone-host-border);
+      }
+
+      .zone-container {
+        background: var(--zone-container);
+        border: 1px solid var(--zone-container-border);
+      }
+
+      .zone-label {
+        font-size: 0.7rem;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .zone-external .zone-label { color: var(--accent-amber); }
+      .zone-host .zone-label { color: var(--accent-blue); }
+      .zone-container .zone-label { color: var(--accent-green); }
+
+      .zone-label::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .zone-external .zone-label::before { background: var(--accent-amber); box-shadow: 0 0 8px var(--accent-amber); }
+      .zone-host .zone-label::before { background: var(--accent-blue); box-shadow: 0 0 8px var(--accent-blue); }
+      .zone-container .zone-label::before { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+
+      /* Nodes */
+      .node {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 12px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        position: relative;
+      }
+
+      .node:last-child { margin-bottom: 0; }
+
+      .node:hover {
+        border-color: var(--border-light);
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+      }
+
+      .node-name {
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 3px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .node-desc {
+        font-size: 0.72rem;
+        color: var(--text-dim);
+        font-family: var(--mono);
+        line-height: 1.4;
+      }
+
+      .node-file {
+        font-size: 0.65rem;
+        color: var(--text-dim);
+        font-family: var(--mono);
+        margin-top: 6px;
+        opacity: 0.7;
+      }
+
+      .node-icon {
+        font-size: 0.95rem;
+        width: 20px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+
+      /* Accent borders on nodes */
+      .node.amber { border-left: 2px solid var(--accent-amber); }
+      .node.blue { border-left: 2px solid var(--accent-blue); }
+      .node.green { border-left: 2px solid var(--accent-green); }
+      .node.purple { border-left: 2px solid var(--accent-purple); }
+      .node.rose { border-left: 2px solid var(--accent-rose); }
+
+      /* Sub-sections inside zones */
+      .section-label {
+        font-size: 0.62rem;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-dim);
+        margin: 20px 0 10px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+
+      .section-label:first-of-type {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: none;
+      }
+
+      /* Sub-grid for smaller nodes */
+      .node-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .node-grid .node {
+        margin-bottom: 0;
+        padding: 10px 12px;
+      }
+
+      .node-grid .node-name {
+        font-size: 0.78rem;
+      }
+
+      .node-grid .node-desc {
+        font-size: 0.68rem;
+      }
+
+      /* Flow arrows (SVG overlay) */
+      .flow-overlay {
+        position: relative;
+        margin-top: 24px;
+      }
+
+      /* Flow description */
+      .flow-section {
+        margin-top: 28px;
+        padding-top: 24px;
+        border-top: 1px solid var(--border);
+      }
+
+      .flow-section h3 {
+        font-size: 0.78rem;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-bottom: 16px;
+      }
+
+      .flow-paths {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .flow-path {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .flow-path-label {
+        font-size: 0.68rem;
+        font-family: var(--mono);
+        padding: 3px 8px;
+        border-radius: 4px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+
+      .flow-path-label.msg {
+        background: rgba(56, 189, 248, 0.1);
+        color: var(--accent-blue);
+        border: 1px solid rgba(56, 189, 248, 0.2);
+      }
+
+      .flow-path-label.sched {
+        background: rgba(167, 139, 250, 0.1);
+        color: var(--accent-purple);
+        border: 1px solid rgba(167, 139, 250, 0.2);
+      }
+
+      .flow-path-label.ipc {
+        background: rgba(52, 211, 153, 0.1);
+        color: var(--accent-green);
+        border: 1px solid rgba(52, 211, 153, 0.2);
+      }
+
+      .flow-path-label.reply {
+        background: rgba(251, 191, 36, 0.1);
+        color: var(--accent-amber);
+        border: 1px solid rgba(251, 191, 36, 0.2);
+      }
+
+      .flow-steps {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        line-height: 1.6;
+      }
+
+      .flow-step {
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 2px 8px;
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        color: var(--text);
+        white-space: nowrap;
+      }
+
+      .flow-arrow {
+        color: var(--text-dim);
+        font-size: 0.7rem;
+      }
+
+      /* Security boundary label */
+      .security-badge {
+        position: absolute;
+        top: -11px;
+        right: 16px;
+        font-size: 0.62rem;
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--accent-green);
+        background: var(--surface);
+        padding: 2px 10px;
+        border: 1px solid var(--zone-container-border);
+        border-radius: 4px;
+      }
+
+      /* Animations */
+      .zone, .node, .flow-path {
+        opacity: 0;
+        animation: fadeUp 0.4s ease forwards;
+      }
+
+      .zone:nth-child(1) { animation-delay: 0.05s; }
+      .zone:nth-child(2) { animation-delay: 0.1s; }
+      .zone:nth-child(3) { animation-delay: 0.15s; }
+
+      .zone:nth-child(1) .node:nth-of-type(1) { animation-delay: 0.15s; }
+      .zone:nth-child(1) .node:nth-of-type(2) { animation-delay: 0.2s; }
+      .zone:nth-child(1) .node:nth-of-type(3) { animation-delay: 0.25s; }
+      .zone:nth-child(1) .node:nth-of-type(4) { animation-delay: 0.3s; }
+      .zone:nth-child(2) .node:nth-of-type(1) { animation-delay: 0.2s; }
+      .zone:nth-child(2) .node:nth-of-type(2) { animation-delay: 0.25s; }
+      .zone:nth-child(2) .node:nth-of-type(3) { animation-delay: 0.3s; }
+      .zone:nth-child(2) .node:nth-of-type(4) { animation-delay: 0.35s; }
+      .zone:nth-child(2) .node:nth-of-type(5) { animation-delay: 0.4s; }
+      .zone:nth-child(2) .node:nth-of-type(6) { animation-delay: 0.45s; }
+      .zone:nth-child(2) .node:nth-of-type(7) { animation-delay: 0.5s; }
+      .zone:nth-child(3) .node:nth-of-type(1) { animation-delay: 0.35s; }
+      .zone:nth-child(3) .node:nth-of-type(2) { animation-delay: 0.4s; }
+      .zone:nth-child(3) .node:nth-of-type(3) { animation-delay: 0.45s; }
+      .zone:nth-child(3) .node:nth-of-type(4) { animation-delay: 0.5s; }
+
+      .flow-path:nth-child(1) { animation-delay: 0.5s; }
+      .flow-path:nth-child(2) { animation-delay: 0.55s; }
+      .flow-path:nth-child(3) { animation-delay: 0.6s; }
+      .flow-path:nth-child(4) { animation-delay: 0.65s; }
+
+      @keyframes fadeUp {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      /* Responsive */
+      @media (max-width: 800px) {
+        .columns {
+          grid-template-columns: 1fr;
+          min-width: 0;
+        }
+        main { padding: 24px 12px; }
+        .diagram { padding: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="header">
+        <h1>Nano<span>Claw</span> Architecture</h1>
+        <p>Single Node.js process connecting channel providers (WhatsApp, Telegram, Slack) to Claude agents running in isolated Linux containers. Messages flow left to right through the security boundary.</p>
+      </div>
+
+      <div class="tags">
+        <span class="tag amber">WhatsApp · Telegram · Slack</span>
+        <span class="tag blue">SQLite + canonical conversation IDs</span>
+        <span class="tag green">Apple Container / Docker</span>
+        <span class="tag blue">Reliable outbound + dead-letter</span>
+        <span class="tag purple">Claude Agent SDK</span>
+      </div>
+
+      <div class="diagram">
+        <div class="columns">
+
+          <!-- External -->
+          <div class="zone zone-external">
+            <div class="zone-label">External</div>
+
+            <div class="section-label">Channel Providers</div>
+
+            <div class="node amber">
+              <div class="node-name">
+                <span class="node-icon">&#9993;</span>
+                WhatsApp
+              </div>
+              <div class="node-desc">Baileys (default)</div>
+            </div>
+
+            <div class="node amber">
+              <div class="node-name">
+                <span class="node-icon">&#9992;</span>
+                Telegram
+              </div>
+              <div class="node-desc">Bot API long-polling</div>
+            </div>
+
+            <div class="node amber">
+              <div class="node-name">
+                <span class="node-icon">&#9641;</span>
+                Slack
+              </div>
+              <div class="node-desc">Web API polling or signed events webhook</div>
+            </div>
+
+            <div class="section-label">Operator</div>
+
+            <div class="node amber">
+              <div class="node-name">
+                <span class="node-icon">&#9000;</span>
+                Claude Code CLI
+              </div>
+              <div class="node-desc">setup / debug / skills</div>
+            </div>
+          </div>
+
+          <!-- Host Process -->
+          <div class="zone zone-host">
+            <div class="zone-label">Host Process</div>
+
+            <div class="section-label">Ingestion</div>
+
+            <div class="node blue">
+              <div class="node-name">
+                <span class="node-icon">&#8644;</span>
+                Channel Provider
+              </div>
+              <div class="node-desc">Factory selects primary channel via CHANNEL_PROVIDER env</div>
+              <div class="node-file">channel-provider.ts</div>
+            </div>
+
+            <div class="node blue">
+              <div class="node-name">
+                <span class="node-icon">&#9881;</span>
+                Capability Matrix
+              </div>
+              <div class="node-desc">typing / attachments / group discovery / delivery mode</div>
+              <div class="node-file">types.ts</div>
+            </div>
+
+            <div class="node-grid">
+              <div class="node blue">
+                <div class="node-name">
+                  <span class="node-icon">&#128257;</span>
+                  Conversation
+                </div>
+                <div class="node-desc">canonical IDs (platform://id)</div>
+                <div class="node-file">conversation.ts</div>
+              </div>
+              <div class="node blue">
+                <div class="node-name">
+                  <span class="node-icon">&#9707;</span>
+                  SQLite
+                </div>
+                <div class="node-desc">messages, tasks, state, canonical IDs, attachments</div>
+                <div class="node-file">db.ts</div>
+              </div>
+            </div>
+
+            <div class="section-label">Processing</div>
+
+            <div class="node-grid">
+              <div class="node blue">
+                <div class="node-name">
+                  <span class="node-icon">&#8635;</span>
+                  Message Loop
+                </div>
+                <div class="node-desc">poll + trigger check + canonical routing</div>
+                <div class="node-file">index.ts</div>
+              </div>
+              <div class="node purple">
+                <div class="node-name">
+                  <span class="node-icon">&#9201;</span>
+                  Scheduler
+                </div>
+                <div class="node-desc">cron-based tasks</div>
+                <div class="node-file">task-scheduler.ts</div>
+              </div>
+            </div>
+
+            <div class="section-label">Dispatch</div>
+
+            <div class="node blue">
+              <div class="node-name">
+                <span class="node-icon">&#9776;</span>
+                Group Queue
+              </div>
+              <div class="node-desc">Per-group ordering, concurrency limit (default 5), stdin piping to active containers</div>
+              <div class="node-file">group-queue.ts</div>
+            </div>
+
+            <div class="node blue">
+              <div class="node-name">
+                <span class="node-icon">&#9654;</span>
+                Container Runner
+              </div>
+              <div class="node-desc">Spawn containers, build volume mounts, stream output, manage timeouts</div>
+              <div class="node-file">container-runner.ts</div>
+            </div>
+
+            <div class="node blue">
+              <div class="node-name">
+                <span class="node-icon">&#8634;</span>
+                Reliable Sender
+              </div>
+              <div class="node-desc">retry + exponential backoff + rate-limit + dead-letter</div>
+              <div class="node-file">delivery.ts</div>
+            </div>
+
+            <div class="section-label">Host Abstractions</div>
+
+            <div class="node-grid">
+              <div class="node rose">
+                <div class="node-name">Runtime</div>
+                <div class="node-desc">apple / docker</div>
+                <div class="node-file">container-runtime.ts</div>
+              </div>
+              <div class="node rose">
+                <div class="node-name">ServiceMgr</div>
+                <div class="node-desc">launchd / systemd</div>
+                <div class="node-file">service-manager.ts</div>
+              </div>
+              <div class="node rose">
+                <div class="node-name">Notifier</div>
+                <div class="node-desc">macos / linux</div>
+                <div class="node-file">host-notifier.ts</div>
+              </div>
+              <div class="node rose">
+                <div class="node-name">Router</div>
+                <div class="node-desc">format + attachment tags + route out</div>
+                <div class="node-file">router.ts</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Container Sandbox -->
+          <div class="zone zone-container">
+            <div class="zone-label">Container Sandbox</div>
+            <div class="security-badge">&#9656; isolation boundary</div>
+
+            <div class="node green">
+              <div class="node-name">
+                <span class="node-icon">&#9673;</span>
+                Agent Runner
+              </div>
+              <div class="node-desc">Claude Agent SDK session</div>
+              <div class="node-desc">Streams partial + final outputs</div>
+              <div class="node-desc">Supports Agent Swarms (teams)</div>
+            </div>
+
+            <div class="section-label">Agent Tools</div>
+
+            <div class="node-grid">
+              <div class="node green">
+                <div class="node-name">MCP Server</div>
+                <div class="node-desc">send_message, task CRUD, group management</div>
+              </div>
+              <div class="node green">
+                <div class="node-name">Tooling</div>
+                <div class="node-desc">bash, files, web search, browser automation</div>
+              </div>
+            </div>
+
+            <div class="section-label">Isolation</div>
+
+            <div class="node green">
+              <div class="node-name">
+                <span class="node-icon">&#128194;</span>
+                Mounted Context
+              </div>
+              <div class="node-desc">/workspace/group &mdash; per-group filesystem</div>
+              <div class="node-desc">/workspace/global &mdash; shared read-only</div>
+              <div class="node-desc">/workspace/ipc &mdash; namespaced IPC</div>
+              <div class="node-desc">.claude/ &mdash; isolated sessions</div>
+            </div>
+
+            <div class="section-label">IPC (filesystem)</div>
+
+            <div class="node green">
+              <div class="node-name">
+                <span class="node-icon">&#8596;</span>
+                IPC Watcher
+              </div>
+              <div class="node-desc">Container writes files, host polls + executes: messages, tasks, group registration</div>
+              <div class="node-file">ipc.ts</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Flow paths -->
+        <div class="flow-section">
+          <h3>Data Flows</h3>
+          <div class="flow-paths">
+
+            <div class="flow-path">
+              <span class="flow-path-label msg">message</span>
+              <div class="flow-steps">
+                <span class="flow-step">Channel Provider</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Canonical ID</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">SQLite</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Message Loop</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Group Queue</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Container Runner</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Agent Runner</span>
+              </div>
+            </div>
+
+            <div class="flow-path">
+              <span class="flow-path-label reply">reply</span>
+              <div class="flow-steps">
+                <span class="flow-step">Agent Runner</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">stdout stream</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Container Runner</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Router</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Reliable Sender</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Channel Provider</span>
+              </div>
+            </div>
+
+            <div class="flow-path">
+              <span class="flow-path-label sched">schedule</span>
+              <div class="flow-steps">
+                <span class="flow-step">Scheduler</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Group Queue</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Container Runner</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">Agent Runner</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">reply</span>
+              </div>
+            </div>
+
+            <div class="flow-path">
+              <span class="flow-path-label ipc">ipc</span>
+              <div class="flow-steps">
+                <span class="flow-step">MCP Server</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">/workspace/ipc/</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">IPC Watcher</span>
+                <span class="flow-arrow">&#8594;</span>
+                <span class="flow-step">send_message / task CRUD / register group</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>

@@ -97,6 +97,27 @@ describe('formatMessages', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
   });
+
+  it('includes attachment metadata when attachments are present', () => {
+    const result = formatMessages([
+      makeMsg({
+        content: 'see file',
+        attachments: [
+          {
+            kind: 'document',
+            mimeType: 'application/pdf',
+            fileName: 'report.pdf',
+            sizeBytes: 1234,
+          },
+        ],
+      }),
+    ]);
+    expect(result).toContain('<attachment');
+    expect(result).toContain('kind="document"');
+    expect(result).toContain('mime="application/pdf"');
+    expect(result).toContain('name="report.pdf"');
+    expect(result).toContain('size="1234"');
+  });
 });
 
 // --- TRIGGER_PATTERN ---

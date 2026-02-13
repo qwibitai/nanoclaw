@@ -49,6 +49,15 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  attachments?: MessageAttachment[];
+}
+
+export interface MessageAttachment {
+  kind: 'image' | 'video' | 'audio' | 'document' | 'file' | 'other';
+  mimeType?: string;
+  fileName?: string;
+  sizeBytes?: number;
+  url?: string;
 }
 
 export interface ScheduledTask {
@@ -79,13 +88,18 @@ export interface TaskRunLog {
 
 export interface Channel {
   name: string;
+  capabilities?: ChannelCapabilities;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
+  // Optional: identify whether a JID represents a group chat for this channel.
+  isGroupChat?(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: refresh channel-side chat/group metadata cache.
+  syncGroupMetadata?(force: boolean): Promise<void>;
   // Whether to prefix outbound messages with the assistant name.
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.
@@ -99,3 +113,39 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
 export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+
+export interface ChannelFactoryOpts {
+  onMessage: OnInboundMessage;
+  onChatMetadata: OnChatMetadata;
+  registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+export interface ChannelCapabilities {
+  typing: boolean;
+  metadataSync: boolean;
+  groupDiscovery: boolean;
+  attachments: boolean;
+  deliveryMode: 'polling' | 'webhook' | 'mixed';
+}
+
+export function getChannelCapabilities(
+  channel: Channel | undefined | null,
+): ChannelCapabilities {
+  if (!channel) {
+    return {
+      typing: false,
+      metadataSync: false,
+      groupDiscovery: false,
+      attachments: false,
+      deliveryMode: 'polling',
+    };
+  }
+  if (channel.capabilities) return channel.capabilities;
+  return {
+    typing: typeof channel.setTyping === 'function',
+    metadataSync: typeof channel.syncGroupMetadata === 'function',
+    groupDiscovery: typeof channel.isGroupChat === 'function',
+    attachments: false,
+    deliveryMode: 'polling',
+  };
+}

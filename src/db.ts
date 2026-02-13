@@ -11,15 +11,18 @@ function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
+      conversation_id TEXT,
       name TEXT,
       last_message_time TEXT
     );
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT,
       chat_jid TEXT,
+      conversation_id TEXT,
       sender TEXT,
       sender_name TEXT,
       content TEXT,
+      attachments_json TEXT,
       timestamp TEXT,
       is_from_me INTEGER,
       PRIMARY KEY (id, chat_jid),
@@ -31,6 +34,7 @@ function createSchema(database: Database.Database): void {
       id TEXT PRIMARY KEY,
       group_folder TEXT NOT NULL,
       chat_jid TEXT NOT NULL,
+      conversation_id TEXT,
       prompt TEXT NOT NULL,
       schedule_type TEXT NOT NULL,
       schedule_value TEXT NOT NULL,
@@ -65,6 +69,7 @@ function createSchema(database: Database.Database): void {
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
+      conversation_id TEXT,
       name TEXT NOT NULL,
       folder TEXT NOT NULL UNIQUE,
       trigger_pattern TEXT NOT NULL,
@@ -82,6 +87,38 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Conversation identity normalization columns (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE chats ADD COLUMN conversation_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN conversation_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN attachments_json TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN conversation_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN conversation_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  database.exec(`UPDATE chats SET conversation_id = jid WHERE conversation_id IS NULL`);
+  database.exec(`UPDATE messages SET conversation_id = chat_jid WHERE conversation_id IS NULL`);
+  database.exec(`UPDATE scheduled_tasks SET conversation_id = chat_jid WHERE conversation_id IS NULL`);
+  database.exec(`UPDATE registered_groups SET conversation_id = jid WHERE conversation_id IS NULL`);
 }
 
 export function initDatabase(): void {
@@ -114,21 +151,23 @@ export function storeChatMetadata(
     // Update with name, preserving existing timestamp if newer
     db.prepare(
       `
-      INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
+      INSERT INTO chats (jid, conversation_id, name, last_message_time) VALUES (?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
+        conversation_id = excluded.conversation_id,
         name = excluded.name,
         last_message_time = MAX(last_message_time, excluded.last_message_time)
     `,
-    ).run(chatJid, name, timestamp);
+    ).run(chatJid, chatJid, name, timestamp);
   } else {
     // Update timestamp only, preserve existing name if any
     db.prepare(
       `
-      INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
+      INSERT INTO chats (jid, conversation_id, name, last_message_time) VALUES (?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
+        conversation_id = excluded.conversation_id,
         last_message_time = MAX(last_message_time, excluded.last_message_time)
     `,
-    ).run(chatJid, chatJid, timestamp);
+    ).run(chatJid, chatJid, chatJid, timestamp);
   }
 }
 
@@ -140,10 +179,12 @@ export function storeChatMetadata(
 export function updateChatName(chatJid: string, name: string): void {
   db.prepare(
     `
-    INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
-    ON CONFLICT(jid) DO UPDATE SET name = excluded.name
+    INSERT INTO chats (jid, conversation_id, name, last_message_time) VALUES (?, ?, ?, ?)
+    ON CONFLICT(jid) DO UPDATE SET
+      conversation_id = excluded.conversation_id,
+      name = excluded.name
   `,
-  ).run(chatJid, name, new Date().toISOString());
+  ).run(chatJid, chatJid, name, new Date().toISOString());
 }
 
 export interface ChatInfo {
@@ -159,7 +200,7 @@ export function getAllChats(): ChatInfo[] {
   return db
     .prepare(
       `
-    SELECT jid, name, last_message_time
+    SELECT COALESCE(conversation_id, jid) AS jid, name, last_message_time
     FROM chats
     ORDER BY last_message_time DESC
   `,
@@ -184,7 +225,7 @@ export function getLastGroupSync(): string | null {
 export function setLastGroupSync(): void {
   const now = new Date().toISOString();
   db.prepare(
-    `INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', ?)`,
+    `INSERT OR REPLACE INTO chats (jid, conversation_id, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', '__group_sync__', ?)`,
   ).run(now);
 }
 
@@ -194,13 +235,15 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, conversation_id, sender, sender_name, content, attachments_json, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
+    msg.chat_jid,
     msg.chat_jid,
     msg.sender,
     msg.sender_name,
     msg.content,
+    msg.attachments ? JSON.stringify(msg.attachments) : null,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
   );
@@ -215,17 +258,20 @@ export function storeMessageDirect(msg: {
   sender: string;
   sender_name: string;
   content: string;
+  attachments?: NewMessage['attachments'];
   timestamp: string;
   is_from_me: boolean;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, conversation_id, sender, sender_name, content, attachments_json, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
+    msg.chat_jid,
     msg.chat_jid,
     msg.sender,
     msg.sender_name,
     msg.content,
+    msg.attachments ? JSON.stringify(msg.attachments) : null,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
   );
@@ -241,22 +287,40 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id,
+           COALESCE(conversation_id, chat_jid) AS chat_jid,
+           sender,
+           sender_name,
+           content,
+           attachments_json,
+           timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND COALESCE(conversation_id, chat_jid) IN (${placeholders}) AND content NOT LIKE ?
     ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as Array<
+      Omit<NewMessage, 'attachments'> & { attachments_json?: string | null }
+    >;
+
+  const messages = rows.map((row) => {
+    const { attachments_json, ...rest } = row;
+    return {
+      ...rest,
+      attachments: attachments_json
+        ? JSON.parse(attachments_json)
+        : undefined,
+    };
+  });
 
   let newTimestamp = lastTimestamp;
-  for (const row of rows) {
+  for (const row of messages) {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
   }
 
-  return { messages: rows, newTimestamp };
+  return { messages, newTimestamp };
 }
 
 export function getMessagesSince(
@@ -266,14 +330,32 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter out bot's own messages by checking content prefix
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id,
+           COALESCE(conversation_id, chat_jid) AS chat_jid,
+           sender,
+           sender_name,
+           content,
+           attachments_json,
+           timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE COALESCE(conversation_id, chat_jid) = ? AND timestamp > ? AND content NOT LIKE ?
     ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as Array<
+      Omit<NewMessage, 'attachments'> & { attachments_json?: string | null }
+    >;
+
+  return rows.map((row) => {
+    const { attachments_json, ...rest } = row;
+    return {
+      ...rest,
+      attachments: attachments_json
+        ? JSON.parse(attachments_json)
+        : undefined,
+    };
+  });
 }
 
 export function createTask(
@@ -281,12 +363,13 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, conversation_id, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
     task.group_folder,
+    task.chat_jid,
     task.chat_jid,
     task.prompt,
     task.schedule_type,
@@ -456,10 +539,11 @@ export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
   const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .prepare('SELECT * FROM registered_groups WHERE COALESCE(conversation_id, jid) = ?')
     .get(jid) as
     | {
         jid: string;
+        conversation_id: string | null;
         name: string;
         folder: string;
         trigger_pattern: string;
@@ -469,8 +553,9 @@ export function getRegisteredGroup(
       }
     | undefined;
   if (!row) return undefined;
+  const canonicalJid = row.conversation_id || row.jid;
   return {
-    jid: row.jid,
+    jid: canonicalJid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
@@ -487,9 +572,10 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, conversation_id, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
+    jid,
     jid,
     group.name,
     group.folder,
@@ -505,6 +591,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     .prepare('SELECT * FROM registered_groups')
     .all() as Array<{
     jid: string;
+    conversation_id: string | null;
     name: string;
     folder: string;
     trigger_pattern: string;
@@ -514,7 +601,8 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
-    result[row.jid] = {
+    const canonicalJid = row.conversation_id || row.jid;
+    result[canonicalJid] = {
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,

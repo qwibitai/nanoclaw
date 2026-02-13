@@ -46,7 +46,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 ## What It Supports
 
-- **WhatsApp I/O** - Message Claude from your phone
+- **Channel providers** - WhatsApp (default), Telegram Bot API, and Slack Web API
 - **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
 - **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
@@ -115,30 +115,76 @@ Skills we'd love to see:
 - [Claude Code](https://claude.ai/download)
 - [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
 
+## Service Management
+
+Use provider-based service commands (auto-selects launchd on macOS, systemd user services on Linux):
+
+```bash
+npm run service:status
+npm run service:start
+npm run service:stop
+npm run service:restart
+```
+
+Optional overrides:
+- `SERVICE_MANAGER=launchd|systemd|none`
+- `HOST_NOTIFIER=macos|linux|none|auto`
+- `CHANNEL_PROVIDER=whatsapp|telegram|slack`
+- `TELEGRAM_BOT_TOKEN=...` (required for Telegram provider)
+- `SLACK_BOT_TOKEN=...` (required for Slack provider)
+- `SLACK_DELIVERY_MODE=polling|events|webhook` (Slack only; `events` and `webhook` both use signed HTTP event delivery)
+- `SLACK_SIGNING_SECRET=...` (required for Slack webhook/events mode)
+- `SLACK_EVENTS_PORT=3010` (optional Slack webhook/events listen port)
+- `CONTAINER_RUNTIME=apple|docker` (optional runtime override)
+
+Outbound delivery reliability (all channel providers):
+- `OUTBOUND_MAX_ATTEMPTS=4`
+- `OUTBOUND_RETRY_BASE_MS=500`
+- `OUTBOUND_RETRY_MAX_MS=8000`
+- `OUTBOUND_MIN_INTERVAL_MS=0`
+
+Conversation identity model:
+- Canonical IDs are platform-aware (`platform://externalId`) for non-WhatsApp providers.
+- WhatsApp keeps existing IDs unchanged for backward compatibility.
+
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channel Provider Factory (WhatsApp | Telegram | Slack)
+  -> Canonical Conversation IDs + SQLite
+  -> Message Loop / Scheduler / Group Queue
+  -> Container Runtime Provider (Apple Container | Docker)
+  -> Claude Agent SDK (isolated container)
+  -> Reliable Sender (retry/backoff/dead-letter)
+  -> Channel Provider (response delivery)
 ```
 
 Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
+- `src/channel-provider.ts` - Channel provider factory (env-based provider selection)
+- `src/channels/whatsapp.ts` - WhatsApp provider (Baileys)
+- `src/channels/telegram.ts` - Telegram provider (Bot API polling)
+- `src/channels/slack.ts` - Slack provider (polling or signed webhook/events)
+- `src/conversation.ts` - Canonical conversation identity mapping
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
+- `src/container-runtime.ts` - Runtime provider/factory (Apple Container or Docker)
+- `src/host-notifier.ts` - Host notifier provider/factory (macOS, Linux, none)
+- `src/service-manager.ts` - Service manager provider/factory (launchd, systemd, none)
+- `src/delivery.ts` - Reliable outbound sender (retry/backoff/rate-limit/dead-letter)
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `src/db.ts` - SQLite operations (messages, groups, sessions, state, canonical conversation IDs)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
 
-**Why WhatsApp and not Telegram/Signal/etc?**
+**Is it WhatsApp-only?**
 
-Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
+No. WhatsApp is the default provider, but Telegram and Slack are built in via provider/factory abstractions. Set `CHANNEL_PROVIDER` to switch.
 
 **Why Apple Container instead of Docker?**
 

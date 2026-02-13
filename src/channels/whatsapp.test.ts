@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 
+const { notifyMock } = vi.hoisted(() => ({
+  notifyMock: vi.fn(),
+}));
+
 // --- Mocks ---
 
 // Mock config
@@ -38,9 +42,11 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock child_process (used for osascript notification)
-vi.mock('child_process', () => ({
-  exec: vi.fn(),
+// Mock host notifier
+vi.mock('../host-notifier.js', () => ({
+  getHostNotifierProvider: vi.fn(() => ({
+    notify: notifyMock,
+  })),
 }));
 
 // Build a fake WASocket that's an EventEmitter with the methods we need
@@ -136,6 +142,7 @@ describe('WhatsAppChannel', () => {
   beforeEach(() => {
     fakeSocket = createFakeSocket();
     vi.mocked(getLastGroupSync).mockReturnValue(null);
+    notifyMock.mockClear();
   });
 
   afterEach(() => {
@@ -234,6 +241,10 @@ describe('WhatsAppChannel', () => {
       // Advance timer past the 1000ms setTimeout before exit
       await vi.advanceTimersByTimeAsync(1500);
 
+      expect(notifyMock).toHaveBeenCalledWith(
+        'NanoClaw',
+        'WhatsApp authentication required. Run /setup in Claude Code.',
+      );
       expect(mockExit).toHaveBeenCalledWith(1);
       mockExit.mockRestore();
       vi.useRealTimers();

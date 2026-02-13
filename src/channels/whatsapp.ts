@@ -1,4 +1,3 @@
-import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,20 +14,29 @@ import {
   setLastGroupSync,
   updateChatName,
 } from '../db.js';
+import { getHostNotifierProvider } from '../host-notifier.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  ChannelCapabilities,
+  ChannelFactoryOpts,
+  MessageAttachment,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-export interface WhatsAppChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+export type WhatsAppChannelOpts = ChannelFactoryOpts;
 
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
   prefixAssistantName = true;
+  capabilities: ChannelCapabilities = {
+    typing: true,
+    metadataSync: true,
+    groupDiscovery: true,
+    attachments: true,
+    deliveryMode: 'polling',
+  };
 
   private sock!: WASocket;
   private connected = false;
@@ -72,9 +80,7 @@ export class WhatsAppChannel implements Channel {
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
+        getHostNotifierProvider().notify('NanoClaw', msg);
         setTimeout(() => process.exit(1), 1000);
       }
 
@@ -160,6 +166,7 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          const attachments = extractAttachments(msg.message);
           const content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
@@ -177,6 +184,7 @@ export class WhatsAppChannel implements Channel {
             content,
             timestamp,
             is_from_me: msg.key.fromMe || false,
+            attachments,
           });
         }
       }
@@ -205,6 +213,10 @@ export class WhatsAppChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+  }
+
+  isGroupChat(jid: string): boolean {
+    return jid.endsWith('@g.us');
   }
 
   async disconnect(): Promise<void> {
@@ -280,4 +292,57 @@ export class WhatsAppChannel implements Channel {
       this.flushing = false;
     }
   }
+}
+
+function extractAttachments(message: any): MessageAttachment[] {
+  const attachments: MessageAttachment[] = [];
+
+  if (message?.imageMessage) {
+    attachments.push({
+      kind: 'image',
+      mimeType: message.imageMessage.mimetype,
+      sizeBytes: message.imageMessage.fileLength
+        ? Number(message.imageMessage.fileLength)
+        : undefined,
+    });
+  }
+  if (message?.videoMessage) {
+    attachments.push({
+      kind: 'video',
+      mimeType: message.videoMessage.mimetype,
+      sizeBytes: message.videoMessage.fileLength
+        ? Number(message.videoMessage.fileLength)
+        : undefined,
+    });
+  }
+  if (message?.audioMessage) {
+    attachments.push({
+      kind: 'audio',
+      mimeType: message.audioMessage.mimetype,
+      sizeBytes: message.audioMessage.fileLength
+        ? Number(message.audioMessage.fileLength)
+        : undefined,
+    });
+  }
+  if (message?.documentMessage) {
+    attachments.push({
+      kind: 'document',
+      mimeType: message.documentMessage.mimetype,
+      fileName: message.documentMessage.fileName,
+      sizeBytes: message.documentMessage.fileLength
+        ? Number(message.documentMessage.fileLength)
+        : undefined,
+    });
+  }
+  if (message?.stickerMessage) {
+    attachments.push({
+      kind: 'other',
+      mimeType: message.stickerMessage.mimetype,
+      sizeBytes: message.stickerMessage.fileLength
+        ? Number(message.stickerMessage.fileLength)
+        : undefined,
+    });
+  }
+
+  return attachments;
 }

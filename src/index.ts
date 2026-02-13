@@ -1,4 +1,3 @@
-import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,13 +9,20 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { createPrimaryChannel } from './channel-provider.js';
+import {
+  fromCanonicalConversationId,
+  isCanonicalConversationId,
+  isGroupConversation,
+  toCanonicalConversationId,
+} from './conversation.js';
 import {
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { getContainerRuntimeProvider } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -32,11 +38,17 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { createReliableSender } from './delivery.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  NewMessage,
+  RegisteredGroup,
+  getChannelCapabilities,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -48,8 +60,46 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let channel!: Channel;
+let reliableSend: ((conversationId: string, text: string) => Promise<void>) | null = null;
 const queue = new GroupQueue();
+
+function getActivePlatform(): string {
+  return channel?.name || 'whatsapp';
+}
+
+function toCanonicalChatId(chatId: string): string {
+  if (isCanonicalConversationId(chatId)) return chatId;
+  return toCanonicalConversationId(getActivePlatform(), chatId);
+}
+
+function toChannelExternalId(canonicalChatId: string): string {
+  const activePlatform = getActivePlatform();
+  const ref = fromCanonicalConversationId(canonicalChatId, activePlatform);
+  if (ref.platform !== activePlatform) {
+    throw new Error(
+      `Conversation platform mismatch: expected ${activePlatform}, got ${ref.platform}`,
+    );
+  }
+  return ref.externalId;
+}
+
+async function sendToChannel(canonicalChatId: string, text: string): Promise<void> {
+  if (reliableSend) {
+    await reliableSend(canonicalChatId, text);
+    return;
+  }
+  await channel.sendMessage(toChannelExternalId(canonicalChatId), text);
+}
+
+async function setChannelTyping(
+  canonicalChatId: string,
+  isTyping: boolean,
+): Promise<void> {
+  const caps = getChannelCapabilities(channel);
+  if (!caps.typing || !channel.setTyping) return;
+  await channel.setTyping(toChannelExternalId(canonicalChatId), isTyping);
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -77,15 +127,16 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
-  registeredGroups[jid] = group;
-  setRegisteredGroup(jid, group);
+  const canonicalJid = toCanonicalChatId(jid);
+  registeredGroups[canonicalJid] = group;
+  setRegisteredGroup(canonicalJid, group);
 
   // Create group folder
   const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
   logger.info(
-    { jid, name: group.name, folder: group.folder },
+    { jid: canonicalJid, name: group.name, folder: group.folder },
     'Group registered',
   );
 }
@@ -97,9 +148,19 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
+  const activePlatform = getActivePlatform();
+  const caps = getChannelCapabilities(channel);
 
   return chats
-    .filter((c) => c.jid !== '__group_sync__' && c.jid.endsWith('@g.us'))
+    .filter((c) => c.jid !== '__group_sync__')
+    .filter((c) => {
+      const ref = fromCanonicalConversationId(c.jid, activePlatform);
+      if (ref.platform !== activePlatform) return false;
+      if (caps.groupDiscovery && channel?.isGroupChat) {
+        return channel.isGroupChat(ref.externalId);
+      }
+      return isGroupConversation(ref);
+    })
     .map((c) => ({
       jid: c.jid,
       name: c.name,
@@ -165,7 +226,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await whatsapp.setTyping(chatJid, true);
+  await setChannelTyping(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -177,7 +238,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
+        await sendToChannel(chatJid, `${ASSISTANT_NAME}: ${text}`);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -189,7 +250,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await whatsapp.setTyping(chatJid, false);
+  await setChannelTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -392,57 +453,42 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
+  const runtime = getContainerRuntimeProvider();
+
   try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
-  } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
+    runtime.ensureSystemRunning();
+    logger.debug({ runtime: runtime.displayName }, 'Container runtime ready');
+  } catch (err) {
+    logger.error({ err, runtime: runtime.displayName }, 'Failed to initialize container runtime');
+    console.error(
+      '\n╔════════════════════════════════════════════════════════════════╗',
+    );
+    console.error(
+      `║  FATAL: ${runtime.displayName.padEnd(52)}║`,
+    );
+    console.error(
+      '║                                                                ║',
+    );
+    console.error(
+      `║  Agents cannot run without ${runtime.displayName.padEnd(31)}║`,
+    );
+    for (const line of runtime.startupHelpLines()) {
+      console.error(`║  ${line.padEnd(60)}║`);
     }
+    console.error(
+      '╚════════════════════════════════════════════════════════════════╝\n',
+    );
+    throw new Error(
+      `${runtime.displayName} runtime is required but failed to start`,
+    );
   }
 
   // Kill and clean up orphaned NanoClaw containers from previous runs
   try {
-    const output = execSync('container ls --format json', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
-    const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
-      .map((c) => c.configuration.id);
+    const orphans = runtime.listRunningContainers('nanoclaw-');
     for (const name of orphans) {
       try {
-        execSync(`container stop ${name}`, { stdio: 'pipe' });
+        runtime.stopContainerSync(name);
       } catch { /* already stopped */ }
     }
     if (orphans.length > 0) {
@@ -463,21 +509,33 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
-    await whatsapp.disconnect();
+    await channel.disconnect();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Create WhatsApp channel
-  whatsapp = new WhatsAppChannel({
-    onMessage: (chatJid, msg) => storeMessage(msg),
-    onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
+  // Create primary channel
+  channel = createPrimaryChannel({
+    onMessage: (chatJid, msg) =>
+      storeMessage({
+        ...msg,
+        chat_jid: toCanonicalChatId(chatJid),
+      }),
+    onChatMetadata: (chatJid, timestamp, name) =>
+      storeChatMetadata(toCanonicalChatId(chatJid), timestamp, name),
     registeredGroups: () => registeredGroups,
   });
 
   // Connect — resolves when first connected
-  await whatsapp.connect();
+  await channel.connect();
+
+  reliableSend = createReliableSender(
+    async (canonicalChatId, text) => {
+      await channel.sendMessage(toChannelExternalId(canonicalChatId), text);
+    },
+    { provider: channel.name },
+  );
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -486,15 +544,17 @@ async function main(): Promise<void> {
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
-      const text = formatOutbound(whatsapp, rawText);
-      if (text) await whatsapp.sendMessage(jid, text);
+      const text = formatOutbound(channel, rawText);
+      if (text) await sendToChannel(jid, text);
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => whatsapp.sendMessage(jid, text),
+    sendMessage: (jid, text) => sendToChannel(jid, text),
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
+    syncGroupMetadata: getChannelCapabilities(channel).metadataSync && channel.syncGroupMetadata
+      ? (force) => channel.syncGroupMetadata!(force)
+      : undefined,
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });

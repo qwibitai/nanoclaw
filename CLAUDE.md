@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in Apple Container (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that connects to a channel provider (WhatsApp/Telegram/Slack), routes messages to Claude Agent SDK running in isolated Linux containers. Runtime providers select Apple Container or Docker.
 
 ## Key Files
 
@@ -12,10 +12,19 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/telegram.ts` | Telegram provider (polling Bot API) |
+| `src/channels/slack.ts` | Slack provider (polling Web API or signed webhook/events) |
+| `src/channel-provider.ts` | Channel provider factory (primary channel selection) |
+| `src/conversation.ts` | Conversation identity model (canonical IDs + kind) |
+| `src/types.ts` | Channel interface, ChannelCapabilities, MessageAttachment |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/container-runtime.ts` | Container runtime provider + factory (Apple/Docker) |
+| `src/host-notifier.ts` | Host notification provider + factory |
+| `src/service-manager.ts` | Service manager provider + factory (launchd/systemd) |
+| `src/delivery.ts` | Reliable outbound sender (retry/backoff/dead-letter) |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
@@ -41,8 +50,10 @@ npm run build        # Compile TypeScript
 
 Service management:
 ```bash
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+npm run service:status
+npm run service:start
+npm run service:stop
+npm run service:restart
 ```
 
 ## Container Build Cache

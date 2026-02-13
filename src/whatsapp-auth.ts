@@ -74,7 +74,7 @@ async function authenticate(): Promise<void> {
     if (connection === 'open') {
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      console.log('  You can now start the NanoClaw service: npm run service:start\n');
 
       // Give it a moment to save credentials, then exit
       setTimeout(() => process.exit(0), 1000);
