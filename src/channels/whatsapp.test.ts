@@ -89,6 +89,9 @@ vi.mock('@whiskeysockets/baileys', () => {
       },
       saveCreds: vi.fn(),
     }),
+    Browsers: {
+      macOS: vi.fn(() => ['NanoClaw', 'Chrome', '1.0.0']),
+    },
   };
 });
 
@@ -126,8 +129,9 @@ function triggerDisconnect(statusCode: number) {
   });
 }
 
-function triggerMessages(messages: unknown[]) {
+async function triggerMessages(messages: unknown[]) {
   fakeSocket._ev.emit('messages.upsert', { messages });
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 // --- Tests ---
@@ -297,7 +301,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-1',
@@ -332,7 +336,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-2',
@@ -359,7 +363,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-3',
@@ -381,7 +385,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-4',
@@ -402,7 +406,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-5',
@@ -430,7 +434,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-6',
@@ -458,7 +462,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-7',
@@ -486,7 +490,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-8',
@@ -515,7 +519,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-9',
@@ -556,7 +560,7 @@ describe('WhatsAppChannel', () => {
 
       // The socket has lid '9876543210:1@lid' → phone '1234567890@s.whatsapp.net'
       // Send a message from the LID
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-lid',
@@ -582,7 +586,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-normal',
@@ -608,7 +612,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-unknown-lid',
