@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T05:04:38Z",
+    "updatedAt": "2026-02-13T05:06:09Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -612,6 +612,45 @@
       "dependencies": ["S40"],
       "risks": ["None"],
       "notes": "Keep lockfile in sync after crate updates"
+    },
+    {
+      "id": "S45",
+      "title": "Ignore ESP-IDF build artifacts",
+      "intent": "Prevent ESP-IDF toolchain downloads from polluting git status",
+      "acceptance": [".gitignore contains .embuild/"],
+      "gates": ["rg -n \"^\\.embuild/\" .gitignore"],
+      "status": "done",
+      "startedAt": "2026-02-13T05:05:52Z",
+      "completedAt": "2026-02-13T05:06:09Z",
+      "dependencies": ["S44"],
+      "risks": ["None"],
+      "notes": "Keeps ESP toolchain cache out of version control"
+    },
+    {
+      "id": "S46",
+      "title": "Reproducible ESP check script",
+      "intent": "Add a scripted esp check command with required env flags",
+      "acceptance": ["scripts/esp-check.sh exists and is executable"],
+      "gates": ["test -x scripts/esp-check.sh"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S45"],
+      "risks": ["None"],
+      "notes": "Encapsulates ESP_IDF_VERSION + build-std flags"
+    },
+    {
+      "id": "S47",
+      "title": "ESP build reproducibility doc",
+      "intent": "Document the exact esp build prerequisites and command",
+      "acceptance": ["docs/ESP_TOOLCHAIN.md exists"],
+      "gates": ["test -f docs/ESP_TOOLCHAIN.md"],
+      "status": "open",
+      "startedAt": null,
+      "completedAt": null,
+      "dependencies": ["S46"],
+      "risks": ["None"],
+      "notes": "Captures IDF v5.1 + build-std requirements"
     }
   ]
 }

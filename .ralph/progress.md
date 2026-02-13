@@ -492,3 +492,12 @@
   - .agents/tasks/prd-microclaw-phase1.json updated (S36 done)
 - Notes:
   - Build-std required for xtensa toolchain in this workspace
+## 2026-02-13T05:06:09Z S45 Ignore ESP-IDF build artifacts
+- Outcome: pass
+- Commands:
+  - rg -n "^\.embuild/" .gitignore -> fail
+  - rg -n "^\.embuild/" .gitignore -> pass
+- Key diffs:
+  - .gitignore updated (.embuild/)
+- Notes:
+  - Keeps espup/IDF downloads out of git status

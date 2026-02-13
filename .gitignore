@@ -33,3 +33,5 @@ groups/global/*
 agents-sdk-docs
 
 .worktrees/
+
+.embuild/
