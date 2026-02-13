@@ -46,7 +46,7 @@ export interface HeartbeatConfig {
   scheduleType: 'cron' | 'interval';
 }
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona';
+export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway';
 
 export interface RegisteredGroup {
   name: string;
@@ -121,3 +121,71 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 // name is optional — channels that deliver names inline (Telegram) pass it here;
 // channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
 export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+
+// --- Agent-Channel Decoupling ---
+
+/**
+ * An Agent is an autonomous entity that handles messages for one or more channels.
+ * Replaces RegisteredGroup as the primary routing unit.
+ */
+export interface Agent {
+  id: string;                    // "main", "omniaura-discord"
+  name: string;
+  description?: string;
+  folder: string;                // Workspace folder (= id for backwards compat)
+  backend: BackendType;
+  containerConfig?: ContainerConfig;
+  heartbeat?: HeartbeatConfig;
+  isAdmin: boolean;              // Local agent = true (can approve tasks, access local FS)
+  isLocal: boolean;              // Runs on local machine (Apple Container)
+  serverFolder?: string;         // Shared server context (e.g., "servers/omniaura-discord")
+  createdAt: string;
+}
+
+/**
+ * Maps a channel JID to an agent.
+ * Multiple channels can route to the same agent.
+ */
+export interface ChannelRoute {
+  channelJid: string;            // "dc:123", "tg:-100...", "123@g.us"
+  agentId: string;               // FK to Agent.id
+  trigger: string;
+  requiresTrigger: boolean;
+  discordGuildId?: string;
+  createdAt: string;
+}
+
+/**
+ * Convert a RegisteredGroup + JID into an Agent (for migration).
+ */
+export function registeredGroupToAgent(jid: string, group: RegisteredGroup): Agent {
+  const isMainGroup = group.folder === 'main';
+  const backendType = group.backend || 'apple-container';
+  return {
+    id: group.folder,
+    name: group.name,
+    description: group.description,
+    folder: group.folder,
+    backend: backendType,
+    containerConfig: group.containerConfig,
+    heartbeat: group.heartbeat,
+    isAdmin: isMainGroup,
+    isLocal: backendType === 'apple-container' || backendType === 'docker',
+    serverFolder: group.serverFolder,
+    createdAt: group.added_at,
+  };
+}
+
+/**
+ * Convert a RegisteredGroup + JID into a ChannelRoute (for migration).
+ */
+export function registeredGroupToRoute(jid: string, group: RegisteredGroup): ChannelRoute {
+  return {
+    channelJid: jid,
+    agentId: group.folder,
+    trigger: group.trigger,
+    requiresTrigger: group.requiresTrigger !== false,
+    discordGuildId: group.discordGuildId,
+    createdAt: group.added_at,
+  };
+}

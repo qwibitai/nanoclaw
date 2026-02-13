@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
-import { HeartbeatConfig, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
+import { Agent, ChannelRoute, HeartbeatConfig, NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
 
 let db: Database;
 
@@ -120,6 +120,36 @@ function createSchema(database: Database): void {
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN description TEXT`);
   } catch { /* column already exists */ }
+
+  // --- Agent-Channel Decoupling tables ---
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      folder TEXT NOT NULL UNIQUE,
+      backend TEXT NOT NULL DEFAULT 'apple-container',
+      container_config TEXT,
+      heartbeat TEXT,
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      is_local INTEGER NOT NULL DEFAULT 1,
+      server_folder TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS channel_routes (
+      channel_jid TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL REFERENCES agents(id),
+      trigger_pattern TEXT NOT NULL,
+      requires_trigger INTEGER NOT NULL DEFAULT 1,
+      discord_guild_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_channel_routes_agent ON channel_routes(agent_id);
+  `);
+
+  // Auto-migrate from registered_groups → agents + channel_routes
+  migrateRegisteredGroupsToAgents(database);
 }
 
 export function initDatabase(): void {
@@ -629,6 +659,240 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Agent + ChannelRoute CRUD ---
+
+function migrateRegisteredGroupsToAgents(database: Database): void {
+  // Check if migration already happened (agents table has data)
+  const agentCount = database.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number };
+  if (agentCount.cnt > 0) return;
+
+  // Read all registered_groups
+  const rows = database.prepare('SELECT * FROM registered_groups').all() as Array<{
+    jid: string;
+    name: string;
+    folder: string;
+    trigger_pattern: string;
+    added_at: string;
+    container_config: string | null;
+    requires_trigger: number | null;
+    heartbeat: string | null;
+    discord_guild_id: string | null;
+    server_folder: string | null;
+    backend: string | null;
+    description: string | null;
+  }>;
+
+  if (rows.length === 0) return;
+
+  // Group rows by folder to deduplicate (multiple JIDs can map to same folder)
+  const agentsByFolder = new Map<string, typeof rows[0]>();
+  for (const row of rows) {
+    if (!agentsByFolder.has(row.folder)) {
+      agentsByFolder.set(row.folder, row);
+    }
+  }
+
+  const insertAgent = database.prepare(`
+    INSERT OR IGNORE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertRoute = database.prepare(`
+    INSERT OR IGNORE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+
+  for (const [folder, row] of agentsByFolder) {
+    const isMain = folder === 'main';
+    const backend = row.backend || 'apple-container';
+    const isLocal = backend === 'apple-container' || backend === 'docker';
+
+    insertAgent.run(
+      folder,              // id
+      row.name,
+      row.description,
+      folder,
+      backend,
+      row.container_config,
+      row.heartbeat,
+      isMain ? 1 : 0,     // is_admin
+      isLocal ? 1 : 0,    // is_local
+      row.server_folder,
+      row.added_at,
+    );
+  }
+
+  // Insert all routes (including multiple JIDs per agent)
+  for (const row of rows) {
+    insertRoute.run(
+      row.jid,
+      row.folder,          // agent_id = folder
+      row.trigger_pattern,
+      row.requires_trigger === null ? 1 : row.requires_trigger,
+      row.discord_guild_id,
+      row.added_at,
+    );
+  }
+}
+
+export function getAgent(id: string): Agent | undefined {
+  const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(id) as {
+    id: string;
+    name: string;
+    description: string | null;
+    folder: string;
+    backend: string;
+    container_config: string | null;
+    heartbeat: string | null;
+    is_admin: number;
+    is_local: number;
+    server_folder: string | null;
+    created_at: string;
+  } | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || undefined,
+    folder: row.folder,
+    backend: row.backend as Agent['backend'],
+    containerConfig: row.container_config ? JSON.parse(row.container_config) : undefined,
+    heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
+    isAdmin: row.is_admin === 1,
+    isLocal: row.is_local === 1,
+    serverFolder: row.server_folder || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function getAllAgents(): Record<string, Agent> {
+  const rows = db.prepare('SELECT * FROM agents').all() as Array<{
+    id: string;
+    name: string;
+    description: string | null;
+    folder: string;
+    backend: string;
+    container_config: string | null;
+    heartbeat: string | null;
+    is_admin: number;
+    is_local: number;
+    server_folder: string | null;
+    created_at: string;
+  }>;
+  const result: Record<string, Agent> = {};
+  for (const row of rows) {
+    result[row.id] = {
+      id: row.id,
+      name: row.name,
+      description: row.description || undefined,
+      folder: row.folder,
+      backend: row.backend as Agent['backend'],
+      containerConfig: row.container_config ? JSON.parse(row.container_config) : undefined,
+      heartbeat: row.heartbeat ? JSON.parse(row.heartbeat) as HeartbeatConfig : undefined,
+      isAdmin: row.is_admin === 1,
+      isLocal: row.is_local === 1,
+      serverFolder: row.server_folder || undefined,
+      createdAt: row.created_at,
+    };
+  }
+  return result;
+}
+
+export function setAgent(agent: Agent): void {
+  db.query(`
+    INSERT OR REPLACE INTO agents (id, name, description, folder, backend, container_config, heartbeat, is_admin, is_local, server_folder, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    agent.id,
+    agent.name,
+    agent.description || null,
+    agent.folder,
+    agent.backend,
+    agent.containerConfig ? JSON.stringify(agent.containerConfig) : null,
+    agent.heartbeat ? JSON.stringify(agent.heartbeat) : null,
+    agent.isAdmin ? 1 : 0,
+    agent.isLocal ? 1 : 0,
+    agent.serverFolder || null,
+    agent.createdAt,
+  );
+}
+
+export function getChannelRoute(channelJid: string): ChannelRoute | undefined {
+  const row = db.prepare('SELECT * FROM channel_routes WHERE channel_jid = ?').get(channelJid) as {
+    channel_jid: string;
+    agent_id: string;
+    trigger_pattern: string;
+    requires_trigger: number;
+    discord_guild_id: string | null;
+    created_at: string;
+  } | undefined;
+  if (!row) return undefined;
+  return {
+    channelJid: row.channel_jid,
+    agentId: row.agent_id,
+    trigger: row.trigger_pattern,
+    requiresTrigger: row.requires_trigger === 1,
+    discordGuildId: row.discord_guild_id || undefined,
+    createdAt: row.created_at,
+  };
+}
+
+export function getAllChannelRoutes(): Record<string, ChannelRoute> {
+  const rows = db.prepare('SELECT * FROM channel_routes').all() as Array<{
+    channel_jid: string;
+    agent_id: string;
+    trigger_pattern: string;
+    requires_trigger: number;
+    discord_guild_id: string | null;
+    created_at: string;
+  }>;
+  const result: Record<string, ChannelRoute> = {};
+  for (const row of rows) {
+    result[row.channel_jid] = {
+      channelJid: row.channel_jid,
+      agentId: row.agent_id,
+      trigger: row.trigger_pattern,
+      requiresTrigger: row.requires_trigger === 1,
+      discordGuildId: row.discord_guild_id || undefined,
+      createdAt: row.created_at,
+    };
+  }
+  return result;
+}
+
+export function setChannelRoute(route: ChannelRoute): void {
+  db.query(`
+    INSERT OR REPLACE INTO channel_routes (channel_jid, agent_id, trigger_pattern, requires_trigger, discord_guild_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    route.channelJid,
+    route.agentId,
+    route.trigger,
+    route.requiresTrigger ? 1 : 0,
+    route.discordGuildId || null,
+    route.createdAt,
+  );
+}
+
+export function getRoutesForAgent(agentId: string): ChannelRoute[] {
+  const rows = db.prepare('SELECT * FROM channel_routes WHERE agent_id = ?').all(agentId) as Array<{
+    channel_jid: string;
+    agent_id: string;
+    trigger_pattern: string;
+    requires_trigger: number;
+    discord_guild_id: string | null;
+    created_at: string;
+  }>;
+  return rows.map((row) => ({
+    channelJid: row.channel_jid,
+    agentId: row.agent_id,
+    trigger: row.trigger_pattern,
+    requiresTrigger: row.requires_trigger === 1,
+    discordGuildId: row.discord_guild_id || undefined,
+    createdAt: row.created_at,
+  }));
 }
 
 // --- JSON migration ---

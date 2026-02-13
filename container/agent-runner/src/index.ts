@@ -62,6 +62,59 @@ const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
+// S3 mode detection: if NANOCLAW_S3_ENDPOINT is set, use S3 for output instead of stdout
+const S3_ENDPOINT = process.env.NANOCLAW_S3_ENDPOINT || '';
+const S3_ACCESS_KEY_ID = process.env.NANOCLAW_S3_ACCESS_KEY_ID || '';
+const S3_SECRET_ACCESS_KEY = process.env.NANOCLAW_S3_SECRET_ACCESS_KEY || '';
+const S3_BUCKET = process.env.NANOCLAW_S3_BUCKET || '';
+const S3_REGION = process.env.NANOCLAW_S3_REGION || '';
+const S3_AGENT_ID = process.env.NANOCLAW_AGENT_ID || '';
+const IS_S3_MODE = !!S3_ENDPOINT;
+
+let s3Client: any = null;
+
+function getS3Client() {
+  if (s3Client) return s3Client;
+  if (!IS_S3_MODE) return null;
+  // Use Bun.S3Client for S3 mode
+  s3Client = new (globalThis as any).Bun.S3Client({
+    endpoint: S3_ENDPOINT,
+    accessKeyId: S3_ACCESS_KEY_ID,
+    secretAccessKey: S3_SECRET_ACCESS_KEY,
+    bucket: S3_BUCKET,
+    region: S3_REGION || undefined,
+  });
+  return s3Client;
+}
+
+async function writeS3Output(output: ContainerOutput): Promise<void> {
+  const client = getS3Client();
+  if (!client) return;
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const key = `agents/${S3_AGENT_ID}/outbox/${new Date().toISOString()}-${id}.json`;
+  const data = JSON.stringify({
+    id,
+    timestamp: new Date().toISOString(),
+    agentId: S3_AGENT_ID,
+    status: output.status,
+    result: output.result,
+    newSessionId: output.newSessionId,
+    error: output.error,
+  });
+  await client.write(key, data);
+  log(`S3 output written: ${key}`);
+}
+
+async function writeS3Ipc(dir: string, data: object): Promise<void> {
+  const client = getS3Client();
+  if (!client) return;
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const key = `agents/${S3_AGENT_ID}/ipc/${dir}/${id}.json`;
+  await client.write(key, JSON.stringify(data));
+}
+
 /**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
@@ -112,9 +165,21 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 function writeOutput(output: ContainerOutput): void {
-  console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
-  console.log(OUTPUT_END_MARKER);
+  if (IS_S3_MODE) {
+    // S3 mode: write to S3 outbox instead of stdout
+    writeS3Output(output).catch((err) => {
+      log(`Failed to write S3 output: ${err instanceof Error ? err.message : String(err)}`);
+      // Fallback to stdout
+      console.log(OUTPUT_START_MARKER);
+      console.log(JSON.stringify(output));
+      console.log(OUTPUT_END_MARKER);
+    });
+  } else {
+    // Stdout mode: use markers (local/Daytona)
+    console.log(OUTPUT_START_MARKER);
+    console.log(JSON.stringify(output));
+    console.log(OUTPUT_END_MARKER);
+  }
 }
 
 function log(message: string): void {

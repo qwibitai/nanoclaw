@@ -14,6 +14,14 @@ if [ -n "$GITHUB_TOKEN" ]; then
   git config --global user.email "${GIT_AUTHOR_EMAIL:-nanoclaw@users.noreply.github.com}"
 fi
 
+# SSH key setup (synced via S3 or mounted)
+if [ -f /workspace/sync/ssh/id_ed25519 ]; then
+  mkdir -p ~/.ssh
+  cp /workspace/sync/ssh/id_ed25519 ~/.ssh/id_ed25519
+  chmod 600 ~/.ssh/id_ed25519
+  ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+fi
+
 # Buffer stdin then run agent.
 # If /tmp/input.json already exists (pre-written by Sprites backend),
 # skip the stdin buffering step. Apple Container requires EOF to flush stdin pipe.

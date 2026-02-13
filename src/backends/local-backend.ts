@@ -20,13 +20,18 @@ import {
 } from '../config.js';
 import { logger } from '../logger.js';
 import { validateAdditionalMounts } from '../mount-security.js';
-import { ContainerProcess, RegisteredGroup } from '../types.js';
+import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import {
   AgentBackend,
+  AgentOrGroup,
   ContainerInput,
   ContainerOutput,
   VolumeMount,
+  getContainerConfig,
+  getFolder,
+  getName,
+  getServerFolder,
 } from './types.js';
 
 function getHomeDir(): string {
@@ -40,12 +45,15 @@ function getHomeDir(): string {
 }
 
 function buildVolumeMounts(
-  group: RegisteredGroup,
+  group: AgentOrGroup,
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
   const projectRoot = process.cwd();
+
+  const folder = getFolder(group);
+  const srvFolder = getServerFolder(group);
 
   if (isMain) {
     mounts.push({
@@ -54,13 +62,13 @@ function buildVolumeMounts(
       readonly: false,
     });
     mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
+      hostPath: path.join(GROUPS_DIR, folder),
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
     mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
+      hostPath: path.join(GROUPS_DIR, folder),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -74,8 +82,8 @@ function buildVolumeMounts(
       });
     }
 
-    if (group.serverFolder) {
-      const serverDir = path.join(GROUPS_DIR, group.serverFolder);
+    if (srvFolder) {
+      const serverDir = path.join(GROUPS_DIR, srvFolder);
       if (fs.existsSync(serverDir)) {
         mounts.push({
           hostPath: serverDir,
@@ -90,7 +98,7 @@ function buildVolumeMounts(
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
-    group.folder,
+    folder,
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
@@ -128,7 +136,7 @@ function buildVolumeMounts(
   });
 
   // Per-group IPC namespace
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -173,10 +181,11 @@ function buildVolumeMounts(
   });
 
   // Additional mounts
-  if (group.containerConfig?.additionalMounts) {
+  const containerCfg = getContainerConfig(group);
+  if (containerCfg?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
-      group.name,
+      containerCfg.additionalMounts,
+      getName(group),
       isMain,
     );
     mounts.push(...validatedMounts);
@@ -207,26 +216,29 @@ export class LocalBackend implements AgentBackend {
   readonly name = 'apple-container';
 
   async runAgent(
-    group: RegisteredGroup,
+    group: AgentOrGroup,
     input: ContainerInput,
     onProcess: (proc: ContainerProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
   ): Promise<ContainerOutput> {
     const startTime = Date.now();
+    const folder = getFolder(group);
+    const groupName = getName(group);
+    const containerCfg = getContainerConfig(group);
 
-    const groupDir = path.join(GROUPS_DIR, group.folder);
+    const groupDir = path.join(GROUPS_DIR, folder);
     fs.mkdirSync(groupDir, { recursive: true });
 
     const mounts = buildVolumeMounts(group, input.isMain);
-    const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+    const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `nanoclaw-${safeName}-${Date.now()}`;
     const containerArgs = buildContainerArgs(mounts, containerName);
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    const configTimeout = containerCfg?.timeout || CONTAINER_TIMEOUT;
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     logger.debug(
       {
-        group: group.name,
+        group: groupName,
         containerName,
         mounts: mounts.map(
           (m) => `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
@@ -238,7 +250,7 @@ export class LocalBackend implements AgentBackend {
 
     logger.info(
       {
-        group: group.name,
+        group: groupName,
         containerName,
         mountCount: mounts.length,
         isMain: input.isMain,
@@ -246,7 +258,7 @@ export class LocalBackend implements AgentBackend {
       'Spawning container agent',
     );
 
-    const logsDir = path.join(GROUPS_DIR, group.folder, 'logs');
+    const logsDir = path.join(GROUPS_DIR, folder, 'logs');
     fs.mkdirSync(logsDir, { recursive: true });
 
     let container: ReturnType<typeof Bun.spawn>;
@@ -257,7 +269,7 @@ export class LocalBackend implements AgentBackend {
         stderr: 'pipe',
       });
     } catch (err) {
-      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
+      logger.error({ group: groupName, containerName, error: err }, 'Container spawn error');
       return {
         status: 'error',
         result: null,
@@ -275,7 +287,7 @@ export class LocalBackend implements AgentBackend {
     container.stdin.end();
 
     const killOnTimeout = () => {
-      logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
+      logger.error({ group: groupName, containerName }, 'Container timeout, stopping gracefully');
       const stopProc = Bun.spawn(['container', 'stop', containerName]);
       const killTimer = setTimeout(() => container.kill(9), 15000);
       stopProc.exited.then((code) => {
@@ -292,7 +304,7 @@ export class LocalBackend implements AgentBackend {
     };
 
     const parser = new StreamParser({
-      groupName: group.name,
+      groupName: groupName,
       containerName,
       timeoutMs,
       startupTimeoutMs: CONTAINER_STARTUP_TIMEOUT,
@@ -351,7 +363,7 @@ export class LocalBackend implements AgentBackend {
       fs.writeFileSync(timeoutLog, [
         `=== Container Run Log (TIMEOUT) ===`,
         `Timestamp: ${new Date().toISOString()}`,
-        `Group: ${group.name}`,
+        `Group: ${groupName}`,
         `Container: ${containerName}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${exitCode}`,
@@ -360,7 +372,7 @@ export class LocalBackend implements AgentBackend {
 
       if (state.hadStreamingOutput) {
         logger.info(
-          { group: group.name, containerName, duration, code: exitCode },
+          { group: groupName, containerName, duration, code: exitCode },
           'Container timed out after output (idle cleanup)',
         );
         await state.outputChain;
@@ -368,7 +380,7 @@ export class LocalBackend implements AgentBackend {
       }
 
       logger.error(
-        { group: group.name, containerName, duration, code: exitCode },
+        { group: groupName, containerName, duration, code: exitCode },
         'Container timed out with no output',
       );
       return {
@@ -386,7 +398,7 @@ export class LocalBackend implements AgentBackend {
     const logLines = [
       `=== Container Run Log ===`,
       `Timestamp: ${new Date().toISOString()}`,
-      `Group: ${group.name}`,
+      `Group: ${groupName}`,
       `IsMain: ${input.isMain}`,
       `Duration: ${duration}ms`,
       `Exit Code: ${exitCode}`,
@@ -436,7 +448,7 @@ export class LocalBackend implements AgentBackend {
     if (exitCode !== 0) {
       logger.error(
         {
-          group: group.name,
+          group: groupName,
           code: exitCode,
           duration,
           stderr: state.stderr,
@@ -456,7 +468,7 @@ export class LocalBackend implements AgentBackend {
     if (onOutput) {
       await state.outputChain;
       logger.info(
-        { group: group.name, duration, newSessionId: state.newSessionId },
+        { group: groupName, duration, newSessionId: state.newSessionId },
         'Container completed (streaming mode)',
       );
       return { status: 'success', result: null, newSessionId: state.newSessionId };
@@ -467,7 +479,7 @@ export class LocalBackend implements AgentBackend {
       const output = parser.parseFinalOutput();
       logger.info(
         {
-          group: group.name,
+          group: groupName,
           duration,
           status: output.status,
           hasResult: !!output.result,
@@ -477,7 +489,7 @@ export class LocalBackend implements AgentBackend {
       return output;
     } catch (err) {
       logger.error(
-        { group: group.name, stdout: state.stdout, stderr: state.stderr, error: err },
+        { group: groupName, stdout: state.stdout, stderr: state.stderr, error: err },
         'Failed to parse container output',
       );
       return {

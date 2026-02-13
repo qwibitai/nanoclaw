@@ -9,7 +9,8 @@ import path from 'path';
 
 import { DATA_DIR } from './config.js';
 import { resolveBackend } from './backends/index.js';
-import { ContainerProcess, RegisteredGroup } from './types.js';
+import { ContainerProcess, RegisteredGroup, Agent } from './types.js';
+import type { AgentOrGroup } from './backends/types.js';
 
 // Re-export types from backends
 export type { ContainerInput, ContainerOutput } from './backends/types.js';
@@ -19,7 +20,7 @@ export type { ContainerInput, ContainerOutput } from './backends/types.js';
  * @deprecated Use resolveBackend(group).runAgent() directly.
  */
 export async function runContainerAgent(
-  group: RegisteredGroup,
+  group: AgentOrGroup,
   input: import('./backends/types.js').ContainerInput,
   onProcess: (proc: ContainerProcess, containerName: string) => void,
   onOutput?: (output: import('./backends/types.js').ContainerOutput) => Promise<void>,

@@ -21,13 +21,17 @@ import {
   SPRITES_TOKEN,
 } from '../config.js';
 import { logger } from '../logger.js';
-import { ContainerProcess, RegisteredGroup } from '../types.js';
+import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import { provisionSprite } from './sprites-provisioning.js';
 import {
   AgentBackend,
+  AgentOrGroup,
   ContainerInput,
   ContainerOutput,
+  getContainerConfig,
+  getFolder,
+  getName,
 } from './types.js';
 
 const API_BASE = 'https://api.sprites.dev/v1';
@@ -219,7 +223,7 @@ export class SpritesBackend implements AgentBackend {
   }
 
   async runAgent(
-    group: RegisteredGroup,
+    group: AgentOrGroup,
     input: ContainerInput,
     onProcess: (proc: ContainerProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -375,7 +379,7 @@ export class SpritesBackend implements AgentBackend {
    * Sync host-side files to the Sprite before each invocation.
    * Only uploads files whose content has changed (via SHA-256 hash).
    */
-  private async syncFiles(sprite: SpriteClient, group: RegisteredGroup, isMain: boolean): Promise<void> {
+  private async syncFiles(sprite: SpriteClient, group: AgentOrGroup, isMain: boolean): Promise<void> {
     const projectRoot = process.cwd();
     const syncOps: Promise<boolean>[] = [];
 
@@ -465,7 +469,7 @@ export class SpritesBackend implements AgentBackend {
    * Download files that may have changed during agent execution.
    * Agent may update CLAUDE.md (memory) and conversation files.
    */
-  private async downloadChangedFiles(sprite: SpriteClient, group: RegisteredGroup): Promise<void> {
+  private async downloadChangedFiles(sprite: SpriteClient, group: AgentOrGroup): Promise<void> {
     try {
       // Download updated CLAUDE.md
       const claudeMd = await sprite.readFile('/workspace/group/CLAUDE.md');

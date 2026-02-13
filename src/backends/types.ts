@@ -3,9 +3,46 @@
  * Defines the AgentBackend interface that all backends implement.
  */
 
-import { ContainerProcess, RegisteredGroup } from '../types.js';
+import { Agent, ContainerProcess, RegisteredGroup } from '../types.js';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona';
+export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway';
+
+/**
+ * Unified group-or-agent type for backwards compatibility.
+ * Backends accept either an Agent or a RegisteredGroup.
+ */
+export type AgentOrGroup = Agent | RegisteredGroup;
+
+/** Extract the folder from either an Agent or RegisteredGroup. */
+export function getFolder(entity: AgentOrGroup): string {
+  return entity.folder;
+}
+
+/** Extract the name from either an Agent or RegisteredGroup. */
+export function getName(entity: AgentOrGroup): string {
+  return entity.name;
+}
+
+/** Check if the entity is an Agent (has 'id' field). */
+export function isAgent(entity: AgentOrGroup): entity is Agent {
+  return 'id' in entity && 'isAdmin' in entity;
+}
+
+/** Get containerConfig from either type. */
+export function getContainerConfig(entity: AgentOrGroup): RegisteredGroup['containerConfig'] {
+  return entity.containerConfig;
+}
+
+/** Get serverFolder from either type. */
+export function getServerFolder(entity: AgentOrGroup): string | undefined {
+  return entity.serverFolder;
+}
+
+/** Get backend type from either type. */
+export function getBackendType(entity: AgentOrGroup): BackendType {
+  if (isAgent(entity)) return entity.backend;
+  return (entity as RegisteredGroup).backend || 'apple-container';
+}
 
 export interface ContainerInput {
   prompt: string;
@@ -34,13 +71,16 @@ export interface VolumeMount {
 /**
  * Interface that all agent backends must implement.
  * Backends handle running agents, IPC, and file operations.
+ *
+ * runAgent accepts AgentOrGroup for backwards compatibility —
+ * new code should pass Agent, old code can still pass RegisteredGroup.
  */
 export interface AgentBackend {
   readonly name: string;
 
   /** Run an agent for a group. Returns when agent completes. */
   runAgent(
-    group: RegisteredGroup,
+    group: AgentOrGroup,
     input: ContainerInput,
     onProcess: (proc: ContainerProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,

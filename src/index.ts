@@ -3,6 +3,11 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  B2_ACCESS_KEY_ID,
+  B2_BUCKET,
+  B2_ENDPOINT,
+  B2_REGION,
+  B2_SECRET_ACCESS_KEY,
   DATA_DIR,
   DISCORD_BOT_TOKEN,
   IDLE_TIMEOUT,
@@ -27,6 +32,8 @@ import {
 } from './container-runner.js';
 import {
   expireStaleSessions,
+  getAllAgents,
+  getAllChannelRoutes,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -36,17 +43,23 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  setAgent,
+  setChannelRoute,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { getCloudAgentIds } from './agents.js';
+import { resolveAgentForChannel, buildAgentToChannelsMap } from './channel-routes.js';
 import { GroupQueue } from './group-queue.js';
 import { consumeShareRequest, startIpcWatcher } from './ipc.js';
+import { NanoClawS3 } from './s3/client.js';
+import { startS3IpcPoller } from './s3/ipc-poller.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { Agent, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -55,11 +68,14 @@ export { escapeXml, formatMessages } from './router.js';
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
+let agents: Record<string, Agent> = {};
+let channelRoutes: Record<string, ChannelRoute> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
 let channels: Channel[] = [];
+let s3: NanoClawS3 | null = null;
 const queue = new GroupQueue();
 
 function loadState(): void {
@@ -73,8 +89,17 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+
+  // Load agent-channel decoupling state (auto-migrated from registered_groups)
+  agents = getAllAgents();
+  channelRoutes = getAllChannelRoutes();
+
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
+    {
+      groupCount: Object.keys(registeredGroups).length,
+      agentCount: Object.keys(agents).length,
+      routeCount: Object.keys(channelRoutes).length,
+    },
     'State loaded',
   );
 }
@@ -130,6 +155,15 @@ Then read the code directly — don't ask the admin to copy files for you.
   if (group.serverFolder) {
     ensureServerDirectory(group.serverFolder);
   }
+
+  // Also create Agent and ChannelRoute entries
+  const agent = registeredGroupToAgent(jid, group);
+  agents[agent.id] = agent;
+  setAgent(agent);
+
+  const route = registeredGroupToRoute(jid, group);
+  channelRoutes[jid] = route;
+  setChannelRoute(route);
 
   logger.info(
     { jid, name: group.name, folder: group.folder, serverFolder: group.serverFolder },
@@ -557,22 +591,56 @@ function recoverPendingMessages(): void {
  * Every agent can discover every other agent's name, purpose, backend, and dev URL.
  */
 function buildAgentRegistry(): void {
-  const registry = Object.entries(registeredGroups).map(([jid, group]) => ({
-    id: group.folder,
-    jid,
-    name: group.name,
-    description: group.description || '',
-    backend: group.backend || 'apple-container',
-    devUrl: group.devUrl,
-    isMain: group.folder === MAIN_GROUP_FOLDER,
-    trigger: group.trigger,
-  }));
+  // Build registry from agents (new system) with channel route info
+  const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+
+  const registry = Object.values(agents).map((agent) => {
+    const jids = agentToChannels.get(agent.id) || [];
+    // Get trigger from first route for backwards compat
+    const firstRoute = jids.length > 0 ? channelRoutes[jids[0]] : undefined;
+    return {
+      id: agent.id,
+      jid: jids[0] || agent.id, // Primary JID
+      jids, // All JIDs
+      name: agent.name,
+      description: agent.description || '',
+      backend: agent.backend,
+      isMain: agent.isAdmin,
+      isLocal: agent.isLocal,
+      trigger: firstRoute?.trigger || `@${ASSISTANT_NAME}`,
+    };
+  });
+
+  // Fallback: also include registered groups not yet in agents table
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (!agents[group.folder]) {
+      registry.push({
+        id: group.folder,
+        jid,
+        jids: [jid],
+        name: group.name,
+        description: group.description || '',
+        backend: group.backend || 'apple-container',
+        isMain: group.folder === MAIN_GROUP_FOLDER,
+        isLocal: !group.backend || group.backend === 'apple-container' || group.backend === 'docker',
+        trigger: group.trigger,
+      });
+    }
+  }
 
   const registryJson = JSON.stringify(registry, null, 2);
 
-  // Write to ALL groups' IPC dirs (every agent can see the full registry)
+  // Write to ALL agents' IPC dirs
+  const folders = new Set<string>();
+  for (const agent of Object.values(agents)) {
+    folders.add(agent.folder);
+  }
   for (const group of Object.values(registeredGroups)) {
-    const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+    folders.add(group.folder);
+  }
+
+  for (const folder of folders) {
+    const groupIpcDir = path.join(DATA_DIR, 'ipc', folder);
     fs.mkdirSync(groupIpcDir, { recursive: true });
     fs.writeFileSync(path.join(groupIpcDir, 'agent_registry.json'), registryJson);
   }
@@ -583,7 +651,19 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
-  // Initialize all backends needed by registered groups
+  // Initialize S3 client if B2 is configured
+  if (B2_ENDPOINT) {
+    s3 = new NanoClawS3({
+      endpoint: B2_ENDPOINT,
+      accessKeyId: B2_ACCESS_KEY_ID,
+      secretAccessKey: B2_SECRET_ACCESS_KEY,
+      bucket: B2_BUCKET,
+      region: B2_REGION,
+    });
+    logger.info('B2 S3 client initialized');
+  }
+
+  // Initialize all backends needed by registered groups and agents
   await initializeBackends(registeredGroups);
 
   // Expire stale sessions on startup to prevent unbounded context growth
@@ -824,6 +904,96 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+  // Start S3 IPC poller for cloud agents (if B2 is configured)
+  if (s3) {
+    startS3IpcPoller({
+      s3,
+      getCloudAgentIds,
+      processOutput: async (agentId, output) => {
+        // Find the channel route(s) for this agent
+        const agentToChannels = buildAgentToChannelsMap(channelRoutes);
+        const jids = agentToChannels.get(agentId) || [];
+        const targetJid = output.targetChannelJid || jids[0];
+
+        if (targetJid && output.result) {
+          const ch = findChannel(channels, targetJid);
+          if (ch) {
+            const text = formatOutbound(ch, output.result);
+            if (text) await ch.sendMessage(targetJid, text);
+          }
+        }
+
+        if (output.newSessionId) {
+          sessions[agentId] = output.newSessionId;
+          setSession(agentId, output.newSessionId);
+        }
+      },
+      processMessage: async (sourceAgentId, data) => {
+        if (data.type === 'message' && data.chatJid && data.text) {
+          const targetGroup = registeredGroups[data.chatJid];
+          const isRegisteredTarget = !!targetGroup;
+          const isMain = sourceAgentId === MAIN_GROUP_FOLDER;
+          if (isMain || isRegisteredTarget) {
+            const ch = findChannel(channels, data.chatJid);
+            if (ch) {
+              const text = formatOutbound(ch, data.text);
+              if (text) await ch.sendMessage(data.chatJid, text);
+            }
+            // Cross-agent: wake up the target agent
+            if (targetGroup && targetGroup.folder !== sourceAgentId) {
+              const trigger = targetGroup.trigger || `@${ASSISTANT_NAME}`;
+              storeMessage({
+                id: `s3-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                chat_jid: data.chatJid,
+                sender: 'system',
+                sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
+                content: `${trigger} ${data.text}`,
+                timestamp: new Date().toISOString(),
+                is_from_me: false,
+              });
+              queue.enqueueMessageCheck(data.chatJid);
+            }
+          }
+        }
+      },
+      processTask: async (sourceAgentId, isAdmin, data) => {
+        const { processTaskIpc } = await import('./ipc.js');
+        await processTaskIpc(data, sourceAgentId, isAdmin, {
+          sendMessage: async (jid, rawText) => {
+            const ch = findChannel(channels, jid);
+            if (!ch) return;
+            const text = formatOutbound(ch, rawText);
+            if (text) return await ch.sendMessage(jid, text);
+          },
+          notifyGroup: (jid, text) => {
+            const group = registeredGroups[jid];
+            const trigger = group?.trigger || `@${ASSISTANT_NAME}`;
+            storeMessage({
+              id: `notify-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              chat_jid: jid,
+              sender: 'system',
+              sender_name: `${agents[sourceAgentId]?.name || sourceAgentId}`,
+              content: `${trigger} ${text}`,
+              timestamp: new Date().toISOString(),
+              is_from_me: false,
+            });
+            queue.enqueueMessageCheck(jid);
+          },
+          registeredGroups: () => registeredGroups,
+          registerGroup,
+          updateGroup: (jid, group) => {
+            registeredGroups[jid] = group;
+            setRegisteredGroup(jid, group);
+          },
+          syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
+          getAvailableGroups,
+          writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+        });
+      },
+      isAdmin: (agentId) => agents[agentId]?.isAdmin ?? false,
+    });
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();

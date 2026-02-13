@@ -4,11 +4,11 @@
  */
 
 import { logger } from '../logger.js';
-import { RegisteredGroup } from '../types.js';
+import { Agent, RegisteredGroup } from '../types.js';
 import { DaytonaBackend } from './daytona-backend.js';
 import { LocalBackend } from './local-backend.js';
 import { SpritesBackend } from './sprites-backend.js';
-import { AgentBackend, BackendType } from './types.js';
+import { AgentBackend, AgentOrGroup, BackendType, getBackendType } from './types.js';
 
 const DEFAULT_BACKEND: BackendType = 'apple-container';
 
@@ -30,17 +30,23 @@ export function getBackend(type: BackendType): AgentBackend {
     case 'daytona':
       backend = new DaytonaBackend();
       break;
+    case 'railway': {
+      // Lazy-load to avoid circular deps and missing module errors when not used
+      const { RailwayBackend } = require('./railway-backend.js');
+      backend = new RailwayBackend();
+      break;
+    }
     default:
       throw new Error(`Unknown backend type: ${type}`);
   }
 
-  backends.set(type, backend);
-  return backend;
+  backends.set(type, backend!);
+  return backend!;
 }
 
-/** Resolve which backend a group should use. */
-export function resolveBackend(group: RegisteredGroup): AgentBackend {
-  const type = group.backend || DEFAULT_BACKEND;
+/** Resolve which backend an agent or group should use. */
+export function resolveBackend(entity: AgentOrGroup): AgentBackend {
+  const type = getBackendType(entity);
   return getBackend(type);
 }
 
@@ -59,18 +65,18 @@ export function getDaytonaBackend(): DaytonaBackend | null {
 /**
  * Initialize all backends that are in use.
  * Called once at startup, replaces the old ensureContainerSystemRunning().
+ * Accepts either Record<string, RegisteredGroup> or Record<string, Agent>.
  */
 export async function initializeBackends(
-  registeredGroups: Record<string, RegisteredGroup>,
+  entities: Record<string, RegisteredGroup> | Record<string, Agent>,
 ): Promise<void> {
   // Determine which backend types are needed
   const neededTypes = new Set<BackendType>();
   neededTypes.add(DEFAULT_BACKEND); // Always initialize the default
 
-  for (const group of Object.values(registeredGroups)) {
-    if (group.backend) {
-      neededTypes.add(group.backend);
-    }
+  for (const entity of Object.values(entities)) {
+    const type = getBackendType(entity);
+    neededTypes.add(type);
   }
 
   logger.info({ backends: [...neededTypes] }, 'Initializing backends');
@@ -93,4 +99,4 @@ export async function shutdownBackends(): Promise<void> {
 }
 
 // Re-export types for convenience
-export type { AgentBackend, BackendType, ContainerInput, ContainerOutput } from './types.js';
+export type { AgentBackend, AgentOrGroup, BackendType, ContainerInput, ContainerOutput } from './types.js';

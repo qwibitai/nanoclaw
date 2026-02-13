@@ -295,6 +295,10 @@ export async function processTaskIpc(
     // For register_group: backend config
     backend?: BackendType;
     group_description?: string;
+    // For delegate_task
+    callbackAgentId?: string;
+    // For context_request
+    requestedTopics?: string[];
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -662,6 +666,95 @@ export async function processTaskIpc(
       logger.info(
         { sourceGroup, sourceJid, targetJid, scope, serverFolder, targetAgent: data.target_agent, trackedMessageId: sentId },
         'Share request forwarded',
+      );
+      break;
+    }
+
+    case 'delegate_task': {
+      if (!data.description) {
+        logger.warn({ data }, 'delegate_task missing description');
+        break;
+      }
+
+      // Find the source group's display name and JID
+      const sourceGroupEntry = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === sourceGroup,
+      );
+      const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
+      const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
+      const callbackAgent = data.callbackAgentId || sourceGroup;
+
+      // Route to admin (main) group for approval
+      const mainJid = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+      )?.[0];
+      if (!mainJid) {
+        logger.warn('delegate_task: could not find main group JID');
+        break;
+      }
+
+      const filesInfo = data.files?.length ? `\n\n*Files included:* ${data.files.join(', ')}` : '';
+      const delegateMsg = `*Task Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${filesInfo}\n\n_React 👍 to approve, or reply manually._`;
+      const sentId = await deps.sendMessage(mainJid, delegateMsg);
+
+      // Track for reaction-based approval
+      if (sentId) {
+        trackShareRequest(sentId, {
+          sourceJid,
+          sourceName,
+          sourceGroup,
+          description: `[DELEGATE TASK] ${data.description}\n\nCallback agent: ${callbackAgent}`,
+          serverFolder: undefined,
+          timestamp: Date.now(),
+        });
+      }
+
+      logger.info(
+        { sourceGroup, callbackAgent, description: data.description.slice(0, 100) },
+        'Delegate task forwarded for approval',
+      );
+      break;
+    }
+
+    case 'context_request': {
+      if (!data.description) {
+        logger.warn({ data }, 'context_request missing description');
+        break;
+      }
+
+      const sourceGroupEntry = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === sourceGroup,
+      );
+      const sourceName = sourceGroupEntry?.[1].name || sourceGroup;
+      const sourceJid = sourceGroupEntry?.[0] || sourceGroup;
+
+      // Route to admin for approval
+      const mainJid = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+      )?.[0];
+      if (!mainJid) {
+        logger.warn('context_request: could not find main group JID');
+        break;
+      }
+
+      const topicsInfo = data.requestedTopics?.length ? `\n\n*Requested topics:* ${data.requestedTopics.join(', ')}` : '';
+      const contextMsg = `*Context Request* from _${sourceName}_ (${sourceJid}):\n\n${data.description}${topicsInfo}\n\n_React 👍 to approve, or reply manually._`;
+      const sentCtxId = await deps.sendMessage(mainJid, contextMsg);
+
+      if (sentCtxId) {
+        trackShareRequest(sentCtxId, {
+          sourceJid,
+          sourceName,
+          sourceGroup,
+          description: `[CONTEXT REQUEST] ${data.description}${data.requestedTopics?.length ? `\nTopics: ${data.requestedTopics.join(', ')}` : ''}`,
+          serverFolder: undefined,
+          timestamp: Date.now(),
+        });
+      }
+
+      logger.info(
+        { sourceGroup, description: data.description.slice(0, 100), topics: data.requestedTopics },
+        'Context request forwarded for approval',
       );
       break;
     }

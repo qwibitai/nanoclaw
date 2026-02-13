@@ -26,13 +26,17 @@ import {
   IDLE_TIMEOUT,
 } from '../config.js';
 import { logger } from '../logger.js';
-import { ContainerProcess, RegisteredGroup } from '../types.js';
+import { ContainerProcess } from '../types.js';
 import { StreamParser } from './stream-parser.js';
 import { provisionDaytona } from './daytona-provisioning.js';
 import {
   AgentBackend,
+  AgentOrGroup,
   ContainerInput,
   ContainerOutput,
+  getContainerConfig,
+  getFolder,
+  getName,
 } from './types.js';
 
 /** Content hash cache: skip uploading unchanged files. */
@@ -186,7 +190,7 @@ export class DaytonaBackend implements AgentBackend {
   }
 
   async runAgent(
-    group: RegisteredGroup,
+    group: AgentOrGroup,
     input: ContainerInput,
     onProcess: (proc: ContainerProcess, containerName: string) => void,
     onOutput?: (output: ContainerOutput) => Promise<void>,
@@ -340,7 +344,7 @@ export class DaytonaBackend implements AgentBackend {
    * Only uploads files whose content has changed (via SHA-256 hash).
    * Uses relative paths for the FS API (resolved from sandbox workdir).
    */
-  private async syncFiles(sandbox: Sandbox, group: RegisteredGroup, isMain: boolean, homeDir: string): Promise<void> {
+  private async syncFiles(sandbox: Sandbox, group: AgentOrGroup, isMain: boolean, homeDir: string): Promise<void> {
     const projectRoot = process.cwd();
     const syncOps: Promise<boolean>[] = [];
 
@@ -443,7 +447,7 @@ export class DaytonaBackend implements AgentBackend {
   /**
    * Download files that may have changed during agent execution.
    */
-  private async downloadChangedFiles(sandbox: Sandbox, group: RegisteredGroup): Promise<void> {
+  private async downloadChangedFiles(sandbox: Sandbox, group: AgentOrGroup): Promise<void> {
     try {
       const claudeMd = await downloadFile(sandbox, 'workspace/group/CLAUDE.md');
       if (claudeMd) {

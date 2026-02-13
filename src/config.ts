@@ -79,3 +79,13 @@ export const SPRITES_RAM_MB = parseInt(process.env.SPRITES_RAM_MB || '0', 10) ||
 export const DAYTONA_API_KEY = process.env.DAYTONA_API_KEY || '';
 export const DAYTONA_API_URL = process.env.DAYTONA_API_URL || '';
 export const DAYTONA_SNAPSHOT = process.env.DAYTONA_SNAPSHOT || '';
+
+// B2 (Backblaze S3) storage bus configuration
+export const B2_ENDPOINT = process.env.B2_ENDPOINT || '';
+export const B2_ACCESS_KEY_ID = process.env.B2_ACCESS_KEY_ID || '';
+export const B2_SECRET_ACCESS_KEY = process.env.B2_SECRET_ACCESS_KEY || '';
+export const B2_BUCKET = process.env.B2_BUCKET || '';
+export const B2_REGION = process.env.B2_REGION || '';
+
+// Railway cloud backend configuration
+export const RAILWAY_API_TOKEN = process.env.RAILWAY_API_TOKEN || '';

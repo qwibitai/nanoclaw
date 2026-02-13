@@ -302,6 +302,12 @@ export class GroupQueue {
     }
   }
 
+  /** Check if a queue slot (by key) is currently active. */
+  isActive(key: string): boolean {
+    const state = this.groups.get(key);
+    return state?.active ?? false;
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
