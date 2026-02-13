@@ -408,3 +408,12 @@
   - .agents/tasks/prd-microclaw-phase1.json updated (S37 done, S38-S43 added)
 - Notes:
   - Added open stories for core parity, sandbox, connectors, device runtime
+## 2026-02-13T03:34:30Z S38 Core router parity - Outcome: pass
+- Commands:
+  - cargo test -p microclaw-core -> fail (missing router exports)
+  - cargo test -p microclaw-core -> pass
+- Key diffs:
+  - crates/microclaw-core/src/lib.rs updated (router formatting + channel trait)
+  - crates/microclaw-core/tests/router.rs added
+- Notes:
+  - Added escape_xml, format_messages, strip_internal_tags, format_outbound, route_outbound, find_channel
