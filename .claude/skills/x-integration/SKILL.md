@@ -118,7 +118,7 @@ Paths relative to project root:
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Host (macOS)                                               │
-│  └── src/index.ts → processTaskIpc()                       │
+│  └── src/ipc.ts → processTaskIpc()                         │
 │      └── host.ts → handleXIpc()                         │
 │          └── spawn subprocess → scripts/*.ts               │
 │              └── Playwright → Chrome → X Website           │
@@ -157,9 +157,9 @@ To integrate this skill into NanoClaw, make the following modifications:
 
 ---
 
-**1. Host side: `src/index.ts`**
+**1. Host side: `src/ipc.ts`**
 
-Add import after other local imports (look for `import { loadJson, saveJson, acquirePidLock } from './utils.js';`):
+Add import after other local imports:
 ```typescript
 import { handleXIpc } from '../.claude/skills/x-integration/host.js';
 ```

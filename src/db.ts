@@ -2,19 +2,13 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { proto } from '@whiskeysockets/baileys';
-
-import { STORE_DIR } from './config.js';
-import { NewMessage, ScheduledTask, TaskRunLog } from './types.js';
+import { DATA_DIR, STORE_DIR } from './config.js';
+import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
 
-export function initDatabase(): void {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  db = new Database(dbPath);
-  db.exec(`
+function createSchema(database: Database.Database): void {
+  database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
       name TEXT,
@@ -60,23 +54,51 @@ export function initDatabase(): void {
       FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id)
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
-  `);
 
-  // Add sender_name column if it doesn't exist (migration for existing DBs)
-  try {
-    db.exec(`ALTER TABLE messages ADD COLUMN sender_name TEXT`);
-  } catch {
-    /* column already exists */
-  }
+    CREATE TABLE IF NOT EXISTS router_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS sessions (
+      group_folder TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      container_config TEXT,
+      requires_trigger INTEGER DEFAULT 1
+    );
+  `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
   try {
-    db.exec(
+    database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
   } catch {
     /* column already exists */
   }
+}
+
+export function initDatabase(): void {
+  const dbPath = path.join(STORE_DIR, 'messages.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+  db = new Database(dbPath);
+  createSchema(db);
+
+  // Migrate from JSON files if they exist
+  migrateJsonState();
+}
+
+/** @internal - for tests only. Creates a fresh in-memory database. */
+export function _initTestDatabase(): void {
+  db = new Database(':memory:');
+  createSchema(db);
 }
 
 /**
@@ -170,36 +192,42 @@ export function setLastGroupSync(): void {
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */
-export function storeMessage(
-  msg: proto.IWebMessageInfo,
-  chatJid: string,
-  isFromMe: boolean,
-  pushName?: string,
-): void {
-  if (!msg.key) return;
-
-  const content =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
-    '';
-
-  const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
-  const sender = msg.key.participant || msg.key.remoteJid || '';
-  const senderName = pushName || sender.split('@')[0];
-  const msgId = msg.key.id || '';
-
+export function storeMessage(msg: NewMessage): void {
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    msgId,
-    chatJid,
-    sender,
-    senderName,
-    content,
-    timestamp,
-    isFromMe ? 1 : 0,
+    msg.id,
+    msg.chat_jid,
+    msg.sender,
+    msg.sender_name,
+    msg.content,
+    msg.timestamp,
+    msg.is_from_me ? 1 : 0,
+  );
+}
+
+/**
+ * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
+ */
+export function storeMessageDirect(msg: {
+  id: string;
+  chat_jid: string;
+  sender: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: boolean;
+}): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    msg.id,
+    msg.chat_jid,
+    msg.sender,
+    msg.sender_name,
+    msg.content,
+    msg.timestamp,
+    msg.is_from_me ? 1 : 0,
   );
 }
 
@@ -381,16 +409,176 @@ export function logTaskRun(log: TaskRunLog): void {
   );
 }
 
-export function getTaskRunLogs(taskId: string, limit = 10): TaskRunLog[] {
-  return db
-    .prepare(
-      `
-    SELECT task_id, run_at, duration_ms, status, result, error
-    FROM task_run_logs
-    WHERE task_id = ?
-    ORDER BY run_at DESC
-    LIMIT ?
-  `,
-    )
-    .all(taskId, limit) as TaskRunLog[];
+// --- Router state accessors ---
+
+export function getRouterState(key: string): string | undefined {
+  const row = db
+    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setRouterState(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
+  ).run(key, value);
+}
+
+// --- Session accessors ---
+
+export function getSession(groupFolder: string): string | undefined {
+  const row = db
+    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
+    .get(groupFolder) as { session_id: string } | undefined;
+  return row?.session_id;
+}
+
+export function setSession(groupFolder: string, sessionId: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
+  ).run(groupFolder, sessionId);
+}
+
+export function getAllSessions(): Record<string, string> {
+  const rows = db
+    .prepare('SELECT group_folder, session_id FROM sessions')
+    .all() as Array<{ group_folder: string; session_id: string }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    result[row.group_folder] = row.session_id;
+  }
+  return result;
+}
+
+// --- Registered group accessors ---
+
+export function getRegisteredGroup(
+  jid: string,
+): (RegisteredGroup & { jid: string }) | undefined {
+  const row = db
+    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .get(jid) as
+    | {
+        jid: string;
+        name: string;
+        folder: string;
+        trigger_pattern: string;
+        added_at: string;
+        container_config: string | null;
+        requires_trigger: number | null;
+      }
+    | undefined;
+  if (!row) return undefined;
+  return {
+    jid: row.jid,
+    name: row.name,
+    folder: row.folder,
+    trigger: row.trigger_pattern,
+    added_at: row.added_at,
+    containerConfig: row.container_config
+      ? JSON.parse(row.container_config)
+      : undefined,
+    requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+  };
+}
+
+export function setRegisteredGroup(
+  jid: string,
+  group: RegisteredGroup,
+): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    jid,
+    group.name,
+    group.folder,
+    group.trigger,
+    group.added_at,
+    group.containerConfig ? JSON.stringify(group.containerConfig) : null,
+    group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+  );
+}
+
+export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
+  const rows = db
+    .prepare('SELECT * FROM registered_groups')
+    .all() as Array<{
+    jid: string;
+    name: string;
+    folder: string;
+    trigger_pattern: string;
+    added_at: string;
+    container_config: string | null;
+    requires_trigger: number | null;
+  }>;
+  const result: Record<string, RegisteredGroup> = {};
+  for (const row of rows) {
+    result[row.jid] = {
+      name: row.name,
+      folder: row.folder,
+      trigger: row.trigger_pattern,
+      added_at: row.added_at,
+      containerConfig: row.container_config
+        ? JSON.parse(row.container_config)
+        : undefined,
+      requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    };
+  }
+  return result;
+}
+
+// --- JSON migration ---
+
+function migrateJsonState(): void {
+  const migrateFile = (filename: string) => {
+    const filePath = path.join(DATA_DIR, filename);
+    if (!fs.existsSync(filePath)) return null;
+    try {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      fs.renameSync(filePath, `${filePath}.migrated`);
+      return data;
+    } catch {
+      return null;
+    }
+  };
+
+  // Migrate router_state.json
+  const routerState = migrateFile('router_state.json') as {
+    last_timestamp?: string;
+    last_agent_timestamp?: Record<string, string>;
+  } | null;
+  if (routerState) {
+    if (routerState.last_timestamp) {
+      setRouterState('last_timestamp', routerState.last_timestamp);
+    }
+    if (routerState.last_agent_timestamp) {
+      setRouterState(
+        'last_agent_timestamp',
+        JSON.stringify(routerState.last_agent_timestamp),
+      );
+    }
+  }
+
+  // Migrate sessions.json
+  const sessions = migrateFile('sessions.json') as Record<
+    string,
+    string
+  > | null;
+  if (sessions) {
+    for (const [folder, sessionId] of Object.entries(sessions)) {
+      setSession(folder, sessionId);
+    }
+  }
+
+  // Migrate registered_groups.json
+  const groups = migrateFile('registered_groups.json') as Record<
+    string,
+    RegisteredGroup
+  > | null;
+  if (groups) {
+    for (const [jid, group] of Object.entries(groups)) {
+      setRegisteredGroup(jid, group);
+    }
+  }
 }
