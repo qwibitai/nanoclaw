@@ -19,6 +19,10 @@ export interface ApiDeps {
 export function createApiApp(deps: ApiDeps): Hono {
   const app = new Hono();
 
+  if (!process.env.DASHBOARD_API_KEY) {
+    console.warn('WARNING: DASHBOARD_API_KEY not set — all API requests will be rejected');
+  }
+
   // API key auth middleware for all /api/* routes
   app.use('/api/*', async (c, next) => {
     const apiKey = c.req.header('X-API-Key');
@@ -26,7 +30,7 @@ export function createApiApp(deps: ApiDeps): Hono {
       return c.json({ error: 'API key required' }, 401);
     }
     const expected = process.env.DASHBOARD_API_KEY;
-    if (apiKey !== expected) {
+    if (!expected || apiKey !== expected) {
       return c.json({ error: 'Invalid API key' }, 403);
     }
     await next();

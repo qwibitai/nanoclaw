@@ -3,13 +3,9 @@
  */
 import type { Hono } from 'hono';
 import type { ApiDeps } from './index.js';
+import { COMPLAINT_SELECT } from '../complaint-mcp-server.js';
 import { transitionComplaintStatus } from '../complaint-utils.js';
 import { VALID_COMPLAINT_STATUSES } from '../types.js';
-
-const COMPLAINT_SELECT = `SELECT id, phone, category, description, location, language, status, priority,
-       source, area_id, created_at, updated_at, resolved_at,
-       CAST(julianday(COALESCE(resolved_at, datetime('now'))) - julianday(created_at) AS INTEGER) AS days_open
-FROM complaints`;
 
 export function complaintsRoutes(app: Hono, deps: ApiDeps): void {
   // GET /api/complaints — list with filters and pagination
@@ -100,11 +96,13 @@ export function complaintsRoutes(app: Hono, deps: ApiDeps): void {
       );
     }
 
+    const note = body.note != null ? String(body.note) : undefined;
+
     const oldStatus = transitionComplaintStatus(
       db,
       id,
       body.status,
-      body.note,
+      note,
       'dashboard',
     );
 

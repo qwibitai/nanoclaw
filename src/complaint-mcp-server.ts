@@ -14,8 +14,8 @@ import { eventBus } from './event-bus.js';
 import { nowISO } from './utils.js';
 
 /** Shared SELECT columns for complaint queries (uses view for days_open). */
-const COMPLAINT_SELECT = `SELECT id, phone, category, description, location, language, status, priority,
-       created_at, updated_at, resolved_at,
+export const COMPLAINT_SELECT = `SELECT id, phone, category, description, location, language, status, priority,
+       source, area_id, created_at, updated_at, resolved_at,
        CAST(julianday(COALESCE(resolved_at, datetime('now'))) - julianday(created_at) AS INTEGER) AS days_open
 FROM complaints`;
 

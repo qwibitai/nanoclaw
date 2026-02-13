@@ -46,6 +46,11 @@ Single Node.js process that connects to WhatsApp. Group chats use containerized 
 | `config/tenant.yaml` | Tenant config (MLA name, constituency, limits) |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `groups/complaint/CLAUDE.md` | Complaint agent system prompt (template with {variables}) |
+| `src/api/index.ts` | Hono app factory, API key auth middleware, route registration |
+| `src/api/complaints.ts` | Complaint CRUD endpoints (list/detail/update) |
+| `src/api/stats.ts` | Aggregate statistics endpoint |
+| `src/api/usage.ts` | Usage volume tracking endpoint |
+| `src/api/categories.ts` | Complaint categories endpoint |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
 ## Architecture
@@ -61,6 +66,8 @@ Required at runtime (via `.env` or `--env-file`):
 - `CLAUDE_CODE_OAUTH_TOKEN` — Claude Code subscription token
 - `SARVAM_API_KEY` — Sarvam AI speech-to-text (voice notes)
 - `TENANT_CONFIG_PATH` — Path to tenant YAML (default: `config/tenant.yaml`)
+- `DASHBOARD_API_KEY` — API key for dashboard REST API authentication
+- `API_PORT` — Dashboard API port (default: `3000`)
 
 ## Skills
 
