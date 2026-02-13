@@ -9,9 +9,10 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 
-const IPC_DIR = '/workspace/ipc';
+const IPC_DIR = process.env.NANOCLAW_IPC_DIR || '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 
@@ -19,6 +20,10 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const DEFAULT_DELEGATE_TIMEOUT_MS = 15 * 60 * 1000;
+const MAX_DELEGATE_TIMEOUT_MS = 60 * 60 * 1000;
+const DELEGATE_CWD_ROOTS = ['/workspace/group', '/workspace/extra'];
+const DELEGATE_CACHE_ROOT = '/workspace/cache';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -34,6 +39,71 @@ function writeIpcFile(dir: string, data: object): string {
   return filename;
 }
 
+function emitChatMessage(text: string, sender?: string): void {
+  const data: Record<string, string | undefined> = {
+    type: 'message',
+    chatJid,
+    text,
+    sender: sender || undefined,
+    groupFolder,
+    timestamp: new Date().toISOString(),
+  };
+  writeIpcFile(MESSAGES_DIR, data);
+}
+
+function resolveDelegateCwd(cwd?: string): { ok: true; cwd: string } | { ok: false; error: string } {
+  const requested = cwd?.trim() || '/workspace/group';
+  const resolved = path.isAbsolute(requested)
+    ? path.resolve(requested)
+    : path.resolve('/workspace/group', requested);
+
+  const allowed = DELEGATE_CWD_ROOTS.some((root) => {
+    const normalizedRoot = path.resolve(root);
+    return (
+      resolved === normalizedRoot ||
+      resolved.startsWith(`${normalizedRoot}${path.sep}`)
+    );
+  });
+
+  if (!allowed) {
+    return {
+      ok: false,
+      error:
+        `cwd must be under ${DELEGATE_CWD_ROOTS.join(' or ')} (got: ${resolved})`,
+    };
+  }
+
+  if (!fs.existsSync(resolved)) {
+    return { ok: false, error: `cwd does not exist: ${resolved}` };
+  }
+  if (!fs.statSync(resolved).isDirectory()) {
+    return { ok: false, error: `cwd is not a directory: ${resolved}` };
+  }
+
+  return { ok: true, cwd: resolved };
+}
+
+function isProviderUnavailableError(line: string): boolean {
+  const s = line.toLowerCase();
+  return [
+    'insufficient_quota',
+    'insufficient quota',
+    'rate limit',
+    '429',
+    'unauthorized',
+    'forbidden',
+    'authentication',
+    'invalid api key',
+    'api key',
+    'not logged in',
+    'login required',
+    'token is not active',
+    'credits',
+    'billing',
+    'usage limit',
+  ].some((needle) => s.includes(needle));
+}
+
 const server = new McpServer({
   name: 'nanoclaw',
   version: '1.0.0',
@@ -47,18 +117,52 @@ server.tool(
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
+    emitChatMessage(args.text, args.sender);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'send_image',
+  'Send an image file to the user or group. The file must exist in the container filesystem (e.g. /workspace/group/screenshot.png). Supports PNG, JPEG, GIF, WebP.',
+  {
+    file_path: z.string().describe('Absolute path to the image file in the container'),
+    caption: z.string().optional().describe('Optional caption to display with the image'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
+        isError: true,
+      };
+    }
+
+    const imageData = fs.readFileSync(args.file_path).toString('base64');
+    const filename = path.basename(args.file_path);
+    const ext = path.extname(filename).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+    };
+    const mimetype = mimeMap[ext] || 'application/octet-stream';
+
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'image',
+      chatJid,
+      imageData,
+      filename,
+      mimetype,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
   },
 );
 
@@ -271,6 +375,310 @@ Use available_groups.json to find the JID for a group. The folder name should be
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+server.tool(
+  'delegate_codex',
+  `Delegate a coding objective to Codex CLI in the same mounted workspace.
+
+Use this when you want Codex to directly read/write files and run commands (including Python) inside the container.
+
+Behavior:
+- Streams Codex assistant text back to chat prefixed as "codex: ..."
+- Returns the exact same prefixed text to the main agent
+- If Codex cannot run (auth/quota/rate-limit/provider errors), it fails immediately and emits:
+  "codex: unavailable: ..."
+`,
+  {
+    objective: z.string().describe('Task for Codex to execute'),
+    cwd: z.string().optional().describe('Working directory (absolute, or relative to /workspace/group). Must stay under /workspace/group or /workspace/extra.'),
+    model: z.string().optional().describe('Optional Codex model override (e.g. "o3").'),
+    timeout_ms: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_DELEGATE_TIMEOUT_MS)
+      .default(DEFAULT_DELEGATE_TIMEOUT_MS)
+      .describe('Hard timeout for the delegate run in milliseconds (default 900000, max 3600000).'),
+  },
+  async (args) => {
+    const cwdResult = resolveDelegateCwd(args.cwd);
+    if (!cwdResult.ok) {
+      const unavailable = `unavailable: ${cwdResult.error}`;
+      emitChatMessage(unavailable, 'codex');
+      return {
+        content: [{ type: 'text' as const, text: `codex: ${unavailable}` }],
+        isError: true,
+      };
+    }
+
+    const timeoutMs = Math.max(
+      1000,
+      Math.min(args.timeout_ms ?? DEFAULT_DELEGATE_TIMEOUT_MS, MAX_DELEGATE_TIMEOUT_MS),
+    );
+
+    const codexArgs = [
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--cd',
+      cwdResult.cwd,
+    ];
+    if (args.model) {
+      codexArgs.push('--model', args.model);
+    }
+    const delegatedObjective = [
+      'Execution constraints:',
+      '- Do NOT create Python virtual environments inside /workspace/group or /workspace/extra.',
+      '- If a Python environment is required, create it under /workspace/cache/venvs.',
+      '- Route large model/package caches under /workspace/cache.',
+      '',
+      'Objective:',
+      args.objective,
+    ].join('\n');
+    codexArgs.push(delegatedObjective);
+
+    return await new Promise<
+      { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
+    >((resolve) => {
+      const prefixedMessages: string[] = [];
+      const stderrLines: string[] = [];
+      let stdoutBuffer = '';
+      let stderrBuffer = '';
+      let finalized = false;
+      let unavailableTriggered = false;
+      let timedOut = false;
+      let proc: ReturnType<typeof spawn> | null = null;
+
+      const finalize = (
+        payload: { content: Array<{ type: 'text'; text: string }>; isError?: boolean },
+      ) => {
+        if (finalized) return;
+        finalized = true;
+        resolve(payload);
+      };
+
+      const pushMessage = (text: string) => {
+        const normalized = text.replace(/\r/g, '').trim();
+        if (!normalized) return;
+        prefixedMessages.push(`codex: ${normalized}`);
+        emitChatMessage(normalized, 'codex');
+      };
+
+      const failUnavailable = (reason: string) => {
+        if (unavailableTriggered) return;
+        unavailableTriggered = true;
+        pushMessage(`unavailable: ${reason}`);
+        if (proc && proc.exitCode === null) {
+          proc.kill('SIGTERM');
+        }
+      };
+
+      const handleStdoutLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        try {
+          const event = JSON.parse(trimmed) as {
+            type?: string;
+            message?: string;
+            item?: { type?: string; text?: string };
+          };
+          if (
+            event.type === 'item.completed' &&
+            event.item?.type === 'agent_message' &&
+            typeof event.item.text === 'string'
+          ) {
+            pushMessage(event.item.text);
+            return;
+          }
+          if (
+            event.type === 'error' &&
+            typeof event.message === 'string'
+          ) {
+            failUnavailable(event.message);
+            return;
+          }
+        } catch {
+          // Non-JSON stdout line from Codex: pass through.
+          pushMessage(trimmed);
+          return;
+        }
+      };
+
+      const handleStderrLine = (line: string) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        stderrLines.push(trimmed);
+        if (stderrLines.length > 100) stderrLines.shift();
+        if (!unavailableTriggered && isProviderUnavailableError(trimmed)) {
+          failUnavailable(trimmed);
+        }
+      };
+
+      try {
+        const delegateEnv = {
+          ...process.env,
+          XDG_CACHE_HOME: process.env.XDG_CACHE_HOME || DELEGATE_CACHE_ROOT,
+          PIP_CACHE_DIR:
+            process.env.PIP_CACHE_DIR || `${DELEGATE_CACHE_ROOT}/pip`,
+          UV_CACHE_DIR: process.env.UV_CACHE_DIR || `${DELEGATE_CACHE_ROOT}/uv`,
+          HF_HOME:
+            process.env.HF_HOME || `${DELEGATE_CACHE_ROOT}/huggingface`,
+          TRANSFORMERS_CACHE:
+            process.env.TRANSFORMERS_CACHE ||
+            `${DELEGATE_CACHE_ROOT}/huggingface`,
+          VIRTUALENV_OVERRIDE_APP_DATA:
+            process.env.VIRTUALENV_OVERRIDE_APP_DATA ||
+            `${DELEGATE_CACHE_ROOT}/virtualenv`,
+        };
+        fs.mkdirSync(DELEGATE_CACHE_ROOT, { recursive: true });
+        proc = spawn('codex', codexArgs, {
+          cwd: cwdResult.cwd,
+          env: delegateEnv,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        const unavailable = `unavailable: ${reason}`;
+        emitChatMessage(unavailable, 'codex');
+        finalize({
+          content: [{ type: 'text', text: `codex: ${unavailable}` }],
+          isError: true,
+        });
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        timedOut = true;
+        failUnavailable(`timed out after ${timeoutMs}ms`);
+      }, timeoutMs);
+
+      proc.stdout!.on('data', (chunk: Buffer | string) => {
+        stdoutBuffer += chunk.toString();
+        while (true) {
+          const idx = stdoutBuffer.indexOf('\n');
+          if (idx === -1) break;
+          const line = stdoutBuffer.slice(0, idx);
+          stdoutBuffer = stdoutBuffer.slice(idx + 1);
+          handleStdoutLine(line);
+        }
+      });
+
+      proc.stderr!.on('data', (chunk: Buffer | string) => {
+        stderrBuffer += chunk.toString();
+        while (true) {
+          const idx = stderrBuffer.indexOf('\n');
+          if (idx === -1) break;
+          const line = stderrBuffer.slice(0, idx);
+          stderrBuffer = stderrBuffer.slice(idx + 1);
+          handleStderrLine(line);
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        failUnavailable(err.message);
+        finalize({
+          content: [
+            {
+              type: 'text',
+              text:
+                prefixedMessages.join('\n\n') ||
+                `codex: unavailable: ${err.message}`,
+            },
+          ],
+          isError: true,
+        });
+      });
+
+      proc.on('close', (code, signal) => {
+        clearTimeout(timer);
+
+        if (stdoutBuffer.trim()) handleStdoutLine(stdoutBuffer);
+        if (stderrBuffer.trim()) handleStderrLine(stderrBuffer);
+
+        if (timedOut || unavailableTriggered) {
+          finalize({
+            content: [
+              {
+                type: 'text',
+                text:
+                  prefixedMessages.join('\n\n') ||
+                  'codex: unavailable',
+              },
+            ],
+            isError: true,
+          });
+          return;
+        }
+
+        if (code !== 0) {
+          const detail =
+            stderrLines[stderrLines.length - 1] ||
+            `codex exited with code ${code}${signal ? ` (signal: ${signal})` : ''}`;
+          failUnavailable(detail);
+          finalize({
+            content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
+            isError: true,
+          });
+          return;
+        }
+
+        if (prefixedMessages.length === 0) {
+          prefixedMessages.push('codex: completed with no textual output.');
+        }
+
+        finalize({
+          content: [{ type: 'text', text: prefixedMessages.join('\n\n') }],
+        });
+      });
+    });
+  },
+);
+
+const ollamaHost = process.env.OLLAMA_HOST || (process.env.NANOCLAW_IPC_DIR ? 'http://localhost:11434' : 'http://host.containers.internal:11434');
+
+server.tool(
+  'query_local_llm',
+  `Query a local Ollama LLM running on the host machine. Use this for tasks that don't need Claude's full reasoning — summarization, formatting, extraction, classification, translation, or simple Q&A. Much faster and free.`,
+  {
+    prompt: z.string().describe('The prompt to send to the local LLM'),
+    model: z.string().default('llama3.2').describe('Ollama model name (e.g., "llama3.2", "mistral", "gemma2")'),
+    system: z.string().optional().describe('Optional system prompt'),
+  },
+  async (args) => {
+    try {
+      const body: Record<string, unknown> = {
+        model: args.model,
+        prompt: args.prompt,
+        stream: false,
+      };
+      if (args.system) body.system = args.system;
+
+      const res = await fetch(`${ollamaHost}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        return {
+          content: [{ type: 'text' as const, text: `Ollama error (${res.status}): ${text}` }],
+          isError: true,
+        };
+      }
+
+      const data = await res.json() as { response: string };
+      return { content: [{ type: 'text' as const, text: data.response }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to reach Ollama at ${ollamaHost}: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   },
 );
 

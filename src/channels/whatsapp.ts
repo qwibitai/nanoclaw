@@ -36,6 +36,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private onFirstOpen?: () => void;
 
   private opts: WhatsAppChannelOpts;
 
@@ -45,11 +46,12 @@ export class WhatsAppChannel implements Channel {
 
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.connectInternal(resolve).catch(reject);
+      this.onFirstOpen = resolve;
+      this.connectInternal().catch(reject);
     });
   }
 
-  private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+  private async connectInternal(): Promise<void> {
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
@@ -132,9 +134,9 @@ export class WhatsAppChannel implements Channel {
         }
 
         // Signal first connection to caller
-        if (onFirstOpen) {
-          onFirstOpen();
-          onFirstOpen = undefined;
+        if (this.onFirstOpen) {
+          this.onFirstOpen();
+          this.onFirstOpen = undefined;
         }
       }
     });
@@ -143,6 +145,7 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('messages.upsert', ({ messages }) => {
       for (const msg of messages) {
+        logger.info({ rawJid: msg.key.remoteJid, fromMe: msg.key.fromMe, hasMessage: !!msg.message, type: msg.message ? Object.keys(msg.message)[0] : 'none' }, 'Raw incoming message');
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;

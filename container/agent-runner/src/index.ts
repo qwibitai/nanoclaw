@@ -371,10 +371,18 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  const model =
+    process.env.NANOCLAW_MODEL ||
+    process.env.ANTHROPIC_MODEL ||
+    (process.env.ANTHROPIC_BASE_URL
+      ? 'devstral-small-2-fast:latest'
+      : undefined);
+
   for await (const message of query({
     prompt: stream,
     options: {
       cwd: '/workspace/group',
+      model,
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: globalClaudeMd
@@ -388,7 +396,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*'
       ],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -401,7 +410,12 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            OLLAMA_HOST: process.env.OLLAMA_HOST || 'http://host.containers.internal:11434',
           },
+        },
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
         },
       },
       hooks: {

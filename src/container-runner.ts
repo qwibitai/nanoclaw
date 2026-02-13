@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in Apple Container and handles IPC
+ * Spawns agent execution in Podman and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -86,7 +86,6 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
-    // Apple Container only supports directory mounts, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -145,6 +144,28 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Codex CLI credentials/config from host (optional).
+  // This enables delegate_codex to authenticate with a ChatGPT Codex account
+  // without requiring API keys.
+  const codexDir = path.join(homeDir, '.codex');
+  if (fs.existsSync(codexDir)) {
+    mounts.push({
+      hostPath: codexDir,
+      containerPath: '/home/node/.codex',
+      readonly: false,
+    });
+  }
+
+  // Gmail credentials directory
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false,  // MCP may need to refresh tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
@@ -157,14 +178,24 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Environment file directory (workaround for Apple Container -i env var bug)
+  // Environment file directory (mounted as /workspace/env-dir for the entrypoint to source)
   // Only expose specific auth variables needed by Claude Code, not the entire .env
   const envDir = path.join(DATA_DIR, 'env');
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+    const allowedVars = [
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_AUTH_TOKEN',
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_MODEL',
+      'NANOCLAW_MODEL',
+      'OLLAMA_HOST',
+      'OPENAI_API_KEY',
+      'OPENAI_BASE_URL',
+    ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
@@ -184,8 +215,17 @@ function buildVolumeMounts(
     }
   }
 
+  // Per-group persistent cache for model/tool downloads (docling, huggingface, pip, etc.).
+  // Keeps heavy artifacts out of mounted user data like /workspace/extra/home/_vault.
+  const cacheDir = path.join(DATA_DIR, 'cache', group.folder);
+  fs.mkdirSync(cacheDir, { recursive: true });
+  mounts.push({
+    hostPath: cacheDir,
+    containerPath: '/workspace/cache',
+    readonly: false,
+  });
+
   // Mount agent-runner source from host — recompiled on container startup.
-  // Bypasses Apple Container's sticky build cache for code changes.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   mounts.push({
     hostPath: agentRunnerSrc,
@@ -209,7 +249,7 @@ function buildVolumeMounts(
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Apple Container: --mount for readonly, -v for read-write
+  // --mount for readonly, -v for read-write
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(
@@ -269,7 +309,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('container', containerArgs, {
+    const container = spawn('podman', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -280,7 +320,7 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Write input and close stdin (Apple Container doesn't flush pipe without EOF)
+    // Write input and close stdin
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
 
@@ -373,7 +413,7 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(`container stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`podman stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
