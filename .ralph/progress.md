@@ -255,3 +255,14 @@
   - crates/microclaw-connectors/tests/discord.rs added
 - Notes:
   - Added Discord API URL + auth header helpers
+
+## 2026-02-13T00:09:45Z S24 Telegram connector
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-connectors -> fail (TelegramConnector missing)
+  - cargo test -p microclaw-connectors -> pass
+- Key diffs:
+  - crates/microclaw-connectors/src/lib.rs updated (TelegramConnector helpers)
+  - crates/microclaw-connectors/tests/telegram.rs added
+- Notes:
+  - Added Telegram API sendMessage URL helper

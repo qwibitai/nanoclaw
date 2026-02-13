@@ -54,3 +54,21 @@ impl Connector for DiscordConnector {
         ConnectorId("discord".to_string())
     }
 }
+
+pub struct TelegramConnector;
+
+impl TelegramConnector {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn send_message_url(token: &str) -> String {
+        format!("https://api.telegram.org/bot{}/sendMessage", token)
+    }
+}
+
+impl Connector for TelegramConnector {
+    fn id(&self) -> ConnectorId {
+        ConnectorId("telegram".to_string())
+    }
+}

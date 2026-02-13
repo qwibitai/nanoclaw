@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:08:46Z",
+    "updatedAt": "2026-02-13T00:09:45Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -342,9 +342,9 @@
       "intent": "Implement Telegram connector using bot API",
       "acceptance": ["cargo test -p microclaw-connectors passes"],
       "gates": ["cargo test -p microclaw-connectors"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:09:13Z",
+      "completedAt": "2026-02-13T00:09:45Z",
       "dependencies": ["S23"],
       "risks": ["Polling/streaming tradeoffs"],
       "notes": "Add retry and idempotency"
