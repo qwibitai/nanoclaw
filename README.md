@@ -55,6 +55,36 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks (first personal AI assistant to support this)
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+- **Web control panel** - Browser-based UI for monitoring, chat, and management
+
+## Web Interface
+
+NanoClaw includes a built-in web control panel that starts automatically alongside the main process at `http://localhost:3100`.
+
+### Tabs
+
+| Group | Tabs | Purpose |
+|-------|------|---------|
+| **Chat** | Chat | Send messages to your agent directly from the browser. Spawns a container and streams the response in real-time via WebSocket. |
+| **Dashboard** | Overview, Channels | System stats (uptime, queue depth, message counts) and channel health status. |
+| **Operations** | Groups, Messages, Tasks, Sessions | Manage registered groups, browse message history, control scheduled tasks (pause/resume/delete), view active sessions. |
+| **System** | Skills, Config, Logs, Debug | Full CRUD for skills, CLAUDE.md editor with per-group scope selector, in-memory log viewer with level filters, and system diagnostics (queue state, DB stats, process info). |
+
+### How it works
+
+The web server runs inside the same Node.js process as everything else — no separate service to manage. It uses Fastify for HTTP/WebSocket and serves a pre-built Lit frontend from `ui/dist/`.
+
+- **REST API** (`/api/*`) for reads and mutations — calls `db.ts` functions directly
+- **WebSocket** (`/ws`) for live events and chat streaming
+- **Chat** sends messages through the same `GroupQueue` and `runContainerAgent` pipeline as WhatsApp/Telegram messages, using a `web@chat` pseudo-JID
+
+To rebuild the frontend after changes:
+
+```bash
+cd ui && npm install && npm run build
+```
+
+The port can be changed with the `WEBUI_PORT` environment variable (default: `3100`).
 
 ## Usage
 
@@ -119,10 +149,11 @@ Skills we'd love to see:
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Channels (WhatsApp/Telegram) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+WebUI (localhost:3100)       --> REST API / WebSocket ----^
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Agents execute in isolated Linux containers with mounted directories. Per-group message queue with concurrency control. IPC via filesystem. Built-in Fastify web server for the control panel.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
@@ -133,6 +164,8 @@ Key files:
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `src/webui/server.ts` - Fastify server, API routes, WebSocket handler
+- `ui/` - Lit + Vite frontend (built to `ui/dist/`)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
