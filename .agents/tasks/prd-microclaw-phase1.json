@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T05:08:00Z",
+    "updatedAt": "2026-02-13T05:11:46Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -651,6 +651,19 @@
       "dependencies": ["S46"],
       "risks": ["None"],
       "notes": "Captures IDF v5.1 + build-std requirements"
+    },
+    {
+      "id": "S48",
+      "title": "Run host test suite",
+      "intent": "Execute full host test suite and capture results",
+      "acceptance": ["cargo test passes in microclaw-sprint0"],
+      "gates": ["cargo test"],
+      "status": "done",
+      "startedAt": "2026-02-13T05:11:16Z",
+      "completedAt": "2026-02-13T05:11:46Z",
+      "dependencies": ["S47"],
+      "risks": ["None"],
+      "notes": "Hardening: verify host builds cleanly after ESP updates"
     }
   ]
 }
