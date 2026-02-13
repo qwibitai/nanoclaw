@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T05:02:24Z",
+    "updatedAt": "2026-02-13T05:04:38Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -498,12 +498,12 @@
       "intent": "Install ESP-IDF toolchain and run esp feature check",
       "acceptance": ["cargo check -p microclaw-device --features esp passes"],
       "gates": ["cargo check -p microclaw-device --features esp"],
-      "status": "in_progress",
+      "status": "done",
       "startedAt": "2026-02-13T03:16:28Z",
-      "completedAt": null,
+      "completedAt": "2026-02-13T05:04:38Z",
       "dependencies": ["S35"],
       "risks": ["Toolchain install may fail in this environment"],
-      "notes": "cargo check fails without esp toolchain; espup install completed. xtensa target build fails with esp-idf-sys time64 mismatch (v5) and IDF v4.4 build fails at cmake build step even after python deps installed via filtered requirements."
+      "notes": "Resolved by using ESP_IDF_VERSION=release/v5.1 with esp-idf-svc 0.51 and CARGO_UNSTABLE_BUILD_STD=std,panic_abort."
     },
     {
       "id": "S37",

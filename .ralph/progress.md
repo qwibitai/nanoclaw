@@ -483,3 +483,12 @@
   - Cargo.lock updated (esp-idf-sys/hal/svc/bindgen/embuild)
 - Notes:
   - IDF v4.4 build required Python 3.11 env for construct==2.10.54; v5.1 build needed bootloader CMakeCache cleanup
+## 2026-02-13T05:04:38Z S36 ESP-IDF toolchain check
+- Outcome: pass
+- Commands:
+  - cargo +esp check -p microclaw-device --features esp (CARGO_BUILD_TARGET=xtensa-esp32s3-espidf) -> fail (missing core/std)
+  - cargo +esp check -p microclaw-device --features esp (CARGO_BUILD_TARGET=xtensa-esp32s3-espidf, CARGO_UNSTABLE_BUILD_STD=std,panic_abort) -> pass
+- Key diffs:
+  - .agents/tasks/prd-microclaw-phase1.json updated (S36 done)
+- Notes:
+  - Build-std required for xtensa toolchain in this workspace
