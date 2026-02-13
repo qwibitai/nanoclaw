@@ -238,18 +238,41 @@ export function getNewMessages(
 ): { messages: NewMessage[]; newTimestamp: string } {
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
-  const placeholders = jids.map(() => '?').join(',');
+  // Build WHERE conditions: exact match for all JIDs, plus LIKE for tg: JIDs
+  // to catch thread-specific messages (e.g. tg:-100123:5 for registered tg:-100123)
+  const conditions: string[] = [];
+  const params: string[] = [lastTimestamp];
+
+  const exactJids: string[] = [];
+  for (const jid of jids) {
+    exactJids.push(jid);
+    if (jid.startsWith('tg:') && jid.split(':').length === 2) {
+      // Base tg: JID — also match thread sub-JIDs
+      conditions.push('chat_jid LIKE ?');
+      params.push(`${jid}:%`);
+    }
+  }
+
+  if (exactJids.length > 0) {
+    const placeholders = exactJids.map(() => '?').join(',');
+    conditions.push(`chat_jid IN (${placeholders})`);
+    params.push(...exactJids);
+  }
+
+  const jidClause = conditions.length > 0 ? `(${conditions.join(' OR ')})` : '1=0';
+  params.push(`${botPrefix}:%`);
+
   // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND ${jidClause} AND content NOT LIKE ?
     ORDER BY timestamp
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(...params) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
