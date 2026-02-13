@@ -120,6 +120,19 @@ export class GroupQueue {
   }
 
   /**
+   * Close all active containers using the given group folder.
+   * Prevents IPC input directory races when multiple Telegram forum topic
+   * containers share the same folder.
+   */
+  closeContainersForFolder(groupFolder: string): void {
+    for (const [jid, state] of this.groups) {
+      if (state.groupFolder === groupFolder && state.active) {
+        this.closeStdin(jid);
+      }
+    }
+  }
+
+  /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
    */

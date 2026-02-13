@@ -10,10 +10,31 @@ import {
   MAIN_GROUP_FOLDER,
   TIMEZONE,
 } from './config.js';
+import { sendPoolMessage } from './channels/telegram.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+
+/**
+ * Resolve a JID to a registered group, with thread-ID fallback for Telegram.
+ * e.g. `tg:-100123:5` falls back to `tg:-100123`.
+ */
+function resolveIpcGroup(
+  jid: string,
+  groups: Record<string, RegisteredGroup>,
+): RegisteredGroup | undefined {
+  const direct = groups[jid];
+  if (direct) return direct;
+
+  if (jid.startsWith('tg:')) {
+    const parts = jid.split(':');
+    if (parts.length === 3) {
+      return groups[`${parts[0]}:${parts[1]}`];
+    }
+  }
+  return undefined;
+}
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -74,17 +95,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
+                const targetGroup = resolveIpcGroup(data.chatJid, registeredGroups);
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(
-                    data.chatJid,
-                    `${ASSISTANT_NAME}: ${data.text}`,
-                  );
+                  if (data.sender && data.chatJid.startsWith('tg:')) {
+                    await sendPoolMessage(
+                      data.chatJid,
+                      data.text,
+                      data.sender,
+                      sourceGroup,
+                    );
+                  } else {
+                    await deps.sendMessage(
+                      data.chatJid,
+                      `${ASSISTANT_NAME}: ${data.text}`,
+                    );
+                  }
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, sender: data.sender },
                     'IPC message sent',
                   );
                 } else {
@@ -188,9 +218,9 @@ export async function processTaskIpc(
         data.schedule_value &&
         data.targetJid
       ) {
-        // Resolve the target group from JID
+        // Resolve the target group from JID (with thread fallback)
         const targetJid = data.targetJid as string;
-        const targetGroupEntry = registeredGroups[targetJid];
+        const targetGroupEntry = resolveIpcGroup(targetJid, registeredGroups);
 
         if (!targetGroupEntry) {
           logger.warn(

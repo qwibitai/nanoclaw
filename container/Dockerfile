@@ -56,8 +56,13 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 RUN printf '#!/bin/bash\nset -e\n[ -f /workspace/env-dir/env ] && export $(cat /workspace/env-dir/env | xargs)\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\ncat > /tmp/input.json\nnode /tmp/dist/index.js < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
+# Match host user UID for bind mount compatibility
+# The default 'node' user is uid 1000; adjust if host UID differs
+ARG HOST_UID=1000
+RUN if [ "$HOST_UID" != "1000" ]; then usermod -u "$HOST_UID" node && groupmod -g "$HOST_UID" node; fi
+
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace
+RUN chown -R node:node /workspace /app
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
