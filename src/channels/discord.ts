@@ -172,20 +172,8 @@ export class DiscordChannel implements Channel {
   private async handleMessage(message: Message): Promise<void> {
     // Ignore own messages
     if (message.author.id === this.client.user?.id) return;
-    // Ignore other bots
-    if (message.author.bot) return;
-
-    const isDM = message.channel.type === ChannelType.DM;
-    const chatJid = isDM
-      ? `dc:dm:${message.author.id}`
-      : `dc:${message.channelId}`;
 
     let content = message.content;
-    const timestamp = message.createdAt.toISOString();
-    const senderName =
-      message.member?.displayName || message.author.displayName || message.author.username;
-    const sender = message.author.id;
-    const msgId = message.id;
 
     // Translate @bot mention into trigger format
     const botId = this.client.user?.id;
@@ -195,6 +183,21 @@ export class DiscordChannel implements Channel {
         content = `@${ASSISTANT_NAME} ${content}`;
       }
     }
+
+    // Allow bot messages through only if they contain our trigger (agent-to-agent comms).
+    // This prevents infinite loops — bots must explicitly @mention us.
+    if (message.author.bot && !TRIGGER_PATTERN.test(content)) return;
+
+    const isDM = message.channel.type === ChannelType.DM;
+    const chatJid = isDM
+      ? `dc:dm:${message.author.id}`
+      : `dc:${message.channelId}`;
+
+    const timestamp = message.createdAt.toISOString();
+    const senderName =
+      message.member?.displayName || message.author.displayName || message.author.username;
+    const sender = message.author.id;
+    const msgId = message.id;
 
     // DMs always trigger — prepend trigger if not present
     if (isDM && !TRIGGER_PATTERN.test(content)) {
