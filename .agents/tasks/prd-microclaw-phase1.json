@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:04:03Z",
+    "updatedAt": "2026-02-13T00:05:14Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -290,9 +290,9 @@
       "intent": "Enforce mount allowlist and deny-by-default egress",
       "acceptance": ["cargo test -p microclaw-sandbox passes"],
       "gates": ["cargo test -p microclaw-sandbox"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:04:24Z",
+      "completedAt": "2026-02-13T00:05:14Z",
       "dependencies": ["S19"],
       "risks": ["Policy errors could block workflows"],
       "notes": "Mirror NanoClaw mount allowlist policy"

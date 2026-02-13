@@ -16,3 +16,4 @@
 2026-02-13T00:02:02Z S17 queue concurrency + retry
 2026-02-13T00:03:01Z S18 apple container runner
 2026-02-13T00:04:03Z S19 docker runner parity
+2026-02-13T00:05:14Z S20 mount allowlist + egress deny

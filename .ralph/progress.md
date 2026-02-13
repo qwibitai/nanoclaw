@@ -211,3 +211,14 @@
   - crates/microclaw-sandbox/tests/docker_runner.rs added
 - Notes:
   - Added Docker CLI command builder with mounts + env
+
+## 2026-02-13T00:05:14Z S20 Mount allowlist + egress deny
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-sandbox -> fail (policy types missing)
+  - cargo test -p microclaw-sandbox -> pass
+- Key diffs:
+  - crates/microclaw-sandbox/src/lib.rs updated (MountPolicy, EgressPolicy)
+  - crates/microclaw-sandbox/tests/policy.rs added
+- Notes:
+  - Added deny-by-default egress and mount allowlist validation

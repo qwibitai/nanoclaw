@@ -33,6 +33,48 @@ impl Mount {
 }
 
 #[derive(Debug, Clone)]
+pub enum PolicyError {
+    MountNotAllowed(String),
+}
+
+pub struct MountPolicy {
+    allowed_prefixes: Vec<String>,
+}
+
+impl MountPolicy {
+    pub fn new(allowed_prefixes: Vec<String>) -> Self {
+        Self { allowed_prefixes }
+    }
+
+    pub fn validate(&self, mounts: &[Mount]) -> Result<(), PolicyError> {
+        for mount in mounts {
+            let allowed = self
+                .allowed_prefixes
+                .iter()
+                .any(|prefix| mount.source.starts_with(prefix));
+            if !allowed {
+                return Err(PolicyError::MountNotAllowed(mount.source.clone()));
+            }
+        }
+        Ok(())
+    }
+}
+
+pub struct EgressPolicy {
+    allowlist: Vec<String>,
+}
+
+impl EgressPolicy {
+    pub fn new(allowlist: Vec<String>) -> Self {
+        Self { allowlist }
+    }
+
+    pub fn allows(&self, host: &str) -> bool {
+        self.allowlist.iter().any(|entry| entry == host)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct RunSpec {
     pub image: String,
     pub command: Vec<String>,
