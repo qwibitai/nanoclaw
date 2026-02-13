@@ -2,7 +2,7 @@
   "meta": {
     "title": "MicroClaw Phase 1 (Parity + Hardening)",
     "createdAt": "2026-02-12T23:27:08Z",
-    "updatedAt": "2026-02-13T00:02:02Z",
+    "updatedAt": "2026-02-13T00:03:01Z",
     "minCycles": 5,
     "staleSeconds": 14400
   },
@@ -264,9 +264,9 @@
       "intent": "Implement Apple Container backend execution",
       "acceptance": ["cargo test -p microclaw-sandbox passes"],
       "gates": ["cargo test -p microclaw-sandbox"],
-      "status": "open",
-      "startedAt": null,
-      "completedAt": null,
+      "status": "done",
+      "startedAt": "2026-02-13T00:02:20Z",
+      "completedAt": "2026-02-13T00:03:01Z",
       "dependencies": ["S17"],
       "risks": ["Local container CLI availability"],
       "notes": "Invoke apple container CLI with mounts"

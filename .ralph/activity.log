@@ -14,3 +14,4 @@
 2026-02-12T23:54:19Z S15 bus WAL + replay
 2026-02-12T23:59:37Z S16 scheduler recurrence + persistence
 2026-02-13T00:02:02Z S17 queue concurrency + retry
+2026-02-13T00:03:01Z S18 apple container runner

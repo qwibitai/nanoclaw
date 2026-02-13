@@ -189,3 +189,14 @@
   - crates/microclaw-queue/tests/concurrency.rs added
 - Notes:
   - Added inflight limit, per-group serialization, retry with backoff
+
+## 2026-02-13T00:03:01Z S18 Apple Container runner
+- Outcome: pass
+- Commands:
+  - cargo test -p microclaw-sandbox -> fail (AppleContainerRunner missing)
+  - cargo test -p microclaw-sandbox -> pass
+- Key diffs:
+  - crates/microclaw-sandbox/src/lib.rs updated (RunSpec, Mount, AppleContainerRunner)
+  - crates/microclaw-sandbox/tests/apple_runner.rs added
+- Notes:
+  - Added Apple container CLI command builder with mounts + env
