@@ -1,5 +1,7 @@
 // MicroClaw Device UI — 360x360 round display, dark theme
-// Scenes: Boot, Paired, Conversation, Settings, Error, Offline
+// Scenes: Boot, ConnectSetup, Paired, Conversation, AgentThinking,
+//         AgentStreaming, AgentTaskProgress, Settings, NotificationList,
+//         Error, Offline
 
 global Theme {
     out property <color> bg: #0B0B0E;
@@ -309,46 +311,470 @@ component ErrorScene inherits VerticalLayout {
     }
 }
 
+component ConnectSetupScene inherits VerticalLayout {
+    callback button-pressed(string);
+    in property <int> page-index: 0;
+
+    alignment: start;
+    spacing: 8px;
+    padding: 20px;
+    padding-top: 30px;
+
+    // Mode label pill
+    HorizontalLayout {
+        alignment: center;
+        Rectangle {
+            width: 120px;
+            height: 28px;
+            border-radius: 14px;
+            background: #1C1C21;
+            border-width: 1px;
+            border-color: #2E2E36;
+            Text {
+                text: page-index == 0 ? "WiFi" :
+                      page-index == 1 ? "Host" :
+                      page-index == 2 ? "Pair" : "Web";
+                color: Theme.accent-indigo;
+                font-size: 12px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // QR placeholder
+    Rectangle { height: 8px; }
+    HorizontalLayout {
+        alignment: center;
+        Rectangle {
+            width: 160px;
+            height: 160px;
+            border-radius: 8px;
+            background: #FAFAF9;
+            Text {
+                text: "QR";
+                color: #0B0B0E;
+                font-size: 24px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Dot indicators
+    Rectangle { height: 4px; }
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+        for i in [0, 1, 2, 3]: Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: i == page-index ? Theme.accent-indigo : #3F3F46;
+        }
+    }
+
+    // Button row
+    Rectangle { height: 8px; }
+    HorizontalLayout {
+        alignment: center;
+        spacing: 12px;
+
+        // Icon button (signal)
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            background: #1C1C21;
+            border-width: 1px;
+            border-color: #2E2E36;
+            TouchArea {
+                clicked => { root.button-pressed("wifi_reconnect"); }
+            }
+            Text {
+                text: "📡";
+                font-size: 20px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Connect button
+        DeviceButton {
+            label: "Connect";
+            accent: Theme.accent-indigo;
+            min-width: 140px;
+            min-height: 56px;
+            clicked => { root.button-pressed("reconnect"); }
+        }
+
+        // Icon button (gear)
+        Rectangle {
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            background: #1C1C21;
+            border-width: 1px;
+            border-color: #2E2E36;
+            TouchArea {
+                clicked => { root.button-pressed("status_get"); }
+            }
+            Text {
+                text: "⚙";
+                font-size: 20px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}
+
+component AgentThinkingScene inherits VerticalLayout {
+    alignment: center;
+    spacing: 16px;
+    padding: 20px;
+
+    // Pulsing circles placeholder
+    HorizontalLayout {
+        alignment: center;
+        Rectangle {
+            width: 80px;
+            height: 80px;
+            border-radius: 40px;
+            background: transparent;
+            border-width: 3px;
+            border-color: Theme.accent-indigo;
+
+            Rectangle {
+                width: 50px;
+                height: 50px;
+                border-radius: 25px;
+                background: transparent;
+                border-width: 2px;
+                border-color: Theme.accent-indigo;
+                x: 15px;
+                y: 15px;
+
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: Theme.accent-indigo;
+                    x: 15px;
+                    y: 15px;
+                }
+            }
+        }
+    }
+
+    SceneTitle {
+        text: "Processing...";
+        font-size: 22px;
+    }
+
+    StatusLine {
+        text: "Analyzing your request";
+    }
+}
+
+component AgentStreamingScene inherits VerticalLayout {
+    callback button-pressed(string);
+    in property <string> streaming-text: "";
+
+    alignment: start;
+    spacing: 8px;
+    padding: 20px;
+    padding-top: 40px;
+
+    SceneTitle {
+        text: "Active";
+        font-size: 22px;
+    }
+
+    // Transcript area with streaming text
+    Rectangle {
+        height: 200px;
+        background: #12121A;
+        border-radius: 8px;
+
+        VerticalLayout {
+            padding: 12px;
+            alignment: start;
+
+            Text {
+                text: root.streaming-text == "" ? "Streaming response..." : root.streaming-text;
+                color: Theme.text-primary;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            // Cursor block
+            Rectangle {
+                width: 8px;
+                height: 16px;
+                background: Theme.accent-green;
+            }
+        }
+    }
+
+    StatusLine {
+        text: "Streaming response...";
+        color: Theme.accent-green;
+    }
+}
+
+component AgentTaskProgressScene inherits VerticalLayout {
+    in property <string> task-name: "Working";
+    in property <int> task-current: 0;
+    in property <int> task-total: 0;
+    in property <string> step-label: "";
+
+    alignment: center;
+    spacing: 16px;
+    padding: 20px;
+
+    SceneTitle {
+        text: root.task-name;
+        font-size: 22px;
+    }
+
+    // Task card
+    Rectangle {
+        height: 80px;
+        background: #12121A;
+        border-radius: 12px;
+        border-width: 1px;
+        border-color: #2E2E36;
+
+        VerticalLayout {
+            padding: 16px;
+            spacing: 8px;
+            alignment: center;
+
+            Text {
+                text: root.task-total > 0 ?
+                    root.task-name + "... " + root.task-current + "/" + root.task-total :
+                    root.task-name + "...";
+                color: Theme.text-primary;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+
+            // Progress bar
+            Rectangle {
+                height: 6px;
+                border-radius: 3px;
+                background: #3F3F46;
+
+                Rectangle {
+                    height: 6px;
+                    border-radius: 3px;
+                    background: Theme.accent-green;
+                    width: root.task-total > 0 ?
+                        parent.width * root.task-current / root.task-total :
+                        parent.width * 50 / 100;
+                }
+            }
+        }
+    }
+
+    if root.step-label != "": StatusLine {
+        text: root.step-label;
+    }
+}
+
+component NotificationListScene inherits VerticalLayout {
+    callback button-pressed(string);
+    in property <int> notification-count: 0;
+
+    alignment: start;
+    spacing: 12px;
+    padding: 20px;
+    padding-top: 40px;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 8px;
+
+        SceneTitle {
+            text: "Notifications";
+        }
+
+        // Badge
+        if notification-count > 0: Rectangle {
+            width: 24px;
+            height: 24px;
+            border-radius: 12px;
+            background: Theme.accent-coral;
+            Text {
+                text: notification-count;
+                color: Theme.text-primary;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    // Placeholder notification cards
+    Rectangle {
+        height: 200px;
+        background: #12121A;
+        border-radius: 8px;
+
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: notification-count > 0 ? "Recent notifications" : "No notifications";
+                color: Theme.text-secondary;
+                font-size: 13px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+component ToastBanner inherits Rectangle {
+    in property <bool> visible-toast: false;
+    in property <string> toast-title: "";
+    in property <string> toast-body: "";
+
+    visible: root.visible-toast;
+    x: 30px;
+    y: 10px;
+    width: 300px;
+    height: 50px;
+    border-radius: 12px;
+    background: #1C1C21;
+    border-width: 1px;
+    border-color: Theme.accent-indigo;
+
+    HorizontalLayout {
+        padding: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        // Dot indicator
+        Rectangle {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.accent-indigo;
+            y: 13px;
+        }
+
+        VerticalLayout {
+            spacing: 2px;
+            alignment: center;
+
+            Text {
+                text: root.toast-title;
+                color: Theme.text-primary;
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            Text {
+                text: root.toast-body;
+                color: Theme.text-secondary;
+                font-size: 11px;
+            }
+        }
+    }
+}
+
 export component MicroClawApp inherits Window {
     in property <int> current-scene: 0;
     in property <string> status-text: "";
+    in property <int> connect-page-index: 0;
+    in property <color> ring-color: transparent;
+    in property <int> ring-width: 0;
+    in property <bool> toast-visible: false;
+    in property <string> toast-title: "";
+    in property <string> toast-body: "";
+    in property <int> notification-count: 0;
+    in property <string> task-name: "Working";
+    in property <int> task-current: 0;
+    in property <int> task-total: 0;
+    in property <string> step-label: "";
+    in property <string> streaming-text: "";
     callback button-pressed(string);
 
     width: 360px;
     height: 360px;
     background: Theme.bg;
 
+    // Ambient ring
     Rectangle {
+        width: 360px;
+        height: 360px;
         border-radius: 180px;
-        clip: true;
+        border-width: root.ring-width * 1px;
+        border-color: root.ring-color;
         background: Theme.bg;
+        clip: true;
 
-    if current-scene == 0: BootScene {
-        button-pressed(action) => { root.button-pressed(action); }
+        if current-scene == 0: BootScene {
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 1: ConnectSetupScene {
+            page-index: root.connect-page-index;
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 2: PairedScene {
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 3: ConversationScene {
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 4: AgentThinkingScene { }
+
+        if current-scene == 5: AgentStreamingScene {
+            streaming-text: root.streaming-text;
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 6: AgentTaskProgressScene {
+            task-name: root.task-name;
+            task-current: root.task-current;
+            task-total: root.task-total;
+            step-label: root.step-label;
+        }
+
+        if current-scene == 7: SettingsScene {
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 8: NotificationListScene {
+            notification-count: root.notification-count;
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 9: ErrorScene {
+            title: "Error";
+            status: "Check connection";
+            button-pressed(action) => { root.button-pressed(action); }
+        }
+
+        if current-scene == 10: ErrorScene {
+            title: "Offline";
+            status: "No heartbeat";
+            button-pressed(action) => { root.button-pressed(action); }
+        }
     }
 
-    if current-scene == 1: PairedScene {
-        button-pressed(action) => { root.button-pressed(action); }
+    // Toast overlay
+    ToastBanner {
+        visible-toast: root.toast-visible;
+        toast-title: root.toast-title;
+        toast-body: root.toast-body;
     }
-
-    if current-scene == 2: ConversationScene {
-        button-pressed(action) => { root.button-pressed(action); }
-    }
-
-    if current-scene == 3: SettingsScene {
-        button-pressed(action) => { root.button-pressed(action); }
-    }
-
-    if current-scene == 4: ErrorScene {
-        title: "Error";
-        status: "Check connection";
-        button-pressed(action) => { root.button-pressed(action); }
-    }
-
-    if current-scene == 5: ErrorScene {
-        title: "Offline";
-        status: "No heartbeat";
-        button-pressed(action) => { root.button-pressed(action); }
-    }
-    } // close Rectangle clip
 }

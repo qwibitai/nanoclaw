@@ -278,13 +278,67 @@ impl SceneRenderer for SlintRenderer {
         let target = state.scene();
         let scene_index = scene_to_index(target);
 
-        // Update Slint property if scene changed
         if self.current_scene != Some(target) {
             self.app.set_current_scene(scene_index);
-            self.window.request_redraw();
             self.current_scene = Some(target);
         }
 
+        // Ring color/width based on scene
+        let (ring_color, ring_width) = match target {
+            crate::ui::Scene::AgentThinking => {
+                (slint::Color::from_argb_u8(255, 99, 102, 241), 5)
+            }
+            crate::ui::Scene::AgentStreaming | crate::ui::Scene::AgentTaskProgress => {
+                (slint::Color::from_argb_u8(255, 50, 213, 131), 5)
+            }
+            crate::ui::Scene::Error | crate::ui::Scene::Offline => {
+                (slint::Color::from_argb_u8(255, 232, 90, 79), 5)
+            }
+            _ => (slint::Color::from_argb_u8(0, 0, 0, 0), 0),
+        };
+        self.app.set_ring_color(ring_color);
+        self.app.set_ring_width(ring_width);
+
+        // Connect page index
+        self.app
+            .set_connect_page_index(state.connect_page_index() as i32);
+
+        // Toast properties
+        if let Some(toast) = state.active_toast() {
+            self.app.set_toast_visible(true);
+            self.app.set_toast_title(toast.title.clone().into());
+            self.app.set_toast_body(toast.body.clone().into());
+        } else {
+            self.app.set_toast_visible(false);
+        }
+
+        // Notification count
+        self.app
+            .set_notification_count(state.notification_count() as i32);
+
+        // Agent activity properties
+        if let Some(activity) = state.agent_activity() {
+            match activity {
+                crate::runtime::AgentActivity::Streaming { partial_text } => {
+                    self.app.set_streaming_text(partial_text.clone().into());
+                }
+                crate::runtime::AgentActivity::TaskProgress {
+                    task_name,
+                    current,
+                    total,
+                    step_label,
+                } => {
+                    self.app.set_task_name(task_name.clone().into());
+                    self.app.set_task_current(*current as i32);
+                    self.app.set_task_total(*total as i32);
+                    self.app
+                        .set_step_label(step_label.clone().unwrap_or_default().into());
+                }
+                _ => {}
+            }
+        }
+
+        self.window.request_redraw();
         slint::platform::update_timers_and_animations();
 
         let drew = crate::slint_platform::render_to_display(
