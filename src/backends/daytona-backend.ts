@@ -479,11 +479,11 @@ export class DaytonaBackend implements AgentBackend {
     return true;
   }
 
-  closeStdin(groupFolder: string): void {
+  closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
     const meta = this.sandboxes.get(groupFolder);
     if (!meta) return;
 
-    uploadFile(meta.sandbox, 'workspace/ipc/input/_close', '').catch((err) => {
+    uploadFile(meta.sandbox, `workspace/ipc/${inputSubdir}/_close`, '').catch((err) => {
       logger.warn({ groupFolder, error: err }, 'Failed to write close sentinel to Daytona sandbox');
     });
   }

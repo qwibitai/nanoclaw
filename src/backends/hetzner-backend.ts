@@ -280,7 +280,7 @@ runcmd:
     return true;
   }
 
-  closeStdin(groupFolder: string): void {
+  closeStdin(groupFolder: string, _inputSubdir?: string): void {
     if (!this.s3) return;
 
     const messageId = `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;

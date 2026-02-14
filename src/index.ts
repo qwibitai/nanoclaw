@@ -333,7 +333,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  let prompt = formatMessages(missedMessages);
+
+  // Inject context about active background tasks
+  const activeTask = queue.getActiveTaskInfo(chatJid);
+  if (activeTask) {
+    const elapsed = Math.round((Date.now() - activeTask.startedAt) / 60000);
+    prompt = `[Background Task Running: "${activeTask.promptPreview}" — started ${elapsed} min ago]\n\n${prompt}`;
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -354,7 +361,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
-      queue.closeStdin(chatJid);
+      queue.closeStdin(chatJid, 'message');
     }, IDLE_TIMEOUT);
   };
 
@@ -477,7 +484,7 @@ async function runAgent(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend),
+      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, backend, 'message'),
       wrappedOnOutput,
     );
 
@@ -885,7 +892,7 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, lane) => queue.registerProcess(groupJid, proc, containerName, groupFolder, undefined, lane),
     sendMessage: async (jid, rawText) => {
       const ch = findChannel(channels, jid);
       if (!ch) {

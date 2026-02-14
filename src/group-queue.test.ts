@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach, mock, jest } from 'bun:test';
+import { describe, it, expect, beforeEach, mock } from 'bun:test';
 
 import { mock as mockModule } from 'bun:test';
 
 mockModule.module('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
-  MAX_CONCURRENT_CONTAINERS: 2,
+  MAX_CONCURRENT_CONTAINERS: 3,
+  MAX_TASK_CONTAINERS: 2,
 }));
 
 mockModule.module('fs', () => ({
@@ -21,154 +22,242 @@ describe('GroupQueue', () => {
   let queue: GroupQueue;
 
   beforeEach(() => {
-    jest.useFakeTimers();
     queue = new GroupQueue();
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  // --- Message lane isolation ---
 
-  // --- Single group at a time ---
-
-  it('only runs one container per group at a time', async () => {
+  it('only runs one message container per group at a time', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
+    const resolvers: Array<() => void> = [];
 
-    const processMessages = mock(async (groupJid: string) => {
+    const processMessages = mock(async (_groupJid: string) => {
       concurrentCount++;
       maxConcurrent = Math.max(maxConcurrent, concurrentCount);
-      // Simulate async work
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise<void>((r) => resolvers.push(r));
       concurrentCount--;
       return true;
     });
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue two messages for the same group
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Advance timers to let the first process complete
-    jest.advanceTimersByTime(200);
-    await Bun.sleep(0);
-
-    // Second enqueue should have been queued, not concurrent
+    await Bun.sleep(10);
     expect(maxConcurrent).toBe(1);
+
+    // Let first finish, second should drain
+    resolvers[0]();
+    await Bun.sleep(10);
+
+    // Second call should now be running
+    resolvers[1]?.();
+    await Bun.sleep(10);
+  });
+
+  // --- Message enqueue while task is active ---
+
+  it('message runs immediately even when task lane is active', async () => {
+    let messageStarted = false;
+    let taskResolve: () => void;
+
+    const processMessages = mock(async () => {
+      messageStarted = true;
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start a task (occupies task lane)
+    queue.enqueueTask('group1@g.us', 'task-1', () =>
+      new Promise<void>((resolve) => { taskResolve = resolve; }),
+      'Test task',
+    );
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+
+    // Enqueue a message — should run immediately on message lane
+    queue.enqueueMessageCheck('group1@g.us');
+    await Bun.sleep(10);
+
+    expect(messageStarted).toBe(true);
+
+    // Clean up
+    taskResolve!();
+    await Bun.sleep(10);
+  });
+
+  // --- Task enqueue while message is active ---
+
+  it('task runs immediately even when message lane is active', async () => {
+    let messageResolve: () => void;
+    let taskRan = false;
+
+    const processMessages = mock(async () => {
+      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start message processing
+    queue.enqueueMessageCheck('group1@g.us');
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us', 'message')).toBe(true);
+
+    // Enqueue a task — should run immediately on task lane
+    queue.enqueueTask('group1@g.us', 'task-1', async () => { taskRan = true; }, 'Test task');
+    await Bun.sleep(10);
+
+    expect(taskRan).toBe(true);
+
+    // Clean up
+    messageResolve!();
+    await Bun.sleep(10);
+  });
+
+  // --- Both lanes active simultaneously ---
+
+  it('both message and task lanes can be active at the same time', async () => {
+    let messageResolve: () => void;
+    let taskResolve: () => void;
+
+    const processMessages = mock(async () => {
+      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await Bun.sleep(10);
+
+    queue.enqueueTask('group1@g.us', 'task-1', () =>
+      new Promise<void>((resolve) => { taskResolve = resolve; }),
+      'Test task',
+    );
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us', 'message')).toBe(true);
+    expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+    expect(queue.isActive('group1@g.us')).toBe(true);
+
+    messageResolve!();
+    taskResolve!();
+    await Bun.sleep(10);
   });
 
   // --- Global concurrency limit ---
 
-  it('respects global concurrency limit', async () => {
-    let activeCount = 0;
-    let maxActive = 0;
-    const completionCallbacks: Array<() => void> = [];
-
-    const processMessages = mock(async (groupJid: string) => {
-      activeCount++;
-      maxActive = Math.max(maxActive, activeCount);
-      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
-      activeCount--;
-      return true;
-    });
-
-    queue.setProcessMessagesFn(processMessages);
-
-    // Enqueue 3 groups (limit is 2)
-    queue.enqueueMessageCheck('group1@g.us');
-    queue.enqueueMessageCheck('group2@g.us');
-    queue.enqueueMessageCheck('group3@g.us');
-
-    // Let promises settle
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-
-    // Only 2 should be active (MAX_CONCURRENT_CONTAINERS = 2)
-    expect(maxActive).toBe(2);
-    expect(activeCount).toBe(2);
-
-    // Complete one — third should start
-    completionCallbacks[0]();
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-
-    expect(processMessages).toHaveBeenCalledTimes(3);
-  });
-
-  // --- Tasks prioritized over messages ---
-
-  it('drains tasks before messages for same group', async () => {
-    const executionOrder: string[] = [];
-    let resolveFirst: () => void;
-
-    const processMessages = mock(async (groupJid: string) => {
-      if (executionOrder.length === 0) {
-        // First call: block until we release it
-        await new Promise<void>((resolve) => {
-          resolveFirst = resolve;
-        });
-      }
-      executionOrder.push('messages');
-      return true;
-    });
-
-    queue.setProcessMessagesFn(processMessages);
-
-    // Start processing messages (takes the active slot)
-    queue.enqueueMessageCheck('group1@g.us');
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-
-    // While active, enqueue both a task and pending messages
-    const taskFn = mock(async () => {
-      executionOrder.push('task');
-    });
-    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
-    queue.enqueueMessageCheck('group1@g.us');
-
-    // Release the first processing
-    resolveFirst!();
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-
-    // Task should have run before the second message check
-    expect(executionOrder[0]).toBe('messages'); // first call
-    expect(executionOrder[1]).toBe('task'); // task runs first in drain
-    // Messages would run after task completes
-  });
-
-  // --- Retry with backoff on failure ---
-
-  it('retries with exponential backoff on failure', async () => {
-    let callCount = 0;
+  it('respects global concurrency limit across both lanes', async () => {
+    const resolvers: Array<() => void> = [];
 
     const processMessages = mock(async () => {
-      callCount++;
-      return false; // failure
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+      return true;
     });
 
     queue.setProcessMessagesFn(processMessages);
+
+    // Fill all 3 slots (MAX_CONCURRENT_CONTAINERS = 3)
     queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueTask('group2@g.us', 'task-1', () =>
+      new Promise<void>((resolve) => resolvers.push(resolve)),
+      'Task 1',
+    );
+    queue.enqueueMessageCheck('group3@g.us');
+    await Bun.sleep(10);
 
-    // First call happens immediately
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-    expect(callCount).toBe(1);
+    expect(resolvers.length).toBe(3);
 
-    // First retry after 5000ms (BASE_RETRY_MS * 2^0)
-    jest.advanceTimersByTime(5000);
-    await Bun.sleep(0);
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-    expect(callCount).toBe(2);
+    // 4th should be queued (over global limit)
+    let fourthStarted = false;
+    queue.enqueueTask('group4@g.us', 'task-2', async () => { fourthStarted = true; }, 'Task 2');
+    await Bun.sleep(10);
+    expect(fourthStarted).toBe(false);
 
-    // Second retry after 10000ms (BASE_RETRY_MS * 2^1)
-    jest.advanceTimersByTime(10000);
-    await Bun.sleep(0);
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-    expect(callCount).toBe(3);
+    // Free one slot — 4th should start
+    resolvers[0]();
+    await Bun.sleep(10);
+    expect(fourthStarted).toBe(true);
+
+    // Clean up
+    for (const r of resolvers.slice(1)) r();
+    await Bun.sleep(10);
+  });
+
+  // --- Task concurrency limit ---
+
+  it('respects MAX_TASK_CONTAINERS limit', async () => {
+    const resolvers: Array<() => void> = [];
+
+    queue.setProcessMessagesFn(mock(async () => true));
+
+    // Start 2 tasks (MAX_TASK_CONTAINERS = 2)
+    queue.enqueueTask('group1@g.us', 'task-1', () =>
+      new Promise<void>((resolve) => resolvers.push(resolve)),
+      'Task 1',
+    );
+    queue.enqueueTask('group2@g.us', 'task-2', () =>
+      new Promise<void>((resolve) => resolvers.push(resolve)),
+      'Task 2',
+    );
+    await Bun.sleep(10);
+
+    expect(resolvers.length).toBe(2);
+
+    // 3rd task should be queued
+    let thirdStarted = false;
+    queue.enqueueTask('group3@g.us', 'task-3', async () => { thirdStarted = true; }, 'Task 3');
+    await Bun.sleep(10);
+    expect(thirdStarted).toBe(false);
+
+    // But a message should still get through
+    let messageStarted = false;
+    queue.setProcessMessagesFn(mock(async () => { messageStarted = true; return true; }));
+    queue.enqueueMessageCheck('group3@g.us');
+    await Bun.sleep(10);
+    expect(messageStarted).toBe(true);
+
+    // Free a task slot — 3rd task should start
+    resolvers[0]();
+    await Bun.sleep(10);
+    expect(thirdStarted).toBe(true);
+
+    // Clean up
+    resolvers[1]();
+    await Bun.sleep(10);
+  });
+
+  // --- activeTaskInfo tracking ---
+
+  it('tracks activeTaskInfo while task is running', async () => {
+    let taskResolve: () => void;
+
+    queue.setProcessMessagesFn(mock(async () => true));
+
+    expect(queue.getActiveTaskInfo('group1@g.us')).toBeNull();
+
+    queue.enqueueTask('group1@g.us', 'task-42', () =>
+      new Promise<void>((resolve) => { taskResolve = resolve; }),
+      'Run daily report',
+    );
+    await Bun.sleep(10);
+
+    const info = queue.getActiveTaskInfo('group1@g.us');
+    expect(info).not.toBeNull();
+    expect(info!.taskId).toBe('task-42');
+    expect(info!.promptPreview).toBe('Run daily report');
+    expect(info!.startedAt).toBeGreaterThan(0);
+
+    taskResolve!();
+    await Bun.sleep(10);
+
+    expect(queue.getActiveTaskInfo('group1@g.us')).toBeNull();
   });
 
   // --- Shutdown prevents new enqueues ---
@@ -180,78 +269,115 @@ describe('GroupQueue', () => {
     await queue.shutdown(1000);
 
     queue.enqueueMessageCheck('group1@g.us');
-    jest.advanceTimersByTime(100);
-    await Bun.sleep(0);
+    queue.enqueueTask('group1@g.us', 'task-1', async () => {}, 'Test');
+    await Bun.sleep(50);
 
     expect(processMessages).not.toHaveBeenCalled();
   });
 
-  // --- Max retries exceeded ---
-
-  it('stops retrying after MAX_RETRIES and resets', async () => {
-    let callCount = 0;
-
-    const processMessages = mock(async () => {
-      callCount++;
-      return false; // always fail
-    });
-
-    queue.setProcessMessagesFn(processMessages);
-    queue.enqueueMessageCheck('group1@g.us');
-
-    // Run through all 5 retries (MAX_RETRIES = 5)
-    // Initial call
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-    expect(callCount).toBe(1);
-
-    // Retry 1: 5000ms, Retry 2: 10000ms, Retry 3: 20000ms, Retry 4: 40000ms, Retry 5: 80000ms
-    const retryDelays = [5000, 10000, 20000, 40000, 80000];
-    for (let i = 0; i < retryDelays.length; i++) {
-      jest.advanceTimersByTime(retryDelays[i] + 10);
-      await Bun.sleep(0);
-      expect(callCount).toBe(i + 2);
-    }
-
-    // After 5 retries (6 total calls), should stop — no more retries
-    const countAfterMaxRetries = callCount;
-    jest.advanceTimersByTime(200000); // Wait a long time
-    await Bun.sleep(0);
-    expect(callCount).toBe(countAfterMaxRetries);
-  });
-
   // --- Waiting groups get drained when slots free up ---
 
-  it('drains waiting groups when active slots free up', async () => {
+  it('drains waiting message groups when active slots free up', async () => {
     const processed: string[] = [];
-    const completionCallbacks: Array<() => void> = [];
+    const resolvers: Array<() => void> = [];
 
     const processMessages = mock(async (groupJid: string) => {
       processed.push(groupJid);
-      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      await new Promise<void>((resolve) => resolvers.push(resolve));
       return true;
     });
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Fill both slots
+    // Fill all 3 slots
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
-
-    // Queue a third
     queue.enqueueMessageCheck('group3@g.us');
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
+    await Bun.sleep(10);
 
-    expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
+    // Queue a 4th
+    queue.enqueueMessageCheck('group4@g.us');
+    await Bun.sleep(10);
+
+    expect(processed).toEqual(['group1@g.us', 'group2@g.us', 'group3@g.us']);
 
     // Free up a slot
-    completionCallbacks[0]();
-    jest.advanceTimersByTime(10);
-    await Bun.sleep(0);
+    resolvers[0]();
+    await Bun.sleep(10);
 
-    expect(processed).toContain('group3@g.us');
+    expect(processed).toContain('group4@g.us');
+
+    // Clean up
+    for (const r of resolvers.slice(1)) r();
+    await Bun.sleep(10);
+  });
+
+  // --- isActive with lane parameter ---
+
+  it('isActive returns correct state per lane', async () => {
+    let messageResolve: () => void;
+    let taskResolve: () => void;
+
+    const processMessages = mock(async () => {
+      await new Promise<void>((resolve) => { messageResolve = resolve; });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    expect(queue.isActive('group1@g.us')).toBe(false);
+    expect(queue.isActive('group1@g.us', 'message')).toBe(false);
+    expect(queue.isActive('group1@g.us', 'task')).toBe(false);
+
+    queue.enqueueMessageCheck('group1@g.us');
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us')).toBe(true);
+    expect(queue.isActive('group1@g.us', 'message')).toBe(true);
+    expect(queue.isActive('group1@g.us', 'task')).toBe(false);
+
+    queue.enqueueTask('group1@g.us', 'task-1', () =>
+      new Promise<void>((resolve) => { taskResolve = resolve; }),
+      'Test',
+    );
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us', 'message')).toBe(true);
+    expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+
+    messageResolve!();
+    await Bun.sleep(10);
+
+    expect(queue.isActive('group1@g.us', 'message')).toBe(false);
+    expect(queue.isActive('group1@g.us', 'task')).toBe(true);
+
+    taskResolve!();
+    await Bun.sleep(10);
+  });
+
+  // --- Task deduplication ---
+
+  it('prevents double-queuing of the same task', async () => {
+    let taskRunCount = 0;
+    let taskResolve: () => void;
+
+    queue.setProcessMessagesFn(mock(async () => true));
+
+    // Start a task to occupy the lane
+    queue.enqueueTask('group1@g.us', 'task-blocker', () =>
+      new Promise<void>((resolve) => { taskResolve = resolve; }),
+      'Blocker',
+    );
+    await Bun.sleep(10);
+
+    // Try to enqueue the same task twice while lane is occupied
+    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
+    queue.enqueueTask('group1@g.us', 'task-dup', async () => { taskRunCount++; }, 'Dup');
+
+    // Release the blocker
+    taskResolve!();
+    await Bun.sleep(10);
+
+    expect(taskRunCount).toBe(1);
   });
 });

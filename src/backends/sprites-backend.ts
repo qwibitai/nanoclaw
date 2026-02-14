@@ -501,9 +501,9 @@ export class SpritesBackend implements AgentBackend {
     return true;
   }
 
-  closeStdin(groupFolder: string): void {
+  closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
     const sprite = this.getSpriteClient(groupFolder);
-    sprite.writeFile('/workspace/ipc/input/_close', '').catch((err) => {
+    sprite.writeFile(`/workspace/ipc/${inputSubdir}/_close`, '').catch((err) => {
       logger.warn({ groupFolder, error: err }, 'Failed to write close sentinel to Sprite');
     });
   }

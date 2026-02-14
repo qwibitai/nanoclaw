@@ -89,8 +89,8 @@ export interface AgentBackend {
   /** Send a follow-up message to an active agent via IPC. Returns true if sent. */
   sendMessage(groupFolder: string, text: string): boolean;
 
-  /** Signal an active agent to wind down. */
-  closeStdin(groupFolder: string): void;
+  /** Signal an active agent to wind down. Optional inputSubdir for task lane isolation. */
+  closeStdin(groupFolder: string, inputSubdir?: string): void;
 
   /** Write IPC data files (tasks snapshot, groups snapshot, agent registry). */
   writeIpcData(groupFolder: string, filename: string, data: string): void;

@@ -47,6 +47,7 @@ function getHomeDir(): string {
 function buildVolumeMounts(
   group: AgentOrGroup,
   isMain: boolean,
+  isScheduledTask: boolean = false,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -140,11 +141,46 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  mounts.push({
-    hostPath: groupIpcDir,
-    containerPath: '/workspace/ipc',
-    readonly: false,
-  });
+  fs.mkdirSync(path.join(groupIpcDir, 'input-task'), { recursive: true });
+
+  if (isScheduledTask) {
+    // Task containers get input-task/ mounted as their /workspace/ipc/input
+    // so follow-up messages don't cross lanes
+    mounts.push({
+      hostPath: path.join(groupIpcDir, 'messages'),
+      containerPath: '/workspace/ipc/messages',
+      readonly: false,
+    });
+    mounts.push({
+      hostPath: path.join(groupIpcDir, 'tasks'),
+      containerPath: '/workspace/ipc/tasks',
+      readonly: false,
+    });
+    mounts.push({
+      hostPath: path.join(groupIpcDir, 'input-task'),
+      containerPath: '/workspace/ipc/input',
+      readonly: false,
+    });
+    // Mount IPC root for agent_registry.json and other top-level files
+    // Use a separate mount point so agent-runner can still find them
+    const ipcFiles = ['agent_registry.json', 'tasks.json', 'groups.json'];
+    for (const file of ipcFiles) {
+      const filePath = path.join(groupIpcDir, file);
+      if (fs.existsSync(filePath)) {
+        mounts.push({
+          hostPath: filePath,
+          containerPath: `/workspace/ipc/${file}`,
+          readonly: true,
+        });
+      }
+    }
+  } else {
+    mounts.push({
+      hostPath: groupIpcDir,
+      containerPath: '/workspace/ipc',
+      readonly: false,
+    });
+  }
 
   // Environment file
   const envDir = path.join(DATA_DIR, 'env');
@@ -229,7 +265,7 @@ export class LocalBackend implements AgentBackend {
     const groupDir = path.join(GROUPS_DIR, folder);
     fs.mkdirSync(groupDir, { recursive: true });
 
-    const mounts = buildVolumeMounts(group, input.isMain);
+    const mounts = buildVolumeMounts(group, input.isMain, input.isScheduledTask);
     const safeName = folder.replace(/[^a-zA-Z0-9-]/g, '-');
     const containerName = `nanoclaw-${safeName}-${Date.now()}`;
     const containerArgs = buildContainerArgs(mounts, containerName);
@@ -515,8 +551,8 @@ export class LocalBackend implements AgentBackend {
     }
   }
 
-  closeStdin(groupFolder: string): void {
-    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+  closeStdin(groupFolder: string, inputSubdir: string = 'input'): void {
+    const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, inputSubdir);
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');

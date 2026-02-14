@@ -475,6 +475,13 @@ export function getDueTasks(): ScheduledTask[] {
     .all(now) as ScheduledTask[];
 }
 
+/** Advance next_run without touching last_run/last_result (used before enqueue). */
+export function advanceTaskNextRun(id: string, nextRun: string | null): void {
+  db.query(
+    `UPDATE scheduled_tasks SET next_run = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END WHERE id = ?`,
+  ).run(nextRun, nextRun, id);
+}
+
 export function updateTaskAfterRun(
   id: string,
   nextRun: string | null,

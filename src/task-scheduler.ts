@@ -13,6 +13,7 @@ import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './container-runner.js';
 import {
+  advanceTaskNextRun,
   createTask,
   deleteTask,
   getAllTasks,
@@ -29,7 +30,7 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string) => void;
+  onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
@@ -237,10 +238,9 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
-  const sessions = deps.getSessions();
-  const sessionId =
-    task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  // Always use isolated sessions for tasks to prevent session ID conflicts
+  // between message and task containers running concurrently
+  const sessionId = undefined;
 
   // Idle timer: writes _close sentinel after IDLE_TIMEOUT of no output,
   // so the container exits instead of hanging at waitForIpcMessage forever.
@@ -250,7 +250,7 @@ async function runTask(
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Scheduled task idle timeout, closing container stdin');
-      deps.queue.closeStdin(task.chat_jid);
+      deps.queue.closeStdin(task.chat_jid, 'task');
     }, IDLE_TIMEOUT);
   };
 
@@ -268,7 +268,7 @@ async function runTask(
         discordGuildId: group.discordGuildId,
         serverFolder: group.serverFolder,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, 'task'),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -357,10 +357,34 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
+        // Advance next_run BEFORE enqueuing so this task isn't
+        // re-discovered on subsequent ticks while it's running/queued.
+        // 'once' tasks (no recurrence) get next_run set to null which
+        // also removes them from getDueTasks results.
+        let nextRun: string | null = null;
+        if (currentTask.schedule_type === 'cron') {
+          try {
+            const interval = CronExpressionParser.parse(currentTask.schedule_value, { tz: TIMEZONE });
+            nextRun = interval.next().toISOString();
+          } catch {
+            // Invalid cron — leave null so it completes as a one-shot
+          }
+        } else if (currentTask.schedule_type === 'interval') {
+          const ms = parseInt(currentTask.schedule_value, 10);
+          if (!isNaN(ms) && ms > 0) {
+            nextRun = new Date(Date.now() + ms).toISOString();
+          }
+        }
+        advanceTaskNextRun(currentTask.id, nextRun);
+
+        const promptPreview = currentTask.id.startsWith('heartbeat-')
+          ? 'Heartbeat'
+          : currentTask.prompt.slice(0, 100);
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,
           () => runTask(currentTask, deps),
+          promptPreview,
         );
       }
     } catch (err) {
