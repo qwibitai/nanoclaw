@@ -218,7 +218,9 @@ export class WhatsAppChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
-      await this.sock.sendPresenceUpdate(isTyping ? 'composing' : 'available', jid);
+      const status = isTyping ? 'composing' : 'paused';
+      logger.debug({ jid, status }, 'Sending presence update');
+      await this.sock.sendPresenceUpdate(status, jid);
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to update typing status');
     }
