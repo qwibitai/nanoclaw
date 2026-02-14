@@ -25,11 +25,17 @@ export function detectRuntime(): Runtime {
   } catch { /* Docker not available */ }
 
   // Fall back to Apple Container (macOS only)
+  // Check if running first, then check if installed but not yet started
   try {
     execSync('container system status', { stdio: 'pipe', timeout: 10000 });
     detectedRuntime = 'apple-container';
     return detectedRuntime;
-  } catch { /* Apple Container not available */ }
+  } catch { /* not running — check if installed */ }
+  try {
+    execSync('which container', { stdio: 'pipe', timeout: 5000 });
+    detectedRuntime = 'apple-container';
+    return detectedRuntime;
+  } catch { /* Apple Container not installed */ }
 
   throw new Error(
     'No container runtime found. Install Docker (https://docs.docker.com/get-docker/) ' +
