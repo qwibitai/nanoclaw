@@ -4,13 +4,26 @@
 FROM oven/bun:slim
 
 # Install Node.js (agents expect node/npm/npx to be available alongside bun)
-# and essential system tools
-RUN apt-get update && apt-get install -y \
+# and essential system tools including Go
+RUN apt-get update && apt-get install -y --no-install-recommends \
     nodejs \
     npm \
     curl \
     git \
+    wget \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Go (latest stable version) - cross-platform support
+ARG GO_VERSION=1.25.0
+RUN ARCH="$(dpkg --print-architecture)" \
+    && wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && tar -C /usr/local -xzf "go${GO_VERSION}.linux-${ARCH}.tar.gz" \
+    && rm "go${GO_VERSION}.linux-${ARCH}.tar.gz"
+
+# Set Go environment variables
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/home/bun/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
 
 # Install GitHub CLI for PR creation and git authentication
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -54,9 +67,11 @@ RUN chmod +x /app/entrypoint.sh
 RUN chown -R bun:bun /workspace
 
 # Pre-warm tsgo (native TypeScript checker) so `npx tsgo` / `bunx tsgo` works.
-# Host-mounted projects have darwin-arm64 binaries; npm global install puts the
-# linux-arm64 binary in /usr/local/bin where all users can access it.
-RUN npm install -g @typescript/native-preview @typescript/native-preview-linux-arm64
+# Host-mounted projects may have platform-specific binaries; npm global install
+# puts the correct linux binary in /usr/local/bin where all users can access it.
+RUN ARCH="$(dpkg --print-architecture)" \
+    && TSGO_ARCH=$([ "$ARCH" = "amd64" ] && echo "x64" || echo "$ARCH") \
+    && npm install -g @typescript/native-preview "@typescript/native-preview-linux-${TSGO_ARCH}"
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER bun
