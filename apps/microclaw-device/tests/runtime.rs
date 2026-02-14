@@ -1,4 +1,5 @@
 use microclaw_device::{now_ms, protocol::*, AgentActivity, RuntimeAction, RuntimeMode, RuntimeState};
+use microclaw_device::pipeline::{SwipeDetector, SwipeDirection};
 use microclaw_device::ui::Scene;
 use microclaw_protocol::TouchEventPayload;
 use serde_json::json;
@@ -443,4 +444,26 @@ fn agent_activity_transitions_scene() {
     // Clear activity
     state.set_agent_activity(None);
     assert_eq!(state.scene(), Scene::Paired);
+}
+
+#[test]
+fn swipe_gesture_detects_horizontal_swipe() {
+    let mut detector = SwipeDetector::new();
+
+    // Simulate swipe right: down at x=100, move to x=180, up
+    assert_eq!(detector.on_down(100, 180), None);
+    assert_eq!(detector.on_move(140, 180), None);
+    assert_eq!(detector.on_up(180, 182), Some(SwipeDirection::Right));
+
+    // Simulate swipe left: down at x=200, move to x=120, up
+    assert_eq!(detector.on_down(200, 180), None);
+    assert_eq!(detector.on_up(120, 178), Some(SwipeDirection::Left));
+
+    // Too short horizontal movement (only 20px)
+    assert_eq!(detector.on_down(100, 180), None);
+    assert_eq!(detector.on_up(120, 180), None);
+
+    // Too much vertical movement (diagonal)
+    assert_eq!(detector.on_down(100, 100), None);
+    assert_eq!(detector.on_up(180, 180), None);
 }

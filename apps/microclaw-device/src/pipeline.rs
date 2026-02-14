@@ -84,3 +84,54 @@ impl TouchPipeline {
         }
     }
 }
+
+pub const SWIPE_MIN_HORIZONTAL_PX: i32 = 40;
+pub const SWIPE_MAX_VERTICAL_PX: i32 = 30;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SwipeDirection {
+    Left,
+    Right,
+}
+
+pub struct SwipeDetector {
+    down_x: Option<u16>,
+    down_y: Option<u16>,
+}
+
+impl SwipeDetector {
+    pub fn new() -> Self {
+        Self { down_x: None, down_y: None }
+    }
+
+    pub fn on_down(&mut self, x: u16, y: u16) -> Option<SwipeDirection> {
+        self.down_x = Some(x);
+        self.down_y = Some(y);
+        None
+    }
+
+    pub fn on_move(&mut self, _x: u16, _y: u16) -> Option<SwipeDirection> {
+        None
+    }
+
+    pub fn on_up(&mut self, x: u16, y: u16) -> Option<SwipeDirection> {
+        let (dx, dy) = match (self.down_x.take(), self.down_y.take()) {
+            (Some(sx), Some(sy)) => (
+                x as i32 - sx as i32,
+                y as i32 - sy as i32,
+            ),
+            _ => return None,
+        };
+
+        if dx.abs() >= SWIPE_MIN_HORIZONTAL_PX && dy.abs() <= SWIPE_MAX_VERTICAL_PX {
+            if dx > 0 { Some(SwipeDirection::Right) } else { Some(SwipeDirection::Left) }
+        } else {
+            None
+        }
+    }
+
+    pub fn cancel(&mut self) {
+        self.down_x = None;
+        self.down_y = None;
+    }
+}
