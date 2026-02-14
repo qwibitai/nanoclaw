@@ -52,7 +52,7 @@ export const SESSION_MAX_AGE = parseInt(
 ); // 4 hours — rotate sessions to prevent unbounded context growth
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
 );
 export const MAX_TASK_CONTAINERS = Math.max(
   1,
