@@ -13,6 +13,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
+import { WebUIChannel } from './channels/webui.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -155,7 +156,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      prompt: missedMessages[0]?.content,
+    },
     'Processing messages',
   );
 
@@ -481,32 +486,6 @@ async function main(): Promise<void> {
     queue,
     channels: () => channels,
     registeredGroups: () => registeredGroups,
-    processWebChat: async (text, onStream, onDone) => {
-      // Find the main group to run the agent against
-      const mainJid = Object.entries(registeredGroups)
-        .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
-      const mainGroup = mainJid ? registeredGroups[mainJid] : undefined;
-      if (!mainGroup || !mainJid) {
-        throw new Error('No main group registered. Register a group first.');
-      }
-
-      let fullText = '';
-      const result = await runAgent(mainGroup, text, mainJid, async (output) => {
-        if (output.result) {
-          const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
-          const chunk = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-          if (chunk) {
-            fullText += chunk;
-            onStream(chunk);
-          }
-        }
-      });
-
-      if (result === 'error' && !fullText) {
-        throw new Error('Agent processing failed');
-      }
-      onDone(fullText || '(no response)');
-    },
   });
 
   // Channel callbacks (shared by all channels)
@@ -528,6 +507,22 @@ async function main(): Promise<void> {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     await telegram.connect();
+  }
+
+  // WebUI channel — register web@chat as an alias for the main group
+  const webuiChannel = new WebUIChannel();
+  channels.push(webuiChannel);
+
+  // Register web@chat so the message loop picks up WebUI messages
+  const mainEntry = Object.entries(registeredGroups)
+    .find(([, g]) => g.folder === MAIN_GROUP_FOLDER);
+  if (mainEntry) {
+    const [, mainGroup] = mainEntry;
+    registeredGroups['web@chat'] = {
+      ...mainGroup,
+      name: mainGroup.name,
+      requiresTrigger: false,
+    };
   }
 
   // Start subsystems (independently of connection handler)

@@ -272,6 +272,16 @@ export class NanoClawApp extends LitElement {
     this.ws.send({ type: 'chat.send', text });
   }
 
+  updated(changed: Map<string, unknown>) {
+    super.updated(changed);
+    if (changed.has('chatMessages') || changed.has('chatStreamText') || changed.has('chatStreaming')) {
+      const thread = this.querySelector('#chat-thread');
+      if (thread) {
+        thread.scrollTop = thread.scrollHeight;
+      }
+    }
+  }
+
   render() {
     return renderApp(this);
   }

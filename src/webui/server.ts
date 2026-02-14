@@ -26,11 +26,6 @@ export interface ServerDeps {
   queue: GroupQueue;
   channels: () => Channel[];
   registeredGroups: () => Record<string, RegisteredGroup>;
-  processWebChat?: (
-    text: string,
-    onStream: (chunk: string) => void,
-    onDone: (fullText: string) => void,
-  ) => Promise<void>;
 }
 
 export async function startWebServer(deps: ServerDeps): Promise<void> {

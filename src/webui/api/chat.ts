@@ -17,7 +17,7 @@ export function registerChatRoutes(app: FastifyInstance, deps: ServerDeps): void
   });
 }
 
-export function handleChatWebSocket(ws: WebSocket, deps: ServerDeps): void {
+export function handleChatWebSocket(ws: WebSocket, _deps: ServerDeps): void {
   ws.on('message', async (raw) => {
     let parsed: { type: string; text?: string };
     try {
@@ -32,7 +32,7 @@ export function handleChatWebSocket(ws: WebSocket, deps: ServerDeps): void {
       const msgId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
       try {
-        // Store user message
+        // Store user message — the message loop picks it up like Telegram/WhatsApp
         storeChatMessage({
           id: msgId,
           chat_jid: WEB_CHAT_JID,
@@ -50,37 +50,8 @@ export function handleChatWebSocket(ws: WebSocket, deps: ServerDeps): void {
         return;
       }
 
-      // Acknowledge receipt
+      // Acknowledge receipt — response comes back via WebUIChannel.sendMessage → broadcast
       ws.send(JSON.stringify({ type: 'chat.ack', id: msgId }));
-
-      // Enqueue for processing via the queue system
-      if (deps.processWebChat) {
-        try {
-          await deps.processWebChat(text, (chunk: string) => {
-            ws.send(JSON.stringify({ type: 'chat.stream', text: chunk }));
-          }, (fullText: string) => {
-            try {
-              storeChatMessage({
-                id: `web-resp-${Date.now()}`,
-                chat_jid: WEB_CHAT_JID,
-                sender: 'assistant',
-                sender_name: 'Assistant',
-                content: fullText,
-                timestamp: new Date().toISOString(),
-                is_from_me: true,
-              });
-            } catch { /* best-effort storage for response */ }
-            ws.send(JSON.stringify({ type: 'chat.done', text: fullText }));
-          });
-        } catch (err) {
-          ws.send(JSON.stringify({
-            type: 'chat.error',
-            error: err instanceof Error ? err.message : 'Unknown error',
-          }));
-        }
-      } else {
-        ws.send(JSON.stringify({ type: 'chat.error', error: 'Chat processing not available' }));
-      }
     }
   });
 }
