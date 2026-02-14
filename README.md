@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="README_zh.md">中文</a> ·
   <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
 </p>
 
