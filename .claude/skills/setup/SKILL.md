@@ -422,7 +422,139 @@ If the user chose a name other than `Omni`, update the copied CLAUDE.md files:
 1. `groups/global/CLAUDE.md` - Change "# Omni" and "You are Omni" to the new name
 2. `groups/main/CLAUDE.md` - Same changes at the top
 
-## 8. Configure External Directory Access (Mount Allowlist)
+## 8. Add Discord Agent (Optional)
+
+Ask the user:
+> Do you want to add a **Discord agent**? This creates a separate agent that responds in Discord channels.
+
+If **no**, skip to the next step.
+
+If **yes**, follow these steps:
+
+### 8a. Discord Bot Token
+
+Ask the user:
+> Provide your Discord bot token. If you don't have one:
+> 1. Go to https://discord.com/developers/applications
+> 2. Create a new application → Bot → Reset Token → Copy it
+> 3. Enable **Message Content Intent** under Bot → Privileged Gateway Intents
+> 4. Invite the bot to your server using OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
+
+If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
+
+### 8b. Register the Discord Channel
+
+The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discord channel ID:
+> Right-click the channel in Discord → **Copy Channel ID** (enable Developer Mode in Discord Settings → Advanced if you don't see this option).
+
+Register the group in the database. First derive the backend value (fallback to runtime choice if table is empty):
+```bash
+BACKEND=$(sqlite3 store/messages.db "SELECT backend FROM registered_groups LIMIT 1")
+[ -z "$BACKEND" ] && BACKEND="<apple-container|docker>"
+```
+```bash
+sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, '$BACKEND', datetime('now'))"
+```
+
+Create the group folder:
+```bash
+mkdir -p groups/<FOLDER_NAME>/logs
+```
+
+### 8c. Auto-Respond Keywords (Optional)
+
+Ask the user:
+> Do you want the agent to auto-respond to messages containing certain keywords (without requiring `@mention`)?
+>
+> This is useful for natural conversations. The agent will respond when any keyword is mentioned (case-insensitive, word-boundary matched).
+
+If **yes**, ask for the keywords (comma-separated list of names/words):
+```bash
+sqlite3 store/messages.db "UPDATE registered_groups SET auto_respond_keywords = '<JSON_ARRAY>', auto_respond_to_questions = 1 WHERE folder = '<FOLDER_NAME>'"
+```
+
+The `auto_respond_keywords` value must be a JSON array string, e.g. `'[\"assistant\",\"support\",\"help\"]'`.
+
+### 8d. Configure MCP Servers (Optional)
+
+Ask the user:
+> Do you want this agent to have access to **MCP servers** (e.g. quarterplan, memory, external tools)?
+
+If **yes**, ask which MCP servers they want. For each server, collect the required configuration.
+
+#### QuarterPlan MCP Server
+
+The quarterplan MCP server provides tools for managing initiatives, tracking PRs, and ARR data. It requires **Backblaze B2 (S3-compatible) credentials**.
+
+Ask the user for these 4 values:
+> To set up the quarterplan MCP server, I need your Backblaze B2 credentials:
+>
+> 1. **Key ID** — The `keyID` from your B2 application key (e.g. `005f1542e777e83...`)
+> 2. **Application Key** — The `applicationKey` (only shown once when created)
+> 3. **Bucket name** — The B2 bucket to store data in (e.g. `my-agents`)
+> 4. **Endpoint** — The S3-compatible endpoint (e.g. `s3.us-east-005.backblazeb2.com`)
+>
+> To create a new application key:
+> 1. Go to https://secure.backblaze.com/app_keys.htm
+> 2. Click **Add a New Application Key**
+> 3. Give it a name, select the bucket, and set **Read and Write** access
+> 4. Copy the `keyID` and `applicationKey` (the key is only shown once!)
+
+Once you have the credentials, derive the region from the endpoint (e.g. `s3.us-east-005.backblazeb2.com` → `us-east-005`).
+
+Write the `.mcp.json` file in the group folder. **Never echo credentials in commands** — use the Write tool directly:
+
+```json
+{
+  "mcpServers": {
+    "quarterplan": {
+      "command": "bun",
+      "args": ["/app/mcp-servers/quarterplan/server.ts"],
+      "env": {
+        "S3_ENDPOINT": "<ENDPOINT>",
+        "S3_BUCKET": "<BUCKET>",
+        "S3_ACCESS_KEY_ID": "<KEY_ID>",
+        "S3_SECRET_ACCESS_KEY": "<APPLICATION_KEY>",
+        "S3_REGION": "<REGION>"
+      }
+    }
+  }
+}
+```
+
+Write to: `groups/<FOLDER_NAME>/.mcp.json`
+
+**Important notes:**
+- The `.mcp.json` file lives in the group folder which is gitignored — credentials stay local
+- The MCP server runs inside the container at `/app/mcp-servers/quarterplan/server.ts`
+- The container image must include the MCP server (rebuild with `./container/build.sh` if needed)
+- Claude Code picks up `.mcp.json` from the working directory (`/workspace/group`) via `settingSources: ['project']`
+
+#### Other MCP Servers
+
+Additional MCP servers can be added to the same `.mcp.json` file. Each server needs:
+- `command`: The executable (usually `bun` or `node`)
+- `args`: Path to the server script (must exist inside the container)
+- `env`: Environment variables the server needs
+
+### 8e. Rebuild and Restart
+
+If you added MCP servers or changed configuration, rebuild and restart:
+
+```bash
+./container/build.sh
+bun run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+Verify the agent is working by checking logs after sending a message in the Discord channel:
+```bash
+tail -f logs/nanoclaw.log
+```
+
+Look for `mcp__quarterplan__` tool calls in the logs to confirm the MCP server is connected.
+
+## 9. Configure External Directory Access (Mount Allowlist)
 
 Ask the user:
 > Do you want the agent to be able to access any directories **outside** the NanoClaw project?
@@ -530,7 +662,7 @@ Tell the user:
 > ```
 > The folder appears inside the container at `/workspace/extra/<folder-name>` (derived from the last segment of the path). Add `"readonly": false` for write access, or `"containerPath": "custom-name"` to override the default name.
 
-## 9. Configure launchd Service
+## 10. Configure launchd Service
 
 Generate the plist file with correct paths automatically:
 
@@ -590,7 +722,7 @@ Verify it's running:
 launchctl list | grep nanoclaw
 ```
 
-## 10. Test
+## 11. Test
 
 Tell the user (using the assistant name they configured):
 > Send `@ASSISTANT_NAME hello` in your registered chat.

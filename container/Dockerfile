@@ -29,13 +29,17 @@ RUN bun install -g @anthropic-ai/claude-code
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY agent-runner/package.json agent-runner/bun.lock* ./
+COPY container/agent-runner/package.json container/agent-runner/bun.lock* ./
 
 # Install dependencies
 RUN bun install
 
 # Copy source code
-COPY agent-runner/ ./
+COPY container/agent-runner/ ./
+
+# Copy shared utilities and MCP servers
+COPY container/mcp-servers/ /app/mcp-servers/
+COPY src/shared/ /app/shared/
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
@@ -43,7 +47,7 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/ext
 # Copy entrypoint script
 # Sources env, configures git, pre-installs cross-platform deps for host mounts,
 # buffers stdin, then runs agent-runner
-COPY entrypoint.sh /app/entrypoint.sh
+COPY container/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
