@@ -6,9 +6,10 @@ use microclaw_protocol::{
     DeviceAction, DeviceStatus, Envelope, MessageId, MessageKind, TouchEventPayload,
     TransportMessage,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::display::DisplayPoint;
+use crate::storage::{self, DeviceStorage};
 use crate::ui::Scene;
 
 const DEFAULT_SAFETY_RETRIES: u32 = 5;
@@ -44,10 +45,11 @@ pub struct InFlightCommand {
     pub enqueued_at_ms: u64,
 }
 
-#[derive(Clone, Debug)]
 pub struct RuntimeState {
     mode: RuntimeMode,
     last_seq: u64,
+    outbound_seq: u64,
+    device_id: String,
     seen_message_ids: HashMap<String, u64>,
     in_flight: HashMap<String, InFlightCommand>,
     diagnostics: VecDeque<String>,
@@ -60,7 +62,11 @@ pub struct RuntimeState {
     ota_in_progress: bool,
     ota_target_version: Option<String>,
     ota_error_reason: Option<String>,
+    boot_failure_count: u32,
+    boot_retry_limit: u32,
     scene_cache: Cell<Scene>,
+    storage: Option<Box<dyn DeviceStorage>>,
+    pending_reconciliation: bool,
 }
 
 impl RuntimeState {
@@ -68,6 +74,8 @@ impl RuntimeState {
         Self {
             mode: RuntimeMode::Booting,
             last_seq: 0,
+            outbound_seq: 0,
+            device_id: "device".to_owned(),
             seen_message_ids: HashMap::new(),
             in_flight: HashMap::new(),
             diagnostics: VecDeque::new(),
@@ -80,14 +88,44 @@ impl RuntimeState {
             ota_in_progress: false,
             ota_target_version: None,
             ota_error_reason: None,
+            boot_failure_count: 0,
+            boot_retry_limit: 3,
             scene_cache: Cell::new(Scene::Boot),
+            storage: None,
+            pending_reconciliation: false,
         }
+    }
+
+    pub fn with_storage(storage: Box<dyn DeviceStorage>) -> Self {
+        let boot_failure_count = storage
+            .get_u32(storage::keys::BOOT_FAILURE_COUNT)
+            .unwrap_or(0);
+        let device_id = storage
+            .get_string(storage::keys::DEVICE_ID)
+            .unwrap_or_else(|| "device".to_owned());
+        let mut state = Self::new();
+        state.boot_failure_count = boot_failure_count;
+        state.device_id = device_id;
+        state.storage = Some(storage);
+
+        if boot_failure_count >= state.boot_retry_limit {
+            state.mode = RuntimeMode::SafeMode("persisted_boot_failures_exceeded".to_owned());
+        }
+        state
     }
 
     pub fn with_host_allowlist(hosts: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut state = Self::new();
         state.host_allowlist = hosts.into_iter().map(Into::into).collect();
         state
+    }
+
+    pub fn set_storage(&mut self, storage: Box<dyn DeviceStorage>) {
+        self.storage = Some(storage);
+    }
+
+    pub fn set_device_id(&mut self, device_id: impl Into<String>) {
+        self.device_id = device_id.into();
     }
 
     pub fn mode(&self) -> &RuntimeMode {
@@ -110,6 +148,28 @@ impl RuntimeState {
         self.offline_since_ms
     }
 
+    pub fn heartbeat_seen_ms(&self) -> Option<u64> {
+        self.last_heartbeat_ms
+    }
+
+    pub fn heartbeat_age_ms(&self, now_ms: u64) -> u64 {
+        let seen_ms = match self.last_heartbeat_ms {
+            Some(value) => value,
+            None => return 0,
+        };
+        now_ms.saturating_sub(seen_ms)
+    }
+
+    pub fn heartbeat_age_limit(&self, heartbeat_timeout_ms: u64) -> u64 {
+        self.heartbeat_seen_ms()
+            .unwrap_or(0)
+            .saturating_add(heartbeat_timeout_ms)
+    }
+
+    pub fn is_heartbeat_stale(&self, now_ms: u64, heartbeat_timeout_ms: u64) -> bool {
+        self.heartbeat_age_ms(now_ms) > heartbeat_timeout_ms
+    }
+
     pub fn safety_fail_count(&self) -> u32 {
         self.safety_fail_count
     }
@@ -124,6 +184,14 @@ impl RuntimeState {
 
     pub fn ota_error_reason(&self) -> Option<&str> {
         self.ota_error_reason.as_deref()
+    }
+
+    pub fn boot_failure_count(&self) -> u32 {
+        self.boot_failure_count
+    }
+
+    pub fn in_flight_ids(&self) -> Vec<String> {
+        self.in_flight.keys().cloned().collect()
     }
 
     pub fn scene(&self) -> Scene {
@@ -184,6 +252,12 @@ impl RuntimeState {
             };
         }
 
+        if msg.is_expired(now_ms()) {
+            return RuntimeAction::RaiseUiState {
+                message: "message_expired_ttl",
+            };
+        }
+
         if self.is_duplicate_or_stale(msg.envelope.seq, &msg.envelope.message_id) {
             return RuntimeAction::RaiseUiState {
                 message: "replay_or_duplicate_rejected",
@@ -196,7 +270,7 @@ impl RuntimeState {
 
         match &msg.kind {
             MessageKind::HelloAck => {
-                self.mode = RuntimeMode::Connected;
+                self.mark_boot_success();
                 self.offline_since_ms = None;
                 self.safety_fail_count = 0;
                 RuntimeAction::RaiseUiState {
@@ -206,6 +280,9 @@ impl RuntimeState {
             MessageKind::StatusDelta | MessageKind::StatusSnapshot => {
                 if let Some(status) = msg.as_status_snapshot() {
                     self.apply_status_snapshot(status);
+                }
+                if msg.kind == MessageKind::StatusSnapshot {
+                    self.pending_reconciliation = false;
                 }
                 self.offline_since_ms = None;
                 RuntimeAction::RaiseUiState {
@@ -270,6 +347,33 @@ impl RuntimeState {
                 if let Some(corr_id) = msg.corr_id.as_ref() {
                     self.in_flight.remove(corr_id);
                 }
+                if let Some(command) = parse_command_payload(&msg.payload) {
+                    if let Some(result) = msg.payload.get("result").and_then(Value::as_str) {
+                        if command.action == DeviceAction::OtaStart {
+                            match result {
+                                "ok" | "success" => {
+                                    return RuntimeAction::RaiseUiState {
+                                        message: "ota_result_ok",
+                                    };
+                                }
+                                "error" | "failed" => {
+                                    self.ota_error_reason = Some(
+                                        msg.payload
+                                            .get("reason")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("ota_failed")
+                                            .to_owned(),
+                                    );
+                                    self.ota_in_progress = false;
+                                    return RuntimeAction::RaiseUiState {
+                                        message: "ota_result_failed",
+                                    };
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
                 RuntimeAction::RaiseUiState {
                     message: "command_result",
                 }
@@ -286,15 +390,15 @@ impl RuntimeState {
     }
 
     pub fn emit_command(&mut self, action: DeviceAction) -> TransportMessage {
-        let seq = self.last_seq.saturating_add(1);
-        self.last_seq = seq;
+        let seq = self.outbound_seq.saturating_add(1);
+        self.outbound_seq = seq;
         let message_id = MessageId::new(format!("cmd-{seq}"));
         let corr_id = format!("corr-{seq}");
         let envelope = Envelope {
             v: 1,
             seq,
-            source: "device".to_owned(),
-            device_id: "microclaw-device".to_owned(),
+            source: self.device_id.clone(),
+            device_id: self.device_id.clone(),
             session_id: "boot".to_owned(),
             message_id,
         };
@@ -319,6 +423,35 @@ impl RuntimeState {
                 "action": action,
             }),
         }
+    }
+
+    pub fn emit_snapshot_request(&mut self) -> TransportMessage {
+        let seq = self.outbound_seq.saturating_add(1);
+        self.outbound_seq = seq;
+        let message_id = MessageId::new(format!("snap-req-{seq}"));
+        let envelope = Envelope {
+            v: 1,
+            seq,
+            source: self.device_id.clone(),
+            device_id: self.device_id.clone(),
+            session_id: "boot".to_owned(),
+            message_id,
+        };
+        self.pending_reconciliation = true;
+        TransportMessage {
+            envelope,
+            kind: MessageKind::SnapshotRequest,
+            corr_id: None,
+            ttl_ms: None,
+            issued_at: Some(now_ms()),
+            signature: None,
+            nonce: None,
+            payload: json!({"reason": "transport_reconnect"}),
+        }
+    }
+
+    pub fn pending_reconciliation(&self) -> bool {
+        self.pending_reconciliation
     }
 
     pub fn mark_offline_with_reason(&mut self, reason: impl Into<String>, now_ms: u64) {
@@ -369,6 +502,7 @@ impl RuntimeState {
         self.ota_error_reason = reason.clone();
         if success {
             self.last_status.ota_state = Some("active".to_owned());
+            self.mode = RuntimeMode::Connected;
             RuntimeAction::RaiseUiState {
                 message: "ota_complete",
             }
@@ -378,6 +512,12 @@ impl RuntimeState {
                 message: "ota_failed",
             }
         }
+    }
+
+    pub fn mark_boot_success(&mut self) {
+        self.clear_boot_failure_count();
+        self.mode = RuntimeMode::Connected;
+        self.last_status.mode = Some("connected".to_owned());
     }
 
     fn apply_status_snapshot(&mut self, status: DeviceStatus) {
@@ -399,6 +539,51 @@ impl RuntimeState {
                 _ => {}
             }
         }
+    }
+
+    pub fn mark_boot_failure(&mut self, now_ms: u64, reason: impl Into<String>) {
+        self.boot_failure_count = self.boot_failure_count.saturating_add(1);
+        self.persist_boot_failure_count();
+        self.push_diagnostic(reason.into());
+        if self.boot_failure_count >= self.boot_retry_limit {
+            self.mode = RuntimeMode::SafeMode("boot_failures_exceeded".to_owned());
+            self.offline_since_ms = Some(now_ms);
+            self.push_diagnostic("boot_failure_detected".to_owned());
+        } else {
+            self.mode = RuntimeMode::Error("boot_retry".to_owned());
+            self.mark_offline_with_reason("boot_failure_detected", now_ms);
+        }
+    }
+
+    pub fn clear_boot_failure_count(&mut self) {
+        self.boot_failure_count = 0;
+        self.persist_boot_failure_count();
+    }
+
+    fn persist_boot_failure_count(&mut self) {
+        if let Some(storage) = self.storage.as_mut() {
+            storage.set_u32(storage::keys::BOOT_FAILURE_COUNT, self.boot_failure_count);
+        }
+    }
+
+    pub fn reclaim_stale_inflight(&mut self, now_ms: u64, max_ms: u64) -> usize {
+        let before = self.in_flight.len();
+        let stale = self
+            .in_flight
+            .iter()
+            .filter_map(|(id, cmd)| {
+                if now_ms.saturating_sub(cmd.enqueued_at_ms) >= max_ms {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        for id in stale {
+            self.in_flight.remove(&id);
+            self.safety_fail_count = self.safety_fail_count.saturating_add(1);
+        }
+        before.saturating_sub(self.in_flight.len())
     }
 
     fn note_heartbeat(&mut self, issued_at: Option<u64>) {
@@ -430,6 +615,10 @@ impl RuntimeState {
             self.diagnostics.pop_front();
         }
     }
+}
+
+fn parse_command_payload(payload: &Value) -> Option<microclaw_protocol::DeviceCommand> {
+    serde_json::from_value(payload.clone()).ok()
 }
 
 pub fn now_ms() -> u64 {

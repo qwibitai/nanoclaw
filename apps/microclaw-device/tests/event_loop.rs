@@ -1,8 +1,8 @@
 use microclaw_device::{
+    drivers,
     event_loop::{DeviceEventLoop, EventLoopConfig},
     pipeline::TouchPipeline,
     protocol::{Envelope, MessageId, MessageKind, TouchEventPayload, TransportMessage},
-    drivers,
     renderer::NullRenderer,
     RuntimeMode, RuntimeState,
 };
@@ -13,6 +13,7 @@ fn loop_executes_touch_and_transport_into_outbound_commands() {
     let mut runtime_loop = DeviceEventLoop::new(EventLoopConfig {
         render_interval_ms: 100,
         offline_timeout_ms: 60_000,
+        ..Default::default()
     });
     let mut renderer = NullRenderer::new();
     let mut pipeline = TouchPipeline::new();
@@ -57,6 +58,7 @@ fn loop_reports_offline_when_heartbeat_stale() {
     let mut runtime_loop = DeviceEventLoop::new(EventLoopConfig {
         render_interval_ms: 100,
         offline_timeout_ms: 50,
+        ..Default::default()
     });
     let mut renderer = NullRenderer::new();
     let mut pipeline = TouchPipeline::new();
@@ -85,6 +87,7 @@ fn loop_drain_touch_driver_events_into_frame() {
     let mut runtime_loop = DeviceEventLoop::new(EventLoopConfig {
         render_interval_ms: 100,
         offline_timeout_ms: 60_000,
+        ..Default::default()
     });
     let mut renderer = NullRenderer::new();
     let mut pipeline = TouchPipeline::new();

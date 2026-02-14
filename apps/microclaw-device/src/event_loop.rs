@@ -1,9 +1,10 @@
 use crate::drivers::TouchDriver;
 use crate::pipeline::TouchPipeline;
+use crate::pipeline::TOUCH_EVENT_STALE_MS;
 use crate::renderer::SceneRenderer;
 use crate::runtime::{RuntimeAction, RuntimeState};
+use crate::transport::TransportBus;
 use microclaw_protocol::TransportMessage;
-use crate::pipeline::TOUCH_EVENT_STALE_MS;
 
 #[derive(Clone, Debug)]
 pub struct LoopOutput {
@@ -12,6 +13,8 @@ pub struct LoopOutput {
     pub rendered: bool,
     pub offline_entered: bool,
     pub in_safe_mode: bool,
+    pub stale_inflight_reclaimed: usize,
+    pub transport_connected: bool,
 }
 
 impl LoopOutput {
@@ -22,6 +25,8 @@ impl LoopOutput {
             rendered: false,
             offline_entered: false,
             in_safe_mode: false,
+            stale_inflight_reclaimed: 0,
+            transport_connected: false,
         }
     }
 }
@@ -30,6 +35,8 @@ impl LoopOutput {
 pub struct EventLoopConfig {
     pub render_interval_ms: u64,
     pub offline_timeout_ms: u64,
+    pub stale_inflight_ms: u64,
+    pub transport_reconnect_backoff_ms: u64,
 }
 
 impl Default for EventLoopConfig {
@@ -37,6 +44,8 @@ impl Default for EventLoopConfig {
         Self {
             render_interval_ms: 250,
             offline_timeout_ms: 15_000,
+            stale_inflight_ms: 45_000,
+            transport_reconnect_backoff_ms: 1_000,
         }
     }
 }
@@ -46,6 +55,8 @@ pub struct DeviceEventLoop {
     last_render_ms: Option<u64>,
     last_touch_ms: Option<u64>,
     scene_cache: Option<crate::ui::Scene>,
+    transport_next_retry_ms: Option<u64>,
+    transport_retry_attempt: u32,
 }
 
 impl DeviceEventLoop {
@@ -55,6 +66,8 @@ impl DeviceEventLoop {
             last_render_ms: None,
             last_touch_ms: None,
             scene_cache: None,
+            transport_next_retry_ms: None,
+            transport_retry_attempt: 0,
         }
     }
 
@@ -143,6 +156,83 @@ impl DeviceEventLoop {
         out
     }
 
+    pub fn step_with_transport_driver<R: SceneRenderer>(
+        &mut self,
+        state: &mut RuntimeState,
+        touch_pipeline: &mut TouchPipeline,
+        transport: &mut dyn TransportBus,
+        touch_driver: Option<&mut dyn TouchDriver>,
+        now_ms: u64,
+        renderer: &mut R,
+    ) -> LoopOutput {
+        let mut pre_messages: Vec<&'static str> = Vec::new();
+        let was_connected = transport.is_connected();
+        {
+            let mut recovery_out = LoopOutput::new();
+            self.service_transport_recovery(state, transport, now_ms, &mut recovery_out);
+            pre_messages.extend(recovery_out.ui_messages);
+        }
+        let became_connected = !was_connected && transport.is_connected();
+        if became_connected {
+            self.transport_retry_attempt = 0;
+            self.transport_next_retry_ms = None;
+        }
+        if was_connected && !transport.is_connected() {
+            state.mark_offline_with_reason("transport_disconnected", now_ms);
+            pre_messages.push("transport_disconnected");
+        }
+
+        let inbound_frames = transport.poll_frames();
+        let mut out = self.step_with_touch_driver(
+            state,
+            touch_pipeline,
+            touch_driver,
+            &inbound_frames,
+            now_ms,
+            renderer,
+        );
+
+        // Prepend recovery messages that were collected before the step
+        let mut merged = pre_messages;
+        merged.append(&mut out.ui_messages);
+        out.ui_messages = merged;
+
+        if became_connected {
+            let snap_req = state.emit_snapshot_request();
+            transport.send_frame(snap_req);
+            out.ui_messages.push("transport_connected");
+            out.ui_messages.push("transport_recovery_completed");
+            out.ui_messages.push("snapshot_request_sent");
+            out.ui_messages.push("transport_step_connected");
+        } else if transport.is_connected() {
+            out.ui_messages.push("transport_step_completed");
+        } else {
+            out.ui_messages.push("transport_step_disconnected");
+        }
+        out.stale_inflight_reclaimed =
+            state.reclaim_stale_inflight(now_ms, self.config.stale_inflight_ms);
+        if out.stale_inflight_reclaimed > 0 {
+            out.ui_messages.push("stale_inflight_reclaimed");
+            out.offline_entered = true;
+        }
+        for frame in out.outbound.drain(..) {
+            transport.send_frame(frame);
+        }
+        out.transport_connected = transport.is_connected();
+        out
+    }
+
+    pub fn step_with_transport<R: SceneRenderer>(
+        &mut self,
+        state: &mut RuntimeState,
+        touch_pipeline: &mut TouchPipeline,
+        transport: &mut dyn TransportBus,
+        now_ms: u64,
+        renderer: &mut R,
+    ) -> LoopOutput {
+        self.step_with_transport_driver(state, touch_pipeline, transport, None, now_ms, renderer)
+    }
+
     fn process_action(
         &mut self,
         state: &mut RuntimeState,
@@ -166,5 +256,67 @@ impl DeviceEventLoop {
                 true
             }
         }
+    }
+
+    fn service_transport_recovery(
+        &mut self,
+        state: &mut RuntimeState,
+        transport: &mut dyn TransportBus,
+        now_ms: u64,
+        out: &mut LoopOutput,
+    ) {
+        if transport.is_connected() {
+            self.transport_retry_attempt = 0;
+            self.transport_next_retry_ms = None;
+            return;
+        }
+
+        if matches!(state.mode(), crate::runtime::RuntimeMode::SafeMode(_)) {
+            out.ui_messages
+                .push("transport_reconnect_blocked_by_safe_mode");
+            return;
+        }
+
+        if state.is_heartbeat_stale(now_ms, self.config.offline_timeout_ms) {
+            out.ui_messages.push("heartbeat_stale_pre_reconnect");
+        }
+
+        let next_retry = self.transport_next_retry_ms.unwrap_or(now_ms);
+        let schedule_needed = now_ms >= next_retry;
+        if schedule_needed {
+            let attempt = self.transport_retry_attempt.saturating_add(1);
+            let next_delay = self.reconnect_backoff(attempt);
+            let reconnected = transport.reconnect(attempt, now_ms);
+            if reconnected {
+                out.ui_messages.push("transport_reconnect_success");
+                state.mark_boot_success();
+                self.transport_retry_attempt = 0;
+                self.transport_next_retry_ms = None;
+            } else {
+                self.transport_retry_attempt = attempt;
+                let next_retry_ms = now_ms.saturating_add(next_delay);
+                self.transport_next_retry_ms = Some(next_retry_ms);
+                out.ui_messages.push("transport_reconnect_failed");
+                state.mark_offline_with_reason("transport_reconnect_failed", now_ms);
+            }
+        }
+
+        if self.transport_next_retry_ms.is_none() && self.transport_retry_attempt > 0 {
+            self.transport_next_retry_ms =
+                Some(now_ms.saturating_add(self.config.transport_reconnect_backoff_ms));
+        }
+    }
+
+    fn reconnect_backoff(&self, attempt: u32) -> u64 {
+        let max_backoff = 30_000;
+        let attempt = attempt.max(1) as u64;
+        let mut delay = self
+            .config
+            .transport_reconnect_backoff_ms
+            .saturating_mul(1u64 << (attempt - 1).min(6));
+        if delay == 0 {
+            delay = 500;
+        }
+        delay.min(max_backoff)
     }
 }

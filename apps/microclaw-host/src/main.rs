@@ -1,5 +1,20 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 fn main() {
-    let _ = microclaw_host::Host::new(microclaw_config::HostConfig::default())
-        .expect("host init should succeed");
-    println!("microclaw-host ready");
+    let config = microclaw_config::HostConfig::from_env();
+    let shutdown = Arc::new(AtomicBool::new(false));
+
+    {
+        let shutdown = shutdown.clone();
+        ctrlc::set_handler(move || {
+            shutdown.store(true, Ordering::Release);
+        })
+        .expect("install ctrl-c handler");
+    }
+
+    let mut host = microclaw_host::Host::new(config).expect("host init should succeed");
+    host.run(shutdown).expect("host run should succeed");
 }

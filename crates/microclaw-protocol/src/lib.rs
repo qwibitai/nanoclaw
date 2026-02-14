@@ -45,6 +45,7 @@ pub enum MessageKind {
     HelloAck,
     StatusSnapshot,
     StatusDelta,
+    SnapshotRequest,
     Command,
     CommandAck,
     CommandResult,
@@ -103,7 +104,7 @@ impl Default for DeviceStatus {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAction {
     Reconnect,

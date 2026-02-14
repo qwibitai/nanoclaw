@@ -1,4 +1,4 @@
-use microclaw_device::{protocol::*, RuntimeAction, RuntimeMode, RuntimeState};
+use microclaw_device::{now_ms, protocol::*, RuntimeAction, RuntimeMode, RuntimeState};
 use microclaw_protocol::TouchEventPayload;
 use serde_json::json;
 
@@ -230,4 +230,176 @@ fn stale_heartbeat_marks_offline_after_timeout() {
         state.mode(),
         microclaw_device::RuntimeMode::Offline
     ));
+}
+
+#[test]
+fn stale_inflight_commands_are_reclaimed_with_safety_bump() {
+    let mut state = RuntimeState::new();
+    state.apply_transport_message(&TransportMessage {
+        envelope: Envelope::new("host", "microclaw-device", "boot", MessageId::new("hello")),
+        kind: MessageKind::HelloAck,
+        corr_id: None,
+        ttl_ms: None,
+        issued_at: Some(0),
+        signature: None,
+        nonce: None,
+        payload: serde_json::json!({}),
+    });
+
+    let now = now_ms();
+    let cmd = state.emit_command(microclaw_protocol::DeviceAction::StatusGet);
+    assert_eq!(state.in_flight_count(), 1);
+    assert!(cmd.issued_at.is_some());
+
+    let reclaimed = state.reclaim_stale_inflight(now.saturating_add(10_000), 1);
+    assert_eq!(reclaimed, 1);
+    assert_eq!(state.in_flight_count(), 0);
+    assert!(state.safety_fail_count() > 0);
+
+    let cmd_result = state.emit_command(microclaw_protocol::DeviceAction::Restart);
+    assert!(cmd_result.corr_id.is_some());
+    assert_eq!(state.in_flight_count(), 1);
+}
+
+// --- Regression tests for bug fixes ---
+
+#[test]
+fn emit_command_does_not_reject_subsequent_inbound_messages() {
+    // Bug: emit_command was bumping last_seq (shared with inbound dedup),
+    // causing valid host messages to be rejected as "stale".
+    let mut state = RuntimeState::new();
+
+    // Accept initial hello (seq=1)
+    state.apply_transport_message(&TransportMessage {
+        envelope: Envelope::new("host", "microclaw-device", "boot", MessageId::new("hello")),
+        kind: MessageKind::HelloAck,
+        corr_id: None,
+        ttl_ms: None,
+        issued_at: Some(0),
+        signature: None,
+        nonce: None,
+        payload: json!({}),
+    });
+
+    // Emit several outbound commands (these should NOT affect inbound seq tracking)
+    state.emit_command(DeviceAction::StatusGet);
+    state.emit_command(DeviceAction::StatusGet);
+    state.emit_command(DeviceAction::StatusGet);
+
+    // Inbound message with seq=2 should still be accepted
+    let action = state.apply_transport_message(&TransportMessage {
+        envelope: {
+            let mut e = Envelope::new("host", "microclaw-device", "boot", MessageId::new("hb-1"));
+            e.seq = 2;
+            e
+        },
+        kind: MessageKind::Heartbeat,
+        corr_id: None,
+        ttl_ms: None,
+        issued_at: Some(100),
+        signature: None,
+        nonce: None,
+        payload: json!({}),
+    });
+    // Must NOT be rejected as replay/stale
+    assert!(
+        !matches!(
+            action,
+            RuntimeAction::RaiseUiState {
+                message: "replay_or_duplicate_rejected"
+            }
+        ),
+        "inbound message rejected after emit_command bumped seq"
+    );
+    assert!(matches!(state.mode(), RuntimeMode::Connected));
+}
+
+#[test]
+fn mark_boot_failure_preserves_safe_mode_when_threshold_exceeded() {
+    // Bug: mark_boot_failure set SafeMode then immediately called
+    // mark_offline_with_reason which overwrote it to Offline.
+    let mut state = RuntimeState::new();
+
+    // Trigger 3 boot failures (default boot_retry_limit is 3)
+    state.mark_boot_failure(100, "fail-1");
+    state.mark_boot_failure(200, "fail-2");
+    state.mark_boot_failure(300, "fail-3");
+
+    // After exceeding the limit, mode must be SafeMode, not Offline
+    assert!(
+        matches!(state.mode(), RuntimeMode::SafeMode(_)),
+        "expected SafeMode after exceeding boot retry limit, got {:?}",
+        state.mode()
+    );
+    assert_eq!(state.boot_failure_count(), 3);
+}
+
+#[test]
+fn mark_boot_failure_below_threshold_goes_offline() {
+    let mut state = RuntimeState::new();
+
+    state.mark_boot_failure(100, "fail-1");
+    // Below threshold (3), should go to Error then Offline
+    assert!(
+        matches!(state.mode(), RuntimeMode::Offline),
+        "expected Offline below boot retry limit, got {:?}",
+        state.mode()
+    );
+    assert_eq!(state.boot_failure_count(), 1);
+}
+
+#[test]
+fn expired_ttl_messages_are_rejected() {
+    let mut state = RuntimeState::new();
+    // Message issued at t=0 with TTL of 100ms, but current time is well past that
+    let msg = TransportMessage {
+        envelope: Envelope::new("host", "microclaw-device", "boot", MessageId::new("old-1")),
+        kind: MessageKind::Heartbeat,
+        corr_id: None,
+        ttl_ms: Some(100),
+        issued_at: Some(0),
+        signature: None,
+        nonce: None,
+        payload: json!({}),
+    };
+
+    // now_ms() is always >> 100, so this message is expired
+    let action = state.apply_transport_message(&msg);
+    assert!(
+        matches!(
+            action,
+            RuntimeAction::RaiseUiState {
+                message: "message_expired_ttl"
+            }
+        ),
+        "expected expired TTL rejection, got {:?}",
+        action
+    );
+}
+
+#[test]
+fn messages_without_ttl_are_not_expired() {
+    let mut state = RuntimeState::new();
+    // No TTL set - should never expire
+    let msg = TransportMessage {
+        envelope: Envelope::new("host", "microclaw-device", "boot", MessageId::new("no-ttl")),
+        kind: MessageKind::HelloAck,
+        corr_id: None,
+        ttl_ms: None,
+        issued_at: Some(0),
+        signature: None,
+        nonce: None,
+        payload: json!({}),
+    };
+
+    let action = state.apply_transport_message(&msg);
+    assert!(
+        matches!(
+            action,
+            RuntimeAction::RaiseUiState {
+                message: "connected"
+            }
+        ),
+        "message without TTL should not be rejected"
+    );
 }

@@ -10,8 +10,13 @@ esp = ["esp-idf-svc"]
 [dependencies]
 microclaw-protocol = { path = "../../crates/microclaw-protocol" }
 serde_json = "1"
+slint = { version = "1.9", default-features = false, features = ["compat-1-2", "renderer-software", "std"] }
 
 esp-idf-svc = { version = "0.51", optional = true }
 
+[target.'cfg(target_os = "espidf")'.dependencies]
+slint = { version = "1.9", default-features = false, features = ["compat-1-2", "renderer-software", "std", "unsafe-single-threaded"] }
+
 [build-dependencies]
 embuild = "0.33"
+slint-build = "1.9"

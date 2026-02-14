@@ -1,4 +1,5 @@
 use rusqlite::{params, Connection, Result as SqlResult};
+use std::path::Path;
 
 pub struct Store {
     conn: Connection,
@@ -89,6 +90,12 @@ fn create_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 }
 
 impl Store {
+    pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
+        let conn = Connection::open(path.as_ref())?;
+        create_schema(&conn)?;
+        Ok(Self { conn })
+    }
+
     pub fn open_in_memory() -> rusqlite::Result<Self> {
         let conn = rusqlite::Connection::open_in_memory()?;
         create_schema(&conn)?;

@@ -1,0 +1,354 @@
+// MicroClaw Device UI — 360x360 round display, dark theme
+// Scenes: Boot, Paired, Conversation, Settings, Error, Offline
+
+global Theme {
+    out property <color> bg: #0B0B0E;
+    out property <color> text-primary: #FAFAF9;
+    out property <color> text-secondary: #A1A1AA;
+    out property <color> accent-green: #32D583;
+    out property <color> accent-coral: #E85A4F;
+    out property <color> accent-indigo: #6366F1;
+    out property <color> button-bg: #1C1C21;
+    out property <color> button-border: #2E2E36;
+}
+
+component DeviceButton inherits Rectangle {
+    in property <string> label;
+    in property <color> accent: Theme.accent-indigo;
+    callback clicked;
+
+    min-height: 46px;
+    min-width: 108px;
+    border-radius: 12px;
+    background: Theme.button-bg;
+    border-width: 1px;
+    border-color: Theme.button-border;
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        padding-left: 16px;
+        padding-right: 16px;
+
+        Text {
+            text: root.label;
+            color: root.accent;
+            font-size: 14px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component SceneTitle inherits Text {
+    color: Theme.text-primary;
+    font-size: 28px;
+    font-weight: 700;
+    horizontal-alignment: center;
+}
+
+component StatusLine inherits Text {
+    color: Theme.text-secondary;
+    font-size: 14px;
+    horizontal-alignment: center;
+}
+
+component BootScene inherits VerticalLayout {
+    callback button-pressed(string);
+
+    alignment: center;
+    spacing: 16px;
+    padding: 20px;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: 8px;
+
+        SceneTitle {
+            text: "microClaw";
+        }
+
+        StatusLine {
+            text: "Connecting...";
+        }
+    }
+
+    // Spacer
+    Rectangle { height: 80px; }
+
+    HorizontalLayout {
+        alignment: center;
+
+        DeviceButton {
+            label: "Retry";
+            accent: Theme.accent-indigo;
+            clicked => { root.button-pressed("retry"); }
+        }
+    }
+}
+
+component PairedScene inherits VerticalLayout {
+    callback button-pressed(string);
+
+    alignment: start;
+    spacing: 12px;
+    padding: 20px;
+    padding-top: 40px;
+
+    SceneTitle {
+        text: "Paired";
+    }
+
+    StatusLine {
+        text: "Connected to host";
+    }
+
+    // Spacer
+    Rectangle { height: 20px; }
+
+    HorizontalLayout {
+        alignment: center;
+
+        DeviceButton {
+            label: "Start Conversation";
+            accent: Theme.accent-green;
+            min-width: 240px;
+            min-height: 56px;
+            clicked => { root.button-pressed("open_conversation"); }
+        }
+    }
+
+    // Spacer
+    Rectangle { height: 12px; }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 16px;
+
+        DeviceButton {
+            label: "Unpair";
+            accent: Theme.text-secondary;
+            min-width: 110px;
+            min-height: 56px;
+            clicked => { root.button-pressed("unpair"); }
+        }
+
+        DeviceButton {
+            label: "Sync Now";
+            accent: Theme.accent-green;
+            min-width: 110px;
+            min-height: 56px;
+            clicked => { root.button-pressed("sync_now"); }
+        }
+    }
+}
+
+component ConversationScene inherits VerticalLayout {
+    callback button-pressed(string);
+
+    alignment: start;
+    spacing: 8px;
+    padding: 20px;
+    padding-top: 40px;
+
+    SceneTitle {
+        text: "Active";
+    }
+
+    // Transcript area placeholder
+    Rectangle {
+        height: 160px;
+        background: #12121A;
+        border-radius: 8px;
+
+        Text {
+            text: "Conversation active";
+            color: Theme.text-secondary;
+            font-size: 13px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    // Spacer
+    Rectangle { height: 8px; }
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 16px;
+
+        DeviceButton {
+            label: "Mute";
+            accent: Theme.text-secondary;
+            min-width: 124px;
+            min-height: 54px;
+            clicked => { root.button-pressed("mute"); }
+        }
+
+        DeviceButton {
+            label: "End Session";
+            accent: Theme.accent-coral;
+            min-width: 124px;
+            min-height: 54px;
+            clicked => { root.button-pressed("end_session"); }
+        }
+    }
+}
+
+component SettingsScene inherits VerticalLayout {
+    callback button-pressed(string);
+
+    alignment: start;
+    spacing: 12px;
+    padding: 20px;
+    padding-top: 40px;
+
+    SceneTitle {
+        text: "Settings";
+    }
+
+    // Settings grid placeholder
+    Rectangle {
+        height: 180px;
+        background: #12121A;
+        border-radius: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding: 16px;
+
+            Text {
+                text: "Device Configuration";
+                color: Theme.text-primary;
+                font-size: 14px;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: "WiFi: Connected";
+                color: Theme.text-secondary;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: "Firmware: v0.1.0";
+                color: Theme.text-secondary;
+                font-size: 12px;
+                horizontal-alignment: center;
+            }
+        }
+    }
+
+    // Spacer
+    Rectangle { height: 16px; }
+
+    HorizontalLayout {
+        alignment: center;
+
+        DeviceButton {
+            label: "Status";
+            accent: Theme.accent-indigo;
+            min-width: 60px;
+            min-height: 30px;
+            clicked => { root.button-pressed("status_get"); }
+        }
+    }
+}
+
+component ErrorScene inherits VerticalLayout {
+    callback button-pressed(string);
+
+    in property <string> title: "Error";
+    in property <string> status: "Check connection";
+
+    alignment: center;
+    spacing: 16px;
+    padding: 20px;
+
+    SceneTitle {
+        text: root.title;
+        color: Theme.accent-coral;
+    }
+
+    StatusLine {
+        text: root.status;
+    }
+
+    // Spacer
+    Rectangle { height: 40px; }
+
+    HorizontalLayout {
+        alignment: center;
+
+        DeviceButton {
+            label: "Restart";
+            accent: Theme.accent-coral;
+            min-width: 188px;
+            min-height: 56px;
+            clicked => { root.button-pressed("restart"); }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+
+        DeviceButton {
+            label: "Reconnect";
+            accent: Theme.text-secondary;
+            min-width: 200px;
+            min-height: 40px;
+            clicked => { root.button-pressed("reconnect"); }
+        }
+    }
+}
+
+export component MicroClawApp inherits Window {
+    in property <int> current-scene: 0;
+    in property <string> status-text: "";
+    callback button-pressed(string);
+
+    width: 360px;
+    height: 360px;
+    background: Theme.bg;
+
+    Rectangle {
+        border-radius: 180px;
+        clip: true;
+        background: Theme.bg;
+
+    if current-scene == 0: BootScene {
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+
+    if current-scene == 1: PairedScene {
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+
+    if current-scene == 2: ConversationScene {
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+
+    if current-scene == 3: SettingsScene {
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+
+    if current-scene == 4: ErrorScene {
+        title: "Error";
+        status: "Check connection";
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+
+    if current-scene == 5: ErrorScene {
+        title: "Offline";
+        status: "No heartbeat";
+        button-pressed(action) => { root.button-pressed(action); }
+    }
+    } // close Rectangle clip
+}

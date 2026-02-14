@@ -1,0 +1,13 @@
+## ESP-IDF component dependencies for microclaw-device
+## These provide the C implementations for the FFI symbols declared in drivers.rs
+##
+## st77916: QSPI LCD panel driver for Waveshare 1.85" round display
+## cst816s: I2C capacitive touch controller (CST816 family)
+##
+## Requires: ESP-IDF v5.1+ with QSPI LCD support
+
+dependencies:
+  espressif/esp_lcd_st77916: "~0.1.0"
+  espressif/esp_lcd_touch_cst816s: "~1.0.0"
+  idf:
+    version: ">=5.1.0"

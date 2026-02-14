@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use microclaw_protocol::TouchEventPayload;
 
-use crate::drivers::TouchDriver;
 use crate::display::{clamp_and_validate_touch, DisplayPoint};
+use crate::drivers::TouchDriver;
 
 pub const TOUCH_QUEUE_CAPACITY: usize = 32;
 pub const TOUCH_EVENT_STALE_MS: u64 = 2_000;
