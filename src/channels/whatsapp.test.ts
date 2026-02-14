@@ -108,6 +108,7 @@ function createTestOpts(overrides?: Partial<WhatsAppChannelOpts>): WhatsAppChann
         folder: 'test-group',
         trigger: '@Andy',
         added_at: '2024-01-01T00:00:00.000Z',
+        channel: 'whatsapp',
       },
     })),
     ...overrides,
@@ -550,6 +551,7 @@ describe('WhatsAppChannel', () => {
             folder: 'self-chat',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
+            channel: 'whatsapp',
           },
         })),
       });

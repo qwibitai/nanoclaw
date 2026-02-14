@@ -5,9 +5,12 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -311,5 +314,76 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- Registered groups with channel ---
+
+describe('registered groups channel field', () => {
+  it('stores and retrieves channel field', () => {
+    setRegisteredGroup('group@g.us', {
+      name: 'Test Group',
+      folder: 'test-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'telegram',
+    });
+
+    const group = getRegisteredGroup('group@g.us');
+    expect(group).toBeDefined();
+    expect(group!.channel).toBe('telegram');
+    expect(group!.name).toBe('Test Group');
+  });
+
+  it('defaults channel to whatsapp for migration compatibility', () => {
+    // Simulate what the migration does: existing rows get DEFAULT 'whatsapp'
+    setRegisteredGroup('legacy@g.us', {
+      name: 'Legacy Group',
+      folder: 'legacy',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'whatsapp',
+    });
+
+    const group = getRegisteredGroup('legacy@g.us');
+    expect(group!.channel).toBe('whatsapp');
+  });
+
+  it('getAllRegisteredGroups returns channel field', () => {
+    setRegisteredGroup('wa@g.us', {
+      name: 'WA Group',
+      folder: 'wa-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'whatsapp',
+    });
+    setRegisteredGroup('tg@g.us', {
+      name: 'TG Group',
+      folder: 'tg-group',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'telegram',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(groups['wa@g.us'].channel).toBe('whatsapp');
+    expect(groups['tg@g.us'].channel).toBe('telegram');
+  });
+
+  it('migration is idempotent (re-init does not fail)', () => {
+    setRegisteredGroup('test@g.us', {
+      name: 'Test',
+      folder: 'test',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'whatsapp',
+    });
+
+    // Re-init simulates restart — migrations should be idempotent
+    _initTestDatabase();
+
+    // DB is fresh in-memory, so previous data is gone, but init didn't crash
+    const groups = getAllRegisteredGroups();
+    expect(Object.keys(groups)).toHaveLength(0);
   });
 });

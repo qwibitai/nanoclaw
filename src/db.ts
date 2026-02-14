@@ -9,6 +9,12 @@ let db: Database.Database;
 
 function createSchema(database: Database.Database): void {
   database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_version (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 0);
+
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
       name TEXT,
@@ -74,13 +80,46 @@ function createSchema(database: Database.Database): void {
     );
   `);
 
-  // Add context_mode column if it doesn't exist (migration for existing DBs)
-  try {
-    database.exec(
-      `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
-    );
-  } catch {
-    /* column already exists */
+  runMigrations(database);
+}
+
+type Migration = (database: Database.Database) => void;
+
+const migrations: Migration[] = [
+  // Migration 1: Add context_mode to scheduled_tasks (previously ad-hoc try/catch)
+  (database) => {
+    try {
+      database.exec(
+        `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
+      );
+    } catch {
+      /* column already exists from pre-migration era */
+    }
+  },
+  // Migration 2: Add channel column to registered_groups
+  (database) => {
+    try {
+      database.exec(
+        `ALTER TABLE registered_groups ADD COLUMN channel TEXT NOT NULL DEFAULT 'whatsapp'`,
+      );
+    } catch {
+      /* column already exists */
+    }
+  },
+];
+
+function runMigrations(database: Database.Database): void {
+  const row = database
+    .prepare('SELECT version FROM schema_version WHERE id = 1')
+    .get() as { version: number };
+  let currentVersion = row.version;
+
+  for (let i = currentVersion; i < migrations.length; i++) {
+    migrations[i](database);
+    currentVersion = i + 1;
+    database
+      .prepare('UPDATE schema_version SET version = ? WHERE id = 1')
+      .run(currentVersion);
   }
 }
 
@@ -466,6 +505,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        channel: string;
       }
     | undefined;
   if (!row) return undefined;
@@ -475,6 +515,7 @@ export function getRegisteredGroup(
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
+    channel: row.channel,
     containerConfig: row.container_config
       ? JSON.parse(row.container_config)
       : undefined,
@@ -487,8 +528,8 @@ export function setRegisteredGroup(
   group: RegisteredGroup,
 ): void {
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     jid,
     group.name,
@@ -497,6 +538,7 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    group.channel,
   );
 }
 
@@ -511,6 +553,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    channel: string;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -519,6 +562,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
+      channel: row.channel,
       containerConfig: row.container_config
         ? JSON.parse(row.container_config)
         : undefined,
@@ -578,7 +622,7 @@ function migrateJsonState(): void {
   > | null;
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
-      setRegisteredGroup(jid, group);
+      setRegisteredGroup(jid, { ...group, channel: group.channel || 'whatsapp' });
     }
   }
 }

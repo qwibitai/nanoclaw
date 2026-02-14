@@ -89,6 +89,7 @@ const testGroup: RegisteredGroup = {
   folder: 'test-group',
   trigger: '@Andy',
   added_at: new Date().toISOString(),
+  channel: 'whatsapp',
 };
 
 const testInput = {

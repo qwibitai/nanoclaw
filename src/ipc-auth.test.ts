@@ -17,6 +17,7 @@ const MAIN_GROUP: RegisteredGroup = {
   folder: 'main',
   trigger: 'always',
   added_at: '2024-01-01T00:00:00.000Z',
+  channel: 'whatsapp',
 };
 
 const OTHER_GROUP: RegisteredGroup = {
@@ -24,6 +25,7 @@ const OTHER_GROUP: RegisteredGroup = {
   folder: 'other-group',
   trigger: '@Andy',
   added_at: '2024-01-01T00:00:00.000Z',
+  channel: 'whatsapp',
 };
 
 const THIRD_GROUP: RegisteredGroup = {
@@ -31,6 +33,7 @@ const THIRD_GROUP: RegisteredGroup = {
   folder: 'third-group',
   trigger: '@Andy',
   added_at: '2024-01-01T00:00:00.000Z',
+  channel: 'whatsapp',
 };
 
 let groups: Record<string, RegisteredGroup>;

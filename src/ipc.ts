@@ -171,6 +171,7 @@ export async function processTaskIpc(
     name?: string;
     folder?: string;
     trigger?: string;
+    channel?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
@@ -366,6 +367,7 @@ export async function processTaskIpc(
           folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
+          channel: data.channel || 'whatsapp',
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
         });
