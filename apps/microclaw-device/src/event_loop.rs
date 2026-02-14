@@ -57,6 +57,7 @@ pub struct DeviceEventLoop {
     scene_cache: Option<crate::ui::Scene>,
     transport_next_retry_ms: Option<u64>,
     transport_retry_attempt: u32,
+    swipe: crate::pipeline::SwipeDetector,
 }
 
 impl DeviceEventLoop {
@@ -68,6 +69,7 @@ impl DeviceEventLoop {
             scene_cache: None,
             transport_next_retry_ms: None,
             transport_retry_attempt: 0,
+            swipe: crate::pipeline::SwipeDetector::new(),
         }
     }
 
@@ -113,16 +115,43 @@ impl DeviceEventLoop {
         touch_pipeline.purge_stale(now_ms, TOUCH_EVENT_STALE_MS, &mut self.last_touch_ms);
 
         while let Some(event) = touch_pipeline.next_frame() {
-            let payload = microclaw_protocol::TouchEventPayload {
-                pointer_id: 0,
-                phase: event.phase,
-                x: event.point.x,
-                y: event.point.y,
-                pressure: None,
-                raw_timestamp_ms: None,
+            let swipe_result = match event.phase {
+                microclaw_protocol::TouchPhase::Down => {
+                    self.swipe.on_down(event.point.x, event.point.y)
+                }
+                microclaw_protocol::TouchPhase::Move => {
+                    self.swipe.on_move(event.point.x, event.point.y)
+                }
+                microclaw_protocol::TouchPhase::Up => {
+                    self.swipe.on_up(event.point.x, event.point.y)
+                }
+                _ => {
+                    self.swipe.cancel();
+                    None
+                }
             };
-            let action = state.apply_touch_event(&payload);
-            frame_dirty |= self.process_action(state, action, &mut out);
+
+            if let Some(direction) = swipe_result {
+                match direction {
+                    crate::pipeline::SwipeDirection::Left => state.next_connect_page(),
+                    crate::pipeline::SwipeDirection::Right => state.prev_connect_page(),
+                }
+                frame_dirty = true;
+            } else if matches!(
+                event.phase,
+                microclaw_protocol::TouchPhase::Down | microclaw_protocol::TouchPhase::Move
+            ) {
+                let payload = microclaw_protocol::TouchEventPayload {
+                    pointer_id: 0,
+                    phase: event.phase,
+                    x: event.point.x,
+                    y: event.point.y,
+                    pressure: None,
+                    raw_timestamp_ms: None,
+                };
+                let action = state.apply_touch_event(&payload);
+                frame_dirty |= self.process_action(state, action, &mut out);
+            }
             self.last_touch_ms = Some(now_ms);
         }
 
@@ -130,6 +159,10 @@ impl DeviceEventLoop {
             frame_dirty = true;
             out.offline_entered = true;
             out.ui_messages.push("offline_timeout");
+        }
+
+        if state.expire_toast(now_ms) {
+            frame_dirty = true;
         }
 
         if state.safety_lockdown_check() {
