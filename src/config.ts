@@ -89,3 +89,9 @@ export const B2_REGION = process.env.B2_REGION || '';
 
 // Railway cloud backend configuration
 export const RAILWAY_API_TOKEN = process.env.RAILWAY_API_TOKEN || '';
+
+// Hetzner Cloud
+export const HETZNER_API_TOKEN = process.env.HETZNER_API_TOKEN || '';
+export const HETZNER_LOCATION = process.env.HETZNER_LOCATION || 'ash'; // Ashburn, US
+export const HETZNER_SERVER_TYPE = process.env.HETZNER_SERVER_TYPE || 'cpx11'; // 2 vCPU, 2GB RAM
+export const HETZNER_IMAGE = process.env.HETZNER_IMAGE || 'ubuntu-22.04';

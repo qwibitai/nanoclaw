@@ -36,6 +36,12 @@ export function getBackend(type: BackendType): AgentBackend {
       backend = new RailwayBackend();
       break;
     }
+    case 'hetzner': {
+      // Lazy-load to avoid circular deps and missing module errors when not used
+      const { HetznerBackend } = require('./hetzner-backend.js');
+      backend = new HetznerBackend();
+      break;
+    }
     default:
       throw new Error(`Unknown backend type: ${type}`);
   }

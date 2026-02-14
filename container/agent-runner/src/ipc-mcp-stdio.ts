@@ -573,7 +573,7 @@ server.tool(
 Returns information about each agent including their ID, name, description, backend type, and JID (for messaging).
 This is useful when you need to send messages to specific agents or request context from them.`,
   {
-    filter_backend: z.enum(['apple-container', 'docker', 'sprites', 'daytona', 'railway']).optional()
+    filter_backend: z.enum(['apple-container', 'docker', 'sprites', 'daytona', 'railway', 'hetzner']).optional()
       .describe('Optional: filter agents by backend type'),
     include_self: z.boolean().default(true)
       .describe('Include the current agent in results (default: true)'),

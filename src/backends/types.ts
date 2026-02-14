@@ -5,7 +5,7 @@
 
 import { Agent, ContainerProcess, RegisteredGroup } from '../types.js';
 
-export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway';
+export type BackendType = 'apple-container' | 'docker' | 'sprites' | 'daytona' | 'railway' | 'hetzner';
 
 /**
  * Unified group-or-agent type for backwards compatibility.
