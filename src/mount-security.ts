@@ -7,6 +7,7 @@
  * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
@@ -121,7 +122,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
  * Expand ~ to home directory and resolve to absolute path
  */
 function expandPath(p: string): string {
-  const homeDir = process.env.HOME || '/Users/user';
+  const homeDir = process.env.HOME || os.homedir();
   if (p.startsWith('~/')) {
     return path.join(homeDir, p.slice(2));
   }
