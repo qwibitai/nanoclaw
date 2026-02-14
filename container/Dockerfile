@@ -25,6 +25,16 @@ ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOPATH="/home/bun/go"
 ENV PATH="${GOPATH}/bin:${PATH}"
 
+# Install just command runner (required for ditto backend development)
+ARG JUST_VERSION=1.41.1
+RUN ARCH="$(dpkg --print-architecture)" \
+    && JUST_ARCH=$([ "$ARCH" = "amd64" ] && echo "x86_64" || echo "aarch64") \
+    && wget -q "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz" \
+    && tar -xzf "just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz" \
+    && mv just /usr/local/bin/just \
+    && chmod +x /usr/local/bin/just \
+    && rm "just-${JUST_VERSION}-${JUST_ARCH}-unknown-linux-musl.tar.gz"
+
 # Install GitHub CLI for PR creation and git authentication
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
