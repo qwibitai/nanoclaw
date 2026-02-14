@@ -36,7 +36,8 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { NewMessage, RegisteredGroup } from './types.js';
+import { BoomError, NewMessage, RegisteredGroup, Session } from './types.js';
+import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -375,6 +376,63 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
+async function connectWhatsApp(): Promise<void> {
+  const authDir = path.join(STORE_DIR, 'auth');
+  fs.mkdirSync(authDir, { recursive: true });
+
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+
+  sock = makeWASocket({
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
+    printQRInTerminal: false,
+    logger,
+    browser: ['NanoClaw', 'Chrome', '1.0.0'],
+  });
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      const msg =
+        'WhatsApp authentication required. Run /setup in Claude Code.';
+      logger.error(msg);
+      exec(
+        `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+      );
+      setTimeout(() => process.exit(1), 1000);
+    }
+
+    if (connection === 'close') {
+      const reason = (lastDisconnect?.error as BoomError)?.output?.statusCode;
+      const shouldReconnect = reason !== DisconnectReason.loggedOut;
+      logger.info({ reason, shouldReconnect }, 'Connection closed');
+
+      if (shouldReconnect) {
+        logger.info('Reconnecting...');
+        connectWhatsApp();
+      } else {
+        logger.info('Logged out. Run /setup to re-authenticate.');
+        process.exit(0);
+      }
+    } else if (connection === 'open') {
+      logger.info('Connected to WhatsApp');
+      
+      // Build LID to phone mapping from auth state for self-chat translation
+      if (sock.user) {
+        const phoneUser = sock.user.id.split(':')[0];
+        const lidUser = sock.user.lid?.split(':')[0];
+        if (lidUser && phoneUser) {
+          lidToPhoneMap[lidUser] = `${phoneUser}@s.whatsapp.net`;
+          logger.debug({ lidUser, phoneUser }, 'LID to phone mapping set');
+        }
+      }
+      
+      // Sync group metadata on startup (respects 24h cache)
+      syncGroupMetadata().catch((err) =>
+        logger.error({ err }, 'Initial group sync failed'),
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.

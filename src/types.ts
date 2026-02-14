@@ -1,3 +1,19 @@
+/**
+ * Shape of a Boom error from @hapi/boom (used by Baileys for disconnect errors).
+ * Defined here to avoid casting to `any` when accessing statusCode.
+ */
+export interface BoomError {
+  output?: {
+    statusCode?: number;
+    payload?: {
+      statusCode?: number;
+      error?: string;
+      message?: string;
+    };
+  };
+  message?: string;
+}
+
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
