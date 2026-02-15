@@ -48,6 +48,12 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+// Track consecutive errors per group to prevent infinite error loops.
+// After MAX_CONSECUTIVE_ERRORS, the cursor advances past the failing batch
+// so the system doesn't re-trigger the same error on every poll.
+const consecutiveErrors: Record<string, number> = {};
+const MAX_CONSECUTIVE_ERRORS = 3;
+
 let whatsapp: WhatsAppChannel;
 const queue = new GroupQueue();
 
@@ -192,16 +198,33 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      consecutiveErrors[chatJid] = 0;
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
       return true;
     }
+
+    const errorCount = (consecutiveErrors[chatJid] || 0) + 1;
+    consecutiveErrors[chatJid] = errorCount;
+
+    if (errorCount >= MAX_CONSECUTIVE_ERRORS) {
+      // Too many consecutive failures — advance cursor to prevent a permanently
+      // stuck queue where every future message re-triggers the same failing batch.
+      logger.error(
+        { group: group.name, errorCount },
+        'Max consecutive errors reached, advancing cursor past failing messages',
+      );
+      consecutiveErrors[chatJid] = 0;
+      return false;
+    }
+
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
-    logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    logger.warn({ group: group.name, errorCount }, 'Agent error, rolled back message cursor for retry');
     return false;
   }
 
+  consecutiveErrors[chatJid] = 0;
   return true;
 }
 
