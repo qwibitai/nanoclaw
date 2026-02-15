@@ -564,6 +564,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
+        'EnterPlanMode', 'ExitPlanMode',
+        'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList',
         'mcp__nanoclaw__*'
       ],
       env: sdkEnv,
