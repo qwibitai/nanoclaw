@@ -37,4 +37,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit -m "docs: update token count to ${{ steps.tokens.outputs.badge }}"
+          git pull --rebase
           git push
