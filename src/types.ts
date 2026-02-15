@@ -37,6 +37,7 @@ export interface RegisteredGroup {
   folder: string;
   trigger: string;
   added_at: string;
+  channel: string; // Channel that owns this group (e.g. 'whatsapp', 'telegram')
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
