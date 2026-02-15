@@ -1,5 +1,5 @@
 #!/bin/bash
-# Auto-update script for NanoClaw instances
+# Auto-update script for OmniClaw instances
 # Pulls latest code from main, rebuilds container + host, and restarts the service
 #
 # Supports: macOS (launchd), Linux (systemd), Docker (docker-compose)
@@ -16,7 +16,7 @@ LOG_DATE="$(date '+%Y-%m-%d %H:%M:%S')"
 
 log() { echo "[$LOG_DATE] $1"; }
 
-log "NanoClaw Auto-Update Starting..."
+log "OmniClaw Auto-Update Starting..."
 log "Repository: $REPO_DIR"
 log "Target branch: $BRANCH"
 
@@ -85,7 +85,8 @@ log "Pulling latest code..."
 git pull --ff-only origin "$BRANCH"
 
 # Write update info for container to read
-UPDATE_INFO_FILE="$REPO_DIR/data/.nanoclaw-update-info.json"
+UPDATE_INFO_FILENAME="${UPDATE_INFO_FILENAME:-.nanoclaw-update-info.json}"
+UPDATE_INFO_FILE="$REPO_DIR/data/$UPDATE_INFO_FILENAME"
 mkdir -p "$(dirname "$UPDATE_INFO_FILE")"
 
 # Generate commit log JSON safely

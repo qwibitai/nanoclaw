@@ -1,5 +1,5 @@
 /**
- * NanoClaw Agent Runner
+ * OmniClaw Agent Runner
  * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Input protocol:
@@ -752,7 +752,8 @@ async function main(): Promise<void> {
 
   // Check for auto-update notification
   let updateNotification = '';
-  const updateInfoPath = '/workspace/data/.nanoclaw-update-info.json';
+  const updateInfoPath = process.env.UPDATE_INFO_PATH || '/workspace/data/.nanoclaw-update-info.json';
+  const productName = process.env.PRODUCT_NAME || 'OmniClaw';
   try {
     if (fs.existsSync(updateInfoPath)) {
       const updateInfo = JSON.parse(fs.readFileSync(updateInfoPath, 'utf-8'));
@@ -765,7 +766,7 @@ async function main(): Promise<void> {
           .join('\n');
 
         updateNotification = `
-🔄 NanoClaw Auto-Update Complete
+🔄 ${productName} Auto-Update Complete
 
 You've been updated to commit ${updateInfo.newCommit.substring(0, 8)} (from ${updateInfo.oldCommit.substring(0, 8)}).
 

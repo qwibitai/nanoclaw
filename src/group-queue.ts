@@ -1,10 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import { Effect } from 'effect';
 
 import type { AgentBackend } from './backends/types.js';
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MAX_TASK_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 import { ContainerProcess } from './types.js';
+import { makeMessageQueue, type MessageQueueService } from './effect/message-queue.js';
 
 interface QueuedTask {
   id: string;
@@ -55,6 +57,17 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private effectQueue: MessageQueueService | null = null;
+
+  constructor() {
+    // Initialize Effect-based message queue
+    Effect.runPromise(makeMessageQueue()).then((queue) => {
+      this.effectQueue = queue;
+      logger.info('Effect-based message queue initialized');
+    }).catch((err) => {
+      logger.error({ err }, 'Failed to initialize Effect message queue');
+    });
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -154,7 +167,17 @@ export class GroupQueue {
       state.messageProcess = proc;
       state.messageContainerName = containerName;
       if (groupFolder) state.messageGroupFolder = groupFolder;
-      if (backend) state.messageBackend = backend;
+      if (backend) {
+        state.messageBackend = backend;
+        // Register backend with Effect queue
+        if (this.effectQueue && groupFolder) {
+          Effect.runPromise(
+            this.effectQueue.registerBackend(groupJid, backend, groupFolder),
+          ).catch((err) => {
+            logger.error({ groupJid, err }, 'Failed to register backend with Effect queue');
+          });
+        }
+      }
     } else {
       state.taskProcess = proc;
       state.taskContainerName = containerName;
@@ -167,12 +190,35 @@ export class GroupQueue {
    * Send a follow-up message to the active message container via IPC.
    * Delegates to the backend if one is registered (supports local + cloud).
    * Returns true if the message was written, false if no active container.
+   *
+   * Now uses Effect-based queue for automatic retries and timeout protection.
    */
-  sendMessage(groupJid: string, text: string): boolean {
+  async sendMessage(groupJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(groupJid);
     if (!state.messageActive || !state.messageGroupFolder) return false;
 
-    // Delegate to backend if available (handles both local and cloud)
+    // Use Effect-based queue if available
+    if (this.effectQueue && state.messageBackend) {
+      try {
+        await Effect.runPromise(
+          this.effectQueue.sendMessage(
+            groupJid,
+            text,
+            state.messageBackend,
+            state.messageGroupFolder,
+          ),
+        );
+        return true;
+      } catch (err) {
+        logger.error(
+          { groupJid, error: err },
+          'Effect message send failed after retries, falling back to direct send',
+        );
+        // Fall through to backup methods
+      }
+    }
+
+    // Fallback: delegate to backend directly
     if (state.messageBackend) {
       return state.messageBackend.sendMessage(state.messageGroupFolder, text);
     }

@@ -1,7 +1,7 @@
 {
-  "name": "nanoclaw",
+  "name": "omniclaw",
   "version": "1.0.0",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "description": "OmniClaw - Personal Claude assistant from the Omni ecosystem. Fork of NanoClaw.",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
