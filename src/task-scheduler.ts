@@ -12,6 +12,7 @@ import {
 import { resolveBackend } from './backends/index.js';
 import type { ContainerOutput } from './backends/types.js';
 import { writeTasksSnapshot } from './container-runner.js';
+import { createThreadStreamer } from './thread-streaming.js';
 import {
   advanceTaskNextRun,
   createTask,
@@ -24,14 +25,15 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
-import { ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
+import { Channel, ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ContainerProcess, containerName: string, groupFolder: string, lane: 'task') => void;
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string) => Promise<string | void>;
+  findChannel: (jid: string) => Channel | undefined;
 }
 
 const HEARTBEAT_SENTINEL = '[HEARTBEAT]';
@@ -254,6 +256,35 @@ async function runTask(
     }, IDLE_TIMEOUT);
   };
 
+  // Set up thread streaming for non-heartbeat tasks
+  const isHeartbeat = task.id.startsWith('heartbeat-');
+  const channel = deps.findChannel(task.chat_jid);
+  let parentMessageId: string | null = null;
+
+  if (!isHeartbeat && group.streamIntermediates && channel?.createThread) {
+    const preview = prompt.slice(0, 80).replace(/\n/g, ' ');
+    try {
+      const msgId = await deps.sendMessage(task.chat_jid, `Running scheduled task: ${preview}...`);
+      parentMessageId = msgId ? String(msgId) : null;
+    } catch {
+      // Announcement failed — continue without thread
+    }
+  }
+
+  const threadLabel = isHeartbeat ? 'heartbeat' : prompt.slice(0, 50);
+  const streamer = createThreadStreamer(
+    {
+      channel,
+      chatJid: task.chat_jid,
+      streamIntermediates: !isHeartbeat && !!group.streamIntermediates,
+      groupName: group.name,
+      groupFolder: task.group_folder,
+      label: threadLabel,
+    },
+    parentMessageId,
+    `Task: ${prompt.slice(0, 60).replace(/\n/g, ' ')}`,
+  );
+
   try {
     const backend = resolveBackend(group);
     const output = await backend.runAgent(
@@ -270,15 +301,17 @@ async function runTask(
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, 'task'),
       async (streamedOutput: ContainerOutput) => {
-        // Skip intermediate output (thinking, tool calls, tool results) —
-        // only forward final results to the channel
-        if (streamedOutput.intermediate) return;
+        if (streamedOutput.intermediate && streamedOutput.result) {
+          const raw = typeof streamedOutput.result === 'string'
+            ? streamedOutput.result
+            : JSON.stringify(streamedOutput.result);
+          await streamer.handleIntermediate(raw);
+          return;
+        }
 
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
           await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          // Only reset idle timer on actual results, not session-update markers
           resetIdleTimer();
         }
         if (streamedOutput.status === 'error') {
@@ -292,7 +325,6 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
     }
 
@@ -305,6 +337,8 @@ async function runTask(
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
   }
+
+  streamer.writeThoughtLog();
 
   const durationMs = Date.now() - startTime;
 

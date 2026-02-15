@@ -60,6 +60,7 @@ import { NanoClawS3 } from './s3/client.js';
 import { startS3IpcPoller } from './s3/ipc-poller.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { reconcileHeartbeats, startSchedulerLoop } from './task-scheduler.js';
+import { createThreadStreamer } from './thread-streaming.js';
 import { Agent, Channel, ChannelRoute, NewMessage, RegisteredGroup, registeredGroupToAgent, registeredGroupToRoute } from './types.js';
 import { findMainGroupJid } from './group-helpers.js';
 import { logger } from './logger.js';
@@ -371,42 +372,29 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  // Thread streaming state
-  const triggeringMessageId = missedMessages[missedMessages.length - 1]?.id;
-  let discordThread: any = null;
-  let threadCreationAttempted = false;
-  const thoughtLogBuffer: string[] = [];
-
-  // Thread name from user's message content
+  // Thread streaming via shared helper
+  const triggeringMessageId = missedMessages[missedMessages.length - 1]?.id || null;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName = lastContent
     .replace(TRIGGER_PATTERN, '').trim().slice(0, 80) || 'Agent working...';
 
+  const streamer = createThreadStreamer(
+    {
+      channel,
+      chatJid,
+      streamIntermediates: !!group.streamIntermediates,
+      groupName: group.name,
+      groupFolder: group.folder,
+      label: lastContent.replace(TRIGGER_PATTERN, '').trim(),
+    },
+    triggeringMessageId,
+    threadName,
+  );
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Handle intermediate output (thinking, tool calls, tool results)
     if (result.intermediate && result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Always buffer for thought log
-      thoughtLogBuffer.push(raw);
-
-      // Stream to channel thread if enabled and supported (off by default)
-      if (group.streamIntermediates && channel?.createThread && channel?.sendToThread && triggeringMessageId) {
-        if (!threadCreationAttempted) {
-          threadCreationAttempted = true;
-          try {
-            discordThread = await channel.createThread(chatJid, triggeringMessageId, threadName);
-          } catch {
-            // Thread creation failed — silently drop intermediates from channel
-          }
-        }
-        if (discordThread) {
-          try {
-            await channel.sendToThread(discordThread, raw);
-          } catch {
-            // Send failed — continue without thread output
-          }
-        }
-      }
+      await streamer.handleIntermediate(raw);
       return;
     }
 
@@ -435,24 +423,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  // Write thought log if we captured any intermediate output
-  if (thoughtLogBuffer.length > 0) {
-    try {
-      const date = new Date().toISOString().split('T')[0];
-      const time = new Date().toISOString().split('T')[1].slice(0, 5).replace(':', '');
-      const summary = lastContent
-        .replace(TRIGGER_PATTERN, '').trim().slice(0, 50)
-        .replace(/[^a-z0-9]+/gi, '-').toLowerCase() || 'query';
-      const filename = `${date}-${time}-${summary}.md`;
-      const dir = path.join(GROUPS_DIR, 'global', 'thoughts', group.folder);
-      fs.mkdirSync(dir, { recursive: true });
-      const header = `# ${group.name} — ${new Date().toLocaleString()}\n\n`;
-      fs.writeFileSync(path.join(dir, filename), header + thoughtLogBuffer.join('\n\n---\n\n'));
-      logger.debug({ group: group.name, filename }, 'Thought log written');
-    } catch (err) {
-      logger.warn({ group: group.name, err }, 'Failed to write thought log');
-    }
-  }
+  streamer.writeThoughtLog();
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -959,8 +930,12 @@ async function main(): Promise<void> {
         return;
       }
       const text = formatOutbound(ch, rawText);
-      if (text) await ch.sendMessage(jid, text);
+      if (text) {
+        const msgId = await ch.sendMessage(jid, text);
+        return msgId ? String(msgId) : undefined;
+      }
     },
+    findChannel: (jid) => findChannel(channels, jid),
   });
   startIpcWatcher({
     sendMessage: async (jid, rawText) => {
