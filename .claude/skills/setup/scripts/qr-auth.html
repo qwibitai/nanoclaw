@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html><head><title>NanoClaw - WhatsApp Auth</title>
+<meta http-equiv="refresh" content="3">
 <style>
   body { font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f5f5f5; }
   .card { background: white; border-radius: 16px; padding: 40px; box-shadow: 0 4px 24px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }
@@ -16,17 +17,19 @@
   <div class="instructions">Settings → Linked Devices → Link a Device</div>
 </div>
 <script>
-  let seconds = 60;
-  const countdown = document.getElementById('countdown');
-  const timer = document.getElementById('timer');
-  const interval = setInterval(() => {
-    seconds--;
-    countdown.textContent = seconds;
-    if (seconds <= 10) timer.classList.add('urgent');
-    if (seconds <= 0) {
-      clearInterval(interval);
-      timer.textContent = 'QR code expired — re-run auth to get a new one';
-      timer.classList.add('urgent');
-    }
-  }, 1000);
+  // Persist start time across auto-refreshes
+  var startKey = 'nanoclaw_qr_start';
+  var start = localStorage.getItem(startKey);
+  if (!start) { start = Date.now().toString(); localStorage.setItem(startKey, start); }
+  var elapsed = Math.floor((Date.now() - parseInt(start)) / 1000);
+  var remaining = Math.max(0, 60 - elapsed);
+  var countdown = document.getElementById('countdown');
+  var timer = document.getElementById('timer');
+  countdown.textContent = remaining;
+  if (remaining <= 10) timer.classList.add('urgent');
+  if (remaining <= 0) {
+    timer.textContent = 'QR code expired — a new one will appear shortly';
+    timer.classList.add('urgent');
+    localStorage.removeItem(startKey);
+  }
 </script></body></html>
