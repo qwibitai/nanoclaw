@@ -114,6 +114,9 @@ export interface Channel {
   // Optional: thread support for streaming intermediate output.
   createThread?(jid: string, messageId: string, name: string): Promise<any>;
   sendToThread?(thread: any, text: string): Promise<void>;
+  // Optional: add/remove emoji reactions on messages.
+  addReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
+  removeReaction?(jid: string, messageId: string, emoji: string): Promise<void>;
   // Whether to prefix outbound messages with the assistant name.
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.

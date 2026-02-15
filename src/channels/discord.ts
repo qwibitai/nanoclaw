@@ -29,7 +29,7 @@ import { Channel, RegisteredGroup } from '../types.js';
 
 export interface DiscordChannelOpts {
   token: string;
-  onReaction?: (chatJid: string, messageId: string, emoji: string) => void;
+  onReaction?: (chatJid: string, messageId: string, emoji: string, userName: string) => void;
 }
 
 export class DiscordChannel implements Channel {
@@ -200,6 +200,33 @@ export class DiscordChannel implements Channel {
       }
     } catch (err) {
       logger.warn({ threadId: thread.id, err }, 'Failed to send to Discord thread');
+    }
+  }
+
+  async addReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    const channelId = jidToChannelId(jid);
+    if (!channelId) return;
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('messages' in channel)) return;
+      const message = await (channel as TextChannel).messages.fetch(messageId);
+      await message.react(emoji);
+    } catch (err) {
+      logger.warn({ jid, messageId, emoji, err }, 'Failed to add Discord reaction');
+    }
+  }
+
+  async removeReaction(jid: string, messageId: string, emoji: string): Promise<void> {
+    const channelId = jidToChannelId(jid);
+    if (!channelId) return;
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !('messages' in channel)) return;
+      const message = await (channel as TextChannel).messages.fetch(messageId);
+      const botReaction = message.reactions.cache.find(r => r.emoji.name === emoji);
+      if (botReaction) await botReaction.users.remove(this.client.user!.id);
+    } catch (err) {
+      logger.warn({ jid, messageId, emoji, err }, 'Failed to remove Discord reaction');
     }
   }
 
@@ -450,7 +477,8 @@ export class DiscordChannel implements Channel {
       : `dc:${reaction.message.channelId}`;
     const emoji = reaction.emoji.name || '';
 
-    this.opts.onReaction?.(chatJid, reaction.message.id, emoji);
+    const userName = user.displayName || user.username || 'Someone';
+    this.opts.onReaction?.(chatJid, reaction.message.id, emoji, userName);
   }
 
   private cleanupOldMedia(folder: string): void {

@@ -15,7 +15,7 @@ import { transferFiles } from './file-transfer.js';
 import { findGroupByFolder, findJidByFolder, findMainGroupJid, isMainGroup } from './group-helpers.js';
 import { logger } from './logger.js';
 import { reconcileHeartbeats } from './task-scheduler.js';
-import { BackendType, HeartbeatConfig, RegisteredGroup } from './types.js';
+import { BackendType, Channel, HeartbeatConfig, RegisteredGroup } from './types.js';
 import { DaytonaBackend } from './backends/daytona-backend.js';
 import { startDaytonaIpcPoller } from './backends/daytona-ipc-poller.js';
 import { startSpritesIpcPoller } from './backends/sprites-ipc-poller.js';
@@ -37,6 +37,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  findChannel?: (jid: string) => Channel | undefined;
 }
 
 // --- Pending share request tracking ---
@@ -112,6 +113,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              if (data.type === 'react_to_message' && data.chatJid && data.messageId && data.emoji) {
+                const ch = deps.findChannel?.(data.chatJid);
+                if (data.remove) {
+                  await (ch?.removeReaction?.(data.chatJid, data.messageId, data.emoji) ?? Promise.resolve());
+                } else {
+                  await (ch?.addReaction?.(data.chatJid, data.messageId, data.emoji) ?? Promise.resolve());
+                }
+                logger.info(
+                  { chatJid: data.chatJid, messageId: data.messageId, emoji: data.emoji, remove: !!data.remove, sourceGroup },
+                  'IPC reaction processed',
+                );
+                fs.unlinkSync(filePath);
+                continue;
+              }
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: any registered agent can message any other registered agent
                 const targetGroup = registeredGroups[data.chatJid];

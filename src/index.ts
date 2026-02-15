@@ -812,59 +812,58 @@ async function main(): Promise<void> {
     try {
       const discord = new DiscordChannel({
         token: DISCORD_BOT_TOKEN,
-        onReaction: (chatJid, messageId, emoji) => {
-          // Only handle approval emojis
-          if (!emoji.startsWith('👍') && emoji !== '❤️' && emoji !== '✅') return;
+        onReaction: (chatJid, messageId, emoji, userName) => {
+          // 1. Check for share_request approval first (only approval emojis)
+          if (emoji.startsWith('👍') || emoji === '❤️' || emoji === '✅') {
+            const request = consumeShareRequest(messageId);
+            if (request) {
+              const mainJid = Object.entries(registeredGroups).find(
+                ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+              )?.[0];
+              if (!mainJid) return;
 
-          // 1. Check for share_request approval first
-          const request = consumeShareRequest(messageId);
-          if (request) {
-            const mainJid = Object.entries(registeredGroups).find(
-              ([, g]) => g.folder === MAIN_GROUP_FOLDER,
-            )?.[0];
-            if (!mainJid) return;
+              logger.info(
+                { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
+                'Share request approved via Discord reaction',
+              );
 
-            logger.info(
-              { messageId, emoji, sourceGroup: request.sourceGroup, sourceName: request.sourceName },
-              'Share request approved via Discord reaction',
-            );
+              const writePaths = request.serverFolder
+                ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
+                : `groups/${request.sourceGroup}/CLAUDE.md`;
+              const syntheticContent = [
+                `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
+                '',
+                `${request.description}`,
+                '',
+                `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
+                `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
+              ].join('\n');
 
-            const writePaths = request.serverFolder
-              ? `groups/${request.sourceGroup}/CLAUDE.md and/or groups/${request.serverFolder}/CLAUDE.md`
-              : `groups/${request.sourceGroup}/CLAUDE.md`;
-            const syntheticContent = [
-              `Share request APPROVED from ${request.sourceName} (${request.sourceJid}):`,
-              '',
-              `${request.description}`,
-              '',
-              `Fulfill this request — write context to ${writePaths}, clone repos if needed.`,
-              `When done, use send_message to ${request.sourceJid} to notify them: "Your context request has been fulfilled! [brief summary] — check your CLAUDE.md and workspace for updates."`,
-            ].join('\n');
+              storeMessage({
+                id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                chat_jid: mainJid,
+                sender: 'system',
+                sender_name: 'System',
+                content: syntheticContent,
+                timestamp: new Date().toISOString(),
+                is_from_me: false,
+              });
 
-            storeMessage({
-              id: `synth-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-              chat_jid: mainJid,
-              sender: 'system',
-              sender_name: 'System',
-              content: syntheticContent,
-              timestamp: new Date().toISOString(),
-              is_from_me: false,
-            });
-
-            queue.enqueueMessageCheck(mainJid);
-            return;
+              queue.enqueueMessageCheck(mainJid);
+              return;
+            }
           }
 
-          // 2. Generic approval: pipe to active container or store as synthetic message
+          // 2. Context-aware reaction notification: include emoji and reactor name
           const group = registeredGroups[chatJid];
           if (!group) return;
 
           logger.info(
-            { chatJid, messageId, emoji, group: group.name },
-            'Reaction approval on bot message in Discord',
+            { chatJid, messageId, emoji, userName, group: group.name },
+            'Reaction on bot message in Discord',
           );
 
-          const approvalContent = `@${ASSISTANT_NAME} [Approved via reaction] Proceed with the plan.`;
+          const reactionContent = `@${ASSISTANT_NAME} [${userName} reacted with ${emoji}]`;
 
           // Try to pipe directly to active container
           if (!queue.sendMessage(chatJid, formatMessages([{
@@ -872,7 +871,7 @@ async function main(): Promise<void> {
             chat_jid: chatJid,
             sender: 'system',
             sender_name: 'System',
-            content: approvalContent,
+            content: reactionContent,
             timestamp: new Date().toISOString(),
           }]))) {
             // No active container — store in DB and enqueue
@@ -881,7 +880,7 @@ async function main(): Promise<void> {
               chat_jid: chatJid,
               sender: 'system',
               sender_name: 'System',
-              content: approvalContent,
+              content: reactionContent,
               timestamp: new Date().toISOString(),
               is_from_me: false,
             });
@@ -971,6 +970,7 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    findChannel: (jid) => findChannel(channels, jid),
   });
   // Start S3 IPC poller for cloud agents (if B2 is configured)
   if (s3) {

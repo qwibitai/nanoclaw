@@ -663,6 +663,31 @@ This is useful when you need to send messages to specific agents or request cont
   },
 );
 
+// Discord-only tools
+if (chatJid.startsWith('dc:')) {
+  server.tool(
+    'react_to_message',
+    'Add or remove an emoji reaction on a Discord message. Use message IDs from the conversation.',
+    {
+      message_id: z.string().describe('The Discord message ID to react to'),
+      emoji: z.string().describe('Emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83c\udf89", "\u2705")'),
+      remove: z.boolean().optional().describe('Set to true to remove the reaction instead of adding it'),
+    },
+    async (args) => {
+      writeIpcFile(MESSAGES_DIR, {
+        type: 'react_to_message',
+        chatJid,
+        messageId: args.message_id,
+        emoji: args.emoji,
+        remove: args.remove || false,
+        groupFolder,
+        timestamp: new Date().toISOString(),
+      });
+      return { content: [{ type: 'text' as const, text: args.remove ? 'Reaction removed.' : 'Reaction added.' }] };
+    },
+  );
+}
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
