@@ -13,6 +13,7 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  IDLE_TIMEOUT,
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -38,17 +39,13 @@ export interface ContainerInput {
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
-}
-
-export interface AgentResponse {
-  outputType: 'message' | 'log';
-  userMessage?: string;
-  internalLog?: string;
+  isScheduledTask?: boolean;
+  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
   status: 'success' | 'error';
-  result: AgentResponse | null;
+  result: string | null;
   newSessionId?: string;
   error?: string;
 }
@@ -110,6 +107,39 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  const settingsFile = path.join(groupSessionsDir, 'settings.json');
+  if (!fs.existsSync(settingsFile)) {
+    fs.writeFileSync(settingsFile, JSON.stringify({
+      env: {
+        // Enable agent swarms (subagent orchestration)
+        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        // Load CLAUDE.md from additional mounted directories
+        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        // Enable Claude's memory feature (persists user preferences between sessions)
+        // https://code.claude.com/docs/en/memory#manage-auto-memory
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      },
+    }, null, 2) + '\n');
+  }
+
+  // Sync skills from container/skills/ into each group's .claude/skills/
+  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  const skillsDst = path.join(groupSessionsDir, 'skills');
+  if (fs.existsSync(skillsSrc)) {
+    for (const skillDir of fs.readdirSync(skillsSrc)) {
+      const srcDir = path.join(skillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(skillsDst, skillDir);
+      fs.mkdirSync(dstDir, { recursive: true });
+      for (const file of fs.readdirSync(srcDir)) {
+        const srcFile = path.join(srcDir, file);
+        const dstFile = path.join(dstDir, file);
+        fs.copyFileSync(srcFile, dstFile);
+      }
+    }
+  }
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -121,38 +151,21 @@ function buildVolumeMounts(
   const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
     readonly: false,
   });
 
-  // Environment file directory (workaround for Apple Container -i env var bug)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
-  fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
-    });
-
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
-      });
-    }
-  }
+  // Mount agent-runner source from host — recompiled on container startup.
+  // Bypasses Apple Container's sticky build cache for code changes.
+  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  mounts.push({
+    hostPath: agentRunnerSrc,
+    containerPath: '/app/src',
+    readonly: true,
+  });
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -165,6 +178,38 @@ function buildVolumeMounts(
   }
 
   return mounts;
+}
+
+/**
+ * Read allowed secrets from .env for passing to the container via stdin.
+ * Secrets are never written to disk or mounted as files.
+ */
+function readSecrets(): Record<string, string> {
+  const envFile = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envFile)) return {};
+
+  const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+  const secrets: Record<string, string> = {};
+  const content = fs.readFileSync(envFile, 'utf-8');
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    if (!allowedVars.includes(key)) continue;
+    let value = trimmed.slice(eqIdx + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (value) secrets[key] = value;
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
@@ -191,6 +236,7 @@ export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -240,22 +286,67 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    // Pass secrets via stdin (never written to disk or mounted as files)
+    input.secrets = readSecrets();
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    // Remove secrets from input so they don't appear in logs
+    delete input.secrets;
+
+    // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
+    let parseBuffer = '';
+    let newSessionId: string | undefined;
+    let outputChain = Promise.resolve();
 
     container.stdout.on('data', (data) => {
-      if (stdoutTruncated) return;
       const chunk = data.toString();
-      const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
-      if (chunk.length > remaining) {
-        stdout += chunk.slice(0, remaining);
-        stdoutTruncated = true;
-        logger.warn(
-          { group: group.name, size: stdout.length },
-          'Container stdout truncated due to size limit',
-        );
-      } else {
-        stdout += chunk;
+
+      // Always accumulate for logging
+      if (!stdoutTruncated) {
+        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+        if (chunk.length > remaining) {
+          stdout += chunk.slice(0, remaining);
+          stdoutTruncated = true;
+          logger.warn(
+            { group: group.name, size: stdout.length },
+            'Container stdout truncated due to size limit',
+          );
+        } else {
+          stdout += chunk;
+        }
+      }
+
+      // Stream-parse for output markers
+      if (onOutput) {
+        parseBuffer += chunk;
+        let startIdx: number;
+        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
+          const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
+          if (endIdx === -1) break; // Incomplete pair, wait for more data
+
+          const jsonStr = parseBuffer
+            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+            .trim();
+          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
+
+          try {
+            const parsed: ContainerOutput = JSON.parse(jsonStr);
+            if (parsed.newSessionId) {
+              newSessionId = parsed.newSessionId;
+            }
+            hadStreamingOutput = true;
+            // Activity detected — reset the hard timeout
+            resetTimeout();
+            // Call onOutput for all markers (including null results)
+            // so idle timers start even for "silent" query completions.
+            outputChain = outputChain.then(() => onOutput(parsed));
+          } catch (err) {
+            logger.warn(
+              { group: group.name, error: err },
+              'Failed to parse streamed output chunk',
+            );
+          }
+        }
       }
     });
 
@@ -265,6 +356,8 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
+      // Don't reset timeout on stderr — SDK writes debug logs continuously.
+      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -280,18 +373,30 @@ export async function runContainerAgent(
     });
 
     let timedOut = false;
+    let hadStreamingOutput = false;
+    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
+    // graceful _close sentinel has time to trigger before the hard kill fires.
+    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
-    const timeout = setTimeout(() => {
+    const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      // Graceful stop: sends SIGTERM, waits, then SIGKILL — lets --rm fire
       exec(`container stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
         }
       });
-    }, group.containerConfig?.timeout || CONTAINER_TIMEOUT);
+    };
+
+    let timeout = setTimeout(killOnTimeout, timeoutMs);
+
+    // Reset the timeout whenever there's activity (streaming output)
+    const resetTimeout = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(killOnTimeout, timeoutMs);
+    };
 
     container.on('close', (code) => {
       clearTimeout(timeout);
@@ -307,25 +412,43 @@ export async function runContainerAgent(
           `Container: ${containerName}`,
           `Duration: ${duration}ms`,
           `Exit Code: ${code}`,
+          `Had Streaming Output: ${hadStreamingOutput}`,
         ].join('\n'));
+
+        // Timeout after output = idle cleanup, not failure.
+        // The agent already sent its response; this is just the
+        // container being reaped after the idle period expired.
+        if (hadStreamingOutput) {
+          logger.info(
+            { group: group.name, containerName, duration, code },
+            'Container timed out after output (idle cleanup)',
+          );
+          outputChain.then(() => {
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          });
+          return;
+        }
 
         logger.error(
           { group: group.name, containerName, duration, code },
-          'Container timed out',
+          'Container timed out with no output',
         );
 
         resolve({
           status: 'error',
           result: null,
-          error: `Container timed out after ${group.containerConfig?.timeout || CONTAINER_TIMEOUT}ms`,
+          error: `Container timed out after ${configTimeout}ms`,
         });
         return;
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const logFile = path.join(logsDir, `container-${timestamp}.log`);
-      const isVerbose =
-        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+      const isVerbose = process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
 
       const logLines = [
         `=== Container Run Log ===`,
@@ -401,6 +524,23 @@ export async function runContainerAgent(
         return;
       }
 
+      // Streaming mode: wait for output chain to settle, return completion marker
+      if (onOutput) {
+        outputChain.then(() => {
+          logger.info(
+            { group: group.name, duration, newSessionId },
+            'Container completed (streaming mode)',
+          );
+          resolve({
+            status: 'success',
+            result: null,
+            newSessionId,
+          });
+        });
+        return;
+      }
+
+      // Legacy mode: parse the last output marker pair from accumulated stdout
       try {
         // Extract JSON between sentinel markers for robust parsing
         const startIdx = stdout.indexOf(OUTPUT_START_MARKER);

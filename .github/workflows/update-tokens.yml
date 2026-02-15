@@ -1,0 +1,35 @@
+name: Update token count
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'container/**', 'launchd/**', 'CLAUDE.md']
+
+permissions:
+  contents: write
+
+jobs:
+  update-tokens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: ./repo-tokens
+        id: tokens
+        with:
+          include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.nanoclaw.plist CLAUDE.md'
+          exclude: 'src/**/*.test.ts'
+          badge-path: 'repo-tokens/badge.svg'
+
+      - name: Commit if changed
+        run: |
+          git add README.md repo-tokens/badge.svg
+          git diff --cached --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: update token count to ${{ steps.tokens.outputs.badge }}"
+          git push

@@ -18,12 +18,14 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 
 | File | Purpose |
 |------|---------|
+| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/ipc.ts` | IPC watcher and task processing |
+| `src/router.ts` | Message formatting and outbound routing |
+| `src/types.ts` | TypeScript interfaces (includes Channel) |
 | `src/config.ts` | Assistant name, trigger pattern, directories |
-| `src/index.ts` | Message routing, WhatsApp connection, agent invocation |
 | `src/db.ts` | Database initialization and queries |
-| `src/types.ts` | TypeScript interfaces |
 | `src/whatsapp-auth.ts` | Standalone WhatsApp authentication script |
-| `.mcp.json` | MCP server configuration (reference) |
 | `groups/CLAUDE.md` | Global memory/persona |
 
 ## Common Customization Patterns
@@ -37,10 +39,9 @@ Questions to ask:
 - Should messages from this channel go to existing groups or new ones?
 
 Implementation pattern:
-1. Find/add MCP server for the channel
-2. Add connection and message handling in `src/index.ts`
-3. Store messages in the database (update `src/db.ts` if needed)
-4. Ensure responses route back to correct channel
+1. Create `src/channels/{name}.ts` implementing the `Channel` interface from `src/types.ts` (see `src/channels/whatsapp.ts` for reference)
+2. Add the channel instance to `main()` in `src/index.ts` and wire callbacks (`onMessage`, `onChatMetadata`)
+3. Messages are stored via the `onMessage` callback; routing is automatic via `ownsJid()`
 
 ### Adding a New MCP Integration
 
@@ -50,9 +51,8 @@ Questions to ask:
 - Which groups should have access?
 
 Implementation:
-1. Add MCP server to the `mcpServers` config in `src/index.ts`
-2. Add tools to `allowedTools` array
-3. Document in `groups/CLAUDE.md`
+1. Add MCP server config to the container settings (see `src/container-runner.ts` for how MCP servers are mounted)
+2. Document available tools in `groups/CLAUDE.md`
 
 ### Changing Assistant Behavior
 
@@ -72,8 +72,8 @@ Questions to ask:
 - Does it need new MCP tools?
 
 Implementation:
-1. Add command handling in `processMessage()` in `src/index.ts`
-2. Check for the command before the trigger pattern check
+1. Commands are handled by the agent naturally — add instructions to `groups/CLAUDE.md` or the group's `CLAUDE.md`
+2. For trigger-level routing changes, modify `processGroupMessages()` in `src/index.ts`
 
 ### Changing Deployment
 
@@ -102,7 +102,6 @@ User: "Add Telegram as an input channel"
 
 1. Ask: "Should Telegram use the same @Andy trigger, or a different one?"
 2. Ask: "Should Telegram messages create separate conversation contexts, or share with WhatsApp groups?"
-3. Find Telegram MCP or library
-4. Add connection handling in index.ts
-5. Update message storage in db.ts
-6. Tell user how to authenticate and test
+3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/whatsapp.ts`)
+4. Add the channel to `main()` in `src/index.ts`
+5. Tell user how to authenticate and test

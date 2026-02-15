@@ -4,13 +4,13 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  ASSISTANT_NAME,
   GROUPS_DIR,
+  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -23,11 +23,11 @@ import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
-  sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ChildProcess, containerName: string) => void;
+  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
+  sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
 async function runTask(
@@ -89,6 +89,18 @@ async function runTask(
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
+  // Idle timer: writes _close sentinel after IDLE_TIMEOUT of no output,
+  // so the container exits instead of hanging at waitForIpcMessage forever.
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      logger.debug({ taskId: task.id }, 'Scheduled task idle timeout, closing container stdin');
+      deps.queue.closeStdin(task.chat_jid);
+    }, IDLE_TIMEOUT);
+  };
+
   try {
     const output = await runContainerAgent(
       group,
@@ -98,17 +110,30 @@ async function runTask(
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
         isMain,
+        isScheduledTask: true,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName),
+      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      async (streamedOutput: ContainerOutput) => {
+        if (streamedOutput.result) {
+          result = streamedOutput.result;
+          // Forward result to user (sendMessage handles formatting)
+          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Only reset idle timer on actual results, not session-update markers
+          resetIdleTimer();
+        }
+        if (streamedOutput.status === 'error') {
+          error = streamedOutput.error || 'Unknown error';
+        }
+      },
     );
+
+    if (idleTimer) clearTimeout(idleTimer);
 
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      if (output.result.outputType === 'message' && output.result.userMessage) {
-        await deps.sendMessage(task.chat_jid, `${ASSISTANT_NAME}: ${output.result.userMessage}`);
-      }
-      result = output.result.userMessage || output.result.internalLog || null;
+      // Messages are sent via MCP tool (IPC), result text is just logged
+      result = output.result;
     }
 
     logger.info(
@@ -116,6 +141,7 @@ async function runTask(
       'Task completed',
     );
   } catch (err) {
+    if (idleTimer) clearTimeout(idleTimer);
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
   }

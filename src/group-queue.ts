@@ -1,6 +1,8 @@
-import { ChildProcess, exec } from 'child_process';
+import { ChildProcess } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
-import { MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -18,6 +20,7 @@ interface GroupState {
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   containerName: string | null;
+  groupFolder: string | null;
   retryCount: number;
 }
 
@@ -38,6 +41,7 @@ export class GroupQueue {
         pendingTasks: [],
         process: null,
         containerName: null,
+        groupFolder: null,
         retryCount: 0,
       };
       this.groups.set(groupJid, state);
@@ -108,10 +112,49 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string): void {
+  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
+    if (groupFolder) state.groupFolder = groupFolder;
+  }
+
+  /**
+   * Send a follow-up message to the active container via IPC file.
+   * Returns true if the message was written, false if no active container.
+   */
+  sendMessage(groupJid: string, text: string): boolean {
+    const state = this.getGroup(groupJid);
+    if (!state.active || !state.groupFolder) return false;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
+      const filepath = path.join(inputDir, filename);
+      const tempPath = `${filepath}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.renameSync(tempPath, filepath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Signal the active container to wind down by writing a close sentinel.
+   */
+  closeStdin(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.active || !state.groupFolder) return;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_close'), '');
+    } catch {
+      // ignore
+    }
   }
 
   private async runForGroup(
@@ -144,6 +187,7 @@ export class GroupQueue {
       state.active = false;
       state.process = null;
       state.containerName = null;
+      state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -167,6 +211,7 @@ export class GroupQueue {
       state.active = false;
       state.process = null;
       state.containerName = null;
+      state.groupFolder = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -236,65 +281,22 @@ export class GroupQueue {
     }
   }
 
-  async shutdown(gracePeriodMs: number): Promise<void> {
+  async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
-    logger.info(
-      { activeCount: this.activeCount, gracePeriodMs },
-      'GroupQueue shutting down',
-    );
 
-    // Collect all active processes
-    const activeProcs: Array<{ jid: string; proc: ChildProcess; containerName: string | null }> = [];
+    // Count active containers but don't kill them — they'll finish on their own
+    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
+    // This prevents WhatsApp reconnection restarts from killing working agents.
+    const activeContainers: string[] = [];
     for (const [jid, state] of this.groups) {
-      if (state.process && !state.process.killed) {
-        activeProcs.push({ jid, proc: state.process, containerName: state.containerName });
+      if (state.process && !state.process.killed && state.containerName) {
+        activeContainers.push(state.containerName);
       }
     }
 
-    if (activeProcs.length === 0) return;
-
-    // Stop all active containers gracefully
-    for (const { jid, proc, containerName } of activeProcs) {
-      if (containerName) {
-        // Defense-in-depth: re-sanitize before shell interpolation.
-        // Primary sanitization is in container-runner.ts when building the name,
-        // but we sanitize again here since exec() runs through a shell.
-        const safeName = containerName.replace(/[^a-zA-Z0-9-]/g, '');
-        logger.info({ jid, containerName: safeName }, 'Stopping container');
-        exec(`container stop ${safeName}`, (err) => {
-          if (err) {
-            logger.warn({ jid, containerName: safeName, err: err.message }, 'container stop failed');
-          }
-        });
-      } else {
-        logger.info({ jid, pid: proc.pid }, 'Sending SIGTERM to process');
-        proc.kill('SIGTERM');
-      }
-    }
-
-    // Wait for grace period
-    await new Promise<void>((resolve) => {
-      const checkInterval = setInterval(() => {
-        const alive = activeProcs.filter(
-          ({ proc }) => !proc.killed && proc.exitCode === null,
-        );
-        if (alive.length === 0) {
-          clearInterval(checkInterval);
-          resolve();
-        }
-      }, 500);
-
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        // SIGKILL survivors
-        for (const { jid, proc } of activeProcs) {
-          if (!proc.killed && proc.exitCode === null) {
-            logger.warn({ jid, pid: proc.pid }, 'Sending SIGKILL to container');
-            proc.kill('SIGKILL');
-          }
-        }
-        resolve();
-      }, gracePeriodMs);
-    });
+    logger.info(
+      { activeCount: this.activeCount, detachedContainers: activeContainers },
+      'GroupQueue shutting down (containers detached, not killed)',
+    );
   }
 }
