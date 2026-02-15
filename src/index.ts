@@ -39,6 +39,43 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
+// Global error handlers to prevent crashes from unhandled rejections/exceptions
+// See: https://github.com/qwibitai/nanoclaw/issues/221
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error(
+    { reason: reason instanceof Error ? reason.message : String(reason) },
+    'Unhandled promise rejection - application will continue',
+  );
+  // Log the promise that was rejected for debugging
+  if (promise && typeof promise.catch === 'function') {
+    promise.catch((err) => {
+      logger.error({ err }, 'Promise rejection details');
+    });
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error(
+    { err: err.message, stack: err.stack },
+    'Uncaught exception - attempting graceful shutdown',
+  );
+  // Attempt graceful shutdown before exiting
+  shutdown().finally(() => {
+    process.exit(1);
+  });
+});
+
+// Top-level shutdown function for global error handlers
+let shutdownFn: (() => Promise<void>) | null = null;
+async function shutdown(): Promise<void> {
+  if (shutdownFn) {
+    await shutdownFn();
+  } else {
+    logger.warn('Shutdown called before initialization, forcing exit');
+    process.exit(1);
+  }
+}
+
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
@@ -171,20 +208,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
-        outputSentToUser = true;
+    // Wrap in try/catch to prevent unhandled rejections
+    try {
+      if (result.result) {
+        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+        if (text) {
+          await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'error') {
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    } catch (err) {
+      logger.error({ group: group.name, err }, 'Error in streaming output callback');
       hadError = true;
     }
   });
@@ -470,6 +513,9 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // Register shutdown function for global error handlers
+  shutdownFn = () => shutdown('SHUTDOWN_SIGNAL');
 
   // Create WhatsApp channel
   whatsapp = new WhatsAppChannel({
