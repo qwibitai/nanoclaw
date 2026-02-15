@@ -49,6 +49,7 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  is_bot_message?: boolean;
 }
 
 export interface ScheduledTask {
@@ -86,10 +87,6 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Whether to prefix outbound messages with the assistant name.
-  // Telegram bots already display their name, so they return false.
-  // WhatsApp returns true. Default true if not implemented.
-  prefixAssistantName?: boolean;
 }
 
 // Callback type that channels use to deliver inbound messages
