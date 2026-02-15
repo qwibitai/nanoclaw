@@ -90,6 +90,9 @@ export interface Channel {
   // Telegram bots already display their name, so they return false.
   // WhatsApp returns true. Default true if not implemented.
   prefixAssistantName?: boolean;
+  // Optional: sync group metadata from the channel provider.
+  // WhatsApp uses this to fetch group names; Slack/Telegram don't need it.
+  syncGroupMetadata?(force?: boolean): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
