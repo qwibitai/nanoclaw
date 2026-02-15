@@ -81,6 +81,8 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
+IMPORTANT: When MODIFYING an existing task, you MUST cancel the old task first using cancel_task, then create the new one. Otherwise you'll end up with duplicate tasks. Always call list_tasks first to find the old task ID, then cancel_task, then schedule_task.
+
 SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 \u2022 cron: Standard cron expression (e.g., "*/5 * * * *" for every 5 minutes, "0 9 * * *" for daily at 9am LOCAL time)
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
