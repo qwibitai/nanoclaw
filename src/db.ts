@@ -243,7 +243,7 @@ export function getNewMessages(
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp >= ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
     ORDER BY timestamp
   `;
 

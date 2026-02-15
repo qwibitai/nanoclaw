@@ -48,6 +48,11 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
+// Track processed message IDs to deduplicate when using >= timestamp comparison.
+// Cleared when the timestamp advances past the tracked window.
+const processedIds = new Set<string>();
+let processedIdsTimestamp = '';
+
 let whatsapp: WhatsAppChannel;
 const queue = new GroupQueue();
 
@@ -300,14 +305,26 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(
+      const { messages: rawMessages, newTimestamp } = getNewMessages(
         jids,
         lastTimestamp,
         ASSISTANT_NAME,
       );
 
+      // Filter out already-processed messages (dedup for same-second timestamps)
+      const messages = rawMessages.filter((m) => !processedIds.has(m.id));
+
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
+
+        // Track processed IDs; clear set when timestamp advances
+        if (newTimestamp > processedIdsTimestamp) {
+          processedIds.clear();
+          processedIdsTimestamp = newTimestamp;
+        }
+        for (const m of rawMessages) {
+          processedIds.add(m.id);
+        }
 
         // Advance the "seen" cursor for all messages immediately
         lastTimestamp = newTimestamp;
