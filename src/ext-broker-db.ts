@@ -43,6 +43,7 @@ export interface ExtCall {
   created_at: string;
   product_id?: string | null;
   scope?: string | null;
+  policy_version?: string | null;
 }
 
 let db: Database.Database;
@@ -109,6 +110,8 @@ function runExtMigrations(database: Database.Database): void {
   try { database.exec(`ALTER TABLE ext_calls ADD COLUMN product_id TEXT`); } catch { /* already exists */ }
   // Migration 004: Add scope column to ext_calls
   try { database.exec(`ALTER TABLE ext_calls ADD COLUMN scope TEXT`); } catch { /* already exists */ }
+  // Migration 005: Add policy_version column to ext_calls
+  try { database.exec(`ALTER TABLE ext_calls ADD COLUMN policy_version TEXT`); } catch { /* already exists */ }
 }
 
 // --- Capabilities CRUD ---
@@ -191,8 +194,8 @@ export function logExtCall(call: ExtCall): boolean {
          (request_id, group_folder, provider, action, access_level,
           params_hmac, params_summary, status, denial_reason, result_summary,
           response_data, task_id, idempotency_key, duration_ms, created_at,
-          product_id, scope)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          product_id, scope, policy_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       call.request_id,
       call.group_folder,
@@ -211,6 +214,7 @@ export function logExtCall(call: ExtCall): boolean {
       call.created_at,
       call.product_id ?? null,
       call.scope ?? null,
+      call.policy_version ?? null,
     );
     return true;
   } catch (err: unknown) {

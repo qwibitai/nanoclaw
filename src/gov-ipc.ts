@@ -10,6 +10,7 @@ import { GateTypes, GovScopes, TaskStates } from './governance/constants.js';
 import type { GateType as GateTypeEnum } from './governance/gates.js';
 import { checkApprover, checkApproverNotExecutor } from './governance/gates.js';
 import { validateTransition } from './governance/policy.js';
+import { POLICY_VERSION } from './governance/policy-version.js';
 import { logger } from './logger.js';
 
 export interface GovIpcData {
@@ -100,6 +101,7 @@ export async function processGovIpc(
       }
 
       const taskId = data.id || `gov-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const metadata = JSON.stringify({ policy_version: POLICY_VERSION });
       createGovTask({
         id: taskId,
         title: data.title,
@@ -115,7 +117,7 @@ export async function processGovIpc(
         created_by: sourceGroup,
         gate: data.gate || 'None',
         dod_required: 0,
-        metadata: null,
+        metadata,
         created_at: now,
         updated_at: now,
       });

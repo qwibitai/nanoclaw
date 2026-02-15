@@ -1126,3 +1126,158 @@ describe('product scoping enforcement (Sprint 2)', () => {
     expect(call!.scope).toBe('COMPANY');
   });
 });
+
+// --- Sprint 3: Enterprise multi-product guardrails ---
+
+describe('enterprise multi-product guardrails (Sprint 3)', () => {
+  const now = new Date().toISOString();
+
+  beforeEach(() => {
+    createProduct({ id: 'prod-alpha', name: 'Alpha', status: 'active', risk_level: 'high', created_at: now, updated_at: now });
+    createProduct({ id: 'prod-beta', name: 'Beta', status: 'active', risk_level: 'normal', created_at: now, updated_at: now });
+  });
+
+  function seedProductTask(id: string, state: string, assignedGroup: string, productId: string | null, scope: string) {
+    createGovTask({
+      id,
+      title: 'Enterprise guardrail test',
+      description: null,
+      task_type: 'FEATURE',
+      state: state as 'DOING',
+      priority: 'P1',
+      product: null,
+      product_id: productId,
+      scope: scope as 'COMPANY',
+      assigned_group: assignedGroup,
+      executor: null,
+      created_by: 'main',
+      gate: 'Security',
+      dod_required: 0,
+      metadata: null,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  it('cross-product denial: task prod-alpha cannot use capability for prod-beta', async () => {
+    grantMock('developer', 2, { product_id: 'prod-beta' });
+    seedProductTask('ent-cross', 'DOING', 'developer', 'prod-alpha', 'PRODUCT');
+
+    const req = makeRequest({
+      request_id: 'ext-ent-cross',
+      action: 'write_stuff',
+      params: { data: 'cross' },
+      task_id: 'ent-cross',
+    });
+    await processExtAccessIpc(req, 'developer', false);
+
+    const response = readResponse('developer', 'ext-ent-cross');
+    expect(response!.status).toBe('denied');
+    expect(response!.error).toContain('CAPABILITY_PRODUCT_MISMATCH');
+    expect(response!.error).toContain('prod-beta');
+    expect(response!.error).toContain('prod-alpha');
+  });
+
+  it('main override logs product_id from task on ext_call record', async () => {
+    grantMock('main', 2); // company-wide cap
+    seedProductTask('ent-main-audit', 'DOING', 'developer', 'prod-alpha', 'PRODUCT');
+
+    const req = makeRequest({
+      request_id: 'ext-ent-main-audit',
+      action: 'write_stuff',
+      params: { data: 'override' },
+      task_id: 'ent-main-audit',
+    });
+    await processExtAccessIpc(req, 'main', true);
+
+    const response = readResponse('main', 'ext-ent-main-audit');
+    expect(response!.status).toBe('executed');
+
+    const call = getExtCallByRequestId('ext-ent-main-audit');
+    expect(call!.product_id).toBe('prod-alpha');
+    expect(call!.scope).toBe('PRODUCT');
+  });
+
+  it('L3 COMPANY scope two-man rule: denied without approvals, allowed with 2', async () => {
+    grantMock('developer', 3, { requires_task_gate: 'Security' });
+    seedProductTask('ent-l3-company', 'APPROVAL', 'developer', null, 'COMPANY');
+
+    // Attempt without approvals — denied
+    const req1 = makeRequest({
+      request_id: 'ext-ent-l3-noapp',
+      action: 'deploy_stuff',
+      task_id: 'ent-l3-company',
+    });
+    await processExtAccessIpc(req1, 'developer', false);
+    const resp1 = readResponse('developer', 'ext-ent-l3-noapp');
+    expect(resp1!.status).toBe('denied');
+    expect(resp1!.error).toContain('gate approval');
+
+    // Add 2 approvals from different groups
+    createGovApproval({ task_id: 'ent-l3-company', gate_type: 'Security', approved_by: 'security', approved_at: now, notes: null });
+    createGovApproval({ task_id: 'ent-l3-company', gate_type: 'Product', approved_by: 'main', approved_at: now, notes: null });
+
+    // Now allowed
+    const req2 = makeRequest({
+      request_id: 'ext-ent-l3-ok',
+      action: 'deploy_stuff',
+      task_id: 'ent-l3-company',
+    });
+    await processExtAccessIpc(req2, 'developer', false);
+    const resp2 = readResponse('developer', 'ext-ent-l3-ok');
+    expect(resp2!.status).toBe('executed');
+  });
+
+  it('cross-product isolation end-to-end: cap for alpha, task for beta → denied', async () => {
+    grantMock('developer', 2, { product_id: 'prod-alpha' });
+    seedProductTask('ent-iso', 'DOING', 'developer', 'prod-beta', 'PRODUCT');
+
+    const req = makeRequest({
+      request_id: 'ext-ent-iso',
+      action: 'write_stuff',
+      params: { data: 'isolated' },
+      task_id: 'ent-iso',
+    });
+    await processExtAccessIpc(req, 'developer', false);
+
+    const response = readResponse('developer', 'ext-ent-iso');
+    expect(response!.status).toBe('denied');
+    expect(response!.error).toContain('CAPABILITY_PRODUCT_MISMATCH');
+  });
+
+  it('non-main with company-wide cap denied for PRODUCT task (isolation)', async () => {
+    grantMock('security', 2); // company-wide
+    seedProductTask('ent-nonmain', 'DOING', 'security', 'prod-alpha', 'PRODUCT');
+
+    const req = makeRequest({
+      request_id: 'ext-ent-nonmain',
+      action: 'write_stuff',
+      params: { data: 'attempt' },
+      task_id: 'ent-nonmain',
+    });
+    await processExtAccessIpc(req, 'security', false);
+
+    const response = readResponse('security', 'ext-ent-nonmain');
+    expect(response!.status).toBe('denied');
+    expect(response!.error).toContain('company-wide capability cannot be used for PRODUCT task');
+  });
+
+  it('L3 with COMPANY scope still enforces two-man rule', async () => {
+    grantMock('developer', 3, { requires_task_gate: 'Security' });
+    seedProductTask('ent-l3-twoman', 'APPROVAL', 'developer', null, 'COMPANY');
+
+    // Only 1 approval — denied
+    createGovApproval({ task_id: 'ent-l3-twoman', gate_type: 'Security', approved_by: 'security', approved_at: now, notes: null });
+
+    const req = makeRequest({
+      request_id: 'ext-ent-l3-1only',
+      action: 'deploy_stuff',
+      task_id: 'ent-l3-twoman',
+    });
+    await processExtAccessIpc(req, 'developer', false);
+
+    const response = readResponse('developer', 'ext-ent-l3-1only');
+    expect(response!.status).toBe('denied');
+    expect(response!.error).toContain('two-man rule');
+  });
+});

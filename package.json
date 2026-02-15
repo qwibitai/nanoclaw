@@ -13,7 +13,10 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ops:status": "tsx scripts/ops-status.ts",
+    "ops:backup": "tsx scripts/backup-os.ts",
+    "ops:restore": "tsx scripts/restore-os.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

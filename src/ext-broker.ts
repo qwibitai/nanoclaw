@@ -33,6 +33,7 @@ import {
   type ProviderSecrets,
 } from './ext-broker-providers.js';
 import { createGovTask, getGovApprovals, getGovTaskById, logGovActivity } from './gov-db.js';
+import { POLICY_VERSION } from './governance/policy-version.js';
 import { logger } from './logger.js';
 
 /** Sentinel task_id for ext_broker audit entries in gov_activities */
@@ -222,6 +223,7 @@ async function handleExtCall(
       idempotency_key: data.idempotency_key || null,
       duration_ms: null,
       created_at: now,
+      policy_version: POLICY_VERSION,
     });
     writeExtResponse(sourceGroup, requestId, {
       request_id: requestId,
@@ -439,6 +441,7 @@ async function handleExtCall(
     created_at: now,
     product_id: taskProductId,
     scope: taskScope,
+    policy_version: POLICY_VERSION,
   });
 
   if (!claimed) {
@@ -628,6 +631,7 @@ function deny(
     idempotency_key: data.idempotency_key || null,
     duration_ms: null,
     created_at: now,
+    policy_version: POLICY_VERSION,
   });
 
   writeExtResponse(sourceGroup, requestId, {
