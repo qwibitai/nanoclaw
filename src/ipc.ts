@@ -12,6 +12,8 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { processExtAccessIpc } from './ext-broker.js';
+import { processGovIpc } from './gov-ipc.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -375,6 +377,19 @@ export async function processTaskIpc(
           'Invalid register_group request - missing required fields',
         );
       }
+      break;
+
+    case 'gov_create':
+    case 'gov_transition':
+    case 'gov_approve':
+    case 'gov_assign':
+      await processGovIpc(data, sourceGroup, isMain);
+      break;
+
+    case 'ext_call':
+    case 'ext_grant':
+    case 'ext_revoke':
+      await processExtAccessIpc(data, sourceGroup, isMain);
       break;
 
     default:

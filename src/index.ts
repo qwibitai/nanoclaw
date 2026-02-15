@@ -35,6 +35,8 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { formatMessages, formatOutbound } from './router.js';
+import { initExtBroker } from './ext-broker.js';
+import { startGovLoop } from './gov-loop.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -458,6 +460,7 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
+  initExtBroker();
   logger.info('Database initialized');
   loadState();
 
@@ -499,6 +502,17 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp.syncGroupMetadata(force),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+  });
+  startGovLoop({
+    registeredGroups: () => registeredGroups,
+    queue,
+    onProcess: (groupJid, proc, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    sendMessage: async (jid, rawText) => {
+      const text = formatOutbound(whatsapp, rawText);
+      if (text) await whatsapp.sendMessage(jid, text);
+    },
+    getSessions: () => sessions,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

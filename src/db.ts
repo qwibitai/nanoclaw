@@ -3,9 +3,15 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, STORE_DIR } from './config.js';
+import { createExtAccessSchema } from './ext-broker-db.js';
+import { createGovSchema } from './gov-db.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
+
+export function getDb(): Database.Database {
+  return db;
+}
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -90,6 +96,8 @@ export function initDatabase(): void {
 
   db = new Database(dbPath);
   createSchema(db);
+  createGovSchema(db);
+  createExtAccessSchema(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
@@ -99,6 +107,8 @@ export function initDatabase(): void {
 export function _initTestDatabase(): void {
   db = new Database(':memory:');
   createSchema(db);
+  createGovSchema(db);
+  createExtAccessSchema(db);
 }
 
 /**

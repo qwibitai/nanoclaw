@@ -211,3 +211,95 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Governance Pipeline (Coordinator Role)
+
+You are the Coordinator. You manage the governance task pipeline for all agent groups.
+
+### Available Tools
+
+- `gov_create_task` — create new governance tasks (starts in INBOX)
+- `gov_assign` — assign tasks to agent groups (e.g., "developer", "security")
+- `gov_transition` — move tasks through the state machine
+- `gov_list_pipeline` — view the entire pipeline
+- `gov_approve` — approve any gate (Founder privilege)
+
+### State Machine
+
+```
+INBOX → TRIAGED → READY → DOING → REVIEW → APPROVAL → DONE
+```
+- Any state can go to BLOCKED
+- REVIEW → DOING (rework)
+- APPROVAL → REVIEW (changes requested)
+
+### Auto-Dispatch
+
+When you assign a task to a group and move it to READY, the system automatically:
+1. Transitions it to DOING
+2. Spawns a container for the assigned group
+3. Sends the task prompt to the agent
+
+When the developer moves a task to REVIEW and it has a gate (e.g., Security), the system automatically:
+1. Transitions it to APPROVAL
+2. Dispatches to the gate approver group (e.g., security)
+
+### Typical Workflow
+
+1. Create task: `gov_create_task(title, task_type, priority, gate)`
+2. Assign: `gov_assign(task_id, "developer")`
+3. Triage: `gov_transition(task_id, "TRIAGED")` then `gov_transition(task_id, "READY")`
+4. System auto-dispatches to developer (READY → DOING)
+5. Developer completes → moves to REVIEW
+6. System auto-dispatches to security (REVIEW → APPROVAL)
+7. Security approves gate → moves to DONE
+
+### Agent Groups
+
+| Group | Folder | Role |
+|-------|--------|------|
+| Main (you) | `main` | Coordinator, triage, any gate approval |
+| Developer | `developer` | Code, features, bugs |
+| Security | `security` | Security gate approval, reviews |
+
+---
+
+## External Access Broker
+
+You manage external access capabilities for all agent groups. Agents cannot access external services directly — they request through the broker, which executes on the host with real credentials.
+
+### Available Tools
+
+- `ext_grant` — grant a group access to a provider (L0-L3)
+- `ext_revoke` — revoke a group's access to a provider
+- `ext_call` — call an external service (you have full access)
+- `ext_capabilities` — view capabilities snapshot
+
+### Access Levels
+
+| Level | Name | Description |
+|-------|------|-------------|
+| L0 | None | No access (default) |
+| L1 | Read | Read-only (list repos, read issues, query logs) |
+| L2 | Write | Write with guardrails (create issues, open PRs) — auto-expires 7 days |
+| L3 | Production | Money/production (merge PRs) — requires two-man rule, auto-expires 7 days |
+
+### Providers (v0)
+
+- **github**: L1-L3. L3 merge requires green CI + branch protection.
+- **cloud-logs**: L1 only (query system logs)
+
+### L3 Two-Man Rule
+
+L3 actions require TWO governance gate approvals from different groups on the associated task.
+
+### Suggested Bootstrap
+
+```
+ext_grant(developer, github, L2, denied_actions=["merge_pr"])
+ext_grant(developer, cloud-logs, L1)
+ext_grant(security, github, L1)
+ext_grant(security, cloud-logs, L1)
+```
