@@ -421,7 +421,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Thread streaming via shared helper
   // Synthetic IDs (synth-*, react-*, notify-*, s3-*) aren't real channel message IDs
   // and will cause Discord/Telegram API failures if passed as reply references.
-  const rawMessageId = missedMessages[missedMessages.length - 1]?.id || null;
+  // Find the first message with a trigger (the one that actually triggered the agent)
+  const triggeringMessage = missedMessages.find((m) => TRIGGER_PATTERN.test(m.content.trim()));
+  const rawMessageId = triggeringMessage?.id || missedMessages[missedMessages.length - 1]?.id || null;
   const triggeringMessageId = rawMessageId && /^(synth|react|notify|s3)-/.test(rawMessageId) ? null : rawMessageId;
   const lastContent = missedMessages[missedMessages.length - 1]?.content || '';
   const threadName = lastContent
