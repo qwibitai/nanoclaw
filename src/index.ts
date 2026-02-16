@@ -69,6 +69,44 @@ import { Effect } from 'effect';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
+// Global error handlers to prevent crashes from unhandled rejections/exceptions
+// See: https://github.com/qwibitai/nanoclaw/issues/221
+// Adopted from [Upstream PR #243] - Critical stability fix
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error(
+    { reason: reason instanceof Error ? reason.message : String(reason) },
+    'Unhandled promise rejection - application will continue',
+  );
+  // Log the promise that was rejected for debugging
+  if (promise && typeof promise.catch === 'function') {
+    promise.catch((err) => {
+      logger.error({ err }, 'Promise rejection details');
+    });
+  }
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error(
+    { err: err.message, stack: err.stack },
+    'Uncaught exception - attempting graceful shutdown',
+  );
+  // Attempt graceful shutdown before exiting
+  shutdown().finally(() => {
+    process.exit(1);
+  });
+});
+
+// Top-level shutdown function for global error handlers
+let shutdownFn: (() => Promise<void>) | null = null;
+async function shutdown(): Promise<void> {
+  if (shutdownFn) {
+    await shutdownFn();
+  } else {
+    logger.warn('Shutdown called before initialization, forcing exit');
+    process.exit(1);
+  }
+}
+
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
@@ -403,30 +441,37 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    if (result.intermediate && result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      await streamer.handleIntermediate(raw);
-      return;
-    }
-
-    // Final output — send to main channel as before
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text && channel) {
-        const formatted = formatOutbound(channel, text);
-        if (formatted) {
-          await channel.sendMessage(chatJid, formatted, triggeringMessageId || undefined);
-          outputSentToUser = true;
-        }
+    // Wrap in try/catch to prevent unhandled rejections
+    // Adopted from [Upstream PR #243] - Critical stability fix
+    try {
+      if (result.intermediate && result.result) {
+        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        await streamer.handleIntermediate(raw);
+        return;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'error') {
+      // Final output — send to main channel as before
+      if (result.result) {
+        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+        if (text && channel) {
+          const formatted = formatOutbound(channel, text);
+          if (formatted) {
+            await channel.sendMessage(chatJid, formatted, triggeringMessageId || undefined);
+            outputSentToUser = true;
+          }
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
+      }
+
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    } catch (err) {
+      logger.error({ group: group.name, err }, 'Error in streaming output callback');
       hadError = true;
     }
   });
@@ -783,14 +828,8 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // Handle unhandled promise rejections to prevent process crashes
-  process.on('unhandledRejection', (reason, promise) => {
-    logger.error(
-      { reason, promise },
-      'CRITICAL: Unhandled promise rejection detected - this should be fixed'
-    );
-    // Don't exit - log and continue to prevent service outage
-  });
+  // Register shutdown function for global error handlers
+  shutdownFn = () => shutdown('SHUTDOWN_SIGNAL');
 
   // --- Parallel startup: backends + channels concurrently ---
   const startupT0 = Date.now();
