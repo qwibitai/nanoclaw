@@ -41,6 +41,9 @@ export class WhatsAppChannel implements Channel {
   private messageCache = new Map<string, { msg: any; ts: number }>();
   private static readonly MESSAGE_CACHE_MAX = 500;
   private static readonly MESSAGE_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  // Track IDs of messages we sent so the upsert handler can ignore echoes (self-chat loop fix)
+  private sentMessageIds = new Set<string>();
+  private static readonly SENT_IDS_MAX = 200;
 
   // Store event handlers so they can be removed on reconnect
   private messageHandler: ((data: any) => Promise<void>) | null = null;
@@ -182,6 +185,12 @@ export class WhatsAppChannel implements Channel {
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
+        // Skip echoes of our own sent messages (prevents self-chat loop)
+        if (msg.key.id && this.sentMessageIds.has(msg.key.id)) {
+          this.sentMessageIds.delete(msg.key.id);
+          continue;
+        }
+
         // Translate LID JID to phone JID if applicable
         const chatJid = await this.translateJid(rawJid);
 
@@ -262,8 +271,17 @@ export class WhatsAppChannel implements Channel {
       const cached = replyToMessageId ? this.messageCache.get(replyToMessageId) : undefined;
       const opts = cached ? { quoted: cached.msg } : undefined;
       const sent = await this.sock.sendMessage(jid, { text }, opts);
+      const sentId = sent?.key?.id;
+      if (sentId) {
+        this.sentMessageIds.add(sentId);
+        // Prune to avoid unbounded growth
+        if (this.sentMessageIds.size > WhatsAppChannel.SENT_IDS_MAX) {
+          const first = this.sentMessageIds.values().next().value;
+          if (first) this.sentMessageIds.delete(first);
+        }
+      }
       logger.info({ jid, length: text.length }, 'Message sent');
-      return sent?.key?.id ?? undefined;
+      return sentId ?? undefined;
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text });
