@@ -21,6 +21,12 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+.env.txt
+.envoak_key
+config.enc
+
+# Personal agent configurations (use agents.example.json as template)
+agents.json
 
 # OS
 .DS_Store
