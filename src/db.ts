@@ -480,16 +480,22 @@ export function getRegisteredGroup(
     .prepare('SELECT * FROM registered_groups WHERE jid = ?')
     .get(jid) as
     | {
-        jid: string;
-        name: string;
-        folder: string;
-        trigger_pattern: string;
-        added_at: string;
-        container_config: string | null;
-        requires_trigger: number | null;
-      }
+      jid: string;
+      name: string;
+      folder: string;
+      trigger_pattern: string;
+      added_at: string;
+      container_config: string | null;
+      requires_trigger: number | null;
+    }
     | undefined;
   if (!row) return undefined;
+
+  // Validate folder name against traversal attacks
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(row.folder)) {
+    return undefined;
+  }
+
   return {
     jid: row.jid,
     name: row.name,
@@ -525,16 +531,21 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   const rows = db
     .prepare('SELECT * FROM registered_groups')
     .all() as Array<{
-    jid: string;
-    name: string;
-    folder: string;
-    trigger_pattern: string;
-    added_at: string;
-    container_config: string | null;
-    requires_trigger: number | null;
-  }>;
+      jid: string;
+      name: string;
+      folder: string;
+      trigger_pattern: string;
+      added_at: string;
+      container_config: string | null;
+      requires_trigger: number | null;
+    }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
+    // Validate folder name against traversal attacks
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(row.folder)) {
+      continue;
+    }
+
     result[row.jid] = {
       name: row.name,
       folder: row.folder,

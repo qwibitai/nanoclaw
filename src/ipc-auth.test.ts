@@ -51,16 +51,16 @@ beforeEach(() => {
   setRegisteredGroup('third@g.us', THIRD_GROUP);
 
   deps = {
-    sendMessage: async () => {},
+    sendMessage: async () => { },
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;
       setRegisteredGroup(jid, group);
       // Mock the fs.mkdirSync that registerGroup does
     },
-    syncGroupMetadata: async () => {},
+    syncGroupMetadata: async () => { },
     getAvailableGroups: () => [],
-    writeGroupsSnapshot: () => {},
+    writeGroupsSnapshot: () => { },
   };
 });
 
@@ -590,5 +590,22 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+
+  it('rejects register_group with invalid folder characters', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'evil@g.us',
+        name: 'Evil Group',
+        folder: '../../.ssh',
+        trigger: '@Evil',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(getRegisteredGroup('evil@g.us')).toBeUndefined();
   });
 });

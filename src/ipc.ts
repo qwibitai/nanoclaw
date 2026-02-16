@@ -357,6 +357,13 @@ export async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        if (!/^[a-z0-9][a-z0-9_-]*$/i.test(data.folder)) {
+          logger.warn(
+            { folder: data.folder, sourceGroup },
+            'Invalid group folder name rejected (must be alphanumeric with hyphens/underscores)',
+          );
+          break;
+        }
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
