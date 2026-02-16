@@ -24,7 +24,7 @@ const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
+  registeredGroups: () => Record<string, RegisteredGroup[]>;
 }
 
 export class WhatsAppChannel implements Channel {

@@ -57,12 +57,12 @@ describe('getAvailableGroups', () => {
     storeChatMetadata('unreg@g.us', '2024-01-01T00:00:02.000Z', 'Unregistered');
 
     _setRegisteredGroups({
-      'reg@g.us': {
+      'reg@g.us': [{
         name: 'Registered',
         folder: 'registered',
         trigger: '@Andy',
         added_at: '2024-01-01T00:00:00.000Z',
-      },
+      }],
     });
 
     const groups = getAvailableGroups();

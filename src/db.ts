@@ -65,14 +65,15 @@ function createSchema(database: Database.Database): void {
       session_id TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS registered_groups (
-      jid TEXT PRIMARY KEY,
+      folder TEXT PRIMARY KEY,
+      jid TEXT NOT NULL,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE INDEX IF NOT EXISTS idx_registered_groups_jid ON registered_groups(jid);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -521,7 +522,7 @@ export function setRegisteredGroup(
   );
 }
 
-export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
+export function getAllRegisteredGroups(): Record<string, RegisteredGroup[]> {
   const rows = db
     .prepare('SELECT * FROM registered_groups')
     .all() as Array<{
@@ -533,9 +534,12 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     container_config: string | null;
     requires_trigger: number | null;
   }>;
-  const result: Record<string, RegisteredGroup> = {};
+  const result: Record<string, RegisteredGroup[]> = {};
   for (const row of rows) {
-    result[row.jid] = {
+    if (!result[row.jid]) {
+      result[row.jid] = [];
+    }
+    result[row.jid].push({
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,
@@ -544,7 +548,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
-    };
+    });
   }
   return result;
 }

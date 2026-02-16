@@ -44,7 +44,7 @@ export { escapeXml, formatMessages } from './router.js';
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
-let registeredGroups: Record<string, RegisteredGroup> = {};
+let registeredGroups: Record<string, RegisteredGroup[]> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
@@ -77,7 +77,10 @@ function saveState(): void {
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
-  registeredGroups[jid] = group;
+  if (!registeredGroups[jid]) {
+    registeredGroups[jid] = [];
+  }
+  registeredGroups[jid].push(group);
   setRegisteredGroup(jid, group);
 
   // Create group folder
@@ -109,7 +112,7 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
 }
 
 /** @internal - exported for testing */
-export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): void {
+export function _setRegisteredGroups(groups: Record<string, RegisteredGroup[]>): void {
   registeredGroups = groups;
 }
 
@@ -118,32 +121,45 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
-  const group = registeredGroups[chatJid];
-  if (!group) return true;
-
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const groups = registeredGroups[chatJid];
+  if (!groups || groups.length === 0) return true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
-    const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
-    );
-    if (!hasTrigger) return true;
+  // Process each group registered to this channel
+  for (const group of groups) {
+    const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+
+    // For non-main groups, check if trigger is required and present
+    if (!isMainGroup && group.requiresTrigger !== false) {
+      const triggerPattern = new RegExp(`^${group.trigger}\\b`, 'i');
+      const hasTrigger = missedMessages.some((m) =>
+        triggerPattern.test(m.content.trim()),
+      );
+      if (!hasTrigger) continue;
+    }
+
+    const success = await processGroupMessagesForSingleGroup(chatJid, group, missedMessages);
+    if (!success) return false;
   }
 
-  const prompt = formatMessages(missedMessages);
-
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  // Only advance cursor if all groups processed successfully
+  lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
   saveState();
+
+  return true;
+}
+
+async function processGroupMessagesForSingleGroup(
+  chatJid: string,
+  group: RegisteredGroup,
+  missedMessages: NewMessage[],
+): Promise<boolean> {
+
+  const prompt = formatMessages(missedMessages);
 
   logger.info(
     { group: group.name, messageCount: missedMessages.length },
@@ -189,16 +205,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
+    // If we already sent output to the user, don't fail the whole batch —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      logger.warn({ group: group.name }, 'Agent error after output was sent');
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
-    logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    logger.warn({ group: group.name }, 'Agent error');
     return false;
   }
 
@@ -317,21 +330,24 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
-          const group = registeredGroups[chatJid];
-          if (!group) continue;
+          const groups = registeredGroups[chatJid];
+          if (!groups || groups.length === 0) continue;
 
-          const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          // Check each group to see if its trigger is present
+          for (const group of groups) {
+            const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+            const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
-            );
-            if (!hasTrigger) continue;
-          }
+            // For non-main groups, only act on trigger messages.
+            // Non-trigger messages accumulate in DB and get pulled as
+            // context when a trigger eventually arrives.
+            if (needsTrigger) {
+              const triggerPattern = new RegExp(`^${group.trigger}\\b`, 'i');
+              const hasTrigger = groupMessages.some((m) =>
+                triggerPattern.test(m.content.trim()),
+              );
+              if (!hasTrigger) continue;
+            }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
@@ -358,6 +374,9 @@ async function startMessageLoop(): Promise<void> {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
           }
+          // For multi-group support: only pipe to first matching group
+          break;
+          }
         }
       }
     } catch (err) {
@@ -372,12 +391,13 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+  for (const [chatJid, groups] of Object.entries(registeredGroups)) {
+    if (!groups || groups.length === 0) continue;
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
-        { group: group.name, pendingCount: pending.length },
+        { chatJid, groupCount: groups.length, pendingCount: pending.length },
         'Recovery: found unprocessed messages',
       );
       queue.enqueueMessageCheck(chatJid);

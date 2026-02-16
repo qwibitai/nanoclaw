@@ -23,7 +23,7 @@ import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
-  registeredGroups: () => Record<string, RegisteredGroup>;
+  registeredGroups: () => Record<string, RegisteredGroup[]>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
@@ -44,7 +44,8 @@ async function runTask(
   );
 
   const groups = deps.registeredGroups();
-  const group = Object.values(groups).find(
+  const allGroups = Object.values(groups).flat();
+  const group = allGroups.find(
     (g) => g.folder === task.group_folder,
   );
 

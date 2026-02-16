@@ -1,0 +1,20 @@
+[
+  {
+    "folder": "main",
+    "trigger": "@andy",
+    "channelName": "main",
+    "description": "Main coordination agent"
+  },
+  {
+    "folder": "researcher",
+    "trigger": "@research",
+    "channelName": "main",
+    "description": "Research and information gathering"
+  },
+  {
+    "folder": "coder",
+    "trigger": "@code",
+    "channelName": "coding",
+    "description": "Software development and code review"
+  }
+]
