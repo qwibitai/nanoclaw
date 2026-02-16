@@ -41,17 +41,37 @@ Only ask the user for help if multiple retries fail with the same error.
 
 ## 3. Container Runtime
 
+### 3a. Choose runtime
+
 Use the environment check results from step 1 to decide which runtime to use:
 
-- PLATFORM=linux → Docker will be used. If the source code still references Apple Container (check for `container system status` in `src/index.ts`), run the `/convert-to-docker` skill first, then continue.
-- PLATFORM=macos + APPLE_CONTAINER=installed → use apple-container
-- PLATFORM=macos + DOCKER=running + APPLE_CONTAINER=not_found → use Docker. If the source code still references Apple Container, run the `/convert-to-docker` skill first.
-- PLATFORM=macos + DOCKER=installed_not_running → start Docker for them: `open -a Docker`. Wait 15s, re-check with `docker info`. If still not running, tell the user Docker is starting up and poll a few more times. Then apply `/convert-to-docker` if source code needs it.
+- PLATFORM=linux → Docker
+- PLATFORM=macos + APPLE_CONTAINER=installed → apple-container
+- PLATFORM=macos + DOCKER=running + APPLE_CONTAINER=not_found → Docker
+- PLATFORM=macos + DOCKER=installed_not_running → start Docker: `open -a Docker`. Wait 15s, re-check with `docker info`. If still not running, tell the user Docker is starting up and poll a few more times.
 - Neither available → AskUserQuestion: Apple Container (recommended for macOS) vs Docker?
-  - **If Docker chosen:** install it, then run the `/convert-to-docker` skill to update the source code.
   - Apple Container: tell user to download from https://github.com/apple/container/releases and install the .pkg. Wait for confirmation, then verify with `container --version`.
   - Docker on macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download.
   - Docker on Linux: install with `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`. Note: user may need to log out/in for group membership.
+
+### 3b. Docker conversion gate (REQUIRED before building)
+
+**If the chosen runtime is Docker**, you MUST check whether the source code has already been converted from Apple Container to Docker. Do NOT skip this step. Run:
+
+```bash
+grep -q 'container system status' src/index.ts && echo "NEEDS_CONVERSION" || echo "ALREADY_CONVERTED"
+```
+
+Check these three files for Apple Container references:
+- `src/index.ts` — look for `container system status` or `ensureContainerSystemRunning`
+- `src/container-runner.ts` — look for `spawn('container'`
+- `container/build.sh` — look for `container build`
+
+**If ANY of those Apple Container references exist**, the source code has NOT been converted. You MUST run the `/convert-to-docker` skill NOW, before proceeding to the build step. Do not attempt to build the container image until the conversion is complete.
+
+**If none of those references exist** (i.e. the code already uses `docker info`, `spawn('docker'`, `docker build`), the conversion has already been done. Continue to 3c.
+
+### 3c. Build and test
 
 Run `./.claude/skills/setup/scripts/03-setup-container.sh --runtime <chosen>` and parse the status block.
 
