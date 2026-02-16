@@ -196,3 +196,166 @@ Show the log tail command: `tail -f logs/nanoclaw.log`
 **WhatsApp disconnected:** Run `npm run auth` to re-authenticate, then `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw`.
 
 **Unload service:** `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
+
+## Advanced Setup
+
+### GitHub Integration (Optional)
+
+After step 4 (Claude Authentication), optionally configure GitHub integration for the agent to push branches and create pull requests.
+
+Ask the user:
+> Do you want the agent to be able to **push branches and create pull requests** on GitHub?
+>
+> This requires a GitHub Personal Access Token (classic). You can skip this and add it later.
+
+If **no**, skip to the next step.
+
+If **yes**:
+
+Tell the user:
+> 1. Go to https://github.com/settings/tokens (click **Tokens (classic)**)
+> 2. Generate a new **classic** token with the **`repo`** scope
+> 3. If you need access to multiple orgs, classic tokens work across all orgs you're a member of (fine-grained tokens are limited to a single owner)
+
+Ask them to paste the token or confirm they've added it to `.env` themselves.
+
+If they paste the token, append it to `.env`:
+
+```bash
+echo "GITHUB_TOKEN=<token>" >> .env
+```
+
+**Optional:** Ask if they want to customize the git identity used for commits:
+
+```bash
+echo "GIT_AUTHOR_NAME=<name>" >> .env
+echo "GIT_AUTHOR_EMAIL=<email>" >> .env
+```
+
+If they skip, defaults are used: `NanoClaw Agent` / `nanoclaw@users.noreply.github.com`.
+
+### Discord Agent (Optional)
+
+After completing the main setup, optionally add a Discord agent to respond in Discord channels.
+
+Ask the user:
+> Do you want to add a **Discord agent**? This creates a separate agent that responds in Discord channels.
+
+If **no**, skip this section.
+
+If **yes**, follow these steps:
+
+#### Discord Bot Token
+
+Ask the user:
+> Provide your Discord bot token. If you don't have one:
+> 1. Go to https://discord.com/developers/applications
+> 2. Create a new application → Bot → Reset Token → Copy it
+> 3. Under **Bot → Privileged Gateway Intents**, enable ALL THREE:
+>    - **Presence Intent**
+>    - **Server Members Intent** (required for `@AllAgents` feature)
+>    - **Message Content Intent** (required to read message text)
+> 4. Invite the bot to your server using OAuth2 → URL Generator (scopes: `bot`, permissions: `Send Messages`, `Read Message History`)
+
+If they paste the token, use the Write tool or a text editor to append `DISCORD_BOT_TOKEN=<token>` to `.env`. Do **not** echo the token via shell command, as it would leak into shell history.
+
+#### Register Discord Channel
+
+The Discord channel JID format is `dc:<channel_id>`. Ask the user for the Discord channel ID:
+> Right-click the channel in Discord → **Copy Channel ID** (enable Developer Mode in Discord Settings → Advanced if you don't see this option).
+
+Register the group in the database. First derive the backend value (fallback to runtime choice if table is empty):
+```bash
+BACKEND=$(sqlite3 store/messages.db "SELECT backend FROM registered_groups LIMIT 1")
+[ -z "$BACKEND" ] && BACKEND="<apple-container|docker>"
+```
+```bash
+sqlite3 store/messages.db "INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, backend, added_at) VALUES ('dc:<CHANNEL_ID>', '<AGENT_NAME>', '<FOLDER_NAME>', '@<TRIGGER>', 1, '$BACKEND', datetime('now'))"
+```
+
+Create the group folder:
+```bash
+mkdir -p groups/<FOLDER_NAME>/logs
+```
+
+Restart the service to connect to Discord:
+```bash
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+Verify the agent is working by checking logs after sending a message in the Discord channel:
+```bash
+tail -f logs/nanoclaw.log
+```
+
+## Reboot Agents
+
+When the user asks to reboot or restart their agents, **check status first** before restarting anything.
+
+### 1. Check which agents are registered
+
+```bash
+sqlite3 store/messages.db "SELECT folder, name, backend FROM registered_groups"
+```
+
+### 2. Check if the NanoClaw service is running
+
+```bash
+launchctl list | grep nanoclaw
+```
+
+A running service shows a PID in the first column. `-` means it's not running.
+
+### 3. Check recent activity per agent
+
+For each registered group folder, check the most recent container log timestamp to determine if it's been active:
+
+```bash
+for folder in $(sqlite3 store/messages.db "SELECT folder FROM registered_groups"); do
+  LATEST=$(ls -t "groups/$folder/logs/" 2>/dev/null | head -1)
+  if [ -n "$LATEST" ]; then
+    echo "$folder: last active $(echo "$LATEST" | sed 's/container-//;s/\.log//' | tr 'T' ' ')"
+  else
+    echo "$folder: no recent activity"
+  fi
+done
+```
+
+Also check the main log for recent errors:
+```bash
+tail -20 logs/nanoclaw.log
+```
+
+### 4. Present status and ask
+
+Use the **AskUserQuestion** tool to show the user the status of each agent and ask which ones to reboot. Example:
+
+> **Agent Status:**
+> - **main** — last active 2 min ago
+> - **ditto-discord** — last active 3 hours ago
+> - **bot-commands** — no recent activity
+>
+> Which agents do you want to reboot?
+>
+> Options:
+> 1. Reboot all (restart NanoClaw service)
+> 2. Let me pick specific ones
+
+### 5. Reboot
+
+**Reboot all** (restarts the entire NanoClaw service, which reconnects all channels):
+```bash
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+After restarting, verify it came back up:
+```bash
+sleep 3 && launchctl list | grep nanoclaw
+```
+
+Then check the log for successful startup:
+```bash
+tail -5 logs/nanoclaw.log
+```
+
+Tell the user the result — whether the service restarted successfully and is processing messages again.
