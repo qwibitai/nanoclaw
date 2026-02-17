@@ -165,3 +165,45 @@ The coordinator (Flux) triggers consolidation for each agent. The consolidation 
 1. Read `memory.md` (the index)
 2. Read topic files relevant to your current task (not all of them)
 3. Optionally read recent daily notes for fresh context
+
+---
+
+## Credentials & Secrets
+
+Secrets are stored in two tiers based on risk level. **NEVER store passwords or tokens in plain text files.**
+
+### Tier 1: `pass` (agent-accessible)
+
+Low-risk credentials that agents can access directly. Stored in GPG-encrypted vault via `pass` (available to the `nanoclaw` user).
+
+```bash
+pass show flux/email-password    # retrieve a secret
+pass ls                          # list all stored secrets
+echo 'value' | pass insert -e path/to/secret   # store a new secret
+```
+
+Use for: agent email accounts, test credentials, low-risk service logins.
+
+### Tier 2: External Access Broker (agent never sees)
+
+High-risk credentials handled by the broker. Agent calls `ext_call()`, broker injects the real token on the host side.
+
+Use for: `GITHUB_TOKEN`, `OPENAI_API_KEY`, production databases, financial APIs, OAuth admin tokens.
+
+### Classification rules
+
+| If the credential... | Tier | Why |
+|----------------------|------|-----|
+| Was created specifically for an agent | T1 | Compromise is contained, easy to rotate |
+| Can spend money (API billing) | T2 | Financial risk |
+| Grants access to private repos/data | T2 | Data breach risk |
+| Is a test/staging credential | T1 | Low blast radius |
+| Is a production deploy key | T2 | Production risk |
+| Is someone's personal password | T2 | Identity risk |
+
+### Rules
+
+1. **Never store T2 secrets in `pass`** — they go in `.env` or root-only files, accessed via broker
+2. **Never store ANY secret in memory files** (daily notes, topic files, conversations)
+3. **If you receive a credential in chat**, immediately store it in `pass` (T1) and delete the plain text reference
+4. **Rotate if exposed** — if a credential appears in a log or plain text file, rotate it immediately
