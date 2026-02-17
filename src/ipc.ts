@@ -128,11 +128,42 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 continue;
               }
               if (data.type === 'format_mention' && data.userName && data.platform) {
-                // TODO: Implement user registry lookup
-                // For now, just log the request and clean up the file
+                // Look up user in registry and write response back to agent
+                const userRegistryPath = path.join(ipcBaseDir, 'user_registry.json');
+                let formattedMention = `@${data.userName}`;
+                try {
+                  if (fs.existsSync(userRegistryPath)) {
+                    const registryData = JSON.parse(fs.readFileSync(userRegistryPath, 'utf-8'));
+                    const key = (data.userName as string).toLowerCase().trim();
+                    const user = registryData[key];
+                    if (user) {
+                      switch (user.platform) {
+                        case 'discord':
+                          formattedMention = `<@${user.id}>`;
+                          break;
+                        case 'whatsapp':
+                          formattedMention = `@${user.id}`;
+                          break;
+                        default:
+                          formattedMention = `@${user.name}`;
+                      }
+                    }
+                  }
+                } catch (err) {
+                  logger.warn({ err, userName: data.userName }, 'format_mention: failed to read user registry');
+                }
+                // Write response back so the agent can read the result
+                if (data.requestId) {
+                  const responseDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+                  fs.mkdirSync(responseDir, { recursive: true });
+                  const responseFile = path.join(responseDir, `${data.requestId}.json`);
+                  const tempPath = `${responseFile}.tmp`;
+                  fs.writeFileSync(tempPath, JSON.stringify({ type: 'format_mention_response', requestId: data.requestId, result: formattedMention }, null, 2));
+                  fs.renameSync(tempPath, responseFile);
+                }
                 logger.info(
-                  { userName: data.userName, platform: data.platform, chatJid: data.chatJid, sourceGroup },
-                  'IPC format_mention request (user registry lookup not yet implemented)',
+                  { userName: data.userName, platform: data.platform, formattedMention, sourceGroup },
+                  'IPC format_mention processed',
                 );
                 fs.unlinkSync(filePath);
                 continue;

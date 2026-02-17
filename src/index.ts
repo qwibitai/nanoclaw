@@ -414,7 +414,28 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   const channel = findChannel(channels, chatJid);
-  if (channel?.setTyping) await channel.setTyping(chatJid, true);
+
+  // Keep the typing indicator alive for the entire agent run.
+  // Discord's typing indicator expires after ~10 seconds, so we refresh
+  // every 8 seconds until the agent finishes. Other channels (Telegram,
+  // WhatsApp) send a one-shot update and ignore subsequent calls gracefully.
+  let typingInterval: ReturnType<typeof setInterval> | null = null;
+  if (channel?.setTyping) {
+    try {
+      await channel.setTyping(chatJid, true);
+      typingInterval = setInterval(() => {
+        channel.setTyping!(chatJid, true).catch(() => {
+          // Non-fatal — typing indicator is best-effort
+        });
+      }, 8_000);
+    } catch (err) {
+      logger.debug(
+        { group: group.name, error: err },
+        'Typing indicator failed to start',
+      );
+    }
+  }
+
   let hadError = false;
   let outputSentToUser = false;
 
@@ -478,6 +499,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  // Stop the typing keep-alive loop
+  if (typingInterval) clearInterval(typingInterval);
   if (channel?.setTyping) await channel.setTyping(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
@@ -1081,7 +1104,8 @@ async function main(): Promise<void> {
         if (targetJid && output.result) {
           const ch = findChannel(channels, targetJid);
           if (ch) {
-            const text = formatOutbound(ch, output.result);
+            const agent = agents[agentId];
+            const text = formatOutbound(ch, output.result, agent?.name);
             if (text) await ch.sendMessage(targetJid, text);
           }
         }
@@ -1099,7 +1123,8 @@ async function main(): Promise<void> {
           if (isMain || isRegisteredTarget) {
             const ch = findChannel(channels, data.chatJid);
             if (ch) {
-              const text = formatOutbound(ch, data.text);
+              const agent = agents[sourceAgentId];
+              const text = formatOutbound(ch, data.text, agent?.name);
               if (text) await ch.sendMessage(data.chatJid, text);
             }
             // Cross-agent: wake up the target agent
@@ -1125,7 +1150,8 @@ async function main(): Promise<void> {
           sendMessage: async (jid, rawText) => {
             const ch = findChannel(channels, jid);
             if (!ch) return;
-            const text = formatOutbound(ch, rawText);
+            const agent = agents[sourceAgentId];
+            const text = formatOutbound(ch, rawText, agent?.name);
             if (text) return await ch.sendMessage(jid, text);
           },
           notifyGroup: (jid, text) => {

@@ -18,7 +18,7 @@ import {
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, DATA_DIR, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import {
   getAllRegisteredGroups,
   storeChatMetadata,
@@ -26,6 +26,42 @@ import {
 } from '../db.js';
 import { logger } from '../logger.js';
 import { Channel, RegisteredGroup } from '../types.js';
+
+/**
+ * Merge Discord user mention data into the shared user registry JSON.
+ * Keyed by lowercase display name so the format_mention MCP tool can look users up.
+ * Writes atomically (temp file + rename) to avoid partial reads.
+ */
+function updateUserRegistry(mentions: Array<{ id: string; name: string; platform: 'discord' }>): void {
+  if (mentions.length === 0) return;
+  const registryPath = path.join(DATA_DIR, 'ipc', 'user_registry.json');
+  try {
+    // Read existing registry or start fresh
+    let registry: Record<string, { id: string; name: string; platform: string; lastSeen: string }> = {};
+    if (fs.existsSync(registryPath)) {
+      try {
+        registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+      } catch {
+        // Corrupt file — start fresh
+        registry = {};
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const { id, name, platform } of mentions) {
+      const key = name.toLowerCase().trim();
+      registry[key] = { id, name, platform, lastSeen: now };
+    }
+
+    // Atomic write: temp file then rename
+    fs.mkdirSync(path.dirname(registryPath), { recursive: true });
+    const tempPath = `${registryPath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(registry, null, 2), 'utf-8');
+    fs.renameSync(tempPath, registryPath);
+  } catch (err) {
+    logger.warn({ err }, 'Failed to update user registry from Discord mentions');
+  }
+}
 
 export interface DiscordChannelOpts {
   token: string;
@@ -329,6 +365,8 @@ export class DiscordChannel implements Channel {
         mentions.push({ id, name, platform: 'discord' });
       }
     }
+    // Persist mention metadata to user registry so format_mention MCP tool can look them up
+    updateUserRegistry(mentions);
     // Resolve <@&ROLE_ID> role mentions and <#CHANNEL_ID> channel mentions
     if (message.mentions.roles?.size) {
       for (const [id, role] of message.mentions.roles) {
