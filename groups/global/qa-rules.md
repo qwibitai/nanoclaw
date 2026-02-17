@@ -43,27 +43,95 @@ Before delivering any code, scripts, patches, or review results:
 
 ---
 
+## Memory System
+
+Memory flows through a pipeline. You write fast, the system curates later.
+
+```
+Conversation → Daily Note (fast dump) → Consolidation (every 15 days) → Topic Files (curated) → memory.md (index)
+```
+
+### Directory structure
+
+```
+{your-workspace}/
+  memory.md                  ← index: links to topic files + last consolidated date
+  memory/
+    daily/
+      2026-02-17.md          ← today's raw notes (append-only, unstructured)
+      2026-02-16.md          ← yesterday's notes
+      ...
+    topics/
+      projects.md            ← curated: active + completed projects
+      decisions.md           ← curated: key decisions and rationale
+      lessons.md             ← curated: lessons learned, gotchas
+      people.md              ← curated: contacts, preferences, team info
+      pending.md             ← curated: ideas for later, follow-ups
+      credentials.md         ← curated: accounts, tokens (if applicable)
+```
+
+### Layer 1: Daily Notes (`memory/daily/YYYY-MM-DD.md`)
+
+This is your **scratch pad**. During work and before compaction, dump everything here fast. No need to categorize — just write.
+
+Format:
+```markdown
+# 2026-02-17
+
+## Session 1
+- Worked on GOV-42 auth middleware
+- Decision: chose JWT over sessions (stateless scales better)
+- Gotcha: Node spawn() with uid/gid doesn't set supplementary groups
+- Blocker: need OPENAI_API_KEY in .env
+- Met with João — prefers WhatsApp, timezone BRT
+- Idea: add rate limiting to the broker
+
+## Session 2
+- Resolved blocker, key added to .env
+- GOV-42 complete, moved to REVIEW
+```
+
+Rules:
+- One file per day, named `YYYY-MM-DD.md`
+- Append new sessions at the bottom
+- No structure required — bullet points are fine
+- **Speed over polish** — the consolidation process will curate later
+
+### Layer 2: Topic Files (`memory/topics/*.md`)
+
+These are **curated** reference files that agents read at session start. They are **ONLY updated during consolidation**, never during regular work.
+
+Rules:
+- Each file stays under ~100 lines. If it grows too large, split (e.g., `lessons-auth.md`, `lessons-platform.md`)
+- Newest entries at the top
+- Date every entry: `### 2026-02-17: Title`
+- Only confirmed facts — no speculation
+- Remove outdated entries during consolidation
+
+### Layer 3: memory.md (Index)
+
+Lists topic files and their last-updated dates. No content — just links.
+
+---
+
 ## Compaction & Session End Protocol
 
-**CRITICAL**: Before your context is compacted or your session ends, you MUST preserve your work:
+**CRITICAL**: Before your context is compacted or your session ends:
 
-1. **Update `working.md`** — current task status, what you were doing, what's left
-2. **Route to category files** — save each piece of information to the correct `memory/` file:
+1. **Update `working.md`** — current task status, what you were doing, what's left, blockers
+2. **Append to today's daily note** (`memory/daily/YYYY-MM-DD.md`) — dump everything important:
+   - What you worked on
+   - Decisions made and why
+   - Problems encountered and solutions
+   - Gotchas or surprises
+   - People you interacted with
+   - Ideas for later
+   - Use the session format shown above
+3. **Call `store_memory()`** — for critical lessons and decisions, also store via MCP for cross-agent search. Always include `source_ref` with the task ID
 
-| Category | Where to save | Example |
-|----------|--------------|---------|
-| Task progress | `working.md` | "Task GOV-42: implemented auth middleware, tests passing, needs review" |
-| Decisions | `memory/decisions.md` | "### 2026-02-17: Chose JWT — stateless scales better" |
-| Lessons/gotchas | `memory/lessons.md` | "### 2026-02-17: Node spawn() doesn't set supplementary groups" |
-| Blockers | `working.md` | "Blocked on: need OPENAI_API_KEY in .env" |
-| Ideas for later | `memory/pending.md` | "Consider adding rate limiting to the broker" |
-| People/contacts | `memory/people.md` | "### João: prefers WhatsApp, timezone BRT" |
-| Projects | `memory/projects.md` | "### 2026-02-17: Voice Transcription — installed" |
+That's it. **Do NOT update topic files during compaction** — the consolidation process handles that.
 
-3. **Update `memory.md` index** — update the Last Updated column for any category file you changed
-4. **Call `store_memory()`** — for lessons and decisions, also store via MCP for cross-agent search. Always include `source_ref` with the task ID
-
-### Memory tags convention
+### Memory tags convention (for `store_memory()`)
 
 - `["pattern", "topic"]` — reusable solution
 - `["gotcha", "topic"]` — unexpected behavior
@@ -72,33 +140,28 @@ Before delivering any code, scripts, patches, or review results:
 
 ---
 
-## Memory Organization
+## Consolidation (Every 15 Days)
 
-Memory is split into category files inside a `memory/` folder. **NEVER** let a single file grow past ~100 lines — split further if needed.
+The coordinator (Flux) triggers consolidation for each agent. The consolidation process:
 
-### Required structure
+1. Read all daily notes since last consolidation
+2. Extract and categorize information into topic files:
 
-```
-{your-workspace}/
-  memory.md              ← index: links to category files, last updated date
-  memory/
-    projects.md          ← active + recently completed projects
-    decisions.md         ← key decisions and rationale
-    lessons.md           ← lessons learned, gotchas, platform quirks
-    people.md            ← contacts, preferences, team info
-    pending.md           ← pending items, ideas for later, follow-ups
-    credentials.md       ← credentials, tokens, accounts (if applicable)
-```
+| From daily notes | Route to |
+|-----------------|----------|
+| Project progress, completions | `topics/projects.md` |
+| Decisions and rationale | `topics/decisions.md` |
+| Lessons, gotchas, surprises | `topics/lessons.md` |
+| People, contacts, preferences | `topics/people.md` |
+| Ideas, follow-ups, pending | `topics/pending.md` |
+| Credentials, accounts | `topics/credentials.md` |
 
-### Rules
-
-1. **`memory.md` is an index only** — it lists category files and their last-updated dates. No content beyond links and a 1-line summary per category.
-2. **One topic per category file** — don't mix projects with lessons. If a category grows too large, split it (e.g., `lessons-auth.md`, `lessons-platform.md`).
-3. **Append, don't rewrite** — add new entries at the top of each file (newest first). Only remove entries when they're confirmed outdated.
-4. **Date every entry** — `### 2026-02-17: Title` format. This helps identify stale entries.
-5. **Keep it factual** — no speculation. Only record confirmed facts, tested solutions, and verified decisions.
-6. **Compaction extracts go to category files** — when following the Compaction Protocol, route each piece of information to the correct category file, not to memory.md.
+3. Remove outdated entries from topic files (completed projects, resolved items)
+4. Archive processed daily notes (move to `memory/daily/archive/` or delete if >30 days old)
+5. Update `memory.md` index with new dates
 
 ### At session start
 
-Read `memory.md` (the index), then read the category files relevant to your current task. You don't need to read all categories every time — just the ones that matter.
+1. Read `memory.md` (the index)
+2. Read topic files relevant to your current task (not all of them)
+3. Optionally read recent daily notes for fresh context
