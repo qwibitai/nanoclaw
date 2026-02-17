@@ -4,7 +4,9 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  ASSISTANT_NAME,
   DATA_DIR,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -15,8 +17,53 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+// Simple extension-to-MIME map (no external deps)
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  mp4: 'video/mp4',
+  '3gp': 'video/3gpp',
+  mov: 'video/quicktime',
+  ogg: 'audio/ogg',
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  wav: 'audio/wav',
+  pdf: 'application/pdf',
+  json: 'application/json',
+  txt: 'text/plain',
+  csv: 'text/csv',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  zip: 'application/zip',
+  tar: 'application/x-tar',
+  gz: 'application/gzip',
+  html: 'text/html',
+  xml: 'text/xml',
+  svg: 'image/svg+xml',
+};
+
+const MAX_FILE_SIZE = 64 * 1024 * 1024; // 64MB WhatsApp limit
+
+function mimeFromPath(filePath: string): string {
+  const ext = path.extname(filePath).slice(1).toLowerCase();
+  return EXT_TO_MIME[ext] || 'application/octet-stream';
+}
+
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendFile: (
+    jid: string,
+    buffer: Buffer,
+    mime: string,
+    fileName: string,
+    caption?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -89,6 +136,95 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                }
+              } else if (
+                data.type === 'file' &&
+                data.chatJid &&
+                data.filePath
+              ) {
+                // Authorization: same as text messages
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  !isMain &&
+                  !(targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC file send attempt blocked',
+                  );
+                } else {
+                  // Translate container path to host path
+                  const containerFilePath: string = data.filePath;
+                  let hostFilePath: string | null = null;
+
+                  if (containerFilePath.startsWith('/workspace/group/')) {
+                    hostFilePath = path.join(
+                      GROUPS_DIR,
+                      sourceGroup,
+                      containerFilePath.slice('/workspace/group/'.length),
+                    );
+                  } else if (
+                    containerFilePath.startsWith('/workspace/project/') &&
+                    isMain
+                  ) {
+                    hostFilePath = path.join(
+                      process.cwd(),
+                      containerFilePath.slice('/workspace/project/'.length),
+                    );
+                  } else if (
+                    containerFilePath.startsWith('/workspace/global/')
+                  ) {
+                    hostFilePath = path.join(
+                      GROUPS_DIR,
+                      'global',
+                      containerFilePath.slice('/workspace/global/'.length),
+                    );
+                  }
+
+                  if (!hostFilePath) {
+                    logger.warn(
+                      { filePath: containerFilePath, sourceGroup },
+                      'Cannot translate container file path to host path',
+                    );
+                  } else if (!fs.existsSync(hostFilePath)) {
+                    logger.warn(
+                      { hostFilePath, containerFilePath, sourceGroup },
+                      'IPC file not found on host',
+                    );
+                  } else {
+                    const stat = fs.statSync(hostFilePath);
+                    if (stat.size > MAX_FILE_SIZE) {
+                      logger.warn(
+                        { hostFilePath, size: stat.size, sourceGroup },
+                        'IPC file exceeds 64MB limit',
+                      );
+                    } else {
+                      const buffer = fs.readFileSync(hostFilePath);
+                      const mime = mimeFromPath(hostFilePath);
+                      const fileName =
+                        data.fileName || path.basename(hostFilePath);
+                      const caption = data.caption
+                        ? `${ASSISTANT_NAME}: ${data.caption}`
+                        : undefined;
+                      await deps.sendFile(
+                        data.chatJid,
+                        buffer,
+                        mime,
+                        fileName,
+                        caption,
+                      );
+                      logger.info(
+                        {
+                          chatJid: data.chatJid,
+                          fileName,
+                          mime,
+                          size: buffer.length,
+                          sourceGroup,
+                        },
+                        'IPC file sent',
+                      );
+                    }
+                  }
                 }
               }
               fs.unlinkSync(filePath);

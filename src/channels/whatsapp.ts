@@ -1,26 +1,103 @@
 import { exec } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  WAMessage,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
+  ASSISTANT_HAS_OWN_NUMBER,
+  ASSISTANT_NAME,
+  GROUPS_DIR,
+  STORE_DIR,
+} from '../config.js';
+import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Map WhatsApp message keys to media type and Baileys MediaType
+const MEDIA_MESSAGE_MAP: Record<
+  string,
+  {
+    type: string;
+    baileysType: 'image' | 'video' | 'audio' | 'document' | 'sticker';
+  }
+> = {
+  imageMessage: { type: 'image', baileysType: 'image' },
+  videoMessage: { type: 'video', baileysType: 'video' },
+  audioMessage: { type: 'audio', baileysType: 'audio' },
+  documentMessage: { type: 'document', baileysType: 'document' },
+  stickerMessage: { type: 'sticker', baileysType: 'sticker' },
+};
+
+// Safe MIME types we'll download (block executables, scripts, etc.)
+const SAFE_MIME_PREFIXES = [
+  'image/',
+  'audio/',
+  'video/',
+  'text/',
+  'application/pdf',
+  'application/json',
+  'application/csv',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-tar',
+  'application/gzip',
+  'application/octet-stream',
+  'application/vnd.openxmlformats-officedocument',
+  'application/vnd.ms-excel',
+  'application/vnd.ms-powerpoint',
+  'application/msword',
+];
+
+// Extension lookup for common MIME types
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+  'video/mp4': 'mp4',
+  'video/3gpp': '3gp',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp4': 'm4a',
+  'text/plain': 'txt',
+  'application/pdf': 'pdf',
+  'application/json': 'json',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+    'docx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'application/msword': 'doc',
+  'application/vnd.ms-excel': 'xls',
+};
+
+function isSafeMime(mime: string): boolean {
+  return SAFE_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
+}
+
+function getExtension(mime: string, filename?: string): string {
+  if (filename) {
+    const ext = path.extname(filename).slice(1);
+    if (ext) return ext;
+  }
+  return MIME_TO_EXT[mime] || mime.split('/')[1] || 'bin';
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -57,7 +134,10 @@ export class WhatsAppChannel implements Channel {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
     const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      logger.warn(
+        { err },
+        'Failed to fetch latest WA Web version, using default',
+      );
       return { version: undefined };
     });
     this.sock = makeWASocket({
@@ -86,9 +166,18 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
-        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+        const reason = (
+          lastDisconnect?.error as { output?: { statusCode?: number } }
+        )?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          {
+            reason,
+            shouldReconnect,
+            queuedMessages: this.outgoingQueue.length,
+          },
+          'Connection closed',
+        );
 
         if (shouldReconnect) {
           logger.info('Reconnecting...');
@@ -167,16 +256,34 @@ export class WhatsAppChannel implements Channel {
 
         // Always notify about chat metadata for group discovery
         const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'whatsapp',
+          isGroup,
+        );
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          // Unwrap nested containers for text extraction
+          let msgContent = msg.message!;
+          if (msgContent.ephemeralMessage?.message)
+            msgContent = msgContent.ephemeralMessage.message;
+          if (msgContent.viewOnceMessage?.message)
+            msgContent = msgContent.viewOnceMessage.message;
+          if (msgContent.viewOnceMessageV2?.message)
+            msgContent = msgContent.viewOnceMessageV2.message;
+          if (msgContent.documentWithCaptionMessage?.message)
+            msgContent = msgContent.documentWithCaptionMessage.message;
+
           const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
+            msgContent.conversation ||
+            msgContent.extendedTextMessage?.text ||
+            msgContent.imageMessage?.caption ||
+            msgContent.videoMessage?.caption ||
+            msgContent.documentMessage?.caption ||
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
@@ -194,7 +301,7 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
-          this.opts.onMessage(chatJid, {
+          const newMsg: import('../types.js').NewMessage = {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
@@ -203,7 +310,13 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
-          });
+          };
+
+          // Attempt media download for supported types
+          const group = groups[chatJid];
+          await this.downloadMedia(msg, group.folder, newMsg);
+
+          this.opts.onMessage(chatJid, newMsg);
         }
       }
     });
@@ -220,7 +333,10 @@ export class WhatsAppChannel implements Channel {
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
+        'WA disconnected, message queued',
+      );
       return;
     }
     try {
@@ -229,7 +345,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        'Failed to send, message queued',
+      );
     }
   }
 
@@ -239,6 +358,39 @@ export class WhatsAppChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+  }
+
+  async sendFile(
+    jid: string,
+    buffer: Buffer,
+    mime: string,
+    fileName: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.connected) {
+      logger.warn({ jid, fileName }, 'WA disconnected, cannot send file');
+      return;
+    }
+    try {
+      if (mime.startsWith('image/')) {
+        await this.sock.sendMessage(jid, { image: buffer, caption });
+      } else if (mime.startsWith('video/')) {
+        await this.sock.sendMessage(jid, { video: buffer, caption });
+      } else if (mime.startsWith('audio/')) {
+        await this.sock.sendMessage(jid, { audio: buffer });
+      } else {
+        await this.sock.sendMessage(jid, {
+          document: buffer,
+          mimetype: mime,
+          fileName,
+          caption,
+        });
+      }
+      logger.info({ jid, fileName, mime, size: buffer.length }, 'File sent');
+    } catch (err) {
+      logger.error({ jid, fileName, err }, 'Failed to send file');
+      throw err;
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -292,6 +444,81 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
+  /**
+   * Download media from a WhatsApp message and populate media fields on newMsg.
+   * Silently skips unsupported/unsafe media types.
+   */
+  private async downloadMedia(
+    msg: WAMessage,
+    groupFolder: string,
+    newMsg: import('../types.js').NewMessage,
+  ): Promise<void> {
+    if (!msg.message) return;
+
+    // Unwrap nested message containers (ephemeral, viewOnce, documentWithCaption)
+    let innerMessage = msg.message;
+    if (innerMessage.ephemeralMessage?.message)
+      innerMessage = innerMessage.ephemeralMessage.message;
+    if (innerMessage.viewOnceMessage?.message)
+      innerMessage = innerMessage.viewOnceMessage.message;
+    if (innerMessage.viewOnceMessageV2?.message)
+      innerMessage = innerMessage.viewOnceMessageV2.message;
+    if (innerMessage.documentWithCaptionMessage?.message)
+      innerMessage = innerMessage.documentWithCaptionMessage.message;
+
+    // Find which media message key is present
+    let mediaKey: string | undefined;
+    let mediaInfo: (typeof MEDIA_MESSAGE_MAP)[string] | undefined;
+    for (const [key, info] of Object.entries(MEDIA_MESSAGE_MAP)) {
+      if ((innerMessage as Record<string, unknown>)[key]) {
+        mediaKey = key;
+        mediaInfo = info;
+        break;
+      }
+    }
+
+    if (!mediaKey || !mediaInfo) return;
+
+    const mediaMsg = (innerMessage as Record<string, Record<string, unknown>>)[
+      mediaKey
+    ];
+    const mime = (mediaMsg.mimetype as string) || '';
+    const origFilename = mediaMsg.fileName as string | undefined;
+
+    if (!isSafeMime(mime)) {
+      logger.info({ mime, mediaKey }, 'Skipping unsafe media MIME type');
+      return;
+    }
+
+    try {
+      const buffer = await downloadMediaMessage(msg, 'buffer', {});
+
+      const ext = getExtension(mime, origFilename);
+      const filename = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+      const filePath = path.join(mediaDir, filename);
+      fs.writeFileSync(filePath, buffer);
+
+      newMsg.media_type = mediaInfo.type;
+      newMsg.media_path = filePath;
+      newMsg.media_mime = mime;
+      newMsg.media_filename = origFilename;
+
+      // If text content is empty, add a placeholder describing the media
+      if (!newMsg.content) {
+        newMsg.content = `[${mediaInfo.type}${origFilename ? ': ' + origFilename : ''}]`;
+      }
+
+      logger.info(
+        { type: mediaInfo.type, mime, filename, size: buffer.length },
+        'Media downloaded',
+      );
+    } catch (err) {
+      logger.warn({ err, mediaKey, mime }, 'Failed to download media');
+    }
+  }
+
   private async translateJid(jid: string): Promise<string> {
     if (!jid.endsWith('@lid')) return jid;
     const lidUser = jid.split('@')[0].split(':')[0];
@@ -299,7 +526,10 @@ export class WhatsAppChannel implements Channel {
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug(
+        { lidJid: jid, phoneJid: cached },
+        'Translated LID to phone JID (cached)',
+      );
       return cached;
     }
 
@@ -309,7 +539,10 @@ export class WhatsAppChannel implements Channel {
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info(
+          { lidJid: jid, phoneJid },
+          'Translated LID to phone JID (signalRepository)',
+        );
         return phoneJid;
       }
     } catch (err) {
@@ -323,12 +556,18 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info(
+        { count: this.outgoingQueue.length },
+        'Flushing outgoing message queue',
+      );
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
         await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        logger.info(
+          { jid: item.jid, length: item.text.length },
+          'Queued message sent',
+        );
       }
     } finally {
       this.flushing = false;

@@ -10,9 +10,21 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    let attrs = `sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"`;
+    if (m.media_type) {
+      attrs += ` media_type="${escapeXml(m.media_type)}"`;
+      // Convert host path to container path so the agent can access the file
+      if (m.media_path) {
+        const filename = m.media_path.split('/').pop() || '';
+        attrs += ` media_path="/workspace/group/media/${escapeXml(filename)}"`;
+      }
+      if (m.media_mime) attrs += ` media_mime="${escapeXml(m.media_mime)}"`;
+      if (m.media_filename)
+        attrs += ` media_filename="${escapeXml(m.media_filename)}"`;
+    }
+    return `<message ${attrs}>${escapeXml(m.content)}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
