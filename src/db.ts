@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, STORE_DIR } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
@@ -22,6 +22,7 @@ function createSchema(database: Database.Database): void {
       content TEXT,
       timestamp TEXT,
       is_from_me INTEGER,
+      is_bot_message INTEGER DEFAULT 0,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -79,6 +80,19 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add is_bot_message column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_bot_message INTEGER DEFAULT 0`,
+    );
+    // Backfill: mark existing bot messages that used the content prefix pattern
+    database.prepare(
+      `UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`,
+    ).run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
   }
@@ -194,7 +208,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -203,6 +217,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.is_bot_message ? 1 : 0,
   );
 }
 
@@ -217,9 +232,10 @@ export function storeMessageDirect(msg: {
   content: string;
   timestamp: string;
   is_from_me: boolean;
+  is_bot_message?: boolean;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -228,6 +244,7 @@ export function storeMessageDirect(msg: {
     msg.content,
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
+    msg.is_bot_message ? 1 : 0,
   );
 }
 
@@ -239,11 +256,13 @@ export function getNewMessages(
   if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
 
   const placeholders = jids.map(() => '?').join(',');
-  // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
+    WHERE timestamp > ? AND chat_jid IN (${placeholders})
+      AND is_bot_message = 0 AND content NOT LIKE ?
     ORDER BY timestamp
   `;
 
@@ -264,11 +283,13 @@ export function getMessagesSince(
   sinceTimestamp: string,
   botPrefix: string,
 ): NewMessage[] {
-  // Filter out bot's own messages by checking content prefix
+  // Filter bot messages using both the is_bot_message flag AND the content
+  // prefix as a backstop for messages written before the migration ran.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
     ORDER BY timestamp
   `;
   return db

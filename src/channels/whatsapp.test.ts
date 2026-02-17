@@ -6,6 +6,8 @@ import { EventEmitter } from 'events';
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
+  ASSISTANT_NAME: 'Andy',
+  ASSISTANT_HAS_OWN_NUMBER: false,
 }));
 
 // Mock logger
@@ -197,9 +199,10 @@ describe('WhatsAppChannel', () => {
       (channel as any).connected = true;
       await (channel as any).flushOutgoingQueue();
 
+      // Group messages get prefixed when flushed
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
         'test@g.us',
-        { text: 'Queued message' },
+        { text: 'Andy: Queued message' },
       );
     });
 
@@ -642,7 +645,19 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       await channel.sendMessage('test@g.us', 'Hello');
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', { text: 'Hello' });
+      // Group messages get prefixed with assistant name
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', { text: 'Andy: Hello' });
+    });
+
+    it('prefixes direct chat messages on shared number', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await channel.sendMessage('123@s.whatsapp.net', 'Hello');
+      // Shared number: DMs also get prefixed (needed for self-chat distinction)
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('123@s.whatsapp.net', { text: 'Andy: Hello' });
     });
 
     it('queues message when disconnected', async () => {
@@ -685,9 +700,10 @@ describe('WhatsAppChannel', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledTimes(3);
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', { text: 'First' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', { text: 'Second' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', { text: 'Third' });
+      // Group messages get prefixed
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', { text: 'Andy: First' });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', { text: 'Andy: Second' });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', { text: 'Andy: Third' });
     });
   });
 
@@ -854,9 +870,9 @@ describe('WhatsAppChannel', () => {
       expect(channel.name).toBe('whatsapp');
     });
 
-    it('prefixes assistant name', () => {
+    it('does not expose prefixAssistantName (prefix handled internally)', () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.prefixAssistantName).toBe(true);
+      expect('prefixAssistantName' in channel).toBe(false);
     });
   });
 });
