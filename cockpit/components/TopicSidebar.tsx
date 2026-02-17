@@ -19,7 +19,7 @@ interface Agent {
 }
 
 const AGENTS: Agent[] = [
-  { folder: 'main', label: 'Coordinator', color: 'bg-blue-500' },
+  { folder: 'main', label: 'Flux (COO)', color: 'bg-blue-500' },
   { folder: 'developer', label: 'Developer', color: 'bg-green-500' },
   { folder: 'security', label: 'Security', color: 'bg-yellow-500' },
 ];
@@ -29,6 +29,7 @@ interface TopicSidebarProps {
   activeTopicId: string | null;
   onSelectTopic: (topicId: string) => void;
   onNewTopic: (group: string) => void;
+  onDeleteTopic?: (topicId: string) => void;
 }
 
 export function TopicSidebar({
@@ -36,6 +37,7 @@ export function TopicSidebar({
   activeTopicId,
   onSelectTopic,
   onNewTopic,
+  onDeleteTopic,
 }: TopicSidebarProps) {
   const [topics, setTopics] = useState<Topic[]>(initialTopics);
 
@@ -101,18 +103,38 @@ export function TopicSidebar({
 
             {/* Topics */}
             {agentTopics.map((topic) => (
-              <button
+              <div
                 key={topic.id}
-                onClick={() => onSelectTopic(topic.id)}
-                className={`w-full text-left px-6 py-1.5 text-sm truncate ${
+                className={`group flex items-center ${
                   topic.id === activeTopicId
-                    ? 'bg-zinc-800 text-white'
-                    : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                    ? 'bg-zinc-800'
+                    : 'hover:bg-zinc-900'
                 }`}
-                title={topic.title}
               >
-                {topic.title}
-              </button>
+                <button
+                  onClick={() => onSelectTopic(topic.id)}
+                  className={`flex-1 text-left px-6 py-1.5 text-sm truncate ${
+                    topic.id === activeTopicId
+                      ? 'text-white'
+                      : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+                  title={topic.title}
+                >
+                  {topic.title}
+                </button>
+                {onDeleteTopic && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteTopic(topic.id);
+                    }}
+                    className="mr-2 hidden text-zinc-600 hover:text-red-400 group-hover:block"
+                    title="Delete topic"
+                  >
+                    &times;
+                  </button>
+                )}
+              </div>
             ))}
 
             {/* New topic button */}

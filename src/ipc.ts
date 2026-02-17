@@ -4,17 +4,27 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './process-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getCockpitTopicById,
+  getTaskById,
+  storeMessage,
+  updateTask,
+  updateTopicActivity,
+} from './db.js';
 import { processExtAccessIpc } from './ext-broker.js';
 import { processGovIpc } from './gov-ipc.js';
 import { logger } from './logger.js';
 import { processMemoryIpc } from './memory-ipc.js';
+import { emitOpsEvent } from './ops-events.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -75,22 +85,50 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                // Route cockpit virtual JIDs to the cockpit (store + SSE)
+                if (typeof data.chatJid === 'string' && data.chatJid.startsWith('cockpit:')) {
+                  const topicId = data.chatJid.slice('cockpit:'.length);
+                  const msgId = `bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                  storeMessage({
+                    id: msgId,
+                    chat_jid: data.chatJid,
+                    sender: ASSISTANT_NAME,
+                    sender_name: data.sender || ASSISTANT_NAME,
+                    content: data.text,
+                    timestamp: new Date().toISOString(),
+                    is_from_me: true,
+                    is_bot_message: true,
+                  });
+                  updateTopicActivity(topicId);
+                  emitOpsEvent('chat:message', {
+                    chatJid: data.chatJid,
+                    topicId,
+                    text: data.text,
+                    sender: data.sender || ASSISTANT_NAME,
+                    timestamp: new Date().toISOString(),
+                  });
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
+                    { chatJid: data.chatJid, topicId, sourceGroup },
+                    'IPC cockpit message routed',
                   );
                 } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
-                  );
+                  // Authorization: verify this group can send to this chatJid
+                  const targetGroup = registeredGroups[data.chatJid];
+                  if (
+                    isMain ||
+                    (targetGroup && targetGroup.folder === sourceGroup)
+                  ) {
+                    await deps.sendMessage(data.chatJid, data.text);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  } else {
+                    logger.warn(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'Unauthorized IPC message attempt blocked',
+                    );
+                  }
                 }
               }
               fs.unlinkSync(filePath);

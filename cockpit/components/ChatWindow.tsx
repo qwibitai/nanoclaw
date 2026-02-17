@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSse, type SseEvent } from '@/lib/use-sse';
 import { ErrorCallout } from './ErrorCallout';
 
@@ -40,10 +40,37 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
   const [error, setError] = useState('');
   const [currentTopicId, setCurrentTopicId] = useState(topicId);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const prevMsgCountRef = useRef(0);
+
+  // Track whether user is scrolled near the bottom
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const threshold = 80; // px from bottom
+    isAtBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
+  // Update messages only when content actually changed
+  const applyMessages = useCallback((incoming: Message[]) => {
+    setMessages((prev) => {
+      if (
+        prev.length === incoming.length &&
+        prev.length > 0 &&
+        prev[prev.length - 1].id === incoming[incoming.length - 1].id
+      ) {
+        return prev; // same data — keep reference stable
+      }
+      return incoming;
+    });
+  }, []);
 
   // Load messages when topic changes
   useEffect(() => {
     setCurrentTopicId(topicId);
+    isAtBottomRef.current = true; // reset on topic switch
     if (!topicId) {
       setMessages([]);
       return;
@@ -52,14 +79,20 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
     fetch(`/api/ops/messages?topic_id=${topicId}&limit=100`)
       .then((r) => r.json())
       .then((data: { messages?: Message[] }) => {
-        if (data.messages) setMessages(data.messages);
+        if (data.messages) applyMessages(data.messages);
       })
       .catch(() => {});
-  }, [topicId]);
+  }, [topicId, applyMessages]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll only when new messages arrive AND user is at bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const newCount = messages.length;
+    const hadNew = newCount > prevMsgCountRef.current;
+    prevMsgCountRef.current = newCount;
+
+    if (hadNew && isAtBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   // Poll for new messages every 3s
@@ -69,12 +102,12 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
       fetch(`/api/ops/messages?topic_id=${currentTopicId}&limit=100`)
         .then((r) => r.json())
         .then((data: { messages?: Message[] }) => {
-          if (data.messages) setMessages(data.messages);
+          if (data.messages) applyMessages(data.messages);
         })
         .catch(() => {});
     }, 3000);
     return () => clearInterval(poll);
-  }, [currentTopicId]);
+  }, [currentTopicId, applyMessages]);
 
   // SSE for real-time bot responses (filter by topicId)
   const handleSseEvent = useCallback(
@@ -151,9 +184,13 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-3 p-4">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="flex-1 min-h-0 overflow-y-auto space-y-3 p-4"
+      >
         {messages.length === 0 && (
           <div className="text-center text-zinc-500 py-8">
             No messages yet. Send a message to start chatting.
@@ -165,7 +202,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
             className={`flex ${msg.is_bot_message ? 'justify-start' : 'justify-end'}`}
           >
             <div
-              className={`max-w-[70%] rounded-lg px-3 py-2 text-sm ${
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                 msg.is_bot_message
                   ? 'bg-zinc-800 text-zinc-100'
                   : 'bg-blue-700/20 text-blue-100 border border-blue-700/30'

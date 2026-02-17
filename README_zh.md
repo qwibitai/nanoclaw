@@ -58,19 +58,19 @@ claude
 
 ## 使用方法
 
-使用触发词（默认为 `@Andy`）与你的助手对话：
+使用触发词（默认为 `@Flux`）与你的助手对话：
 
 ```
-@Andy 每周一到周五早上9点，给我发一份销售渠道的概览（需要访问我的 Obsidian vault 文件夹）
-@Andy 每周五回顾过去一周的 git 历史，如果与 README 有出入，就更新它
-@Andy 每周一早上8点，从 Hacker News 和 TechCrunch 收集关于 AI 发展的资讯，然后发给我一份简报
+@Flux 每周一到周五早上9点，给我发一份销售渠道的概览（需要访问我的 Obsidian vault 文件夹）
+@Flux 每周五回顾过去一周的 git 历史，如果与 README 有出入，就更新它
+@Flux 每周一早上8点，从 Hacker News 和 TechCrunch 收集关于 AI 发展的资讯，然后发给我一份简报
 ```
 
 在主频道（你的self-chat）中，可以管理群组和任务：
 ```
-@Andy 列出所有群组的计划任务
-@Andy 暂停周一简报任务
-@Andy 加入"家庭聊天"群组
+@Flux 列出所有群组的计划任务
+@Flux 暂停周一简报任务
+@Flux 加入"家庭聊天"群组
 ```
 
 ## 定制

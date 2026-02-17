@@ -87,7 +87,7 @@ import type { RegisteredGroup } from './types.js';
 const testGroup: RegisteredGroup = {
   name: 'Test Group',
   folder: 'test-group',
-  trigger: '@Andy',
+  trigger: '@Flux',
   added_at: new Date().toISOString(),
 };
 

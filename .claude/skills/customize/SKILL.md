@@ -100,7 +100,7 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 User: "Add Telegram as an input channel"
 
-1. Ask: "Should Telegram use the same @Andy trigger, or a different one?"
+1. Ask: "Should Telegram use the same @Flux trigger, or a different one?"
 2. Ask: "Should Telegram messages create separate conversation contexts, or share with WhatsApp groups?"
 3. Create `src/channels/telegram.ts` implementing the `Channel` interface (see `src/channels/whatsapp.ts`)
 4. Add the channel to `main()` in `src/index.ts`

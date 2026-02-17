@@ -19,7 +19,7 @@ NAME=""
 TRIGGER=""
 FOLDER=""
 REQUIRES_TRIGGER="true"
-ASSISTANT_NAME="Andy"
+ASSISTANT_NAME="Flux"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -66,13 +66,13 @@ log "Created groups/$FOLDER/logs/"
 
 # Update assistant name in CLAUDE.md files if different from default
 NAME_UPDATED="false"
-if [ "$ASSISTANT_NAME" != "Andy" ]; then
-  log "Updating assistant name from Andy to $ASSISTANT_NAME"
+if [ "$ASSISTANT_NAME" != "Flux" ]; then
+  log "Updating assistant name from Flux to $ASSISTANT_NAME"
 
   for md_file in groups/global/CLAUDE.md groups/main/CLAUDE.md; do
     if [ -f "$PROJECT_ROOT/$md_file" ]; then
-      sed -i '' "s/^# Andy$/# $ASSISTANT_NAME/" "$PROJECT_ROOT/$md_file"
-      sed -i '' "s/You are Andy/You are $ASSISTANT_NAME/g" "$PROJECT_ROOT/$md_file"
+      sed -i '' "s/^# Flux$/# $ASSISTANT_NAME/" "$PROJECT_ROOT/$md_file"
+      sed -i '' "s/You are Flux/You are $ASSISTANT_NAME/g" "$PROJECT_ROOT/$md_file"
       log "Updated $md_file"
     else
       log "WARNING: $md_file not found, skipping name update"

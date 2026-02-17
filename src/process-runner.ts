@@ -202,12 +202,23 @@ export async function runContainerAgent(
     // Prevent NODE_OPTIONS from parent leaking (e.g., --inspect)
     NODE_OPTIONS: '',
   };
+  // Remove CLAUDECODE so child Claude Code doesn't think it's a nested session
+  delete childEnv.CLAUDECODE;
+
+  // Spawn as non-root user if running as root (Claude Code refuses --dangerously-skip-permissions as root)
+  const spawnOptions: Parameters<typeof spawn>[2] = {
+    stdio: ['pipe', 'pipe', 'pipe'] as const,
+    env: childEnv,
+  };
+  if (process.getuid?.() === 0) {
+    const AGENT_UID = parseInt(process.env.AGENT_UID || '999', 10);
+    const AGENT_GID = parseInt(process.env.AGENT_GID || '987', 10);
+    spawnOptions.uid = AGENT_UID;
+    spawnOptions.gid = AGENT_GID;
+  }
 
   return new Promise((resolve) => {
-    const child = spawn('node', [entryPoint], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: childEnv,
-    });
+    const child = spawn('node', [entryPoint], spawnOptions);
 
     onProcess(child, processName);
 

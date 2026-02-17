@@ -77,6 +77,25 @@ function ChatPageInner() {
     [router],
   );
 
+  const handleDeleteTopic = useCallback(
+    async (topicId: string) => {
+      try {
+        const result = await writeAction('/api/write/chat/topic/delete', {
+          topic_id: topicId,
+        });
+        if (result.ok) {
+          setTopics((prev) => prev.filter((t) => t.id !== topicId));
+          if (activeTopicId === topicId) {
+            router.push('/chat');
+          }
+        }
+      } catch {
+        // silently fail
+      }
+    },
+    [router, activeTopicId],
+  );
+
   if (loading) {
     return (
       <div className="flex h-[calc(100vh-6rem)] items-center justify-center text-zinc-500">
@@ -92,8 +111,9 @@ function ChatPageInner() {
         activeTopicId={activeTopicId}
         onSelectTopic={handleSelectTopic}
         onNewTopic={handleNewTopic}
+        onDeleteTopic={handleDeleteTopic}
       />
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         <ChatWindow topicId={activeTopicId} group={activeGroup} />
       </div>
     </div>

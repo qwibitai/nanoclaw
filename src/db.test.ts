@@ -53,7 +53,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Flux');
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('msg-1');
     expect(messages[0].sender).toBe('123@s.whatsapp.net');
@@ -73,7 +73,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:04.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Flux');
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('');
   });
@@ -92,7 +92,7 @@ describe('storeMessage', () => {
     });
 
     // Message is stored (we can retrieve it — is_from_me doesn't affect retrieval)
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Flux');
     expect(messages).toHaveLength(1);
   });
 
@@ -117,7 +117,7 @@ describe('storeMessage', () => {
       timestamp: '2024-01-01T00:00:01.000Z',
     });
 
-    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const messages = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Flux');
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
   });
@@ -149,20 +149,20 @@ describe('getMessagesSince', () => {
   });
 
   it('returns messages after the given timestamp', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:02.000Z', 'Andy');
+    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:02.000Z', 'Flux');
     // Should exclude m1, m2 (before/at timestamp), m3 (bot message)
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe('third');
   });
 
   it('excludes bot messages via is_bot_message flag', () => {
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Andy');
+    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:00.000Z', 'Flux');
     const botMsgs = msgs.filter((m) => m.content === 'bot reply');
     expect(botMsgs).toHaveLength(0);
   });
 
   it('returns all non-bot messages when sinceTimestamp is empty', () => {
-    const msgs = getMessagesSince('group@g.us', '', 'Andy');
+    const msgs = getMessagesSince('group@g.us', '', 'Flux');
     // 3 user messages (bot message excluded)
     expect(msgs).toHaveLength(3);
   });
@@ -171,10 +171,10 @@ describe('getMessagesSince', () => {
     // Simulate a message written before migration: has prefix but is_bot_message = 0
     store({
       id: 'm5', chat_jid: 'group@g.us', sender: 'Bot@s.whatsapp.net',
-      sender_name: 'Bot', content: 'Andy: old bot reply',
+      sender_name: 'Bot', content: 'Flux: old bot reply',
       timestamp: '2024-01-01T00:00:05.000Z',
     });
-    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:04.000Z', 'Andy');
+    const msgs = getMessagesSince('group@g.us', '2024-01-01T00:00:04.000Z', 'Flux');
     expect(msgs).toHaveLength(0);
   });
 });
@@ -209,7 +209,7 @@ describe('getNewMessages', () => {
     const { messages, newTimestamp } = getNewMessages(
       ['group1@g.us', 'group2@g.us'],
       '2024-01-01T00:00:00.000Z',
-      'Andy',
+      'Flux',
     );
     // Excludes bot message, returns 3 user messages
     expect(messages).toHaveLength(3);
@@ -220,7 +220,7 @@ describe('getNewMessages', () => {
     const { messages } = getNewMessages(
       ['group1@g.us', 'group2@g.us'],
       '2024-01-01T00:00:02.000Z',
-      'Andy',
+      'Flux',
     );
     // Only g1 msg2 (after ts, not bot)
     expect(messages).toHaveLength(1);
@@ -228,7 +228,7 @@ describe('getNewMessages', () => {
   });
 
   it('returns empty for no registered groups', () => {
-    const { messages, newTimestamp } = getNewMessages([], '', 'Andy');
+    const { messages, newTimestamp } = getNewMessages([], '', 'Flux');
     expect(messages).toHaveLength(0);
     expect(newTimestamp).toBe('');
   });

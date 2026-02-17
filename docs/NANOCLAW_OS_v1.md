@@ -55,7 +55,7 @@ Host (single Node.js process)
 
 | Agent | Folder | Can Create | Can Execute | Can Approve | Ext Access |
 |-------|--------|-----------|-------------|-------------|------------|
-| **main** (Coordinator) | `main` | Yes | Yes | Any gate | L1–L3 |
+| **main** (Flux, COO) | `main` | Yes | Yes | Any gate | L1–L3 |
 | **developer** (Friday) | `developer` | No | Yes | No | L1–L2 |
 | **security** (Sentinel) | `security` | No | No | Security gate | L1 |
 

@@ -6,6 +6,7 @@
 import http from 'http';
 
 import {
+  archiveCockpitTopic,
   createCockpitTopic,
   getCockpitTopicById,
   getCockpitTopics,
@@ -13,6 +14,7 @@ import {
   storeChatMetadata,
   storeMessageDirect,
   updateTopicActivity,
+  updateTopicTitle,
 } from './db.js';
 import {
   createNotification,
@@ -727,6 +729,11 @@ async function handleActionChat(
       json(res, 404, { error: 'Topic not found' });
       return;
     }
+    // Auto-name the topic from the first real message if still using default title
+    if (topic.title === 'New Topic') {
+      const newTitle = (message as string).slice(0, 60);
+      updateTopicTitle(topicId, newTitle);
+    }
   }
 
   // Virtual JID for this topic
@@ -770,6 +777,27 @@ async function handleActionCreateTopic(
   storeChatMetadata(`cockpit:${topicId}`, new Date().toISOString(), topicTitle);
 
   json(res, 200, { ok: true, topic: { id: topicId, group_folder: groupFolder, title: topicTitle } });
+}
+
+async function handleActionDeleteTopic(
+  body: Record<string, unknown>,
+  res: http.ServerResponse,
+): Promise<void> {
+  const { topic_id } = body;
+  if (!topic_id || typeof topic_id !== 'string') {
+    json(res, 400, { error: 'Missing required field: topic_id' });
+    return;
+  }
+
+  const topic = getCockpitTopicById(topic_id);
+  if (!topic) {
+    json(res, 404, { error: 'Topic not found' });
+    return;
+  }
+
+  archiveCockpitTopic(topic_id);
+  logger.info({ topicId: topic_id }, 'Topic archived');
+  json(res, 200, { ok: true });
 }
 
 // Callback for notifying the message loop about new cockpit messages
@@ -932,6 +960,8 @@ export async function routeWriteAction(
       return handleActionChat(body, res);
     case '/ops/actions/topic':
       return handleActionCreateTopic(body, res);
+    case '/ops/actions/topic/delete':
+      return handleActionDeleteTopic(body, res);
     case '/ops/actions/dod':
       return handleActionUpdateDoD(body, res);
     case '/ops/actions/evidence':

@@ -176,7 +176,7 @@ Configuration constants are in `src/config.ts`:
 ```typescript
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Flux';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
@@ -206,7 +206,7 @@ Groups can have additional directories mounted via `containerConfig` in the SQLi
 registerGroup("1234567890@g.us", {
   name: "Dev Team",
   folder: "dev-team",
-  trigger: "@Andy",
+  trigger: "@Flux",
   added_at: new Date().toISOString(),
   containerConfig: {
     additionalMounts: [
@@ -357,10 +357,10 @@ Sessions enable conversation continuity - Claude remembers what you talked about
 
 ### Trigger Word Matching
 
-Messages must start with the trigger pattern (default: `@Andy`):
-- `@Andy what's the weather?` → ✅ Triggers Claude
+Messages must start with the trigger pattern (default: `@Flux`):
+- `@Flux what's the weather?` → ✅ Triggers Claude
 - `@andy help me` → ✅ Triggers (case insensitive)
-- `Hey @Andy` → ❌ Ignored (trigger not at start)
+- `Hey @Flux` → ❌ Ignored (trigger not at start)
 - `What's up?` → ❌ Ignored (no trigger)
 
 ### Conversation Catch-Up
@@ -370,7 +370,7 @@ When a triggered message arrives, the agent receives all messages since its last
 ```
 [Jan 31 2:32 PM] John: hey everyone, should we do pizza tonight?
 [Jan 31 2:33 PM] Sarah: sounds good to me
-[Jan 31 2:35 PM] John: @Andy what toppings do you recommend?
+[Jan 31 2:35 PM] John: @Flux what toppings do you recommend?
 ```
 
 This allows the agent to understand the conversation context even if it wasn't mentioned in every message.
@@ -383,16 +383,16 @@ This allows the agent to understand the conversation context even if it wasn't m
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| `@Assistant [message]` | `@Andy what's the weather?` | Talk to Claude |
+| `@Assistant [message]` | `@Flux what's the weather?` | Talk to Claude |
 
 ### Commands Available in Main Channel Only
 
 | Command | Example | Effect |
 |---------|---------|--------|
-| `@Assistant add group "Name"` | `@Andy add group "Family Chat"` | Register a new group |
-| `@Assistant remove group "Name"` | `@Andy remove group "Work Team"` | Unregister a group |
-| `@Assistant list groups` | `@Andy list groups` | Show registered groups |
-| `@Assistant remember [fact]` | `@Andy remember I prefer dark mode` | Add to global memory |
+| `@Assistant add group "Name"` | `@Flux add group "Family Chat"` | Register a new group |
+| `@Assistant remove group "Name"` | `@Flux remove group "Work Team"` | Unregister a group |
+| `@Assistant list groups` | `@Flux list groups` | Show registered groups |
+| `@Assistant remember [fact]` | `@Flux remember I prefer dark mode` | Add to global memory |
 
 ---
 
@@ -418,7 +418,7 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 ### Creating a Task
 
 ```
-User: @Andy remind me every Monday at 9am to review the weekly metrics
+User: @Flux remind me every Monday at 9am to review the weekly metrics
 
 Claude: [calls mcp__nanoclaw__schedule_task]
         {
@@ -433,7 +433,7 @@ Claude: Done! I'll remind you every Monday at 9am.
 ### One-Time Tasks
 
 ```
-User: @Andy at 5pm today, send me a summary of today's emails
+User: @Flux at 5pm today, send me a summary of today's emails
 
 Claude: [calls mcp__nanoclaw__schedule_task]
         {
@@ -446,14 +446,14 @@ Claude: [calls mcp__nanoclaw__schedule_task]
 ### Managing Tasks
 
 From any group:
-- `@Andy list my scheduled tasks` - View tasks for this group
-- `@Andy pause task [id]` - Pause a task
-- `@Andy resume task [id]` - Resume a paused task
-- `@Andy cancel task [id]` - Delete a task
+- `@Flux list my scheduled tasks` - View tasks for this group
+- `@Flux pause task [id]` - Pause a task
+- `@Flux resume task [id]` - Resume a paused task
+- `@Flux cancel task [id]` - Delete a task
 
 From main channel:
-- `@Andy list all tasks` - View tasks from all groups
-- `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+- `@Flux list all tasks` - View tasks from all groups
+- `@Flux schedule task for "Family Chat": [prompt]` - Schedule for another group
 
 ---
 
@@ -522,7 +522,7 @@ When NanoClaw starts, it:
         <key>HOME</key>
         <string>{{HOME}}</string>
         <key>ASSISTANT_NAME</key>
-        <string>Andy</string>
+        <string>Flux</string>
     </dict>
     <key>StandardOutPath</key>
     <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
@@ -610,7 +610,7 @@ chmod 700 groups/
 | Session not continuing | Session ID not saved | Check SQLite: `sqlite3 store/messages.db "SELECT * FROM sessions"` |
 | Session not continuing | Mount path mismatch | Container user is `node` with HOME=/home/node; sessions must be at `/home/node/.claude/` |
 | "QR code expired" | WhatsApp session expired | Delete store/auth/ and restart |
-| "No groups registered" | Haven't added groups | Use `@Andy add group "Name"` in main |
+| "No groups registered" | Haven't added groups | Use `@Flux add group "Name"` in main |
 
 ### Log Location
 
