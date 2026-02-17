@@ -19,6 +19,13 @@ if [ -n "$GITHUB_TOKEN" ]; then
   gh auth setup-git 2>/dev/null || true
   git config --global user.name "${GIT_AUTHOR_NAME:-NanoClaw Agent}"
   git config --global user.email "${GIT_AUTHOR_EMAIL:-nanoclaw@users.noreply.github.com}"
+
+  # Authenticate Graphite CLI if available and not already authenticated
+  if command -v gt &> /dev/null; then
+    if ! gt auth status &> /dev/null; then
+      echo "$GITHUB_TOKEN" | gt auth --token - 2>/dev/null || true
+    fi
+  fi
 fi
 
 # SSH key setup (synced via S3 or mounted)
