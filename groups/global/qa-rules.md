@@ -48,23 +48,20 @@ Before delivering any code, scripts, patches, or review results:
 **CRITICAL**: Before your context is compacted or your session ends, you MUST preserve your work:
 
 1. **Update `working.md`** — current task status, what you were doing, what's left
-2. **Store lessons learned** — use `store_memory()` with:
-   - Decisions made and why (alternative approaches considered)
-   - Problems encountered and how they were resolved
-   - Gotchas or surprises (things that didn't work as expected)
-   - Patterns discovered (reusable solutions)
-   - Always include `source_ref` with the task ID
-3. **Update `memory.md`** — add key facts, decisions, and outcomes from this session
-
-### What to extract before compaction
+2. **Route to category files** — save each piece of information to the correct `memory/` file:
 
 | Category | Where to save | Example |
 |----------|--------------|---------|
 | Task progress | `working.md` | "Task GOV-42: implemented auth middleware, tests passing, needs review" |
-| Decisions | `store_memory()` + `memory.md` | "Chose JWT over sessions because stateless scales better" |
-| Lessons | `store_memory()` + `memory.md` | "Node spawn() with uid/gid doesn't set supplementary groups" |
+| Decisions | `memory/decisions.md` | "### 2026-02-17: Chose JWT — stateless scales better" |
+| Lessons/gotchas | `memory/lessons.md` | "### 2026-02-17: Node spawn() doesn't set supplementary groups" |
 | Blockers | `working.md` | "Blocked on: need OPENAI_API_KEY in .env" |
-| Ideas for later | `memory.md` | "Consider adding rate limiting to the broker" |
+| Ideas for later | `memory/pending.md` | "Consider adding rate limiting to the broker" |
+| People/contacts | `memory/people.md` | "### João: prefers WhatsApp, timezone BRT" |
+| Projects | `memory/projects.md` | "### 2026-02-17: Voice Transcription — installed" |
+
+3. **Update `memory.md` index** — update the Last Updated column for any category file you changed
+4. **Call `store_memory()`** — for lessons and decisions, also store via MCP for cross-agent search. Always include `source_ref` with the task ID
 
 ### Memory tags convention
 
@@ -72,3 +69,36 @@ Before delivering any code, scripts, patches, or review results:
 - `["gotcha", "topic"]` — unexpected behavior
 - `["decision", "topic"]` — why one approach over another
 - `["finding", "topic"]` — security or code quality finding
+
+---
+
+## Memory Organization
+
+Memory is split into category files inside a `memory/` folder. **NEVER** let a single file grow past ~100 lines — split further if needed.
+
+### Required structure
+
+```
+{your-workspace}/
+  memory.md              ← index: links to category files, last updated date
+  memory/
+    projects.md          ← active + recently completed projects
+    decisions.md         ← key decisions and rationale
+    lessons.md           ← lessons learned, gotchas, platform quirks
+    people.md            ← contacts, preferences, team info
+    pending.md           ← pending items, ideas for later, follow-ups
+    credentials.md       ← credentials, tokens, accounts (if applicable)
+```
+
+### Rules
+
+1. **`memory.md` is an index only** — it lists category files and their last-updated dates. No content beyond links and a 1-line summary per category.
+2. **One topic per category file** — don't mix projects with lessons. If a category grows too large, split it (e.g., `lessons-auth.md`, `lessons-platform.md`).
+3. **Append, don't rewrite** — add new entries at the top of each file (newest first). Only remove entries when they're confirmed outdated.
+4. **Date every entry** — `### 2026-02-17: Title` format. This helps identify stale entries.
+5. **Keep it factual** — no speculation. Only record confirmed facts, tested solutions, and verified decisions.
+6. **Compaction extracts go to category files** — when following the Compaction Protocol, route each piece of information to the correct category file, not to memory.md.
+
+### At session start
+
+Read `memory.md` (the index), then read the category files relevant to your current task. You don't need to read all categories every time — just the ones that matter.

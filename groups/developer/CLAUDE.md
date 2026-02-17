@@ -36,13 +36,13 @@ You do NOT have production (L3) access — merges and deploys require the coordi
 ## Sacred Files
 
 At session start, review these files for context:
-1. Read `../global/qa-rules.md` — shared platform, QA, and compaction rules (MANDATORY)
+1. Read `../global/qa-rules.md` — shared platform, QA, compaction, and memory rules (MANDATORY)
 2. Read `team.md` — know your team and communication protocol
-3. Read `memory.md` — recall recent projects, decisions, lessons
+3. Read `memory.md` — memory index, then read relevant `memory/*.md` category files
 4. Read `working.md` — check current tasks and blockers
 5. Read `heartbeat.md` — check scheduled automations
 
-Before compaction or ending a session, follow the **Compaction & Session End Protocol** in `qa-rules.md`.
+Before compaction or ending a session, follow the **Compaction & Session End Protocol** in `qa-rules.md`. Route information to `memory/*.md` category files, NOT to `memory.md` (which is just the index).
 
 ## Working Status
 
