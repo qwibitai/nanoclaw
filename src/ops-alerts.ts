@@ -70,6 +70,9 @@ function handleOpsEvent(type: OpsEventType, data: Record<string, unknown>): void
     case 'breaker:state':
       handleBreakerState(data);
       break;
+    case 'channel:status':
+      handleChannelStatus(data);
+      break;
   }
 }
 
@@ -128,6 +131,22 @@ function handleBreakerState(data: Record<string, unknown>): void {
     `breaker:open:${data.provider}`,
     `Circuit breaker OPEN for provider "${data.provider}".\nGroup: ${data.group || 'global'}`,
   );
+}
+
+function handleChannelStatus(data: Record<string, unknown>): void {
+  const channel = data.channel as string;
+  const status = data.status as string;
+  if (status === 'logged_out' || status === 'auth_required') {
+    sendAlert(
+      `channel:${channel}:${status}`,
+      `Channel "${channel}" requires re-authentication.\nStatus: ${status}\nReason: ${data.reason || 'unknown'}\nAction: ${data.action || 'Re-authenticate manually'}`,
+    );
+  } else if (status === 'disconnected') {
+    sendAlert(
+      `channel:${channel}:disconnected`,
+      `Channel "${channel}" disconnected.\nReason: ${data.reason || 'unknown'}`,
+    );
+  }
 }
 
 function sendAlert(dedupKey: string, message: string): void {

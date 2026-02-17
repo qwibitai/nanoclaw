@@ -1,4 +1,3 @@
-import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -17,6 +16,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { emitOpsEvent } from '../ops-events.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -32,6 +32,7 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private authRequired = false;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -69,19 +70,26 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        this.authRequired = true;
+        logger.error('WhatsApp authentication required — QR code displayed but no terminal to scan.');
+        emitOpsEvent('channel:status', {
+          channel: 'whatsapp',
+          status: 'auth_required',
+          reason: 'QR code required but running headless',
+          action: 'Re-authenticate WhatsApp (scan QR via /setup)',
+        });
+        // Don't exit — cockpit and other channels remain functional.
+        // Resolve startup promise so the rest of the system can start.
+        if (onFirstOpen) {
+          onFirstOpen();
+          onFirstOpen = undefined;
+        }
       }
 
       if (connection === 'close') {
         this.connected = false;
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const shouldReconnect = reason !== DisconnectReason.loggedOut && !this.authRequired;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
@@ -95,11 +103,20 @@ export class WhatsAppChannel implements Channel {
             }, 5000);
           });
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+          this.authRequired = true;
+          logger.warn('WhatsApp logged out (401). Channel disabled until re-authentication.');
+          emitOpsEvent('channel:status', {
+            channel: 'whatsapp',
+            status: 'logged_out',
+            reason: 'Session invalidated by WhatsApp (401)',
+            action: 'Re-authenticate via /setup',
+          });
+          // Don't exit — cockpit and other channels remain functional.
+          // WhatsApp will stay disconnected until manual re-auth.
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.authRequired = false;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)

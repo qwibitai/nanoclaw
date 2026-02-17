@@ -40,9 +40,9 @@ vi.mock('fs', async () => {
   };
 });
 
-// Mock child_process (used for osascript notification)
-vi.mock('child_process', () => ({
-  exec: vi.fn(),
+// Mock ops-events
+vi.mock('../ops-events.js', () => ({
+  emitOpsEvent: vi.fn(),
 }));
 
 // Build a fake WASocket that's an EventEmitter with the methods we need
@@ -97,6 +97,7 @@ vi.mock('@whiskeysockets/baileys', () => {
 
 import { WhatsAppChannel, WhatsAppChannelOpts } from './whatsapp.js';
 import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
+import { emitOpsEvent } from '../ops-events.js';
 
 // --- Test helpers ---
 
@@ -221,28 +222,49 @@ describe('WhatsAppChannel', () => {
   // --- QR code and auth ---
 
   describe('authentication', () => {
-    it('exits process when QR code is emitted (no auth state)', async () => {
-      vi.useFakeTimers();
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
+    it('emits ops event and resolves connect on QR (headless)', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
-      // Start connect but don't await (it won't resolve - process exits)
-      channel.connect().catch(() => {});
+      // Start connect
+      const p = channel.connect();
 
       // Flush microtasks so connectInternal registers handlers
-      await vi.advanceTimersByTimeAsync(0);
+      await new Promise((r) => setTimeout(r, 0));
 
-      // Emit QR code event
+      // Emit QR code event (headless — no terminal to scan)
       fakeSocket._ev.emit('connection.update', { qr: 'some-qr-data' });
 
-      // Advance timer past the 1000ms setTimeout before exit
-      await vi.advanceTimersByTimeAsync(1500);
+      // connect() should resolve even without opening (so cockpit can start)
+      await p;
 
-      expect(mockExit).toHaveBeenCalledWith(1);
-      mockExit.mockRestore();
-      vi.useRealTimers();
+      expect(channel.isConnected()).toBe(false);
+      expect(emitOpsEvent).toHaveBeenCalledWith('channel:status', expect.objectContaining({
+        channel: 'whatsapp',
+        status: 'auth_required',
+      }));
+    });
+
+    it('does not reconnect after QR auth required', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      const p = channel.connect();
+      await new Promise((r) => setTimeout(r, 0));
+
+      // QR emitted
+      fakeSocket._ev.emit('connection.update', { qr: 'some-qr-data' });
+      await p;
+
+      // Connection close follows — should NOT trigger reconnect
+      fakeSocket._ev.emit('connection.update', {
+        connection: 'close',
+        lastDisconnect: { error: { output: { statusCode: 428 } } },
+      });
+
+      // Give reconnect time to kick in (it shouldn't)
+      await new Promise((r) => setTimeout(r, 100));
+      expect(channel.isConnected()).toBe(false);
     });
   });
 
@@ -264,9 +286,7 @@ describe('WhatsAppChannel', () => {
       // The channel should attempt to reconnect (calls connectInternal again)
     });
 
-    it('exits on loggedOut disconnect', async () => {
-      const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-
+    it('emits ops event on loggedOut instead of exiting', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -276,8 +296,10 @@ describe('WhatsAppChannel', () => {
       triggerDisconnect(401);
 
       expect(channel.isConnected()).toBe(false);
-      expect(mockExit).toHaveBeenCalledWith(0);
-      mockExit.mockRestore();
+      expect(emitOpsEvent).toHaveBeenCalledWith('channel:status', expect.objectContaining({
+        channel: 'whatsapp',
+        status: 'logged_out',
+      }));
     });
 
     it('retries reconnection after 5s on failure', async () => {

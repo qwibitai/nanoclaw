@@ -21,7 +21,8 @@ export type OpsEventType =
   | 'limits:denial'
   | 'breaker:state'
   | 'chat:message'
-  | 'notification:created';
+  | 'notification:created'
+  | 'channel:status';
 
 export interface OpsEvent {
   type: OpsEventType;
