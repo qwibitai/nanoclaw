@@ -39,6 +39,12 @@ npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
+### Environment Variables
+
+- **Never** read or modify `.env` — it contains secrets and is denied in settings.
+- When a new environment variable is needed, add it to `.env.example` with an empty or placeholder value and a descriptive comment.
+- Tell the user to fill in the actual value in `.env`.
+
 Service management:
 ```bash
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
