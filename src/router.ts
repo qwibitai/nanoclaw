@@ -1,7 +1,7 @@
-import { ASSISTANT_NAME } from './config.js';
 import { Channel, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
+  if (!s) return '';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -20,12 +20,10 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
-export function formatOutbound(channel: Channel, rawText: string): string {
+export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  const prefix =
-    channel.prefixAssistantName !== false ? `${ASSISTANT_NAME}: ` : '';
-  return `${prefix}${text}`;
+  return text;
 }
 
 export function routeOutbound(

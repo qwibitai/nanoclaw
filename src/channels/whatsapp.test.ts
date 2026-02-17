@@ -6,6 +6,8 @@ import { EventEmitter } from 'events';
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
+  ASSISTANT_NAME: 'Andy',
+  ASSISTANT_HAS_OWN_NUMBER: false,
 }));
 
 // Mock logger
@@ -72,6 +74,7 @@ let fakeSocket: ReturnType<typeof createFakeSocket>;
 vi.mock('@whiskeysockets/baileys', () => {
   return {
     default: vi.fn(() => fakeSocket),
+    Browsers: { macOS: vi.fn(() => ['macOS', 'Chrome', '']) },
     DisconnectReason: {
       loggedOut: 401,
       badSession: 500,
@@ -126,8 +129,10 @@ function triggerDisconnect(statusCode: number) {
   });
 }
 
-function triggerMessages(messages: unknown[]) {
+async function triggerMessages(messages: unknown[]) {
   fakeSocket._ev.emit('messages.upsert', { messages });
+  // Flush microtasks so the async messages.upsert handler completes
+  await new Promise((r) => setTimeout(r, 0));
 }
 
 // --- Tests ---
@@ -194,9 +199,10 @@ describe('WhatsAppChannel', () => {
       (channel as any).connected = true;
       await (channel as any).flushOutgoingQueue();
 
+      // Group messages get prefixed when flushed
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
         'test@g.us',
-        { text: 'Queued message' },
+        { text: 'Andy: Queued message' },
       );
     });
 
@@ -297,7 +303,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-1',
@@ -332,7 +338,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-2',
@@ -359,7 +365,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-3',
@@ -381,7 +387,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-4',
@@ -402,7 +408,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-5',
@@ -430,7 +436,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-6',
@@ -458,7 +464,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-7',
@@ -486,7 +492,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-8',
@@ -515,7 +521,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-9',
@@ -556,7 +562,7 @@ describe('WhatsAppChannel', () => {
 
       // The socket has lid '9876543210:1@lid' → phone '1234567890@s.whatsapp.net'
       // Send a message from the LID
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-lid',
@@ -582,7 +588,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-normal',
@@ -608,7 +614,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      triggerMessages([
+      await triggerMessages([
         {
           key: {
             id: 'msg-unknown-lid',
@@ -639,7 +645,19 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       await channel.sendMessage('test@g.us', 'Hello');
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', { text: 'Hello' });
+      // Group messages get prefixed with assistant name
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', { text: 'Andy: Hello' });
+    });
+
+    it('prefixes direct chat messages on shared number', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await channel.sendMessage('123@s.whatsapp.net', 'Hello');
+      // Shared number: DMs also get prefixed (needed for self-chat distinction)
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('123@s.whatsapp.net', { text: 'Andy: Hello' });
     });
 
     it('queues message when disconnected', async () => {
@@ -682,9 +700,10 @@ describe('WhatsAppChannel', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledTimes(3);
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', { text: 'First' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', { text: 'Second' });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', { text: 'Third' });
+      // Group messages get prefixed
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', { text: 'Andy: First' });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', { text: 'Andy: Second' });
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', { text: 'Andy: Third' });
     });
   });
 
@@ -851,9 +870,9 @@ describe('WhatsAppChannel', () => {
       expect(channel.name).toBe('whatsapp');
     });
 
-    it('prefixes assistant name', () => {
+    it('does not expose prefixAssistantName (prefix handled internally)', () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.prefixAssistantName).toBe(true);
+      expect('prefixAssistantName' in channel).toBe(false);
     });
   });
 });

@@ -4,7 +4,6 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import {
-  ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -79,10 +78,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(
-                    data.chatJid,
-                    `${ASSISTANT_NAME}: ${data.text}`,
-                  );
+                  await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -171,6 +167,7 @@ export async function processTaskIpc(
     name?: string;
     folder?: string;
     trigger?: string;
+    requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
   },
   sourceGroup: string, // Verified identity from IPC directory
@@ -366,6 +363,7 @@ export async function processTaskIpc(
           trigger: data.trigger,
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
+          requiresTrigger: data.requiresTrigger,
         });
       } else {
         logger.warn(

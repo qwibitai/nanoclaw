@@ -1,7 +1,7 @@
 ---
 name: convert-to-docker
 description: Convert NanoClaw from Apple Container to Docker for cross-platform support. Use when user wants to run on Linux, switch to Docker, enable cross-platform deployment, or migrate away from Apple Container. Triggers on "docker", "linux support", "convert to docker", "cross-platform", or "replace apple container".
-disable-model-invocation: true
+disable-model-invocation: false
 ---
 
 # Convert to Docker
