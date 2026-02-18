@@ -480,7 +480,18 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ process: group.folder }, line);
+        if (!line) continue;
+        // Strip ANSI escape codes from Claude SDK output
+        const clean = line.replace(/\x1B\[[0-9;]*m/g, '').trim();
+        if (!clean) continue;
+        // Route to the appropriate log level so agent errors are visible in production
+        if (/\b(ERROR|error)\b/.test(clean) || /\bfatal\b/i.test(clean)) {
+          logger.error({ agent: group.folder }, clean);
+        } else if (/\b(WARN|WARNING|warn)\b/.test(clean)) {
+          logger.warn({ agent: group.folder }, clean);
+        } else {
+          logger.debug({ agent: group.folder }, clean);
+        }
       }
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
