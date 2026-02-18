@@ -85,6 +85,8 @@ function getAgentRunnerEntry(): string {
 function setupWorkspace(
   group: RegisteredGroup,
   isMain: boolean,
+  agentUid: number,
+  agentGid: number,
 ): { env: Record<string, string>; groupDir: string; ipcDir: string } {
   const projectRoot = process.cwd();
   const groupDir = path.join(GROUPS_DIR, group.folder);
@@ -107,8 +109,6 @@ function setupWorkspace(
   const sessionHomeDir = path.join(DATA_DIR, 'sessions', group.folder);
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   // Ensure agent user owns HOME and .claude/ so SDK can write session data
-  const agentUid = parseInt(process.env.AGENT_UID || '999', 10);
-  const agentGid = parseInt(process.env.AGENT_GID || '987', 10);
   fs.chownSync(sessionHomeDir, agentUid, agentGid);
   fs.chownSync(groupSessionsDir, agentUid, agentGid);
 
@@ -139,6 +139,13 @@ function setupWorkspace(
   const skillsSrc = path.join(projectRoot, 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   syncSkills(skillsSrc, skillsDst, group.containerConfig?.skillsFilter, group.name);
+  // Fix ownership: syncSkills runs as root and creates root-owned files.
+  // chown the entire skills dst so the agent user can read/write them.
+  if (process.getuid?.() === 0 && fs.existsSync(skillsDst)) {
+    try {
+      execSync(`chown -R ${agentUid}:${agentGid} ${JSON.stringify(skillsDst)}`, { timeout: 5000 });
+    } catch { /* ignore — non-fatal */ }
+  }
 
   // Additional mounts (extra directories)
   const extraBase = path.join(DATA_DIR, 'extra', group.folder);
@@ -310,7 +317,66 @@ function callOAuthRefresh(refreshToken: string): Promise<OAuthTokenResponse> {
   });
 }
 
+// --- Rate-limit retry config ---
+const MAX_RATE_LIMIT_RETRIES = 3;
+// Backoff: 30s → 60s → 120s (attempt 1, 2, 3)
+const RATE_LIMIT_BACKOFF_BASE_MS = 30_000;
+
+const RATE_LIMIT_PATTERNS = [
+  '429',
+  'rate limit',
+  'too many requests',
+  'overloaded',
+  'usage limit',
+  'capacity',
+];
+
+function isRateLimitError(output: ContainerOutput): boolean {
+  const haystack = (output.error ?? '').toLowerCase();
+  return RATE_LIMIT_PATTERNS.some((p) => haystack.includes(p));
+}
+
+/**
+ * Public entry point. Wraps the inner spawn with exponential-backoff retry
+ * on rate-limit errors (429 / "usage limit" / "overloaded" from the API).
+ */
 export async function runContainerAgent(
+  group: RegisteredGroup,
+  input: ContainerInput,
+  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<ContainerOutput> {
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const backoffMs = RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, attempt - 1);
+      logger.warn(
+        { group: group.name, attempt, backoffMs },
+        'Rate limit detected — backing off before retry',
+      );
+      await new Promise<void>((r) => setTimeout(r, backoffMs));
+    }
+
+    const output = await spawnAgentOnce(group, input, onProcess, onOutput);
+
+    if (output.status === 'success' || !isRateLimitError(output)) {
+      return output;
+    }
+
+    logger.warn(
+      { group: group.name, attempt, error: output.error },
+      'Rate-limited response — will retry',
+    );
+  }
+
+  // All retries exhausted
+  return {
+    status: 'error',
+    result: null,
+    error: `Rate limit: max retries (${MAX_RATE_LIMIT_RETRIES}) exceeded`,
+  };
+}
+
+async function spawnAgentOnce(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
@@ -322,7 +388,7 @@ export async function runContainerAgent(
   const agentUid = parseInt(process.env.AGENT_UID || '999', 10);
   const agentGid = parseInt(process.env.AGENT_GID || '987', 10);
 
-  const { env: workspaceEnv, groupDir, ipcDir } = setupWorkspace(group, input.isMain);
+  const { env: workspaceEnv, groupDir, ipcDir } = setupWorkspace(group, input.isMain, agentUid, agentGid);
 
   // Proactively refresh OAuth credentials before spawning the agent.
   // The SDK only auto-refreshes while a session is running (not at startup),
@@ -391,12 +457,16 @@ export async function runContainerAgent(
     if (AGENT_CPU_QUOTA)  spawnArgs.push(`--property=CPUQuota=${AGENT_CPU_QUOTA}`);
     if (AGENT_TASKS_MAX)  spawnArgs.push(`--property=TasksMax=${AGENT_TASKS_MAX}`);
     if (process.getuid?.() === 0) {
-      spawnArgs.push(`--property=User=${agentUid}`, `--property=Group=${agentGid}`);
-      // systemd-run handles uid/gid itself — don't set them on spawnOptions too
+      // --property=User= does NOT work with --scope (only with --service).
+      // runuser switches the user inside the scope while root creates the cgroup.
+      const agentUser = process.env.AGENT_USER || 'nanoclaw';
+      spawnArgs.push('--', 'runuser', '-u', agentUser, '--', 'node', entryPoint);
+      // systemd-run must run as root to create the scope — keep uid/gid unset on spawnOptions.
       delete spawnOptions.uid;
       delete spawnOptions.gid;
+    } else {
+      spawnArgs.push('--', 'node', entryPoint);
     }
-    spawnArgs.push('--', 'node', entryPoint);
     logger.info(
       { group: group.name, processName, memoryMax: AGENT_MEMORY_MAX, cpuQuota: AGENT_CPU_QUOTA },
       'Spawning agent in systemd scope (resource-limited)',

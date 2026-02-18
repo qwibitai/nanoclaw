@@ -549,6 +549,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  onSessionUpdate?: (newId: string) => void,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -654,6 +655,10 @@ async function runQuery(
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
+      // Notify caller even if we throw later (e.g., error_during_execution +
+      // SDK exit code 1). This lets main() report the new session ID in the
+      // error output instead of the old broken one.
+      onSessionUpdate?.(newSessionId);
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
@@ -707,6 +712,13 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+  // Track the latest session ID even across runQuery throws.
+  // When error_during_execution fires, the SDK initializes a NEW session
+  // (system/init) before exiting. We capture that via onSessionUpdate so
+  // the error output carries the NEW valid ID, not the old broken one.
+  let latestSessionId: string | undefined = sessionId;
+  const onSessionUpdate = (newId: string) => { latestSessionId = newId; };
+
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   // Clean up stale _close sentinel from previous container runs
@@ -731,7 +743,7 @@ async function main(): Promise<void> {
 
       let queryResult: Awaited<ReturnType<typeof runQuery>>;
       try {
-        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, onSessionUpdate);
       } catch (queryErr) {
         const msg = queryErr instanceof Error ? queryErr.message : String(queryErr);
         // If resume fails with auth/session error, retry with a fresh session
@@ -739,7 +751,7 @@ async function main(): Promise<void> {
           log(`Session resume failed (${msg}), retrying with fresh session...`);
           sessionId = undefined;
           resumeAt = undefined;
-          queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+          queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt, onSessionUpdate);
         } else {
           throw queryErr;
         }
@@ -777,10 +789,20 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    // Report latestSessionId (updated via onSessionUpdate even if runQuery threw).
+    // If error_during_execution fired, the SDK initialized a NEW session before
+    // exiting — latestSessionId will be that new ID. The host should resume from
+    // it on the next attempt instead of the broken input session.
+    // If no new session was ever initialized (latestSessionId === input session),
+    // omit the newSessionId so the host clears the broken session rather than
+    // perpetuating it.
+    const newSessionIdToReport = latestSessionId !== containerInput.sessionId
+      ? latestSessionId
+      : undefined;
     writeOutput({
       status: 'error',
       result: null,
-      newSessionId: sessionId,
+      newSessionId: newSessionIdToReport,
       error: errorMessage
     });
     process.exit(1);

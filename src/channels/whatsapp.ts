@@ -38,6 +38,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempts = 0;
 
   private opts: WhatsAppChannelOpts;
 
@@ -94,15 +95,15 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s (cap)
+          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 60000);
+          this.reconnectAttempts++;
+          logger.info({ attempt: this.reconnectAttempts, delayMs: delay }, 'Reconnecting...');
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'Reconnection attempt failed');
+            });
+          }, delay);
         } else {
           this.authRequired = true;
           logger.warn('WhatsApp logged out (401). Channel disabled until re-authentication.');
@@ -118,6 +119,7 @@ export class WhatsAppChannel implements Channel {
       } else if (connection === 'open') {
         this.connected = true;
         this.authRequired = false;
+        this.reconnectAttempts = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)

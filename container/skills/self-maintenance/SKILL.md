@@ -573,6 +573,88 @@ Store a weekly learning summary in daily note under `## Performance Review Learn
 
 ---
 
+## 10. Daily Topic Consolidation
+
+**Schedule**: Every day at 23:00 UTC
+**Scheduled task ID**: `task-daily-consolidation`
+**Purpose**: Extract decisions, insights, and open questions from cockpit topics into persistent memory. Safety net for sessions that closed without explicit consolidation.
+
+### Step 1 — Find topics with activity today
+
+```bash
+node -e "
+const db = require('/root/nanoclaw/node_modules/better-sqlite3')('/root/nanoclaw/store/messages.db');
+const since = new Date(); since.setUTCHours(0,0,0,0);
+const rows = db.prepare('SELECT DISTINCT m.chat_jid, ct.title, ct.group_folder, COUNT(*) as msg_count FROM messages m JOIN cockpit_topics ct ON ct.id = REPLACE(m.chat_jid, \\'cockpit:\\', \\'\\') WHERE m.chat_jid LIKE \\'cockpit:%\\' AND m.timestamp >= ? AND m.is_bot_message = 0 GROUP BY m.chat_jid').all(since.toISOString());
+console.log(JSON.stringify(rows, null, 2));
+"
+```
+
+### Scope — both channels
+
+Covers:
+- **Cockpit topics** — `chat_jid LIKE 'cockpit:%'`
+- **WhatsApp registered groups** — `chat_jid` in `registered_groups`
+
+### Step 2 — Read today's messages (both channels)
+
+```bash
+# Cockpit topics
+node -e "
+const db = require('/root/nanoclaw/node_modules/better-sqlite3')('/root/nanoclaw/store/messages.db');
+const since = new Date(); since.setUTCHours(0,0,0,0);
+const rows = db.prepare('SELECT chat_jid, sender_name, content, timestamp FROM messages WHERE chat_jid LIKE \\'cockpit:%\\' AND timestamp >= ? AND is_bot_message = 0 ORDER BY chat_jid, timestamp').all(since.toISOString());
+console.log(JSON.stringify(rows, null, 2));
+"
+
+# WhatsApp registered groups
+node -e "
+const db = require('/root/nanoclaw/node_modules/better-sqlite3')('/root/nanoclaw/store/messages.db');
+const since = new Date(); since.setUTCHours(0,0,0,0);
+const rows = db.prepare('SELECT m.chat_jid, rg.name as group_name, m.sender_name, m.content, m.timestamp FROM messages m JOIN registered_groups rg ON rg.jid = m.chat_jid WHERE m.timestamp >= ? AND m.is_bot_message = 0 ORDER BY m.chat_jid, m.timestamp').all(since.toISOString());
+console.log(JSON.stringify(rows, null, 2));
+"
+```
+
+### Step 3 — Extract and store to memory
+
+For each conversation (Cockpit or WhatsApp) with substantive content today:
+
+1. Identify:
+   - **Decisions** — "decidimos", "vamos usar", "escolhemos", "aprovado", "ficou decidido", "será X"
+   - **Insights** — non-obvious conclusions, validated hypotheses, key learnings
+   - **Action items** — things agreed to be done
+   - **Open questions** — "ficou em aberto", "precisamos validar", "ainda não sabemos"
+
+2. Store with `store_memory`:
+   - Cockpit: `tags=["decision|learning|action|pending", "topic-consolidation", "topic:{title}"]`
+   - WhatsApp: `tags=["decision|learning|action|pending", "whatsapp-consolidation", "group:{name}"]`
+   - Always: `source_ref = "daily-consolidation-{YYYY-MM-DD}"`
+
+3. Skip trivial conversations (greetings, one-word confirmations, test messages).
+
+### Step 4 — Update daily note
+
+Append to `memory/daily/{YYYY-MM-DD}.md`:
+
+```
+## Daily Consolidation — {HH:MM} UTC
+
+### Cockpit Topics — {N} reviewed, {N} items stored
+| Topic | Decisions | Insights | Pending |
+|-------|-----------|---------|---------|
+| {title} | {N} | {N} | {N} |
+
+### WhatsApp Groups — {N} reviewed, {N} items stored
+| Group | Decisions | Insights | Pending |
+|-------|-----------|---------|---------|
+| {name} | {N} | {N} | {N} |
+```
+
+If no activity in either channel: append one line — "No conversation activity to consolidate." Do not message the channel.
+
+---
+
 ## Running on demand
 
 Any routine can be triggered manually:
@@ -585,4 +667,5 @@ Any routine can be triggered manually:
 - "Weekly report" → execute section 7
 - "Provider health check" → execute section 8
 - "Performance review" → execute section 9
+- "Consolidate conversations" → execute section 10
 - "Full maintenance" → execute all sections in order

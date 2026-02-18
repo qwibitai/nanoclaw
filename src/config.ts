@@ -47,7 +47,7 @@ export const IDLE_TIMEOUT = parseInt(
 ); // 5min default — kill agent if no output for 5 min (overridden by CONTAINER_TIMEOUT for long tasks)
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '3', 10) || 3,
 );
 
 // Per-agent resource limits (enforced via systemd-run --scope on Linux).

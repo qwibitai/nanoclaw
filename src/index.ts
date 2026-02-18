@@ -18,6 +18,7 @@ import {
   writeTasksSnapshot,
 } from './process-runner.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -275,7 +276,11 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        // Only persist a new session ID on success — error outputs carry
+        // the OLD broken session ID (the one that just failed), not a new one.
+        // Saving on error would re-queue the broken session and create an
+        // infinite error_during_execution loop.
+        if (output.newSessionId && output.status !== 'error') {
           sessions[sessionKey] = output.newSessionId;
           setSession(sessionKey, output.newSessionId);
         }
@@ -307,12 +312,18 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      // Clear the broken session so the next run starts fresh
+      delete sessions[sessionKey];
+      deleteSession(sessionKey);
       return 'error';
     }
 
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    // Clear the session on unexpected error too — it may be corrupted
+    delete sessions[sessionKey];
+    deleteSession(sessionKey);
     return 'error';
   }
 }
@@ -373,6 +384,7 @@ function processCockpitTopic(
     if (msgs.length === 0) return;
 
     const msgPrompt = formatMessages(msgs);
+    const previousCursor = lastAgentTimestamp[virtualJid] || '';
     lastAgentTimestamp[virtualJid] = msgs[msgs.length - 1].timestamp;
     saveState();
 
@@ -384,7 +396,8 @@ function processCockpitTopic(
       }, IDLE_TIMEOUT);
     };
 
-    await runAgent(
+    let outputSentToUser = false;
+    const agentResult = await runAgent(
       group,
       msgPrompt,
       virtualJid,
@@ -393,6 +406,7 @@ function processCockpitTopic(
           const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
           const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
           if (text) {
+            outputSentToUser = true;
             // Store bot response in the topic's message stream
             storeMessage({
               id: `bot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -419,6 +433,13 @@ function processCockpitTopic(
     );
 
     if (idleTimer) clearTimeout(idleTimer);
+
+    if (agentResult === 'error' && !outputSentToUser) {
+      // Roll back cursor so the message gets retried on next enqueue
+      lastAgentTimestamp[virtualJid] = previousCursor;
+      saveState();
+      logger.warn({ topicId }, 'Cockpit agent error, rolled back cursor for retry');
+    }
   });
 }
 

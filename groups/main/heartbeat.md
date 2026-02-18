@@ -15,6 +15,7 @@ All routines defined in skill: `self-maintenance`
 | Sunday 20:00 | Weekly | Performance Review | Evaluate agents, score dimensions, decide promote/maintain/demote |
 | Monday 09:00 | Weekly | Weekly Report | Compile and send status report to main channel |
 | 1st & 15th | Bi-weekly | Memory Consolidation | Curate daily notes → topic files for all agents |
+| 23:00 | Daily | Daily Consolidation | Extract decisions/insights from cockpit topics + WhatsApp groups into persistent memory (safety net) |
 
 ## Developer Heartbeats
 
