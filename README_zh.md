@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="README.md">English</a> ·
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
+  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
 </p>
 
 **新功能:** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。在你的聊天中启动多个协作智能体团队。
@@ -175,7 +175,7 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 ## 社区
 
-有问题？有想法？[加入 Discord](https://discord.gg/VGWXrf8x)。
+有问题？有想法？[加入 Discord](https://discord.gg/VDdww8qS42)。
 
 ## 许可证
 

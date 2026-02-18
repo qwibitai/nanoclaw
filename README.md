@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VGWXrf8x"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
@@ -86,6 +86,21 @@ There are no configuration files to learn. Just tell Claude Code what you want:
 Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
+
+## Skills System CLI (Experimental)
+
+The new deterministic skills-system primitives are available as local commands:
+
+```bash
+npm run skills:init -- --core-version 0.5.0 --base-source .
+npm run skills:apply -- --skill whatsapp --version 1.2.0 --files-modified src/server.ts
+npm run skills:update-preview
+npm run skills:update-stage -- --target-core-version 0.6.0 --base-source /path/to/new/core
+npm run skills:update-commit
+# or: npm run skills:update-rollback
+```
+
+These commands operate on `.nanoclaw/state.yaml`, `.nanoclaw/state.next.yaml`, `.nanoclaw/base/`, `.nanoclaw/base.next/`, and `.nanoclaw/backup/`.
 
 ## Contributing
 
@@ -176,7 +191,7 @@ This keeps the base system minimal and lets every user customize their installat
 
 ## Community
 
-Questions? Ideas? [Join the Discord](https://discord.gg/VGWXrf8x).
+Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
 
 ## License
 
