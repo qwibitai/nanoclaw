@@ -356,6 +356,9 @@ export async function runContainerAgent(
   const spawnOptions: Parameters<typeof spawn>[2] = {
     stdio: ['pipe', 'pipe', 'pipe'] as const,
     env: childEnv,
+    // Own process group so we can kill the entire tree (agent + claude + bash subprocesses)
+    // via process.kill(-child.pid, signal) on timeout.
+    detached: true,
   };
   if (process.getuid?.() === 0) {
     spawnOptions.uid = agentUid;
@@ -460,13 +463,15 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error({ group: group.name, processName }, 'Process timeout, sending SIGTERM');
-      child.kill('SIGTERM');
-      // Force kill after 15s if SIGTERM doesn't work
+      logger.error({ group: group.name, processName }, 'Process timeout, sending SIGTERM to process group');
+      // Kill the entire process group (negative PID) — this reaches agent-runner,
+      // claude, and any bash/git/curl subprocesses it spawned.
+      try { process.kill(-child.pid!, 'SIGTERM'); } catch { child.kill('SIGTERM'); }
+      // Force kill the group after 15s if SIGTERM doesn't work
       setTimeout(() => {
         if (!child.killed) {
-          logger.warn({ group: group.name, processName }, 'SIGTERM failed, force killing');
-          child.kill('SIGKILL');
+          logger.warn({ group: group.name, processName }, 'SIGTERM failed, force killing process group');
+          try { process.kill(-child.pid!, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
         }
       }, 15_000);
     };
