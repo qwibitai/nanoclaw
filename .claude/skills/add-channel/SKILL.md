@@ -153,8 +153,8 @@ export class DiscordChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    // Discord JIDs are numeric channel IDs
-    return /^\d+$/.test(jid);
+    // Discord JIDs are namespaced as "discord:<numericChannelId>"
+    return /^discord:\d+$/.test(jid);
   }
 
   async disconnect(): Promise<void> {
