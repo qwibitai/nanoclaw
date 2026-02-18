@@ -23,6 +23,9 @@ groups/global/*
 .env
 mcp.json
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # SQLite databases
 *.db
 
