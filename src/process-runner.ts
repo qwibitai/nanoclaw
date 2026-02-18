@@ -6,6 +6,7 @@
  * Passes workspace paths via environment variables.
  */
 import { ChildProcess, spawn } from 'child_process';
+import https from 'https';
 import fs from 'fs';
 import path from 'path';
 
@@ -176,6 +177,134 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
+// Claude Code OAuth token endpoint and client ID (from SDK source)
+const CLAUDE_OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
+const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+// Refresh 10 minutes before expiry
+const OAUTH_REFRESH_THRESHOLD_MS = 10 * 60 * 1000;
+
+interface ClaudeCredentials {
+  claudeAiOauth?: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    scopes?: string[];
+    subscriptionType?: string;
+    rateLimitTier?: string;
+  };
+}
+
+/**
+ * Proactively refresh Claude OAuth credentials if they are expired or expiring soon.
+ *
+ * The SDK's auto-refresh only runs proactively (within a window before expiry),
+ * NOT reactively when the token is already expired. Calling this before spawning
+ * the agent ensures the SDK always starts with a fresh token.
+ *
+ * On success, writes the refreshed credentials back to the session file AND
+ * copies them to the root ~/.claude/ location for future sessions.
+ */
+async function refreshOAuthIfNeeded(
+  sessionCredFile: string,
+  agentUid: number,
+  agentGid: number,
+): Promise<void> {
+  if (!fs.existsSync(sessionCredFile)) return;
+
+  let creds: ClaudeCredentials;
+  try {
+    creds = JSON.parse(fs.readFileSync(sessionCredFile, 'utf8')) as ClaudeCredentials;
+  } catch {
+    return; // Not parseable — let the SDK handle it
+  }
+
+  const oauth = creds.claudeAiOauth;
+  if (!oauth?.refreshToken || !oauth?.accessToken) return;
+
+  // Check if token needs refresh
+  const now = Date.now();
+  if (oauth.expiresAt && oauth.expiresAt > now + OAUTH_REFRESH_THRESHOLD_MS) {
+    return; // Still fresh — no refresh needed
+  }
+
+  logger.info({ credFile: sessionCredFile }, 'OAuth token expired/expiring — refreshing');
+
+  try {
+    const newTokens = await callOAuthRefresh(oauth.refreshToken);
+
+    creds.claudeAiOauth = {
+      ...oauth,
+      accessToken: newTokens.access_token,
+      refreshToken: newTokens.refresh_token ?? oauth.refreshToken,
+      expiresAt: now + (newTokens.expires_in ?? 3600) * 1000,
+    };
+
+    const credsJson = JSON.stringify(creds, null, 2);
+
+    // Write refreshed creds to session file (keep agent ownership)
+    fs.writeFileSync(sessionCredFile, credsJson, { mode: 0o600 });
+    try { fs.chownSync(sessionCredFile, agentUid, agentGid); } catch { /* ignore */ }
+
+    // Propagate to root ~/.claude/ so future sessions start fresh
+    const rootCredFile = path.join(process.env.HOME || '/root', '.claude', '.credentials.json');
+    try {
+      fs.writeFileSync(rootCredFile, credsJson, { mode: 0o600 });
+    } catch { /* root fs write may fail if dir doesn't exist */ }
+
+    const newExpiry = new Date(creds.claudeAiOauth.expiresAt).toISOString();
+    logger.info({ newExpiry }, 'OAuth token refreshed successfully');
+  } catch (err) {
+    logger.warn({ err }, 'OAuth token refresh failed — proceeding with expired token');
+  }
+}
+
+interface OAuthTokenResponse {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+}
+
+function callOAuthRefresh(refreshToken: string): Promise<OAuthTokenResponse> {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: CLAUDE_OAUTH_CLIENT_ID,
+    });
+
+    const req = https.request({
+      hostname: 'platform.claude.com',
+      path: '/v1/oauth/token',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            resolve(JSON.parse(data) as OAuthTokenResponse);
+          } catch (e) {
+            reject(new Error(`Failed to parse token response: ${e}`));
+          }
+        } else {
+          reject(new Error(`Token refresh HTTP ${res.statusCode}: ${data.slice(0, 200)}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(10_000, () => {
+      req.destroy(new Error('OAuth refresh timeout'));
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -185,7 +314,17 @@ export async function runContainerAgent(
   const startTime = Date.now();
   const entryPoint = getAgentRunnerEntry();
 
+  const agentUid = parseInt(process.env.AGENT_UID || '999', 10);
+  const agentGid = parseInt(process.env.AGENT_GID || '987', 10);
+
   const { env: workspaceEnv, groupDir, ipcDir } = setupWorkspace(group, input.isMain);
+
+  // Proactively refresh OAuth credentials before spawning the agent.
+  // The SDK only auto-refreshes while a session is running (not at startup),
+  // so we must ensure the token is fresh before handing it to the agent.
+  const sessionCredFile = path.join(DATA_DIR, 'sessions', group.folder, '.claude', '.credentials.json');
+  await refreshOAuthIfNeeded(sessionCredFile, agentUid, agentGid);
+
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const processName = `nanoclaw-${safeName}-${Date.now()}`;
 
@@ -219,10 +358,8 @@ export async function runContainerAgent(
     env: childEnv,
   };
   if (process.getuid?.() === 0) {
-    const AGENT_UID = parseInt(process.env.AGENT_UID || '999', 10);
-    const AGENT_GID = parseInt(process.env.AGENT_GID || '987', 10);
-    spawnOptions.uid = AGENT_UID;
-    spawnOptions.gid = AGENT_GID;
+    spawnOptions.uid = agentUid;
+    spawnOptions.gid = agentGid;
     // HOME stays as /root — the agent user (docker group) has r/w access
     // to /root/.claude/.credentials.json for OAuth token read/refresh.
   }
@@ -344,6 +481,16 @@ export async function runContainerAgent(
     child.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      // Sync credentials back to root so the next session starts with fresh tokens.
+      // The SDK may have refreshed the token mid-session; propagate that back.
+      const rootCredFile = path.join(process.env.HOME || '/root', '.claude', '.credentials.json');
+      if (fs.existsSync(sessionCredFile)) {
+        try {
+          fs.copyFileSync(sessionCredFile, rootCredFile);
+          fs.chmodSync(rootCredFile, 0o600);
+        } catch { /* ignore — root fs */ }
+      }
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
