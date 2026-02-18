@@ -82,9 +82,9 @@ if [ "$ASSISTANT_NAME" != "Andy" ]; then
   # Add ASSISTANT_NAME to .env so config.ts picks it up
   ENV_FILE="$PROJECT_ROOT/.env"
   if [ -f "$ENV_FILE" ] && grep -q '^ASSISTANT_NAME=' "$ENV_FILE"; then
-    sed "s/^ASSISTANT_NAME=.*/ASSISTANT_NAME=$ASSISTANT_NAME/" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
+    sed "s|^ASSISTANT_NAME=.*|ASSISTANT_NAME=\"$ASSISTANT_NAME\"|" "$ENV_FILE" > "$ENV_FILE.tmp" && mv "$ENV_FILE.tmp" "$ENV_FILE"
   else
-    echo "ASSISTANT_NAME=$ASSISTANT_NAME" >> "$ENV_FILE"
+    echo "ASSISTANT_NAME=\"$ASSISTANT_NAME\"" >> "$ENV_FILE"
   fi
   log "Set ASSISTANT_NAME=$ASSISTANT_NAME in .env"
 
