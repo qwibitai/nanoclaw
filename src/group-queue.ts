@@ -91,8 +91,15 @@ export class GroupQueue {
     }
 
     if (state.active) {
+      // Preempt idle container for scheduled tasks to prevent indefinite deferral.
+      // The container will exit gracefully via waitForIpcMessage() checking _close sentinel,
+      // then drainGroup() will pick up this pending task.
+      this.closeStdin(groupJid);
       state.pendingTasks.push({ id: taskId, groupJid, fn });
-      logger.debug({ groupJid, taskId }, 'Container active, task queued');
+      logger.debug(
+        { groupJid, taskId },
+        'Container active, preempting with close sentinel for scheduled task',
+      );
       return;
     }
 
@@ -112,7 +119,12 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
