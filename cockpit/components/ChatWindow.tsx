@@ -37,6 +37,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
+  const [isAgentTyping, setIsAgentTyping] = useState(false);
   const [error, setError] = useState('');
   const [currentTopicId, setCurrentTopicId] = useState(topicId);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -70,6 +71,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
   // Load messages when topic changes
   useEffect(() => {
     setCurrentTopicId(topicId);
+    setIsAgentTyping(false);
     isAtBottomRef.current = true; // reset on topic switch
     if (!topicId) {
       setMessages([]);
@@ -83,6 +85,13 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
       })
       .catch(() => {});
   }, [topicId, applyMessages]);
+
+  // Clear typing indicator when bot responds (works for both SSE and polling)
+  useEffect(() => {
+    if (isAgentTyping && messages.length > 0 && messages[messages.length - 1].is_bot_message) {
+      setIsAgentTyping(false);
+    }
+  }, [messages, isAgentTyping]);
 
   // Auto-scroll only when new messages arrive AND user is at bottom
   useEffect(() => {
@@ -164,9 +173,12 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
       });
       if (!result.ok) {
         setError((result.error as string) || 'Failed to send message');
-      } else if (!currentTopicId && result.topic_id) {
-        // First message created a new topic — update state
-        setCurrentTopicId(result.topic_id as string);
+      } else {
+        setIsAgentTyping(true);
+        if (!currentTopicId && result.topic_id) {
+          // First message created a new topic — update state
+          setCurrentTopicId(result.topic_id as string);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send');
@@ -218,6 +230,17 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
             </div>
           </div>
         ))}
+        {isAgentTyping && (
+          <div className="flex justify-start">
+            <div className="rounded-lg bg-zinc-800 px-3 py-3">
+              <div className="flex gap-1 items-center">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" />
+              </div>
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
