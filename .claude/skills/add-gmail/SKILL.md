@@ -246,13 +246,15 @@ cd .. && npm run build
 Wait for TypeScript compilation, then restart the service:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 Check that it started:
 
 ```bash
-sleep 2 && launchctl list | grep nanoclaw
+sleep 2 && launchctl list | grep nanoclaw  # macOS
+# Linux: systemctl --user status nanoclaw
 ```
 
 ### Step 5: Test Gmail Integration
@@ -651,7 +653,8 @@ cd .. && npm run build
 Restart the service:
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 Verify it started and check for email channel startup message:
@@ -726,5 +729,6 @@ To remove Gmail entirely:
    ```bash
    cd container && ./build.sh && cd ..
    npm run build
-   launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+   launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+   # Linux: systemctl --user restart nanoclaw
    ```

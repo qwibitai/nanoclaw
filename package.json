@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "setup": "tsx src/setup/index.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
