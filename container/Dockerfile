@@ -87,8 +87,8 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/server /workspace/ext
 COPY container/entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Set ownership to node user (non-root) for writable directories
-RUN chown -R bun:bun /workspace
+# Set ownership to bun user (non-root) for writable directories
+RUN chown -R bun:bun /workspace && chmod 777 /home/bun
 
 # Pre-warm tsgo (native TypeScript checker) so `npx tsgo` / `bunx tsgo` works.
 # Host-mounted projects may have platform-specific binaries; npm global install

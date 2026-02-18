@@ -41,10 +41,10 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function connectSocket(phoneNumber?: string): Promise<void> {
+async function connectSocket(phoneNumber?: string, isReconnect = false): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-  if (state.creds.registered) {
+  if (state.creds.registered && !isReconnect) {
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
     console.log('✓ Already authenticated with WhatsApp');
     console.log(
@@ -110,7 +110,7 @@ async function connectSocket(phoneNumber?: string): Promise<void> {
         // 515 = stream error, often happens after pairing succeeds but before
         // registration completes. Reconnect to finish the handshake.
         console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
-        connectSocket(phoneNumber);
+        connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
         console.log('\n✗ Connection failed. Please try again.');
