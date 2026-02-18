@@ -169,7 +169,7 @@ export class DiscordChannel implements Channel {
 
 **Key implementation details:**
 - Client intents: `Guilds`, `GuildMessages`, `MessageContent`, `DirectMessages`
-- Message normalization: `{ channelId, content, authorName, messageId, isBot, timestamp }`
+- Message normalization: match the `NewMessage` interface: `{ id, chat_jid, sender, sender_name, content, timestamp, is_from_me?, is_bot_message? }`
 - 2000 char limit: Split long messages at newlines
 - JID format: Discord uses numeric channel IDs (e.g., `"1234567890"`)
 
