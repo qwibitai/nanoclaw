@@ -265,6 +265,9 @@ async function handlePairingCode(
     process.exit(3);
   }
 
+  // Emit pairing code immediately so the caller can display it to the user
+  emitAuthStatus('pairing-code', 'pairing_code_ready', 'waiting', { PAIRING_CODE: pairingCode });
+
   // Poll for completion (120s)
   await pollAuthCompletion('pairing-code', statusFile, projectRoot, pairingCode);
 }
