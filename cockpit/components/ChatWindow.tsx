@@ -20,6 +20,11 @@ interface PendingImage {
   preview: string;   // object URL for display
 }
 
+interface PendingTxt {
+  name: string;
+  content: string;
+}
+
 interface ChatWindowProps {
   topicId: string | null;
   group: string;
@@ -49,6 +54,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
   const [error, setError] = useState('');
   const [currentTopicId, setCurrentTopicId] = useState(topicId);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
+  const [pendingTxt, setPendingTxt] = useState<PendingTxt | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -109,9 +115,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
     } else if (isTxt) {
       const reader = new FileReader();
       reader.onload = () => {
-        const text = reader.result as string;
-        const block = `\n\n<attachment filename="${file.name}">\n${text}\n</attachment>`;
-        setInput((prev) => prev + block);
+        setPendingTxt({ name: file.name, content: reader.result as string });
       };
       reader.readAsText(file);
     } else {
@@ -124,6 +128,7 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
     setCurrentTopicId(topicId);
     setIsAgentTyping(false);
     setPendingImage(null);
+    setPendingTxt(null);
     isAtBottomRef.current = true; // reset on topic switch
     if (!topicId) {
       setMessages([]);
@@ -202,12 +207,18 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
     e.preventDefault();
     if (!input.trim() || sending) return;
 
-    const text = input.trim();
     const imageToSend = pendingImage;
+    const txtToSend = pendingTxt;
+    // Append TXT content as an XML attachment block (invisible in the textarea)
+    const rawText = input.trim();
+    const text = txtToSend
+      ? `${rawText}\n\n<attachment filename="${txtToSend.name}">\n${txtToSend.content}\n</attachment>`
+      : rawText;
     setInput('');
     setError('');
     setSending(true);
     setPendingImage(null);
+    setPendingTxt(null);
 
     // Optimistic: add user message immediately
     const optimisticMsg: Message = {
@@ -334,23 +345,42 @@ export function ChatWindow({ topicId, group }: ChatWindowProps) {
 
       {/* Input */}
       <form onSubmit={handleSend} className="border-t border-zinc-800 p-4">
-        {/* Pending image preview */}
-        {pendingImage && (
-          <div className="mb-2 flex items-center gap-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={pendingImage.preview}
-              alt={pendingImage.name}
-              className="h-16 w-16 rounded object-cover border border-zinc-600"
-            />
-            <span className="flex-1 truncate text-xs text-zinc-400">{pendingImage.name}</span>
-            <button
-              type="button"
-              onClick={() => setPendingImage(null)}
-              className="text-xs text-zinc-500 hover:text-zinc-200"
-            >
-              ✕
-            </button>
+        {/* Pending attachment previews */}
+        {(pendingImage || pendingTxt) && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {pendingImage && (
+              <div className="flex items-center gap-2 rounded border border-zinc-600 bg-zinc-900 p-1 pr-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={pendingImage.preview}
+                  alt={pendingImage.name}
+                  className="h-10 w-10 rounded object-cover"
+                />
+                <span className="max-w-[120px] truncate text-xs text-zinc-400">{pendingImage.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setPendingImage(null)}
+                  className="text-xs text-zinc-500 hover:text-zinc-200"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+            {pendingTxt && (
+              <div className="flex items-center gap-2 rounded border border-zinc-600 bg-zinc-900 px-2 py-1">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="max-w-[140px] truncate text-xs text-zinc-400">{pendingTxt.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setPendingTxt(null)}
+                  className="text-xs text-zinc-500 hover:text-zinc-200"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
           </div>
         )}
         <div className="flex gap-2">
