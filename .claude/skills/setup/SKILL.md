@@ -87,7 +87,10 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 If HAS_AUTH=true, confirm: keep or re-authenticate?
 
-AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
+**Choose auth method based on environment (from step 2):**
+
+If IS_HEADLESS=true AND IS_WSL=false → AskUserQuestion: Pairing code (recommended) vs QR code in terminal?
+Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
 
 - **QR browser:** `npx tsx src/setup/index.ts --step whatsapp-auth -- --method qr-browser` (Bash timeout: 150000ms)
 - **Pairing code:** Ask for phone number first. `npx tsx src/setup/index.ts --step whatsapp-auth -- --method pairing-code --phone NUMBER` (Bash timeout: 150000ms). Display PAIRING_CODE.
