@@ -41,6 +41,8 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  threadTs?: string;
+  threadKey?: string;
   secrets?: Record<string, string>;
 }
 
@@ -60,6 +62,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  threadKey?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -160,6 +163,12 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  // Create thread-specific input directory if threadKey is provided
+  if (threadKey) {
+    const threadInputDir = path.join(groupIpcDir, `input-${threadKey}`);
+    fs.mkdirSync(threadInputDir, { recursive: true });
+    try { fs.chownSync(threadInputDir, 1000, 1000); } catch { /* non-root host */ }
+  }
   // Ensure the container's node user (uid 1000) can write to IPC directories
   try {
     for (const sub of ['', 'messages', 'tasks', 'input']) {
@@ -240,7 +249,7 @@ export async function runContainerAgent(
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.threadKey);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);

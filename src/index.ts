@@ -132,8 +132,104 @@ function getChannelMinCursor(chatJid: string): string {
 }
 
 /**
- * Process all pending messages for a group, scoped per-thread.
- * Each Slack thread gets its own conversation context and session.
+ * Process a single thread's messages: cursor management, trigger check, agent invocation.
+ * Returns true on success, false on error requiring retry.
+ */
+async function processThread(
+  chatJid: string,
+  group: RegisteredGroup,
+  threadTs: string | undefined,
+  threadKey: string,
+  isMainGroup: boolean,
+  threadMessages: NewMessage[],
+): Promise<boolean> {
+  const cKey = cursorKey(chatJid, threadTs);
+  const threadCursor = lastAgentTimestamp[cKey] || '';
+
+  // Filter messages after this thread's cursor
+  const pending = threadMessages.filter((m) => m.timestamp > threadCursor);
+  if (pending.length === 0) return true;
+
+  // Check trigger per-thread
+  if (!isMainGroup && group.requiresTrigger !== false) {
+    const hasTrigger = pending.some((m) =>
+      TRIGGER_PATTERN.test(m.content.trim()),
+    );
+    if (!hasTrigger) return true;
+  }
+
+  const sessionKey = threadTs ? `${group.folder}:${threadTs}` : group.folder;
+  const prompt = formatMessages(pending);
+
+  // Advance cursor so the piping path in startMessageLoop won't re-fetch
+  // these messages. Save the old cursor so we can roll back on error.
+  const previousCursor = lastAgentTimestamp[cKey] || '';
+  lastAgentTimestamp[cKey] = pending[pending.length - 1].timestamp;
+  saveState();
+
+  logger.info(
+    { group: group.name, thread: threadTs, messageCount: pending.length },
+    'Processing messages',
+  );
+
+  // Track idle timer for closing stdin when agent is idle
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      logger.debug({ group: group.name, thread: threadTs }, 'Idle timeout, closing container stdin');
+      queue.closeStdin(chatJid, threadKey);
+    }, IDLE_TIMEOUT);
+  };
+
+  await slack.setTyping(chatJid, true);
+  let hadError = false;
+  let outputSentToUser = false;
+
+  const output = await runAgent(group, prompt, chatJid, sessionKey, threadTs, threadKey, async (result) => {
+    // Streaming output callback — called for each agent result
+    if (result.result) {
+      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+      if (text) {
+        await slack.sendMessage(chatJid, text, threadTs);
+        outputSentToUser = true;
+      }
+      // Only reset idle timer on actual results, not session-update markers (result: null)
+      resetIdleTimer();
+    }
+
+    if (result.status === 'error') {
+      hadError = true;
+    }
+  });
+
+  await slack.setTyping(chatJid, false);
+  if (idleTimer) clearTimeout(idleTimer);
+
+  if (output === 'error' || hadError) {
+    // If we already sent output to the user, don't roll back the cursor —
+    // the user got their response and re-processing would send duplicates.
+    if (outputSentToUser) {
+      logger.warn({ group: group.name, thread: threadTs }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+    } else {
+      // Roll back cursor so retries can re-process these messages
+      lastAgentTimestamp[cKey] = previousCursor;
+      saveState();
+      logger.warn({ group: group.name, thread: threadTs }, 'Agent error, rolled back message cursor for retry');
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Process all pending messages for a group, running threads in parallel.
+ * Each Slack thread gets its own container and conversation context.
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
@@ -156,102 +252,38 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     else threadGroups.set(threadKey, [msg]);
   }
 
-  // Process each thread sequentially (one container per channel at a time)
-  for (const [threadKey, threadMessages] of threadGroups) {
+  // Process threads in parallel — first thread reuses the slot already claimed
+  // by runForGroup, additional threads claim their own slots
+  const threadEntries = Array.from(threadGroups.entries());
+  let allSuccess = true;
+
+  const threadPromises = threadEntries.map(async ([threadKey, threadMessages], index) => {
     const threadTs = threadKey === '__channel__' ? undefined : threadKey;
-    const cKey = cursorKey(chatJid, threadTs);
-    const threadCursor = lastAgentTimestamp[cKey] || '';
 
-    // Filter messages after this thread's cursor
-    const pending = threadMessages.filter((m) => m.timestamp > threadCursor);
-    if (pending.length === 0) continue;
-
-    // Check trigger per-thread
-    if (!isMainGroup && group.requiresTrigger !== false) {
-      const hasTrigger = pending.some((m) =>
-        TRIGGER_PATTERN.test(m.content.trim()),
-      );
-      if (!hasTrigger) continue;
-    }
-
-    // Set active thread for outbound messages
-    slack.setActiveThread(chatJid, threadTs);
-    queue.setActiveThread(chatJid, threadTs || null);
-
-    const sessionKey = threadTs ? `${group.folder}:${threadTs}` : group.folder;
-    const prompt = formatMessages(pending);
-
-    // Advance cursor so the piping path in startMessageLoop won't re-fetch
-    // these messages. Save the old cursor so we can roll back on error.
-    const previousCursor = lastAgentTimestamp[cKey] || '';
-    lastAgentTimestamp[cKey] = pending[pending.length - 1].timestamp;
-    saveState();
-
-    logger.info(
-      { group: group.name, thread: threadTs, messageCount: pending.length },
-      'Processing messages',
-    );
-
-    // Track idle timer for closing stdin when agent is idle
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const resetIdleTimer = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
-        queue.closeStdin(chatJid);
-      }, IDLE_TIMEOUT);
-    };
-
-    await slack.setTyping(chatJid, true);
-    let hadError = false;
-    let outputSentToUser = false;
-
-    const output = await runAgent(group, prompt, chatJid, sessionKey, async (result) => {
-      // Streaming output callback — called for each agent result
-      if (result.result) {
-        const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-        logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-        if (text) {
-          await slack.sendMessage(chatJid, text);
-          outputSentToUser = true;
-        }
-        // Only reset idle timer on actual results, not session-update markers (result: null)
-        resetIdleTimer();
-      }
-
-      if (result.status === 'error') {
-        hadError = true;
-      }
-    });
-
-    await slack.setTyping(chatJid, false);
-    if (idleTimer) clearTimeout(idleTimer);
-
-    if (output === 'error' || hadError) {
-      // If we already sent output to the user, don't roll back the cursor —
-      // the user got their response and re-processing would send duplicates.
-      if (outputSentToUser) {
-        logger.warn({ group: group.name, thread: threadTs }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
-      } else {
-        // Roll back cursor so retries can re-process these messages
-        lastAgentTimestamp[cKey] = previousCursor;
-        saveState();
-        logger.warn({ group: group.name, thread: threadTs }, 'Agent error, rolled back message cursor for retry');
-        slack.setActiveThread(chatJid);
-        queue.setActiveThread(chatJid, null);
-        return false;
+    // First thread reuses the orchestrator's slot; additional threads need their own
+    if (index > 0) {
+      // Wait for a slot to become available
+      while (!queue.claimSlot()) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
-  }
 
-  // Clear active thread after all threads processed
-  slack.setActiveThread(chatJid);
-  queue.setActiveThread(chatJid, null);
+    try {
+      queue.registerThread(chatJid, threadKey, null!, `pending-${threadKey}`, group.folder);
+      const success = await processThread(chatJid, group, threadTs, threadKey, isMainGroup, threadMessages);
+      if (!success) allSuccess = false;
+    } finally {
+      queue.unregisterThread(chatJid, threadKey);
+      // Release the slot for additional threads (not the first one — managed by runForGroup)
+      if (index > 0) {
+        queue.releaseSlot();
+      }
+    }
+  });
 
-  return true;
+  await Promise.all(threadPromises);
+
+  return allSuccess;
 }
 
 async function runAgent(
@@ -259,6 +291,8 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   sessionKey: string,
+  threadTs: string | undefined,
+  threadKey: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -309,8 +343,10 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        threadTs,
+        threadKey,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerThread(chatJid, threadKey, proc, containerName, group.folder),
       wrappedOnOutput,
     );
 
@@ -382,7 +418,7 @@ async function startMessageLoop(): Promise<void> {
             else threadGroups.set(threadKey, [msg]);
           }
 
-          let needsEnqueue = false;
+          let shouldEnqueue = false;
 
           for (const [threadKey, threadMsgs] of threadGroups) {
             const threadTs = threadKey === '__channel__' ? undefined : threadKey;
@@ -397,11 +433,10 @@ async function startMessageLoop(): Promise<void> {
               if (!hasTrigger) continue;
             }
 
-            const activeThread = queue.getActiveThread(chatJid);
             const cKey = cursorKey(chatJid, threadTs);
 
             // If same thread is active in a container, pipe messages to it
-            if (activeThread === (threadTs ?? null)) {
+            if (queue.isThreadActive(chatJid, threadKey)) {
               const allPending = getMessagesSince(
                 chatJid,
                 lastAgentTimestamp[cKey] || '',
@@ -411,7 +446,7 @@ async function startMessageLoop(): Promise<void> {
                 allPending.length > 0 ? allPending : threadMsgs;
               const formatted = formatMessages(messagesToSend);
 
-              if (queue.sendMessage(chatJid, formatted)) {
+              if (queue.sendMessage(chatJid, formatted, threadKey)) {
                 logger.debug(
                   { chatJid, thread: threadTs, count: messagesToSend.length },
                   'Piped messages to active container',
@@ -425,11 +460,11 @@ async function startMessageLoop(): Promise<void> {
               }
             }
 
-            // Different thread or no active container — enqueue for processing
-            needsEnqueue = true;
+            // Thread not active — enqueue for processing
+            shouldEnqueue = true;
           }
 
-          if (needsEnqueue) {
+          if (shouldEnqueue) {
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -528,15 +563,16 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, threadKey) =>
+      queue.registerThread(groupJid, threadKey, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const text = formatOutbound(rawText);
       if (text) await slack.sendMessage(jid, text);
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => slack.sendMessage(jid, text),
-    sendFile: (jid, filePath, filename, title, comment) => slack.sendFile(jid, filePath, filename, title, comment),
+    sendMessage: (jid, text, threadTs) => slack.sendMessage(jid, text, threadTs),
+    sendFile: (jid, filePath, filename, title, comment, threadTs) => slack.sendFile(jid, filePath, filename, title, comment, threadTs),
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroupMetadata: (_force) => slack.syncChannelMetadata(),

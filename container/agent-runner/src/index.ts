@@ -26,6 +26,8 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  threadTs?: string;
+  threadKey?: string;
   secrets?: Record<string, string>;
 }
 
@@ -54,9 +56,11 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// Set dynamically in main() after reading containerInput
+let IPC_INPUT_DIR = '/workspace/ipc/input';
+let IPC_INPUT_CLOSE_SENTINEL = '/workspace/ipc/input/_close';
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -449,6 +453,7 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            ...(containerInput.threadTs && { NANOCLAW_THREAD_TS: containerInput.threadTs }),
           },
         },
         hubspot: {
@@ -530,6 +535,12 @@ async function main(): Promise<void> {
     });
     process.exit(1);
   }
+
+  // Set thread-scoped IPC input directory
+  const threadKey = containerInput.threadKey || '__channel__';
+  IPC_INPUT_DIR = `/workspace/ipc/input-${threadKey}`;
+  IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+  log(`IPC input dir: ${IPC_INPUT_DIR}`);
 
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.

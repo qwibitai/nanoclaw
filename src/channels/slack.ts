@@ -31,7 +31,6 @@ export class SlackChannel implements Channel {
   private botUserId = '';
   private outgoingQueue: Array<{ jid: string; text: string; threadTs?: string }> = [];
   private flushing = false;
-  private activeThread: Map<string, string> = new Map();
   private channelSyncTimerStarted = false;
   private displayNameCache: Map<string, string> = new Map();
 
@@ -176,11 +175,11 @@ export class SlackChannel implements Channel {
     }
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, threadTs?: string): Promise<void> {
     // No assistant name prefix — Slack shows bot identity natively
 
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text, threadTs });
       logger.info(
         { jid, length: text.length, queueSize: this.outgoingQueue.length },
         'Slack disconnected, message queued',
@@ -191,7 +190,6 @@ export class SlackChannel implements Channel {
     try {
       // Split long messages on newline boundaries
       const chunks = this.splitMessage(text);
-      const threadTs = this.activeThread.get(jid);
       for (const chunk of chunks) {
         await this.app.client.chat.postMessage({
           channel: jid,
@@ -201,7 +199,6 @@ export class SlackChannel implements Channel {
       }
       logger.info({ jid, length: text.length, chunks: chunks.length, threadTs }, 'Message sent');
     } catch (err) {
-      const threadTs = this.activeThread.get(jid);
       this.outgoingQueue.push({ jid, text, threadTs });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
@@ -227,14 +224,6 @@ export class SlackChannel implements Channel {
     }
   }
 
-  setActiveThread(channelJid: string, threadTs?: string): void {
-    if (threadTs) {
-      this.activeThread.set(channelJid, threadTs);
-    } else {
-      this.activeThread.delete(channelJid);
-    }
-  }
-
   async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
     // No-op: Slack API doesn't support bot typing indicators
   }
@@ -247,7 +236,7 @@ export class SlackChannel implements Channel {
     comment?: string,
     threadTs?: string,
   ): Promise<void> {
-    const resolvedThread = threadTs || this.activeThread.get(jid);
+    const resolvedThread = threadTs;
     const actualFilename = filename || path.basename(filePath);
 
     try {

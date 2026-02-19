@@ -36,7 +36,7 @@ describe('GroupQueue', () => {
 
   // --- Single group at a time ---
 
-  it('only runs one container per group at a time', async () => {
+  it('only runs one orchestrator per group at a time', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
@@ -211,30 +211,52 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(countAfterMaxRetries);
   });
 
-  // --- Active thread tracking ---
+  // --- Thread tracking ---
 
-  it('tracks active thread per group', () => {
-    expect(queue.getActiveThread('group1@g.us')).toBeNull();
+  it('tracks registered threads per group', () => {
+    expect(queue.isThreadActive('group1@g.us', '1234567890.123456')).toBe(false);
 
-    queue.setActiveThread('group1@g.us', '1234567890.123456');
-    expect(queue.getActiveThread('group1@g.us')).toBe('1234567890.123456');
+    const mockProc = { killed: false } as any;
+    queue.registerThread('group1@g.us', '1234567890.123456', mockProc, 'container-1', 'group-folder');
+    expect(queue.isThreadActive('group1@g.us', '1234567890.123456')).toBe(true);
 
-    queue.setActiveThread('group1@g.us', null);
-    expect(queue.getActiveThread('group1@g.us')).toBeNull();
+    queue.unregisterThread('group1@g.us', '1234567890.123456');
+    expect(queue.isThreadActive('group1@g.us', '1234567890.123456')).toBe(false);
   });
 
-  it('resets active thread when container finishes', async () => {
-    const processMessages = vi.fn(async () => {
-      queue.setActiveThread('group1@g.us', '1234567890.123456');
-      return true;
-    });
+  it('supports multiple threads per group simultaneously', () => {
+    const mockProc = { killed: false } as any;
+    queue.registerThread('group1@g.us', 'thread-a', mockProc, 'container-a', 'group-folder');
+    queue.registerThread('group1@g.us', 'thread-b', mockProc, 'container-b', 'group-folder');
 
-    queue.setProcessMessagesFn(processMessages);
-    queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(10);
+    expect(queue.isThreadActive('group1@g.us', 'thread-a')).toBe(true);
+    expect(queue.isThreadActive('group1@g.us', 'thread-b')).toBe(true);
+    expect(queue.isThreadActive('group1@g.us', 'thread-c')).toBe(false);
 
-    // After container finishes, activeThreadTs should be reset
-    expect(queue.getActiveThread('group1@g.us')).toBeNull();
+    queue.unregisterThread('group1@g.us', 'thread-a');
+    expect(queue.isThreadActive('group1@g.us', 'thread-a')).toBe(false);
+    expect(queue.isThreadActive('group1@g.us', 'thread-b')).toBe(true);
+  });
+
+  // --- sanitizeThreadKey ---
+
+  it('sanitizes thread keys correctly', () => {
+    expect(queue.sanitizeThreadKey(undefined)).toBe('__channel__');
+    expect(queue.sanitizeThreadKey(null)).toBe('__channel__');
+    expect(queue.sanitizeThreadKey('1234567890.123456')).toBe('1234567890.123456');
+    expect(queue.sanitizeThreadKey('invalid')).toBe('__channel__');
+  });
+
+  // --- Slot management ---
+
+  it('claimSlot respects concurrency limit', () => {
+    // MAX_CONCURRENT_CONTAINERS = 2, but we start at 0 external slots
+    expect(queue.claimSlot()).toBe(true);
+    expect(queue.claimSlot()).toBe(true);
+    expect(queue.claimSlot()).toBe(false); // at limit
+
+    queue.releaseSlot();
+    expect(queue.claimSlot()).toBe(true);
   });
 
   // --- Waiting groups get drained when slots free up ---

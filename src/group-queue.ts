@@ -14,15 +14,18 @@ interface QueuedTask {
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
 
-interface GroupState {
-  active: boolean;
-  pendingMessages: boolean;
-  pendingTasks: QueuedTask[];
+interface ThreadState {
   process: ChildProcess | null;
   containerName: string | null;
-  groupFolder: string | null;
+  groupFolder: string;
+}
+
+interface GroupState {
+  orchestratorActive: boolean;
+  pendingMessages: boolean;
+  pendingTasks: QueuedTask[];
+  threads: Map<string, ThreadState>;
   retryCount: number;
-  activeThreadTs: string | null;
 }
 
 export class GroupQueue {
@@ -37,14 +40,11 @@ export class GroupQueue {
     let state = this.groups.get(groupJid);
     if (!state) {
       state = {
-        active: false,
+        orchestratorActive: false,
         pendingMessages: false,
         pendingTasks: [],
-        process: null,
-        containerName: null,
-        groupFolder: null,
+        threads: new Map(),
         retryCount: 0,
-        activeThreadTs: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -55,14 +55,23 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
+  /**
+   * Sanitize a Slack thread_ts into a safe directory name.
+   * Returns '__channel__' for null/undefined (top-level channel messages).
+   */
+  sanitizeThreadKey(threadTs: string | undefined | null): string {
+    if (!threadTs) return '__channel__';
+    if (/^\d+\.\d+$/.test(threadTs)) return threadTs;
+    return '__channel__';
+  }
+
   enqueueMessageCheck(groupJid: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
 
-    if (state.active) {
+    if (state.orchestratorActive) {
       state.pendingMessages = true;
-      logger.debug({ groupJid }, 'Container active, message queued');
       return;
     }
 
@@ -92,7 +101,7 @@ export class GroupQueue {
       return;
     }
 
-    if (state.active) {
+    if (state.orchestratorActive) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
@@ -114,22 +123,54 @@ export class GroupQueue {
     this.runTask(groupJid, { id: taskId, groupJid, fn });
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerThread(
+    groupJid: string,
+    threadKey: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder: string,
+  ): void {
     const state = this.getGroup(groupJid);
-    state.process = proc;
-    state.containerName = containerName;
-    if (groupFolder) state.groupFolder = groupFolder;
+    state.threads.set(threadKey, { process: proc, containerName, groupFolder });
+  }
+
+  unregisterThread(groupJid: string, threadKey: string): void {
+    const state = this.getGroup(groupJid);
+    state.threads.delete(threadKey);
+  }
+
+  isThreadActive(groupJid: string, threadKey: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.threads.has(threadKey) ?? false;
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Claim a concurrency slot. Returns true if a slot was available.
    */
-  sendMessage(groupJid: string, text: string): boolean {
-    const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return false;
+  claimSlot(): boolean {
+    if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) return false;
+    this.activeCount++;
+    return true;
+  }
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+  /**
+   * Release a concurrency slot and drain waiting groups.
+   */
+  releaseSlot(): void {
+    this.activeCount--;
+    this.drainWaiting();
+  }
+
+  /**
+   * Send a follow-up message to a thread's container via IPC file.
+   * Returns true if the message was written, false if no active thread.
+   */
+  sendMessage(groupJid: string, text: string, threadKey: string): boolean {
+    const state = this.getGroup(groupJid);
+    const thread = state.threads.get(threadKey);
+    if (!thread) return false;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', thread.groupFolder, `input-${threadKey}`);
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
@@ -144,13 +185,14 @@ export class GroupQueue {
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal a thread's container to wind down by writing a close sentinel.
    */
-  closeStdin(groupJid: string): void {
+  closeStdin(groupJid: string, threadKey: string): void {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return;
+    const thread = state.threads.get(threadKey);
+    if (!thread) return;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    const inputDir = path.join(DATA_DIR, 'ipc', thread.groupFolder, `input-${threadKey}`);
     try {
       fs.mkdirSync(inputDir, { recursive: true });
       fs.writeFileSync(path.join(inputDir, '_close'), '');
@@ -159,22 +201,12 @@ export class GroupQueue {
     }
   }
 
-  setActiveThread(groupJid: string, threadTs: string | null): void {
-    const state = this.getGroup(groupJid);
-    state.activeThreadTs = threadTs;
-  }
-
-  getActiveThread(groupJid: string): string | null {
-    const state = this.groups.get(groupJid);
-    return state?.activeThreadTs ?? null;
-  }
-
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
-    state.active = true;
+    state.orchestratorActive = true;
     state.pendingMessages = false;
     this.activeCount++;
 
@@ -196,11 +228,8 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
-      state.active = false;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
-      state.activeThreadTs = null;
+      state.orchestratorActive = false;
+      state.threads.clear();
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -208,7 +237,7 @@ export class GroupQueue {
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
-    state.active = true;
+    state.orchestratorActive = true;
     this.activeCount++;
 
     logger.debug(
@@ -221,11 +250,8 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
-      state.active = false;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
-      state.activeThreadTs = null;
+      state.orchestratorActive = false;
+      state.threads.clear();
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -298,13 +324,12 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
     const activeContainers: string[] = [];
-    for (const [jid, state] of this.groups) {
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
+    for (const [_jid, state] of this.groups) {
+      for (const [_threadKey, thread] of state.threads) {
+        if (thread.process && !thread.process.killed && thread.containerName) {
+          activeContainers.push(thread.containerName);
+        }
       }
     }
 
