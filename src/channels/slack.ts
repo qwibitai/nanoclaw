@@ -115,11 +115,17 @@ export class SlackChannel implements Channel {
       await this.handleEvent(event.channel, user, text || '', ts, false, undefined, eventFiles);
     });
 
-    // Register /status slash command
+    // Register /corey slash command
     if (this.opts.getStatusData) {
-      this.app.command('/status', async ({ ack }) => {
-        const text = this.formatStatusResponse(this.opts.getStatusData!());
-        await ack({ text, response_type: 'ephemeral' });
+      this.app.command('/corey', async ({ ack, respond }) => {
+        await ack();
+        try {
+          const text = this.formatStatusResponse(this.opts.getStatusData!());
+          await respond({ text, response_type: 'ephemeral' });
+        } catch (err) {
+          logger.error({ err }, 'Error generating status response');
+          await respond({ text: 'Failed to generate status', response_type: 'ephemeral' });
+        }
       });
     }
 
