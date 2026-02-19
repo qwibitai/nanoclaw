@@ -18,6 +18,8 @@ interface ThreadState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string;
+  description: string;
+  startedAt: number;
 }
 
 interface GroupState {
@@ -101,12 +103,7 @@ export class GroupQueue {
       return;
     }
 
-    if (state.orchestratorActive) {
-      state.pendingTasks.push({ id: taskId, groupJid, fn });
-      logger.debug({ groupJid, taskId }, 'Container active, task queued');
-      return;
-    }
-
+    // Tasks run independently from message orchestration — only check concurrency
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (!this.waitingGroups.includes(groupJid)) {
@@ -129,9 +126,10 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder: string,
+    description: string,
   ): void {
     const state = this.getGroup(groupJid);
-    state.threads.set(threadKey, { process: proc, containerName, groupFolder });
+    state.threads.set(threadKey, { process: proc, containerName, groupFolder, description, startedAt: Date.now() });
   }
 
   unregisterThread(groupJid: string, threadKey: string): void {
@@ -142,6 +140,32 @@ export class GroupQueue {
   isThreadActive(groupJid: string, threadKey: string): boolean {
     const state = this.groups.get(groupJid);
     return state?.threads.has(threadKey) ?? false;
+  }
+
+  getStatus(): {
+    activeContainers: Array<{ groupJid: string; threadKey: string; description: string; startedAt: number; groupFolder: string }>;
+    activeCount: number;
+    maxConcurrent: number;
+    queuedGroups: string[];
+  } {
+    const activeContainers: Array<{ groupJid: string; threadKey: string; description: string; startedAt: number; groupFolder: string }> = [];
+    for (const [groupJid, state] of this.groups) {
+      for (const [threadKey, thread] of state.threads) {
+        activeContainers.push({
+          groupJid,
+          threadKey,
+          description: thread.description,
+          startedAt: thread.startedAt,
+          groupFolder: thread.groupFolder,
+        });
+      }
+    }
+    return {
+      activeContainers,
+      activeCount: this.activeCount,
+      maxConcurrent: MAX_CONCURRENT_CONTAINERS,
+      queuedGroups: [...this.waitingGroups],
+    };
   }
 
   /**
@@ -236,8 +260,10 @@ export class GroupQueue {
   }
 
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
-    const state = this.getGroup(groupJid);
-    state.orchestratorActive = true;
+    // Tasks do NOT set orchestratorActive — they run independently from
+    // message processing, using only a concurrency slot. This prevents
+    // scheduled tasks (e.g. reminders) from being blocked behind
+    // long-running message containers.
     this.activeCount++;
 
     logger.debug(
@@ -250,8 +276,6 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
-      state.orchestratorActive = false;
-      state.threads.clear();
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -286,14 +310,14 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
 
     // Tasks first (they won't be re-discovered from SQLite like messages)
-    if (state.pendingTasks.length > 0) {
+    if (state.pendingTasks.length > 0 && this.activeCount < MAX_CONCURRENT_CONTAINERS) {
       const task = state.pendingTasks.shift()!;
       this.runTask(groupJid, task);
       return;
     }
 
-    // Then pending messages
-    if (state.pendingMessages) {
+    // Then pending messages — only if the message orchestrator isn't already running
+    if (state.pendingMessages && !state.orchestratorActive) {
       this.runForGroup(groupJid, 'drain');
       return;
     }
@@ -314,7 +338,7 @@ export class GroupQueue {
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
         this.runTask(nextJid, task);
-      } else if (state.pendingMessages) {
+      } else if (state.pendingMessages && !state.orchestratorActive) {
         this.runForGroup(nextJid, 'drain');
       }
       // If neither pending, skip this group

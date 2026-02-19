@@ -41,6 +41,13 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface MessageFile {
+  name: string;
+  mimetype: string;
+  size: number;
+  localPath: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -51,7 +58,11 @@ export interface NewMessage {
   is_from_me?: boolean;
   is_bot_message?: boolean;
   thread_ts?: string;
+  files?: MessageFile[];
 }
+
+// Callback for message deletion (edit/delete awareness)
+export type OnMessageDelete = (chatJid: string, messageId: string) => void;
 
 export interface ScheduledTask {
   id: string;

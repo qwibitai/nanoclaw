@@ -18,12 +18,14 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  deleteMessage,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getRecentTaskRuns,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -34,7 +36,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
-import { formatMessages, formatOutbound } from './router.js';
+import { formatMessages, formatOutbound, stripInternalTags } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -191,8 +193,7 @@ async function processThread(
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const text = stripInternalTags(raw);
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
         await slack.sendMessage(chatJid, text, threadTs);
@@ -269,7 +270,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     try {
-      queue.registerThread(chatJid, threadKey, null!, `pending-${threadKey}`, group.folder);
+      queue.registerThread(chatJid, threadKey, null!, `pending-${threadKey}`, group.folder, 'Processing messages...');
       const success = await processThread(chatJid, group, threadTs, threadKey, isMainGroup, threadMessages);
       if (!success) allSuccess = false;
     } finally {
@@ -346,7 +347,7 @@ async function runAgent(
         threadTs,
         threadKey,
       },
-      (proc, containerName) => queue.registerThread(chatJid, threadKey, proc, containerName, group.folder),
+      (proc, containerName) => queue.registerThread(chatJid, threadKey, proc, containerName, group.folder, prompt.slice(0, 100)),
       wrappedOnOutput,
     );
 
@@ -368,6 +369,44 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   }
+}
+
+/**
+ * Launch a standalone thread processor outside the orchestrator.
+ * Used when new messages arrive for a thread while the orchestrator
+ * is already busy processing other threads. Runs fire-and-forget.
+ * Caller must have already claimed a slot via queue.claimSlot().
+ */
+function launchStandaloneThread(
+  chatJid: string,
+  group: RegisteredGroup,
+  threadTs: string | undefined,
+  threadKey: string,
+  isMainGroup: boolean,
+): void {
+  const minCursor = getChannelMinCursor(chatJid);
+  const allMessages = getMessagesSince(chatJid, minCursor, ASSISTANT_NAME);
+  const threadMessages = allMessages.filter(
+    (m) => (m.thread_ts || '__channel__') === threadKey,
+  );
+
+  logger.info(
+    { chatJid, thread: threadTs, messageCount: threadMessages.length },
+    'Launching standalone thread',
+  );
+
+  // Fire-and-forget — processThread handles its own cursor/error management
+  (async () => {
+    try {
+      queue.registerThread(chatJid, threadKey, null!, `pending-${threadKey}`, group.folder, 'Processing messages...');
+      await processThread(chatJid, group, threadTs, threadKey, isMainGroup, threadMessages);
+    } catch (err) {
+      logger.error({ chatJid, thread: threadTs, err }, 'Standalone thread error');
+    } finally {
+      queue.unregisterThread(chatJid, threadKey);
+      queue.releaseSlot();
+    }
+  })();
 }
 
 async function startMessageLoop(): Promise<void> {
@@ -460,8 +499,13 @@ async function startMessageLoop(): Promise<void> {
               }
             }
 
-            // Thread not active — enqueue for processing
-            shouldEnqueue = true;
+            // Thread not active — launch directly if we can get a slot,
+            // even if the orchestrator is busy with other threads
+            if (queue.claimSlot()) {
+              launchStandaloneThread(chatJid, group, threadTs, threadKey, isMainGroup);
+            } else {
+              shouldEnqueue = true;
+            }
           }
 
           if (shouldEnqueue) {
@@ -552,7 +596,13 @@ async function main(): Promise<void> {
   slack = new SlackChannel({
     onMessage: (chatJid, msg) => storeMessage(msg),
     onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
+    onMessageDelete: (chatJid, messageId) => deleteMessage(messageId, chatJid),
     registeredGroups: () => registeredGroups,
+    getStatusData: () => ({
+      queue: queue.getStatus(),
+      tasks: getAllTasks().filter((t) => t.status === 'active'),
+      recentRuns: getRecentTaskRuns(5),
+    }),
   });
 
   // Connect — resolves when Socket Mode is ready
@@ -563,8 +613,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder, threadKey) =>
-      queue.registerThread(groupJid, threadKey, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, threadKey, description) =>
+      queue.registerThread(groupJid, threadKey, proc, containerName, groupFolder, description),
     sendMessage: async (jid, rawText) => {
       const text = formatOutbound(rawText);
       if (text) await slack.sendMessage(jid, text);

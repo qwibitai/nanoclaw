@@ -105,6 +105,15 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* column already exists */
   }
+
+  // Add files_json column if it doesn't exist (migration for file attachments)
+  try {
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN files_json TEXT DEFAULT NULL`,
+    );
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -217,7 +226,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_ts, files_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -228,6 +237,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
     msg.thread_ts || null,
+    msg.files?.length ? JSON.stringify(msg.files) : null,
   );
 }
 
@@ -271,7 +281,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts, files_json
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -280,7 +290,13 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as (NewMessage & { files_json?: string })[];
+  for (const row of rows) {
+    if (row.files_json) {
+      row.files = JSON.parse(row.files_json);
+    }
+    delete row.files_json;
+  }
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -298,15 +314,29 @@ export function getMessagesSince(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts, files_json
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
     ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as (NewMessage & { files_json?: string })[];
+  for (const row of rows) {
+    if (row.files_json) {
+      row.files = JSON.parse(row.files_json);
+    }
+    delete row.files_json;
+  }
+  return rows;
+}
+
+export function deleteMessage(messageId: string, chatJid: string): void {
+  db.prepare('DELETE FROM messages WHERE id = ? AND chat_jid = ?').run(
+    messageId,
+    chatJid,
+  );
 }
 
 export function createTask(
@@ -440,6 +470,18 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+export function getRecentTaskRuns(limit = 5): Array<TaskRunLog & { task_prompt: string | null }> {
+  return db
+    .prepare(
+      `
+    SELECT l.*, t.prompt as task_prompt
+    FROM task_run_logs l LEFT JOIN scheduled_tasks t ON l.task_id = t.id
+    ORDER BY l.run_at DESC LIMIT ?
+  `,
+    )
+    .all(limit) as Array<TaskRunLog & { task_prompt: string | null }>;
 }
 
 // --- Router state accessors ---

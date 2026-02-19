@@ -102,40 +102,36 @@ describe('GroupQueue', () => {
 
   it('drains tasks before messages for same group', async () => {
     const executionOrder: string[] = [];
-    let resolveFirst: () => void;
+    const completionCallbacks: Array<() => void> = [];
 
     const processMessages = vi.fn(async (groupJid: string) => {
-      if (executionOrder.length === 0) {
-        // First call: block until we release it
-        await new Promise<void>((resolve) => {
-          resolveFirst = resolve;
-        });
-      }
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
       executionOrder.push('messages');
       return true;
     });
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Start processing messages (takes the active slot)
+    // Fill both slots with message processing (MAX_CONCURRENT_CONTAINERS=2)
     queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // While active, enqueue both a task and pending messages
+    // Both slots full — enqueue a task and pending messages for group1
     const taskFn = vi.fn(async () => {
       executionOrder.push('task');
     });
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Release the first processing
-    resolveFirst!();
+    // Release group1's first processing — frees a slot, drainGroup runs
+    completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Task should have run before the second message check
-    expect(executionOrder[0]).toBe('messages'); // first call
-    expect(executionOrder[1]).toBe('task'); // task runs first in drain
-    // Messages would run after task completes
+    // First entry is the completed message processing
+    expect(executionOrder[0]).toBe('messages');
+    // Task should drain before the second message check
+    expect(executionOrder[1]).toBe('task');
   });
 
   // --- Retry with backoff on failure ---
@@ -217,7 +213,7 @@ describe('GroupQueue', () => {
     expect(queue.isThreadActive('group1@g.us', '1234567890.123456')).toBe(false);
 
     const mockProc = { killed: false } as any;
-    queue.registerThread('group1@g.us', '1234567890.123456', mockProc, 'container-1', 'group-folder');
+    queue.registerThread('group1@g.us', '1234567890.123456', mockProc, 'container-1', 'group-folder', 'test');
     expect(queue.isThreadActive('group1@g.us', '1234567890.123456')).toBe(true);
 
     queue.unregisterThread('group1@g.us', '1234567890.123456');
@@ -226,8 +222,8 @@ describe('GroupQueue', () => {
 
   it('supports multiple threads per group simultaneously', () => {
     const mockProc = { killed: false } as any;
-    queue.registerThread('group1@g.us', 'thread-a', mockProc, 'container-a', 'group-folder');
-    queue.registerThread('group1@g.us', 'thread-b', mockProc, 'container-b', 'group-folder');
+    queue.registerThread('group1@g.us', 'thread-a', mockProc, 'container-a', 'group-folder', 'test');
+    queue.registerThread('group1@g.us', 'thread-b', mockProc, 'container-b', 'group-folder', 'test');
 
     expect(queue.isThreadActive('group1@g.us', 'thread-a')).toBe(true);
     expect(queue.isThreadActive('group1@g.us', 'thread-b')).toBe(true);

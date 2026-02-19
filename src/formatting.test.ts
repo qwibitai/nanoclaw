@@ -163,6 +163,18 @@ describe('stripInternalTags', () => {
   it('returns empty string when text is only internal tags', () => {
     expect(stripInternalTags('<internal>only this</internal>')).toBe('');
   });
+
+  it('strips unclosed internal tags (malformed closing tag)', () => {
+    expect(
+      stripInternalTags('<internal>thinking about stuff</invoke>'),
+    ).toBe('');
+  });
+
+  it('strips unclosed internal tags (no closing tag)', () => {
+    expect(
+      stripInternalTags('visible <internal>hidden reasoning'),
+    ).toBe('visible');
+  });
 });
 
 describe('formatOutbound', () => {

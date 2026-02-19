@@ -26,7 +26,7 @@ export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
   queue: GroupQueue;
-  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string, threadKey: string) => void;
+  onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string, threadKey: string, description: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
 }
 
@@ -113,7 +113,7 @@ async function runTask(
         isScheduledTask: true,
         threadKey: '__task__',
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, '__task__'),
+      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder, '__task__', task.prompt.slice(0, 100)),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

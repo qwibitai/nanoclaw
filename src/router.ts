@@ -10,14 +10,25 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    let inner = escapeXml(m.content);
+    if (m.files?.length) {
+      for (const f of m.files) {
+        const containerPath = f.localPath.replace(/^data\/files\//, '/workspace/files/');
+        inner += `\n<file name="${escapeXml(f.name)}" type="${escapeXml(f.mimetype)}" path="${escapeXml(containerPath)}" />`;
+      }
+    }
+    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${inner}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {
-  return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+  // Strip properly closed <internal>...</internal> blocks
+  let result = text.replace(/<internal>[\s\S]*?<\/internal>/g, '');
+  // Strip unclosed <internal> blocks (malformed closing tag or missing entirely)
+  result = result.replace(/<internal>[\s\S]*/g, '');
+  return result.trim();
 }
 
 export function formatOutbound(rawText: string): string {
