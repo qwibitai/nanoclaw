@@ -152,7 +152,6 @@ function killOrphanedProcesses(projectRoot: string): void {
   try {
     execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
       stdio: 'ignore',
-      shell: true,
     });
     logger.info('Stopped any orphaned nanoclaw processes');
   } catch {
