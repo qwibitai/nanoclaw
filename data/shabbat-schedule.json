@@ -1,0 +1,1659 @@
+{
+  "location": "Crown Heights, Brooklyn",
+  "coordinates": [
+    40.669,
+    -73.943
+  ],
+  "elevation": 25,
+  "timezone": "America/New_York",
+  "tzeisBufferMinutes": 18,
+  "generatedAt": "2026-02-20T19:30:58.983Z",
+  "expiresAt": "2031-01-01T00:00:00.000Z",
+  "windowCount": 274,
+  "windows": [
+    {
+      "start": "2026-01-02T21:40:10.000Z",
+      "end": "2026-01-03T22:44:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-01-09T21:46:50.000Z",
+      "end": "2026-01-10T22:50:33.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-01-16T21:54:25.000Z",
+      "end": "2026-01-17T22:57:39.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-01-23T22:02:38.000Z",
+      "end": "2026-01-24T23:05:16.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-01-30T22:11:11.000Z",
+      "end": "2026-01-31T23:13:10.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-02-06T22:19:49.000Z",
+      "end": "2026-02-07T23:21:09.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-02-13T22:28:22.000Z",
+      "end": "2026-02-14T23:29:07.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-02-20T22:36:45.000Z",
+      "end": "2026-02-21T23:36:59.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-02-27T22:44:53.000Z",
+      "end": "2026-02-28T23:44:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-03-06T22:52:46.000Z",
+      "end": "2026-03-07T23:52:24.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-03-13T23:00:26.000Z",
+      "end": "2026-03-15T00:00:00.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-03-20T23:07:56.000Z",
+      "end": "2026-03-22T00:07:37.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-03-27T23:15:20.000Z",
+      "end": "2026-03-29T00:15:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-04-01T23:20:34.000Z",
+      "end": "2026-04-05T00:23:06.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Pesach I / Pesach II / Shabbat"
+    },
+    {
+      "start": "2026-04-07T23:26:50.000Z",
+      "end": "2026-04-10T00:28:46.000Z",
+      "type": "yomtov",
+      "label": "Pesach VII / Pesach VIII"
+    },
+    {
+      "start": "2026-04-10T23:29:59.000Z",
+      "end": "2026-04-12T00:31:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-04-17T23:37:19.000Z",
+      "end": "2026-04-19T00:39:11.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-04-24T23:44:39.000Z",
+      "end": "2026-04-26T00:47:27.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-05-01T23:51:57.000Z",
+      "end": "2026-05-03T00:55:47.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-05-08T23:59:09.000Z",
+      "end": "2026-05-10T01:04:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-05-16T00:06:05.000Z",
+      "end": "2026-05-17T01:12:05.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-05-22T00:11:42.000Z",
+      "end": "2026-05-24T01:19:37.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shavuot I / Shabbat / Shavuot II"
+    },
+    {
+      "start": "2026-05-30T00:18:29.000Z",
+      "end": "2026-05-31T01:26:20.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-06-06T00:23:29.000Z",
+      "end": "2026-06-07T01:31:58.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-06-13T00:27:21.000Z",
+      "end": "2026-06-14T01:36:09.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-06-20T00:29:54.000Z",
+      "end": "2026-06-21T01:38:40.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-06-27T00:30:56.000Z",
+      "end": "2026-06-28T01:39:19.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-07-04T00:30:21.000Z",
+      "end": "2026-07-05T01:38:01.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-07-11T00:28:07.000Z",
+      "end": "2026-07-12T01:34:48.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-07-18T00:24:15.000Z",
+      "end": "2026-07-19T01:29:45.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-07-25T00:18:52.000Z",
+      "end": "2026-07-26T01:23:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-08-01T00:12:04.000Z",
+      "end": "2026-08-02T01:14:58.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-08-08T00:04:01.000Z",
+      "end": "2026-08-09T01:05:38.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-08-14T23:54:54.000Z",
+      "end": "2026-08-16T00:55:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-08-21T23:44:54.000Z",
+      "end": "2026-08-23T00:44:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-08-28T23:34:11.000Z",
+      "end": "2026-08-30T00:32:42.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-09-04T23:22:57.000Z",
+      "end": "2026-09-06T00:20:45.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-09-11T23:11:21.000Z",
+      "end": "2026-09-14T00:06:53.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Rosh Hashana 5787 / Rosh Hashana II"
+    },
+    {
+      "start": "2026-09-18T22:59:34.000Z",
+      "end": "2026-09-19T23:56:29.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-09-20T22:56:11.000Z",
+      "end": "2026-09-21T23:53:02.000Z",
+      "type": "yomtov",
+      "label": "Yom Kippur"
+    },
+    {
+      "start": "2026-09-25T22:47:45.000Z",
+      "end": "2026-09-27T23:42:49.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Sukkot I / Sukkot II"
+    },
+    {
+      "start": "2026-10-02T22:36:05.000Z",
+      "end": "2026-10-04T23:31:14.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Shmini Atzeret / Simchat Torah"
+    },
+    {
+      "start": "2026-10-09T22:24:44.000Z",
+      "end": "2026-10-10T23:21:43.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-10-16T22:13:53.000Z",
+      "end": "2026-10-17T23:11:15.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-10-23T22:03:43.000Z",
+      "end": "2026-10-24T23:01:38.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-10-30T21:54:28.000Z",
+      "end": "2026-10-31T22:53:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-11-06T21:46:18.000Z",
+      "end": "2026-11-07T22:45:42.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-11-13T21:39:27.000Z",
+      "end": "2026-11-14T22:39:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-11-20T21:34:06.000Z",
+      "end": "2026-11-21T22:35:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-11-27T21:30:26.000Z",
+      "end": "2026-11-28T22:32:29.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-12-04T21:28:33.000Z",
+      "end": "2026-12-05T22:31:23.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-12-11T21:28:32.000Z",
+      "end": "2026-12-12T22:32:00.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-12-18T21:30:22.000Z",
+      "end": "2026-12-19T22:34:16.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2026-12-25T21:33:58.000Z",
+      "end": "2026-12-26T22:38:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-01-01T21:39:07.000Z",
+      "end": "2027-01-02T22:43:10.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-01-08T21:45:34.000Z",
+      "end": "2027-01-09T22:49:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-01-15T21:53:01.000Z",
+      "end": "2027-01-16T22:56:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-01-22T22:01:09.000Z",
+      "end": "2027-01-23T23:03:54.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-01-29T22:09:39.000Z",
+      "end": "2027-01-30T23:11:45.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-02-05T22:18:17.000Z",
+      "end": "2027-02-06T23:19:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-02-12T22:26:52.000Z",
+      "end": "2027-02-13T23:27:42.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-02-19T22:35:17.000Z",
+      "end": "2027-02-20T23:35:35.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-02-26T22:43:27.000Z",
+      "end": "2027-02-27T23:43:22.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-03-05T22:51:23.000Z",
+      "end": "2027-03-06T23:51:03.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-03-12T22:59:05.000Z",
+      "end": "2027-03-13T23:58:39.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-03-19T23:06:37.000Z",
+      "end": "2027-03-21T00:06:16.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-03-26T23:14:01.000Z",
+      "end": "2027-03-28T00:13:56.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-04-02T23:21:22.000Z",
+      "end": "2027-04-04T00:21:43.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-04-09T23:28:41.000Z",
+      "end": "2027-04-11T00:29:38.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-04-16T23:36:01.000Z",
+      "end": "2027-04-18T00:37:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-04-21T23:41:15.000Z",
+      "end": "2027-04-25T00:45:59.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Pesach I / Pesach II / Shabbat"
+    },
+    {
+      "start": "2027-04-27T23:47:32.000Z",
+      "end": "2027-04-30T00:51:56.000Z",
+      "type": "yomtov",
+      "label": "Pesach VII / Pesach VIII"
+    },
+    {
+      "start": "2027-04-30T23:50:40.000Z",
+      "end": "2027-05-02T00:54:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-05-07T23:57:53.000Z",
+      "end": "2027-05-09T01:02:36.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-05-15T00:04:53.000Z",
+      "end": "2027-05-16T01:10:41.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-05-22T00:11:29.000Z",
+      "end": "2027-05-23T01:18:19.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-05-29T00:17:30.000Z",
+      "end": "2027-05-30T01:25:13.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-06-05T00:22:40.000Z",
+      "end": "2027-06-06T01:31:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-06-11T00:26:15.000Z",
+      "end": "2027-06-13T01:35:32.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shavuot I / Shabbat / Shavuot II"
+    },
+    {
+      "start": "2027-06-19T00:29:33.000Z",
+      "end": "2027-06-20T01:38:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-06-26T00:30:52.000Z",
+      "end": "2027-06-27T01:39:20.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-07-03T00:30:35.000Z",
+      "end": "2027-07-04T01:38:23.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-07-10T00:28:38.000Z",
+      "end": "2027-07-11T01:35:30.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-07-17T00:25:03.000Z",
+      "end": "2027-07-18T01:30:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-07-24T00:19:55.000Z",
+      "end": "2027-07-25T01:24:22.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-07-31T00:13:22.000Z",
+      "end": "2027-08-01T01:16:29.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-08-07T00:05:31.000Z",
+      "end": "2027-08-08T01:07:22.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-08-13T23:56:35.000Z",
+      "end": "2027-08-15T00:57:14.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-08-20T23:46:44.000Z",
+      "end": "2027-08-22T00:46:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-08-27T23:36:08.000Z",
+      "end": "2027-08-29T00:34:47.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-09-03T23:24:59.000Z",
+      "end": "2027-09-05T00:22:53.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-09-10T23:13:26.000Z",
+      "end": "2027-09-12T00:10:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-09-17T23:01:40.000Z",
+      "end": "2027-09-18T23:58:37.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-09-24T22:49:51.000Z",
+      "end": "2027-09-25T23:46:37.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-10-01T22:38:08.000Z",
+      "end": "2027-10-03T23:33:15.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Rosh Hashana 5788 / Rosh Hashana II"
+    },
+    {
+      "start": "2027-10-08T22:26:43.000Z",
+      "end": "2027-10-09T23:23:39.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-10-10T22:23:32.000Z",
+      "end": "2027-10-11T23:20:33.000Z",
+      "type": "yomtov",
+      "label": "Yom Kippur"
+    },
+    {
+      "start": "2027-10-15T22:15:46.000Z",
+      "end": "2027-10-17T23:11:36.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Sukkot I / Sukkot II"
+    },
+    {
+      "start": "2027-10-22T22:05:28.000Z",
+      "end": "2027-10-24T23:01:57.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Shmini Atzeret / Simchat Torah"
+    },
+    {
+      "start": "2027-10-29T21:56:02.000Z",
+      "end": "2027-10-30T22:54:30.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-11-05T21:47:40.000Z",
+      "end": "2027-11-06T22:46:55.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-11-12T21:40:34.000Z",
+      "end": "2027-11-13T22:40:41.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-11-19T21:34:56.000Z",
+      "end": "2027-11-20T22:35:57.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-11-26T21:30:57.000Z",
+      "end": "2027-11-27T22:32:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-12-03T21:28:45.000Z",
+      "end": "2027-12-04T22:31:27.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-12-10T21:28:24.000Z",
+      "end": "2027-12-11T22:31:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-12-17T21:29:55.000Z",
+      "end": "2027-12-18T22:33:45.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-12-24T21:33:12.000Z",
+      "end": "2027-12-25T22:37:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2027-12-31T21:38:06.000Z",
+      "end": "2028-01-01T22:42:11.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-01-07T21:44:21.000Z",
+      "end": "2028-01-08T22:48:11.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-01-14T21:51:38.000Z",
+      "end": "2028-01-15T22:55:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-01-21T21:59:40.000Z",
+      "end": "2028-01-22T23:02:32.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-01-28T22:08:07.000Z",
+      "end": "2028-01-29T23:10:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-02-04T22:16:45.000Z",
+      "end": "2028-02-05T23:18:19.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-02-11T22:25:21.000Z",
+      "end": "2028-02-12T23:26:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-02-18T22:33:48.000Z",
+      "end": "2028-02-19T23:34:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-02-25T22:42:01.000Z",
+      "end": "2028-02-26T23:42:00.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-03-03T22:49:59.000Z",
+      "end": "2028-03-04T23:49:41.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-03-10T22:57:44.000Z",
+      "end": "2028-03-11T23:57:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-03-17T23:05:17.000Z",
+      "end": "2028-03-19T00:04:55.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-03-24T23:12:43.000Z",
+      "end": "2028-03-26T00:12:34.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-03-31T23:20:04.000Z",
+      "end": "2028-04-02T00:20:19.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-04-07T23:27:23.000Z",
+      "end": "2028-04-09T00:28:13.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-04-10T23:30:31.000Z",
+      "end": "2028-04-13T00:32:49.000Z",
+      "type": "yomtov",
+      "label": "Pesach I / Pesach II"
+    },
+    {
+      "start": "2028-04-14T23:34:43.000Z",
+      "end": "2028-04-16T00:36:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-04-16T23:36:48.000Z",
+      "end": "2028-04-19T00:39:48.000Z",
+      "type": "yomtov",
+      "label": "Pesach VII / Pesach VIII"
+    },
+    {
+      "start": "2028-04-21T23:42:03.000Z",
+      "end": "2028-04-23T00:44:30.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-04-28T23:49:22.000Z",
+      "end": "2028-04-30T00:52:50.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-05-05T23:56:37.000Z",
+      "end": "2028-05-07T01:01:09.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-05-13T00:03:40.000Z",
+      "end": "2028-05-14T01:09:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-05-20T00:10:21.000Z",
+      "end": "2028-05-21T01:17:01.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-05-27T00:16:29.000Z",
+      "end": "2028-05-28T01:24:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-05-31T00:19:39.000Z",
+      "end": "2028-06-02T01:28:30.000Z",
+      "type": "yomtov",
+      "label": "Shavuot I / Shavuot II"
+    },
+    {
+      "start": "2028-06-03T00:21:49.000Z",
+      "end": "2028-06-04T01:30:07.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-06-10T00:26:07.000Z",
+      "end": "2028-06-11T01:34:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-06-17T00:29:10.000Z",
+      "end": "2028-06-18T01:37:59.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-06-24T00:30:45.000Z",
+      "end": "2028-06-25T01:39:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-07-01T00:30:45.000Z",
+      "end": "2028-07-02T01:38:42.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-07-08T00:29:06.000Z",
+      "end": "2028-07-09T01:36:09.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-07-15T00:25:48.000Z",
+      "end": "2028-07-16T01:31:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-07-22T00:20:56.000Z",
+      "end": "2028-07-23T01:25:37.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-07-29T00:14:37.000Z",
+      "end": "2028-07-30T01:17:59.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-08-05T00:07:00.000Z",
+      "end": "2028-08-06T01:09:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-08-11T23:58:15.000Z",
+      "end": "2028-08-13T00:59:06.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-08-18T23:48:32.000Z",
+      "end": "2028-08-20T00:48:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-08-25T23:38:03.000Z",
+      "end": "2028-08-27T00:36:52.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-09-01T23:26:59.000Z",
+      "end": "2028-09-03T00:25:01.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-09-08T23:15:30.000Z",
+      "end": "2028-09-10T00:12:55.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-09-15T23:03:46.000Z",
+      "end": "2028-09-17T00:00:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-09-20T22:55:19.000Z",
+      "end": "2028-09-23T23:48:43.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Rosh Hashana 5789 / Rosh Hashana II / Shabbat"
+    },
+    {
+      "start": "2028-09-29T22:40:12.000Z",
+      "end": "2028-09-30T23:36:57.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Yom Kippur"
+    },
+    {
+      "start": "2028-10-04T22:31:57.000Z",
+      "end": "2028-10-07T23:25:36.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Sukkot I / Sukkot II / Shabbat"
+    },
+    {
+      "start": "2028-10-11T22:20:46.000Z",
+      "end": "2028-10-14T23:14:53.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shmini Atzeret / Simchat Torah / Shabbat"
+    },
+    {
+      "start": "2028-10-20T22:07:14.000Z",
+      "end": "2028-10-21T23:04:56.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-10-27T21:57:38.000Z",
+      "end": "2028-10-28T22:55:59.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-11-03T21:49:04.000Z",
+      "end": "2028-11-04T22:48:10.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-11-10T21:41:44.000Z",
+      "end": "2028-11-11T22:41:41.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-11-17T21:35:49.000Z",
+      "end": "2028-11-18T22:36:41.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-11-24T21:31:32.000Z",
+      "end": "2028-11-25T22:33:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-12-01T21:29:00.000Z",
+      "end": "2028-12-02T22:31:35.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-12-08T21:28:19.000Z",
+      "end": "2028-12-09T22:31:36.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-12-15T21:29:31.000Z",
+      "end": "2028-12-16T22:33:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-12-22T21:32:30.000Z",
+      "end": "2028-12-23T22:36:33.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2028-12-29T21:37:07.000Z",
+      "end": "2028-12-30T22:41:13.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-01-05T21:43:09.000Z",
+      "end": "2029-01-06T22:47:03.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-01-12T21:50:17.000Z",
+      "end": "2029-01-13T22:53:48.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-01-19T21:58:12.000Z",
+      "end": "2029-01-20T23:01:10.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-01-26T22:06:36.000Z",
+      "end": "2029-01-27T23:08:56.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-02-02T22:15:13.000Z",
+      "end": "2029-02-03T23:16:54.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-02-09T22:23:50.000Z",
+      "end": "2029-02-10T23:24:53.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-02-16T22:32:19.000Z",
+      "end": "2029-02-17T23:32:48.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-02-23T22:40:35.000Z",
+      "end": "2029-02-24T23:40:37.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-03-02T22:48:36.000Z",
+      "end": "2029-03-03T23:48:20.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-03-09T22:56:22.000Z",
+      "end": "2029-03-10T23:55:57.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-03-16T23:03:58.000Z",
+      "end": "2029-03-18T00:03:34.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-03-23T23:11:24.000Z",
+      "end": "2029-03-25T00:11:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-03-30T23:18:46.000Z",
+      "end": "2029-04-02T00:20:03.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Pesach I / Pesach II"
+    },
+    {
+      "start": "2029-04-05T23:25:02.000Z",
+      "end": "2029-04-08T00:26:48.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Pesach VII / Shabbat / Pesach VIII"
+    },
+    {
+      "start": "2029-04-13T23:33:25.000Z",
+      "end": "2029-04-15T00:34:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-04-20T23:40:45.000Z",
+      "end": "2029-04-22T00:43:02.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-04-27T23:48:05.000Z",
+      "end": "2029-04-29T00:51:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-05-04T23:55:20.000Z",
+      "end": "2029-05-06T00:59:40.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-05-12T00:02:26.000Z",
+      "end": "2029-05-13T01:07:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-05-19T00:09:12.000Z",
+      "end": "2029-05-22T01:17:49.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Shavuot I / Shavuot II"
+    },
+    {
+      "start": "2029-05-26T00:15:27.000Z",
+      "end": "2029-05-27T01:22:52.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-06-02T00:20:56.000Z",
+      "end": "2029-06-03T01:29:08.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-06-09T00:25:27.000Z",
+      "end": "2029-06-10T01:34:07.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-06-16T00:28:43.000Z",
+      "end": "2029-06-17T01:37:33.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-06-23T00:30:35.000Z",
+      "end": "2029-06-24T01:39:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-06-30T00:30:52.000Z",
+      "end": "2029-07-01T01:38:57.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-07-07T00:29:30.000Z",
+      "end": "2029-07-08T01:36:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-07-14T00:26:30.000Z",
+      "end": "2029-07-15T01:32:39.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-07-21T00:21:55.000Z",
+      "end": "2029-07-22T01:26:49.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-07-28T00:15:50.000Z",
+      "end": "2029-07-29T01:19:26.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-08-04T00:08:26.000Z",
+      "end": "2029-08-05T01:10:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-08-10T23:59:52.000Z",
+      "end": "2029-08-12T01:00:56.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-08-17T23:50:19.000Z",
+      "end": "2029-08-19T00:50:15.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-08-24T23:39:58.000Z",
+      "end": "2029-08-26T00:38:55.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-08-31T23:28:59.000Z",
+      "end": "2029-09-02T00:27:08.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-09-07T23:17:34.000Z",
+      "end": "2029-09-09T00:15:05.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-09-09T23:14:14.000Z",
+      "end": "2029-09-12T00:09:52.000Z",
+      "type": "yomtov",
+      "label": "Rosh Hashana 5790 / Rosh Hashana II"
+    },
+    {
+      "start": "2029-09-14T23:05:51.000Z",
+      "end": "2029-09-16T00:02:56.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-09-18T22:59:06.000Z",
+      "end": "2029-09-19T23:56:00.000Z",
+      "type": "yomtov",
+      "label": "Yom Kippur"
+    },
+    {
+      "start": "2029-09-21T22:54:02.000Z",
+      "end": "2029-09-22T23:50:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-09-23T22:50:40.000Z",
+      "end": "2029-09-25T23:45:44.000Z",
+      "type": "yomtov",
+      "label": "Sukkot I / Sukkot II"
+    },
+    {
+      "start": "2029-09-28T22:42:16.000Z",
+      "end": "2029-09-29T23:39:00.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-09-30T22:38:56.000Z",
+      "end": "2029-10-02T23:34:03.000Z",
+      "type": "yomtov",
+      "label": "Shmini Atzeret / Simchat Torah"
+    },
+    {
+      "start": "2029-10-05T22:30:43.000Z",
+      "end": "2029-10-06T23:27:35.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-10-12T22:19:35.000Z",
+      "end": "2029-10-13T23:16:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-10-19T22:09:02.000Z",
+      "end": "2029-10-20T23:06:38.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-10-26T21:59:16.000Z",
+      "end": "2029-10-27T22:57:29.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-11-02T21:50:30.000Z",
+      "end": "2029-11-03T22:49:28.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-11-09T21:42:56.000Z",
+      "end": "2029-11-10T22:42:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-11-16T21:36:46.000Z",
+      "end": "2029-11-17T22:37:27.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-11-23T21:32:10.000Z",
+      "end": "2029-11-24T22:33:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-11-30T21:29:19.000Z",
+      "end": "2029-12-01T22:31:46.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-12-07T21:28:19.000Z",
+      "end": "2029-12-08T22:31:28.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-12-14T21:29:10.000Z",
+      "end": "2029-12-15T22:32:52.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-12-21T21:31:51.000Z",
+      "end": "2029-12-22T22:35:52.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2029-12-28T21:36:12.000Z",
+      "end": "2029-12-29T22:40:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-01-04T21:41:59.000Z",
+      "end": "2030-01-05T22:45:57.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-01-11T21:48:57.000Z",
+      "end": "2030-01-12T22:52:32.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-01-18T21:56:45.000Z",
+      "end": "2030-01-19T22:59:49.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-01-25T22:05:05.000Z",
+      "end": "2030-01-26T23:07:32.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-02-01T22:13:41.000Z",
+      "end": "2030-02-02T23:15:28.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-02-08T22:22:19.000Z",
+      "end": "2030-02-09T23:23:28.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-02-15T22:30:49.000Z",
+      "end": "2030-02-16T23:31:24.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-02-22T22:39:08.000Z",
+      "end": "2030-02-23T23:39:14.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-03-01T22:47:11.000Z",
+      "end": "2030-03-02T23:46:58.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-03-08T22:55:00.000Z",
+      "end": "2030-03-09T23:54:36.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-03-15T23:02:37.000Z",
+      "end": "2030-03-17T00:02:13.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-03-22T23:10:05.000Z",
+      "end": "2030-03-24T00:09:50.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-03-29T23:17:27.000Z",
+      "end": "2030-03-31T00:17:33.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-04-05T23:24:47.000Z",
+      "end": "2030-04-07T00:25:24.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-04-12T23:32:06.000Z",
+      "end": "2030-04-14T00:33:24.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-04-17T23:37:21.000Z",
+      "end": "2030-04-21T00:41:34.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Pesach I / Pesach II / Shabbat"
+    },
+    {
+      "start": "2030-04-23T23:43:38.000Z",
+      "end": "2030-04-26T00:47:29.000Z",
+      "type": "yomtov",
+      "label": "Pesach VII / Pesach VIII"
+    },
+    {
+      "start": "2030-04-26T23:46:47.000Z",
+      "end": "2030-04-28T00:49:52.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-05-03T23:54:04.000Z",
+      "end": "2030-05-05T00:58:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-05-11T00:01:11.000Z",
+      "end": "2030-05-12T01:06:25.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-05-18T00:08:02.000Z",
+      "end": "2030-05-19T01:14:20.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-05-25T00:14:23.000Z",
+      "end": "2030-05-26T01:21:39.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-06-01T00:20:02.000Z",
+      "end": "2030-06-02T01:28:06.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-06-07T00:24:07.000Z",
+      "end": "2030-06-09T01:33:20.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shavuot I / Shabbat / Shavuot II"
+    },
+    {
+      "start": "2030-06-15T00:28:14.000Z",
+      "end": "2030-06-16T01:37:04.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-06-22T00:30:21.000Z",
+      "end": "2030-06-23T01:39:03.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-06-29T00:30:56.000Z",
+      "end": "2030-06-30T01:39:08.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-07-06T00:29:52.000Z",
+      "end": "2030-07-07T01:37:16.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-07-13T00:27:09.000Z",
+      "end": "2030-07-14T01:33:30.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-07-20T00:22:50.000Z",
+      "end": "2030-07-21T01:27:58.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-07-27T00:17:01.000Z",
+      "end": "2030-07-28T01:20:51.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-08-03T00:09:50.000Z",
+      "end": "2030-08-04T01:12:21.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-08-10T00:01:28.000Z",
+      "end": "2030-08-11T01:02:44.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-08-16T23:52:04.000Z",
+      "end": "2030-08-18T00:52:12.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-08-23T23:41:51.000Z",
+      "end": "2030-08-25T00:40:58.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-08-30T23:30:58.000Z",
+      "end": "2030-09-01T00:29:15.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-09-06T23:19:37.000Z",
+      "end": "2030-09-08T00:17:14.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-09-13T23:07:57.000Z",
+      "end": "2030-09-15T00:05:05.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-09-20T22:56:08.000Z",
+      "end": "2030-09-21T23:52:59.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-09-27T22:44:21.000Z",
+      "end": "2030-09-29T23:39:25.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Rosh Hashana 5791 / Rosh Hashana II"
+    },
+    {
+      "start": "2030-10-04T22:32:45.000Z",
+      "end": "2030-10-05T23:29:34.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-10-06T22:29:30.000Z",
+      "end": "2030-10-07T23:26:22.000Z",
+      "type": "yomtov",
+      "label": "Yom Kippur"
+    },
+    {
+      "start": "2030-10-11T22:21:31.000Z",
+      "end": "2030-10-13T23:17:06.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Sukkot I / Sukkot II"
+    },
+    {
+      "start": "2030-10-18T22:10:51.000Z",
+      "end": "2030-10-20T23:06:59.000Z",
+      "type": "shabbat+yomtov",
+      "label": "Shabbat / Shmini Atzeret / Simchat Torah"
+    },
+    {
+      "start": "2030-10-25T22:00:56.000Z",
+      "end": "2030-10-26T22:59:02.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-11-01T21:51:59.000Z",
+      "end": "2030-11-02T22:50:48.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-11-08T21:44:11.000Z",
+      "end": "2030-11-09T22:43:50.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-11-15T21:37:45.000Z",
+      "end": "2030-11-16T22:38:17.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-11-22T21:32:52.000Z",
+      "end": "2030-11-23T22:34:18.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-11-29T21:29:42.000Z",
+      "end": "2030-11-30T22:32:00.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-12-06T21:28:21.000Z",
+      "end": "2030-12-07T22:31:24.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-12-13T21:28:53.000Z",
+      "end": "2030-12-14T22:32:30.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-12-20T21:31:15.000Z",
+      "end": "2030-12-21T22:35:14.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    },
+    {
+      "start": "2030-12-27T21:35:19.000Z",
+      "end": "2030-12-28T22:39:25.000Z",
+      "type": "shabbat",
+      "label": "Shabbat"
+    }
+  ]
+}
