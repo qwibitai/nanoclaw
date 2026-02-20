@@ -10,12 +10,6 @@ modifies:
   - src/index.ts
   - src/task-scheduler.ts
   - src/ipc.ts
-  - package.json
-structured:
-  npm_dev_dependencies:
-    "@hebcal/core": "^5"
-  npm_scripts:
-    generate-zmanim: "tsx scripts/generate-zmanim.ts"
 conflicts: []
 depends: []
 test: "npx vitest run src/shabbat.test.ts"

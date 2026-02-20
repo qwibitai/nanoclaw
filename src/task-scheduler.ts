@@ -21,6 +21,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
@@ -216,6 +217,15 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
+
+      if (isShabbatOrYomTov()) {
+        if (dueTasks.length > 0) {
+          logger.debug({ count: dueTasks.length }, 'Shabbat/Yom Tov active, skipping due tasks');
+        }
+        setTimeout(loop, SCHEDULER_POLL_INTERVAL);
+        return;
+      }
+
       if (dueTasks.length > 0) {
         logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
