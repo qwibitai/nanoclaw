@@ -1,0 +1,18 @@
+skill: voice-transcription-elevenlabs
+version: 1.0.0
+description: "Voice message transcription via ElevenLabs Scribe v2"
+core_version: 0.1.0
+adds:
+  - src/transcription.ts
+modifies:
+  - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
+structured:
+  npm_dependencies:
+    "@elevenlabs/elevenlabs-js": "^2.36.0"
+  env_additions:
+    - ELEVENLABS_API_KEY
+conflicts:
+  - voice-transcription
+depends: []
+test: "npx vitest run src/channels/whatsapp.test.ts"
