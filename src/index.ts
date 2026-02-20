@@ -429,9 +429,14 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // WhatsApp is optional — skip when WHATSAPP_ENABLED=false (e.g. Warren-only deploys)
+  if (process.env.WHATSAPP_ENABLED !== 'false') {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  } else {
+    logger.info('WhatsApp channel disabled (WHATSAPP_ENABLED=false)');
+  }
 
   // Warren channel (optional — enabled via WARREN_CALLBACK_URL)
   if (process.env.WARREN_CALLBACK_URL) {
