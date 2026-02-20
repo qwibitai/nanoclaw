@@ -31,4 +31,5 @@ ENV NODE_ENV=production
 # Data directory for SQLite, auth state, group configs
 VOLUME ["/app/data"]
 
-CMD ["npm", "start"]
+# Run node directly (not via npm) so crash output isn't swallowed
+CMD ["node", "dist/index.js"]
