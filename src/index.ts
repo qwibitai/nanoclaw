@@ -9,6 +9,7 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
+import { WarrenChannel } from './channels/warren.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -431,6 +432,15 @@ async function main(): Promise<void> {
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
   await whatsapp.connect();
+
+  // Warren channel (optional — enabled via WARREN_CALLBACK_URL)
+  if (process.env.WARREN_CALLBACK_URL) {
+    const warrenChannel = new WarrenChannel({
+      callbackUrl: process.env.WARREN_CALLBACK_URL,
+    });
+    channels.push(warrenChannel);
+    await warrenChannel.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
