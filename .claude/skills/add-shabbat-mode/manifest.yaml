@@ -1,0 +1,21 @@
+skill: shabbat-mode
+version: 1.0.0
+description: "Pause all activity during Shabbat and Yom Tov"
+core_version: 0.1.0
+adds:
+  - src/shabbat.ts
+  - src/shabbat.test.ts
+  - scripts/generate-zmanim.ts
+modifies:
+  - src/index.ts
+  - src/task-scheduler.ts
+  - src/ipc.ts
+  - package.json
+structured:
+  npm_dev_dependencies:
+    "@hebcal/core": "^5"
+  npm_scripts:
+    generate-zmanim: "tsx scripts/generate-zmanim.ts"
+conflicts: []
+depends: []
+test: "npx vitest run src/shabbat.test.ts"
