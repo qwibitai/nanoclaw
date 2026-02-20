@@ -1,0 +1,8 @@
+node_modules
+dist
+.git
+*.md
+docs
+assets
+vitest.config.ts
+vitest.skills.config.ts
