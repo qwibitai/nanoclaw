@@ -8,9 +8,12 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  markTaskRunning,
+  resetRunningTasks,
   storeChatMetadata,
   storeMessage,
   updateTask,
+  updateTaskAfterRun,
 } from './db.js';
 
 beforeEach(() => {
@@ -324,5 +327,81 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+
+  it('marks task as running', () => {
+    createTask({
+      id: 'task-r',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'run me',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    markTaskRunning('task-r');
+    expect(getTaskById('task-r')!.status).toBe('running');
+  });
+
+  it('resetRunningTasks resets running to active', () => {
+    createTask({
+      id: 'task-r2',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'run me',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    markTaskRunning('task-r2');
+    const count = resetRunningTasks();
+    expect(count).toBe(1);
+    expect(getTaskById('task-r2')!.status).toBe('active');
+  });
+
+  it('updateTaskAfterRun transitions running to active for recurring tasks', () => {
+    createTask({
+      id: 'task-r3',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'repeat me',
+      schedule_type: 'interval',
+      schedule_value: '60000',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    markTaskRunning('task-r3');
+    updateTaskAfterRun('task-r3', '2024-06-01T00:01:00.000Z', 'done');
+    expect(getTaskById('task-r3')!.status).toBe('active');
+  });
+
+  it('updateTaskAfterRun transitions running to completed for once tasks', () => {
+    createTask({
+      id: 'task-r4',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'run once',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    markTaskRunning('task-r4');
+    updateTaskAfterRun('task-r4', null, 'done');
+    expect(getTaskById('task-r4')!.status).toBe('completed');
   });
 });

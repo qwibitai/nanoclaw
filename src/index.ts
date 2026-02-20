@@ -26,6 +26,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  resetRunningTasks,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -408,6 +409,10 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  const resetCount = resetRunningTasks();
+  if (resetCount > 0) {
+    logger.warn({ count: resetCount }, 'Reset stuck running tasks to active on startup');
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {

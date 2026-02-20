@@ -416,6 +416,16 @@ export function deleteTask(id: string): void {
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
 }
 
+export function markTaskRunning(id: string): void {
+  db.prepare(`UPDATE scheduled_tasks SET status = 'running' WHERE id = ?`).run(id);
+}
+
+export function resetRunningTasks(): number {
+  return db
+    .prepare(`UPDATE scheduled_tasks SET status = 'active' WHERE status = 'running'`)
+    .run().changes;
+}
+
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
   return db
@@ -438,7 +448,7 @@ export function updateTaskAfterRun(
   db.prepare(
     `
     UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE 'active' END
     WHERE id = ?
   `,
   ).run(nextRun, now, lastResult, nextRun, id);

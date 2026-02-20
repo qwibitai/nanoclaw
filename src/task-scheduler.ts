@@ -16,6 +16,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  markTaskRunning,
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
@@ -201,6 +202,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
+        markTaskRunning(currentTask.id);
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,
