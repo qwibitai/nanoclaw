@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 
 import makeWASocket, {
@@ -17,7 +18,11 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
+import { identifySpeaker } from '../voice-recognition.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+
+const VOICE_AUDIO_DIR = path.join(process.cwd(), 'data', 'voice-audio');
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -174,7 +179,8 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          // but let voice messages through for transcription
+          if (!content && !isVoiceMessage(msg)) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -188,12 +194,58 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
+          // Transcribe voice messages and identify speaker
+          let finalContent = content;
+          if (isVoiceMessage(msg)) {
+            try {
+              const { transcript, audioBuffer } = await transcribeAudioMessage(msg, this.sock);
+
+              // Save raw audio for enrollment/debugging
+              if (audioBuffer) {
+                try {
+                  await fsPromises.mkdir(VOICE_AUDIO_DIR, { recursive: true });
+                  const audioPath = path.join(VOICE_AUDIO_DIR, `${Date.now()}.ogg`);
+                  await fsPromises.writeFile(audioPath, audioBuffer);
+                  logger.debug({ audioPath }, 'Saved voice audio');
+                } catch (saveErr) {
+                  logger.warn({ err: saveErr }, 'Failed to save voice audio');
+                }
+              }
+
+              // Identify speaker
+              let speakerTag = '';
+              if (audioBuffer) {
+                try {
+                  const result = await identifySpeaker(audioBuffer);
+                  if (result.speaker) {
+                    const pct = Math.round(result.similarity * 100);
+                    speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+                  } else {
+                    speakerTag = ' [Unknown speaker]';
+                  }
+                } catch (idErr) {
+                  logger.warn({ err: idErr }, 'Speaker identification failed');
+                }
+              }
+
+              if (transcript) {
+                finalContent = `[Voice: ${transcript}]${speakerTag}`;
+                logger.info({ chatJid, length: transcript.length, speakerTag }, 'Transcribed voice message');
+              } else {
+                finalContent = '[Voice Message - transcription unavailable]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription error');
+              finalContent = '[Voice Message - transcription failed]';
+            }
+          }
+
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content,
+            content: finalContent,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
