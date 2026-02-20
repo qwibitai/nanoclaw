@@ -1,0 +1,14 @@
+skill: voice-recognition
+version: 1.0.0
+description: "Speaker recognition using PyAnnote voice embeddings"
+core_version: 0.1.0
+adds:
+  - src/voice-recognition.ts
+  - scripts/voice-recognition-service.py
+modifies:
+  - src/channels/whatsapp.ts
+  - src/transcription.ts
+conflicts: []
+depends:
+  - voice-transcription-elevenlabs
+test: "npx tsc --noEmit"

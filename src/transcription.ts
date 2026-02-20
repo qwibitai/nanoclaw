@@ -193,14 +193,19 @@ async function transcribeWithElevenLabs(
   }
 }
 
+export interface TranscriptionResult {
+  transcript: string | null;
+  audioBuffer: Buffer | null;
+}
+
 export async function transcribeAudioMessage(
   msg: WAMessage,
   sock: WASocket,
-): Promise<string | null> {
+): Promise<TranscriptionResult> {
   const config = DEFAULT_CONFIG;
 
   if (!config.enabled) {
-    return config.fallbackMessage;
+    return { transcript: config.fallbackMessage, audioBuffer: null };
   }
 
   try {
@@ -216,7 +221,7 @@ export async function transcribeAudioMessage(
 
     if (!buffer || buffer.length === 0) {
       console.error('Failed to download audio message');
-      return config.fallbackMessage;
+      return { transcript: config.fallbackMessage, audioBuffer: null };
     }
 
     console.log(`Downloaded audio message: ${buffer.length} bytes`);
@@ -224,13 +229,13 @@ export async function transcribeAudioMessage(
     const transcript = await transcribeWithElevenLabs(buffer, config);
 
     if (!transcript) {
-      return config.fallbackMessage;
+      return { transcript: config.fallbackMessage, audioBuffer: buffer };
     }
 
-    return transcript.trim();
+    return { transcript: transcript.trim(), audioBuffer: buffer };
   } catch (err) {
     console.error('Transcription error:', err);
-    return config.fallbackMessage;
+    return { transcript: config.fallbackMessage, audioBuffer: null };
   }
 }
 

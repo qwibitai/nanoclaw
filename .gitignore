@@ -33,3 +33,6 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Python venv for voice recognition
+scripts/venv/
