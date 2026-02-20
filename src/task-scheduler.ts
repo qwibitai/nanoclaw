@@ -224,14 +224,17 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         // Re-check task status in case it was paused/cancelled
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
+          logger.info({ taskId: task.id, reason: !currentTask ? 'not_found' : 'not_active' }, '[DEBUG] Skipping task');
           continue;
         }
 
+        logger.info({ taskId: currentTask.id, chatJid: currentTask.chat_jid, groupFolder: currentTask.group_folder }, '[DEBUG] Calling enqueueTask');
         deps.queue.enqueueTask(
           currentTask.chat_jid,
           currentTask.id,
           () => runTask(currentTask, deps),
         );
+        logger.info({ taskId: currentTask.id }, '[DEBUG] enqueueTask returned');
       }
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
