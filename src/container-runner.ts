@@ -14,6 +14,8 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  PERSISTENCE_ENABLED,
+  PERSISTENCE_ROOT,
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -98,6 +100,16 @@ function buildVolumeMounts(
         readonly: true,
       });
     }
+  }
+
+  if (PERSISTENCE_ENABLED) {
+    const groupPersistenceDir = path.join(PERSISTENCE_ROOT, group.folder);
+    fs.mkdirSync(groupPersistenceDir, { recursive: true });
+    mounts.push({
+      hostPath: groupPersistenceDir,
+      containerPath: '/workspace/persistence',
+      readonly: false,
+    });
   }
 
   // Per-group Claude sessions directory (isolated from other groups)
