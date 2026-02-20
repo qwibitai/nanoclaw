@@ -100,6 +100,26 @@ function buildVolumeMounts(
     }
   }
 
+  // Google Calendar credentials directory
+  const calendarDir = path.join(homeDir, '.google-calendar-mcp');
+  if (fs.existsSync(calendarDir)) {
+    mounts.push({
+      hostPath: calendarDir,
+      containerPath: '/home/node/.google-calendar-mcp',
+      readonly: false,  // MCP may need to refresh tokens
+    });
+  }
+
+  // Google Calendar MCP token storage (used by @cocal/google-calendar-mcp)
+  const calendarTokenDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+  if (fs.existsSync(calendarTokenDir)) {
+    mounts.push({
+      hostPath: calendarTokenDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false,
+    });
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(

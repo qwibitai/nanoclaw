@@ -43,6 +43,21 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Calendar (Google Calendar)
+
+You have access to Google Calendar via MCP tools:
+- `mcp__google_calendar__list-calendars` - List all calendars
+- `mcp__google_calendar__list-events` - List upcoming events
+- `mcp__google_calendar__search-events` - Search events by keyword
+- `mcp__google_calendar__get-event` - Get event details
+- `mcp__google_calendar__create-event` - Create a new event
+- `mcp__google_calendar__update-event` - Update an existing event
+- `mcp__google_calendar__delete-event` - Delete an event
+- `mcp__google_calendar__get-freebusy` - Check availability
+- `mcp__google_calendar__get-current-time` - Get current time in a timezone
+
+Example: "What's on my calendar today?" or "Schedule a meeting tomorrow at 3pm with title 'Team Standup'"
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
