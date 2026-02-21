@@ -31,5 +31,5 @@ ENV NODE_ENV=production
 # Data directory for SQLite, auth state, group configs
 VOLUME ["/app/data"]
 
-# Diagnostic: test modules one by one to find the crash
-CMD ["sh", "-c", "echo '=== MODULE DIAGNOSTIC ===' && node -e \"console.log('basic node: ok')\" && node -e \"import('better-sqlite3').then(() => console.log('better-sqlite3: ok')).catch(e => console.error('better-sqlite3: FAIL', e.message))\" && node -e \"import('pino').then(() => console.log('pino: ok')).catch(e => console.error('pino: FAIL', e.message))\" && node -e \"import('@whiskeysockets/baileys').then(() => console.log('baileys: ok')).catch(e => console.error('baileys: FAIL', e.message))\" && echo '=== loading app ===' && exec node dist/index.js"]
+# Diagnostic: capture exit code and signals
+CMD ["sh", "-c", "trap 'echo GOT_SIGTERM' TERM; trap 'echo GOT_SIGINT' INT; echo '=== launching node ==='; node dist/index.js; CODE=$?; echo \"=== node exited with code: $CODE ===\"; if [ $CODE -eq 139 ]; then echo 'SEGFAULT (SIGSEGV)'; elif [ $CODE -eq 143 ]; then echo 'SIGTERM from outside'; elif [ $CODE -eq 137 ]; then echo 'SIGKILL (OOM?)'; fi; sleep 10"]
