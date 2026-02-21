@@ -5,10 +5,12 @@ import {
   ASSISTANT_NAME,
   DATA_DIR,
   IDLE_TIMEOUT,
+  IMESSAGE_ENABLED,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
+import { IMessageChannel } from './channels/imessage.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -49,6 +51,7 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
+let imessage: IMessageChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -432,6 +435,18 @@ async function main(): Promise<void> {
   channels.push(whatsapp);
   await whatsapp.connect();
 
+  // iMessage channel (macOS only, non-fatal)
+  if (IMESSAGE_ENABLED) {
+    try {
+      imessage = new IMessageChannel(channelOpts);
+      channels.push(imessage);
+      await imessage.connect();
+    } catch (err) {
+      logger.warn({ err }, 'iMessage channel failed to connect — continuing without it');
+      imessage = undefined;
+    }
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -456,7 +471,10 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: async (force) => {
+      await (whatsapp?.syncGroupMetadata(force) ?? Promise.resolve());
+      await (imessage?.syncChatMetadata(force) ?? Promise.resolve());
+    },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });

@@ -112,6 +112,8 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`);
     database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
+    database.exec(`UPDATE chats SET channel = 'imessage', is_group = 0 WHERE jid LIKE 'imsg:%' AND jid NOT LIKE 'imsg-group:%'`);
+    database.exec(`UPDATE chats SET channel = 'imessage', is_group = 1 WHERE jid LIKE 'imsg-group:%'`);
   } catch {
     /* columns already exist */
   }
