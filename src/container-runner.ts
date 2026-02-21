@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execFileSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -25,17 +25,49 @@ import { RegisteredGroup } from './types.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-/** Recursively chmod a directory and all its contents (directories and files). */
-function chmodRecursive(dir: string, mode: number): void {
-  fs.chmodSync(dir, mode);
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      chmodRecursive(full, mode);
-    } else {
-      fs.chmodSync(full, mode);
+/**
+ * Docker-in-Docker path translation.
+ *
+ * When NanoClaw runs inside a container and spawns agent containers via the
+ * Docker socket, bind-mount hostPaths must reference the Docker host filesystem,
+ * not container-internal paths. We detect our volume mounts at startup and
+ * translate paths accordingly.
+ */
+let dindMapping: { containerPrefix: string; hostPrefix: string } | null = null;
+
+export function initDindPathMapping(): void {
+  if (!fs.existsSync('/.dockerenv')) return;
+
+  try {
+    const containerId = os.hostname();
+    const raw = execFileSync('docker', [
+      'inspect', containerId,
+      '--format', '{{range .Mounts}}{{.Destination}}|||{{.Source}}###{{end}}',
+    ], { encoding: 'utf-8', timeout: 5000 }).trim();
+
+    for (const entry of raw.split('###')) {
+      if (!entry) continue;
+      const [dest, source] = entry.split('|||');
+      if (dest && source && DATA_DIR.startsWith(dest)) {
+        dindMapping = { containerPrefix: dest, hostPrefix: source };
+        logger.info(
+          { containerPrefix: dest, hostPrefix: source },
+          'DinD volume mapping detected',
+        );
+        return;
+      }
     }
+  } catch (err) {
+    logger.debug({ err }, 'DinD detection skipped (not in container or no Docker access)');
   }
+}
+
+/** Translate a container-internal path to the Docker host path. No-op outside DinD. */
+function toHostPath(containerPath: string): string {
+  if (dindMapping && containerPath.startsWith(dindMapping.containerPrefix)) {
+    return dindMapping.hostPrefix + containerPath.slice(dindMapping.containerPrefix.length);
+  }
+  return containerPath;
 }
 
 function getHomeDir(): string {
@@ -82,21 +114,21 @@ function buildVolumeMounts(
   if (isMain) {
     // Main gets the entire project root mounted
     mounts.push({
-      hostPath: projectRoot,
+      hostPath: toHostPath(projectRoot),
       containerPath: '/workspace/project',
       readonly: false,
     });
 
     // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
+      hostPath: toHostPath(path.join(GROUPS_DIR, group.folder)),
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
+      hostPath: toHostPath(path.join(GROUPS_DIR, group.folder)),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -106,7 +138,7 @@ function buildVolumeMounts(
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
-        hostPath: globalDir,
+        hostPath: toHostPath(globalDir),
         containerPath: '/workspace/global',
         readonly: true,
       });
@@ -155,10 +187,8 @@ function buildVolumeMounts(
       }
     }
   }
-  // Ensure agent container (node user, uid 1000) can write to sessions dir
-  chmodRecursive(groupSessionsDir, 0o777);
   mounts.push({
-    hostPath: groupSessionsDir,
+    hostPath: toHostPath(groupSessionsDir),
     containerPath: '/home/node/.claude',
     readonly: false,
   });
@@ -166,27 +196,26 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
-  for (const sub of ['', 'messages', 'tasks', 'input']) {
-    const dir = sub ? path.join(groupIpcDir, sub) : groupIpcDir;
-    fs.mkdirSync(dir, { recursive: true });
-    // Agent container runs as node (uid 1000); orchestrator runs as root.
-    // chmod so the agent can read/write IPC files.
-    fs.chmodSync(dir, 0o777);
-  }
+  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
-    hostPath: groupIpcDir,
+    hostPath: toHostPath(groupIpcDir),
     containerPath: '/workspace/ipc',
     readonly: false,
   });
 
-  // Mount agent-runner source from host — recompiled on container startup.
-  // Bypasses sticky build cache for code changes.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  mounts.push({
-    hostPath: agentRunnerSrc,
-    containerPath: '/app/src',
-    readonly: true,
-  });
+  // Mount agent-runner source for live recompilation in dev.
+  // In DinD (production), /app is baked into the image — not a volume — so this
+  // path doesn't exist on the Docker host. The entrypoint falls back to pre-built dist.
+  if (!dindMapping) {
+    const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+    mounts.push({
+      hostPath: agentRunnerSrc,
+      containerPath: '/app/src',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -254,8 +283,6 @@ export async function runContainerAgent(
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
-  // Ensure agent container (node user, uid 1000) can write to workspace
-  fs.chmodSync(groupDir, 0o777);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

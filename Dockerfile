@@ -50,4 +50,5 @@ COPY --from=builder /app/container ./container
 VOLUME ["/app/data"]
 
 # Build the agent image (requires Docker socket) then start NanoClaw
+ENV DOCKER_BUILDKIT=1
 CMD docker build -t nanoclaw-agent:latest /app/container && node dist/index.js

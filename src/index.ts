@@ -14,6 +14,7 @@ import { WarrenChannel } from './channels/warren.js';
 type WhatsAppChannelType = import('./channels/whatsapp.js').WhatsAppChannel;
 import {
   ContainerOutput,
+  initDindPathMapping,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -420,6 +421,7 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  initDindPathMapping();
   initDatabase();
   logger.info('Database initialized');
   loadState();
