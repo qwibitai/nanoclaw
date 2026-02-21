@@ -1,0 +1,21 @@
+skill: generative-ui
+version: 1.0.0
+description: "Generative UI integration via JSON render"
+core_version: 0.1.0
+adds:
+  - src/channels/discord.ts
+  - src/channels/discord.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies:
+    - "@json-render/core": "^0.8.0"
+    - "@json-render/react": "^0.8.0"
+    - "@json-render/shadcn": "^0.8.0"
+  env_additions:
+    - GENUI_PORT
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/discord.test.ts"
