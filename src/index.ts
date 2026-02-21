@@ -342,14 +342,25 @@ async function startMessageLoop(): Promise<void> {
         }
 
         for (const [chatJid, groupMessages] of messagesByGroup) {
+          logger.info({ chatJid, msgCount: groupMessages.length }, '[DEBUG] Processing group messages');
+
           const group = registeredGroups[chatJid];
-          if (!group) continue;
+          if (!group) {
+            logger.info({ chatJid }, '[DEBUG] No group registered, skipping');
+            continue;
+          }
+          logger.info({ chatJid, groupName: group.name }, '[DEBUG] Group found');
 
           const channel = findChannel(channels, chatJid);
-          if (!channel) continue;
+          if (!channel) {
+            logger.info({ chatJid, channelCount: channels.length }, '[DEBUG] No channel found, skipping');
+            continue;
+          }
+          logger.info({ chatJid }, '[DEBUG] Channel found');
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          logger.info({ chatJid, isMainGroup, needsTrigger, requiresTrigger: group.requiresTrigger }, '[DEBUG] Trigger check');
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
@@ -358,6 +369,7 @@ async function startMessageLoop(): Promise<void> {
             const hasTrigger = groupMessages.some((m) =>
               TRIGGER_PATTERN.test(m.content.trim()),
             );
+            logger.info({ chatJid, hasTrigger }, '[DEBUG] Trigger pattern test');
             if (!hasTrigger) continue;
           }
 
@@ -371,6 +383,7 @@ async function startMessageLoop(): Promise<void> {
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
+          logger.info({ chatJid, messagesToSendCount: messagesToSend.length }, '[DEBUG] Messages formatted, attempting to send');
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -385,6 +398,7 @@ async function startMessageLoop(): Promise<void> {
               logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
             );
           } else {
+            logger.info({ chatJid }, '[DEBUG] No active container, calling enqueueMessageCheck');
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
           }
