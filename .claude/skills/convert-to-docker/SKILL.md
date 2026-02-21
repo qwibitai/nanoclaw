@@ -99,6 +99,18 @@ function buildContainerArgs(mounts: VolumeMount[]): string[] {
     const container = spawn('docker', containerArgs, {
 ```
 
+### 1f. Ensure per-group `.claude` mount is writable (required)
+
+After creating `groupSessionsDir`, make it writable for the container user:
+
+```typescript
+const groupSessionsDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+fs.mkdirSync(groupSessionsDir, { recursive: true });
+fs.chmodSync(groupSessionsDir, 0o777); // required so container user can write .claude state/debug
+```
+
+This prevents runtime errors like `EACCES: permission denied, mkdir '/home/node/.claude/debug'` when the host directory is root-owned.
+
 ## 2. Update Startup Check
 
 Edit `src/index.ts`:
@@ -325,6 +337,15 @@ npm run dev
 # Verify response received
 ```
 
+### 7e. Required message-processing permission check
+
+After startup, run one real message through a channel and check logs:
+
+1. Send one trigger message from a connected channel.
+2. Confirm there is no log line containing `EACCES`.
+3. Confirm there is no log line containing `mkdir '/home/node/.claude/debug'`.
+4. Confirm at least one successful container execution/output path.
+
 ## Troubleshooting
 
 **Docker not running:**
@@ -347,6 +368,11 @@ docker builder prune -af
 
 **Container can't write to mounted directories:**
 Check directory permissions on the host. The container runs as uid 1000.
+
+**`EACCES mkdir /home/node/.claude/debug`:**
+- Symptom: `EACCES: permission denied, mkdir '/home/node/.claude/debug'`
+- Cause: mounted `data/sessions/*/.claude` is not writable by container user (uid 1000)
+- Fix: ensure write permission (`chmod 777`) or align ownership to container uid/gid
 
 ## Summary of Changed Files
 

@@ -108,6 +108,9 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Container runs as non-root "node" user (uid 1000); ensure writable.
+  // Host-created dirs default to root:root 755, which blocks SDK debug/session files.
+  fs.chmodSync(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, JSON.stringify({
