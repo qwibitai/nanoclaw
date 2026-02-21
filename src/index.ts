@@ -8,6 +8,7 @@ import {
   IDLE_TIMEOUT,
   IMESSAGE_ENABLED,
   MAIN_GROUP_FOLDER,
+  MONITOR_ENABLED,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
   WHATSAPP_ENABLED,
@@ -41,6 +42,8 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { monitorBus, MONITOR_EVENTS } from './monitor-events.js';
+import { startMonitorServer } from './monitor-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -261,6 +264,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        monitorBus.emit(MONITOR_EVENTS.MESSAGE_SENT, {
+          chatJid,
+          groupName: group.name,
+          contentPreview: text.slice(0, 200),
+          timestamp: new Date().toISOString(),
+        });
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -491,9 +500,29 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start monitor dashboard
+  let monitorServer: import('http').Server | null = null;
+  if (MONITOR_ENABLED) {
+    monitorServer = startMonitorServer({
+      getGroups: () => {
+        const available = getAvailableGroups();
+        return available.map((g) => ({
+          jid: g.jid,
+          name: g.name,
+          folder: registeredGroups[g.jid]?.folder || '',
+          isRegistered: g.isRegistered,
+          lastActivity: g.lastActivity,
+        }));
+      },
+      getQueueState: () => queue.getState(),
+      getChannelStatus: () => channels.map((ch) => ({ name: ch.name, connected: ch.isConnected() })),
+    });
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    monitorServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -503,7 +532,16 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      storeMessage(msg);
+      monitorBus.emit(MONITOR_EVENTS.MESSAGE_RECEIVED, {
+        chatJid,
+        groupName: registeredGroups[chatJid]?.name || chatJid,
+        senderName: msg.sender_name,
+        contentPreview: (msg.content || '').slice(0, 200),
+        timestamp: msg.timestamp,
+      });
+    },
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
       storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,

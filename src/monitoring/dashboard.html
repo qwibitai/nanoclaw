@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NanoClaw Monitor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  a { color: #58a6ff; text-decoration: none; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+  }
+  .header h1 { font-size: 16px; font-weight: 600; color: #f0f6fc; }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+    background: #f85149;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .status-dot.connected { background: #3fb950; }
+
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 10px 20px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+    flex-wrap: wrap;
+  }
+  .stat { display: flex; gap: 6px; align-items: center; }
+  .stat-label { color: #8b949e; }
+  .stat-value { color: #f0f6fc; font-weight: 600; }
+  .stat-value.ok { color: #3fb950; }
+  .stat-value.warn { color: #d29922; }
+  .stat-value.error { color: #f85149; }
+
+  .main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 1fr auto auto;
+    height: calc(100vh - 90px);
+  }
+
+  .panel {
+    border: 1px solid #21262d;
+    background: #0d1117;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .panel-header {
+    padding: 8px 12px;
+    background: #161b22;
+    border-bottom: 1px solid #21262d;
+    font-weight: 600;
+    font-size: 12px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .panel-body {
+    overflow-y: auto;
+    flex: 1;
+    padding: 4px 0;
+  }
+
+  /* Groups panel */
+  .groups-panel { grid-row: 1 / 3; }
+  .group-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #21262d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .group-item:hover { background: #161b22; }
+  .group-item.selected { background: #1f2937; border-left: 3px solid #58a6ff; }
+  .group-item.unregistered { opacity: 0.5; }
+  .group-name { font-weight: 500; color: #c9d1d9; }
+  .group-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+  .badge-active { background: #1b4332; color: #3fb950; }
+  .badge-idle { background: #1c1d21; color: #8b949e; }
+  .badge-pending { background: #3b2e00; color: #d29922; }
+
+  /* Messages panel */
+  .messages-panel { grid-column: 2; grid-row: 1; }
+  .msg-item {
+    padding: 4px 12px;
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .msg-item:hover { background: #161b22; }
+  .msg-time { color: #484f58; white-space: nowrap; min-width: 50px; }
+  .msg-sender { color: #58a6ff; font-weight: 500; white-space: nowrap; min-width: 80px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+  .msg-sender.bot { color: #d2a8ff; }
+  .msg-content { color: #c9d1d9; word-break: break-word; flex: 1; }
+  .msg-group { color: #8b949e; font-size: 10px; white-space: nowrap; }
+
+  /* Tasks panel */
+  .tasks-panel { grid-column: 1 / 3; }
+  .task-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .task-table th {
+    text-align: left;
+    padding: 6px 12px;
+    color: #8b949e;
+    font-weight: 500;
+    font-size: 11px;
+    border-bottom: 1px solid #21262d;
+  }
+  .task-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid #21262d;
+    font-size: 12px;
+  }
+  .status-active { color: #3fb950; }
+  .status-paused { color: #d29922; }
+  .status-completed { color: #8b949e; }
+  .status-error { color: #f85149; }
+  .status-success { color: #3fb950; }
+
+  /* Task logs panel */
+  .logs-panel { grid-column: 1 / 3; }
+  .logs-toggle {
+    cursor: pointer;
+    user-select: none;
+  }
+  .logs-toggle::before {
+    content: '\25B6 ';
+    font-size: 10px;
+  }
+  .logs-toggle.open::before {
+    content: '\25BC ';
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: #0d1117; }
+  ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+
+  .empty-state {
+    padding: 20px;
+    text-align: center;
+    color: #484f58;
+    font-style: italic;
+  }
+
+  /* Filter chip */
+  .filter-chip {
+    font-size: 10px;
+    background: #1f2937;
+    padding: 2px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    display: none;
+  }
+  .filter-chip.visible { display: inline-block; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>NanoClaw Monitor <span id="statusDot" class="status-dot"></span></h1>
+  <span id="uptimeText" class="stat-value" style="font-size: 12px; color: #8b949e;"></span>
+</div>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat"><span class="stat-label">Uptime</span> <span class="stat-value" id="statUptime">-</span></div>
+  <div class="stat"><span class="stat-label">Memory</span> <span class="stat-value" id="statMemory">-</span></div>
+  <div class="stat"><span class="stat-label">Containers</span> <span class="stat-value" id="statContainers">-</span></div>
+  <div class="stat"><span class="stat-label">WhatsApp</span> <span class="stat-value" id="statWhatsApp">-</span></div>
+</div>
+
+<div class="main">
+  <div class="panel groups-panel">
+    <div class="panel-header">Groups</div>
+    <div class="panel-body" id="groupsList"></div>
+  </div>
+
+  <div class="panel messages-panel">
+    <div class="panel-header">
+      Message Feed
+      <span id="msgFilter" class="filter-chip" onclick="clearFilter()"></span>
+    </div>
+    <div class="panel-body" id="messagesFeed"></div>
+  </div>
+
+  <div class="panel tasks-panel">
+    <div class="panel-header">Scheduled Tasks</div>
+    <div class="panel-body" id="tasksList">
+      <table class="task-table">
+        <thead><tr><th>ID</th><th>Group</th><th>Schedule</th><th>Next Run</th><th>Last Run</th><th>Status</th></tr></thead>
+        <tbody id="tasksBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel logs-panel">
+    <div class="panel-header">
+      <span class="logs-toggle" id="logsToggle" onclick="toggleLogs()">Task Run History</span>
+    </div>
+    <div class="panel-body" id="logsList" style="display: none;">
+      <table class="task-table">
+        <thead><tr><th>Task</th><th>Run At</th><th>Duration</th><th>Status</th><th>Result</th></tr></thead>
+        <tbody id="logsBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  // State
+  let groups = [];
+  let messages = [];
+  let tasks = [];
+  let taskLogs = [];
+  let status = {};
+  let selectedGroupJid = null;
+  let sseConnected = false;
+
+  // Map group jid -> group info for quick lookup
+  let groupMap = {};
+
+  // Relative time
+  function relTime(ts) {
+    if (!ts) return '-';
+    const diff = Date.now() - new Date(ts).getTime();
+    if (diff < 0) {
+      const abs = -diff;
+      if (abs < 60000) return 'in ' + Math.round(abs / 1000) + 's';
+      if (abs < 3600000) return 'in ' + Math.round(abs / 60000) + 'm';
+      if (abs < 86400000) return 'in ' + Math.round(abs / 3600000) + 'h';
+      return 'in ' + Math.round(abs / 86400000) + 'd';
+    }
+    if (diff < 60000) return Math.round(diff / 1000) + 's ago';
+    if (diff < 3600000) return Math.round(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.round(diff / 3600000) + 'h ago';
+    return Math.round(diff / 86400000) + 'd ago';
+  }
+
+  function formatDuration(ms) {
+    if (!ms && ms !== 0) return '-';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    return (ms / 60000).toFixed(1) + 'm';
+  }
+
+  function formatUptime(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    if (d > 0) return d + 'd ' + (h % 24) + 'h';
+    if (h > 0) return h + 'h ' + (m % 60) + 'm';
+    return m + 'm ' + (s % 60) + 's';
+  }
+
+  function formatBytes(b) {
+    if (b < 1024 * 1024) return (b / 1024).toFixed(0) + ' KB';
+    return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function timeOnly(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Render functions
+  function renderStatus() {
+    const dot = document.getElementById('statusDot');
+    dot.className = 'status-dot' + (sseConnected ? ' connected' : '');
+
+    if (status.uptime != null) {
+      document.getElementById('statUptime').textContent = formatUptime(status.uptime);
+    }
+    if (status.memory) {
+      document.getElementById('statMemory').textContent = formatBytes(status.memory.heapUsed);
+    }
+    if (status.activeContainers != null) {
+      const el = document.getElementById('statContainers');
+      el.textContent = status.activeContainers + '/' + status.maxContainers;
+      el.className = 'stat-value' + (status.activeContainers > 0 ? ' ok' : '');
+    }
+    if (status.channels) {
+      const wa = status.channels.find(c => c.name === 'whatsapp');
+      if (wa) {
+        const el = document.getElementById('statWhatsApp');
+        el.textContent = wa.connected ? 'connected' : 'disconnected';
+        el.className = 'stat-value' + (wa.connected ? ' ok' : ' error');
+      }
+    }
+  }
+
+  function renderGroups() {
+    const el = document.getElementById('groupsList');
+    if (groups.length === 0) {
+      el.innerHTML = '<div class="empty-state">No groups yet</div>';
+      return;
+    }
+
+    // Build lookup
+    groupMap = {};
+    groups.forEach(g => { groupMap[g.jid] = g; });
+
+    el.innerHTML = groups.map(g => {
+      const selected = g.jid === selectedGroupJid ? ' selected' : '';
+      const unreg = !g.isRegistered ? ' unregistered' : '';
+      let badge = '<span class="group-badge badge-idle">idle</span>';
+      if (g.active) badge = '<span class="group-badge badge-active">active</span>';
+      else if (g.pendingMessages || g.pendingTasks > 0) badge = '<span class="group-badge badge-pending">pending</span>';
+      return '<div class="group-item' + selected + unreg + '" onclick="selectGroup(\'' + escapeHtml(g.jid) + '\')">' +
+        '<span class="group-name">' + escapeHtml(g.name || g.folder || g.jid) + '</span>' +
+        badge +
+        '</div>';
+    }).join('');
+  }
+
+  function renderMessages() {
+    const el = document.getElementById('messagesFeed');
+    const filtered = selectedGroupJid
+      ? messages.filter(m => m.chat_jid === selectedGroupJid)
+      : messages;
+
+    if (filtered.length === 0) {
+      el.innerHTML = '<div class="empty-state">No messages</div>';
+      return;
+    }
+
+    // Show oldest first (messages come DESC from API, reverse for display)
+    const sorted = [...filtered].reverse();
+
+    el.innerHTML = sorted.map(m => {
+      const isBotMsg = m.is_bot_message || m.is_from_me;
+      const senderClass = isBotMsg ? ' bot' : '';
+      const groupName = groupMap[m.chat_jid]?.name || '';
+      const groupTag = !selectedGroupJid && groupName
+        ? ' <span class="msg-group">[' + escapeHtml(groupName) + ']</span>'
+        : '';
+      const preview = (m.content || '').slice(0, 200);
+      return '<div class="msg-item">' +
+        '<span class="msg-time">' + timeOnly(m.timestamp) + '</span>' +
+        '<span class="msg-sender' + senderClass + '">' + escapeHtml(m.sender_name || '?') + '</span>' +
+        '<span class="msg-content">' + escapeHtml(preview) + groupTag + '</span>' +
+        '</div>';
+    }).join('');
+
+    // Auto-scroll to bottom
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function renderTasks() {
+    const tbody = document.getElementById('tasksBody');
+    if (tasks.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No scheduled tasks</td></tr>';
+      return;
+    }
+    tbody.innerHTML = tasks.map(t => {
+      const statusClass = 'status-' + t.status;
+      const schedule = t.schedule_type === 'cron' ? t.schedule_value : t.schedule_type + ': ' + t.schedule_value;
+      return '<tr>' +
+        '<td>' + escapeHtml(t.id.slice(0, 8)) + '</td>' +
+        '<td>' + escapeHtml(t.group_folder) + '</td>' +
+        '<td>' + escapeHtml(schedule) + '</td>' +
+        '<td>' + relTime(t.next_run) + '</td>' +
+        '<td>' + relTime(t.last_run) + '</td>' +
+        '<td class="' + statusClass + '">' + t.status + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderLogs() {
+    const tbody = document.getElementById('logsBody');
+    if (taskLogs.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No task runs yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = taskLogs.map(l => {
+      const statusClass = 'status-' + l.status;
+      const result = l.error || l.result || '-';
+      return '<tr>' +
+        '<td>' + escapeHtml(l.task_id.slice(0, 8)) + '</td>' +
+        '<td>' + relTime(l.run_at) + '</td>' +
+        '<td>' + formatDuration(l.duration_ms) + '</td>' +
+        '<td class="' + statusClass + '">' + l.status + '</td>' +
+        '<td>' + escapeHtml((result || '').slice(0, 100)) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  // Actions
+  function selectGroup(jid) {
+    if (selectedGroupJid === jid) {
+      selectedGroupJid = null;
+      document.getElementById('msgFilter').className = 'filter-chip';
+    } else {
+      selectedGroupJid = jid;
+      const g = groupMap[jid];
+      const chip = document.getElementById('msgFilter');
+      chip.textContent = (g?.name || jid.slice(0, 12)) + ' x';
+      chip.className = 'filter-chip visible';
+    }
+    renderGroups();
+    renderMessages();
+  }
+
+  function clearFilter() {
+    selectedGroupJid = null;
+    document.getElementById('msgFilter').className = 'filter-chip';
+    renderGroups();
+    renderMessages();
+  }
+
+  function toggleLogs() {
+    const el = document.getElementById('logsList');
+    const toggle = document.getElementById('logsToggle');
+    if (el.style.display === 'none') {
+      el.style.display = '';
+      toggle.classList.add('open');
+    } else {
+      el.style.display = 'none';
+      toggle.classList.remove('open');
+    }
+  }
+
+  // Data fetching
+  async function fetchAll() {
+    try {
+      const [statusRes, groupsRes, tasksRes, msgsRes, logsRes] = await Promise.all([
+        fetch('/api/status'),
+        fetch('/api/groups'),
+        fetch('/api/tasks'),
+        fetch('/api/messages?limit=100'),
+        fetch('/api/task-logs?limit=50'),
+      ]);
+      status = await statusRes.json();
+      groups = await groupsRes.json();
+      tasks = await tasksRes.json();
+      messages = await msgsRes.json();
+      taskLogs = await logsRes.json();
+
+      renderStatus();
+      renderGroups();
+      renderMessages();
+      renderTasks();
+      renderLogs();
+    } catch (err) {
+      console.error('Failed to fetch data:', err);
+    }
+  }
+
+  // SSE
+  function connectSSE() {
+    const es = new EventSource('/api/events');
+
+    es.onopen = () => {
+      sseConnected = true;
+      renderStatus();
+    };
+
+    es.onerror = () => {
+      sseConnected = false;
+      renderStatus();
+      es.close();
+      setTimeout(connectSSE, 5000);
+    };
+
+    es.addEventListener('message:received', (e) => {
+      const data = JSON.parse(e.data);
+      messages.unshift({
+        chat_jid: data.chatJid,
+        sender_name: data.senderName,
+        content: data.contentPreview,
+        timestamp: data.timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+      });
+      if (messages.length > 200) messages.pop();
+      renderMessages();
+    });
+
+    es.addEventListener('message:sent', (e) => {
+      const data = JSON.parse(e.data);
+      messages.unshift({
+        chat_jid: data.chatJid,
+        sender_name: 'Bot',
+        content: data.contentPreview,
+        timestamp: data.timestamp,
+        is_from_me: true,
+        is_bot_message: true,
+      });
+      if (messages.length > 200) messages.pop();
+      renderMessages();
+    });
+
+    es.addEventListener('queue:change', (e) => {
+      const data = JSON.parse(e.data);
+      status.activeContainers = data.activeCount;
+      status.maxContainers = data.maxConcurrent;
+      status.waitingCount = data.waitingCount;
+
+      // Update group states
+      const queueByJid = {};
+      (data.groups || []).forEach(g => { queueByJid[g.jid] = g; });
+      groups.forEach(g => {
+        const q = queueByJid[g.jid];
+        if (q) {
+          g.active = q.active;
+          g.pendingMessages = q.pendingMessages;
+          g.pendingTasks = q.pendingTasks;
+          g.containerName = q.containerName;
+        }
+      });
+
+      renderStatus();
+      renderGroups();
+    });
+
+    es.addEventListener('channel:status', (e) => {
+      const data = JSON.parse(e.data);
+      if (status.channels) {
+        const ch = status.channels.find(c => c.name === data.channel);
+        if (ch) ch.connected = data.connected;
+      }
+      renderStatus();
+    });
+
+    es.addEventListener('container:start', () => renderGroups());
+    es.addEventListener('container:end', () => renderGroups());
+
+    es.addEventListener('task:started', () => {
+      fetch('/api/tasks').then(r => r.json()).then(d => { tasks = d; renderTasks(); });
+    });
+
+    es.addEventListener('task:completed', () => {
+      Promise.all([
+        fetch('/api/tasks').then(r => r.json()),
+        fetch('/api/task-logs?limit=50').then(r => r.json()),
+      ]).then(([t, l]) => {
+        tasks = t;
+        taskLogs = l;
+        renderTasks();
+        renderLogs();
+      });
+    });
+  }
+
+  // Periodic refresh for relative timestamps
+  setInterval(() => {
+    renderTasks();
+    renderLogs();
+    // Refresh status to keep uptime current
+    fetch('/api/status').then(r => r.json()).then(d => {
+      status = d;
+      renderStatus();
+    }).catch(() => {});
+  }, 30000);
+
+  // Init
+  fetchAll();
+  connectSSE();
+</script>
+</body>
+</html>

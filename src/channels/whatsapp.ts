@@ -11,6 +11,7 @@ import makeWASocket, {
 } from '@whiskeysockets/baileys';
 
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { monitorBus, MONITOR_EVENTS } from '../monitor-events.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
@@ -80,6 +81,7 @@ export class WhatsAppChannel implements Channel {
 
       if (connection === 'close') {
         this.connected = false;
+        monitorBus.emit(MONITOR_EVENTS.CHANNEL_STATUS, { channel: 'whatsapp', connected: false });
         const reason = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
@@ -100,6 +102,7 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        monitorBus.emit(MONITOR_EVENTS.CHANNEL_STATUS, { channel: 'whatsapp', connected: true });
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
