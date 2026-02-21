@@ -58,19 +58,14 @@ export class GroupQueue {
   }
 
   enqueueMessageCheck(groupJid: string): void {
-    logger.info({ groupJid, shuttingDown: this.shuttingDown }, '[DEBUG-MSG] enqueueMessageCheck called');
-
     if (this.shuttingDown) {
-      logger.info({ groupJid }, '[DEBUG-MSG] Skipping - shuttingDown=true');
       return;
     }
 
     const state = this.getGroup(groupJid);
-    logger.info({ groupJid, stateActive: state.active, pendingMessages: state.pendingMessages, activeCount: this.activeCount }, '[DEBUG-MSG] Message queue state');
 
     if (state.active) {
       state.pendingMessages = true;
-      logger.info({ groupJid }, '[DEBUG-MSG] Container active, message queued - requesting graceful shutdown');
       // Preempt idle container so queued messages can be processed
       this.closeStdin(groupJid);
       return;
@@ -81,39 +76,28 @@ export class GroupQueue {
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
-      logger.info(
-        { groupJid, activeCount: this.activeCount },
-        '[DEBUG-MSG] At concurrency limit, message queued',
-      );
       return;
     }
 
-    logger.info({ groupJid }, '[DEBUG-MSG] Calling runForGroup');
     this.runForGroup(groupJid, 'messages').catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
   }
 
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>): void {
-    logger.info({ groupJid, taskId, shuttingDown: this.shuttingDown }, '[DEBUG] enqueueTask called');
-
     if (this.shuttingDown) {
-      logger.info({ groupJid, taskId }, '[DEBUG] Skipping - shuttingDown=true');
       return;
     }
 
     const state = this.getGroup(groupJid);
-    logger.info({ groupJid, taskId, stateActive: state.active, pendingTasksCount: state.pendingTasks.length, activeCount: this.activeCount }, '[DEBUG] Queue state');
 
     // Prevent double-queuing of the same task
     if (state.pendingTasks.some((t) => t.id === taskId)) {
-      logger.info({ groupJid, taskId }, '[DEBUG] Task already queued, skipping');
       return;
     }
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
-      logger.info({ groupJid, taskId }, '[DEBUG] Container active, task queued - requesting graceful shutdown');
       // Preempt idle container so queued task can run
       this.closeStdin(groupJid);
       return;
@@ -124,15 +108,10 @@ export class GroupQueue {
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
-      logger.info(
-        { groupJid, taskId, activeCount: this.activeCount },
-        '[DEBUG] At concurrency limit, task queued',
-      );
       return;
     }
 
     // Run immediately
-    logger.info({ groupJid, taskId }, '[DEBUG] Calling runTask immediately');
     this.runTask(groupJid, { id: taskId, groupJid, fn }).catch((err) =>
       logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
     );
@@ -207,26 +186,19 @@ export class GroupQueue {
     state.pendingMessages = false;
     this.activeCount++;
 
-    logger.info(
-      { groupJid, reason, activeCount: this.activeCount },
-      '[DEBUG-MSG] Starting container for group',
-    );
-
     try {
       if (this.processMessagesFn) {
-        logger.info({ groupJid }, '[DEBUG-MSG] Calling processMessagesFn');
         const success = await this.processMessagesFn(groupJid);
-        logger.info({ groupJid, success }, '[DEBUG-MSG] processMessagesFn returned');
         if (success) {
           state.retryCount = 0;
         } else {
           this.scheduleRetry(groupJid, state);
         }
       } else {
-        logger.error({ groupJid }, '[DEBUG-MSG] processMessagesFn is null!');
+        logger.error({ groupJid }, 'processMessagesFn is null');
       }
     } catch (err) {
-      logger.error({ groupJid, err }, '[DEBUG-MSG] Error processing messages for group');
+      logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
@@ -234,7 +206,6 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
-      logger.info({ groupJid, activeCount: this.activeCount }, '[DEBUG-MSG] runForGroup cleanup complete');
       this.drainGroup(groupJid);
     }
   }
@@ -246,17 +217,10 @@ export class GroupQueue {
     state.isTaskContainer = true;
     this.activeCount++;
 
-    logger.info(
-      { groupJid, taskId: task.id, activeCount: this.activeCount },
-      '[DEBUG] Running queued task',
-    );
-
     try {
-      logger.info({ groupJid, taskId: task.id }, '[DEBUG] Calling task.fn()');
       await task.fn();
-      logger.info({ groupJid, taskId: task.id }, '[DEBUG] task.fn() completed');
     } catch (err) {
-      logger.error({ groupJid, taskId: task.id, err }, '[DEBUG] Error running task');
+      logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
       state.isTaskContainer = false;
@@ -264,7 +228,6 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
-      logger.info({ groupJid, taskId: task.id }, '[DEBUG] runTask cleanup complete');
       this.drainGroup(groupJid);
     }
   }
