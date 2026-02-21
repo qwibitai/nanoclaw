@@ -20,7 +20,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-# Copy source and build
+# Copy source and build (ARG busts cache when source changes)
+ARG CACHEBUST=1
 COPY . .
 RUN npm run build
 
