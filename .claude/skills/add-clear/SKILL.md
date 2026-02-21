@@ -196,12 +196,16 @@ async function handleClearCommand(
   chatJid: string,
   group: RegisteredGroup,
   channel: Channel,
+  clearCommandTimestamp: string,
 ): Promise<void> {
   try {
     const allMessages = getAllMessagesForGroup(chatJid);
 
     if (allMessages.length === 0) {
       await channel.sendMessage(chatJid, 'Nothing to clear yet — no messages in this conversation.');
+      // Advance cursor to prevent reprocessing /clear command
+      lastAgentTimestamp[chatJid] = clearCommandTimestamp;
+      saveState();
       return;
     }
 
@@ -209,10 +213,29 @@ async function handleClearCommand(
     const recentMessages = allMessages.slice(-500);
     const lastTimestamp = allMessages[allMessages.length - 1].timestamp;
 
-    const formattedMessages = formatMessages(recentMessages);
+    let formattedMessages = formatMessages(recentMessages);
+
+    // Progressive truncation to prevent token limit errors
+    const MAX_CHARS = 150000;  // ~37.5k tokens at 4 chars/token, well under 200k limit
+    let messagesToSummarize = recentMessages;
+    while (formattedMessages.length > MAX_CHARS && messagesToSummarize.length > 10) {
+      // Reduce by 25% each iteration
+      messagesToSummarize = messagesToSummarize.slice(-Math.floor(messagesToSummarize.length * 0.75));
+      formattedMessages = formatMessages(messagesToSummarize);
+    }
+
+    // Hard cap if still too large
+    if (formattedMessages.length > MAX_CHARS) {
+      formattedMessages = formattedMessages.slice(0, MAX_CHARS) + '\n[Truncated due to length]';
+    }
 
     logger.info(
-      { group: group.folder, total: allMessages.length, summarizing: recentMessages.length },
+      {
+        group: group.folder,
+        total: allMessages.length,
+        summarizing: messagesToSummarize.length,
+        chars: formattedMessages.length,
+      },
       'Executing /clear command',
     );
 
@@ -300,6 +323,14 @@ Read `processGroupMessages()`. Find the lines that retrieve `missedMessages` and
 // Detect /clear command
 const clearCommand = missedMessages.find((m) => m.content.trim() === '/clear');
 if (clearCommand) {
+  // Permission check: only bot owner can clear
+  if (!clearCommand.is_from_me) {
+    await channel.sendMessage(chatJid, '❌ Only the bot owner can use /clear.');
+    lastAgentTimestamp[chatJid] = clearCommand.timestamp;
+    saveState();
+    return true;
+  }
+
   // Check if conversation was JUST cleared (deduplicates queued /clear commands)
   const allMessages = getAllMessagesForGroup(chatJid);
   if (allMessages.length === 1 && allMessages[0].content.startsWith('[Conversation cleared]')) {
@@ -310,11 +341,8 @@ if (clearCommand) {
     return true;
   }
 
-  // Advance cursor past the /clear message before handling
-  lastAgentTimestamp[chatJid] = clearCommand.timestamp;
-  saveState();
-
-  await handleClearCommand(chatJid, group, channel);
+  // Execute clear - cursor advances INSIDE handleClearCommand on success only
+  await handleClearCommand(chatJid, group, channel, clearCommand.timestamp);
   return true;
 }
 ```
