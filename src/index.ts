@@ -10,6 +10,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { SlackChannel } from './channels/slack.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -48,7 +49,7 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let appChannel: Channel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -427,10 +428,19 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Create and connect channels based on configuration
+  if (NANOCLAW_CHANNEL === 'slack') {
+    logger.info('Using Slack channel');
+    appChannel = new SlackChannel(channelOpts);
+  } else {
+    if (NANOCLAW_CHANNEL !== 'whatsapp') {
+      logger.warn({ channel: NANOCLAW_CHANNEL }, 'Unknown channel type, defaulting to WhatsApp');
+    }
+    logger.info('Using WhatsApp channel');
+    appChannel = new WhatsAppChannel(channelOpts);
+  }
+  channels.push(appChannel);
+  await appChannel.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

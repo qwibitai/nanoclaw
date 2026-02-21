@@ -1,0 +1,13 @@
+  // Create and connect channels based on configuration
+  if (NANOCLAW_CHANNEL === 'slack') {
+    logger.info('Using Slack channel');
+    appChannel = new SlackChannel(channelOpts);
+  } else {
+    if (NANOCLAW_CHANNEL !== 'whatsapp') {
+      logger.warn({ channel: NANOCLAW_CHANNEL }, 'Unknown channel type, defaulting to WhatsApp');
+    }
+    logger.info('Using WhatsApp channel');
+    appChannel = new WhatsAppChannel(channelOpts);
+  }
+  channels.push(appChannel);
+  await appChannel.connect();
