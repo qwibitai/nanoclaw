@@ -49,6 +49,7 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let dockerAvailable = false;
 
 let whatsapp: WhatsAppChannelType;
 const channels: Channel[] = [];
@@ -121,6 +122,15 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
  * Called by the GroupQueue when it's this group's turn.
  */
 async function processGroupMessages(chatJid: string): Promise<boolean> {
+  if (!dockerAvailable) {
+    // Re-check in case Docker became available (e.g. socket mounted after startup)
+    dockerAvailable = ensureContainerRuntimeRunning();
+    if (!dockerAvailable) {
+      logger.error('Cannot process messages: Docker runtime not available');
+      return false;
+    }
+  }
+
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
@@ -401,8 +411,10 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  dockerAvailable = ensureContainerRuntimeRunning();
+  if (dockerAvailable) {
+    cleanupOrphans();
+  }
 }
 
 async function main(): Promise<void> {
