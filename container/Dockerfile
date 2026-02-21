@@ -55,21 +55,7 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/
 # Follow-up messages arrive via IPC files in /workspace/ipc/input/
 # In dev, /app/src is bind-mounted with live source — recompile to /tmp/dist.
 # In production (DinD), the mount is empty — fall back to pre-built /app/dist.
-COPY <<'ENTRY' /app/entrypoint.sh
-#!/bin/bash
-set -e
-if ls /app/src/*.ts /app/src/**/*.ts 2>/dev/null | head -1 | grep -q .; then
-  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2
-  ln -s /app/node_modules /tmp/dist/node_modules
-  chmod -R a-w /tmp/dist
-  DIST=/tmp/dist
-else
-  DIST=/app/dist
-fi
-cat > /tmp/input.json
-node "$DIST/index.js" < /tmp/input.json
-ENTRY
-RUN chmod +x /app/entrypoint.sh
+RUN printf '#!/bin/bash\nset -e\nif ls /app/src/*.ts /app/src/**/*.ts 2>/dev/null | head -1 | grep -q .; then\n  cd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\n  ln -s /app/node_modules /tmp/dist/node_modules\n  chmod -R a-w /tmp/dist\n  DIST=/tmp/dist\nelse\n  DIST=/app/dist\nfi\ncat > /tmp/input.json\nnode "$DIST/index.js" < /tmp/input.json\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
