@@ -1,5 +1,7 @@
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import { CronExpressionParser } from 'cron-parser';
 
@@ -162,6 +164,8 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For self_update
+    branch?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -373,7 +377,95 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'self_update':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized self_update attempt blocked',
+        );
+        break;
+      }
+      if (data.branch && !isValidBranchName(data.branch)) {
+        logger.warn({ branch: data.branch }, 'Invalid branch name rejected');
+        const mainJid = findMainJid(registeredGroups);
+        if (mainJid) {
+          await deps.sendMessage(
+            mainJid,
+            `Update failed: invalid branch name "${data.branch}"`,
+          );
+        }
+        break;
+      }
+      // Run update in background so IPC loop continues
+      performSelfUpdate(data.branch, deps, registeredGroups);
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+const execAsync = promisify(exec);
+
+function isValidBranchName(branch: string): boolean {
+  // Allow typical git branch names: alphanumeric, hyphens, underscores, dots, slashes
+  return /^[a-zA-Z0-9._\-/]+$/.test(branch) && branch.length <= 128;
+}
+
+function findMainJid(
+  registeredGroups: Record<string, RegisteredGroup>,
+): string | undefined {
+  return Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+}
+
+async function performSelfUpdate(
+  branch: string | undefined,
+  deps: IpcDeps,
+  registeredGroups: Record<string, RegisteredGroup>,
+): Promise<void> {
+  const mainJid = findMainJid(registeredGroups);
+  const send = async (text: string) => {
+    if (mainJid) await deps.sendMessage(mainJid, text);
+  };
+
+  logger.info({ branch }, 'Self-update requested');
+  await send(`Self-update started${branch ? ` (branch: ${branch})` : ''}...`);
+
+  try {
+    // Checkout branch if specified
+    if (branch) {
+      await send(`Fetching and checking out ${branch}...`);
+      await execAsync(`git fetch origin ${branch}`, { timeout: 60_000 });
+      await execAsync(`git checkout ${branch}`, { timeout: 10_000 });
+    }
+
+    // Pull latest
+    await send('Pulling latest changes...');
+    const { stdout: pullOutput } = await execAsync('git pull', {
+      timeout: 60_000,
+    });
+    logger.info({ output: pullOutput.trim() }, 'git pull completed');
+
+    // Install dependencies
+    await send('Installing dependencies...');
+    await execAsync('npm install', { timeout: 120_000 });
+    logger.info('npm install completed');
+
+    // Build
+    await send('Building...');
+    await execAsync('npm run build', { timeout: 60_000 });
+    logger.info('npm run build completed');
+
+    await send('Updated successfully, restarting...');
+    // Give the message time to send, then trigger graceful shutdown.
+    // Launchd KeepAlive will restart the process.
+    setTimeout(() => process.kill(process.pid, 'SIGTERM'), 2000);
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : String(err);
+    logger.error({ err }, 'Self-update failed');
+    await send(`Update failed: ${message}`);
   }
 }
