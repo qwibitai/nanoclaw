@@ -29,6 +29,67 @@ export interface IpcDeps {
 }
 
 let ipcWatcherRunning = false;
+const MAX_IPC_FILE_BYTES = 1024 * 1024; // 1 MiB safety cap
+
+function listIpcJsonFiles(dir: string): string[] {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => entry.name);
+}
+
+export function readIpcJsonFile(filePath: string): unknown {
+  const initialStat = fs.lstatSync(filePath);
+  if (!initialStat.isFile()) {
+    throw new Error('IPC entry is not a regular file');
+  }
+  if (initialStat.size > MAX_IPC_FILE_BYTES) {
+    throw new Error(`IPC file exceeds ${MAX_IPC_FILE_BYTES} bytes`);
+  }
+
+  const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const fd = fs.openSync(filePath, openFlags);
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      throw new Error('IPC entry is not a regular file');
+    }
+    if (stat.size > MAX_IPC_FILE_BYTES) {
+      throw new Error(`IPC file exceeds ${MAX_IPC_FILE_BYTES} bytes`);
+    }
+    const raw = fs.readFileSync(fd, 'utf-8');
+    return JSON.parse(raw);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function quarantineIpcFile(
+  ipcBaseDir: string,
+  sourceGroup: string,
+  file: string,
+  filePath: string,
+): void {
+  const errorDir = path.join(ipcBaseDir, 'errors');
+  fs.mkdirSync(errorDir, { recursive: true });
+  const targetPath = path.join(errorDir, `${sourceGroup}-${file}`);
+  try {
+    fs.renameSync(filePath, targetPath);
+  } catch (moveErr) {
+    const code = (moveErr as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      logger.warn(
+        { file, sourceGroup, filePath, targetPath, err: moveErr },
+        'Failed to quarantine IPC file; attempting best-effort delete',
+      );
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      /* ignore */
+    }
+  }
+}
 
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
@@ -64,14 +125,21 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process messages from this group's IPC directory
       try {
         if (fs.existsSync(messagesDir)) {
-          const messageFiles = fs
-            .readdirSync(messagesDir)
-            .filter((f) => f.endsWith('.json'));
+          const messageFiles = listIpcJsonFiles(messagesDir);
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              const data = readIpcJsonFile(filePath) as {
+                type?: string;
+                chatJid?: string;
+                text?: string;
+              };
+              if (
+                data.type === 'message' &&
+                data.chatJid &&
+                typeof data.text === 'string' &&
+                data.text.trim() !== ''
+              ) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
@@ -96,12 +164,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC message',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(ipcBaseDir, sourceGroup, file, filePath);
             }
           }
         }
@@ -115,13 +178,27 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process tasks from this group's IPC directory
       try {
         if (fs.existsSync(tasksDir)) {
-          const taskFiles = fs
-            .readdirSync(tasksDir)
-            .filter((f) => f.endsWith('.json'));
+          const taskFiles = listIpcJsonFiles(tasksDir);
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              const data = readIpcJsonFile(filePath) as {
+                type: string;
+                taskId?: string;
+                prompt?: string;
+                schedule_type?: string;
+                schedule_value?: string;
+                context_mode?: string;
+                groupFolder?: string;
+                chatJid?: string;
+                targetJid?: string;
+                jid?: string;
+                name?: string;
+                folder?: string;
+                trigger?: string;
+                requiresTrigger?: boolean;
+                containerConfig?: RegisteredGroup['containerConfig'];
+              };
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
               fs.unlinkSync(filePath);
@@ -130,12 +207,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 { file, sourceGroup, err },
                 'Error processing IPC task',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              quarantineIpcFile(ipcBaseDir, sourceGroup, file, filePath);
             }
           }
         }

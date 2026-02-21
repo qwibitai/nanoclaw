@@ -164,15 +164,30 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          const hasSupportedPayload = Boolean(
+            msg.message?.conversation ||
+            msg.message?.extendedTextMessage ||
+            msg.message?.imageMessage ||
+            msg.message?.videoMessage ||
+            msg.message?.audioMessage ||
+            msg.message?.documentMessage ||
+            msg.message?.stickerMessage ||
+            msg.message?.contactMessage ||
+            msg.message?.contactsArrayMessage ||
+            msg.message?.locationMessage ||
+            msg.message?.liveLocationMessage ||
+            msg.message?.pollCreationMessage ||
+            msg.message?.pollCreationMessageV2 ||
+            msg.message?.pollCreationMessageV3,
+          );
+          if (!hasSupportedPayload) continue;
+
           const content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
-
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
