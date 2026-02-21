@@ -52,6 +52,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    storeChatMetadata: () => {},
     storeMessage: () => {},
     enqueueCheck: () => {},
     registeredGroups: () => groups,

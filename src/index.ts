@@ -485,6 +485,7 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    storeChatMetadata,
     storeMessage: storeMessageDirect,
     enqueueCheck: (jid) => queue.enqueueMessageCheck(jid),
     registeredGroups: () => registeredGroups,

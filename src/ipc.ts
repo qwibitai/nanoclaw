@@ -16,6 +16,13 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  storeChatMetadata: (
+    chatJid: string,
+    timestamp: string,
+    name?: string,
+    channel?: string,
+    isGroup?: boolean,
+  ) => void;
   storeMessage: (msg: {
     id: string;
     chat_jid: string;
@@ -102,15 +109,24 @@ export function startIpcWatcher(deps: IpcDeps): void {
               } else if (data.type === 'inbound' && data.chatJid && data.text) {
                 // Inbound message from a channel (e.g. Warren): store in DB
                 // and trigger agent processing.
+                const now = new Date().toISOString();
                 if (!registeredGroups[data.chatJid]) {
                   deps.registerGroup(data.chatJid, {
                     name: data.senderName || data.chatJid,
                     folder: sourceGroup,
                     trigger: '',
-                    added_at: new Date().toISOString(),
+                    added_at: now,
                     requiresTrigger: false,
                   });
                 }
+                // Ensure chats row exists (messages FK → chats)
+                deps.storeChatMetadata(
+                  data.chatJid,
+                  now,
+                  data.senderName || data.chatJid,
+                  sourceGroup,
+                  true,
+                );
                 deps.storeMessage({
                   id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
                   chat_jid: data.chatJid,
