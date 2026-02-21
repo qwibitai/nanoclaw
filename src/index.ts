@@ -190,9 +190,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Progress events — forward to channel and return early
+    // Non-critical: catch errors so a temporary Warren outage doesn't
+    // cause unhandled rejections for every tool event.
     if (result.type === 'progress') {
       logger.info({ group: group.name, tool: result.tool, summary: result.summary }, 'Tool progress event');
-      await channel.sendProgress?.(chatJid, result.tool, result.summary);
+      try {
+        await channel.sendProgress?.(chatJid, result.tool, result.summary);
+      } catch {
+        logger.debug({ group: group.name }, 'sendProgress failed (warren may be restarting)');
+      }
       return;
     }
 
