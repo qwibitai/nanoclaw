@@ -46,4 +46,4 @@ ENV NODE_ENV=production
 
 VOLUME ["/app/data"]
 
-CMD ["node", "dist/index.js"]
+CMD ["sh", "-c", "echo NANOCLAW_IMG_V2 && exec node dist/index.js"]
