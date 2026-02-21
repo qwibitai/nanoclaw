@@ -205,6 +205,19 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Self-Update
+
+You can pull the latest code, rebuild, and restart yourself using the `self_update` tool.
+
+**When to use**: The user says "pull latest", "update yourself", "deploy new code", "checkout branch X", or similar.
+
+- `self_update()` — pull current branch, install, build, restart
+- `self_update(branch: "feat/new-feature")` — checkout that branch first, then pull, install, build, restart
+
+After calling this tool, the orchestrator will send progress messages to this chat. Your container will be terminated when the restart happens — this is normal.
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:

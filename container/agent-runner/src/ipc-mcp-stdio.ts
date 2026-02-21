@@ -274,6 +274,52 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'self_update',
+  `Pull the latest code, rebuild, and restart the orchestrator. Main group only.
+
+Use when asked to "pull latest", "update yourself", "deploy new code", or "checkout branch X".
+Optionally specify a branch to checkout before pulling. The container will terminate during restart — this is expected.`,
+  {
+    branch: z
+      .string()
+      .optional()
+      .describe(
+        'Git branch to checkout before pulling (e.g., "main", "feat/new-feature"). Omit to pull the current branch.',
+      ),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can trigger a self-update.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'self_update',
+      branch: args.branch || undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Self-update requested${args.branch ? ` (branch: ${args.branch})` : ''}. The orchestrator will pull, build, and restart. This container will terminate during the restart.`,
+        },
+      ],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
