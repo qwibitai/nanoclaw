@@ -8,12 +8,24 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'IMESSAGE_ENABLED',
+  'WHATSAPP_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+
+// WhatsApp channel: default true unless explicitly disabled
+const waEnv = process.env.WHATSAPP_ENABLED || envConfig.WHATSAPP_ENABLED;
+export const WHATSAPP_ENABLED = waEnv !== undefined ? waEnv === 'true' : true;
+
+// iMessage channel: default true on macOS, false elsewhere
+const imsgEnv = process.env.IMESSAGE_ENABLED || envConfig.IMESSAGE_ENABLED;
+export const IMESSAGE_ENABLED = imsgEnv !== undefined
+  ? imsgEnv === 'true'
+  : process.platform === 'darwin';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 

@@ -4,11 +4,15 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
+  IMESSAGE_ENABLED,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  WHATSAPP_ENABLED,
 } from './config.js';
+import { IMessageChannel } from './channels/imessage.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -18,10 +22,12 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  createUser,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getAllUsers,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -38,6 +44,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { lookupUser, normalizePhone } from './users.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -48,7 +55,8 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let whatsapp: WhatsAppChannel | undefined;
+let imessage: IMessageChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -75,6 +83,74 @@ function saveState(): void {
     'last_agent_timestamp',
     JSON.stringify(lastAgentTimestamp),
   );
+}
+
+/**
+ * Auto-seed the admin user on first run.
+ * Extracts phone from the main group JID or WhatsApp's own number.
+ */
+function seedAdminIfNeeded(): void {
+  const users = getAllUsers();
+  if (users.length > 0) return; // already seeded
+
+  // Try to derive phone from main group JID (DM format: phone@s.whatsapp.net)
+  let phone: string | null = null;
+  let email: string | null = null;
+  const mainJid = Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+
+  if (mainJid) {
+    if (mainJid.endsWith('@s.whatsapp.net')) {
+      phone = normalizePhone(mainJid);
+    } else if (mainJid.startsWith('imsg:') && !mainJid.startsWith('imsg-group:')) {
+      // iMessage DM — could be phone or email
+      const id = mainJid.slice(5);
+      if (id.includes('@')) {
+        email = id.toLowerCase();
+      } else {
+        phone = normalizePhone(id);
+      }
+    }
+  }
+
+  // Fallback: try WhatsApp's authenticated phone
+  if (!phone && !email && whatsapp?.getOwnPhone()) {
+    phone = whatsapp.getOwnPhone()!;
+  }
+
+  if (!phone && !email) {
+    logger.warn('Could not determine admin phone/email — users table empty, will retry next restart');
+    return;
+  }
+
+  const admin = {
+    id: 'admin',
+    name: 'Admin',
+    phone,
+    email,
+    role: 'admin' as const,
+    created_at: new Date().toISOString(),
+  };
+  createUser(admin);
+
+  // Create profile file
+  const profileDir = path.join(GROUPS_DIR, 'global', 'users');
+  fs.mkdirSync(profileDir, { recursive: true });
+  const profilePath = path.join(profileDir, 'admin.md');
+  if (!fs.existsSync(profilePath)) {
+    fs.writeFileSync(profilePath, `# Admin\n\nOwner of this NanoClaw instance.\n`);
+  }
+
+  logger.info({ phone, email }, 'Admin user auto-seeded');
+}
+
+/**
+ * Check if any message in the batch is from a whitelisted user.
+ * All messages remain as context, but only whitelisted senders can trigger the agent.
+ */
+function hasWhitelistedSender(messages: NewMessage[]): boolean {
+  return messages.some((m) => lookupUser(m.sender) !== undefined);
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -135,6 +211,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
+  // Whitelist check: only trigger if at least one message is from a known user
+  if (!hasWhitelistedSender(missedMessages)) return true;
+
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const hasTrigger = missedMessages.some((m) =>
@@ -143,7 +222,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  const prompt = formatMessages(missedMessages, lookupUser);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -336,6 +415,9 @@ async function startMessageLoop(): Promise<void> {
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
+          // Whitelist check: only trigger if at least one message is from a known user
+          if (!hasWhitelistedSender(groupMessages)) continue;
+
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
@@ -355,7 +437,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
+          const formatted = formatMessages(messagesToSend, lookupUser);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -428,9 +510,31 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (WHATSAPP_ENABLED) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
+
+  // iMessage channel (macOS only, non-fatal)
+  if (IMESSAGE_ENABLED) {
+    try {
+      imessage = new IMessageChannel(channelOpts);
+      channels.push(imessage);
+      await imessage.connect();
+    } catch (err) {
+      logger.warn({ err }, 'iMessage channel failed to connect — continuing without it');
+      imessage = undefined;
+    }
+  }
+
+  if (channels.length === 0) {
+    logger.error('No channels enabled. Enable at least one of: WHATSAPP_ENABLED, IMESSAGE_ENABLED');
+    process.exit(1);
+  }
+
+  // Seed admin user on first run (after channels connect so WhatsApp fallback works)
+  seedAdminIfNeeded();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -456,7 +560,10 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: async (force) => {
+      await (whatsapp?.syncGroupMetadata(force) ?? Promise.resolve());
+      await (imessage?.syncChatMetadata(force) ?? Promise.resolve());
+    },
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });

@@ -22,6 +22,26 @@ case "$(uname -s)" in
   *)       PLATFORM="unknown" ;;
 esac
 
+# Determine which channels are configured
+WA_CONFIGURED="false"
+IMSG_CONFIGURED="false"
+if [ -f "$PROJECT_ROOT/store/messages.db" ]; then
+  WA_COUNT=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups WHERE jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us'" 2>/dev/null || echo "0")
+  IMSG_COUNT=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups WHERE jid LIKE 'imsg:%' OR jid LIKE 'imsg-group:%'" 2>/dev/null || echo "0")
+  [ "$WA_COUNT" -gt 0 ] 2>/dev/null && WA_CONFIGURED="true"
+  [ "$IMSG_COUNT" -gt 0 ] 2>/dev/null && IMSG_CONFIGURED="true"
+fi
+
+# Also check .env flags
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  WA_ENV=$(grep '^WHATSAPP_ENABLED=' "$PROJECT_ROOT/.env" 2>/dev/null | sed 's/^WHATSAPP_ENABLED=//' || echo "")
+  IMSG_ENV=$(grep '^IMESSAGE_ENABLED=' "$PROJECT_ROOT/.env" 2>/dev/null | sed 's/^IMESSAGE_ENABLED=//' || echo "")
+  [ "$WA_ENV" = "true" ] && WA_CONFIGURED="true"
+  [ "$IMSG_ENV" = "true" ] && IMSG_CONFIGURED="true"
+fi
+
+log "Channel config: whatsapp=$WA_CONFIGURED imessage=$IMSG_CONFIGURED"
+
 # 1. Check service status
 SERVICE="not_found"
 if [ "$PLATFORM" = "macos" ]; then
@@ -62,30 +82,51 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 log "Credentials: $CREDENTIALS"
 
-# 4. Check WhatsApp auth
-WHATSAPP_AUTH="not_found"
-if [ -d "$PROJECT_ROOT/store/auth" ] && [ "$(ls -A "$PROJECT_ROOT/store/auth" 2>/dev/null)" ]; then
-  WHATSAPP_AUTH="authenticated"
+# 4. Check WhatsApp auth (only if WhatsApp is configured)
+WHATSAPP_AUTH="not_applicable"
+if [ "$WA_CONFIGURED" = "true" ]; then
+  WHATSAPP_AUTH="not_found"
+  if [ -d "$PROJECT_ROOT/store/auth" ] && [ "$(ls -A "$PROJECT_ROOT/store/auth" 2>/dev/null)" ]; then
+    WHATSAPP_AUTH="authenticated"
+  fi
 fi
 log "WhatsApp auth: $WHATSAPP_AUTH"
 
-# 5. Check registered groups (in SQLite — the JSON file gets migrated away on startup)
+# 5. Check iMessage access (only if iMessage is configured)
+IMESSAGE_ACCESS="not_applicable"
+if [ "$IMSG_CONFIGURED" = "true" ]; then
+  IMESSAGE_ACCESS="not_accessible"
+  if [ "$PLATFORM" = "macos" ] && [ -r "$HOME/Library/Messages/chat.db" ]; then
+    IMESSAGE_ACCESS="accessible"
+  fi
+fi
+log "iMessage access: $IMESSAGE_ACCESS"
+
+# 6. Check registered groups (in SQLite — the JSON file gets migrated away on startup)
 REGISTERED_GROUPS=0
 if [ -f "$PROJECT_ROOT/store/messages.db" ]; then
   REGISTERED_GROUPS=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups" 2>/dev/null || echo "0")
 fi
 log "Registered groups: $REGISTERED_GROUPS"
 
-# 6. Check mount allowlist
+# 7. Check mount allowlist
 MOUNT_ALLOWLIST="missing"
 if [ -f "$HOME/.config/nanoclaw/mount-allowlist.json" ]; then
   MOUNT_ALLOWLIST="configured"
 fi
 log "Mount allowlist: $MOUNT_ALLOWLIST"
 
-# Determine overall status
+# Determine overall status — only fail on configured channel auth issues
 STATUS="success"
-if [ "$SERVICE" != "running" ] || [ "$CREDENTIALS" = "missing" ] || [ "$WHATSAPP_AUTH" = "not_found" ] || [ "$REGISTERED_GROUPS" -eq 0 ] 2>/dev/null; then
+AUTH_OK="true"
+if [ "$WHATSAPP_AUTH" = "not_found" ]; then
+  AUTH_OK="false"
+fi
+if [ "$IMESSAGE_ACCESS" = "not_accessible" ]; then
+  AUTH_OK="false"
+fi
+
+if [ "$SERVICE" != "running" ] || [ "$CREDENTIALS" = "missing" ] || [ "$AUTH_OK" = "false" ] || [ "$REGISTERED_GROUPS" -eq 0 ] 2>/dev/null; then
   STATUS="failed"
 fi
 
@@ -97,6 +138,7 @@ SERVICE: $SERVICE
 CONTAINER_RUNTIME: $CONTAINER_RUNTIME
 CREDENTIALS: $CREDENTIALS
 WHATSAPP_AUTH: $WHATSAPP_AUTH
+IMESSAGE_ACCESS: $IMESSAGE_ACCESS
 REGISTERED_GROUPS: $REGISTERED_GROUPS
 MOUNT_ALLOWLIST: $MOUNT_ALLOWLIST
 STATUS: $STATUS

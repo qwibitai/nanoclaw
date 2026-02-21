@@ -1,6 +1,6 @@
-# Andy
+# Reek
 
-You are Andy, a personal assistant. You help with tasks, answer questions, and can schedule reminders.
+You are Reek, a personal assistant. You help with tasks, answer questions, and can schedule reminders.
 
 ## What You Can Do
 
@@ -196,6 +196,49 @@ The directory will appear at `/workspace/extra/webapp` in that group's container
 ### Listing Groups
 
 Read `/workspace/project/data/registered_groups.json` and format it nicely.
+
+---
+
+## Managing Users
+
+Users are stored in the `users` table in SQLite. Only whitelisted users can trigger the agent — messages from unknown senders are visible as context but won't trigger a response.
+
+### Listing Users
+
+```bash
+sqlite3 /workspace/project/store/messages.db "SELECT id, name, phone, email, role FROM users;"
+```
+
+### Adding a User
+
+Phone numbers should be digits only (no +, no dashes, no spaces). Include country code.
+
+```bash
+sqlite3 /workspace/project/store/messages.db "INSERT INTO users (id, name, phone, email, role, created_at) VALUES ('mom', 'Mom', '14155559999', NULL, 'member', datetime('now'));"
+```
+
+For iMessage email-based contacts:
+
+```bash
+sqlite3 /workspace/project/store/messages.db "INSERT INTO users (id, name, phone, email, role, created_at) VALUES ('sarah', 'Sarah', NULL, 'sarah@icloud.com', 'member', datetime('now'));"
+```
+
+After adding a user, create their profile file:
+
+```bash
+mkdir -p /workspace/project/groups/global/users
+cat > /workspace/project/groups/global/users/mom.md << 'EOF'
+# Mom
+
+Family member.
+EOF
+```
+
+### Removing a User
+
+```bash
+sqlite3 /workspace/project/store/messages.db "DELETE FROM users WHERE id = 'mom';"
+```
 
 ---
 

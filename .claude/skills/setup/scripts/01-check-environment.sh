@@ -84,6 +84,37 @@ elif [ -f "$PROJECT_ROOT/store/messages.db" ]; then
   fi
 fi
 
+# Detect iMessage availability (macOS only)
+IMESSAGE_AVAILABLE="false"
+HAS_IMESSAGE_ACCESS="false"
+if [ "$PLATFORM" = "macos" ] && [ -f "$HOME/Library/Messages/chat.db" ]; then
+  IMESSAGE_AVAILABLE="true"
+  log "iMessage: chat.db found"
+  if [ -r "$HOME/Library/Messages/chat.db" ]; then
+    HAS_IMESSAGE_ACCESS="true"
+    log "iMessage: chat.db readable (Full Disk Access granted)"
+  else
+    log "iMessage: chat.db exists but not readable (Full Disk Access needed)"
+  fi
+else
+  log "iMessage: not available (platform=$PLATFORM)"
+fi
+
+# Detect configured channel from registered groups
+CONFIGURED_CHANNEL="none"
+if [ -f "$PROJECT_ROOT/store/messages.db" ]; then
+  HAS_IMSG=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups WHERE jid LIKE 'imsg:%' OR jid LIKE 'imsg-group:%'" 2>/dev/null || echo "0")
+  HAS_WA=$(sqlite3 "$PROJECT_ROOT/store/messages.db" "SELECT COUNT(*) FROM registered_groups WHERE jid LIKE '%@s.whatsapp.net' OR jid LIKE '%@g.us'" 2>/dev/null || echo "0")
+  if [ "$HAS_IMSG" -gt 0 ] 2>/dev/null && [ "$HAS_WA" -gt 0 ] 2>/dev/null; then
+    CONFIGURED_CHANNEL="both"
+  elif [ "$HAS_IMSG" -gt 0 ] 2>/dev/null; then
+    CONFIGURED_CHANNEL="imessage"
+  elif [ "$HAS_WA" -gt 0 ] 2>/dev/null; then
+    CONFIGURED_CHANNEL="whatsapp"
+  fi
+  log "Configured channel: $CONFIGURED_CHANNEL (imsg=$HAS_IMSG, wa=$HAS_WA)"
+fi
+
 log "Environment check complete"
 
 # Output structured status block
@@ -97,6 +128,9 @@ DOCKER: $DOCKER
 HAS_ENV: $HAS_ENV
 HAS_AUTH: $HAS_AUTH
 HAS_REGISTERED_GROUPS: $HAS_REGISTERED_GROUPS
+IMESSAGE_AVAILABLE: $IMESSAGE_AVAILABLE
+HAS_IMESSAGE_ACCESS: $HAS_IMESSAGE_ACCESS
+CONFIGURED_CHANNEL: $CONFIGURED_CHANNEL
 STATUS: success
 LOG: logs/setup.log
 === END ===

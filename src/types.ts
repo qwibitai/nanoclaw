@@ -52,6 +52,15 @@ export interface NewMessage {
   is_bot_message?: boolean;
 }
 
+export interface User {
+  id: string;        // human-readable slug: "admin", "mom", "sarah"
+  name: string;      // display name: "Mom", "Sarah"
+  phone: string | null;  // normalized digits: "14155551234"
+  email: string | null;  // for iMessage email IDs: "sarah@icloud.com"
+  role: 'admin' | 'member';
+  created_at: string;
+}
+
 export interface ScheduledTask {
   id: string;
   group_folder: string;

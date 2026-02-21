@@ -234,6 +234,15 @@ export class WhatsAppChannel implements Channel {
     this.sock?.end(undefined);
   }
 
+  /**
+   * Get the phone number of the authenticated WhatsApp account.
+   * Returns normalized digits (e.g. "14155551234") or undefined if not connected.
+   */
+  getOwnPhone(): string | undefined {
+    if (!this.sock?.user?.id) return undefined;
+    return this.sock.user.id.split(':')[0];
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
       const status = isTyping ? 'composing' : 'paused';

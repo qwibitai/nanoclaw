@@ -1,4 +1,4 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, NewMessage, User } from './types.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -9,10 +9,15 @@ export function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+export function formatMessages(
+  messages: NewMessage[],
+  resolveUser?: (sender: string) => User | undefined,
+): string {
+  const lines = messages.map((m) => {
+    const user = resolveUser?.(m.sender);
+    const userAttr = user ? ` user="${escapeXml(user.id)}" role="${user.role}"` : '';
+    return `<message sender="${escapeXml(m.sender_name)}"${userAttr} time="${m.timestamp}">${escapeXml(m.content)}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
