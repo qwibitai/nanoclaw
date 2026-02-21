@@ -10,6 +10,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { startDashboard } from './dashboard.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -36,6 +37,7 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { TeamManager } from './team-manager.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -169,8 +171,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  await channel.sendMessage(chatJid, '⏳');
   let hadError = false;
   let outputSentToUser = false;
+
+  // Send periodic "작업 중..." status every 60s while container is running
+  const STATUS_MESSAGES = ['⏳ 아직 작업 중이에요...', '⏳ 조금만 더 기다려 주세요...', '⏳ 열심히 처리 중이에요...'];
+  let statusCount = 0;
+  const statusInterval = setInterval(async () => {
+    if (!outputSentToUser) {
+      const msg = STATUS_MESSAGES[statusCount % STATUS_MESSAGES.length];
+      statusCount++;
+      await channel.sendMessage(chatJid, msg);
+    }
+  }, 60000);
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -192,6 +206,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  clearInterval(statusInterval);
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
@@ -249,7 +264,8 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        // Only save session ID on success, not on error (prevents stale session loop)
+        if (output.newSessionId && output.status !== 'error') {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -271,7 +287,8 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    // Only save session ID on success
+    if (output.newSessionId && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -432,6 +449,19 @@ async function main(): Promise<void> {
   channels.push(whatsapp);
   await whatsapp.connect();
 
+  // Start Team Manager
+  const teamDir = path.join(DATA_DIR, 'sessions', 'main', '.claude', 'teams');
+  const teamSendMessage = async (text: string) => {
+    const mainJid = Object.entries(registeredGroups).find(([, g]) => g.folder === 'main')?.[0];
+    if (!mainJid) return;
+    const channel = findChannel(channels, mainJid);
+    if (!channel) return;
+    await channel.sendMessage(mainJid, text);
+  };
+  const teamManager = new TeamManager(teamDir, teamSendMessage);
+  await teamManager.startAllTeams();
+  logger.info('Team Manager started');
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -450,6 +480,10 @@ async function main(): Promise<void> {
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
+      if (jid.startsWith('team:')) {
+        logger.debug({ jid }, 'Skipping IPC send for internal team JID');
+        return Promise.resolve();
+      }
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
@@ -459,6 +493,11 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+  });
+  startDashboard({
+    getWhatsAppStatus: () => whatsapp?.isConnected?.() ?? false,
+    startedAt: Date.now(),
+    teamManager,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
