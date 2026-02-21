@@ -17,8 +17,10 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
+// Base directory for all persistent data. In Docker, set DATA_DIR to a
+// volume-mounted path so state survives container restarts.
 const PROJECT_ROOT = process.cwd();
+const BASE_DIR = process.env.DATA_DIR || path.join(PROJECT_ROOT, 'data');
 const HOME_DIR = process.env.HOME || '/Users/user';
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
@@ -28,9 +30,9 @@ export const MOUNT_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'mount-allowlist.json',
 );
-export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+export const STORE_DIR = process.env.STORE_DIR || path.join(BASE_DIR, 'store');
+export const GROUPS_DIR = process.env.GROUPS_DIR || path.join(BASE_DIR, 'groups');
+export const DATA_DIR = BASE_DIR;
 export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
