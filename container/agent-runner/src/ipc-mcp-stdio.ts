@@ -274,6 +274,46 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'get_config',
+  'Get the current Warren configuration (commands, settings, repos).',
+  {},
+  async () => {
+    const configPath = path.join(IPC_DIR, 'current_config.json');
+    if (!fs.existsSync(configPath)) {
+      return { content: [{ type: 'text' as const, text: 'Config not available.' }] };
+    }
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      return { content: [{ type: 'text' as const, text: JSON.stringify(config, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading config: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
+  },
+);
+
+server.tool(
+  'update_config',
+  'Update Warren configuration. Pass a partial config object with fields to change (e.g. commands, max_concurrent_sessions, idle_timeout_minutes).',
+  {
+    config: z
+      .record(z.string(), z.unknown())
+      .describe(
+        'Partial config to merge (e.g. {commands: {actions: [...], templates: [...]}})',
+      ),
+  },
+  async (args) => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'update_config',
+      config: args.config,
+      timestamp: Date.now(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Config update submitted.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

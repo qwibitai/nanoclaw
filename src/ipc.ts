@@ -12,7 +12,7 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { Channel, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -43,6 +43,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  channels: Channel[];
 }
 
 let ipcWatcherRunning = false;
@@ -221,6 +222,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For update_config
+    config?: Record<string, unknown>;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -424,6 +427,25 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'update_config': {
+      const warrenChannel = deps.channels.find(c => c.updateConfig);
+      if (!warrenChannel?.updateConfig) {
+        logger.warn('No warren channel available for config update');
+        break;
+      }
+      if (!data.config) {
+        logger.warn('update_config missing config field');
+        break;
+      }
+      try {
+        await warrenChannel.updateConfig(data.config);
+        logger.info({ updates: Object.keys(data.config) }, 'Config updated via IPC');
+      } catch (err) {
+        logger.error({ err }, 'Failed to update config via IPC');
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

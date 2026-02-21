@@ -73,4 +73,22 @@ export class WarrenChannel implements Channel {
       // Typing indicators are best-effort
     });
   }
+
+  async fetchConfig(): Promise<Record<string, unknown>> {
+    const baseUrl = this.callbackUrl.replace('/internal/nanoclaw/callback', '');
+    const resp = await fetch(`${baseUrl}/internal/nanoclaw/config`);
+    if (!resp.ok) throw new Error(`Config fetch failed: ${resp.status}`);
+    return resp.json() as Promise<Record<string, unknown>>;
+  }
+
+  async updateConfig(updates: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const baseUrl = this.callbackUrl.replace('/internal/nanoclaw/callback', '');
+    const resp = await fetch(`${baseUrl}/internal/nanoclaw/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!resp.ok) throw new Error(`Config update failed: ${resp.status}`);
+    return resp.json() as Promise<Record<string, unknown>>;
+  }
 }

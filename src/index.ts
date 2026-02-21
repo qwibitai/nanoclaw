@@ -17,6 +17,7 @@ import {
   ContainerResult,
   initDindPathMapping,
   runContainerAgent,
+  writeConfigSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -262,6 +263,9 @@ async function runAgent(
     })),
   );
 
+  // Update config snapshot for container to read
+  await writeConfigSnapshot(group.folder, channels);
+
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
@@ -480,6 +484,7 @@ async function main(): Promise<void> {
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
+    channels,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
@@ -506,6 +511,7 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    channels,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

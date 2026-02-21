@@ -89,6 +89,10 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: forward tool-progress events to the frontend.
   sendProgress?(jid: string, tool: string, summary: string): Promise<void>;
+  // Optional: fetch config from a remote source (e.g. Warren).
+  fetchConfig?(): Promise<Record<string, unknown>>;
+  // Optional: update config on a remote source (e.g. Warren).
+  updateConfig?(updates: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
 // Callback type that channels use to deliver inbound messages

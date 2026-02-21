@@ -19,7 +19,7 @@ import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { Channel, RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -681,6 +681,26 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+}
+
+export async function writeConfigSnapshot(
+  groupFolder: string,
+  channels: Channel[],
+): Promise<void> {
+  const warrenChannel = channels.find(c => c.fetchConfig);
+  if (!warrenChannel?.fetchConfig) return;
+
+  try {
+    const config = await warrenChannel.fetchConfig();
+    const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+    fs.mkdirSync(ipcDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ipcDir, 'current_config.json'),
+      JSON.stringify(config, null, 2),
+    );
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write config snapshot');
+  }
 }
 
 export interface AvailableGroup {
