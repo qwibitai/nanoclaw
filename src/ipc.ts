@@ -16,6 +16,16 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  storeMessage: (msg: {
+    id: string;
+    chat_jid: string;
+    sender: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: boolean;
+  }) => void;
+  enqueueCheck: (jid: string) => void;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -89,6 +99,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (data.type === 'inbound' && data.chatJid && data.text) {
+                // Inbound message from a channel (e.g. Warren): store in DB
+                // and trigger agent processing.
+                if (!registeredGroups[data.chatJid]) {
+                  deps.registerGroup(data.chatJid, {
+                    name: data.senderName || data.chatJid,
+                    folder: sourceGroup,
+                    trigger: '',
+                    added_at: new Date().toISOString(),
+                    requiresTrigger: false,
+                  });
+                }
+                deps.storeMessage({
+                  id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                  chat_jid: data.chatJid,
+                  sender: data.sender || data.chatJid,
+                  sender_name: data.senderName || 'User',
+                  content: data.text,
+                  timestamp: new Date().toISOString(),
+                  is_from_me: false,
+                });
+                deps.enqueueCheck(data.chatJid);
+                logger.info(
+                  { chatJid: data.chatJid, sourceGroup },
+                  'Inbound IPC message stored',
+                );
               }
               fs.unlinkSync(filePath);
             } catch (err) {

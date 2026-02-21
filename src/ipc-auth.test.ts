@@ -52,6 +52,8 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    storeMessage: () => {},
+    enqueueCheck: () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;
