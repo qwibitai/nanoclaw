@@ -31,5 +31,5 @@ ENV NODE_ENV=production
 # Data directory for SQLite, auth state, group configs
 VOLUME ["/app/data"]
 
-# Diagnostic wrapper — logs before node starts to isolate infrastructure vs app issues
-CMD ["sh", "-c", "echo '=== NANOCLAW STARTING ===' && echo \"node: $(node --version)\" && echo \"pwd: $(pwd)\" && echo \"dist/index.js exists: $(test -f dist/index.js && echo yes || echo no)\" && echo '=== launching node ===' && exec node dist/index.js"]
+# Diagnostic: test modules one by one to find the crash
+CMD ["sh", "-c", "echo '=== MODULE DIAGNOSTIC ===' && node -e \"console.log('basic node: ok')\" && node -e \"import('better-sqlite3').then(() => console.log('better-sqlite3: ok')).catch(e => console.error('better-sqlite3: FAIL', e.message))\" && node -e \"import('pino').then(() => console.log('pino: ok')).catch(e => console.error('pino: FAIL', e.message))\" && node -e \"import('@whiskeysockets/baileys').then(() => console.log('baileys: ok')).catch(e => console.error('baileys: FAIL', e.message))\" && echo '=== loading app ===' && exec node dist/index.js"]
