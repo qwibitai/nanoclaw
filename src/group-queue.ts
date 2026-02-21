@@ -18,6 +18,7 @@ interface GroupState {
   active: boolean;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
+  taskPreemptPending: boolean;
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
@@ -39,6 +40,7 @@ export class GroupQueue {
         active: false,
         pendingMessages: false,
         pendingTasks: [],
+        taskPreemptPending: false,
         process: null,
         containerName: null,
         groupFolder: null,
@@ -92,6 +94,8 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
+      state.taskPreemptPending = true;
+      this.trySignalTaskPreempt(groupJid, state, taskId);
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
     }
@@ -116,7 +120,10 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
-    if (groupFolder) state.groupFolder = groupFolder;
+    if (groupFolder) {
+      state.groupFolder = groupFolder;
+      this.trySignalTaskPreempt(groupJid, state);
+    }
   }
 
   /**
@@ -157,6 +164,27 @@ export class GroupQueue {
     }
   }
 
+  private trySignalTaskPreempt(
+    groupJid: string,
+    state: GroupState,
+    taskId?: string,
+  ): void {
+    if (!state.taskPreemptPending || !state.active || !state.groupFolder) return;
+
+    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    try {
+      fs.mkdirSync(inputDir, { recursive: true });
+      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      state.taskPreemptPending = false;
+      logger.debug(
+        { groupJid, taskId },
+        'Queued task requested active container shutdown',
+      );
+    } catch {
+      // Keep taskPreemptPending=true and retry on next registration/event.
+    }
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
@@ -164,6 +192,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.pendingMessages = false;
+    state.taskPreemptPending = false;
     this.activeCount++;
 
     logger.debug(
@@ -188,6 +217,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.taskPreemptPending = false;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -196,6 +226,7 @@ export class GroupQueue {
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.taskPreemptPending = false;
     this.activeCount++;
 
     logger.debug(
@@ -212,6 +243,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.taskPreemptPending = false;
       this.activeCount--;
       this.drainGroup(groupJid);
     }

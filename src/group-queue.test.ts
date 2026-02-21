@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'fs';
 
 import { GroupQueue } from './group-queue.js';
 
@@ -26,6 +27,7 @@ describe('GroupQueue', () => {
   let queue: GroupQueue;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.useFakeTimers();
     queue = new GroupQueue();
   });
@@ -241,5 +243,57 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toContain('group3@g.us');
+  });
+
+  it('signals active container to close when task is queued', async () => {
+    let resolveRun: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveRun = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'group1');
+    queue.enqueueTask('group1@g.us', 'task-1', async () => {});
+
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-data/ipc/group1/input/_close',
+      '',
+    );
+
+    resolveRun!();
+  });
+
+  it('signals close after delayed process registration when task already queued', async () => {
+    let resolveRun: () => void;
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveRun = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.enqueueTask('group1@g.us', 'task-1', async () => {});
+    expect(fs.writeFileSync).not.toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-data/ipc/group1/input/_close',
+      '',
+    );
+
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'group1');
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      '/tmp/nanoclaw-test-data/ipc/group1/input/_close',
+      '',
+    );
+
+    resolveRun!();
   });
 });
