@@ -31,5 +31,5 @@ ENV NODE_ENV=production
 # Data directory for SQLite, auth state, group configs
 VOLUME ["/app/data"]
 
-# Run node directly (not via npm) so crash output isn't swallowed
-CMD ["node", "dist/index.js"]
+# Diagnostic wrapper — logs before node starts to isolate infrastructure vs app issues
+CMD ["sh", "-c", "echo '=== NANOCLAW STARTING ===' && echo \"node: $(node --version)\" && echo \"pwd: $(pwd)\" && echo \"dist/index.js exists: $(test -f dist/index.js && echo yes || echo no)\" && echo '=== launching node ===' && exec node dist/index.js"]
