@@ -14,6 +14,7 @@
  *   Final marker after loop ends signals completion.
  */
 
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
@@ -512,6 +513,17 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+  }
+
+  // Configure git to use OAuth token for GitHub HTTPS access.
+  // Also rewrite SSH URLs to HTTPS so git@github.com: clones work too.
+  // Credential file lives in /tmp — container is ephemeral (--rm).
+  const oauthToken = sdkEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  if (oauthToken) {
+    fs.writeFileSync('/tmp/.git-credentials', `https://oauth2:${oauthToken}@github.com\n`, { mode: 0o600 });
+    execFileSync('git', ['config', '--global', 'credential.helper', 'store --file /tmp/.git-credentials']);
+    execFileSync('git', ['config', '--global', 'url.https://github.com/.insteadOf', 'git@github.com:']);
+    log('Git credentials configured for GitHub HTTPS access');
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
