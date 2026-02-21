@@ -38,12 +38,48 @@ const RendererFromLibrary = (JsonRenderReact as JsonRecord).Renderer as
     }>
   | undefined;
 
+const JSONUIProvider = (JsonRenderReact as JsonRecord).JSONUIProvider as
+  | React.ComponentType<{ registry?: JsonRecord; children: React.ReactNode }>
+  | undefined;
+
+const defineRegistry = (JsonRenderReact as JsonRecord).defineRegistry as
+  | ((catalog: JsonRecord, options: { components?: JsonRecord }) =>
+      | JsonRecord
+      | { registry?: JsonRecord })
+  | undefined;
+
 const shadcnExports = JsonRenderShadcn as JsonRecord;
-const shadcnComponentMap =
-  (shadcnExports.componentMap as JsonRecord | undefined) ||
-  (shadcnExports.shadcnComponentMap as JsonRecord | undefined) ||
-  (shadcnExports.registry as JsonRecord | undefined) ||
-  (shadcnExports.shadcnRegistry as JsonRecord | undefined);
+const shadcnComponents =
+  (shadcnExports.shadcnComponents as JsonRecord | undefined) ||
+  (shadcnExports.shadcnComponentDefinitions as JsonRecord | undefined);
+
+const registry: JsonRecord | undefined = (() => {
+  if (!defineRegistry || !shadcnComponents) return undefined;
+  const result = defineRegistry({}, { components: shadcnComponents });
+  const base =
+    result &&
+    typeof result === 'object' &&
+    'registry' in result &&
+    result.registry &&
+    typeof result.registry === 'object'
+      ? (result.registry as JsonRecord)
+      : (result as JsonRecord);
+  // Alias legacy names the agent may produce
+  if (!base.Container && base.Stack) base.Container = base.Stack;
+  if (!base.Box && base.Stack) base.Box = base.Stack;
+  if (!base.Paragraph && base.Text) base.Paragraph = base.Text;
+  return base;
+})();
+
+function normalizeElement(el: unknown): unknown {
+  if (!el || typeof el !== 'object' || Array.isArray(el)) return el;
+  const elem = el as JsonRecord;
+  // Map legacy "component" field to "type" expected by @json-render/react
+  if (elem.component !== undefined && elem.type === undefined) {
+    return { ...elem, type: elem.component };
+  }
+  return elem;
+}
 
 function coerceSpec(input: unknown): JsonRenderSpec | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -54,15 +90,17 @@ function coerceSpec(input: unknown): JsonRenderSpec | null {
   const root = typeof value.root === 'string' || value.root === null
     ? value.root
     : null;
-  const elements =
+  const rawElements =
     value.elements && typeof value.elements === 'object' && !Array.isArray(value.elements)
       ? (value.elements as Record<string, unknown>)
       : {};
 
-  return {
-    root,
-    elements,
-  };
+  const elements: Record<string, unknown> = {};
+  for (const [key, el] of Object.entries(rawElements)) {
+    elements[key] = normalizeElement(el);
+  }
+
+  return { root, elements };
 }
 
 function handleAction(...args: unknown[]): void {
@@ -107,17 +145,18 @@ function CanvasRenderer({ spec }: { spec: JsonRenderSpec }) {
     );
   }
 
-  const rendererProps: JsonRecord = {
-    spec,
-    onAction: handleAction,
-  };
+  const rendererProps: JsonRecord = { spec, onAction: handleAction };
+  if (registry) rendererProps.registry = registry;
 
-  if (shadcnComponentMap) {
-    rendererProps.componentMap = shadcnComponentMap;
-    rendererProps.registry = shadcnComponentMap;
+  const rendered = React.createElement(RendererFromLibrary, rendererProps);
+
+  if (JSONUIProvider) {
+    const providerProps: JsonRecord = { children: rendered };
+    if (registry) providerProps.registry = registry;
+    return React.createElement(JSONUIProvider, providerProps, rendered);
   }
 
-  return React.createElement(RendererFromLibrary, rendererProps);
+  return rendered;
 }
 
 function App() {

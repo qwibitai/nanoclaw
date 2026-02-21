@@ -29,11 +29,24 @@ Target this canonical structure:
 {
   "root": "page",
   "elements": {
-    "page": { "component": "Container", "children": ["hero", "features"] },
-    "hero": { "component": "Heading", "props": { "text": "Build faster" } }
+    "page": { "type": "Stack", "children": ["hero", "features"] },
+    "hero": { "type": "Heading", "props": { "text": "Build faster", "level": "h1" } }
   }
 }
 ```
+
+Each element should use a `type` field (component name). `component` is accepted only for legacy compatibility and is normalized to `type` at render time.
+
+## Available Components
+
+Use `json-render-shadcn` for exact component props. Common components:
+
+- Layout: `Stack`, `Grid`, `Card`
+- Content: `Heading`, `Text`, `Image`, `Avatar`, `Badge`, `Alert`, `Separator`
+- Input: `Button`, `Link`, `Input`, `Textarea`, `Select`, `Checkbox`, `Switch`, `Slider`, `Toggle`
+- Complex: `Tabs`, `Accordion`, `Dialog`, `Drawer`, `Table`, `Carousel`, `Progress`
+
+For shadcn-based components, prefer `label` for button/link text props.
 
 ## SpecStream JSONL Example
 
@@ -41,9 +54,9 @@ Initial render:
 
 ```jsonl
 {"op":"replace","path":"/root","value":"page"}
-{"op":"add","path":"/elements/page","value":{"component":"Container","children":["hero","cta"]}}
-{"op":"add","path":"/elements/hero","value":{"component":"Heading","props":{"text":"Ship websites with NanoClaw"}}}
-{"op":"add","path":"/elements/cta","value":{"component":"Button","props":{"text":"Get started"}}}
+{"op":"add","path":"/elements/page","value":{"type":"Stack","children":["hero","cta"]}}
+{"op":"add","path":"/elements/hero","value":{"type":"Heading","props":{"text":"Ship websites with NanoClaw","level":"h1"}}}
+{"op":"add","path":"/elements/cta","value":{"type":"Button","props":{"label":"Get started"}}}
 ```
 
 Refinement patch:
@@ -51,7 +64,7 @@ Refinement patch:
 ```jsonl
 {"op":"replace","path":"/elements/hero/props/text","value":"Launch in days, not weeks"}
 {"op":"add","path":"/elements/page/children/2","value":"social-proof"}
-{"op":"add","path":"/elements/social-proof","value":{"component":"Text","props":{"text":"Trusted by 1,000+ teams"}}}
+{"op":"add","path":"/elements/social-proof","value":{"type":"Text","props":{"text":"Trusted by 1,000+ teams","variant":"muted"}}}
 ```
 
 ## Iteration Loop
