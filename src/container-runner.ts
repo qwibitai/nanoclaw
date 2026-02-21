@@ -25,6 +25,19 @@ import { RegisteredGroup } from './types.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+/** Recursively chmod a directory and all its contents (directories and files). */
+function chmodRecursive(dir: string, mode: number): void {
+  fs.chmodSync(dir, mode);
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      chmodRecursive(full, mode);
+    } else {
+      fs.chmodSync(full, mode);
+    }
+  }
+}
+
 function getHomeDir(): string {
   const home = process.env.HOME || os.homedir();
   if (!home) {
@@ -142,6 +155,8 @@ function buildVolumeMounts(
       }
     }
   }
+  // Ensure agent container (node user, uid 1000) can write to sessions dir
+  chmodRecursive(groupSessionsDir, 0o777);
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -151,9 +166,13 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  for (const sub of ['', 'messages', 'tasks', 'input']) {
+    const dir = sub ? path.join(groupIpcDir, sub) : groupIpcDir;
+    fs.mkdirSync(dir, { recursive: true });
+    // Agent container runs as node (uid 1000); orchestrator runs as root.
+    // chmod so the agent can read/write IPC files.
+    fs.chmodSync(dir, 0o777);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -235,6 +254,8 @@ export async function runContainerAgent(
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+  // Ensure agent container (node user, uid 1000) can write to workspace
+  fs.chmodSync(groupDir, 0o777);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
