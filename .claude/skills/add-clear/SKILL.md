@@ -300,6 +300,16 @@ Read `processGroupMessages()`. Find the lines that retrieve `missedMessages` and
 // Detect /clear command
 const clearCommand = missedMessages.find((m) => m.content.trim() === '/clear');
 if (clearCommand) {
+  // Check if conversation was JUST cleared (deduplicates queued /clear commands)
+  const allMessages = getAllMessagesForGroup(chatJid);
+  if (allMessages.length === 1 && allMessages[0].content.startsWith('[Conversation cleared]')) {
+    // Already cleared, likely a queued duplicate /clear
+    await channel.sendMessage(chatJid, 'Conversation was just cleared.');
+    lastAgentTimestamp[chatJid] = clearCommand.timestamp;
+    saveState();
+    return true;
+  }
+
   // Advance cursor past the /clear message before handling
   lastAgentTimestamp[chatJid] = clearCommand.timestamp;
   saveState();
