@@ -243,10 +243,8 @@ async function handleClearCommand(
     // EXTENSION POINT: if /add-memory-system is installed, write summary to daily log here
     // Example: await writeToMemoryDaily(group.folder, summary, new Date());
 
-    // Atomic: clear messages and insert summary in one transaction
-    clearAndSummarizeMessages(chatJid, summary, lastTimestamp);
-
-    // Reset SDK session directory (preserves settings.json)
+    // 1. Reset SDK session FIRST
+    // (if DB fails after this, user can safely retry /clear)
     const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
     if (fs.existsSync(sessionDir)) {
       const settingsPath = path.join(sessionDir, 'settings.json');
@@ -254,15 +252,22 @@ async function handleClearCommand(
         ? fs.readFileSync(settingsPath, 'utf-8')
         : null;
 
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-      fs.mkdirSync(sessionDir, { recursive: true });
-
-      if (settingsBackup) {
-        fs.writeFileSync(settingsPath, settingsBackup);
+      try {
+        fs.rmSync(sessionDir, { recursive: true, force: true });
+        fs.mkdirSync(sessionDir, { recursive: true });
+        if (settingsBackup) {
+          fs.writeFileSync(settingsPath, settingsBackup);
+        }
+      } catch (fsErr) {
+        logger.error({ group: group.folder, fsErr }, 'Session directory cleanup failed — aborting clear');
+        throw new Error(`Session cleanup failed: ${fsErr instanceof Error ? fsErr.message : String(fsErr)}. Nothing was cleared.`);
       }
     }
 
-    // Clear in-memory session reference and persist to DB
+    // 2. Clear DB atomically (if this fails, session is already reset but DB intact — retry is safe)
+    clearAndSummarizeMessages(chatJid, summary, lastTimestamp);
+
+    // 3. Clear in-memory session reference and persist to DB
     sessions[group.folder] = '';
     setSession(group.folder, '');
 
