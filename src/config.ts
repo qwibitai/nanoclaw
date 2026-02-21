@@ -12,6 +12,7 @@ const envConfig = readEnvFile([
   'PERSISTENCE_ROOT',
   'PERSISTENCE_AUTO_RESUME_ON_BOOT',
   'PERSISTENCE_INCLUDE_PERSONALITY',
+  'PERSISTENCE_SEED_MD_FILES',
 ]);
 
 export const ASSISTANT_NAME =
@@ -84,6 +85,13 @@ function resolvePathFromProject(candidate: string): string {
   return path.resolve(PROJECT_ROOT, candidate);
 }
 
+function parseStringList(value: string | undefined): string[] {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  return [...new Set(trimmed.split(',').map((entry) => entry.trim()).filter(Boolean))];
+}
+
 export const PERSISTENCE_ENABLED = parseBoolean(
   process.env.PERSISTENCE_ENABLED || envConfig.PERSISTENCE_ENABLED,
   true,
@@ -99,3 +107,6 @@ export const PERSISTENCE_INCLUDE_PERSONALITY = parseBoolean(
   process.env.PERSISTENCE_INCLUDE_PERSONALITY || envConfig.PERSISTENCE_INCLUDE_PERSONALITY,
   true,
 );
+export const PERSISTENCE_SEED_MD_FILES = parseStringList(
+  process.env.PERSISTENCE_SEED_MD_FILES || envConfig.PERSISTENCE_SEED_MD_FILES,
+).map(resolvePathFromProject);

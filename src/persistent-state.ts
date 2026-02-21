@@ -6,6 +6,7 @@ import {
   PERSISTENCE_ENABLED,
   PERSISTENCE_INCLUDE_PERSONALITY,
   PERSISTENCE_ROOT,
+  PERSISTENCE_SEED_MD_FILES,
 } from './config.js';
 import { logger } from './logger.js';
 
@@ -13,6 +14,7 @@ const STATE_MARKER = 'NANOCLAW_STATE';
 const STATE_BLOCK_RE = /<!--\s*NANOCLAW_STATE\n([\s\S]*?)\n-->\n?/m;
 const PROMPT_PROGRESS_MAX_CHARS = 12_000;
 const PROMPT_PERSONALITY_MAX_CHARS = 6_000;
+const PROMPT_SEED_MD_MAX_CHARS = 6_000;
 
 type PersistentStatus = 'idle' | 'in_progress' | 'resuming' | 'error';
 type ExecutionSource = 'chat' | 'scheduled' | 'boot_resume';
@@ -222,6 +224,26 @@ function readPersonality(groupFolder: string): string | null {
   return content || null;
 }
 
+function readSeedMarkdownFiles(): Array<{ filePath: string; content: string }> {
+  if (PERSISTENCE_SEED_MD_FILES.length === 0) return [];
+
+  const seedFiles: Array<{ filePath: string; content: string }> = [];
+  for (const filePath of PERSISTENCE_SEED_MD_FILES) {
+    if (path.extname(filePath).toLowerCase() !== '.md') continue;
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+      const content = fs.readFileSync(filePath, 'utf8').trim();
+      if (!content) continue;
+      seedFiles.push({ filePath, content });
+    } catch (err) {
+      logger.warn({ err, file: filePath }, 'Failed to read seed markdown file');
+    }
+  }
+
+  return seedFiles;
+}
+
 export function buildPromptWithPersistence(
   basePrompt: string,
   groupFolder: string,
@@ -234,6 +256,7 @@ export function buildPromptWithPersistence(
     PROMPT_PROGRESS_MAX_CHARS,
   );
   const personality = readPersonality(groupFolder);
+  const seedMarkdownFiles = readSeedMarkdownFiles();
 
   const sections: string[] = [
     '<persistent_context>',
@@ -258,6 +281,23 @@ export function buildPromptWithPersistence(
       clipForPrompt(personality, PROMPT_PERSONALITY_MAX_CHARS),
       '```',
     );
+  }
+
+  if (seedMarkdownFiles.length > 0) {
+    sections.push(
+      '',
+      'Additional seed markdown files configured via `PERSISTENCE_SEED_MD_FILES`:',
+    );
+
+    for (const seed of seedMarkdownFiles) {
+      sections.push(
+        '',
+        `Seed file: \`${seed.filePath}\``,
+        '```md',
+        clipForPrompt(seed.content, PROMPT_SEED_MD_MAX_CHARS),
+        '```',
+      );
+    }
   }
 
   sections.push('</persistent_context>', '', basePrompt);
