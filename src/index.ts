@@ -190,6 +190,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Progress events — forward to channel and return early
     if (result.type === 'progress') {
+      logger.info({ group: group.name, tool: result.tool, summary: result.summary }, 'Tool progress event');
       await channel.sendProgress?.(chatJid, result.tool, result.summary);
       return;
     }

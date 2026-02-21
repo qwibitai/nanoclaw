@@ -489,11 +489,17 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (message.type === 'assistant') {
+      if ('uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
       // Emit progress events for tool_use blocks
       const content = (message as { content?: Array<{ type: string; name?: string; input?: Record<string, unknown> }> }).content;
       if (content) {
+        const toolBlocks = content.filter(b => b.type === 'tool_use');
+        if (toolBlocks.length > 0) {
+          log(`[progress] ${toolBlocks.length} tool_use blocks: ${toolBlocks.map(b => b.name).join(', ')}`);
+        }
         for (const block of content) {
           if (block.type === 'tool_use' && block.name) {
             writeOutput({
@@ -503,6 +509,8 @@ async function runQuery(
             });
           }
         }
+      } else {
+        log(`[progress] assistant message has no content array, keys: ${Object.keys(message).join(', ')}`);
       }
     }
 
