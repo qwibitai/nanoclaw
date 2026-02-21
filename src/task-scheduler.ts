@@ -20,6 +20,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
+import { monitorBus, MONITOR_EVENTS } from './monitor-events.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
@@ -42,6 +43,7 @@ async function runTask(
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
   );
+  monitorBus.emit(MONITOR_EVENTS.TASK_STARTED, { taskId: task.id, groupFolder: task.group_folder, scheduleType: task.schedule_type });
 
   const groups = deps.registeredGroups();
   const group = Object.values(groups).find(
@@ -156,6 +158,7 @@ async function runTask(
     result,
     error,
   });
+  monitorBus.emit(MONITOR_EVENTS.TASK_COMPLETED, { taskId: task.id, groupFolder: task.group_folder, status: error ? 'error' : 'success', durationMs, error });
 
   let nextRun: string | null = null;
   if (task.schedule_type === 'cron') {

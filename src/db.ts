@@ -597,6 +597,64 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   return result;
 }
 
+// --- Monitor query functions ---
+
+export function getRecentMessages(chatJid?: string, limit = 50): Array<{
+  id: string;
+  chat_jid: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+  is_bot_message: number;
+}> {
+  const clampedLimit = Math.min(Math.max(1, limit), 200);
+  if (chatJid) {
+    return db
+      .prepare(
+        `SELECT id, chat_jid, sender_name, content, timestamp, is_from_me, is_bot_message
+         FROM messages WHERE chat_jid = ?
+         ORDER BY timestamp DESC LIMIT ?`,
+      )
+      .all(chatJid, clampedLimit) as any[];
+  }
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender_name, content, timestamp, is_from_me, is_bot_message
+       FROM messages
+       ORDER BY timestamp DESC LIMIT ?`,
+    )
+    .all(clampedLimit) as any[];
+}
+
+export function getTaskRunLogs(taskId?: string, limit = 50): Array<{
+  id: number;
+  task_id: string;
+  run_at: string;
+  duration_ms: number;
+  status: string;
+  result: string | null;
+  error: string | null;
+}> {
+  const clampedLimit = Math.min(Math.max(1, limit), 200);
+  if (taskId) {
+    return db
+      .prepare(
+        `SELECT id, task_id, run_at, duration_ms, status, result, error
+         FROM task_run_logs WHERE task_id = ?
+         ORDER BY run_at DESC LIMIT ?`,
+      )
+      .all(taskId, clampedLimit) as any[];
+  }
+  return db
+    .prepare(
+      `SELECT id, task_id, run_at, duration_ms, status, result, error
+       FROM task_run_logs
+       ORDER BY run_at DESC LIMIT ?`,
+    )
+    .all(clampedLimit) as any[];
+}
+
 // --- User accessors ---
 
 export function createUser(user: User): void {

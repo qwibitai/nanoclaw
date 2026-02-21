@@ -78,3 +78,7 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Monitor dashboard
+export const MONITOR_PORT = parseInt(process.env.MONITOR_PORT || '9100', 10);
+export const MONITOR_ENABLED = (process.env.MONITOR_ENABLED || 'true') !== 'false';
