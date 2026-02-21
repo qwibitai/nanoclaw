@@ -1,4 +1,8 @@
 import { Bot } from 'grammy';
+import https from 'https';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
@@ -17,6 +21,7 @@ export interface TelegramChannelOpts {
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
+  prefixAssistantName = false; // Telegram bots already display their name
 
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
@@ -25,6 +30,59 @@ export class TelegramChannel implements Channel {
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
     this.opts = opts;
+  }
+
+  /**
+   * Convert Claude's Markdown output to Telegram HTML.
+   * Telegram HTML supports: <b>, <i>, <code>, <pre>, <a>, <u>, <s>
+   */
+  private markdownToHtml(text: string): string {
+    // Process fenced code blocks first (```lang\ncode\n```)
+    let result = '';
+    const fencedCodeRegex = /```(\w*)\n?([\s\S]*?)```/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = fencedCodeRegex.exec(text)) !== null) {
+      // Process text before this code block
+      result += this.inlineMarkdownToHtml(text.slice(lastIndex, match.index));
+      // Add code block (escape HTML inside)
+      const code = match[2]
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      result += `<pre><code>${code}</code></pre>`;
+      lastIndex = match.index + match[0].length;
+    }
+    result += this.inlineMarkdownToHtml(text.slice(lastIndex));
+
+    return result;
+  }
+
+  private inlineMarkdownToHtml(text: string): string {
+    return text
+      // Escape HTML special chars
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      // Headers → bold
+      .replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>')
+      // Bold: **text** or __text__
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/__(.+?)__/g, '<b>$1</b>')
+      // Italic: *text* or _text_ (single)
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<i>$1</i>')
+      .replace(/(?<!_)_(?!_)(.+?)(?<!_)_(?!_)/g, '<i>$1</i>')
+      // Strikethrough: ~~text~~
+      .replace(/~~(.+?)~~/g, '<s>$1</s>')
+      // Inline code: `code`
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // Links: [text](url)
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+      // Horizontal rules
+      .replace(/^(-{3,}|\*{3,})$/gm, '───────────')
+      // Bullet lists: - item or * item
+      .replace(/^[*-]\s+(.+)$/gm, '• $1');
   }
 
   async connect(): Promise<void> {
@@ -153,10 +211,62 @@ export class TelegramChannel implements Channel {
       storeNonText(ctx, '[Voice message]'),
     );
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+
+    // Documents: download files ≤10MB so the agent can read them
+    this.bot.on('message:document', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const doc = ctx.message.document;
+      const fileName = doc?.file_name || 'file';
+      const fileId = doc?.file_id;
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+
+      this.opts.onChatMetadata(chatJid, timestamp);
+
+      // Try to download the file if it's small enough (Telegram limit: 20MB for bots)
+      let content = `[Document: ${fileName}]${caption}`;
+      if (fileId && doc?.file_size && doc.file_size < 10 * 1024 * 1024) {
+        try {
+          const tgFile = await ctx.api.getFile(fileId);
+          if (tgFile.file_path) {
+            // Save to group's uploads directory so agent can access it
+            const groupFolder = group.folder;
+            const uploadsDir = path.join(
+              process.cwd(),
+              'groups',
+              groupFolder,
+              'uploads',
+            );
+            fs.mkdirSync(uploadsDir, { recursive: true });
+            const localPath = path.join(uploadsDir, fileName);
+            await this.downloadFile(tgFile.file_path, localPath);
+            content = `[Document: ${fileName}] (saved to /workspace/group/uploads/${fileName})${caption}`;
+            logger.info({ chatJid, fileName, localPath }, 'Document downloaded');
+          }
+        } catch (err) {
+          logger.warn({ chatJid, fileName, err }, 'Failed to download document');
+        }
+      }
+
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
     });
+
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
       storeNonText(ctx, `[Sticker ${emoji}]`);
@@ -195,16 +305,28 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+      const html = this.markdownToHtml(text);
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
-      } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+      const chunks =
+        html.length <= MAX_LENGTH
+          ? [html]
+          : Array.from(
+              { length: Math.ceil(html.length / MAX_LENGTH) },
+              (_, i) => html.slice(i * MAX_LENGTH, (i + 1) * MAX_LENGTH),
+            );
+
+      for (const chunk of chunks) {
+        try {
+          await this.bot.api.sendMessage(numericId, chunk, {
+            parse_mode: 'HTML',
+          });
+        } catch {
+          // Fallback to plain text if HTML parsing fails (e.g. unmatched tags)
           await this.bot.api.sendMessage(
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            text.slice(0, MAX_LENGTH),
           );
         }
       }
@@ -212,6 +334,25 @@ export class TelegramChannel implements Channel {
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
+  }
+
+  private downloadFile(filePath: string, localPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = `https://api.telegram.org/file/bot${this.botToken}/${filePath}`;
+      const protocol = url.startsWith('https') ? https : http;
+      const file = fs.createWriteStream(localPath);
+      protocol
+        .get(url, (res) => {
+          res.pipe(file);
+          file.on('finish', () => {
+            file.close();
+            resolve();
+          });
+          file.on('error', reject);
+          res.on('error', reject);
+        })
+        .on('error', reject);
+    });
   }
 
   isConnected(): boolean {

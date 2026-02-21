@@ -169,6 +169,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
+  // Telegram's typing action expires after ~5s; keep it alive during long responses
+  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
+    channel.setTyping?.(chatJid, true);
+  }, 4000);
+  const stopTyping = () => {
+    if (typingInterval) {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+    channel.setTyping?.(chatJid, false);
+  };
+
   let hadError = false;
   let outputSentToUser = false;
 
@@ -180,6 +192,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
+        // Stop typing before sending so the indicator clears immediately
+        stopTyping();
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
@@ -192,7 +206,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  stopTyping();
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
