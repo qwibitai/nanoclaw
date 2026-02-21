@@ -34,14 +34,17 @@ export function ensureContainerRuntimeRunning(): boolean {
   }
 }
 
-/** Kill orphaned NanoClaw containers from previous runs. */
+/** Kill orphaned NanoClaw agent containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
     const output = execSync(
       `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
-    const orphans = output.trim().split('\n').filter(Boolean);
+    // Only stop containers whose name starts with "nanoclaw-" (spawned agents).
+    // Docker's name filter is substring-based, so it also matches the
+    // orchestrator container (e.g. "warren-app-srtpzj-nanoclaw-1").
+    const orphans = output.trim().split('\n').filter((n) => n.startsWith('nanoclaw-'));
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
