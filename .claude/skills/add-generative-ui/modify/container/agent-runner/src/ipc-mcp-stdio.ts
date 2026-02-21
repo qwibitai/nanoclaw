@@ -69,6 +69,32 @@ async function waitForCanvasResponse(
   return null;
 }
 
+function normalizeJsonl(input: string): string {
+  const lines = input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.length > 0 ? `${lines.join('\n')}\n` : '';
+}
+
+function operationsToJsonl(ops: unknown[]): string {
+  if (ops.length === 0) return '';
+  const lines = ops.map((op, index) => {
+    try {
+      const serialized = JSON.stringify(op);
+      if (serialized === undefined) {
+        throw new Error('Operation serializes to undefined');
+      }
+      return serialized;
+    } catch {
+      throw new Error(
+        `Unable to serialize operation at index ${index}. Ensure ops are valid JSON values.`,
+      );
+    }
+  });
+  return `${lines.join('\n')}\n`;
+}
+
 const server = new McpServer({
   name: 'nanoclaw',
   version: '1.0.0',
@@ -99,39 +125,44 @@ server.tool(
 
 server.tool(
   'update_canvas',
-  `Update the live generative UI canvas. Use "set_spec" for first render and "patch_ops" for incremental refinements.
+  `Update the live generative UI canvas with json-render SpecStream JSONL (RFC6902 operations).
 
 Input strategies:
-- Initial render: set_spec only
-- Incremental update: patch_ops only
-- Combined transaction: set_spec + patch_ops
-- Advanced batch: events array with explicit set/patch events in order
+- Preferred: events_jsonl string (one operation per line)
+- Convenience: ops array (serialized to JSONL automatically)
+- Combined: provide both to append ops after events_jsonl
 
 Targeting:
 - Non-main groups can only update their own group folder.
 - Main group can target another registered group with group_folder.`,
   {
-    set_spec: z.unknown().optional().describe('Full UI spec for a complete state replacement.'),
-    patch_ops: z.array(z.any()).optional().describe('JSON Patch operations applied after set_spec (if provided).'),
-    events: z.array(
-      z.object({
-        type: z.enum(['set', 'patch']),
-        spec: z.unknown().optional(),
-        ops: z.array(z.any()).optional(),
-      }),
-    ).optional().describe('Optional explicit ordered events. If provided, set_spec and patch_ops are ignored.'),
+    events_jsonl: z.string().optional().describe('SpecStream JSONL payload. Each line is a JSON Patch op object (op/path/value/from).'),
+    ops: z.array(z.any()).optional().describe('Optional operation objects to serialize as JSONL. Useful when building ops programmatically.'),
     group_folder: z.string().optional().describe('Optional target group folder (main only).'),
   },
   async (args) => {
-    const hasSet = args.set_spec !== undefined;
-    const hasPatch = Array.isArray(args.patch_ops) && args.patch_ops.length > 0;
-    const hasEvents = Array.isArray(args.events) && args.events.length > 0;
+    const inlineJsonl = normalizeJsonl(args.events_jsonl ?? '');
+    let opsJsonl = '';
+    if (Array.isArray(args.ops) && args.ops.length > 0) {
+      try {
+        opsJsonl = operationsToJsonl(args.ops);
+      } catch (err) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: err instanceof Error ? err.message : String(err),
+          }],
+          isError: true,
+        };
+      }
+    }
 
-    if (!hasSet && !hasPatch && !hasEvents) {
+    const eventsJsonl = `${inlineJsonl}${opsJsonl}`;
+    if (!eventsJsonl.trim()) {
       return {
         content: [{
           type: 'text' as const,
-          text: 'No canvas update provided. Supply set_spec, patch_ops, or events.',
+          text: 'No canvas update provided. Supply events_jsonl or ops.',
         }],
         isError: true,
       };
@@ -153,9 +184,7 @@ Targeting:
       type: 'update_canvas',
       requestId,
       group_folder: args.group_folder,
-      set_spec: args.set_spec,
-      patch_ops: args.patch_ops,
-      events: args.events,
+      events_jsonl: eventsJsonl,
       source_group: groupFolder,
       timestamp: new Date().toISOString(),
     });

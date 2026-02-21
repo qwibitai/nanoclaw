@@ -15,6 +15,9 @@ adds:
   - web/dist/canvas-app.js
   - web/dist/canvas-app.css
   - container/skills/generative-ui-builder/SKILL.md
+  - container/skills/json-render-core/SKILL.md
+  - container/skills/json-render-react/SKILL.md
+  - container/skills/json-render-shadcn/SKILL.md
 modifies:
   - src/config.ts
   - src/index.ts
@@ -26,6 +29,7 @@ structured:
   npm_dependencies:
     "@json-render/core": "^0.8.0"
     "@json-render/react": "^0.8.0"
+    "@json-render/shadcn": "^0.8.0"
     react: "^19.0.0"
     react-dom: "^19.0.0"
     esbuild: "^0.25.0"

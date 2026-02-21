@@ -15,6 +15,7 @@ describe('add-generative-ui skill package', () => {
     expect(content).toContain('version: 1.0.0');
     expect(content).toContain('@json-render/core');
     expect(content).toContain('@json-render/react');
+    expect(content).toContain('@json-render/shadcn');
     expect(content).toContain('GENUI_PORT');
     expect(content).toContain('scripts/build-canvas-ui.mjs');
   });
@@ -26,6 +27,7 @@ describe('add-generative-ui skill package', () => {
     const content = fs.readFileSync(skillPath, 'utf-8');
     expect(content).toContain('name: add-generative-ui');
     expect(content).toContain('mcp__nanoclaw__update_canvas');
+    expect(content).toContain('events_jsonl');
     expect(content).toContain('/api/canvas/');
     expect(content).toContain('http://127.0.0.1:4318/canvas');
   });
@@ -44,6 +46,9 @@ describe('add-generative-ui skill package', () => {
       'add/web/dist/canvas-app.js',
       'add/web/dist/canvas-app.css',
       'add/container/skills/generative-ui-builder/SKILL.md',
+      'add/container/skills/json-render-core/SKILL.md',
+      'add/container/skills/json-render-react/SKILL.md',
+      'add/container/skills/json-render-shadcn/SKILL.md',
     ];
 
     for (const relPath of expectedFiles) {
@@ -81,7 +86,7 @@ describe('add-generative-ui skill package', () => {
     }
   });
 
-  it('runtime skill guides website generation with set+patch flow', () => {
+  it('runtime skill guides website generation with SpecStream flow', () => {
     const runtimeSkillPath = path.join(
       skillDir,
       'add',
@@ -94,8 +99,29 @@ describe('add-generative-ui skill package', () => {
 
     expect(content).toContain('name: generative-ui-builder');
     expect(content).toContain('mcp__nanoclaw__update_canvas');
-    expect(content).toContain('set_spec');
-    expect(content).toContain('patch_ops');
+    expect(content).toContain('events_jsonl');
+    expect(content).toContain('/root');
+    expect(content).toContain('/elements');
     expect(content).toContain('http://127.0.0.1:4318/canvas');
+  });
+
+  it('includes upstream json-render helper skills', () => {
+    const core = fs.readFileSync(
+      path.join(skillDir, 'add', 'container', 'skills', 'json-render-core', 'SKILL.md'),
+      'utf-8',
+    );
+    const react = fs.readFileSync(
+      path.join(skillDir, 'add', 'container', 'skills', 'json-render-react', 'SKILL.md'),
+      'utf-8',
+    );
+    const shadcn = fs.readFileSync(
+      path.join(skillDir, 'add', 'container', 'skills', 'json-render-shadcn', 'SKILL.md'),
+      'utf-8',
+    );
+
+    expect(core).toContain('name: json-render-core');
+    expect(react).toContain('name: json-render-react');
+    expect(shadcn).toContain('name: json-render-shadcn');
+    expect(shadcn).toContain('@json-render/shadcn');
   });
 });

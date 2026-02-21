@@ -1,9 +1,8 @@
-import React, { ReactNode, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import * as JsonRenderCore from '@json-render/core';
 import * as JsonRenderReact from '@json-render/react';
-import { z } from 'zod';
+import * as JsonRenderShadcn from '@json-render/shadcn';
 
 import './styles.css';
 
@@ -15,6 +14,11 @@ type GroupEntry = {
   folder: string;
 };
 
+type JsonRenderSpec = {
+  root: string | null;
+  elements: Record<string, unknown>;
+};
+
 type CanvasStatePayload = {
   group: GroupEntry;
   groupFolder: string;
@@ -24,243 +28,96 @@ type CanvasStatePayload = {
   canvasUrl?: string;
 };
 
-type CanvasNode = JsonRecord & {
-  type?: string;
-  key?: string;
-  children?: CanvasNode[];
-};
-
-const PassthroughProvider = ({ children }: { children?: ReactNode }) => <>{children}</>;
-const DataProvider = (JsonRenderReact as JsonRecord).DataProvider as
-  | React.ComponentType<{ children?: ReactNode; initialData?: JsonRecord }>
-  | undefined;
-const ActionProvider = (JsonRenderReact as JsonRecord).ActionProvider as
-  | React.ComponentType<{ children?: ReactNode; actions?: JsonRecord; handlers?: JsonRecord }>
-  | undefined;
-const VisibilityProvider = (JsonRenderReact as JsonRecord).VisibilityProvider as
-  | React.ComponentType<{ children?: ReactNode }>
-  | undefined;
 const RendererFromLibrary = (JsonRenderReact as JsonRecord).Renderer as
-  | React.ComponentType<{ tree: CanvasNode; registry?: JsonRecord; catalog?: JsonRecord }>
+  | React.ComponentType<{
+      spec?: JsonRenderSpec;
+      tree?: unknown;
+      componentMap?: JsonRecord;
+      registry?: JsonRecord;
+      onAction?: (...args: unknown[]) => void;
+    }>
   | undefined;
 
-const createCatalog = (JsonRenderCore as JsonRecord).createCatalog as
-  | ((input: JsonRecord) => JsonRecord)
-  | undefined;
+const shadcnExports = JsonRenderShadcn as JsonRecord;
+const shadcnComponentMap =
+  (shadcnExports.componentMap as JsonRecord | undefined) ||
+  (shadcnExports.shadcnComponentMap as JsonRecord | undefined) ||
+  (shadcnExports.registry as JsonRecord | undefined) ||
+  (shadcnExports.shadcnRegistry as JsonRecord | undefined);
 
-const catalog = createCatalog
-  ? createCatalog({
-      components: {
-        Container: { schema: z.object({ style: z.record(z.any()).optional() }).passthrough() },
-        Heading: { schema: z.object({ text: z.string().optional(), level: z.number().optional() }).passthrough() },
-        Text: { schema: z.object({ text: z.string().optional(), style: z.record(z.any()).optional() }).passthrough() },
-        Button: { schema: z.object({ text: z.string().optional(), action: z.string().optional(), href: z.string().optional() }).passthrough() },
-        Image: { schema: z.object({ src: z.string().optional(), alt: z.string().optional(), style: z.record(z.any()).optional() }).passthrough() },
-        Stack: { schema: z.object({ style: z.record(z.any()).optional() }).passthrough() },
-        List: { schema: z.object({ items: z.array(z.string()).optional(), ordered: z.boolean().optional() }).passthrough() },
-      },
-      actions: {
-        open_url: {
-          schema: z.object({
-            url: z.string(),
-          }),
-        },
-      },
-      data: {},
-    })
-  : null;
-
-const actionHandlers = {
-  open_url: ({ url }: { url?: string }) => {
-    if (!url) return;
-    if (typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
-  },
-};
-
-function asStyle(style: unknown): React.CSSProperties {
-  if (style && typeof style === 'object') {
-    return style as React.CSSProperties;
-  }
-  return {};
-}
-
-function nodeText(node: CanvasNode): string {
-  if (typeof node.text === 'string') return node.text;
-  if (typeof node.label === 'string') return node.label;
-  if (typeof node.title === 'string') return node.title;
-  return '';
-}
-
-function normalizeSpec(spec: unknown): CanvasNode | null {
-  if (!spec) return null;
-
-  if (typeof spec !== 'object') {
-    return {
-      type: 'Text',
-      key: 'root-text',
-      text: String(spec),
-    };
+function coerceSpec(input: unknown): JsonRenderSpec | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null;
   }
 
-  const obj = spec as CanvasNode;
-
-  if (obj.tree && typeof obj.tree === 'object') {
-    return normalizeSpec(obj.tree);
-  }
-
-  if (typeof obj.type === 'string') {
-    return {
-      ...obj,
-      key: obj.key || 'root',
-    };
-  }
+  const value = input as JsonRecord;
+  const root = typeof value.root === 'string' || value.root === null
+    ? value.root
+    : null;
+  const elements =
+    value.elements && typeof value.elements === 'object' && !Array.isArray(value.elements)
+      ? (value.elements as Record<string, unknown>)
+      : {};
 
   return {
-    type: 'Container',
-    key: 'root-container',
-    children: [
-      {
-        type: 'Text',
-        key: 'raw-json',
-        text: JSON.stringify(obj, null, 2),
-        style: {
-          fontFamily: 'monospace',
-          whiteSpace: 'pre-wrap',
-          background: '#0f172a',
-          color: '#e2e8f0',
-          padding: '14px',
-          borderRadius: '12px',
-        },
-      },
-    ],
+    root,
+    elements,
   };
 }
 
-function renderChildren(node: CanvasNode): ReactNode {
-  const children = Array.isArray(node.children) ? node.children : [];
-  return children.map((child, index) => (
-    <RenderNode key={child.key || `${node.key || 'node'}-${index}`} node={child} />
-  ));
-}
+function handleAction(...args: unknown[]): void {
+  const [actionName, maybePayload] = args;
 
-function RenderNode({ node }: { node: CanvasNode }) {
-  const type = node.type || 'Container';
-  const style = asStyle(node.style);
+  let name = '';
+  let payload: JsonRecord = {};
 
-  if (type === 'Heading') {
-    const level = typeof node.level === 'number' ? Math.max(1, Math.min(6, node.level)) : 1;
-    const text = nodeText(node);
-    switch (level) {
-      case 1:
-        return <h1 style={style}>{text}</h1>;
-      case 2:
-        return <h2 style={style}>{text}</h2>;
-      case 3:
-        return <h3 style={style}>{text}</h3>;
-      case 4:
-        return <h4 style={style}>{text}</h4>;
-      case 5:
-        return <h5 style={style}>{text}</h5>;
-      default:
-        return <h6 style={style}>{text}</h6>;
+  if (typeof actionName === 'string') {
+    name = actionName;
+  } else if (actionName && typeof actionName === 'object') {
+    const value = actionName as JsonRecord;
+    if (typeof value.action === 'string') {
+      name = value.action;
+    } else if (typeof value.name === 'string') {
+      name = value.name;
+    }
+
+    if (value.payload && typeof value.payload === 'object' && !Array.isArray(value.payload)) {
+      payload = value.payload as JsonRecord;
     }
   }
 
-  if (type === 'Text') {
-    return <p style={style}>{nodeText(node)}</p>;
+  if (maybePayload && typeof maybePayload === 'object' && !Array.isArray(maybePayload)) {
+    payload = maybePayload as JsonRecord;
   }
 
-  if (type === 'Image') {
-    return (
-      <img
-        src={typeof node.src === 'string' ? node.src : ''}
-        alt={typeof node.alt === 'string' ? node.alt : 'image'}
-        style={style}
-      />
-    );
-  }
-
-  if (type === 'List') {
-    const items = Array.isArray(node.items) ? node.items : [];
-    if (node.ordered) {
-      return (
-        <ol style={style}>
-          {items.map((item, index) => <li key={`${node.key || 'list'}-${index}`}>{String(item)}</li>)}
-        </ol>
-      );
+  if (name === 'open_url') {
+    const url = payload.url;
+    if (typeof url === 'string' && url.length > 0) {
+      window.open(url, '_blank', 'noopener,noreferrer');
     }
-    return (
-      <ul style={style}>
-        {items.map((item, index) => <li key={`${node.key || 'list'}-${index}`}>{String(item)}</li>)}
-      </ul>
-    );
   }
-
-  if (type === 'Button') {
-    const text = nodeText(node) || 'Button';
-    const href = typeof node.href === 'string' ? node.href : undefined;
-    if (href) {
-      return (
-        <a href={href} target="_blank" rel="noreferrer" style={style}>
-          {text}
-        </a>
-      );
-    }
-    return (
-      <button
-        style={style}
-        onClick={() => actionHandlers.open_url({ url: typeof node.url === 'string' ? node.url : undefined })}
-      >
-        {text}
-      </button>
-    );
-  }
-
-  return <div style={style}>{renderChildren(node)}</div>;
 }
 
-function FallbackRenderer({ tree }: { tree: CanvasNode }) {
-  return <RenderNode node={tree} />;
-}
-
-function CanvasRenderer({ tree }: { tree: CanvasNode }) {
-  const Renderer = RendererFromLibrary || FallbackRenderer;
-  const dataProvider = DataProvider || PassthroughProvider;
-  const actionProvider = ActionProvider || PassthroughProvider;
-  const visibilityProvider = VisibilityProvider || PassthroughProvider;
+function CanvasRenderer({ spec }: { spec: JsonRenderSpec }) {
+  if (!RendererFromLibrary) {
+    return (
+      <div className="placeholder">
+        json-render Renderer is unavailable. Raw spec shown in the state panel.
+      </div>
+    );
+  }
 
   const rendererProps: JsonRecord = {
-    tree,
-    registry: {
-      Container: RenderNode,
-      Heading: RenderNode,
-      Text: RenderNode,
-      Button: RenderNode,
-      Image: RenderNode,
-      Stack: RenderNode,
-      List: RenderNode,
-    },
+    spec,
+    onAction: handleAction,
   };
 
-  if (catalog) {
-    rendererProps.catalog = catalog;
+  if (shadcnComponentMap) {
+    rendererProps.componentMap = shadcnComponentMap;
+    rendererProps.registry = shadcnComponentMap;
   }
 
-  return React.createElement(
-    dataProvider,
-    { initialData: {} },
-    React.createElement(
-      actionProvider,
-      { actions: actionHandlers, handlers: actionHandlers },
-      React.createElement(
-        visibilityProvider,
-        null,
-        React.createElement(Renderer, rendererProps),
-      ),
-    ),
-  );
+  return React.createElement(RendererFromLibrary, rendererProps);
 }
 
 function App() {
@@ -273,7 +130,7 @@ function App() {
     const loadGroups = async () => {
       try {
         const response = await fetch('/api/canvas/groups');
-        const payload = await response.json() as { groups: GroupEntry[] };
+        const payload = (await response.json()) as { groups: GroupEntry[] };
         const nextGroups = Array.isArray(payload.groups) ? payload.groups : [];
         setGroups(nextGroups);
 
@@ -298,13 +155,15 @@ function App() {
     const loadState = async () => {
       try {
         const response = await fetch(`/api/canvas/${selectedGroup}/state`);
-        const payload = await response.json() as CanvasStatePayload | { error?: string };
+        const payload = (await response.json()) as
+          | CanvasStatePayload
+          | { error?: string };
         if (cancelled) return;
 
         if (!response.ok) {
           const message =
             typeof (payload as { error?: string }).error === 'string'
-              ? (payload as { error?: string }).error as string
+              ? ((payload as { error?: string }).error as string)
               : `Failed to load canvas state (${response.status})`;
           setError(message);
           return;
@@ -329,7 +188,7 @@ function App() {
     };
   }, [selectedGroup]);
 
-  const tree = useMemo(() => normalizeSpec(state?.spec), [state?.spec]);
+  const spec = useMemo(() => coerceSpec(state?.spec), [state?.spec]);
 
   return (
     <div className="layout">
@@ -351,14 +210,18 @@ function App() {
         </header>
         <div className="canvas-body">
           {error ? <div className="placeholder">{error}</div> : null}
-          {!error && tree ? <CanvasRenderer tree={tree} /> : null}
-          {!error && !tree ? (
+          {!error && spec ? <CanvasRenderer spec={spec} /> : null}
+          {!error && !spec ? (
             <div className="placeholder">
               No canvas state yet. Ask NanoClaw to call
               {' '}
               <code>mcp__nanoclaw__update_canvas</code>
               {' '}
-              with a <code>set_spec</code> payload.
+              with SpecStream
+              {' '}
+              <code>events_jsonl</code>
+              {' '}
+              operations.
             </div>
           ) : null}
         </div>

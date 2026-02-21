@@ -1,59 +1,71 @@
 ---
 name: generative-ui-builder
-description: Build and iterate websites on NanoClaw's live canvas. Use when the user asks for landing pages, dashboards, marketing pages, portfolios, or any visual web UI mockup. Prefer set-first then patch refinements through mcp__nanoclaw__update_canvas.
+description: Build and iterate websites on NanoClaw's live canvas using json-render SpecStream JSONL. Use when users request landing pages, dashboards, marketing pages, or UI mockups.
 allowed-tools: mcp__nanoclaw__update_canvas, mcp__nanoclaw__send_message
 ---
 
 # Generative UI Builder
 
-Use this workflow whenever the user wants a website or UI built on the live canvas.
+Use this workflow when the user wants a website/UI rendered on NanoClaw's canvas.
 
-## Core Loop
+Companion skills in this environment:
+- `json-render-core`
+- `json-render-react`
+- `json-render-shadcn`
 
-1. Clarify goal, audience, and visual direction.
-2. Build an initial full spec with `mcp__nanoclaw__update_canvas` using `set_spec`.
-3. Refine with `patch_ops` instead of replacing everything.
-4. Confirm what changed and share canvas URL.
+## Core Contract
 
-## Tool Contract
+Always call `mcp__nanoclaw__update_canvas` with `events_jsonl`.
 
-Call `mcp__nanoclaw__update_canvas` with one of:
+- `events_jsonl` is newline-delimited JSON Patch operations (RFC6902)
+- Paths target json-render spec fields (`/root`, `/elements/...`)
+- Optional `group_folder` can target another group from main context
 
-- `set_spec`: full replacement (initial render)
-- `patch_ops`: JSON Patch refinement
-- `set_spec` + `patch_ops`: apply both in one transaction
-- `events`: ordered list of `{type:"set"|"patch", ...}` for advanced updates
+## json-render Spec Shape
 
-Always prefer:
+Target this canonical structure:
 
-- First call: `set_spec`
-- Follow-up calls: `patch_ops`
+```json
+{
+  "root": "page",
+  "elements": {
+    "page": { "component": "Container", "children": ["hero", "features"] },
+    "hero": { "component": "Heading", "props": { "text": "Build faster" } }
+  }
+}
+```
 
-## Stable Spec Pattern
+## SpecStream JSONL Example
 
-Use predictable component nodes:
+Initial render:
 
-- `Container` / `Stack` for layout wrappers
-- `Heading` for section titles
-- `Text` for copy
-- `Button` for actions
-- `Image` for hero/media
-- `List` for bullets or steps
+```jsonl
+{"op":"replace","path":"/root","value":"page"}
+{"op":"add","path":"/elements/page","value":{"component":"Container","children":["hero","cta"]}}
+{"op":"add","path":"/elements/hero","value":{"component":"Heading","props":{"text":"Ship websites with NanoClaw"}}}
+{"op":"add","path":"/elements/cta","value":{"component":"Button","props":{"text":"Get started"}}}
+```
 
-Include `style` objects directly on nodes for spacing, typography, colors, and layout.
+Refinement patch:
 
-## Iteration Tactics
+```jsonl
+{"op":"replace","path":"/elements/hero/props/text","value":"Launch in days, not weeks"}
+{"op":"add","path":"/elements/page/children/2","value":"social-proof"}
+{"op":"add","path":"/elements/social-proof","value":{"component":"Text","props":{"text":"Trusted by 1,000+ teams"}}}
+```
 
-- Change only requested sections with targeted JSON Patch ops.
-- Keep structure stable; patch content/style values in place.
-- If changes become broad, send a fresh `set_spec` and continue patching.
+## Iteration Loop
+
+1. Clarify audience, goals, and visual direction.
+2. Choose stable element IDs (`page`, `hero`, `cta`, etc.).
+3. Send initial `events_jsonl` to create full structure.
+4. Apply focused patch lines for requested refinements.
+5. Confirm what changed and share canvas URL.
 
 ## Response Pattern
 
 After each successful update:
 
-1. Summarize what was rendered.
-2. Mention the active group/folder if relevant.
-3. Provide the URL:
-   `http://127.0.0.1:4318/canvas`
-   (or the URL returned by the tool if different).
+1. Summarize rendered sections and changes.
+2. Mention group target if relevant.
+3. Share canvas URL from tool result (default: `http://127.0.0.1:4318/canvas`).

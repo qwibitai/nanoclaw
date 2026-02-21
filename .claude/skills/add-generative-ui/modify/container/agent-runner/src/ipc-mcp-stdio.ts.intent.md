@@ -1,12 +1,13 @@
 # What this skill adds
 
-- Adds MCP tool `update_canvas` to forward canvas updates through IPC and await structured responses.
+- Adds MCP tool `update_canvas` to forward json-render SpecStream JSONL updates through IPC and await structured responses.
 - Adds response polling helper for synchronous tool UX.
 
 # Key sections
 
 - `RESPONSES_DIR` constant.
 - `waitForCanvasResponse(requestId, timeoutMs)` helper.
+- JSONL helpers (`normalizeJsonl`, `operationsToJsonl`).
 - New `server.tool('update_canvas', ...)`.
 
 # Invariants

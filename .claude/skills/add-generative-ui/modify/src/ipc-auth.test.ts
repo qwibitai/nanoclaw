@@ -327,7 +327,7 @@ describe('update_canvas authorization', () => {
         type: 'update_canvas',
         requestId: 'req-1',
         group_folder: 'other-group',
-        set_spec: { type: 'Text', text: 'hello' },
+        events_jsonl: '{"op":"replace","path":"/root","value":"app"}\n',
       },
       'main',
       true,
@@ -337,9 +337,7 @@ describe('update_canvas authorization', () => {
     expect(updateCanvasMock).toHaveBeenCalledWith(
       {
         groupFolder: 'other-group',
-        setSpec: { type: 'Text', text: 'hello' },
-        patchOps: undefined,
-        events: undefined,
+        eventsJsonl: '{"op":"replace","path":"/root","value":"app"}\n',
       },
       'main',
       true,
@@ -352,7 +350,7 @@ describe('update_canvas authorization', () => {
         type: 'update_canvas',
         requestId: 'req-2',
         group_folder: 'main',
-        set_spec: { type: 'Text', text: 'blocked' },
+        events_jsonl: '{"op":"replace","path":"/root","value":"blocked"}\n',
       },
       'other-group',
       false,
@@ -362,9 +360,7 @@ describe('update_canvas authorization', () => {
     expect(updateCanvasMock).toHaveBeenCalledWith(
       {
         groupFolder: 'main',
-        setSpec: { type: 'Text', text: 'blocked' },
-        patchOps: undefined,
-        events: undefined,
+        eventsJsonl: '{"op":"replace","path":"/root","value":"blocked"}\n',
       },
       'other-group',
       false,

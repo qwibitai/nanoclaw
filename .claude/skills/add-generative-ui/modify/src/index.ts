@@ -11,7 +11,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { CanvasServer } from './canvas-server.js';
-import { CanvasEventError, CanvasEvent, CanvasStore } from './canvas-store.js';
+import { CanvasStore } from './canvas-store.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -156,62 +156,27 @@ function resolveTargetGroupFolder(
   return { ok: true, groupFolder: target };
 }
 
-function normalizeCanvasEvents(input: {
-  events?: Array<{ type: string; spec?: unknown; ops?: unknown[] }>;
-  setSpec?: unknown;
-  patchOps?: unknown[];
-}): CanvasEvent[] {
-  if (Array.isArray(input.events) && input.events.length > 0) {
-    return input.events.map((event, index) => {
-      if (event.type === 'set') {
-        return {
-          type: 'set',
-          spec: event.spec,
-        };
-      }
-      if (event.type === 'patch' && Array.isArray(event.ops)) {
-        return {
-          type: 'patch',
-          ops: event.ops as any,
-        };
-      }
-      throw new CanvasEventError(
-        `Invalid event at index ${index}. Expected type "set" or "patch".`,
-        index + 1,
-      );
-    });
-  }
-
-  const events: CanvasEvent[] = [];
-  if (input.setSpec !== undefined) {
-    events.push({
-      type: 'set',
-      spec: input.setSpec,
-    });
-  }
-  if (Array.isArray(input.patchOps) && input.patchOps.length > 0) {
-    events.push({
-      type: 'patch',
-      ops: input.patchOps as any,
-    });
-  }
-  return events;
+function normalizeCanvasEventsJsonl(input: string | undefined): string {
+  if (!input) return '';
+  const lines = input
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return lines.length > 0 ? `${lines.join('\n')}\n` : '';
 }
 
 async function updateCanvasState(
   data: {
     groupFolder?: string;
-    setSpec?: unknown;
-    patchOps?: unknown[];
-    events?: Array<{ type: string; spec?: unknown; ops?: unknown[] }>;
+    eventsJsonl?: string;
   },
   sourceGroup: string,
   isMain: boolean,
 ): Promise<Record<string, unknown>> {
-  if (!canvasStore) {
+  if (!canvasServer) {
     return {
       success: false,
-      error: 'Canvas store is not initialized',
+      error: 'Canvas server is not initialized',
     };
   }
 
@@ -231,41 +196,68 @@ async function updateCanvasState(
     };
   }
 
-  try {
-    const events = normalizeCanvasEvents(data);
-    if (events.length === 0) {
-      return {
-        success: false,
-        error: 'No canvas updates supplied. Provide set_spec, patch_ops, or events.',
-      };
-    }
-
-    const state = canvasStore.applyEvents(target.groupFolder, events);
-
-    return {
-      success: true,
-      group: {
-        jid: targetGroup.jid,
-        name: targetGroup.group.name,
-        folder: targetGroup.group.folder,
-      },
-      ...state,
-      canvasUrl: canvasServer?.canvasUrl() ?? `http://127.0.0.1:${GENUI_PORT}/canvas`,
-    };
-  } catch (err) {
-    if (err instanceof CanvasEventError) {
-      return {
-        success: false,
-        error: err.message,
-        line: err.line,
-      };
-    }
-
+  const eventsJsonl = normalizeCanvasEventsJsonl(data.eventsJsonl);
+  if (!eventsJsonl) {
     return {
       success: false,
-      error: err instanceof Error ? err.message : String(err),
+      error: 'No canvas updates supplied. Provide events_jsonl.',
     };
   }
+
+  const canvasPort = canvasServer.getPort() ?? GENUI_PORT;
+  const endpoint = `http://127.0.0.1:${canvasPort}/api/canvas/${encodeURIComponent(target.groupFolder)}/events`;
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+      },
+      body: eventsJsonl,
+    });
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to reach canvas server: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    payload = (await response.json()) as Record<string, unknown>;
+  } catch {
+    return {
+      success: false,
+      error: `Canvas server returned non-JSON response (${response.status})`,
+    };
+  }
+
+  if (!response.ok) {
+    const error = typeof payload.error === 'string'
+      ? payload.error
+      : `Canvas server rejected update (${response.status})`;
+    const line =
+      typeof payload.line === 'number' ? payload.line : undefined;
+    return {
+      success: false,
+      error,
+      line,
+    };
+  }
+
+  return {
+    success: true,
+    group: {
+      jid: targetGroup.jid,
+      name: targetGroup.group.name,
+      folder: targetGroup.group.folder,
+    },
+    ...payload,
+    canvasUrl:
+      typeof payload.canvasUrl === 'string'
+        ? payload.canvasUrl
+        : canvasServer.canvasUrl() ?? `http://127.0.0.1:${GENUI_PORT}/canvas`,
+  };
 }
 
 /**

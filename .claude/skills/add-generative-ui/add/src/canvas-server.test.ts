@@ -74,29 +74,45 @@ describeSocket('CanvasServer', () => {
     expect(payload.groups[0].folder).toBe('main');
   });
 
-  it('applies posted events and returns updated state', async () => {
+  it('applies posted SpecStream JSONL and returns updated state', async () => {
     const post = await fetch(endpoint('/api/canvas/main/events'), {
       method: 'POST',
-      body: '{"type":"set","spec":{"title":"Hello"}}\n{"type":"patch","ops":[{"op":"replace","path":"/title","value":"Updated"}]}\n',
+      body: [
+        '{"op":"replace","path":"/root","value":"page"}',
+        '{"op":"add","path":"/elements/page","value":{"component":"Container","children":["hero"]}}',
+        '{"op":"add","path":"/elements/hero","value":{"component":"Heading","props":{"text":"Updated"}}}',
+      ].join('\n'),
     });
 
     const updated = (await post.json()) as {
       revision: number;
-      spec: { title: string };
+      spec: {
+        root: string;
+        elements: {
+          hero: { props: { text: string } };
+        };
+      };
     };
     expect(post.status).toBe(200);
-    expect(updated.revision).toBe(2);
-    expect(updated.spec.title).toBe('Updated');
+    expect(updated.revision).toBe(3);
+    expect(updated.spec.root).toBe('page');
+    expect(updated.spec.elements.hero.props.text).toBe('Updated');
 
     const getState = await fetch(endpoint('/api/canvas/main/state'));
     const state = (await getState.json()) as {
       revision: number;
-      spec: { title: string };
+      spec: {
+        root: string;
+        elements: {
+          hero: { props: { text: string } };
+        };
+      };
     };
 
     expect(getState.status).toBe(200);
-    expect(state.revision).toBe(2);
-    expect(state.spec.title).toBe('Updated');
+    expect(state.revision).toBe(3);
+    expect(state.spec.root).toBe('page');
+    expect(state.spec.elements.hero.props.text).toBe('Updated');
   });
 
   it('rejects malformed JSONL payloads', async () => {

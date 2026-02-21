@@ -2,7 +2,7 @@
 
 - Adds IPC request handling for `update_canvas`.
 - Adds response file writing under each group namespace (`/ipc/<group>/responses`).
-- Extends `IpcDeps` with `updateCanvas(...)`.
+- Extends `IpcDeps` with `updateCanvas(...)` carrying `eventsJsonl` payloads.
 
 # Key sections
 

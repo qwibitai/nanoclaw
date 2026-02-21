@@ -8,6 +8,46 @@ import { DATA_DIR } from './config.js';
 
 const { applyPatch } = pkg;
 
+const SPECSTREAM_OPS = new Set<Operation['op']>([
+  'add',
+  'remove',
+  'replace',
+  'move',
+  'copy',
+  'test',
+]);
+
+interface JsonRenderSpec {
+  root: string | null;
+  elements: Record<string, unknown>;
+}
+
+function createEmptySpec(): JsonRenderSpec {
+  return {
+    root: null,
+    elements: {},
+  };
+}
+
+function coerceSpec(input: unknown): JsonRenderSpec {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return createEmptySpec();
+  }
+
+  const value = input as Record<string, unknown>;
+  const root =
+    typeof value.root === 'string' || value.root === null ? value.root : null;
+  const elements =
+    value.elements && typeof value.elements === 'object' && !Array.isArray(value.elements)
+      ? (value.elements as Record<string, unknown>)
+      : {};
+
+  return {
+    root,
+    elements,
+  };
+}
+
 export interface CanvasState {
   groupFolder: string;
   spec: unknown;
@@ -15,15 +55,7 @@ export interface CanvasState {
   updatedAt: string | null;
 }
 
-export type CanvasEvent =
-  | {
-      type: 'set';
-      spec: unknown;
-    }
-  | {
-      type: 'patch';
-      ops: Operation[];
-    };
+export type CanvasSpecStreamEvent = Operation;
 
 interface StoredCanvasState {
   spec: unknown;
@@ -61,42 +93,40 @@ export class CanvasStore {
   }
 
   applyEventsFromJsonl(groupFolder: string, eventsJsonl: string): CanvasState {
-    const events = parseCanvasEventsJsonl(eventsJsonl);
-    return this.applyEvents(groupFolder, events);
+    const operations = parseCanvasEventsJsonl(eventsJsonl);
+    return this.applyEvents(groupFolder, operations);
   }
 
-  applyEvents(groupFolder: string, events: CanvasEvent[]): CanvasState {
-    if (events.length === 0) {
+  applyEvents(groupFolder: string, operations: CanvasSpecStreamEvent[]): CanvasState {
+    if (operations.length === 0) {
       throw new CanvasEventError('No canvas events found in request body', 0);
     }
 
     const current = this.getOrLoad(groupFolder);
-    let nextSpec = structuredClone(current.spec);
+    let nextSpec = coerceSpec(structuredClone(current.spec));
 
-    events.forEach((event, index) => {
+    operations.forEach((operation, index) => {
       const line = index + 1;
-      if (event.type === 'set') {
-        nextSpec = structuredClone(event.spec);
-        return;
-      }
-
       try {
         const patchResult = applyPatch(
           nextSpec as Record<string, unknown>,
-          event.ops,
+          [operation],
           true,
           false,
         );
-        nextSpec = patchResult.newDocument;
+        nextSpec = coerceSpec(patchResult.newDocument);
       } catch (err) {
         const details = err instanceof Error ? err.message : String(err);
-        throw new CanvasEventError(`Invalid patch operation: ${details}`, line);
+        throw new CanvasEventError(
+          `Invalid SpecStream operation: ${details}`,
+          line,
+        );
       }
     });
 
     const updated: StoredCanvasState = {
       spec: nextSpec,
-      revision: current.revision + events.length,
+      revision: current.revision + operations.length,
       updatedAt: new Date().toISOString(),
     };
 
@@ -117,7 +147,7 @@ export class CanvasStore {
     const filePath = this.getCanvasFilePath(groupFolder);
     if (!fs.existsSync(filePath)) {
       const initial: StoredCanvasState = {
-        spec: {},
+        spec: createEmptySpec(),
         revision: 0,
         updatedAt: null,
       };
@@ -130,7 +160,7 @@ export class CanvasStore {
         fs.readFileSync(filePath, 'utf-8'),
       ) as StoredCanvasState;
       const loaded: StoredCanvasState = {
-        spec: parsed.spec ?? {},
+        spec: coerceSpec(parsed.spec),
         revision: Number.isFinite(parsed.revision) ? parsed.revision : 0,
         updatedAt: parsed.updatedAt ?? null,
       };
@@ -138,7 +168,7 @@ export class CanvasStore {
       return loaded;
     } catch {
       const fallback: StoredCanvasState = {
-        spec: {},
+        spec: createEmptySpec(),
         revision: 0,
         updatedAt: null,
       };
@@ -161,7 +191,7 @@ export class CanvasStore {
   }
 }
 
-export function parseCanvasEventsJsonl(input: string): CanvasEvent[] {
+export function parseCanvasEventsJsonl(input: string): CanvasSpecStreamEvent[] {
   const lines = input
     .split('\n')
     .map((line) => line.trim())
@@ -177,38 +207,38 @@ export function parseCanvasEventsJsonl(input: string): CanvasEvent[] {
       throw new CanvasEventError('Invalid JSON on line', lineNumber);
     }
 
-    if (!parsed || typeof parsed !== 'object') {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new CanvasEventError('Canvas event must be an object', lineNumber);
     }
 
     const event = parsed as Record<string, unknown>;
+    const op = event.op;
 
-    if (event.type === 'set') {
-      if (!('spec' in event)) {
-        throw new CanvasEventError('"set" event requires "spec"', lineNumber);
-      }
-      return {
-        type: 'set',
-        spec: event.spec,
-      };
+    if (typeof op !== 'string' || !SPECSTREAM_OPS.has(op as Operation['op'])) {
+      throw new CanvasEventError(
+        'SpecStream event "op" must be one of add/remove/replace/move/copy/test',
+        lineNumber,
+      );
     }
 
-    if (event.type === 'patch') {
-      if (!Array.isArray(event.ops)) {
-        throw new CanvasEventError(
-          '"patch" event requires "ops" array',
-          lineNumber,
-        );
-      }
-      return {
-        type: 'patch',
-        ops: event.ops as Operation[],
-      };
+    if (typeof event.path !== 'string') {
+      throw new CanvasEventError('SpecStream event requires string "path"', lineNumber);
     }
 
-    throw new CanvasEventError(
-      'Canvas event type must be "set" or "patch"',
-      lineNumber,
-    );
+    if ((op === 'add' || op === 'replace' || op === 'test') && !('value' in event)) {
+      throw new CanvasEventError(
+        `SpecStream "${op}" event requires "value"`,
+        lineNumber,
+      );
+    }
+
+    if ((op === 'move' || op === 'copy') && typeof event.from !== 'string') {
+      throw new CanvasEventError(
+        `SpecStream "${op}" event requires string "from"`,
+        lineNumber,
+      );
+    }
+
+    return event as Operation;
   });
 }

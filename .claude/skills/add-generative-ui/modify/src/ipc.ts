@@ -29,9 +29,7 @@ export interface IpcDeps {
   updateCanvas: (
     request: {
       groupFolder?: string;
-      setSpec?: unknown;
-      patchOps?: unknown[];
-      events?: Array<{ type: string; spec?: unknown; ops?: unknown[] }>;
+      eventsJsonl?: string;
     },
     sourceGroup: string,
     isMain: boolean,
@@ -195,9 +193,7 @@ export async function processTaskIpc(
     // For update_canvas
     requestId?: string;
     group_folder?: string;
-    set_spec?: unknown;
-    patch_ops?: unknown[];
-    events?: Array<{ type: string; spec?: unknown; ops?: unknown[] }>;
+    events_jsonl?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -415,9 +411,7 @@ export async function processTaskIpc(
         const result = await deps.updateCanvas(
           {
             groupFolder: data.group_folder,
-            setSpec: data.set_spec,
-            patchOps: data.patch_ops,
-            events: data.events,
+            eventsJsonl: data.events_jsonl,
           },
           sourceGroup,
           isMain,

@@ -1,7 +1,8 @@
 # What this skill adds
 
 - Boots a local canvas HTTP server (`/canvas`, `/api/canvas/*`) at startup.
-- Adds canvas state/update handling and exposes it to IPC as `updateCanvas`.
+- Adds canvas update handling and exposes it to IPC as `updateCanvas`.
+- Routes canvas updates through HTTP `POST /api/canvas/:group/events` using SpecStream JSONL.
 - Ensures graceful shutdown includes canvas server teardown.
 
 # Key sections
@@ -10,7 +11,7 @@
 - New helper functions:
   - `findGroupByFolder`
   - `resolveTargetGroupFolder`
-  - `normalizeCanvasEvents`
+  - `normalizeCanvasEventsJsonl`
   - `updateCanvasState`
 - `main()` now initializes/stops canvas server and wires `updateCanvas` into `startIpcWatcher`.
 
