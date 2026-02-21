@@ -10,7 +10,8 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WarrenChannel } from './channels/warren.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+// WhatsApp is heavy (~100MB) — lazy import only when enabled
+type WhatsAppChannelType = import('./channels/whatsapp.js').WhatsAppChannel;
 import {
   ContainerOutput,
   runContainerAgent,
@@ -49,7 +50,7 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let whatsapp: WhatsAppChannelType;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -430,7 +431,9 @@ async function main(): Promise<void> {
 
   // Create and connect channels
   // WhatsApp is optional — skip when WHATSAPP_ENABLED=false (e.g. Warren-only deploys)
+  // Dynamic import keeps baileys out of memory when disabled
   if (process.env.WHATSAPP_ENABLED !== 'false') {
+    const { WhatsAppChannel } = await import('./channels/whatsapp.js');
     whatsapp = new WhatsAppChannel(channelOpts);
     channels.push(whatsapp);
     await whatsapp.connect();

@@ -31,5 +31,4 @@ ENV NODE_ENV=production
 # Data directory for SQLite, auth state, group configs
 VOLUME ["/app/data"]
 
-# Diagnostic: capture exit code and signals
-CMD ["sh", "-c", "trap 'echo GOT_SIGTERM' TERM; trap 'echo GOT_SIGINT' INT; echo '=== launching node ==='; node dist/index.js; CODE=$?; echo \"=== node exited with code: $CODE ===\"; if [ $CODE -eq 139 ]; then echo 'SEGFAULT (SIGSEGV)'; elif [ $CODE -eq 143 ]; then echo 'SIGTERM from outside'; elif [ $CODE -eq 137 ]; then echo 'SIGKILL (OOM?)'; fi; sleep 10"]
+CMD ["node", "dist/index.js"]
