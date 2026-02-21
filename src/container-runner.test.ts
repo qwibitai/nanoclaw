@@ -81,7 +81,7 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { runContainerAgent, ContainerOutput, ContainerResult } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -124,6 +124,7 @@ describe('container-runner timeout behavior', () => {
 
     // Emit output with a result
     emitOutputMarker(fakeProc, {
+      type: 'result',
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
@@ -141,7 +142,7 @@ describe('container-runner timeout behavior', () => {
     // Let the promise resolve
     await vi.advanceTimersByTimeAsync(10);
 
-    const result = await resultPromise;
+    const result = await resultPromise as ContainerResult;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-123');
     expect(onOutput).toHaveBeenCalledWith(
@@ -166,7 +167,7 @@ describe('container-runner timeout behavior', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    const result = await resultPromise;
+    const result = await resultPromise as ContainerResult;
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
@@ -183,6 +184,7 @@ describe('container-runner timeout behavior', () => {
 
     // Emit output
     emitOutputMarker(fakeProc, {
+      type: 'result',
       status: 'success',
       result: 'Done',
       newSessionId: 'session-456',
@@ -195,7 +197,7 @@ describe('container-runner timeout behavior', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    const result = await resultPromise;
+    const result = await resultPromise as ContainerResult;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
   });

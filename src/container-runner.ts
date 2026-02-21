@@ -90,12 +90,21 @@ export interface ContainerInput {
   secrets?: Record<string, string>;
 }
 
-export interface ContainerOutput {
+export interface ContainerResult {
+  type: 'result';
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
 }
+
+export interface ContainerProgress {
+  type: 'progress';
+  tool: string;
+  summary: string;
+}
+
+export type ContainerOutput = ContainerResult | ContainerProgress;
 
 interface VolumeMount {
   hostPath: string;
@@ -372,7 +381,7 @@ export async function runContainerAgent(
 
           try {
             const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
+            if (parsed.type !== 'progress' && parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
             hadStreamingOutput = true;
@@ -466,6 +475,7 @@ export async function runContainerAgent(
           );
           outputChain.then(() => {
             resolve({
+              type: 'result',
               status: 'success',
               result: null,
               newSessionId,
@@ -480,6 +490,7 @@ export async function runContainerAgent(
         );
 
         resolve({
+          type: 'result',
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -558,6 +569,7 @@ export async function runContainerAgent(
         );
 
         resolve({
+          type: 'result',
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -573,6 +585,7 @@ export async function runContainerAgent(
             'Container completed (streaming mode)',
           );
           resolve({
+            type: 'result',
             status: 'success',
             result: null,
             newSessionId,
@@ -598,7 +611,7 @@ export async function runContainerAgent(
           jsonLine = lines[lines.length - 1];
         }
 
-        const output: ContainerOutput = JSON.parse(jsonLine);
+        const output = JSON.parse(jsonLine) as ContainerResult;
 
         logger.info(
           {
@@ -623,6 +636,7 @@ export async function runContainerAgent(
         );
 
         resolve({
+          type: 'result',
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -634,6 +648,7 @@ export async function runContainerAgent(
       clearTimeout(timeout);
       logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
       resolve({
+        type: 'result',
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,

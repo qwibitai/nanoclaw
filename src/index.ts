@@ -14,6 +14,7 @@ import { WarrenChannel } from './channels/warren.js';
 type WhatsAppChannelType = import('./channels/whatsapp.js').WhatsAppChannel;
 import {
   ContainerOutput,
+  ContainerResult,
   initDindPathMapping,
   runContainerAgent,
   writeGroupsSnapshot,
@@ -187,9 +188,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    // Progress events — forward to channel and return early
+    if (result.type === 'progress') {
+      await channel.sendProgress?.(chatJid, result.tool, result.summary);
+      return;
+    }
+
+    // Backwards compat: treat missing type as result
+    const res = result as ContainerResult;
+
     // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+    if (res.result) {
+      const raw = typeof res.result === 'string' ? res.result : JSON.stringify(res.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
@@ -201,7 +211,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'error') {
+    if (res.status === 'error') {
       hadError = true;
     }
   });
@@ -263,7 +273,7 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.type !== 'progress' && output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -285,12 +295,12 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.type !== 'progress' && output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
 
-    if (output.status === 'error') {
+    if (output.type !== 'progress' && output.status === 'error') {
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',

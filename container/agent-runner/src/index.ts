@@ -367,7 +367,6 @@ function summarizeTool(toolName: string, input: Record<string, unknown>): string
     case 'Bash':
       return ('$ ' + String(input.command || '')).slice(0, 60);
     case 'Grep':
-      return String(input.pattern || '');
     case 'Glob':
       return String(input.pattern || '');
     case 'WebSearch':

@@ -87,6 +87,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: forward tool-progress events to the frontend.
+  sendProgress?(jid: string, tool: string, summary: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

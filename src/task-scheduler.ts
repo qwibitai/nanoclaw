@@ -114,6 +114,7 @@ async function runTask(
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        if (streamedOutput.type === 'progress') return;
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
@@ -129,9 +130,9 @@ async function runTask(
 
     if (idleTimer) clearTimeout(idleTimer);
 
-    if (output.status === 'error') {
+    if (output.type !== 'progress' && output.status === 'error') {
       error = output.error || 'Unknown error';
-    } else if (output.result) {
+    } else if (output.type !== 'progress' && output.result) {
       // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
     }
