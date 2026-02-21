@@ -235,7 +235,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  const keys = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+  const keys = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN'];
   const fromFile = readEnvFile(keys);
   // Fall back to process.env for Docker deployments where secrets
   // come via environment variables rather than a .env file.

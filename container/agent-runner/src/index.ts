@@ -188,7 +188,7 @@ function createPreCompactHook(): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'GITHUB_TOKEN'];
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -515,12 +515,12 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // Configure git to use OAuth token for GitHub HTTPS access.
+  // Configure git to use GitHub PAT for HTTPS access.
   // Also rewrite SSH URLs to HTTPS so git@github.com: clones work too.
   // Credential file lives in /tmp — container is ephemeral (--rm).
-  const oauthToken = sdkEnv.CLAUDE_CODE_OAUTH_TOKEN;
-  if (oauthToken) {
-    fs.writeFileSync('/tmp/.git-credentials', `https://oauth2:${oauthToken}@github.com\n`, { mode: 0o600 });
+  const githubToken = sdkEnv.GITHUB_TOKEN;
+  if (githubToken) {
+    fs.writeFileSync('/tmp/.git-credentials', `https://x-access-token:${githubToken}@github.com\n`, { mode: 0o600 });
     execFileSync('git', ['config', '--global', 'credential.helper', 'store --file /tmp/.git-credentials']);
     execFileSync('git', ['config', '--global', 'url.https://github.com/.insteadOf', 'git@github.com:']);
     log('Git credentials configured for GitHub HTTPS access');
