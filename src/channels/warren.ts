@@ -62,6 +62,17 @@ export class WarrenChannel implements Channel {
     }
   }
 
+  async sendResult(jid: string, summary: string): Promise<void> {
+    const sessionId = jid.replace('warren:', '');
+    await fetch(this.callbackUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, type: 'result', text: summary }),
+    }).catch(() => {
+      // Result notification is best-effort
+    });
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     const sessionId = jid.replace('warren:', '');
     const url = this.callbackUrl.replace('/callback', '/typing');

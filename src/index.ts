@@ -224,6 +224,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  // Signal completion so Warren can fire the notification overlay
+  await channel.sendResult?.(chatJid, '').catch(() => {});
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
