@@ -30,12 +30,21 @@ interface ContainerInput {
   secrets?: Record<string, string>;
 }
 
-interface ContainerOutput {
+interface ContainerResult {
+  type: 'result';
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
 }
+
+interface ContainerProgress {
+  type: 'progress';
+  tool: string;
+  summary: string;
+}
+
+type ContainerOutput = ContainerResult | ContainerProgress;
 
 interface SessionEntry {
   sessionId: string;
@@ -348,6 +357,28 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+function summarizeTool(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'Read':
+      return String(input.file_path || '').split('/').slice(-2).join('/');
+    case 'Write':
+    case 'Edit':
+      return String(input.file_path || '').split('/').slice(-2).join('/');
+    case 'Bash':
+      return ('$ ' + String(input.command || '')).slice(0, 60);
+    case 'Grep':
+      return String(input.pattern || '');
+    case 'Glob':
+      return String(input.pattern || '');
+    case 'WebSearch':
+      return String(input.query || '');
+    case 'WebFetch':
+      return String(input.url || '').slice(0, 60);
+    default:
+      return toolName;
+  }
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -461,6 +492,19 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Emit progress events for tool_use blocks
+      const content = (message as { content?: Array<{ type: string; name?: string; input?: Record<string, unknown> }> }).content;
+      if (content) {
+        for (const block of content) {
+          if (block.type === 'tool_use' && block.name) {
+            writeOutput({
+              type: 'progress',
+              tool: block.name,
+              summary: summarizeTool(block.name, block.input || {}),
+            });
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -478,6 +522,7 @@ async function runQuery(
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
+        type: 'result',
         status: 'success',
         result: textResult || null,
         newSessionId
@@ -501,6 +546,7 @@ async function main(): Promise<void> {
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     writeOutput({
+      type: 'result',
       status: 'error',
       result: null,
       error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
@@ -569,7 +615,7 @@ async function main(): Promise<void> {
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({ type: 'result', status: 'success', result: null, newSessionId: sessionId });
 
       log('Query ended, waiting for next IPC message...');
 
@@ -587,6 +633,7 @@ async function main(): Promise<void> {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
     writeOutput({
+      type: 'result',
       status: 'error',
       result: null,
       newSessionId: sessionId,
