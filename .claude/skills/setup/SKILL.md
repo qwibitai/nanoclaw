@@ -15,9 +15,10 @@ Run setup scripts automatically. Only pause when user action is required (WhatsA
 
 Run `./.claude/skills/setup/scripts/01-check-environment.sh` and parse the status block.
 
-- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
+- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5a
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record PLATFORM, APPLE_CONTAINER, and DOCKER values for step 3
+- Record IMESSAGE_AVAILABLE, HAS_IMESSAGE_ACCESS, and CONFIGURED_CHANNEL for step 5
 
 **If NODE_OK=false:**
 
@@ -98,7 +99,27 @@ Do NOT ask the user to paste the token into the chat. Do NOT use AskUserQuestion
 
 **API key:** Tell the user to add `ANTHROPIC_API_KEY=<key>` to the `.env` file in the project root, then let you know when done. Once confirmed, verify the `.env` file has the key.
 
-## 5. WhatsApp Authentication
+## 5. Choose Messaging Channel
+
+Determine the available channels from step 1:
+
+- **If PLATFORM=macos AND IMESSAGE_AVAILABLE=true:** AskUserQuestion with three options:
+  1. **iMessage** (Recommended) — Uses your Mac's Messages app. No phone pairing needed.
+  2. **WhatsApp** — Uses WhatsApp Web protocol. Requires scanning a QR code.
+  3. **Both** — Run both channels simultaneously.
+
+- **If PLATFORM=linux OR IMESSAGE_AVAILABLE=false:** Auto-select WhatsApp. Tell the user: "Using WhatsApp (iMessage is only available on macOS)."
+
+- **If CONFIGURED_CHANNEL is not "none":** Note which channel is already configured and ask if they want to keep it, switch, or add the other channel.
+
+Based on the choice, set the `.env` flags:
+- WhatsApp only: `WHATSAPP_ENABLED=true`, `IMESSAGE_ENABLED=false`
+- iMessage only: `WHATSAPP_ENABLED=false`, `IMESSAGE_ENABLED=true`
+- Both: `WHATSAPP_ENABLED=true`, `IMESSAGE_ENABLED=true`
+
+Then proceed to the relevant sub-steps:
+
+### 5a. WhatsApp Authentication (if WhatsApp chosen)
 
 If HAS_AUTH=true from step 1, confirm with user: "WhatsApp credentials already exist. Want to keep them or re-authenticate?" If keeping, skip to step 6.
 
@@ -116,7 +137,28 @@ If AUTH_STATUS=already_authenticated → skip ahead.
 - 515 → Stream error during pairing. The auth script handles reconnection, but if it persists, re-run the auth script.
 - timeout → Auth took too long. Ask user if they scanned/entered the code, offer to retry.
 
+### 5b. iMessage Setup (if iMessage chosen)
+
+Run `./.claude/skills/setup/scripts/04b-setup-imessage.sh --check-only` and parse the status block.
+
+**If CHAT_DB_ACCESSIBLE=true:** iMessage is ready. Continue to step 6.
+
+**If CHAT_DB_EXISTS=true but CHAT_DB_ACCESSIBLE=false (ERROR=permission_denied):**
+Tell the user Full Disk Access is needed for the Node.js process. Guide them:
+1. Open **System Settings > Privacy & Security > Full Disk Access**
+2. Click **+** and add the Node.js binary. Find it with: `which node` (typically `/opt/homebrew/bin/node` or `/usr/local/bin/node`)
+3. Also add your **terminal app** (Terminal.app, iTerm2, etc.) if not already listed
+4. Restart the terminal after granting access
+
+After the user confirms, re-run `04b-setup-imessage.sh --check-only` to verify.
+
+**If ERROR=no_messages_app:** Tell the user to open the Messages app at least once to initialize the database, then re-run.
+
+**If ERROR=not_macos:** This shouldn't happen (step 5 should have auto-selected WhatsApp). Fall back to WhatsApp.
+
 ## 6. Configure Trigger and Channel Type
+
+### WhatsApp channel
 
 First, determine the phone number situation. Get the bot's WhatsApp number from `store/auth/creds.json`:
 `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
@@ -137,7 +179,18 @@ AskUserQuestion: Main channel type? (options depend on phone number setup)
 
 Do NOT show options that don't apply to the user's setup. For example, don't offer "DM with the bot" if the bot shares the user's number (you can't DM yourself on WhatsApp).
 
-## 7. Sync and Select Group (If Group Channel)
+### iMessage channel
+
+AskUserQuestion: What trigger word? (default: Andy). In group chats, messages starting with @TriggerWord go to Claude. In the main channel, no prefix needed.
+
+AskUserQuestion: Main channel type?
+1. **DM with yourself** (Recommended) — Message your own phone/email in Messages. The bot responds in the same conversation.
+2. **DM with a contact** — Pick a specific contact's conversation. Useful if you have a secondary Apple ID.
+3. **Group chat** — Use an existing iMessage group conversation.
+
+## 7. Sync and Select Channel
+
+### WhatsApp
 
 **For personal chat:** The JID is the bot's own phone number from step 6. Construct as `NUMBER@s.whatsapp.net`.
 
@@ -146,9 +199,21 @@ Do NOT show options that don't apply to the user's setup. For example, don't off
 **For group (solo or with bot):**
 1. Run `./.claude/skills/setup/scripts/05-sync-groups.sh` (Bash timeout: 60000ms)
 2. **If BUILD=failed:** Read `logs/setup.log`, fix the TypeScript error, re-run.
-3. **If GROUPS_IN_DB=0:** Check `logs/setup.log` for the sync output. Common causes: WhatsApp auth expired (re-run step 5), connection timeout (re-run sync script with longer timeout).
+3. **If GROUPS_IN_DB=0:** Check `logs/setup.log` for the sync output. Common causes: WhatsApp auth expired (re-run step 5a), connection timeout (re-run sync script with longer timeout).
 4. Run `./.claude/skills/setup/scripts/05b-list-groups.sh` to get groups (pipe-separated JID|name lines). Do NOT display the output to the user.
 5. Pick the most likely candidates (e.g. groups with the trigger word or "NanoClaw" in the name, small/solo groups) and present them as AskUserQuestion options — show names only, not JIDs. Include an "Other" option if their group isn't listed. If they pick Other, search by name in the DB or re-run with a higher limit.
+
+### iMessage
+
+**For DM with yourself:** Ask for the user's phone number or email address (the one registered with iMessage). Construct JID as `imsg:+1XXXXXXXXXX` or `imsg:user@example.com`.
+
+**For DM with a contact:** Ask for the contact's phone number or email. Construct JID as `imsg:+1XXXXXXXXXX` or `imsg:user@example.com`.
+
+**For group chat:**
+1. Run `./.claude/skills/setup/scripts/04b-setup-imessage.sh --list-chats` (Bash timeout: 30000ms)
+2. Parse the pipe-separated `jid|name` output lines (before the status block).
+3. Present the best candidates as AskUserQuestion options — show names only, not JIDs. Include an "Other" option.
+4. If they pick Other or no groups found, ask them to create a group in Messages first, then re-run.
 
 ## 8. Register Channel
 
@@ -159,6 +224,14 @@ Run `./.claude/skills/setup/scripts/06-register-channel.sh` with args:
 - `--folder "main"` — always "main" for the first channel
 - `--no-trigger-required` — if personal chat, DM, or solo group
 - `--assistant-name "Name"` — if trigger word differs from "Andy"
+
+**iMessage JID formats:**
+- DM: `imsg:+14155551234` or `imsg:user@example.com`
+- Group: `imsg-group:chat123456789`
+
+**WhatsApp JID formats:**
+- DM: `14155551234@s.whatsapp.net`
+- Group: `120363012345678901@g.us`
 
 ## 9. Mount Allowlist
 
@@ -193,7 +266,9 @@ Run `./.claude/skills/setup/scripts/09-verify.sh` and parse the status block.
 - SERVICE=stopped → run `npm run build` first, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux). Re-check.
 - SERVICE=not_found → re-run step 10.
 - CREDENTIALS=missing → re-run step 4.
-- WHATSAPP_AUTH=not_found → re-run step 5.
+- WHATSAPP_AUTH=not_found → re-run step 5a.
+- IMESSAGE_ACCESS=not_accessible → re-run step 5b (guide Full Disk Access).
+- WHATSAPP_AUTH=not_applicable or IMESSAGE_ACCESS=not_applicable → these are fine, the channel isn't configured.
 - REGISTERED_GROUPS=0 → re-run steps 7-8.
 - MOUNT_ALLOWLIST=missing → run `./.claude/skills/setup/scripts/07-configure-mounts.sh --empty` to create a default.
 
@@ -205,14 +280,18 @@ Show the log tail command: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common causes: wrong Node path in plist (re-run step 10), missing `.env` (re-run step 4), missing WhatsApp auth (re-run step 5).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common causes: wrong Node path in plist (re-run step 10), missing `.env` (re-run step 4), missing WhatsApp auth (re-run step 5a).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — start it with the appropriate command for your runtime. Check container logs in `groups/main/logs/container-*.log`.
 
 **No response to messages:** Verify the trigger pattern matches. Main channel and personal/solo chats don't need a prefix. Check the registered JID in the database: `sqlite3 store/messages.db "SELECT * FROM registered_groups"`. Check `logs/nanoclaw.log`.
 
-**Messages sent but not received (DMs):** WhatsApp may use LID (Linked Identity) JIDs. Check logs for LID translation. Verify the registered JID has no device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`).
+**Messages sent but not received (WhatsApp DMs):** WhatsApp may use LID (Linked Identity) JIDs. Check logs for LID translation. Verify the registered JID has no device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`).
 
 **WhatsApp disconnected:** Run `npm run auth` to re-authenticate, then `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw`.
+
+**iMessage not receiving messages:** Verify Full Disk Access is granted to the Node.js binary (`which node`), not just the terminal app. The launchd service runs Node directly, so Node itself needs the permission. After granting, restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`.
+
+**iMessage Full Disk Access — which binary?** The launchd plist runs Node directly. Check the plist for the exact path: `grep -A1 ProgramArguments ~/Library/LaunchAgents/com.nanoclaw.plist | grep string | head -1`. That binary needs Full Disk Access.
 
 **Unload service:** `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
