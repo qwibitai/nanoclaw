@@ -190,7 +190,7 @@ export class WhatsAppChannel implements Channel {
               )) as Buffer;
 
               if (buffer && buffer.length > 0) {
-                const filename = saveMediaToGroup(groups[chatJid].folder, buffer, mediaInfo);
+                const filename = await saveMediaToGroup(groups[chatJid].folder, buffer, mediaInfo);
                 const containerPath = `/workspace/group/media/${filename}`;
                 content = formatMediaContent(mediaInfo, containerPath, content);
               } else {

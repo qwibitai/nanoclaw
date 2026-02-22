@@ -5,15 +5,32 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import exifr from 'exifr';
 
 import { GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
+
+export interface GPSData {
+  latitude: number;
+  longitude: number;
+  altitude?: number;
+  timestamp?: string;
+}
+
+export interface MediaMetadata {
+  gps?: GPSData;
+  camera?: string;
+  timestamp?: string;
+  width?: number;
+  height?: number;
+}
 
 export interface MediaInfo {
   type: 'image' | 'document';
   mimetype: string;
   filename?: string;
   caption?: string;
+  metadata?: MediaMetadata;
 }
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -64,14 +81,69 @@ export function getMediaInfo(msg: { message?: Record<string, any> | null }): Med
 }
 
 /**
+ * Extract EXIF metadata from image buffer
+ */
+async function extractMetadata(buffer: Buffer, mimetype: string): Promise<MediaMetadata | undefined> {
+  // Only extract metadata from images
+  if (!mimetype.startsWith('image/')) {
+    return undefined;
+  }
+
+  try {
+    const exif = await exifr.parse(buffer, {
+      gps: true,
+    });
+
+    if (!exif) return undefined;
+
+    const metadata: MediaMetadata = {};
+
+    // Extract GPS data
+    if (exif.latitude && exif.longitude) {
+      metadata.gps = {
+        latitude: exif.latitude,
+        longitude: exif.longitude,
+        altitude: exif.GPSAltitude,
+        timestamp: exif.GPSDateStamp || exif.DateTimeOriginal,
+      };
+      logger.info({
+        lat: exif.latitude.toFixed(6),
+        lon: exif.longitude.toFixed(6)
+      }, 'GPS data extracted');
+    }
+
+    // Extract camera info
+    if (exif.Make || exif.Model) {
+      metadata.camera = [exif.Make, exif.Model].filter(Boolean).join(' ');
+    }
+
+    // Extract timestamp
+    if (exif.DateTimeOriginal || exif.DateTime) {
+      metadata.timestamp = exif.DateTimeOriginal || exif.DateTime;
+    }
+
+    // Extract dimensions
+    if (exif.ExifImageWidth && exif.ExifImageHeight) {
+      metadata.width = exif.ExifImageWidth;
+      metadata.height = exif.ExifImageHeight;
+    }
+
+    return Object.keys(metadata).length > 0 ? metadata : undefined;
+  } catch (err) {
+    logger.debug({ err }, 'Failed to extract EXIF metadata');
+    return undefined;
+  }
+}
+
+/**
  * Save a media buffer to the group's media directory.
  * Returns the filename (relative to media/).
  */
-export function saveMediaToGroup(
+export async function saveMediaToGroup(
   groupFolder: string,
   buffer: Buffer,
   mediaInfo: MediaInfo,
-): string {
+): Promise<string> {
   const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
 
@@ -90,7 +162,14 @@ export function saveMediaToGroup(
 
   const filePath = path.join(mediaDir, filename);
   fs.writeFileSync(filePath, buffer);
-  logger.info({ groupFolder, filename, size: buffer.length }, 'Media saved');
+
+  // Extract metadata from images
+  const metadata = await extractMetadata(buffer, mediaInfo.mimetype);
+  if (metadata) {
+    mediaInfo.metadata = metadata;
+  }
+
+  logger.info({ groupFolder, filename, size: buffer.length, hasGPS: !!metadata?.gps }, 'Media saved');
 
   return filename;
 }
@@ -107,7 +186,29 @@ export function formatMediaContent(
   const parts: string[] = [];
 
   if (mediaInfo.type === 'image') {
-    parts.push(`[Image attached: ${containerPath}]`);
+    let imageLine = `[Image attached: ${containerPath}`;
+
+    // Add GPS data if available
+    if (mediaInfo.metadata?.gps) {
+      const { latitude, longitude, altitude } = mediaInfo.metadata.gps;
+      imageLine += ` | GPS: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+      if (altitude) {
+        imageLine += ` (${altitude.toFixed(1)}m)`;
+      }
+    }
+
+    // Add camera info if available
+    if (mediaInfo.metadata?.camera) {
+      imageLine += ` | Camera: ${mediaInfo.metadata.camera}`;
+    }
+
+    // Add timestamp if available
+    if (mediaInfo.metadata?.timestamp) {
+      imageLine += ` | Taken: ${mediaInfo.metadata.timestamp}`;
+    }
+
+    imageLine += ']';
+    parts.push(imageLine);
   } else if (mediaInfo.mimetype === 'application/pdf') {
     parts.push(`[PDF attached: ${mediaInfo.filename || 'document.pdf'} — ${containerPath}]`);
   } else {
