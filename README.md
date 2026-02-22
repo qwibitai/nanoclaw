@@ -7,6 +7,7 @@
 </p>
 
 <p align="center">
+  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
@@ -87,21 +88,6 @@ Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
 
-## Skills System CLI (Experimental)
-
-The new deterministic skills-system primitives are available as local commands:
-
-```bash
-npm run skills:init -- --core-version 0.5.0 --base-source .
-npm run skills:apply -- --skill whatsapp --version 1.2.0 --files-modified src/server.ts
-npm run skills:update-preview
-npm run skills:update-stage -- --target-core-version 0.6.0 --base-source /path/to/new/core
-npm run skills:update-commit
-# or: npm run skills:update-rollback
-```
-
-These commands operate on `.nanoclaw/state.yaml`, `.nanoclaw/state.next.yaml`, `.nanoclaw/base/`, `.nanoclaw/base.next/`, and `.nanoclaw/backup/`.
-
 ## Contributing
 
 **Don't add features. Add skills.**
@@ -112,7 +98,7 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 
 ### RFS (Request for Skills)
 
-Skills we'd love to see:
+Skills we'd like to see:
 
 **Communication Channels**
 - `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
