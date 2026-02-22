@@ -15,6 +15,7 @@ type WhatsAppChannelType = import('./channels/whatsapp.js').WhatsAppChannel;
 import {
   ContainerOutput,
   ContainerResult,
+  extractRepoMounts,
   initDindPathMapping,
   runContainerAgent,
   writeConfigSnapshot,
@@ -271,8 +272,9 @@ async function runAgent(
     })),
   );
 
-  // Update config snapshot for container to read
-  await writeConfigSnapshot(group.folder, channels);
+  // Update config snapshot for container to read, and extract repo mounts
+  const warrenConfig = await writeConfigSnapshot(group.folder, channels);
+  const configMounts = extractRepoMounts(warrenConfig);
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
@@ -306,6 +308,7 @@ async function runAgent(
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      configMounts,
     );
 
     if (output.type !== 'progress' && output.newSessionId) {

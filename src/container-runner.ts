@@ -106,7 +106,7 @@ export interface ContainerProgress {
 
 export type ContainerOutput = ContainerResult | ContainerProgress;
 
-interface VolumeMount {
+export interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
@@ -115,6 +115,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  configMounts?: VolumeMount[],
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -236,6 +237,11 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Config-derived mounts (e.g. repos from Warren config)
+  if (configMounts) {
+    mounts.push(...configMounts);
+  }
+
   return mounts;
 }
 
@@ -287,13 +293,14 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  configMounts?: VolumeMount[],
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, configMounts);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -686,9 +693,9 @@ export function writeTasksSnapshot(
 export async function writeConfigSnapshot(
   groupFolder: string,
   channels: Channel[],
-): Promise<void> {
+): Promise<Record<string, unknown> | null> {
   const warrenChannel = channels.find(c => c.fetchConfig);
-  if (!warrenChannel?.fetchConfig) return;
+  if (!warrenChannel?.fetchConfig) return null;
 
   try {
     const config = await warrenChannel.fetchConfig();
@@ -698,9 +705,30 @@ export async function writeConfigSnapshot(
       path.join(ipcDir, 'current_config.json'),
       JSON.stringify(config, null, 2),
     );
+    return config as Record<string, unknown>;
   } catch (err) {
     logger.warn({ err }, 'Failed to write config snapshot');
+    return null;
   }
+}
+
+export function extractRepoMounts(
+  config: Record<string, unknown> | null,
+): VolumeMount[] {
+  if (!config) return [];
+  const repos = config.repos as Record<string, { path?: string }> | undefined;
+  if (!repos || typeof repos !== 'object') return [];
+
+  const mounts: VolumeMount[] = [];
+  for (const [name, repo] of Object.entries(repos)) {
+    if (!repo.path) continue;
+    mounts.push({
+      hostPath: toHostPath(repo.path),
+      containerPath: `/workspace/extra/${name}`,
+      readonly: false,
+    });
+  }
+  return mounts;
 }
 
 export interface AvailableGroup {

@@ -10,7 +10,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { ContainerOutput, runContainerAgent, writeConfigSnapshot, writeTasksSnapshot } from './container-runner.js';
+import { ContainerOutput, extractRepoMounts, runContainerAgent, writeConfigSnapshot, writeTasksSnapshot } from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -65,9 +65,10 @@ async function runTask(
     return;
   }
 
-  // Update config + tasks snapshots for container to read
+  // Update config + tasks snapshots for container to read, and extract repo mounts
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
-  await writeConfigSnapshot(task.group_folder, deps.channels);
+  const warrenConfig = await writeConfigSnapshot(task.group_folder, deps.channels);
+  const configMounts = extractRepoMounts(warrenConfig);
   const tasks = getAllTasks();
   writeTasksSnapshot(
     task.group_folder,
@@ -128,6 +129,7 @@ async function runTask(
           error = streamedOutput.error || 'Unknown error';
         }
       },
+      configMounts,
     );
 
     if (idleTimer) clearTimeout(idleTimer);

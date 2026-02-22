@@ -436,10 +436,12 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
+  // Load global CLAUDE.md as additional system context (shared across all groups).
+  // Skip if the group has its own CLAUDE.md — group-specific persona takes priority.
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const groupClaudeMdPath = '/workspace/group/CLAUDE.md';
   let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
+  if (!containerInput.isMain && !fs.existsSync(groupClaudeMdPath) && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
