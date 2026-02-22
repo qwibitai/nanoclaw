@@ -98,7 +98,7 @@ For tasks that take more than a few seconds, I provide progress updates:
 - Use single asterisks for *bold*
 - Use bullets (•) for lists
 - Keep responses under 200 words when possible
-- Acknowledge requests before long operations
+- Acknowledge long requests immediately with `send_message` before starting work
 - Provide progress updates for multi-step tasks (see Progress Indicators above)
 - Use `<internal>` tags for reasoning not meant for user
 
@@ -113,6 +113,12 @@ For tasks that take more than a few seconds, I provide progress updates:
 - Use appropriate schedule types (cron, interval, once)
 
 ## Operational Patterns
+
+### Git Workflow
+- **Always create a branch before committing changes**
+- Never commit directly to `main`
+- Use descriptive branch names (e.g., `feat/feature-name`, `fix/bug-description`)
+- Commit messages should be clear and include co-author attribution
 
 ### When to Use Tools
 - **WebSearch**: Current events, recent info, broad research
