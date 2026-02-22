@@ -12,6 +12,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { sendGoogleAssistantCommand, resetGoogleAssistantConversation, googleAssistantHealth } from './google-assistant.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { isShabbatOrYomTov } from './shabbat.js';
@@ -179,6 +180,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    requestId?: string;
+    text?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -419,6 +422,46 @@ export async function processTaskIpc(
           logger.info({ sourceGroup }, 'OAuth token refreshed via IPC');
         }
       });
+      break;
+    }
+
+    case 'google_assistant_command': {
+      const requestId = data.requestId as string | undefined;
+      const text = data.text as string | undefined;
+      if (!requestId || !text) {
+        logger.warn({ data }, 'Invalid google_assistant_command: missing requestId or text');
+        break;
+      }
+
+      try {
+        const result =
+          text === '__reset_conversation__'
+            ? await resetGoogleAssistantConversation()
+            : text === '__health__'
+              ? await googleAssistantHealth()
+              : await sendGoogleAssistantCommand(text);
+
+        // Write response to the group's responses directory
+        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(responsesDir, `${requestId}.json`);
+        const tempFile = `${responseFile}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify(result));
+        fs.renameSync(tempFile, responseFile);
+
+        logger.info({ requestId, sourceGroup, text: text.slice(0, 50) }, 'Google Assistant command processed');
+      } catch (err) {
+        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(responsesDir, `${requestId}.json`);
+        const tempFile = `${responseFile}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify({
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        }));
+        fs.renameSync(tempFile, responseFile);
+        logger.error({ err, requestId, sourceGroup }, 'Google Assistant command failed');
+      }
       break;
     }
 
