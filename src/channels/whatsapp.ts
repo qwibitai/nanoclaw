@@ -17,6 +17,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { downloadAndSaveMedia, formatMediaAttribute } from '../media.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -164,12 +165,26 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          const groupFolder = groups[chatJid].folder;
+
+          // Download media if present
+          const mediaInfo = await downloadAndSaveMedia(msg, groupFolder);
+
+          let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // If media was downloaded, add image attribute to content
+          if (mediaInfo) {
+            const mediaAttr = formatMediaAttribute(mediaInfo);
+            // Prepend media info as XML-style attribute
+            content = `<message ${mediaAttr}>${content || ''}</message>`;
+            logger.info({ filePath: mediaInfo.filePath, caption: mediaInfo.caption }, 'Media attached to message');
+          }
+
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
