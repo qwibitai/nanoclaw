@@ -1,5 +1,7 @@
 # NanoClaw
 
+> **WARNING:** This repo is a fork. Always push to and create PRs on `jonazri/nanoclaw` (origin). NEVER push to or create PRs on `qwibitai/nanoclaw` (upstream).
+
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context
