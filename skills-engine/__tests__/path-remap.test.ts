@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadPathRemap, recordPathRemap, resolvePathRemap } from '../path-remap.js';
+import { readState, writeState } from '../state.js';
 import {
   cleanup,
   createMinimalState,
@@ -38,6 +39,17 @@ describe('path-remap', () => {
     it('returns original path when remap is empty', () => {
       expect(resolvePathRemap('src/file.ts', {})).toBe('src/file.ts');
     });
+
+    it('ignores remap entries that escape project root', () => {
+      const remap = { 'src/file.ts': '../../outside.txt' };
+      expect(resolvePathRemap('src/file.ts', remap)).toBe('src/file.ts');
+    });
+
+    it('throws when requested path itself escapes project root', () => {
+      expect(() => resolvePathRemap('../../outside.txt', {})).toThrow(
+        /escapes project root/i,
+      );
+    });
   });
 
   describe('loadPathRemap', () => {
@@ -48,6 +60,18 @@ describe('path-remap', () => {
 
     it('returns remap from state', () => {
       recordPathRemap({ 'src/a.ts': 'src/b.ts' });
+      const remap = loadPathRemap();
+      expect(remap).toEqual({ 'src/a.ts': 'src/b.ts' });
+    });
+
+    it('drops unsafe remap entries stored in state', () => {
+      const state = readState();
+      state.path_remap = {
+        'src/a.ts': 'src/b.ts',
+        'src/evil.ts': '../../outside.txt',
+      };
+      writeState(state);
+
       const remap = loadPathRemap();
       expect(remap).toEqual({ 'src/a.ts': 'src/b.ts' });
     });
@@ -72,6 +96,12 @@ describe('path-remap', () => {
       recordPathRemap({ 'src/a.ts': 'src/b.ts' });
       recordPathRemap({ 'src/a.ts': 'src/c.ts' });
       expect(loadPathRemap()).toEqual({ 'src/a.ts': 'src/c.ts' });
+    });
+
+    it('rejects unsafe remap entries', () => {
+      expect(() =>
+        recordPathRemap({ 'src/a.ts': '../../outside.txt' }),
+      ).toThrow(/escapes project root/i);
     });
   });
 });

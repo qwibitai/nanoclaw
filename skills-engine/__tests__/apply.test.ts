@@ -11,6 +11,7 @@ import {
   initGitRepo,
   setupNanoclawDir,
 } from './test-helpers.js';
+import { readState, writeState } from '../state.js';
 
 describe('apply', () => {
   let tmpDir: string;
@@ -88,5 +89,27 @@ describe('apply', () => {
 
     // Added file should be cleaned up
     expect(fs.existsSync(path.join(tmpDir, 'src/added.ts'))).toBe(false);
+  });
+
+  it('does not allow path_remap to write files outside project root', async () => {
+    const state = readState();
+    state.path_remap = { 'src/newfile.ts': '../../outside.txt' };
+    writeState(state);
+
+    const skillDir = createSkillPackage(tmpDir, {
+      skill: 'remap-escape',
+      version: '1.0.0',
+      core_version: '1.0.0',
+      adds: ['src/newfile.ts'],
+      modifies: [],
+      addFiles: { 'src/newfile.ts': 'safe content' },
+    });
+
+    const result = await applySkill(skillDir);
+    expect(result.success).toBe(true);
+
+    // Remap escape is ignored; file remains constrained inside project root.
+    expect(fs.existsSync(path.join(tmpDir, 'src/newfile.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '..', 'outside.txt'))).toBe(false);
   });
 });
