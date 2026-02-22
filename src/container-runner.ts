@@ -43,7 +43,15 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   model?: string;
+  runId?: string;
   secrets?: Record<string, string>;
+}
+
+export interface UsageStats {
+  input_tokens: number;
+  output_tokens: number;
+  duration_ms: number;
+  peak_rss_mb: number;
 }
 
 export interface ContainerOutput {
@@ -51,6 +59,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: UsageStats;
 }
 
 interface VolumeMount {
@@ -101,6 +110,17 @@ function buildVolumeMounts(
     }
   }
 
+  // MCP servers (read-only) — provides token-efficient and other stdio MCP servers.
+  // Mounted for all groups; MCP_SERVERS_ROOT env var points agents to this path.
+  const mcpServersDir = path.join(getHomeDir(), 'Documents', 'remote-claude', 'mcp-servers');
+  if (fs.existsSync(mcpServersDir)) {
+    mounts.push({
+      hostPath: mcpServersDir,
+      containerPath: '/workspace/mcp-servers',
+      readonly: true,
+    });
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -123,6 +143,8 @@ function buildVolumeMounts(
         // Enable Claude's memory feature (persists user preferences between sessions)
         // https://code.claude.com/docs/en/memory#manage-auto-memory
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+        // MCP servers root — used by mcp-setup skill to write correct paths into .mcp.json
+        MCP_SERVERS_ROOT: '/workspace/mcp-servers',
       },
     }, null, 2) + '\n');
   }
@@ -135,7 +157,10 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      // Remove stale dst (may be a symlink from a previous sync) before copying.
+      // dereference:true follows symlinks in src so container always gets real files.
+      fs.rmSync(dstDir, { recursive: true, force: true });
+      fs.cpSync(srcDir, dstDir, { recursive: true, dereference: true });
     }
   }
 
@@ -499,6 +524,17 @@ export async function runContainerAgent(
       logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
 
       if (code !== 0) {
+        // SIGKILL (137) after output was already streamed = container runtime's idle
+        // cleanup (e.g. Apple Container VM timeout). Treat as idle cleanup, not failure.
+        if (hadStreamingOutput && code === 137) {
+          logger.info(
+            { group: group.name, code, duration, newSessionId },
+            'Container killed after output (idle cleanup)',
+          );
+          outputChain.then(() => resolve({ status: 'success', result: null, newSessionId }));
+          return;
+        }
+
         logger.error(
           {
             group: group.name,

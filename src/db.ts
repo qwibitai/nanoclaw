@@ -75,6 +75,15 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS worker_runs (
+      run_id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      completed_at TEXT,
+      result_summary TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_runs_folder ON worker_runs(group_folder, started_at);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -577,6 +586,41 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Worker run deduplication ---
+
+/**
+ * Insert a worker run record. Returns true if inserted (new run), false if
+ * the run_id already exists (duplicate — caller should skip execution).
+ */
+export function insertWorkerRun(runId: string, groupFolder: string): boolean {
+  try {
+    db.prepare(
+      `INSERT INTO worker_runs (run_id, group_folder, status, started_at) VALUES (?, ?, 'running', ?)`,
+    ).run(runId, groupFolder, new Date().toISOString());
+    return true;
+  } catch {
+    return false; // UNIQUE constraint = duplicate run_id
+  }
+}
+
+export function completeWorkerRun(
+  runId: string,
+  status: 'completed' | 'failed',
+  resultSummary?: string,
+): void {
+  db.prepare(
+    `UPDATE worker_runs SET status = ?, completed_at = ?, result_summary = ? WHERE run_id = ?`,
+  ).run(status, new Date().toISOString(), resultSummary ?? null, runId);
+}
+
+export function getWorkerRun(
+  runId: string,
+): { run_id: string; status: string; result_summary: string | null } | undefined {
+  return db
+    .prepare(`SELECT run_id, status, result_summary FROM worker_runs WHERE run_id = ?`)
+    .get(runId) as { run_id: string; status: string; result_summary: string | null } | undefined;
 }
 
 // --- JSON migration ---

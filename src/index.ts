@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -31,6 +32,8 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  insertWorkerRun,
+  completeWorkerRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
@@ -157,6 +160,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
+  // For jarvis-worker groups: generate a stable run_id and dedup before executing.
+  // run_id is a hash of (folder + last message id + content) so retrying the same
+  // message yields the same run_id and won't double-execute.
+  const isWorkerGroup = group.folder.startsWith('jarvis-worker');
+  let runId: string | undefined;
+  if (isWorkerGroup) {
+    const last = missedMessages[missedMessages.length - 1];
+    runId = createHash('sha256')
+      .update(`${group.folder}:${last.id}:${last.content}`)
+      .digest('hex')
+      .slice(0, 16);
+    const inserted = insertWorkerRun(runId, group.folder);
+    if (!inserted) {
+      logger.warn({ group: group.name, runId }, 'Duplicate run_id, skipping execution');
+      return true;
+    }
+    logger.info({ group: group.name, runId }, 'Worker run started');
+  }
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -172,7 +194,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, runId, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
@@ -180,7 +202,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // For worker groups, append usage stats to final response so Andy can see cost
+        let finalText = text;
+        if (isWorkerGroup && result.usage) {
+          const u = result.usage;
+          finalText += `\n\n<internal>run_id=${runId} tokens=${u.input_tokens}in/${u.output_tokens}out duration=${Math.round(u.duration_ms / 1000)}s rss=${u.peak_rss_mb}MB</internal>`;
+        }
+        await channel.sendMessage(chatJid, finalText);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -198,6 +226,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  if (isWorkerGroup && runId) {
+    completeWorkerRun(runId, output === 'error' || hadError ? 'failed' : 'completed');
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -220,6 +252,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  runId: string | undefined,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -271,6 +304,7 @@ async function runAgent(
         chatJid,
         isMain,
         model: group.containerConfig?.model,
+        runId,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,

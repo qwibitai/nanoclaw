@@ -48,3 +48,43 @@ launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## Apple Container Build Workflow (macOS)
+
+Use this sequence before rebuilding `nanoclaw-agent`:
+
+```bash
+cd container
+container system status
+container builder status || container builder start
+container build -t nanoclaw-agent:latest .
+```
+
+If the CLI appears stuck at `Dialing builder`, inspect build activity with:
+
+```bash
+while true; do
+  clear
+  date
+  container logs buildkit | tail -n 60
+  sleep 2
+done
+```
+
+Notes:
+- `container logs buildkit | tail -f` is not a persistent follow stream. Use the loop above.
+- Avoid `--no-cache` unless debugging; it forces slow package install layers repeatedly.
+
+### Builder Recovery (XPC Deadlock)
+
+If `container builder stop` hangs and logs show `Connection invalid [uuid=buildkit]`:
+
+```bash
+container system logs | tail -n 80
+/bin/zsh -lc "launchctl kickstart -k gui/$(id -u)/com.apple.container.container-runtime-linux.buildkit && launchctl kickstart -k gui/$(id -u)/com.apple.container.apiserver"
+container system start
+container builder start
+container builder status
+```
+
+Expected end state: `container system status` reports apiserver running and `container builder status` reports buildkit `RUNNING`.

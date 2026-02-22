@@ -141,3 +141,44 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nanoclaw.plist
 # Rebuild after code changes
 npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
+
+## Apple Container Builder Stuck / Hanging
+
+Symptom patterns:
+- `container build ...` shows `Dialing builder` for a long time
+- `container builder stop` hangs
+- `container system logs` shows `Connection invalid [uuid=buildkit]`
+
+```bash
+# 1) Confirm runtime and builder state
+container system status
+container builder status
+
+# 2) Check recent builder/system logs
+container system logs | tail -n 80
+container logs buildkit | tail -n 80
+
+# 3) If stop hangs, restart launchd services directly
+/bin/zsh -lc "launchctl kickstart -k gui/$(id -u)/com.apple.container.container-runtime-linux.buildkit && launchctl kickstart -k gui/$(id -u)/com.apple.container.apiserver"
+
+# 4) Bring services back and verify
+container system start
+container builder start
+container system status
+container builder status
+
+# 5) Retry build from Dockerfile directory
+cd container
+container build -t nanoclaw-agent:latest .
+```
+
+To monitor progress reliably during build:
+
+```bash
+while true; do
+  clear
+  date
+  container logs buildkit | tail -n 60
+  sleep 2
+done
+```

@@ -35,6 +35,12 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    duration_ms: number;
+    peak_rss_mb: number;
+  };
 }
 
 interface SessionEntry {
@@ -362,6 +368,13 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  const queryStartMs = Date.now();
+  let peakRssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  const rssInterval = setInterval(() => {
+    const rss = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    if (rss > peakRssMb) peakRssMb = rss;
+  }, 2000);
+
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -477,15 +490,26 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const msgUsage = (message as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      const durationMs = Date.now() - queryStartMs;
+      clearInterval(rssInterval);
+      const usage = {
+        input_tokens: msgUsage?.input_tokens ?? 0,
+        output_tokens: msgUsage?.output_tokens ?? 0,
+        duration_ms: durationMs,
+        peak_rss_mb: peakRssMb,
+      };
+      log(`Result #${resultCount}: subtype=${message.subtype} usage=${JSON.stringify(usage)}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        usage,
       });
     }
   }
 
+  clearInterval(rssInterval);
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
