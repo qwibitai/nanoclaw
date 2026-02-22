@@ -21,6 +21,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { AUTH_ERROR_PATTERN, refreshOAuthToken } from './oauth.js';
 import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -30,6 +31,16 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+}
+
+async function notifyMain(deps: SchedulerDependencies, text: string): Promise<void> {
+  const groups = deps.registeredGroups();
+  const mainJid = Object.entries(groups).find(
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+  )?.[0];
+  if (mainJid) {
+    await deps.sendMessage(mainJid, text);
+  }
 }
 
 async function runTask(
@@ -157,7 +168,49 @@ async function runTask(
     if (closeTimer) clearTimeout(closeTimer);
 
     if (output.status === 'error') {
-      error = output.error || 'Unknown error';
+      const outputError = output.error || 'Unknown error';
+
+      if (AUTH_ERROR_PATTERN.test(outputError)) {
+        logger.warn({ taskId: task.id }, 'Auth error in scheduled task, refreshing token and retrying');
+        await notifyMain(deps, '[system] Auth token expired — refreshing and retrying.');
+        const refreshed = await refreshOAuthToken();
+        if (refreshed) {
+          const retry = await runContainerAgent(
+            group,
+            {
+              prompt: task.prompt,
+              sessionId,
+              groupFolder: task.group_folder,
+              chatJid: task.chat_jid,
+              isMain,
+              isScheduledTask: true,
+            },
+            (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+            async (streamedOutput: ContainerOutput) => {
+              if (streamedOutput.result) {
+                result = streamedOutput.result;
+                await deps.sendMessage(task.chat_jid, streamedOutput.result);
+              }
+              if (streamedOutput.status === 'error') {
+                error = streamedOutput.error || 'Unknown error';
+              }
+            },
+          );
+          if (retry.status === 'error') {
+            error = retry.error || 'Unknown error after retry';
+            logger.error({ taskId: task.id, error }, 'Scheduled task failed after token refresh');
+            await notifyMain(deps, '[system] Token refresh failed. You may need to run "claude login".');
+          } else {
+            if (retry.result) result = retry.result;
+            await notifyMain(deps, '[system] Token refreshed. Services restored.');
+          }
+        } else {
+          error = outputError;
+          await notifyMain(deps, '[system] Token refresh failed. You may need to run "claude login".');
+        }
+      } else {
+        error = outputError;
+      }
     } else if (output.result) {
       // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
