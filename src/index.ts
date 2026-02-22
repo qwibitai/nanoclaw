@@ -487,6 +487,7 @@ async function main(): Promise<void> {
   if (process.env.WARREN_CALLBACK_URL) {
     const warrenChannel = new WarrenChannel({
       callbackUrl: process.env.WARREN_CALLBACK_URL,
+      internalSecret: process.env.WARREN_INTERNAL_SECRET,
     });
     channels.push(warrenChannel);
     await warrenChannel.connect();
