@@ -23,8 +23,8 @@ export interface SpeakerIdentification {
 const PROFILE_DIR = path.join(process.cwd(), 'data', 'voice-profiles');
 const VENV_PYTHON = path.join(process.cwd(), 'scripts', 'venv', 'bin', 'python3');
 const PYTHON_SERVICE = path.join(process.cwd(), 'scripts', 'voice-recognition-service.py');
-const SIMILARITY_THRESHOLD_HIGH = 0.75;
-const SIMILARITY_THRESHOLD_MEDIUM = 0.60;
+const SIMILARITY_THRESHOLD_HIGH = 0.70;
+const SIMILARITY_THRESHOLD_MEDIUM = 0.55;
 
 // ── Pure math (no Python needed) ──────────────────────────────────
 

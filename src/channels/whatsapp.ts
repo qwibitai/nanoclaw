@@ -220,6 +220,21 @@ export class WhatsAppChannel implements Channel {
                   if (result.speaker) {
                     const pct = Math.round(result.similarity * 100);
                     speakerTag = ` [${result.confidence === 'high' ? 'Direct from' : 'Possibly'} ${result.speaker}, ${pct}% match]`;
+
+                    // Continuous learning: update profile with high-confidence samples
+                    if (result.speaker === 'Yonatan' && result.similarity >= 0.65) {
+                      try {
+                        const { extractVoiceEmbedding, updateVoiceProfile } = await import('../voice-recognition.js');
+                        const embedding = await extractVoiceEmbedding(audioBuffer!);
+                        await updateVoiceProfile('Yonatan', [embedding]);
+                        logger.info(
+                          { similarity: result.similarity },
+                          'Auto-updated voice profile with new sample',
+                        );
+                      } catch (learnErr) {
+                        logger.warn({ err: learnErr }, 'Failed to auto-update voice profile');
+                      }
+                    }
                   } else {
                     speakerTag = ' [Unknown speaker]';
                   }
