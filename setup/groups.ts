@@ -153,14 +153,24 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const output = execSync(`node --input-type=module -e ${JSON.stringify(syncScript)}`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      timeout: 45000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    syncOk = output.includes('SYNCED:');
-    logger.info({ output: output.trim() }, 'Sync output');
+    const tmpScript = path.join(projectRoot, 'store', '_sync-groups.mjs');
+    fs.mkdirSync(path.join(projectRoot, 'store'), { recursive: true });
+    fs.writeFileSync(tmpScript, syncScript, 'utf-8');
+    let stdout = '';
+    try {
+      // Use spawnSync so we can inspect stdout even on non-zero exit (connection-close fires after sock.end)
+      const { spawnSync } = await import('child_process');
+      const result = spawnSync('node', [tmpScript], {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 45000,
+      });
+      stdout = result.stdout ?? '';
+      syncOk = stdout.includes('SYNCED:');
+      if (syncOk) logger.info({ stdout: stdout.trim() }, 'Sync output');
+    } finally {
+      fs.rmSync(tmpScript, { force: true });
+    }
   } catch (err) {
     logger.error({ err }, 'Sync failed');
   }
