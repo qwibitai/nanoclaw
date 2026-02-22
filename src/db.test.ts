@@ -281,6 +281,7 @@ describe('task CRUD', () => {
       context_mode: 'isolated',
       next_run: '2024-06-01T00:00:00.000Z',
       status: 'active',
+      suppress_pattern: null,
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
@@ -288,6 +289,7 @@ describe('task CRUD', () => {
     expect(task).toBeDefined();
     expect(task!.prompt).toBe('do something');
     expect(task!.status).toBe('active');
+    expect(task!.suppress_pattern).toBeNull();
   });
 
   it('updates task status', () => {
@@ -301,6 +303,7 @@ describe('task CRUD', () => {
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
+      suppress_pattern: null,
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
@@ -319,10 +322,31 @@ describe('task CRUD', () => {
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
+      suppress_pattern: null,
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+
+  it('round-trips suppress_pattern', () => {
+    createTask({
+      id: 'task-sp',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'heartbeat check',
+      schedule_type: 'cron',
+      schedule_value: '*/30 * * * *',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      suppress_pattern: '^HEARTBEAT_OK$',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-sp');
+    expect(task).toBeDefined();
+    expect(task!.suppress_pattern).toBe('^HEARTBEAT_OK$');
   });
 });

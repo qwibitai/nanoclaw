@@ -120,8 +120,21 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Check suppress_pattern before delivering to user
+          let suppressed = false;
+          if (task.suppress_pattern) {
+            try {
+              if (new RegExp(task.suppress_pattern).test(streamedOutput.result.trim())) {
+                logger.debug({ taskId: task.id, pattern: task.suppress_pattern }, 'Task output suppressed by suppress_pattern');
+                suppressed = true;
+              }
+            } catch {
+              logger.warn({ taskId: task.id, pattern: task.suppress_pattern }, 'Invalid suppress_pattern regex, delivering output normally');
+            }
+          }
+          if (!suppressed) {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
