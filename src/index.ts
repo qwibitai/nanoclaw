@@ -39,6 +39,7 @@ import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { AUTH_ERROR_PATTERN, refreshOAuthToken } from './oauth.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -218,6 +219,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+function notifyMainGroup(text: string): void {
+  const mainJid = Object.entries(registeredGroups).find(
+    ([_, g]) => g.folder === MAIN_GROUP_FOLDER
+  )?.[0];
+  if (!mainJid) return;
+  const channel = findChannel(channels, mainJid);
+  channel?.sendMessage(mainJid, text);
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -283,6 +293,31 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      if (output.error && AUTH_ERROR_PATTERN.test(output.error)) {
+        logger.warn({ group: group.name }, 'Auth error detected, refreshing token and retrying');
+        notifyMainGroup('[system] Auth token expired — refreshing and retrying.');
+        const refreshed = await refreshOAuthToken();
+        if (refreshed) {
+          const retry = await runContainerAgent(
+            group,
+            { prompt, sessionId, groupFolder: group.folder, chatJid, isMain },
+            (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
+            wrappedOnOutput,
+          );
+          if (retry.newSessionId) {
+            sessions[group.folder] = retry.newSessionId;
+            setSession(group.folder, retry.newSessionId);
+          }
+          if (retry.status === 'error') {
+            logger.error({ group: group.name, error: retry.error }, 'Container agent error after token refresh');
+            notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+            return 'error';
+          }
+          notifyMainGroup('[system] Token refreshed. Services restored.');
+          return 'success';
+        }
+        notifyMainGroup('[system] Token refresh failed. You may need to run "claude login".');
+      }
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
