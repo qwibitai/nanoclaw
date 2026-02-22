@@ -53,6 +53,45 @@ Do NOT use markdown headings (##) in WhatsApp messages. Only use:
 
 Keep messages clean and readable for WhatsApp.
 
+## Agent Teams (Telegram Only)
+
+When `TELEGRAM_BOT_POOL` is configured (3+ additional bot tokens), you can create **Agent Teams** — multiple subagents working together, each with their own Telegram bot identity.
+
+**Sending a message as a subagent:**
+
+Use `send_message` with the optional `sender` parameter:
+
+```bash
+cat > /workspace/ipc/messages/$(date +%s%N).json << 'EOF'
+{
+  "type": "message",
+  "chatJid": "tg:123456789",
+  "text": "I've analyzed the architecture.",
+  "sender": "Researcher"
+}
+EOF
+```
+
+The host will:
+1. Assign a pool bot to "Researcher" (round-robin)
+2. Rename that bot to "Researcher" in the chat (if permissions allow)
+3. Send the message through that bot
+
+Subsequent "Researcher" messages reuse the same bot. Each unique sender gets a dedicated bot from the pool.
+
+**Example team scenario:**
+
+```
+You → "Create a team of researcher and coder to explain Docker"
+
+[Lead bot acknowledges and spawns subagents]
+
+Researcher bot → "Docker is container technology..."
+Coder bot → "The Dockerfile defines..."
+```
+
+Pool bots will be renamed to match their role in the chat, so the user sees distinct identities.
+
 ---
 
 ## Admin Context
