@@ -18,6 +18,7 @@ import {
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import { AUTH_ERROR_PATTERN } from './oauth.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -298,6 +299,13 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
+    let resolved = false;
+    const safeResolve = (value: ContainerOutput) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(value);
+    };
+
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -360,6 +368,26 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
+
+            // Streaming failsafe: detect auth errors immediately
+            // In streaming mode the container never exits on auth errors —
+            // the SDK retries internally. Catch it here and abort early.
+            if (parsed.result && AUTH_ERROR_PATTERN.test(parsed.result)) {
+              logger.warn(
+                { group: group.name, containerName },
+                'Auth error detected in streaming output, aborting container',
+              );
+              container.kill('SIGTERM');
+              clearTimeout(timeout);
+              safeResolve({
+                status: 'error',
+                result: null,
+                error: parsed.result,
+                newSessionId,
+              });
+              return;
+            }
+
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -447,7 +475,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
-            resolve({
+            safeResolve({
               status: 'success',
               result: null,
               newSessionId,
@@ -461,7 +489,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container timed out after ${configTimeout}ms`,
@@ -539,7 +567,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
@@ -554,7 +582,7 @@ export async function runContainerAgent(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
           );
-          resolve({
+          safeResolve({
             status: 'success',
             result: null,
             newSessionId,
@@ -592,7 +620,7 @@ export async function runContainerAgent(
           'Container completed',
         );
 
-        resolve(output);
+        safeResolve(output);
       } catch (err) {
         logger.error(
           {
@@ -604,7 +632,7 @@ export async function runContainerAgent(
           'Failed to parse container output',
         );
 
-        resolve({
+        safeResolve({
           status: 'error',
           result: null,
           error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
@@ -615,7 +643,7 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
-      resolve({
+      safeResolve({
         status: 'error',
         result: null,
         error: `Container spawn error: ${err.message}`,

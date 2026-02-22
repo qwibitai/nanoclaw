@@ -20,7 +20,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
-import { AUTH_ERROR_PATTERN, refreshOAuthToken } from './oauth.js';
+import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
 import { isShabbatOrYomTov } from './shabbat.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -114,6 +114,9 @@ async function runTask(
   };
 
   try {
+    // Pre-flight: refresh token if expired or expiring soon
+    await ensureTokenFresh();
+
     const output = await runContainerAgent(
       group,
       {

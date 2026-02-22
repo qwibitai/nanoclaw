@@ -39,7 +39,7 @@ import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
-import { AUTH_ERROR_PATTERN, refreshOAuthToken } from './oauth.js';
+import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -274,6 +274,9 @@ async function runAgent(
     : undefined;
 
   try {
+    // Pre-flight: refresh token if expired or expiring soon
+    await ensureTokenFresh();
+
     const output = await runContainerAgent(
       group,
       {
@@ -454,6 +457,9 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
   initShabbatSchedule();
+
+  // Ensure token is fresh at startup so the first container doesn't hit an expired token
+  await ensureTokenFresh();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {

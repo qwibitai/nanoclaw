@@ -34,6 +34,8 @@ log "Updated .env with token (expires_at=$expires_at)"
 
 # Cancel any existing scheduled refresh
 systemctl --user stop "$TIMER_NAME.timer" 2>/dev/null || true
+# Clear stale "failed" state so systemd-run doesn't refuse to create the unit
+systemctl --user reset-failed "$TIMER_NAME.service" 2>/dev/null || true
 
 # Schedule next run 30 minutes before expiry
 now_ms=$(($(date +%s) * 1000))
@@ -51,10 +53,12 @@ fi
 next_run_sec=$((next_run_ms / 1000))
 next_run_time=$(date -d "@$next_run_sec" -Iseconds)
 
-systemd-run --user \
+if systemd-run --user \
   --unit="$TIMER_NAME" \
   --on-calendar="$(date -d "@$next_run_sec" '+%Y-%m-%d %H:%M:%S')" \
   --description="NanoClaw OAuth token refresh" \
-  "$(realpath "$0")"
-
-log "Scheduled next refresh at $next_run_time"
+  "$(realpath "$0")"; then
+  log "Scheduled next refresh at $next_run_time"
+else
+  log "ERROR: systemd-run failed (exit $?), next refresh NOT scheduled"
+fi
