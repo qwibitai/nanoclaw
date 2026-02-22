@@ -27,9 +27,16 @@ export interface AllowedRoot {
   description?: string;
 }
 
+export interface WebAccessConfig {
+  webFetch?: boolean; // Default: true
+  webSearch?: boolean; // Default: true
+  fetchAllowlist?: string[]; // Optional URL prefixes to restrict WebFetch
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  webAccess?: WebAccessConfig;
 }
 
 export interface RegisteredGroup {
