@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 
 // Mock config
 vi.mock('../config.js', () => ({
-  STORE_DIR: '/tmp/nanoclaw-test-store',
+  STORE_DIR: '/tmp/cambot-agent-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
 }));
@@ -112,6 +112,7 @@ function createTestOpts(overrides?: Partial<WhatsAppChannelOpts>): WhatsAppChann
         added_at: '2024-01-01T00:00:00.000Z',
       },
     })),
+    registerGroup: vi.fn(),
     ...overrides,
   };
 }
@@ -772,7 +773,7 @@ describe('WhatsAppChannel', () => {
 
       await connectChannel(channel);
 
-      await channel.syncGroupMetadata(true);
+      await channel.syncMetadata(true);
 
       expect(fakeSocket.groupFetchAllParticipating).toHaveBeenCalled();
       expect(updateChatName).toHaveBeenCalledWith('group@g.us', 'Forced Group');
@@ -789,7 +790,7 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       // Should not throw
-      await expect(channel.syncGroupMetadata(true)).resolves.toBeUndefined();
+      await expect(channel.syncMetadata(true)).resolves.toBeUndefined();
     });
 
     it('skips groups with no subject', async () => {
@@ -807,7 +808,7 @@ describe('WhatsAppChannel', () => {
       // Clear any calls from the automatic sync on connect
       vi.mocked(updateChatName).mockClear();
 
-      await channel.syncGroupMetadata(true);
+      await channel.syncMetadata(true);
 
       expect(updateChatName).toHaveBeenCalledTimes(1);
       expect(updateChatName).toHaveBeenCalledWith('group1@g.us', 'Has Subject');

@@ -17,15 +17,11 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import { Channel, ChannelOpts } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export interface WhatsAppChannelOpts {
-  onMessage: OnInboundMessage;
-  onChatMetadata: OnChatMetadata;
-  registeredGroups: () => Record<string, RegisteredGroup>;
-}
+export type WhatsAppChannelOpts = ChannelOpts;
 
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
@@ -37,9 +33,9 @@ export class WhatsAppChannel implements Channel {
   private flushing = false;
   private groupSyncTimerStarted = false;
 
-  private opts: WhatsAppChannelOpts;
+  private opts: ChannelOpts;
 
-  constructor(opts: WhatsAppChannelOpts) {
+  constructor(opts: ChannelOpts) {
     this.opts = opts;
   }
 
@@ -73,7 +69,7 @@ export class WhatsAppChannel implements Channel {
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);
         exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          `osascript -e 'display notification "${msg}" with title "CamBot-Agent" sound name "Basso"'`,
         );
         setTimeout(() => process.exit(1), 1000);
       }
@@ -121,14 +117,14 @@ export class WhatsAppChannel implements Channel {
         );
 
         // Sync group metadata on startup (respects 24h cache)
-        this.syncGroupMetadata().catch((err) =>
+        this.syncMetadata().catch((err) =>
           logger.error({ err }, 'Initial group sync failed'),
         );
         // Set up daily sync timer (only once)
         if (!this.groupSyncTimerStarted) {
           this.groupSyncTimerStarted = true;
           setInterval(() => {
-            this.syncGroupMetadata().catch((err) =>
+            this.syncMetadata().catch((err) =>
               logger.error({ err }, 'Periodic group sync failed'),
             );
           }, GROUP_SYNC_INTERVAL_MS);
@@ -253,7 +249,7 @@ export class WhatsAppChannel implements Channel {
    * Fetches all participating groups and stores their names in the database.
    * Called on startup, daily, and on-demand via IPC.
    */
-  async syncGroupMetadata(force = false): Promise<void> {
+  async syncMetadata(force = false): Promise<void> {
     if (!force) {
       const lastSync = getLastGroupSync();
       if (lastSync) {
