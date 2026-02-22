@@ -2,7 +2,7 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, MAX_CONCURRENT_CONTAINERS, MESSAGE_DEBOUNCE } from './config.js';
 import { logger } from './logger.js';
 import { monitorBus, MONITOR_EVENTS } from './monitor-events.js';
 
@@ -23,6 +23,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  debounceTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class GroupQueue {
@@ -44,6 +45,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        debounceTimer: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -77,7 +79,27 @@ export class GroupQueue {
       return;
     }
 
-    this.runForGroup(groupJid, 'messages');
+    // Debounce: reset timer on each call so rapid-fire messages batch together
+    if (state.debounceTimer) {
+      clearTimeout(state.debounceTimer);
+    }
+    state.debounceTimer = setTimeout(() => {
+      state.debounceTimer = null;
+      // Re-check conditions — state may have changed during the debounce window
+      if (this.shuttingDown) return;
+      if (state.active) {
+        state.pendingMessages = true;
+        return;
+      }
+      if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+        state.pendingMessages = true;
+        if (!this.waitingGroups.includes(groupJid)) {
+          this.waitingGroups.push(groupJid);
+        }
+        return;
+      }
+      this.runForGroup(groupJid, 'messages');
+    }, MESSAGE_DEBOUNCE);
   }
 
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>): void {
@@ -188,6 +210,10 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+    if (state.debounceTimer) {
+      clearTimeout(state.debounceTimer);
+      state.debounceTimer = null;
+    }
     state.active = true;
     state.pendingMessages = false;
     this.activeCount++;
@@ -321,6 +347,14 @@ export class GroupQueue {
 
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
+
+    // Clear any pending debounce timers
+    for (const state of this.groups.values()) {
+      if (state.debounceTimer) {
+        clearTimeout(state.debounceTimer);
+        state.debounceTimer = null;
+      }
+    }
 
     // Count active containers but don't kill them — they'll finish on their own
     // via idle timeout or container timeout. The --rm flag cleans them up on exit.

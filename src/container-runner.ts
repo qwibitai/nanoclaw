@@ -109,21 +109,43 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Read existing settings or create defaults; always ensure hooks are configured.
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-      env: {
-        // Enable agent swarms (subagent orchestration)
-        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        // Load CLAUDE.md from additional mounted directories
-        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        // Enable Claude's memory feature (persists user preferences between sessions)
-        // https://code.claude.com/docs/en/memory#manage-auto-memory
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-      },
-    }, null, 2) + '\n');
+  let settings: Record<string, unknown> = {};
+  if (fs.existsSync(settingsFile)) {
+    try {
+      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+    } catch { /* start fresh if corrupt */ }
+  }
+  if (!settings.env) {
+    settings.env = {
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    };
+  }
+  // Hook: block gh CLI subcommands that use GraphQL (fine-grained PAT compat)
+  const ghHookCmd = 'node /home/node/.claude/hooks/gh-rest-api.js';
+  const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>;
+  const preToolUse = (hooks.PreToolUse ?? []) as Array<Record<string, unknown>>;
+  if (!preToolUse.some((e) => JSON.stringify(e).includes(ghHookCmd))) {
+    preToolUse.push({
+      matcher: 'Bash',
+      hooks: [{ type: 'command', command: ghHookCmd }],
+    });
+  }
+  hooks.PreToolUse = preToolUse;
+  settings.hooks = hooks;
+  fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
+
+  // Sync hooks from container/hooks/ into each group's .claude/hooks/
+  const hooksSrc = path.join(process.cwd(), 'container', 'hooks');
+  const hooksDst = path.join(groupSessionsDir, 'hooks');
+  if (fs.existsSync(hooksSrc)) {
+    fs.mkdirSync(hooksDst, { recursive: true });
+    for (const file of fs.readdirSync(hooksSrc)) {
+      fs.copyFileSync(path.join(hooksSrc, file), path.join(hooksDst, file));
+    }
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -201,6 +223,13 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
+  }
+
+  // Pass GH_TOKEN so container Bash subprocesses can run `gh pr create` / `git push`
+  // via HTTPS. The stdin secrets mechanism only reaches the SDK, not Bash.
+  const ghToken = readEnvFile(['GH_TOKEN']).GH_TOKEN;
+  if (ghToken) {
+    args.push('-e', `GH_TOKEN=${ghToken}`);
   }
 
   for (const mount of mounts) {

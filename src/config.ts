@@ -27,6 +27,10 @@ export const IMESSAGE_ENABLED = imsgEnv !== undefined
   ? imsgEnv === 'true'
   : process.platform === 'darwin';
 export const POLL_INTERVAL = 2000;
+export const MESSAGE_DEBOUNCE = parseInt(
+  process.env.MESSAGE_DEBOUNCE || '4000',
+  10,
+);
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts

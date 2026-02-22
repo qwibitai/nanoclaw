@@ -6,6 +6,7 @@ import { GroupQueue } from './group-queue.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  MESSAGE_DEBOUNCE: 4000,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -55,8 +56,8 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Advance timers to let the first process complete
-    await vi.advanceTimersByTimeAsync(200);
+    // Advance past debounce (4000ms) + processing time (100ms)
+    await vi.advanceTimersByTimeAsync(4200);
 
     // Second enqueue should have been queued, not concurrent
     expect(maxConcurrent).toBe(1);
@@ -84,14 +85,14 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group2@g.us');
     queue.enqueueMessageCheck('group3@g.us');
 
-    // Let promises settle
-    await vi.advanceTimersByTimeAsync(10);
+    // Advance past debounce to let first two start
+    await vi.advanceTimersByTimeAsync(4010);
 
     // Only 2 should be active (MAX_CONCURRENT_CONTAINERS = 2)
     expect(maxActive).toBe(2);
     expect(activeCount).toBe(2);
 
-    // Complete one — third should start
+    // Complete one — third should start (drain bypasses debounce)
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
@@ -119,7 +120,7 @@ describe('GroupQueue', () => {
 
     // Start processing messages (takes the active slot)
     queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(4010);
 
     // While active, enqueue both a task and pending messages
     const taskFn = vi.fn(async () => {
@@ -151,17 +152,17 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // First call happens immediately
-    await vi.advanceTimersByTimeAsync(10);
+    // First call happens after debounce (4000ms)
+    await vi.advanceTimersByTimeAsync(4010);
     expect(callCount).toBe(1);
 
-    // First retry after 5000ms (BASE_RETRY_MS * 2^0)
-    await vi.advanceTimersByTimeAsync(5000);
+    // First retry after 5000ms backoff + 4000ms debounce
+    await vi.advanceTimersByTimeAsync(5000 + 4000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(2);
 
-    // Second retry after 10000ms (BASE_RETRY_MS * 2^1)
-    await vi.advanceTimersByTimeAsync(10000);
+    // Second retry after 10000ms backoff + 4000ms debounce
+    await vi.advanceTimersByTimeAsync(10000 + 4000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(3);
   });
@@ -194,14 +195,14 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group1@g.us');
 
     // Run through all 5 retries (MAX_RETRIES = 5)
-    // Initial call
-    await vi.advanceTimersByTimeAsync(10);
+    // Initial call after debounce
+    await vi.advanceTimersByTimeAsync(4010);
     expect(callCount).toBe(1);
 
-    // Retry 1: 5000ms, Retry 2: 10000ms, Retry 3: 20000ms, Retry 4: 40000ms, Retry 5: 80000ms
+    // Each retry = backoff delay + debounce (4000ms)
     const retryDelays = [5000, 10000, 20000, 40000, 80000];
     for (let i = 0; i < retryDelays.length; i++) {
-      await vi.advanceTimersByTimeAsync(retryDelays[i] + 10);
+      await vi.advanceTimersByTimeAsync(retryDelays[i] + 4000 + 10);
       expect(callCount).toBe(i + 2);
     }
 
@@ -228,18 +229,42 @@ describe('GroupQueue', () => {
     // Fill both slots
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group2@g.us');
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(4010);
 
-    // Queue a third
+    // Queue a third (hits concurrency limit, queued immediately — no debounce needed)
     queue.enqueueMessageCheck('group3@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toEqual(['group1@g.us', 'group2@g.us']);
 
-    // Free up a slot
+    // Free up a slot — drain bypasses debounce
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toContain('group3@g.us');
+  });
+
+  // --- Debounce batching ---
+
+  it('batches rapid-fire enqueues into a single processMessages call', async () => {
+    const processMessages = vi.fn(async () => true);
+    queue.setProcessMessagesFn(processMessages);
+
+    // 3 rapid enqueues over ~2 seconds (within the 4s debounce window)
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(1000);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(1000);
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Not yet — debounce hasn't fired
+    await vi.advanceTimersByTimeAsync(10);
+    expect(processMessages).not.toHaveBeenCalled();
+
+    // Advance past debounce from last enqueue (4000ms)
+    await vi.advanceTimersByTimeAsync(4000);
+
+    expect(processMessages).toHaveBeenCalledTimes(1);
+    expect(processMessages).toHaveBeenCalledWith('group1@g.us');
   });
 });
