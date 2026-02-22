@@ -186,9 +186,9 @@ async function handleQrBrowser(
   statusFile: string,
   qrFile: string,
 ): Promise<void> {
-  // Poll for QR data (15s)
+  // Poll for QR data (45s)
   let qrReady = false;
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 45; i++) {
     const statusContent = readFileSafe(statusFile);
     if (statusContent === 'already_authenticated') {
       emitAuthStatus('qr-browser', 'already_authenticated', 'success');
@@ -210,8 +210,8 @@ async function handleQrBrowser(
   const qrData = fs.readFileSync(qrFile, 'utf-8');
   try {
     const svg = execSync(
-      `node -e "const QR=require('qrcode');const data=${JSON.stringify(qrData)};QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
-      { cwd: projectRoot, encoding: 'utf-8' },
+      `node -e "const QR=require('qrcode');QR.toString(process.env.QR_DATA,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
+      { cwd: projectRoot, encoding: 'utf-8', env: { ...process.env, QR_DATA: qrData } },
     );
     const html = QR_AUTH_TEMPLATE.replace('{{QR_SVG}}', svg);
     const htmlPath = path.join(projectRoot, 'store', 'qr-auth.html');
@@ -239,9 +239,9 @@ async function handlePairingCode(
   statusFile: string,
   phone: string,
 ): Promise<void> {
-  // Poll for pairing code (15s)
+  // Poll for pairing code (45s)
   let pairingCode = '';
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 45; i++) {
     const statusContent = readFileSafe(statusFile);
     if (statusContent === 'already_authenticated') {
       emitAuthStatus('pairing-code', 'already_authenticated', 'success');

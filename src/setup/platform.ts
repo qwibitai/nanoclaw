@@ -61,23 +61,30 @@ export function openBrowser(url: string): boolean {
       return true;
     }
     if (platform === 'linux') {
-      // Try xdg-open first, then wslview for WSL
-      if (commandExists('xdg-open')) {
-        execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: 'ignore' });
-        return true;
-      }
-      if (isWSL() && commandExists('wslview')) {
-        execSync(`wslview ${JSON.stringify(url)}`, { stdio: 'ignore' });
-        return true;
-      }
-      // WSL without wslview: try cmd.exe
+      // In WSL, prefer Windows-native openers before xdg-open (which needs a display)
       if (isWSL()) {
-        try {
-          execSync(`cmd.exe /c start "" ${JSON.stringify(url)}`, { stdio: 'ignore' });
-          return true;
-        } catch {
-          // cmd.exe not available
+        if (commandExists('wslview')) {
+          try {
+            execSync(`wslview ${JSON.stringify(url)}`, { stdio: 'ignore' });
+            return true;
+          } catch { /* try next */ }
         }
+        try {
+          // Convert WSL path to Windows path if it's a file path
+          let winUrl = url;
+          if (url.startsWith('/')) {
+            try { winUrl = execSync(`wslpath -w ${JSON.stringify(url)}`, { encoding: 'utf-8' }).trim(); } catch { /* keep original */ }
+          }
+          execSync(`cmd.exe /c start "" ${JSON.stringify(winUrl)}`, { stdio: 'ignore' });
+          return true;
+        } catch { /* try next */ }
+      }
+      // Non-WSL Linux: xdg-open
+      if (commandExists('xdg-open')) {
+        try {
+          execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: 'ignore' });
+          return true;
+        } catch { /* failed */ }
       }
     }
   } catch {
