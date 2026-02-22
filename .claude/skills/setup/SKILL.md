@@ -57,7 +57,21 @@ Check the preflight results for `APPLE_CONTAINER` and `DOCKER`.
   - macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download at https://docker.com/products/docker-desktop
   - Linux: install with `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`. Note: user may need to log out/in for group membership.
 
-### 3b. Build and test
+### 3b. Apple Container conversion gate (if needed)
+
+**If the chosen runtime is Apple Container**, you MUST check whether the source code has already been converted from Docker to Apple Container. Do NOT skip this step. Run:
+
+```bash
+grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "ALREADY_CONVERTED" || echo "NEEDS_CONVERSION"
+```
+
+**If NEEDS_CONVERSION**, the source code still uses Docker as the runtime. You MUST run the `/convert-to-apple-container` skill NOW, before proceeding to the build step.
+
+**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
+
+**If the chosen runtime is Docker**, no conversion is needed — Docker is the default. Continue to 3c.
+
+### 3c. Build and test
 
 Run `./.claude/skills/setup/scripts/03-setup-container.sh --runtime <chosen>` and parse the status block.
 

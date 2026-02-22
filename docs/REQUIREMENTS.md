@@ -55,9 +55,8 @@ Skills to add or switch to different messaging platforms:
 - `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
 ### Container Runtime
-The project currently uses Apple Container (macOS-only). We need:
-- `/convert-to-docker` - Replace Apple Container with standard Docker
-- This unlocks Linux support and broader deployment options
+The project uses Docker by default (cross-platform). For macOS users who prefer Apple Container:
+- `/convert-to-apple-container` - Switch from Docker to Apple Container (macOS-only)
 
 ### Platform Support
 - `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)

@@ -58,7 +58,7 @@ export function setupRerereAdapter(
 
   // Clean up stale MERGE_HEAD from a previous crash
   if (fs.existsSync(path.join(gitDir, 'MERGE_HEAD'))) {
-    cleanupMergeState();
+    cleanupMergeState(filePath);
   }
 
   // Hash objects into git object store

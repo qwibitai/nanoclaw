@@ -3,26 +3,28 @@
 </p>
 
 <p align="center">
-  我的个人 Claude 助手，安全地运行在容器中。它轻巧、易于理解，并可根据你自己的需求进行定制。
+  NanoClaw —— 您的专属 Claude 助手，在容器中安全运行。它轻巧易懂，并能根据您的个人需求灵活定制。
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> ·
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord"></a>
+  <a href="https://nanoclaw.dev">nanoclaw.dev</a>&nbsp; • &nbsp;
+  <a href="README.md">English</a>&nbsp; • &nbsp;
+  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
 
-**新功能:** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。在你的聊天中启动多个协作智能体团队。
+**新功能：** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。可轻松组建智能体团队，在您的聊天中高效协作。
 
 ## 我为什么创建这个项目
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，愿景宏大。但我无法安心地运行一个我不了解、却能接触我个人生活的软件。OpenClaw 有 52 多个模块、8 个配置管理文件、45 多个依赖项，以及为 15 个渠道提供商设计的抽象层。其安全性是应用级别的（通过白名单、配对码），而非操作系统级别的隔离。所有东西都在一个共享内存的 Node 进程中运行。
+[OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，愿景宏大。但我无法安心使用一个我不了解却能访问我个人隐私的软件。OpenClaw 有 52+ 个模块、8 个配置管理文件、45+ 个依赖项，以及为 15 个渠道提供商设计的抽象层。其安全性是应用级别的（通过白名单、配对码实现），而非操作系统级别的隔离。所有东西都在一个共享内存的 Node 进程中运行。
 
-NanoClaw 用一个你能在 8 分钟内理解的代码库，为你提供了同样的核心功能。只有一个进程，寥寥数个文件。智能体（Agent）运行在具有文件系统隔离的真实 Linux 容器中，而不是依赖于权限检查。
+NanoClaw 用一个您能在 8 分钟内理解的代码库，为您提供了同样的核心功能。只有一个进程，少数几个文件。智能体（Agent）运行在具有文件系统隔离的真实 Linux 容器中，而不是依赖于权限检查。
 
-## 快速上手
+## 快速开始
 
 ```bash
-git clone https://github.com/gavrielc/nanoclaw.git
+git clone https://github.com/qwibitai/nanoclaw.git
 cd nanoclaw
 claude
 ```
@@ -31,26 +33,26 @@ claude
 
 ## 设计哲学
 
-**小到可以理解:** 一个进程，几个源文件。没有微服务，没有消息队列，没有抽象层。让 Claude Code 带你过一遍代码。
+**小巧易懂：** 单一进程，少量源文件。无微服务、无消息队列、无复杂抽象层。让 Claude Code 引导您轻松上手。
 
-**通过隔离保障安全:** 智能体运行在 Linux 容器（在 macOS 上是 Apple Container，或 Docker）中。它们只能看到被明确挂载的内容。即使是 Bash 访问也是安全的，因为命令是在容器内部执行，而不是在你的主机上。
+**通过隔离保障安全:** 智能体运行在 Linux 容器（在 macOS 上是 Apple Container，或 Docker）中。它们只能看到被明确挂载的内容。即便通过 Bash 访问也十分安全，因为所有命令都在容器内执行，不会直接操作您的宿主机。
 
-**为单一用户打造:** 这不是一个框架。这是一个完全符合我个人需求的、可工作的软件。你应该 fork 它，然后让 Claude Code 修改它以完全匹配你的需求。
+**为单一用户打造:** 这不是一个框架，是一个完全符合我个人需求的、可工作的软件。您可以 Fork 本项目，然后让 Claude Code 根据您的精确需求进行修改和适配。
 
 **定制即代码修改:** 没有繁杂的配置文件。想要不同的行为？直接修改代码。代码库足够小，这样做是安全的。
 
-**AI 原生:** 无安装向导(由 Claude Code 指导安装)。无监控仪表盘(直接问 Claude 发生了什么)。无调试工具(描述问题，Claude 会修复它)。
+**AI 原生:** 无安装向导(由 Claude Code 指导安装)。无需监控仪表盘，直接询问 Claude 即可了解系统状况。无调试工具(描述问题，Claude 会修复它)。
 
-**技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Telegram）。相反，他们应该贡献像 `/add-telegram` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造你的 fork。最终，你得到的是只做你需要事情的整洁代码。
+**技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Telegram）。相反，他们应该贡献像 `/add-telegram` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造您的 fork。最终，您得到的是只做您需要事情的整洁代码。
 
-**最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着你直接运行的就是 Claude Code。工具套件至关重要。一个糟糕的套件即使是聪明的模型也会显得愚笨，而一个好的套件则能赋予它们超能力。Claude Code (在我看来) 是市面上最好的工具套件。
+**最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着您直接运行的就是 Claude Code。工具套件至关重要。一个低效的工具套件会让再聪明的模型也显得迟钝，而一个优秀的套件则能赋予它们超凡的能力。Claude Code (在我看来) 是市面上最好的工具套件。
 
 ## 功能支持
 
 - **WhatsApp 输入/输出** - 通过手机给 Claude 发消息
-- **隔离的群组上下文** - 每个群组都有其独立的 `CLAUDE.md` 记忆、隔离的文件系统，并在其自己的容器沙箱中运行，只挂载该文件系统
-- **主频道** - 你的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
-- **计划任务** - 运行 Claude 的周期性作业，并可以给你回发消息
+- **隔离的群组上下文** - 每个群组都拥有独立的 `CLAUDE.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
+- **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
+- **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
 - **网络访问** - 搜索和抓取网页内容
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
@@ -58,7 +60,7 @@ claude
 
 ## 使用方法
 
-使用触发词（默认为 `@Andy`）与你的助手对话：
+使用触发词（默认为 `@Andy`）与您的助手对话：
 
 ```
 @Andy 每周一到周五早上9点，给我发一份销售渠道的概览（需要访问我的 Obsidian vault 文件夹）
@@ -66,7 +68,7 @@ claude
 @Andy 每周一早上8点，从 Hacker News 和 TechCrunch 收集关于 AI 发展的资讯，然后发给我一份简报
 ```
 
-在主频道（你的self-chat）中，可以管理群组和任务：
+在主频道（您的self-chat）中，可以管理群组和任务：
 ```
 @Andy 列出所有群组的计划任务
 @Andy 暂停周一简报任务
@@ -75,7 +77,7 @@ claude
 
 ## 定制
 
-没有需要学习的配置文件。直接告诉 Claude Code 你想要什么：
+没有需要学习的配置文件。直接告诉 Claude Code 您想要什么：
 
 - "把触发词改成 @Bob"
 - "记住以后回答要更简短直接"
@@ -90,9 +92,9 @@ claude
 
 **不要添加功能，而是添加技能。**
 
-如果你想添加 Telegram 支持，不要创建一个 PR 同时添加 Telegram 和 WhatsApp。而是贡献一个技能文件 (`.claude/skills/add-telegram/SKILL.md`)，教 Claude Code 如何改造一个 NanoClaw 安装以使用 Telegram。
+如果您想添加 Telegram 支持，不要创建一个 PR 同时添加 Telegram 和 WhatsApp。而是贡献一个技能文件 (`.claude/skills/add-telegram/SKILL.md`)，教 Claude Code 如何改造一个 NanoClaw 安装以使用 Telegram。
 
-然后用户在自己的 fork 上运行 `/add-telegram`，就能得到只做他们需要的事情的整洁代码，而不是一个试图支持所有用例的臃肿系统。
+然后用户在自己的 fork 上运行 `/add-telegram`，就能得到只做他们需要事情的整洁代码，而不是一个试图支持所有用例的臃肿系统。
 
 ### RFS (技能征集)
 
@@ -122,14 +124,14 @@ claude
 WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
-单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组独立的消息队列，带全局并发控制。通过文件系统进行进程间通信（IPC）。
+单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组的消息队列都带有全局并发控制。通过文件系统进行进程间通信（IPC）。
 
 关键文件：
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/whatsapp.ts` - WhatsApp 连接、认证、收发消息
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由
-- `src/group-queue.ts` - 每群组队列，带全局并发限制
+- `src/group-queue.ts` - 各带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
 - `src/db.ts` - SQLite 操作（消息、群组、会话、状态）
@@ -139,23 +141,23 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 **为什么是 WhatsApp 而不是 Telegram/Signal 等？**
 
-因为我用 WhatsApp。fork 这个项目然后运行一个技能来改变它。正是这个项目的核心理念。
+因为我用 WhatsApp。Fork 这个项目然后运行一个技能来改变它。正是这个项目的核心理念。
 
-**为什么是 Apple Container 而不是 Docker？**
+**为什么是 Docker？**
 
-在 macOS 上，Apple Container 轻巧、快速，并为 Apple 芯片优化。但 Docker 也完全支持——在 `/setup` 期间，你可以选择使用哪个运行时。在 Linux 上，会自动使用 Docker。
+Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 macOS 上，您可以选择通过运行 `/convert-to-apple-container` 切换到 Apple Container，以获得更轻量级的原生运行时体验。
 
 **我可以在 Linux 上运行吗？**
 
-可以。运行 `/setup`，它会自动配置 Docker 作为容器运行时。感谢 [@dotsetgreg](https://github.com/dotsetgreg) 贡献了 `/convert-to-docker` 技能。
+可以。Docker 是默认的容器运行时，在 macOS 和 Linux 上都可以使用。只需运行 `/setup`。
 
-**这个安全吗？**
+**这个项目安全吗？**
 
-智能体在容器中运行，而不是在应用级别的权限检查之后。它们只能访问被明确挂载的目录。你仍然应该审查你运行的代码，但这个代码库小到你真的可以做到。完整的安全模型请见 [docs/SECURITY.md](docs/SECURITY.md)。
+智能体在容器中运行，而不是在应用级别的权限检查之后。它们只能访问被明确挂载的目录。您仍然应该审查您运行的代码，但这个代码库小到您真的可以做到。完整的安全模型请见 [docs/SECURITY.md](docs/SECURITY.md)。
 
 **为什么没有配置文件？**
 
-我们不希望配置泛滥。每个用户都应该定制它，让代码完全符合他们的需求，而不是去配置一个通用的系统。如果你喜欢用配置文件，告诉 Claude 让它加上。
+我们不希望配置泛滥。每个用户都应该定制它，让代码完全符合他们的需求，而不是去配置一个通用的系统。如果您喜欢用配置文件，告诉 Claude 让它加上。
 
 **我该如何调试问题？**
 
@@ -175,7 +177,7 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 ## 社区
 
-有问题？有想法？[加入 Discord](https://discord.gg/VDdww8qS42)。
+有任何疑问或建议？欢迎[加入 Discord 社区](https://discord.gg/VDdww8qS42)与我们交流。
 
 ## 许可证
 
