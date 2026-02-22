@@ -165,6 +165,17 @@ function buildVolumeMounts(
     readonly: true,
   });
 
+  // Accounts directory: global account registry (Google, and future providers)
+  // Mounted read-only so agents can read credentials but never modify them
+  const accountsDir = path.join(DATA_DIR, '..', 'data', 'accounts');
+  if (fs.existsSync(accountsDir)) {
+    mounts.push({
+      hostPath: accountsDir,
+      containerPath: '/workspace/accounts',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
