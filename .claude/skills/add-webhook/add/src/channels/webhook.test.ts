@@ -1,7 +1,20 @@
 import { AddressInfo } from 'net';
 import { createServer, request } from 'http';
+import { EventEmitter } from 'events';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { httpsRequestMock } = vi.hoisted(() => ({
+  httpsRequestMock: vi.fn(),
+}));
+
+vi.mock('https', async () => {
+  const actual = await vi.importActual<typeof import('https')>('https');
+  return {
+    ...actual,
+    request: httpsRequestMock,
+  };
+});
 
 vi.mock('../logger.js', () => ({
   logger: {
@@ -141,7 +154,7 @@ describe('WebhookChannel', () => {
       expect.any(String),
       'wh:user-123',
       'webhook',
-      true,
+      false,
     );
 
     await channel.disconnect();
@@ -305,6 +318,52 @@ describe('WebhookChannel', () => {
         text: 'hello connector',
         channel: 'webhook',
       }),
+    );
+  });
+
+  it('allows https connector URLs in sendMessage', async () => {
+    httpsRequestMock.mockImplementation(
+      (_options: unknown, onResponse?: (res: unknown) => void) => {
+        const res = new EventEmitter() as EventEmitter & {
+          statusCode: number;
+          resume: () => void;
+        };
+        res.statusCode = 200;
+        res.resume = () => {};
+
+        const req = new EventEmitter() as EventEmitter & {
+          write: (chunk: string) => void;
+          end: () => void;
+        };
+        req.write = () => {};
+        req.end = () => {
+          onResponse?.(res);
+          res.emit('end');
+        };
+
+        return req;
+      },
+    );
+
+    const channel = new WebhookChannel(
+      18794,
+      '127.0.0.1',
+      undefined,
+      'https://example.test/v1/outbound',
+      createOpts(),
+    );
+
+    await channel.sendMessage('wh:user-https', 'hello secure connector');
+
+    expect(httpsRequestMock).toHaveBeenCalledTimes(1);
+    expect(httpsRequestMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST',
+        hostname: 'example.test',
+        port: 443,
+        path: '/v1/outbound',
+      }),
+      expect.any(Function),
     );
   });
 });

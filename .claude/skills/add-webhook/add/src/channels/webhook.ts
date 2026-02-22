@@ -4,8 +4,9 @@ import {
   Server,
   ServerResponse,
   createServer,
-  request,
+  request as httpRequest,
 } from 'http';
+import { request as httpsRequest } from 'https';
 import { EventEmitter } from 'events';
 
 import { logger } from '../logger.js';
@@ -90,13 +91,15 @@ export class WebhookChannel extends EventEmitter implements Channel {
       return;
     }
 
-    if (endpoint.protocol !== 'http:') {
+    if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') {
       logger.error(
         { connectorUrl: this.connectorUrl },
-        'Webhook connector URL must use http://',
+        'Webhook connector URL must use http:// or https://',
       );
       return;
     }
+
+    const reqFn = endpoint.protocol === 'https:' ? httpsRequest : httpRequest;
 
     const payload = JSON.stringify({
       jid,
@@ -106,11 +109,15 @@ export class WebhookChannel extends EventEmitter implements Channel {
     });
 
     await new Promise<void>((resolve) => {
-      const req = request(
+      const req = reqFn(
         {
           method: 'POST',
           hostname: endpoint.hostname,
-          port: endpoint.port ? parseInt(endpoint.port, 10) : 80,
+          port: endpoint.port
+            ? parseInt(endpoint.port, 10)
+            : endpoint.protocol === 'https:'
+              ? 443
+              : 80,
           path: `${endpoint.pathname}${endpoint.search}`,
           headers: {
             'content-type': 'application/json',
@@ -240,7 +247,7 @@ export class WebhookChannel extends EventEmitter implements Channel {
     };
 
     this.opts.onMessage(chatJid, message);
-    this.opts.onChatMetadata(chatJid, timestamp, chatName, 'webhook', true);
+    this.opts.onChatMetadata(chatJid, timestamp, chatName, 'webhook', false);
 
     this.writeJson(res, 200, {
       status: 'accepted',
