@@ -95,6 +95,20 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add worker_runs extended columns (migration for existing DBs)
+  const workerRunsMigrations = [
+    `ALTER TABLE worker_runs ADD COLUMN retry_count INTEGER DEFAULT 0`,
+    `ALTER TABLE worker_runs ADD COLUMN error_details TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN branch_name TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN pr_url TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN commit_sha TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN test_summary TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN risk_summary TEXT`,
+  ];
+  for (const sql of workerRunsMigrations) {
+    try { database.exec(sql); } catch { /* column already exists */ }
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -590,24 +604,69 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
 
 // --- Worker run deduplication ---
 
+export type WorkerRunStatus =
+  | 'queued' | 'running' | 'review_requested'
+  | 'failed_contract' | 'done' | 'failed';
+
 /**
- * Insert a worker run record. Returns true if inserted (new run), false if
- * the run_id already exists (duplicate — caller should skip execution).
+ * Insert a worker run record.
+ * - 'new': run_id not seen before — inserted with status 'queued'
+ * - 'retry': run_id exists with status 'failed' or 'failed_contract' — retry_count incremented, reset to 'queued'
+ * - 'duplicate': run_id exists with any other status — caller should skip execution
  */
-export function insertWorkerRun(runId: string, groupFolder: string): boolean {
-  try {
-    db.prepare(
-      `INSERT INTO worker_runs (run_id, group_folder, status, started_at) VALUES (?, ?, 'running', ?)`,
-    ).run(runId, groupFolder, new Date().toISOString());
-    return true;
-  } catch {
-    return false; // UNIQUE constraint = duplicate run_id
+export function insertWorkerRun(runId: string, groupFolder: string): 'new' | 'retry' | 'duplicate' {
+  const existing = getWorkerRun(runId);
+  if (existing) {
+    if (existing.status === 'failed' || existing.status === 'failed_contract') {
+      db.prepare(
+        `UPDATE worker_runs SET status = 'queued', retry_count = retry_count + 1, started_at = ? WHERE run_id = ?`,
+      ).run(new Date().toISOString(), runId);
+      return 'retry';
+    }
+    return 'duplicate';
   }
+  db.prepare(
+    `INSERT INTO worker_runs (run_id, group_folder, status, started_at, retry_count) VALUES (?, ?, 'queued', ?, 0)`,
+  ).run(runId, groupFolder, new Date().toISOString());
+  return 'new';
+}
+
+export function updateWorkerRunStatus(runId: string, status: WorkerRunStatus): void {
+  const terminal = status === 'done' || status === 'failed' || status === 'failed_contract' || status === 'review_requested';
+  if (terminal) {
+    db.prepare(
+      `UPDATE worker_runs SET status = ?, completed_at = ? WHERE run_id = ?`,
+    ).run(status, new Date().toISOString(), runId);
+  } else {
+    db.prepare(`UPDATE worker_runs SET status = ? WHERE run_id = ?`).run(status, runId);
+  }
+}
+
+export function updateWorkerRunCompletion(
+  runId: string,
+  data: {
+    branch_name?: string;
+    pr_url?: string;
+    commit_sha?: string;
+    test_summary?: string;
+    risk_summary?: string;
+  },
+): void {
+  db.prepare(
+    `UPDATE worker_runs SET branch_name = ?, pr_url = ?, commit_sha = ?, test_summary = ?, risk_summary = ? WHERE run_id = ?`,
+  ).run(
+    data.branch_name ?? null,
+    data.pr_url ?? null,
+    data.commit_sha ?? null,
+    data.test_summary ?? null,
+    data.risk_summary ?? null,
+    runId,
+  );
 }
 
 export function completeWorkerRun(
   runId: string,
-  status: 'completed' | 'failed',
+  status: WorkerRunStatus,
   resultSummary?: string,
 ): void {
   db.prepare(
@@ -615,12 +674,22 @@ export function completeWorkerRun(
   ).run(status, new Date().toISOString(), resultSummary ?? null, runId);
 }
 
-export function getWorkerRun(
-  runId: string,
-): { run_id: string; status: string; result_summary: string | null } | undefined {
+export function getWorkerRun(runId: string): {
+  run_id: string;
+  status: string;
+  retry_count: number;
+  result_summary: string | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  commit_sha: string | null;
+  test_summary: string | null;
+  risk_summary: string | null;
+} | undefined {
   return db
-    .prepare(`SELECT run_id, status, result_summary FROM worker_runs WHERE run_id = ?`)
-    .get(runId) as { run_id: string; status: string; result_summary: string | null } | undefined;
+    .prepare(
+      `SELECT run_id, status, retry_count, result_summary, branch_name, pr_url, commit_sha, test_summary, risk_summary FROM worker_runs WHERE run_id = ?`,
+    )
+    .get(runId) as ReturnType<typeof getWorkerRun>;
 }
 
 // --- JSON migration ---

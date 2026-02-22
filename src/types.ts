@@ -31,6 +31,7 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   model?: string;   // Claude model to use (e.g. 'claude-haiku-4-5-20251001')
+  image?: string;   // Override container image (e.g. 'nanoclaw-worker:latest')
 }
 
 export interface RegisteredGroup {

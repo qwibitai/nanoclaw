@@ -36,6 +36,8 @@ export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
+export const WORKER_CONTAINER_IMAGE =
+  process.env.WORKER_CONTAINER_IMAGE || 'nanoclaw-worker:latest';
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,

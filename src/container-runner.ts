@@ -14,6 +14,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  WORKER_CONTAINER_IMAGE,
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
@@ -73,6 +74,7 @@ function buildVolumeMounts(
   isMain: boolean,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
+  const isWorker = group.folder.startsWith('jarvis-worker') || !!group.containerConfig?.image;
   const homeDir = getHomeDir();
   const projectRoot = process.cwd();
 
@@ -121,65 +123,67 @@ function buildVolumeMounts(
     });
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
-  const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-      env: {
-        // Enable agent swarms (subagent orchestration)
-        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        // Load CLAUDE.md from additional mounted directories
-        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        // Enable Claude's memory feature (persists user preferences between sessions)
-        // https://code.claude.com/docs/en/memory#manage-auto-memory
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-        // MCP servers root — used by mcp-setup skill to write correct paths into .mcp.json
-        MCP_SERVERS_ROOT: '/workspace/mcp-servers',
-      },
-    }, null, 2) + '\n');
-  }
-
-  // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      // Remove stale dst (may be a symlink from a previous sync) before copying.
-      // dereference:true follows symlinks in src so container always gets real files.
-      fs.rmSync(dstDir, { recursive: true, force: true });
-      fs.cpSync(srcDir, dstDir, { recursive: true, dereference: true });
+  if (!isWorker) {
+    // Per-group Claude sessions directory (isolated from other groups)
+    // Each group gets their own .claude/ to prevent cross-group session access
+    const groupSessionsDir = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      '.claude',
+    );
+    fs.mkdirSync(groupSessionsDir, { recursive: true });
+    const settingsFile = path.join(groupSessionsDir, 'settings.json');
+    if (!fs.existsSync(settingsFile)) {
+      fs.writeFileSync(settingsFile, JSON.stringify({
+        env: {
+          // Enable agent swarms (subagent orchestration)
+          // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+          // Load CLAUDE.md from additional mounted directories
+          // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+          CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+          // Enable Claude's memory feature (persists user preferences between sessions)
+          // https://code.claude.com/docs/en/memory#manage-auto-memory
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+          // MCP servers root — used by mcp-setup skill to write correct paths into .mcp.json
+          MCP_SERVERS_ROOT: '/workspace/mcp-servers',
+        },
+      }, null, 2) + '\n');
     }
-  }
 
-  // Sync rules from container/rules/ into each group's .claude/rules/
-  const rulesSrc = path.join(process.cwd(), 'container', 'rules');
-  const rulesDst = path.join(groupSessionsDir, 'rules');
-  if (fs.existsSync(rulesSrc)) {
-    fs.mkdirSync(rulesDst, { recursive: true });
-    for (const ruleFile of fs.readdirSync(rulesSrc)) {
-      if (!ruleFile.endsWith('.md')) continue;
-      fs.copyFileSync(path.join(rulesSrc, ruleFile), path.join(rulesDst, ruleFile));
+    // Sync skills from container/skills/ into each group's .claude/skills/
+    const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+    const skillsDst = path.join(groupSessionsDir, 'skills');
+    if (fs.existsSync(skillsSrc)) {
+      for (const skillDir of fs.readdirSync(skillsSrc)) {
+        const srcDir = path.join(skillsSrc, skillDir);
+        if (!fs.statSync(srcDir).isDirectory()) continue;
+        const dstDir = path.join(skillsDst, skillDir);
+        // Remove stale dst (may be a symlink from a previous sync) before copying.
+        // dereference:true follows symlinks in src so container always gets real files.
+        fs.rmSync(dstDir, { recursive: true, force: true });
+        fs.cpSync(srcDir, dstDir, { recursive: true, dereference: true });
+      }
     }
-  }
 
-  mounts.push({
-    hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
-    readonly: false,
-  });
+    // Sync rules from container/rules/ into each group's .claude/rules/
+    const rulesSrc = path.join(process.cwd(), 'container', 'rules');
+    const rulesDst = path.join(groupSessionsDir, 'rules');
+    if (fs.existsSync(rulesSrc)) {
+      fs.mkdirSync(rulesDst, { recursive: true });
+      for (const ruleFile of fs.readdirSync(rulesSrc)) {
+        if (!ruleFile.endsWith('.md')) continue;
+        fs.copyFileSync(path.join(rulesSrc, ruleFile), path.join(rulesDst, ruleFile));
+      }
+    }
+
+    mounts.push({
+      hostPath: groupSessionsDir,
+      containerPath: '/home/node/.claude',
+      readonly: false,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -193,14 +197,16 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Mount agent-runner source from host — recompiled on container startup.
-  // Bypasses sticky build cache for code changes.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  mounts.push({
-    hostPath: agentRunnerSrc,
-    containerPath: '/app/src',
-    readonly: true,
-  });
+  if (!isWorker) {
+    // Mount agent-runner source from host — recompiled on container startup.
+    // Bypasses sticky build cache for code changes.
+    const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+    mounts.push({
+      hostPath: agentRunnerSrc,
+      containerPath: '/app/src',
+      readonly: true,
+    });
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
@@ -215,15 +221,23 @@ function buildVolumeMounts(
   return mounts;
 }
 
+function getContainerImage(group: RegisteredGroup): string {
+  if (group.containerConfig?.image) return group.containerConfig.image;
+  if (group.folder.startsWith('jarvis-worker')) return WORKER_CONTAINER_IMAGE;
+  return CONTAINER_IMAGE;
+}
+
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
-function readSecrets(): Record<string, string> {
+function readSecrets(group: RegisteredGroup): Record<string, string> {
+  const isWorker = group.folder.startsWith('jarvis-worker') || !!group.containerConfig?.image;
+  if (isWorker) return readEnvFile(['GITHUB_TOKEN']);
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string, group: RegisteredGroup): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Run as host user so bind-mounted files are accessible (Docker only).
@@ -247,7 +261,7 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  args.push(getContainerImage(group));
 
   return args;
 }
@@ -266,7 +280,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group);
 
   logger.debug(
     {
@@ -307,7 +321,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    input.secrets = readSecrets(group);
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
     // Remove secrets from input so they don't appear in logs
