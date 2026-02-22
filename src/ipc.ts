@@ -1,3 +1,4 @@
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -379,6 +380,18 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'refresh_oauth': {
+      const script = path.join(process.cwd(), 'scripts', 'refresh-oauth.sh');
+      exec(script, (err, stdout, stderr) => {
+        if (err) {
+          logger.error({ err, stderr, sourceGroup }, 'OAuth refresh failed');
+        } else {
+          logger.info({ sourceGroup }, 'OAuth token refreshed via IPC');
+        }
+      });
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
