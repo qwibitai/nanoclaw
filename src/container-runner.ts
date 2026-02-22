@@ -223,7 +223,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'PERPLEXITY_API_KEY', 'OPENAI_API_KEY']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
@@ -238,6 +238,9 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
+
+  // Allow containers to reach host services (e.g. RAG API)
+  args.push('--add-host', 'host.docker.internal:host-gateway');
 
   for (const mount of mounts) {
     if (mount.readonly) {
