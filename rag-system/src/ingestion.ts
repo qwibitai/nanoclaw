@@ -31,8 +31,8 @@ function readWatermark(): WatermarkData | null {
     if (fs.existsSync(WATERMARK_PATH)) {
       return JSON.parse(fs.readFileSync(WATERMARK_PATH, 'utf-8'));
     }
-  } catch {
-    // Corrupt watermark file — treat as fresh start
+  } catch (err) {
+    console.warn('Failed to read watermark file, treating as fresh start:', err);
   }
   return null;
 }
@@ -217,8 +217,9 @@ export async function runIngestionCycle(): Promise<void> {
   }
 }
 
-// Allow running directly: tsx src/ingestion.ts
-if (process.argv[1]?.endsWith('ingestion.ts')) {
+// Allow running directly: tsx src/ingestion.ts or node dist/ingestion.js
+const basename = process.argv[1] ? path.basename(process.argv[1]) : '';
+if (basename === 'ingestion.ts' || basename === 'ingestion.js') {
   (async () => {
     const { loadConfig } = await import('./config.js');
     const { initialize } = await import('./embeddings.js');

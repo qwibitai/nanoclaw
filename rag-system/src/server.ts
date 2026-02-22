@@ -48,8 +48,13 @@ app.post('/api/search', async (req: Request, res: Response) => {
   try {
     const searchReq: SearchRequest = req.body;
 
-    if (!searchReq.query) {
+    if (!searchReq.query || typeof searchReq.query !== 'string') {
       res.status(400).json({ error: 'query field is required' });
+      return;
+    }
+
+    if (searchReq.query.length > 2000) {
+      res.status(400).json({ error: 'query too long (max 2000 chars)' });
       return;
     }
 
@@ -76,9 +81,9 @@ app.post('/api/search', async (req: Request, res: Response) => {
       filters.endDate = searchReq.filters.dateRange.end;
     }
 
-    const limit = searchReq.limit || config.search.topK;
-    const scoreThreshold =
-      searchReq.scoreThreshold ?? config.search.scoreThreshold;
+    const limit = Math.min(Math.max(Math.trunc(searchReq.limit || config.search.topK), 1), 100);
+    const scoreThreshold = Math.min(Math.max(
+      searchReq.scoreThreshold ?? config.search.scoreThreshold, 0), 1);
 
     const qdrantResults = await qdrantClient.searchSimilar(
       queryVector,
