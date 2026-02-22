@@ -42,3 +42,18 @@ export function findChannel(
 ): Channel | undefined {
   return channels.find((c) => c.ownsJid(jid));
 }
+
+/**
+ * Notify broadcast-only channels (channels that don't own any JID).
+ * Best-effort — errors are caught silently per channel.
+ */
+export async function notifyBroadcastChannels(
+  channels: Channel[],
+  jid: string,
+  text: string,
+): Promise<void> {
+  const listeners = channels.filter((c) => !c.ownsJid(jid) && c.isConnected());
+  await Promise.allSettled(
+    listeners.map((c) => c.sendMessage(jid, text)),
+  );
+}
