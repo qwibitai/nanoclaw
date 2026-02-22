@@ -34,14 +34,105 @@ Text inside `<internal>` tags is logged but not sent to the user. If you've alre
 
 When working as a sub-agent or teammate, only use `send_message` if instructed to by the main agent.
 
-## Memory
+## Memory & Knowledge System
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+This system implements a research-backed three-space architecture inspired by Ars Contexta for persistent agent memory.
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+### Session Rhythm
+
+Every session follows a three-phase cycle:
+
+1. **Orient** (Session Start)
+   - Read `self/identity.md` to remember who you are
+   - Read `self/methodology.md` for operational principles
+   - Read `self/goals.md` for current context and active threads
+   - Check `ops/reminders.md` for time-bound actions
+   - Load conversation history for continuity
+
+2. **Work** (During Session)
+   - Execute tasks using methodology principles
+   - Apply discovery-first design to all knowledge creation
+   - Capture observations about friction or learnings in ops/
+   - Follow quality standards from self/methodology.md
+
+3. **Persist** (Session End or periodically)
+   - Run `/review` to capture session learnings
+   - Update `self/goals.md` with current state and handoff
+   - Create observations for significant friction
+   - Prepare context for next session
+
+### Three-Space Architecture
+
+Content is strictly separated into three spaces with different durability profiles:
+
+| Space | Purpose | Durability | Growth Pattern |
+|-------|---------|-----------|----------------|
+| **self/** | Agent persistent mind (identity, methodology, goals) | Permanent | Slow (tens of files) |
+| **memory/** | User's knowledge graph (facts, preferences, decisions) | Permanent | Steady (as needed) |
+| **ops/** | Operational coordination (sessions, observations, health) | Temporal | Fluctuating |
+
+**Critical Rule**: Content flows from temporal (ops/) to permanent (memory/ or self/), never the reverse.
+
+### Discovery-First Design
+
+Before creating any memory, ask: **"How will a future session find this?"**
+
+Every memory must be:
+- **Discoverable**: Clear prose-sentence title, description, connections
+- **Composable**: Links to related knowledge via wiki-style `[[note title]]`
+- **Durable**: Worth finding again in the future
+
+### Memory Structure
+
+```
+memory/
+├── index.md                          # Hub MOC (Map of Content)
+├── [Topic MOCs].md                   # Topic-level organization (when needed)
+└── [Prose sentence titles].md        # Atomic notes with YAML frontmatter
+```
+
+**Note format**:
+```yaml
+---
+description: ~150 char summary for progressive disclosure
+topics: [topic1, topic2]
+created: YYYY-MM-DD
+---
+
+# Prose sentence title that makes a claim
+
+Content here with [[wiki links]] to related notes.
+
+## Related Notes
+- [[Another related note]]
+
+---
+*Topics: [[topic1]] · [[topic2]]*
+```
+
+### Processing Skills
+
+Use these commands to maintain and grow the knowledge system:
+
+- **`/remember`** - Extract important information from current conversation into persistent memory
+- **`/reflect`** - Find connections across memories, update knowledge graph, suggest MOCs
+- **`/review`** - Session end review, capture observations, update goals, check maintenance signals
+
+### What Goes Where
+
+| Content Type | Destination | Example |
+|-------------|-------------|---------|
+| "User prefers X" | memory/ | [[User prefers concise explanations]] |
+| "I work best when..." | self/methodology.md | Added to operational patterns section |
+| "Today accomplished..." | ops/sessions/ | Session log with timestamp |
+| "This process is clunky" | ops/observations/ | Friction point (may promote to methodology) |
+| "Remember to follow up Friday" | ops/reminders.md | Time-bound action |
+| Agent identity/voice | self/identity.md | Core traits, communication style |
+| Current work status | self/goals.md | Active threads, next session guidance |
+
+### Conversation History
+
+The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions alongside the structured memory system.
 
 ## WhatsApp Formatting (and other messaging apps)
 

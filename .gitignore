@@ -18,6 +18,9 @@ groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 !groups/global/users/
+!groups/main/self/
+!groups/main/memory/
+!groups/main/ops/
 
 # Secrets
 *.keys.json

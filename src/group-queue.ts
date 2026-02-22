@@ -17,6 +17,8 @@ const BASE_RETRY_MS = 5000;
 
 interface GroupState {
   active: boolean;
+  idleWaiting: boolean;
+  isTaskContainer: boolean;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
@@ -39,6 +41,8 @@ export class GroupQueue {
     if (!state) {
       state = {
         active: false,
+        idleWaiting: false,
+        isTaskContainer: false,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
@@ -115,6 +119,9 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
+      if (state.idleWaiting) {
+        this.closeStdin(groupJid);
+      }
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
     }
@@ -168,12 +175,25 @@ export class GroupQueue {
   }
 
   /**
+   * Mark the container as idle-waiting (finished work, waiting for IPC input).
+   * If tasks are pending, preempt the idle container immediately.
+   */
+  notifyIdle(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.idleWaiting = true;
+    if (state.pendingTasks.length > 0) {
+      this.closeStdin(groupJid);
+    }
+  }
+
+  /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return false;
+    if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
+    state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -215,6 +235,8 @@ export class GroupQueue {
       state.debounceTimer = null;
     }
     state.active = true;
+    state.idleWaiting = false;
+    state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
     monitorBus.emit(MONITOR_EVENTS.QUEUE_CHANGE, this.getState());
@@ -254,6 +276,8 @@ export class GroupQueue {
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.idleWaiting = false;
+    state.isTaskContainer = true;
     this.activeCount++;
     monitorBus.emit(MONITOR_EVENTS.QUEUE_CHANGE, this.getState());
 
@@ -271,6 +295,7 @@ export class GroupQueue {
       const containerName = state.containerName;
       const groupFolder = state.groupFolder;
       state.active = false;
+      state.isTaskContainer = false;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
