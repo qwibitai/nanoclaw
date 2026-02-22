@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -17,7 +18,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
-import { downloadAndSaveMedia, formatMediaAttribute } from '../media.js';
+import { formatMediaContent, getMediaInfo, saveMediaToGroup } from '../media.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -165,24 +166,40 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const groupFolder = groups[chatJid].folder;
-
-          // Download media if present
-          const mediaInfo = await downloadAndSaveMedia(msg, groupFolder);
-
           let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
+            msg.message?.documentMessage?.caption ||
+            msg.message?.documentWithCaptionMessage?.message?.documentMessage?.caption ||
             '';
 
-          // If media was downloaded, add image attribute to content
+          // Detect and download media attachments (images, documents)
+          const mediaInfo = getMediaInfo(msg);
           if (mediaInfo) {
-            const mediaAttr = formatMediaAttribute(mediaInfo);
-            // Prepend media info as XML-style attribute
-            content = `<message ${mediaAttr}>${content || ''}</message>`;
-            logger.info({ filePath: mediaInfo.filePath, caption: mediaInfo.caption }, 'Media attached to message');
+            try {
+              const buffer = (await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                {
+                  logger: console as any,
+                  reuploadRequest: this.sock.updateMediaMessage,
+                },
+              )) as Buffer;
+
+              if (buffer && buffer.length > 0) {
+                const filename = saveMediaToGroup(groups[chatJid].folder, buffer, mediaInfo);
+                const containerPath = `/workspace/group/media/${filename}`;
+                content = formatMediaContent(mediaInfo, containerPath, content);
+              } else {
+                logger.warn({ chatJid }, 'Media download returned empty buffer');
+              }
+            } catch (err) {
+              logger.error({ err, chatJid, mediaType: mediaInfo.type }, 'Failed to download media');
+              // Continue with caption-only content
+            }
           }
 
           const sender = msg.key.participant || msg.key.remoteJid || '';

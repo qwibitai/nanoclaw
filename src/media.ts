@@ -1,113 +1,124 @@
+/**
+ * Media handling utilities for NanoClaw
+ * Detects, saves, and formats media attachments from WhatsApp messages
+ */
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import type { WAMessage } from '@whiskeysockets/baileys';
+
+import { GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
-import { DATA_DIR } from './config.js';
 
 export interface MediaInfo {
-  filePath: string;
-  fileName: string;
-  mimeType: string;
+  type: 'image' | 'document';
+  mimetype: string;
+  filename?: string;
   caption?: string;
 }
 
+const MIME_TO_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'application/pdf': '.pdf',
+};
+
 /**
- * Download and save media from a WhatsApp message
- * @param message - The WhatsApp message containing media
- * @param groupFolder - The group folder name to save media in
- * @returns MediaInfo if media was downloaded, undefined otherwise
+ * Detect media in a Baileys WAMessage.
+ * Returns media info if the message contains a supported attachment, null otherwise.
+ * Skips voice messages (ptt), stickers, and videos (too large).
  */
-export async function downloadAndSaveMedia(
-  message: WAMessage,
-  groupFolder: string,
-): Promise<MediaInfo | undefined> {
-  try {
-    const msg = message.message;
-    if (!msg) return undefined;
+export function getMediaInfo(msg: { message?: Record<string, any> | null }): MediaInfo | null {
+  if (!msg.message) return null;
 
-    // Check if message contains media
-    const imageMessage = msg.imageMessage;
-    const videoMessage = msg.videoMessage;
-    const audioMessage = msg.audioMessage;
-    const documentMessage = msg.documentMessage;
-
-    if (!imageMessage && !videoMessage && !audioMessage && !documentMessage) {
-      return undefined; // No media in this message
-    }
-
-    // Determine media type and caption
-    let mimeType: string;
-    let caption: string | undefined;
-    let extension: string;
-
-    if (imageMessage) {
-      mimeType = imageMessage.mimetype || 'image/jpeg';
-      caption = imageMessage.caption || undefined;
-      extension = mimeType.split('/')[1] || 'jpg';
-    } else if (videoMessage) {
-      mimeType = videoMessage.mimetype || 'video/mp4';
-      caption = videoMessage.caption || undefined;
-      extension = mimeType.split('/')[1] || 'mp4';
-    } else if (audioMessage) {
-      mimeType = audioMessage.mimetype || 'audio/ogg';
-      extension = mimeType.split('/')[1] || 'ogg';
-    } else if (documentMessage) {
-      mimeType = documentMessage.mimetype || 'application/octet-stream';
-      caption = documentMessage.caption || undefined;
-      extension = documentMessage.fileName?.split('.').pop() || 'bin';
-    } else {
-      return undefined;
-    }
-
-    logger.info({ mimeType, hasCaption: !!caption }, 'Downloading media from message');
-
-    // Download media as buffer
-    const buffer = await downloadMediaMessage(message, 'buffer', {});
-
-    if (!buffer || buffer.length === 0) {
-      logger.warn('Downloaded media buffer is empty');
-      return undefined;
-    }
-
-    // Create media directory for this group
-    const groupDir = path.join(DATA_DIR, '..', 'groups', groupFolder);
-    const mediaDir = path.join(groupDir, 'images'); // Using 'images' for backward compatibility
-    fs.mkdirSync(mediaDir, { recursive: true });
-
-    // Generate unique filename using timestamp and message ID
-    const timestamp = Date.now();
-    const messageId = message.key.id || 'unknown';
-    const sanitizedId = messageId.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
-    const fileName = `${timestamp}_${sanitizedId}.${extension}`;
-    const filePath = path.join(mediaDir, fileName);
-
-    // Save media to file
-    fs.writeFileSync(filePath, buffer);
-
-    logger.info({ filePath, size: buffer.length, mimeType }, 'Media saved successfully');
-
+  if (msg.message.imageMessage) {
     return {
-      filePath,
-      fileName,
-      mimeType,
-      caption,
+      type: 'image',
+      mimetype: msg.message.imageMessage.mimetype || 'image/jpeg',
+      caption: msg.message.imageMessage.caption || undefined,
     };
-  } catch (err) {
-    logger.error({ err }, 'Failed to download and save media');
-    return undefined;
   }
+
+  if (msg.message.documentMessage) {
+    return {
+      type: 'document',
+      mimetype: msg.message.documentMessage.mimetype || 'application/octet-stream',
+      filename: msg.message.documentMessage.fileName || undefined,
+      caption: msg.message.documentMessage.caption || undefined,
+    };
+  }
+
+  // Handle documentWithCaptionMessage wrapper (WhatsApp sometimes wraps documents)
+  if (msg.message.documentWithCaptionMessage?.message?.documentMessage) {
+    const doc = msg.message.documentWithCaptionMessage.message.documentMessage;
+    return {
+      type: 'document',
+      mimetype: doc.mimetype || 'application/octet-stream',
+      filename: doc.fileName || undefined,
+      caption: doc.caption || undefined,
+    };
+  }
+
+  return null;
 }
 
 /**
- * Format media info as a message attribute for the agent
- * @param mediaInfo - The media information
- * @returns Formatted string with media details
+ * Save a media buffer to the group's media directory.
+ * Returns the filename (relative to media/).
  */
-export function formatMediaAttribute(mediaInfo: MediaInfo): string {
-  const attrs = [
-    `image="${mediaInfo.filePath}"`,
-    `mime="${mediaInfo.mimeType}"`,
-  ];
-  return attrs.join(' ');
+export function saveMediaToGroup(
+  groupFolder: string,
+  buffer: Buffer,
+  mediaInfo: MediaInfo,
+): string {
+  const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
+  fs.mkdirSync(mediaDir, { recursive: true });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const id = crypto.randomBytes(4).toString('hex');
+
+  let filename: string;
+  if (mediaInfo.filename) {
+    // Sanitize original filename, prepend timestamp for uniqueness
+    const safe = mediaInfo.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    filename = `${timestamp}_${safe}`;
+  } else {
+    const ext = MIME_TO_EXT[mediaInfo.mimetype] || '';
+    filename = `${timestamp}_${id}${ext}`;
+  }
+
+  const filePath = path.join(mediaDir, filename);
+  fs.writeFileSync(filePath, buffer);
+  logger.info({ groupFolder, filename, size: buffer.length }, 'Media saved');
+
+  return filename;
+}
+
+/**
+ * Format the message content to include media attachment info.
+ * The container path tells the agent where to find the file.
+ */
+export function formatMediaContent(
+  mediaInfo: MediaInfo,
+  containerPath: string,
+  originalContent: string,
+): string {
+  const parts: string[] = [];
+
+  if (mediaInfo.type === 'image') {
+    parts.push(`[Image attached: ${containerPath}]`);
+  } else if (mediaInfo.mimetype === 'application/pdf') {
+    parts.push(`[PDF attached: ${mediaInfo.filename || 'document.pdf'} — ${containerPath}]`);
+  } else {
+    const name = mediaInfo.filename || 'file';
+    parts.push(`[Document attached: ${name} — ${containerPath}]`);
+  }
+
+  // Add caption/original text if present
+  if (originalContent) {
+    parts.push(originalContent);
+  }
+
+  return parts.join('\n');
 }
