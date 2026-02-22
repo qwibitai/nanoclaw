@@ -198,6 +198,11 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     args.push('-e', 'HOME=/home/node');
   }
 
+  const tz = readEnvFile(['TZ']).TZ;
+  if (tz) {
+    args.push('-e', `TZ=${tz}`);
+  }
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
