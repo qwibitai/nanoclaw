@@ -1,0 +1,26 @@
+{
+  "qdrant": {
+    "url": "http://localhost:6333",
+    "collection": "message_embeddings",
+    "vectorSize": 1536,
+    "distance": "Cosine"
+  },
+  "embeddings": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "search": {
+    "topK": 10,
+    "scoreThreshold": 0.3
+  },
+  "server": {
+    "port": 3847,
+    "host": "0.0.0.0"
+  },
+  "ingestion": {
+    "batchSize": 100,
+    "pollIntervalMs": 300000,
+    "nanoclawDbPath": "/home/yaz/code/yonibot/nanoclaw/store/messages.db"
+  }
+}
