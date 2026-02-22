@@ -20,6 +20,12 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { logger } from './logger.js';
+import {
+  buildPromptWithPersistence,
+  ensureGroupPersistenceFiles,
+  markTaskRunEnd,
+  markTaskRunStart,
+} from './persistent-state.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
@@ -83,6 +89,8 @@ async function runTask(
 
   let result: string | null = null;
   let error: string | null = null;
+  ensureGroupPersistenceFiles(task.group_folder);
+  markTaskRunStart(task.group_folder, task.prompt, 'scheduled');
 
   // For group context mode, use the group's current session
   const sessions = deps.getSessions();
@@ -107,7 +115,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt: buildPromptWithPersistence(task.prompt, task.group_folder),
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
@@ -179,6 +187,7 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+  markTaskRunEnd(task.group_folder, error ? 'error' : 'success', result, error);
 }
 
 let schedulerRunning = false;

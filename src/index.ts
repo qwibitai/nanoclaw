@@ -38,6 +38,14 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import {
+  buildPromptWithPersistence,
+  ensureGroupPersistenceFiles,
+  markBootResumeQueued,
+  markTaskRunEnd,
+  markTaskRunStart,
+  shouldQueueBootResume,
+} from './persistent-state.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -143,7 +151,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  ensureGroupPersistenceFiles(group.folder);
+  const basePrompt = formatMessages(missedMessages);
+  const prompt = buildPromptWithPersistence(basePrompt, group.folder);
+  markTaskRunStart(group.folder, basePrompt, 'chat');
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -171,6 +182,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let lastTextOutput: string | null = null;
+  let lastError: string | null = null;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -180,6 +193,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
+        lastTextOutput = text;
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
@@ -193,6 +207,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+      lastError = result.error || 'Unknown error';
     }
   });
 
@@ -200,6 +215,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
+    markTaskRunEnd(group.folder, 'error', lastTextOutput, lastError);
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -213,6 +229,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  markTaskRunEnd(group.folder, 'success', lastTextOutput, null);
   return true;
 }
 
@@ -404,6 +421,33 @@ function recoverPendingMessages(): void {
   }
 }
 
+function recoverPersistentProgress(): void {
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if (!shouldQueueBootResume(group.folder)) continue;
+
+    const timestamp = new Date().toISOString();
+    const syntheticMessage = `@${ASSISTANT_NAME} Continue the interrupted work from /workspace/persistence/task-progress.md. Resume from the latest checkpoint, update the file with current status, and finish any remaining steps.`;
+
+    storeChatMetadata(chatJid, timestamp, group.name);
+    storeMessage({
+      id: `resume-${group.folder}-${Date.now()}`,
+      chat_jid: chatJid,
+      sender: 'nanoclaw-system',
+      sender_name: 'NanoClaw System',
+      content: syntheticMessage,
+      timestamp,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+    markBootResumeQueued(group.folder);
+    queue.enqueueMessageCheck(chatJid);
+    logger.info(
+      { group: group.name, chatJid },
+      'Boot recovery queued persistent continuation',
+    );
+  }
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -467,6 +511,7 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  recoverPersistentProgress();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

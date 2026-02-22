@@ -9,6 +9,11 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'PERSISTENCE_ENABLED',
+  'PERSISTENCE_ROOT',
+  'PERSISTENCE_AUTO_RESUME_ON_BOOT',
+  'PERSISTENCE_INCLUDE_PERSONALITY',
+  'PERSISTENCE_SEED_MD_FILES',
 ]);
 
 export const ASSISTANT_NAME =
@@ -67,3 +72,42 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+  if (value == null || value === '') return defaultValue;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return defaultValue;
+}
+
+function resolvePathFromProject(candidate: string): string {
+  if (path.isAbsolute(candidate)) return candidate;
+  return path.resolve(PROJECT_ROOT, candidate);
+}
+
+function parseStringList(value: string | undefined): string[] {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  return [...new Set(trimmed.split(',').map((entry) => entry.trim()).filter(Boolean))];
+}
+
+export const PERSISTENCE_ENABLED = parseBoolean(
+  process.env.PERSISTENCE_ENABLED || envConfig.PERSISTENCE_ENABLED,
+  true,
+);
+export const PERSISTENCE_ROOT = resolvePathFromProject(
+  process.env.PERSISTENCE_ROOT || envConfig.PERSISTENCE_ROOT || 'data/persistence',
+);
+export const PERSISTENCE_AUTO_RESUME_ON_BOOT = parseBoolean(
+  process.env.PERSISTENCE_AUTO_RESUME_ON_BOOT || envConfig.PERSISTENCE_AUTO_RESUME_ON_BOOT,
+  true,
+);
+export const PERSISTENCE_INCLUDE_PERSONALITY = parseBoolean(
+  process.env.PERSISTENCE_INCLUDE_PERSONALITY || envConfig.PERSISTENCE_INCLUDE_PERSONALITY,
+  true,
+);
+export const PERSISTENCE_SEED_MD_FILES = parseStringList(
+  process.env.PERSISTENCE_SEED_MD_FILES || envConfig.PERSISTENCE_SEED_MD_FILES,
+).map(resolvePathFromProject);
