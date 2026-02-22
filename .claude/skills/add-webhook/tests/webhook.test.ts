@@ -1,310 +1,122 @@
-import { AddressInfo } from 'net';
-import { createServer, request } from 'http';
+import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+describe('webhook skill package', () => {
+  const skillDir = path.resolve(__dirname, '..');
 
-vi.mock('../logger.js', () => ({
-  logger: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}));
+  it('has a valid manifest', () => {
+    const manifestPath = path.join(skillDir, 'manifest.yaml');
+    expect(fs.existsSync(manifestPath)).toBe(true);
 
-import { WebhookChannel, WebhookChannelOpts } from './webhook.js';
-
-function createOpts(
-  overrides?: Partial<WebhookChannelOpts>,
-): WebhookChannelOpts {
-  return {
-    onMessage: vi.fn(),
-    onChatMetadata: vi.fn(),
-    registeredGroups: vi.fn(() => ({})),
-    ...overrides,
-  };
-}
-
-function getListeningPort(channel: WebhookChannel): number {
-  const server = (channel as any).server as import('http').Server;
-  const addr = server.address();
-  if (!addr || typeof addr === 'string') {
-    throw new Error('Server is not bound to a TCP port');
-  }
-  return addr.port;
-}
-
-async function httpJsonRequest(params: {
-  port: number;
-  method: 'GET' | 'POST';
-  path: string;
-  token?: string;
-  jsonBody?: unknown;
-  rawBody?: string;
-}): Promise<{ statusCode: number; body: string; headers: Record<string, string> }> {
-  const body =
-    params.rawBody !== undefined
-      ? params.rawBody
-      : params.jsonBody !== undefined
-        ? JSON.stringify(params.jsonBody)
-        : '';
-
-  return new Promise((resolve, reject) => {
-    const req = request(
-      {
-        hostname: '127.0.0.1',
-        port: params.port,
-        method: params.method,
-        path: params.path,
-        headers: {
-          ...(body
-            ? {
-                'content-type': 'application/json',
-                'content-length': Buffer.byteLength(body),
-              }
-            : {}),
-          ...(params.token
-            ? { authorization: `Bearer ${params.token}` }
-            : {}),
-        },
-      },
-      (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (chunk) => (text += chunk));
-        res.on('end', () => {
-          const headers: Record<string, string> = {};
-          for (const [k, v] of Object.entries(res.headers)) {
-            headers[k] = Array.isArray(v) ? v.join(',') : (v || '').toString();
-          }
-          resolve({
-            statusCode: res.statusCode || 0,
-            body: text,
-            headers,
-          });
-        });
-      },
-    );
-
-    req.on('error', reject);
-    if (body) req.write(body);
-    req.end();
-  });
-}
-
-describe('WebhookChannel', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+    const content = fs.readFileSync(manifestPath, 'utf-8');
+    expect(content).toContain('skill: webhook');
+    expect(content).toContain('version: 1.0.0');
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
+  it('has all files declared in adds', () => {
+    const addFile = path.join(skillDir, 'add', 'src', 'channels', 'webhook.ts');
+    expect(fs.existsSync(addFile)).toBe(true);
+
+    const content = fs.readFileSync(addFile, 'utf-8');
+    expect(content).toContain('class WebhookChannel');
+    expect(content).toContain('implements Channel');
+
+    const testFile = path.join(skillDir, 'add', 'src', 'channels', 'webhook.test.ts');
+    expect(fs.existsSync(testFile)).toBe(true);
+
+    const testContent = fs.readFileSync(testFile, 'utf-8');
+    expect(testContent).toContain("describe('WebhookChannel'");
   });
 
-  it('handles inbound message payloads', async () => {
-    const opts = createOpts();
-    const channel = new WebhookChannel(
-      0,
-      '127.0.0.1',
-      undefined,
-      'http://127.0.0.1:19400/v1/outbound',
-      opts,
-    );
+  it('has all files declared in modifies', () => {
+    const indexFile = path.join(skillDir, 'modify', 'src', 'index.ts');
+    const configFile = path.join(skillDir, 'modify', 'src', 'config.ts');
+    const routingTestFile = path.join(skillDir, 'modify', 'src', 'routing.test.ts');
 
-    await channel.connect();
-    const port = getListeningPort(channel);
+    expect(fs.existsSync(indexFile)).toBe(true);
+    expect(fs.existsSync(configFile)).toBe(true);
+    expect(fs.existsSync(routingTestFile)).toBe(true);
 
-    const response = await httpJsonRequest({
-      port,
-      method: 'POST',
-      path: '/v1/inbound',
-      jsonBody: {
-        userId: 'user-123',
-        content: 'hello webhook',
-        senderName: 'Alice',
-      },
-    });
+    const indexContent = fs.readFileSync(indexFile, 'utf-8');
+    expect(indexContent).toContain('WebhookChannel');
+    expect(indexContent).toContain('WEBHOOK_PORT');
+    expect(indexContent).toContain('WEBHOOK_ONLY');
+    expect(indexContent).toContain('findChannel');
+    expect(indexContent).toContain('channels: Channel[]');
 
-    expect(response.statusCode).toBe(200);
-    expect(opts.onMessage).toHaveBeenCalledWith(
-      'wh:user-123',
-      expect.objectContaining({
-        chat_jid: 'wh:user-123',
-        sender: 'user-123',
-        sender_name: 'Alice',
-        content: 'hello webhook',
-        is_from_me: false,
-      }),
-    );
-    expect(opts.onChatMetadata).toHaveBeenCalledWith(
-      'wh:user-123',
-      expect.any(String),
-      'wh:user-123',
-      'webhook',
-      true,
-    );
-
-    await channel.disconnect();
+    const configContent = fs.readFileSync(configFile, 'utf-8');
+    expect(configContent).toContain('WEBHOOK_PORT');
+    expect(configContent).toContain('WEBHOOK_HOST');
+    expect(configContent).toContain('WEBHOOK_TOKEN');
+    expect(configContent).toContain('WEBHOOK_CONNECTOR_URL');
+    expect(configContent).toContain('WEBHOOK_ONLY');
   });
 
-  it('rejects unauthorized requests when token auth is enabled', async () => {
-    const channel = new WebhookChannel(
-      0,
-      '127.0.0.1',
-      'secret-token',
-      'http://127.0.0.1:19400/v1/outbound',
-      createOpts(),
-    );
-
-    await channel.connect();
-    const port = getListeningPort(channel);
-
-    const response = await httpJsonRequest({
-      port,
-      method: 'GET',
-      path: '/health',
-    });
-
-    expect(response.statusCode).toBe(401);
-
-    await channel.disconnect();
+  it('has intent files for modified files', () => {
+    expect(fs.existsSync(path.join(skillDir, 'modify', 'src', 'index.ts.intent.md'))).toBe(true);
+    expect(fs.existsSync(path.join(skillDir, 'modify', 'src', 'config.ts.intent.md'))).toBe(true);
   });
 
-  it('serves health endpoint', async () => {
-    const channel = new WebhookChannel(
-      0,
-      '127.0.0.1',
-      undefined,
-      'http://127.0.0.1:19400/v1/outbound',
-      createOpts(),
+  it('modified index.ts preserves core structure', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'index.ts'),
+      'utf-8',
     );
 
-    await channel.connect();
-    const port = getListeningPort(channel);
-
-    const response = await httpJsonRequest({
-      port,
-      method: 'GET',
-      path: '/health',
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({
-      status: 'ok',
-      channel: 'webhook',
-    });
-
-    await channel.disconnect();
+    expect(content).toContain('function loadState()');
+    expect(content).toContain('function saveState()');
+    expect(content).toContain('function registerGroup(');
+    expect(content).toContain('function getAvailableGroups()');
+    expect(content).toContain('function processGroupMessages(');
+    expect(content).toContain('function runAgent(');
+    expect(content).toContain('function startMessageLoop()');
+    expect(content).toContain('function recoverPendingMessages()');
+    expect(content).toContain('function ensureContainerSystemRunning()');
+    expect(content).toContain('async function main()');
+    expect(content).toContain('_setRegisteredGroups');
+    expect(content).toContain('isDirectRun');
   });
 
-  it('returns 404 for unknown routes', async () => {
-    const channel = new WebhookChannel(
-      0,
-      '127.0.0.1',
-      undefined,
-      'http://127.0.0.1:19400/v1/outbound',
-      createOpts(),
+  it('modified index.ts includes webhook channel creation', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'index.ts'),
+      'utf-8',
     );
 
-    await channel.connect();
-    const port = getListeningPort(channel);
-
-    const response = await httpJsonRequest({
-      port,
-      method: 'GET',
-      path: '/does-not-exist',
-    });
-
-    expect(response.statusCode).toBe(404);
-
-    await channel.disconnect();
+    expect(content).toContain('const channels: Channel[] = []');
+    expect(content).toContain('if (!WEBHOOK_ONLY)');
+    expect(content).toContain('if (WEBHOOK_PORT)');
+    expect(content).toContain('new WebhookChannel(');
   });
 
-  it('returns 400 for invalid JSON payloads', async () => {
-    const channel = new WebhookChannel(
-      0,
-      '127.0.0.1',
-      undefined,
-      'http://127.0.0.1:19400/v1/outbound',
-      createOpts(),
+  it('modified config.ts preserves all existing exports', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'config.ts'),
+      'utf-8',
     );
 
-    await channel.connect();
-    const port = getListeningPort(channel);
+    expect(content).toContain('export const ASSISTANT_NAME');
+    expect(content).toContain('export const POLL_INTERVAL');
+    expect(content).toContain('export const TRIGGER_PATTERN');
+    expect(content).toContain('export const CONTAINER_IMAGE');
+    expect(content).toContain('export const DATA_DIR');
+    expect(content).toContain('export const TIMEZONE');
 
-    const response = await httpJsonRequest({
-      port,
-      method: 'POST',
-      path: '/v1/inbound',
-      rawBody: '{"broken":',
-    });
-
-    expect(response.statusCode).toBe(400);
-
-    await channel.disconnect();
+    expect(content).toContain('export const WEBHOOK_PORT');
+    expect(content).toContain('export const WEBHOOK_HOST');
+    expect(content).toContain('export const WEBHOOK_TOKEN');
+    expect(content).toContain('export const WEBHOOK_CONNECTOR_URL');
+    expect(content).toContain('export const WEBHOOK_ONLY');
   });
 
-  it('owns only wh: prefixed JIDs', () => {
-    const channel = new WebhookChannel(
-      18794,
-      '127.0.0.1',
-      undefined,
-      'http://127.0.0.1:19400/v1/outbound',
-      createOpts(),
+  it('modified routing.test.ts includes webhook JID tests', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'routing.test.ts'),
+      'utf-8',
     );
 
-    expect(channel.ownsJid('wh:user-1')).toBe(true);
-    expect(channel.ownsJid('tg:123')).toBe(false);
-    expect(channel.ownsJid('123@g.us')).toBe(false);
-  });
-
-  it('forwards sendMessage payload to connector URL', async () => {
-    const received = new Promise<{
-      method: string;
-      path: string;
-      body: Record<string, unknown>;
-    }>((resolve) => {
-      const connector = createServer((req, res) => {
-        let raw = '';
-        req.setEncoding('utf8');
-        req.on('data', (chunk) => (raw += chunk));
-        req.on('end', () => {
-          res.statusCode = 200;
-          res.setHeader('content-type', 'application/json');
-          res.end('{"ok":true}');
-          resolve({
-            method: req.method || '',
-            path: req.url || '',
-            body: JSON.parse(raw),
-          });
-        });
-      });
-
-      connector.listen(0, '127.0.0.1', async () => {
-        const addr = connector.address() as AddressInfo;
-
-        const channel = new WebhookChannel(
-          18794,
-          '127.0.0.1',
-          undefined,
-          `http://127.0.0.1:${addr.port}/v1/outbound`,
-          createOpts(),
-        );
-
-        await channel.sendMessage('wh:user-9', 'hello connector');
-        connector.close();
-      });
-    });
-
-    const req = await received;
-    expect(req.method).toBe('POST');
-    expect(req.path).toBe('/v1/outbound');
-    expect(req.body).toEqual(
-      expect.objectContaining({
-        jid: 'wh:user-9',
-        text: 'hello connector',
-        channel: 'webhook',
-      }),
-    );
+    expect(content).toContain('Webhook JID: starts with wh:');
+    expect(content).toContain('wh:');
   });
 });
