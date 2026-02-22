@@ -1,9 +1,9 @@
-export const NANOCLAW_DIR = '.nanoclaw';
+export const CAMBOT_AGENT_DIR = '.cambot-agent';
 export const STATE_FILE = 'state.yaml';
-export const BASE_DIR = '.nanoclaw/base';
-export const BACKUP_DIR = '.nanoclaw/backup';
-export const LOCK_FILE = '.nanoclaw/lock';
-export const CUSTOM_DIR = '.nanoclaw/custom';
-export const RESOLUTIONS_DIR = '.nanoclaw/resolutions';
+export const BASE_DIR = '.cambot-agent/base';
+export const BACKUP_DIR = '.cambot-agent/backup';
+export const LOCK_FILE = '.cambot-agent/lock';
+export const CUSTOM_DIR = '.cambot-agent/custom';
+export const RESOLUTIONS_DIR = '.cambot-agent/resolutions';
 export const SHIPPED_RESOLUTIONS_DIR = '.claude/resolutions';
 export const SKILLS_SCHEMA_VERSION = '0.1.0';

@@ -9,7 +9,7 @@ import {
   createSkillPackage,
   createTempDir,
   initGitRepo,
-  setupNanoclawDir,
+  setupCambotAgentDir,
 } from './test-helpers.js';
 
 describe('apply', () => {
@@ -18,7 +18,7 @@ describe('apply', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    setupNanoclawDir(tmpDir);
+    setupCambotAgentDir(tmpDir);
     createMinimalState(tmpDir);
     initGitRepo(tmpDir);
     process.chdir(tmpDir);
@@ -68,7 +68,7 @@ describe('apply', () => {
     fs.writeFileSync(existingFile, 'original content');
 
     // Set up base for the modified file
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'existing.ts'), 'original content');
 

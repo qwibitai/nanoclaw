@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 
 import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { NANOCLAW_DIR } from './constants.js';
+import { CAMBOT_AGENT_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { isCustomizeActive } from './customize.js';
 import { executeFileOps } from './file-ops.js';
@@ -98,7 +98,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   for (const relPath of manifest.modifies) {
     const resolvedPath = resolvePathRemap(relPath, pathRemap);
     const currentPath = path.join(projectRoot, resolvedPath);
-    const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', resolvedPath);
+    const basePath = path.join(projectRoot, CAMBOT_AGENT_DIR, 'base', resolvedPath);
 
     if (fs.existsSync(currentPath) && fs.existsSync(basePath)) {
       const currentHash = computeFileHash(currentPath);
@@ -178,7 +178,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const relPath of manifest.modifies) {
       const resolvedPath = resolvePathRemap(relPath, pathRemap);
       const currentPath = path.join(projectRoot, resolvedPath);
-      const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', resolvedPath);
+      const basePath = path.join(projectRoot, CAMBOT_AGENT_DIR, 'base', resolvedPath);
       // skillPath uses original relPath — skill packages are never mutated
       const skillPath = path.join(skillDir, 'modify', relPath);
 
@@ -205,7 +205,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       // git merge-file modifies the first argument in-place, so use a temp copy
       const tmpCurrent = path.join(
         os.tmpdir(),
-        `nanoclaw-merge-${crypto.randomUUID()}-${path.basename(relPath)}`,
+        `cambot-agent-merge-${crypto.randomUUID()}-${path.basename(relPath)}`,
       );
       fs.copyFileSync(currentPath, tmpCurrent);
 

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
+import { BASE_DIR, CAMBOT_AGENT_DIR } from './constants.js';
 import { acquireLock } from './lock.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
 import { computeFileHash, readState, writeState } from './state.js';

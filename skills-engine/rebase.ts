@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 
 import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
+import { BASE_DIR, CAMBOT_AGENT_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { acquireLock } from './lock.js';
 import {
@@ -88,7 +88,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       const baseFilePath = path.join(baseAbsDir, relPath);
       if (fs.existsSync(baseFilePath)) filesToBackup.push(baseFilePath);
     }
-    const stateFilePath = path.join(projectRoot, NANOCLAW_DIR, 'state.yaml');
+    const stateFilePath = path.join(projectRoot, CAMBOT_AGENT_DIR, 'state.yaml');
     filesToBackup.push(stateFilePath);
     createBackup(filesToBackup);
 
@@ -128,7 +128,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       // Save combined patch
       const patchPath = path.join(
         projectRoot,
-        NANOCLAW_DIR,
+        CAMBOT_AGENT_DIR,
         'combined.patch',
       );
       fs.writeFileSync(patchPath, combinedPatch, 'utf-8');
@@ -179,7 +179,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
           // Find old base content from backup
           const oldBasePath = path.join(
             projectRoot,
-            '.nanoclaw',
+            '.cambot-agent',
             'backup',
             BASE_DIR,
             relPath,
@@ -196,7 +196,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
           // Three-way merge: current(new base) ← old-base → saved(modifications)
           const tmpSaved = path.join(
             os.tmpdir(),
-            `nanoclaw-rebase-${crypto.randomUUID()}-${path.basename(relPath)}`,
+            `cambot-agent-rebase-${crypto.randomUUID()}-${path.basename(relPath)}`,
           );
           fs.writeFileSync(tmpSaved, saved);
 

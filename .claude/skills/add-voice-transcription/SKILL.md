@@ -1,17 +1,17 @@
 ---
 name: add-voice-transcription
-description: Add voice message transcription to NanoClaw using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
+description: Add voice message transcription to CamBot-Agent using OpenAI's Whisper API. Automatically transcribes WhatsApp voice notes so the agent can read and respond to them.
 ---
 
 # Add Voice Transcription
 
-This skill adds automatic voice message transcription to NanoClaw's WhatsApp channel using OpenAI's Whisper API. When a voice note arrives, it is downloaded, transcribed, and delivered to the agent as `[Voice: <transcript>]`.
+This skill adds automatic voice message transcription to CamBot-Agent's WhatsApp channel using OpenAI's Whisper API. When a voice note arrives, it is downloaded, transcribed, and delivered to the agent as `[Voice: <transcript>]`.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `voice-transcription` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
+Read `.cambot-agent/state.yaml`. If `voice-transcription` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
 
 ### Ask the user
 
@@ -23,7 +23,7 @@ Run the skills engine to apply this skill's code package.
 
 ### Initialize skills system (if needed)
 
-If `.nanoclaw/` directory doesn't exist yet:
+If `.cambot-agent/` directory doesn't exist yet:
 
 ```bash
 npx tsx scripts/apply-skill.ts --init
@@ -41,7 +41,7 @@ This deterministically:
 - Three-way merges transcription tests into `src/channels/whatsapp.test.ts` (mock + 3 test cases)
 - Installs the `openai` npm dependency
 - Updates `.env.example` with `OPENAI_API_KEY`
-- Records the application in `.nanoclaw/state.yaml`
+- Records the application in `.cambot-agent/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
 - `modify/src/channels/whatsapp.ts.intent.md` — what changed and invariants for whatsapp.ts
@@ -66,7 +66,7 @@ If the user doesn't have an API key:
 >
 > 1. Go to https://platform.openai.com/api-keys
 > 2. Click "Create new secret key"
-> 3. Give it a name (e.g., "NanoClaw Transcription")
+> 3. Give it a name (e.g., "CamBot-Agent Transcription")
 > 4. Copy the key (starts with `sk-`)
 >
 > Cost: ~$0.006 per minute of audio (~$0.003 per typical 30-second voice note)
@@ -93,8 +93,8 @@ The container reads environment from `data/env/env`, not `.env` directly.
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.cambot-agent  # macOS
+# Linux: systemctl --user restart cambot-agent
 ```
 
 ## Phase 4: Verify
@@ -108,7 +108,7 @@ Tell the user:
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log | grep -i voice
+tail -f logs/cambot-agent.log | grep -i voice
 ```
 
 Look for:

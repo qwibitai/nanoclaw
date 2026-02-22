@@ -4,7 +4,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
+import { BASE_DIR, CAMBOT_AGENT_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { readManifest } from './manifest.js';
 import {
@@ -193,7 +193,7 @@ export async function replaySkills(
         const oursContent = fs.readFileSync(currentPath, 'utf-8');
         const tmpCurrent = path.join(
           os.tmpdir(),
-          `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
+          `cambot-agent-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
         );
         fs.copyFileSync(currentPath, tmpCurrent);
 

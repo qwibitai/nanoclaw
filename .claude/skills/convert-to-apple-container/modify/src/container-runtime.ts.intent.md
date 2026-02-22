@@ -17,7 +17,7 @@ Replaced Docker runtime with Apple Container runtime. This is a full file replac
 - Changed: error message references Apple Container instead of Docker
 
 ### cleanupOrphans
-- Changed: `docker ps --filter name=nanoclaw- --format '{{.Names}}'` → `container ls --format json` with JSON parsing
+- Changed: `docker ps --filter name=cambot-agent- --format '{{.Names}}'` → `container ls --format json` with JSON parsing
 - Apple Container returns JSON with `{ status, configuration: { id } }` structure
 
 ## Invariants

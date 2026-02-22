@@ -6,7 +6,7 @@ export {
   SKILLS_SCHEMA_VERSION,
   CUSTOM_DIR,
   LOCK_FILE,
-  NANOCLAW_DIR,
+  CAMBOT_AGENT_DIR,
   RESOLUTIONS_DIR,
   SHIPPED_RESOLUTIONS_DIR,
   STATE_FILE,
@@ -18,7 +18,7 @@ export {
   startCustomize,
 } from './customize.js';
 export { executeFileOps } from './file-ops.js';
-export { initNanoclawDir } from './init.js';
+export { initCambotAgentDir } from './init.js';
 export { acquireLock, isLocked, releaseLock } from './lock.js';
 export {
   checkConflicts,

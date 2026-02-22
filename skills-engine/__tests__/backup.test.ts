@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { createBackup, restoreBackup, clearBackup } from '../backup.js';
-import { createTempDir, setupNanoclawDir, cleanup } from './test-helpers.js';
+import { createTempDir, setupCambotAgentDir, cleanup } from './test-helpers.js';
 
 describe('backup', () => {
   let tmpDir: string;
@@ -10,7 +10,7 @@ describe('backup', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    setupNanoclawDir(tmpDir);
+    setupCambotAgentDir(tmpDir);
     process.chdir(tmpDir);
   });
 
@@ -41,7 +41,7 @@ describe('backup', () => {
     fs.writeFileSync(path.join(tmpDir, 'src', 'app.ts'), 'content');
     createBackup(['src/app.ts']);
 
-    const backupDir = path.join(tmpDir, '.nanoclaw', 'backup');
+    const backupDir = path.join(tmpDir, '.cambot-agent', 'backup');
     expect(fs.existsSync(backupDir)).toBe(true);
 
     clearBackup();
@@ -51,7 +51,7 @@ describe('backup', () => {
   it('createBackup writes tombstone for non-existent files', () => {
     createBackup(['src/newfile.ts']);
 
-    const tombstone = path.join(tmpDir, '.nanoclaw', 'backup', 'src', 'newfile.ts.tombstone');
+    const tombstone = path.join(tmpDir, '.cambot-agent', 'backup', 'src', 'newfile.ts.tombstone');
     expect(fs.existsSync(tombstone)).toBe(true);
   });
 

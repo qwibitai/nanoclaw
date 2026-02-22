@@ -7,7 +7,7 @@
   <clipPath id="r">
     <rect width="97" height="20" rx="3" fill="#fff"/>
   </clipPath>
-  <a xlink:href="https://github.com/qwibitai/nanoclaw/tree/main/repo-tokens">
+  <a xlink:href="https://github.com/qwibitai/cambot-agent/tree/main/repo-tokens">
     <g clip-path="url(#r)">
       <rect width="52" height="20" fill="#555"/>
       <rect x="52" width="45" height="20" fill="#4c1"/>

@@ -1,5 +1,5 @@
 /**
- * Container runtime abstraction for NanoClaw.
+ * Container runtime abstraction for CamBot-Agent.
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
 import { execSync } from 'child_process';
@@ -50,7 +50,7 @@ export function ensureContainerRuntimeRunning(): void {
         '║  2. Run: container system start                                ║',
       );
       console.error(
-        '║  3. Restart NanoClaw                                           ║',
+        '║  3. Restart CamBot-Agent                                           ║',
       );
       console.error(
         '╚════════════════════════════════════════════════════════════════╝\n',
@@ -60,7 +60,7 @@ export function ensureContainerRuntimeRunning(): void {
   }
 }
 
-/** Kill orphaned NanoClaw containers from previous runs. */
+/** Kill orphaned CamBot-Agent containers from previous runs. */
 export function cleanupOrphans(): void {
   try {
     const output = execSync(`${CONTAINER_RUNTIME_BIN} ls --format json`, {
@@ -69,7 +69,7 @@ export function cleanupOrphans(): void {
     });
     const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('cambot-agent-'))
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {

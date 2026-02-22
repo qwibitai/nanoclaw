@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# setup.sh — Bootstrap script for NanoClaw
+# setup.sh — Bootstrap script for CamBot-Agent
 # Handles Node.js/npm setup, then hands off to the Node.js setup modules.
 # This is the only bash script in the setup flow.
 
@@ -136,7 +136,7 @@ elif [ "$NATIVE_OK" = "false" ]; then
 fi
 
 cat <<EOF
-=== NANOCLAW SETUP: BOOTSTRAP ===
+=== CAMBOT_AGENT SETUP: BOOTSTRAP ===
 PLATFORM: $PLATFORM
 IS_WSL: $IS_WSL
 IS_ROOT: $IS_ROOT

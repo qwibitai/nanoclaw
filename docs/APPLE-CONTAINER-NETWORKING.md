@@ -51,7 +51,7 @@ sysctl net.inet.ip.forwarding
 # Expected: net.inet.ip.forwarding: 1
 
 # Test container internet access
-container run --rm --entrypoint curl nanoclaw-agent:latest \
+container run --rm --entrypoint curl cambot-agent-agent:latest \
   -s4 --connect-timeout 5 -o /dev/null -w "%{http_code}" https://api.anthropic.com
 # Expected: 404
 

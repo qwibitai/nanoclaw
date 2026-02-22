@@ -124,7 +124,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
       try { fs.unlinkSync(QR_FILE); } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      console.log('  You can now start the CamBot-Agent service.\n');
 
       // Give it a moment to save credentials, then exit
       setTimeout(() => process.exit(0), 1000);

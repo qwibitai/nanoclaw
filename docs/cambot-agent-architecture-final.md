@@ -1,4 +1,4 @@
-# NanoClaw Skills Architecture
+# CamBot-Agent Skills Architecture
 
 ## Core Principle
 
@@ -20,13 +20,13 @@ The goal is that Level 1 handles everything on a mature, well-tested installatio
 
 Many users clone the repo without forking, don't commit their changes, and don't think of themselves as git users. The system must work safely for them without requiring any git knowledge.
 
-Before any operation, the system copies all files that will be modified to `.nanoclaw/backup/`. On success, the backup is deleted. On failure, the backup is restored. This provides rollback safety regardless of whether the user commits, pushes, or understands git.
+Before any operation, the system copies all files that will be modified to `.cambot-agent/backup/`. On success, the backup is deleted. On failure, the backup is restored. This provides rollback safety regardless of whether the user commits, pushes, or understands git.
 
 ---
 
 ## 1. The Shared Base
 
-`.nanoclaw/base/` holds the clean core — the original codebase before any skills or customizations were applied. This is the stable common ancestor for all three-way merges, and it only changes on core updates.
+`.cambot-agent/base/` holds the clean core — the original codebase before any skills or customizations were applied. This is the stable common ancestor for all three-way merges, and it only changes on core updates.
 
 - `git merge-file` uses the base to compute two diffs: what the user changed (current vs base) and what the skill wants to change (base vs skill's modified file), then combines both
 - The base enables drift detection: if a file's hash differs from its base hash, something has been modified (skills, user customizations, or both)
@@ -121,9 +121,9 @@ skills/
 
 - `git merge-file` requires three full files — no intermediate reconstruction step
 - Git's three-way merge uses context matching, so it works even if the user has moved code around — unlike line-number-based diffs that break immediately
-- Auditable: `diff .nanoclaw/base/src/server.ts skills/add-whatsapp/modify/src/server.ts` shows exactly what the skill changes
+- Auditable: `diff .cambot-agent/base/src/server.ts skills/add-whatsapp/modify/src/server.ts` shows exactly what the skill changes
 - Deterministic: same three inputs always produce the same merge result
-- Size is negligible since NanoClaw's core files are small
+- Size is negligible since CamBot-Agent's core files are small
 
 ### Intent Files
 
@@ -190,7 +190,7 @@ depends: []                # Skills that must be applied first
 test: "npx vitest run src/channels/whatsapp.test.ts"
 
 # --- Future fields (not yet implemented in v0.1) ---
-# author: nanoclaw-team
+# author: cambot-agent-team
 # license: MIT
 # min_skills_system_version: "0.1.0"
 # tested_with: [telegram@1.0.0]
@@ -243,7 +243,7 @@ Recorded in `state.yaml`:
 applied_skills:
   - skill: telegram
     version: 1.0.0
-    custom_patch: .nanoclaw/custom/telegram-group-only.patch
+    custom_patch: .cambot-agent/custom/telegram-group-only.patch
     custom_patch_description: "Restrict bot responses to group chats only"
 ```
 
@@ -323,7 +323,7 @@ When a user runs the skill's slash command in Claude Code:
 
 ### Step 2: Backup
 
-Copy all files that will be modified to `.nanoclaw/backup/`. If the operation fails at any point, restore from backup.
+Copy all files that will be modified to `.cambot-agent/backup/`. If the operation fails at any point, restore from backup.
 
 ### Step 3: File Operations
 
@@ -340,7 +340,7 @@ cp skills/add-whatsapp/add/src/channels/whatsapp.ts src/channels/whatsapp.ts
 For each file in `modifies` (with path remapping applied):
 
 ```bash
-git merge-file src/server.ts .nanoclaw/base/src/server.ts skills/add-whatsapp/modify/src/server.ts
+git merge-file src/server.ts .cambot-agent/base/src/server.ts skills/add-whatsapp/modify/src/server.ts
 ```
 
 - **Exit code 0**: clean merge, move on
@@ -348,7 +348,7 @@ git merge-file src/server.ts .nanoclaw/base/src/server.ts skills/add-whatsapp/mo
 
 ### Step 6: Conflict Resolution (Three-Level)
 
-1. **Check shared resolution cache** (`.nanoclaw/resolutions/`) — load into local `git rerere` if a verified resolution exists for this skill combination. **Only apply if input hashes match exactly** (base hash + current hash + skill modified hash).
+1. **Check shared resolution cache** (`.cambot-agent/resolutions/`) — load into local `git rerere` if a verified resolution exists for this skill combination. **Only apply if input hashes match exactly** (base hash + current hash + skill modified hash).
 2. **`git rerere`** — checks local cache. If found, applied automatically. Done.
 3. **Claude Code** — reads conflict markers + `SKILL.md` + `.intent.md` (Invariants, Must-keep sections) of current and previously applied skills. Resolves. `git rerere` caches the resolution.
 4. **User** — if Claude Code cannot determine intent, it asks the user for the desired behavior.
@@ -366,15 +366,15 @@ Collect all structured declarations (from this skill and any previously applied 
 ### Step 8: Post-Apply and Validate
 
 1. Run any `post_apply` commands (non-structured operations only)
-2. Update `.nanoclaw/state.yaml` — skill record, file hashes (base, skill, merged per file), structured outcomes
+2. Update `.cambot-agent/state.yaml` — skill record, file hashes (base, skill, merged per file), structured outcomes
 3. **Run skill tests** — mandatory, even if all merges were clean
 4. If tests fail on a clean merge → escalate to Level 2 (Claude Code diagnoses the semantic conflict)
 
 ### Step 9: Clean Up
 
-If tests pass, delete `.nanoclaw/backup/`. The operation is complete.
+If tests pass, delete `.cambot-agent/backup/`. The operation is complete.
 
-If tests fail and Level 2 can't resolve, restore from `.nanoclaw/backup/` and report the failure.
+If tests fail and Level 2 can't resolve, restore from `.cambot-agent/backup/` and report the failure.
 
 ---
 
@@ -382,14 +382,14 @@ If tests fail and Level 2 can't resolve, restore from `.nanoclaw/backup/` and re
 
 ### The Problem
 
-`git rerere` is local by default. But NanoClaw has thousands of users applying the same skill combinations. Every user hitting the same conflict and waiting for Claude Code to resolve it is wasteful.
+`git rerere` is local by default. But CamBot-Agent has thousands of users applying the same skill combinations. Every user hitting the same conflict and waiting for Claude Code to resolve it is wasteful.
 
 ### The Solution
 
-NanoClaw maintains a verified resolution cache in `.nanoclaw/resolutions/` that ships with the project. This is the shared artifact — **not** `.git/rr-cache/`, which stays local.
+CamBot-Agent maintains a verified resolution cache in `.cambot-agent/resolutions/` that ships with the project. This is the shared artifact — **not** `.git/rr-cache/`, which stays local.
 
 ```
-.nanoclaw/
+.cambot-agent/
   resolutions/
     whatsapp@1.2.0+telegram@1.0.0/
       src/
@@ -438,12 +438,12 @@ After `git merge-file` produces a conflict, the system must create the index sta
 
 ```bash
 # 1. Run the merge (produces conflict markers in the working tree)
-git merge-file current.ts .nanoclaw/base/src/file.ts skills/add-whatsapp/modify/src/file.ts
+git merge-file current.ts .cambot-agent/base/src/file.ts skills/add-whatsapp/modify/src/file.ts
 
 # 2. If exit code > 0 (conflict), set up rerere adapter:
 
 # Create blob objects for the three versions
-base_hash=$(git hash-object -w .nanoclaw/base/src/file.ts)
+base_hash=$(git hash-object -w .cambot-agent/base/src/file.ts)
 ours_hash=$(git hash-object -w skills/previous-skill/modify/src/file.ts)  # or the pre-merge current
 theirs_hash=$(git hash-object -w skills/add-whatsapp/modify/src/file.ts)
 
@@ -498,7 +498,7 @@ The bar: **a user with any common combination of official skills should never en
 
 ## 8. State Tracking
 
-`.nanoclaw/state.yaml` records everything about the installation:
+`.cambot-agent/state.yaml` records everything about the installation:
 
 ```yaml
 skills_system_version: "0.1.0"     # Schema version — tooling checks this before any operation
@@ -544,7 +544,7 @@ custom_modifications:
     applied_at: 2026-02-15T12:00:00Z
     files_modified:
       - src/server.ts
-    patch_file: .nanoclaw/custom/001-logging-middleware.patch
+    patch_file: .cambot-agent/custom/001-logging-middleware.patch
 ```
 
 **v0.1 implementation notes:**
@@ -588,7 +588,7 @@ There is no unrecoverable state.
 
 ## 10. Core Updates
 
-Core updates must be as programmatic as possible. The NanoClaw team is responsible for ensuring updates apply cleanly to common skill combinations.
+Core updates must be as programmatic as possible. The CamBot-Agent team is responsible for ensuring updates apply cleanly to common skill combinations.
 
 ### Patches and Migrations
 
@@ -736,7 +736,7 @@ If the user aborts, stop here. Nothing was modified.
 
 #### Step 3: Backup
 
-Copy all files that will be modified to `.nanoclaw/backup/`.
+Copy all files that will be modified to `.cambot-agent/backup/`.
 
 #### Step 4: File Operations and Path Remap
 
@@ -747,7 +747,7 @@ Apply renames, deletes, moves. Record path remap in state.
 For each core file that changed:
 
 ```bash
-git merge-file src/server.ts .nanoclaw/base/src/server.ts updates/0.5.0-to-0.6.0/files/src/server.ts
+git merge-file src/server.ts .cambot-agent/base/src/server.ts updates/0.5.0-to-0.6.0/files/src/server.ts
 ```
 
 #### Step 6: Conflict Resolution
@@ -760,14 +760,14 @@ git merge-file src/server.ts .nanoclaw/base/src/server.ts updates/0.5.0-to-0.6.0
 #### Step 7: Re-apply Custom Patches
 
 ```bash
-git apply --3way .nanoclaw/custom/001-logging-middleware.patch
+git apply --3way .cambot-agent/custom/001-logging-middleware.patch
 ```
 
 Using `--3way` allows git to fall back to three-way merge when line numbers have drifted. If `--3way` fails, escalate to Level 2.
 
 #### Step 8: Update Base
 
-`.nanoclaw/base/` replaced with new clean core. This is the **only time** the base changes.
+`.cambot-agent/base/` replaced with new clean core. This is the **only time** the base changes.
 
 #### Step 9: Apply Migration Skills
 
@@ -814,7 +814,7 @@ Core updated: 0.5.0 → 0.8.0
 
 #### Step 13: Clean Up
 
-Delete `.nanoclaw/backup/`.
+Delete `.cambot-agent/backup/`.
 
 ### Progressive Core Slimming
 
@@ -835,7 +835,7 @@ Removing a skill is not a reverse-patch operation. **Uninstall is a replay witho
 
 1. Read `state.yaml` to get the full list of applied skills and custom modifications
 2. Remove the target skill from the list
-3. Backup the current codebase to `.nanoclaw/backup/`
+3. Backup the current codebase to `.cambot-agent/backup/`
 4. **Replay from clean base** — apply each remaining skill in order, apply custom patches, using the resolution cache
 5. Run all tests
 6. If tests pass, delete backup and update `state.yaml`
@@ -860,7 +860,7 @@ Flatten accumulated layers into a clean starting point.
 ### What Rebase Does
 
 1. Takes the user's current actual files as the new reality
-2. Updates `.nanoclaw/base/` to the current core version's clean files
+2. Updates `.cambot-agent/base/` to the current core version's clean files
 3. For each applied skill, regenerates the modified file diffs against the new base
 4. Updates `state.yaml` with `rebased_at` timestamp
 5. Clears old custom patches (now baked in)
@@ -891,10 +891,10 @@ Given `state.yaml`, reproduce the exact installation on a fresh machine with no 
 # Fully programmatic — no Claude Code needed
 
 # 1. Install core at specified version
-nanoclaw-init --version 0.5.0
+cambot-agent-init --version 0.5.0
 
 # 2. Load shared resolutions into local rerere cache
-load-resolutions .nanoclaw/resolutions/
+load-resolutions .cambot-agent/resolutions/
 
 # 3. For each skill in applied_skills (in order):
 for skill in state.applied_skills:
@@ -907,7 +907,7 @@ for skill in state.applied_skills:
   # Merge modified code files (with path remapping)
   for file in skill.files_modified:
     resolved_path = apply_remap(file, state.path_remap)
-    git merge-file ${resolved_path} .nanoclaw/base/${resolved_path} skills/${skill.name}/modify/${file}
+    git merge-file ${resolved_path} .cambot-agent/base/${resolved_path} skills/${skill.name}/modify/${file}
     # git rerere auto-resolves from shared cache if needed
 
   # Apply skill-specific custom patch if recorded
@@ -977,7 +977,7 @@ Each passing combination generates a verified resolution entry for the shared ca
 
 ### `.gitattributes`
 
-Ship with NanoClaw to reduce noisy merge conflicts:
+Ship with CamBot-Agent to reduce noisy merge conflicts:
 
 ```
 * text=auto
@@ -1017,7 +1017,7 @@ project/
       ...
     telegram-reactions/             # Layered skill
       ...
-  .nanoclaw/
+  .cambot-agent/
     base/                           # Clean core (shared base)
       src/
         server.ts
@@ -1046,9 +1046,9 @@ project/
 2. **Three-level resolution: git → Claude → user.** Programmatic first, AI second, human third.
 3. **Clean merges aren't enough.** Tests run after every operation. Semantic conflicts survive text merges.
 4. **All operations are safe.** Backup before, restore on failure. No half-applied state.
-5. **One shared base.** `.nanoclaw/base/` is the clean core before any skills or customizations. It's the stable common ancestor for all three-way merges. Only updated on core updates.
+5. **One shared base.** `.cambot-agent/base/` is the clean core before any skills or customizations. It's the stable common ancestor for all three-way merges. Only updated on core updates.
 6. **Code merges vs. structured operations.** Source code is three-way merged. Dependencies, env vars, and configs are aggregated programmatically. Structured operations are implicit and batched.
-7. **Resolutions are learned and shared.** Maintainers resolve conflicts and ship verified resolutions with hash enforcement. `.nanoclaw/resolutions/` is the shared artifact.
+7. **Resolutions are learned and shared.** Maintainers resolve conflicts and ship verified resolutions with hash enforcement. `.cambot-agent/resolutions/` is the shared artifact.
 8. **One skill, one happy path.** No predefined configuration options. Customization is more patching.
 9. **Skills layer and compose.** Core skills provide the foundation. Extension skills add capabilities.
 10. **Intent is first-class and structured.** `SKILL.md`, `.intent.md` (What, Invariants, Must-keep), and `migration.md`.

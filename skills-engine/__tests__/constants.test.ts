@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  NANOCLAW_DIR,
+  CAMBOT_AGENT_DIR,
   STATE_FILE,
   BASE_DIR,
   BACKUP_DIR,
@@ -12,7 +12,7 @@ import {
 
 describe('constants', () => {
   const allConstants = {
-    NANOCLAW_DIR,
+    CAMBOT_AGENT_DIR,
     STATE_FILE,
     BASE_DIR,
     BACKUP_DIR,
@@ -29,15 +29,15 @@ describe('constants', () => {
     }
   });
 
-  it('path constants use forward slashes and .nanoclaw prefix', () => {
+  it('path constants use forward slashes and .cambot-agent prefix', () => {
     const pathConstants = [BASE_DIR, BACKUP_DIR, LOCK_FILE, CUSTOM_DIR, RESOLUTIONS_DIR];
     for (const p of pathConstants) {
       expect(p).not.toContain('\\');
-      expect(p).toMatch(/^\.nanoclaw\//);
+      expect(p).toMatch(/^\.cambot-agent\//);
     }
   });
 
-  it('NANOCLAW_DIR is .nanoclaw', () => {
-    expect(NANOCLAW_DIR).toBe('.nanoclaw');
+  it('CAMBOT_AGENT_DIR is .cambot-agent', () => {
+    expect(CAMBOT_AGENT_DIR).toBe('.cambot-agent');
   });
 });

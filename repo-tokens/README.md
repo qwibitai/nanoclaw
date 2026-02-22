@@ -12,7 +12,7 @@ A GitHub Action that calculates the size of your codebase in terms of tokens and
 ## Usage
 
 ```yaml
-- uses: qwibitai/nanoclaw/repo-tokens@v1
+- uses: qwibitai/cambot-agent/repo-tokens@v1
   with:
     include: 'src/**/*.ts'
     exclude: 'src/**/*.test.ts'
@@ -51,7 +51,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: qwibitai/nanoclaw/repo-tokens@v1
+      - uses: qwibitai/cambot-agent/repo-tokens@v1
         id: tokens
         with:
           include: 'src/**/*.ts'

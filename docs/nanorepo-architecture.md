@@ -1,8 +1,8 @@
-# NanoClaw Skills Architecture
+# CamBot-Agent Skills Architecture
 
 ## What Skills Are For
 
-NanoClaw's core is intentionally minimal. Skills are how users extend it: adding channels, integrations, cross-platform support, or replacing internals entirely. Examples: add Telegram alongside WhatsApp, switch from Apple Container to Docker, add Gmail integration, add voice message transcription. Each skill modifies the actual codebase, adding channel handlers, updating the message router, changing container configuration, and adding dependencies, rather than working through a plugin API or runtime hooks.
+CamBot-Agent's core is intentionally minimal. Skills are how users extend it: adding channels, integrations, cross-platform support, or replacing internals entirely. Examples: add Telegram alongside WhatsApp, switch from Apple Container to Docker, add Gmail integration, add voice message transcription. Each skill modifies the actual codebase, adding channel handlers, updating the message router, changing container configuration, and adding dependencies, rather than working through a plugin API or runtime hooks.
 
 ## Why This Architecture
 
@@ -26,11 +26,11 @@ Every operation follows this escalation:
 
 ## Backup/Restore Safety
 
-Before any operation, all affected files are copied to `.nanoclaw/backup/`. On success, backup is deleted. On failure, backup is restored. Works safely for users who don't use git.
+Before any operation, all affected files are copied to `.cambot-agent/backup/`. On success, backup is deleted. On failure, backup is restored. Works safely for users who don't use git.
 
 ## The Shared Base
 
-`.nanoclaw/base/` holds a clean copy of the core codebase. This is the single common ancestor for all three-way merges, only updated during core updates.
+`.cambot-agent/base/` holds a clean copy of the core codebase. This is the single common ancestor for all three-way merges, only updated during core updates.
 
 ## Two Types of Changes
 
@@ -101,14 +101,14 @@ Renames, deletes, and moves are declared in the manifest and run **before** code
 
 ## Shared Resolution Cache
 
-`.nanoclaw/resolutions/` ships pre-computed, verified conflict resolutions with **hash enforcement** — a cached resolution only applies if base, current, and skill input hashes match exactly. This means most users never encounter unresolved conflicts for common skill combinations.
+`.cambot-agent/resolutions/` ships pre-computed, verified conflict resolutions with **hash enforcement** — a cached resolution only applies if base, current, and skill input hashes match exactly. This means most users never encounter unresolved conflicts for common skill combinations.
 
 ### rerere Adapter
 `git rerere` requires unmerged index entries that `git merge-file` doesn't create. An adapter sets up the required index state after `merge-file` produces a conflict, enabling rerere caching. This requires the project to be a git repository; users without `.git/` lose caching but not functionality.
 
 ## State Tracking
 
-`.nanoclaw/state.yaml` records: core version, all applied skills (with per-file hashes for base/skill/merged), structured operation outcomes, custom patches, and path remaps. This makes drift detection instant and replay deterministic.
+`.cambot-agent/state.yaml` records: core version, all applied skills (with per-file hashes for base/skill/merged), structured operation outcomes, custom patches, and path remaps. This makes drift detection instant and replay deterministic.
 
 ## Untracked Changes
 

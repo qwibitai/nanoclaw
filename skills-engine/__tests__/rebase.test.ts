@@ -9,7 +9,7 @@ import {
   createMinimalState,
   createTempDir,
   initGitRepo,
-  setupNanoclawDir,
+  setupCambotAgentDir,
   writeState,
 } from './test-helpers.js';
 
@@ -19,7 +19,7 @@ describe('rebase', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    setupNanoclawDir(tmpDir);
+    setupCambotAgentDir(tmpDir);
     createMinimalState(tmpDir);
     process.chdir(tmpDir);
   });
@@ -31,7 +31,7 @@ describe('rebase', () => {
 
   it('rebase with one skill: patch created, state updated, rebased_at set', async () => {
     // Set up base file
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'index.ts'), 'const x = 1;\n');
 
@@ -68,7 +68,7 @@ describe('rebase', () => {
     expect(result.patchFile).toBeDefined();
 
     // Verify patch file exists
-    const patchPath = path.join(tmpDir, '.nanoclaw', 'combined.patch');
+    const patchPath = path.join(tmpDir, '.cambot-agent', 'combined.patch');
     expect(fs.existsSync(patchPath)).toBe(true);
 
     const patchContent = fs.readFileSync(patchPath, 'utf-8');
@@ -76,7 +76,7 @@ describe('rebase', () => {
 
     // Verify state was updated
     const stateContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'state.yaml'),
+      path.join(tmpDir, '.cambot-agent', 'state.yaml'),
       'utf-8',
     );
     const state = parse(stateContent);
@@ -99,7 +99,7 @@ describe('rebase', () => {
 
   it('rebase flattens: base updated to match working tree', async () => {
     // Set up base file (clean core)
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'index.ts'), 'const x = 1;\n');
 
@@ -132,7 +132,7 @@ describe('rebase', () => {
 
     // Base should now include the skill's changes (flattened)
     const baseContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'base', 'src', 'index.ts'),
+      path.join(tmpDir, '.cambot-agent', 'base', 'src', 'index.ts'),
       'utf-8',
     );
     expect(baseContent).toContain('skill');
@@ -141,7 +141,7 @@ describe('rebase', () => {
 
   it('rebase with multiple skills + custom mods: all collapsed into single patch', async () => {
     // Set up base files
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'src', 'index.ts'), 'const x = 1;\n');
     fs.writeFileSync(
@@ -193,7 +193,7 @@ describe('rebase', () => {
           description: 'tweaked config',
           applied_at: new Date().toISOString(),
           files_modified: ['src/config.ts'],
-          patch_file: '.nanoclaw/custom/001-tweaked-config.patch',
+          patch_file: '.cambot-agent/custom/001-tweaked-config.patch',
         },
       ],
     });
@@ -207,7 +207,7 @@ describe('rebase', () => {
 
     // Verify combined patch includes changes from both skills
     const patchContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'combined.patch'),
+      path.join(tmpDir, '.cambot-agent', 'combined.patch'),
       'utf-8',
     );
     expect(patchContent).toContain('skill-a');
@@ -215,7 +215,7 @@ describe('rebase', () => {
 
     // Verify state: custom_modifications should be cleared
     const stateContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'state.yaml'),
+      path.join(tmpDir, '.cambot-agent', 'state.yaml'),
       'utf-8',
     );
     const state = parse(stateContent);
@@ -227,13 +227,13 @@ describe('rebase', () => {
 
     // Base should be flattened — include all skill changes
     const baseIndex = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'base', 'src', 'index.ts'),
+      path.join(tmpDir, '.cambot-agent', 'base', 'src', 'index.ts'),
       'utf-8',
     );
     expect(baseIndex).toContain('skill-a');
 
     const baseConfig = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'base', 'src', 'config.ts'),
+      path.join(tmpDir, '.cambot-agent', 'base', 'src', 'config.ts'),
       'utf-8',
     );
     expect(baseConfig).toContain('skill-b');
@@ -241,7 +241,7 @@ describe('rebase', () => {
 
   it('rebase clears resolution cache', async () => {
     // Set up base + working tree
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'index.ts'), 'const x = 1;\n');
 
@@ -252,7 +252,7 @@ describe('rebase', () => {
     );
 
     // Create a fake resolution cache entry
-    const resDir = path.join(tmpDir, '.nanoclaw', 'resolutions', 'skill-a+skill-b');
+    const resDir = path.join(tmpDir, '.cambot-agent', 'resolutions', 'skill-a+skill-b');
     fs.mkdirSync(resDir, { recursive: true });
     fs.writeFileSync(path.join(resDir, 'meta.yaml'), 'skills: [skill-a, skill-b]\n');
 
@@ -276,14 +276,14 @@ describe('rebase', () => {
 
     // Resolution cache should be cleared
     const resolutions = fs.readdirSync(
-      path.join(tmpDir, '.nanoclaw', 'resolutions'),
+      path.join(tmpDir, '.cambot-agent', 'resolutions'),
     );
     expect(resolutions).toHaveLength(0);
   });
 
   it('rebase with new base: base updated, changes merged', async () => {
     // Set up current base (multi-line so changes don't conflict)
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
     fs.writeFileSync(
       path.join(baseDir, 'src', 'index.ts'),
@@ -329,7 +329,7 @@ describe('rebase', () => {
 
     // Verify base was updated to new core
     const baseContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'base', 'src', 'index.ts'),
+      path.join(tmpDir, '.cambot-agent', 'base', 'src', 'index.ts'),
       'utf-8',
     );
     expect(baseContent).toContain('core v2 header');
@@ -344,7 +344,7 @@ describe('rebase', () => {
 
     // State should reflect rebase
     const stateContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'state.yaml'),
+      path.join(tmpDir, '.cambot-agent', 'state.yaml'),
       'utf-8',
     );
     const state = parse(stateContent);
@@ -353,7 +353,7 @@ describe('rebase', () => {
 
   it('rebase with new base: conflict returns backupPending', async () => {
     // Set up current base — short file so changes overlap
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+    const baseDir = path.join(tmpDir, '.cambot-agent', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
     fs.writeFileSync(
       path.join(baseDir, 'src', 'index.ts'),
@@ -401,7 +401,7 @@ describe('rebase', () => {
 
     // combined.patch should still exist
     expect(result.patchFile).toBeDefined();
-    const patchPath = path.join(tmpDir, '.nanoclaw', 'combined.patch');
+    const patchPath = path.join(tmpDir, '.cambot-agent', 'combined.patch');
     expect(fs.existsSync(patchPath)).toBe(true);
 
     // Working tree should have conflict markers (not rolled back)
@@ -414,7 +414,7 @@ describe('rebase', () => {
 
     // State should NOT be updated yet (conflicts pending)
     const stateContent = fs.readFileSync(
-      path.join(tmpDir, '.nanoclaw', 'state.yaml'),
+      path.join(tmpDir, '.cambot-agent', 'state.yaml'),
       'utf-8',
     );
     const state = parse(stateContent);

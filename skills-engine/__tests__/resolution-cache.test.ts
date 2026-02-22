@@ -8,7 +8,7 @@ import {
   loadResolutions,
   saveResolution,
 } from '../resolution-cache.js';
-import { createTempDir, setupNanoclawDir, initGitRepo, cleanup } from './test-helpers.js';
+import { createTempDir, setupCambotAgentDir, initGitRepo, cleanup } from './test-helpers.js';
 
 function sha256(content: string): string {
   return crypto.createHash('sha256').update(content).digest('hex');
@@ -22,7 +22,7 @@ describe('resolution-cache', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    setupNanoclawDir(tmpDir);
+    setupCambotAgentDir(tmpDir);
     process.chdir(tmpDir);
   });
 
@@ -45,7 +45,7 @@ describe('resolution-cache', () => {
     );
 
     // Skills are sorted, so key is "skill-a+skill-b"
-    const resDir = path.join(tmpDir, '.nanoclaw', 'resolutions', 'skill-a+skill-b');
+    const resDir = path.join(tmpDir, '.cambot-agent', 'resolutions', 'skill-a+skill-b');
     expect(fs.existsSync(resDir)).toBe(true);
 
     // Check preimage and resolution files exist
@@ -74,7 +74,7 @@ describe('resolution-cache', () => {
       tmpDir,
     );
 
-    const resDir = path.join(tmpDir, '.nanoclaw', 'resolutions', 'alpha+beta');
+    const resDir = path.join(tmpDir, '.cambot-agent', 'resolutions', 'alpha+beta');
     const meta = parse(fs.readFileSync(path.join(resDir, 'meta.yaml'), 'utf-8'));
     expect(meta.file_hashes).toBeDefined();
     expect(meta.file_hashes['src/config.ts']).toEqual(hashes);
@@ -176,8 +176,8 @@ describe('resolution-cache', () => {
 
     function setupInputFiles() {
       // Create base file
-      fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'base', 'src'), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, '.nanoclaw', 'base', 'src', 'config.ts'), baseContent);
+      fs.mkdirSync(path.join(tmpDir, '.cambot-agent', 'base', 'src'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, '.cambot-agent', 'base', 'src', 'config.ts'), baseContent);
 
       // Create current file
       fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });

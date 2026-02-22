@@ -10,7 +10,7 @@ import {
 import { CUSTOM_DIR } from '../constants.js';
 import {
   createTempDir,
-  setupNanoclawDir,
+  setupCambotAgentDir,
   createMinimalState,
   cleanup,
   writeState,
@@ -23,7 +23,7 @@ describe('customize', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    setupNanoclawDir(tmpDir);
+    setupCambotAgentDir(tmpDir);
     createMinimalState(tmpDir);
     fs.mkdirSync(path.join(tmpDir, CUSTOM_DIR), { recursive: true });
     process.chdir(tmpDir);
@@ -116,7 +116,7 @@ describe('customize', () => {
     fs.writeFileSync(trackedFile, 'export const x = 2;');
 
     // Make the base file a directory to cause diff to exit with code 2
-    const baseFilePath = path.join(tmpDir, '.nanoclaw', 'base', 'src', 'app.ts');
+    const baseFilePath = path.join(tmpDir, '.cambot-agent', 'base', 'src', 'app.ts');
     fs.mkdirSync(baseFilePath, { recursive: true });
 
     expect(() => commitCustomize()).toThrow(/diff error/i);

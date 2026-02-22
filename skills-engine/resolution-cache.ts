@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { parse, stringify } from 'yaml';
 
-import { NANOCLAW_DIR, RESOLUTIONS_DIR, SHIPPED_RESOLUTIONS_DIR } from './constants.js';
+import { CAMBOT_AGENT_DIR, RESOLUTIONS_DIR, SHIPPED_RESOLUTIONS_DIR } from './constants.js';
 import { computeFileHash } from './state.js';
 import { FileInputHashes, ResolutionMeta } from './types.js';
 
@@ -89,7 +89,7 @@ export function loadResolutions(
       continue;
     }
 
-    const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', relPath);
+    const basePath = path.join(projectRoot, CAMBOT_AGENT_DIR, 'base', relPath);
     const currentPath = path.join(projectRoot, relPath);
     const skillModifyPath = path.join(skillDir, 'modify', relPath);
 

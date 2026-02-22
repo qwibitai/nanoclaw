@@ -1,4 +1,4 @@
-# NanoClaw Agent Container
+# CamBot-Agent Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
 FROM node:22-slim
