@@ -352,6 +352,32 @@ After calling this tool, the orchestrator will send progress messages to this ch
 
 ---
 
+## Self-Edit: Modifying Your Own Source Code
+
+You can modify your own NanoClaw source code through a safe PR workflow. Use this when the user asks you to add a feature, fix a bug, or change your behavior.
+
+**When to use**: The user says "add feature X", "fix bug Y", "change how you do Z", "improve X", or similar requests that involve changing NanoClaw source code.
+
+### How It Works
+
+1. Read the relevant source in `/workspace/project/` to understand what to change
+2. Create a **git worktree** (isolated directory — live `main` stays untouched)
+3. Make changes in the worktree, validate with `tsc` + `vitest`
+4. Push a branch and create a PR via GitHub CLI
+5. Send the user the PR link
+6. Schedule a poll that auto-detects when the PR is merged and triggers `self_update` to pull + rebuild + restart
+
+**Full instructions are in the `self-edit` skill** — read `/workspace/project/container/skills/self-edit/SKILL.md` before starting.
+
+### Key Rules
+
+- **New features must be packaged as skills** — create a skill directory in `.claude/skills/{name}/` with `manifest.yaml`, `SKILL.md`, `add/`, `modify/` following NanoClaw's skill creation process. Use existing skills like `add-telegram` as structural templates. See `scripts/apply-skill.ts` and `CONTRIBUTING.md` for the skills-engine API.
+- **Bug fixes and internal refactors** can be raw code changes directly in the worktree.
+- **Never edit live code** in `/workspace/project/src/` — always use a worktree.
+- **Always validate** before creating a PR.
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:

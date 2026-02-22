@@ -433,6 +433,15 @@ async function performSelfUpdate(
   logger.info({ branch }, 'Self-update requested');
   await send(`Self-update started${branch ? ` (branch: ${branch})` : ''}...`);
 
+  // Record current HEAD for rollback
+  let prevHead: string | undefined;
+  try {
+    const { stdout } = await execAsync('git rev-parse HEAD', { timeout: 10_000 });
+    prevHead = stdout.trim();
+  } catch {
+    logger.warn('Could not record HEAD for rollback');
+  }
+
   try {
     // Checkout branch if specified
     if (branch) {
@@ -448,15 +457,39 @@ async function performSelfUpdate(
     });
     logger.info({ output: pullOutput.trim() }, 'git pull completed');
 
-    // Install dependencies
-    await send('Installing dependencies...');
-    await execAsync('npm install', { timeout: 120_000 });
-    logger.info('npm install completed');
+    // Install dependencies + build (wrapped for rollback)
+    try {
+      await send('Installing dependencies...');
+      await execAsync('npm install', { timeout: 120_000 });
+      logger.info('npm install completed');
 
-    // Build
-    await send('Building...');
-    await execAsync('npm run build', { timeout: 60_000 });
-    logger.info('npm run build completed');
+      await send('Building...');
+      await execAsync('npm run build', { timeout: 60_000 });
+      logger.info('npm run build completed');
+    } catch (buildErr) {
+      const buildMessage = buildErr instanceof Error ? buildErr.message : String(buildErr);
+      logger.error({ err: buildErr }, 'Self-update build failed, attempting rollback');
+
+      if (prevHead) {
+        try {
+          await send(`Build failed, rolling back to ${prevHead.slice(0, 8)}...`);
+          await execAsync(`git reset --hard ${prevHead}`, { timeout: 10_000 });
+          await execAsync('npm install', { timeout: 120_000 });
+          await execAsync('npm run build', { timeout: 60_000 });
+          await send(`Rolled back successfully. Build error: ${buildMessage}`);
+          logger.info({ prevHead }, 'Self-update rolled back successfully');
+          return;
+        } catch (rollbackErr) {
+          const rollbackMessage = rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+          logger.error({ err: rollbackErr }, 'Self-update rollback also failed');
+          await send(`Update failed and rollback failed: ${rollbackMessage}`);
+          return;
+        }
+      }
+
+      await send(`Update failed (no rollback available): ${buildMessage}`);
+      return;
+    }
 
     await send('Updated successfully, restarting...');
     // Give the message time to send, then trigger graceful shutdown.

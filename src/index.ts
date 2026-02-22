@@ -1,5 +1,7 @@
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { promisify } from 'util';
 
 import {
   ASSISTANT_NAME,
@@ -493,12 +495,80 @@ function recoverPendingMessages(): void {
   }
 }
 
+const execAsyncBoot = promisify(exec);
+
+/**
+ * Auto-pull latest main on boot.
+ * Ensures we're on main, pulls, installs, and builds.
+ * On failure, rolls back to previous HEAD and continues boot.
+ */
+async function pullLatestMain(): Promise<void> {
+  try {
+    // Ensure we're on main
+    const { stdout: branch } = await execAsyncBoot('git rev-parse --abbrev-ref HEAD', { timeout: 10_000 });
+    if (branch.trim() !== 'main') {
+      logger.warn({ branch: branch.trim() }, 'Boot auto-pull: not on main, skipping');
+      return;
+    }
+
+    const { stdout: prevHead } = await execAsyncBoot('git rev-parse HEAD', { timeout: 10_000 });
+    const prevSha = prevHead.trim();
+
+    logger.info('Boot auto-pull: pulling latest main...');
+    await execAsyncBoot('git pull origin main', { timeout: 60_000 });
+
+    const { stdout: newHead } = await execAsyncBoot('git rev-parse HEAD', { timeout: 10_000 });
+    if (newHead.trim() === prevSha) {
+      logger.info('Boot auto-pull: already up to date');
+      return;
+    }
+
+    logger.info('Boot auto-pull: new changes detected, installing and building...');
+    try {
+      await execAsyncBoot('npm install', { timeout: 120_000 });
+      await execAsyncBoot('npm run build', { timeout: 60_000 });
+      logger.info('Boot auto-pull completed successfully');
+    } catch (buildErr) {
+      logger.warn({ err: buildErr }, 'Boot auto-pull: build failed, rolling back...');
+      try {
+        await execAsyncBoot(`git reset --hard ${prevSha}`, { timeout: 10_000 });
+        await execAsyncBoot('npm install', { timeout: 120_000 });
+        await execAsyncBoot('npm run build', { timeout: 60_000 });
+        logger.warn('Boot auto-pull: rolled back successfully');
+      } catch (rollbackErr) {
+        logger.error({ err: rollbackErr }, 'Boot auto-pull: rollback also failed, proceeding with current state');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Boot auto-pull failed, proceeding with current code');
+  }
+}
+
+/**
+ * Clean up leftover worktrees from crashed self-edit sessions.
+ */
+async function cleanupWorktrees(): Promise<void> {
+  try {
+    await execAsyncBoot('git worktree prune', { timeout: 10_000 });
+
+    const worktreeDir = path.resolve('.worktrees');
+    if (fs.existsSync(worktreeDir)) {
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+      logger.info('Cleaned up leftover .worktrees/ directory');
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Worktree cleanup failed, continuing boot');
+  }
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 }
 
 async function main(): Promise<void> {
+  await pullLatestMain();
+  await cleanupWorktrees();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
