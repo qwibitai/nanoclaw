@@ -9,7 +9,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
+import { MAIN_GROUP_FOLDER, STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
 
@@ -80,6 +80,22 @@ export async function run(args: string[]): Promise<void> {
     container_config TEXT,
     requires_trigger INTEGER DEFAULT 1
   )`);
+
+  // Safety net: the first channel registered must always use the hardcoded
+  // main folder so that group-permission checks (which gate task visibility)
+  // work correctly. If no groups exist yet and the caller supplied a different
+  // folder name (e.g. an LLM substituted the WhatsApp display name), silently
+  // override it to MAIN_GROUP_FOLDER and warn.
+  const existingCount = (
+    db.prepare('SELECT COUNT(*) as count FROM registered_groups').get() as { count: number }
+  ).count;
+  if (existingCount === 0 && parsed.folder !== MAIN_GROUP_FOLDER) {
+    logger.warn(
+      { supplied: parsed.folder, override: MAIN_GROUP_FOLDER },
+      'First registration: overriding folder to hardcoded main folder',
+    );
+    parsed.folder = MAIN_GROUP_FOLDER;
+  }
 
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups
