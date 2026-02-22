@@ -42,6 +42,7 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  assistantName?: string;
   secrets?: Record<string, string>;
 }
 
@@ -180,9 +181,37 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * For CLAUDE_CODE_OAUTH_TOKEN, also checks ~/.claude/.credentials.json
+ * as a fallback/override. The CLI auto-refreshes that file, so it always
+ * has a fresh token — unlike .env which can go stale.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+
+  // If using an API key, no need to check credentials.json
+  if (secrets.ANTHROPIC_API_KEY) return secrets;
+
+  // Try to read a fresh OAuth token from the Claude CLI credentials file.
+  // This token is auto-refreshed by the CLI, so it's always current.
+  try {
+    const credsPath = path.join(getHomeDir(), '.claude', '.credentials.json');
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf-8'));
+    const token = creds?.claudeAiOauth?.accessToken;
+    const expiresAt = creds?.claudeAiOauth?.expiresAt;
+    if (token && typeof token === 'string' && token.startsWith('sk-ant-oat01-')) {
+      // Only use if not expired (with 5-minute buffer)
+      if (!expiresAt || Date.now() < expiresAt - 5 * 60 * 1000) {
+        secrets.CLAUDE_CODE_OAUTH_TOKEN = token;
+      } else {
+        logger.warn('OAuth token in ~/.claude/.credentials.json is expired');
+      }
+    }
+  } catch {
+    // credentials.json doesn't exist or isn't readable — that's fine
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
