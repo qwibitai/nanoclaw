@@ -27,6 +27,12 @@ export interface WhatsAppChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/**
+ * WhatsApp channel implementation for NanoClaw.
+ *
+ * Handles WhatsApp Business API connection, message sending/receiving,
+ * group metadata synchronization, and presence updates.
+ */
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
