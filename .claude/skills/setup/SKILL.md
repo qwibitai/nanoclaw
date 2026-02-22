@@ -120,7 +120,10 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 
 ## 8. Register Channel
 
-Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "main" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
+Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "DISPLAY_NAME" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
+
+- `--name` → the WhatsApp group or chat display name (e.g. `"My Bot Group"`). Use the actual name from step 7.
+- `--folder` → **always the literal string `"main"`**. Do NOT replace this with the group name or any other value. The primary channel workspace folder is always `main`.
 
 ## 9. Mount Allowlist
 

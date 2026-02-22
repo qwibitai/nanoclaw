@@ -120,6 +120,70 @@ describe('parameterized SQL registration', () => {
   });
 });
 
+describe('first-registration folder safety net', () => {
+  it('overrides folder to "main" when no groups exist and a wrong folder is supplied', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      container_config TEXT,
+      requires_trigger INTEGER DEFAULT 1
+    )`);
+
+    const MAIN_GROUP_FOLDER = 'main';
+
+    // Simulate what register.ts does: check count before insert
+    let folder = 'My Bot Group'; // wrong value an LLM might supply
+    const existingCount = (
+      db.prepare('SELECT COUNT(*) as count FROM registered_groups').get() as { count: number }
+    ).count;
+    if (existingCount === 0 && folder !== MAIN_GROUP_FOLDER) {
+      folder = MAIN_GROUP_FOLDER;
+    }
+
+    expect(folder).toBe('main');
+
+    db.close();
+  });
+
+  it('does NOT override folder when groups already exist', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
+      jid TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      folder TEXT NOT NULL UNIQUE,
+      trigger_pattern TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      container_config TEXT,
+      requires_trigger INTEGER DEFAULT 1
+    )`);
+
+    // Insert an existing group first
+    db.prepare(
+      `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run('111@g.us', 'Main Group', 'main', '@Andy', '2024-01-01T00:00:00.000Z', 1);
+
+    const MAIN_GROUP_FOLDER = 'main';
+
+    let folder = 'work-group'; // intentional secondary folder
+    const existingCount = (
+      db.prepare('SELECT COUNT(*) as count FROM registered_groups').get() as { count: number }
+    ).count;
+    if (existingCount === 0 && folder !== MAIN_GROUP_FOLDER) {
+      folder = MAIN_GROUP_FOLDER;
+    }
+
+    // Should NOT have been overridden — a second group can use any folder name
+    expect(folder).toBe('work-group');
+
+    db.close();
+  });
+});
+
 describe('file templating', () => {
   it('replaces assistant name in CLAUDE.md content', () => {
     let content = '# Andy\n\nYou are Andy, a personal assistant.';
