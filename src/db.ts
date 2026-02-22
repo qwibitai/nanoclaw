@@ -307,6 +307,7 @@ export function getNewMessages(
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
     ORDER BY timestamp
   `;
 
@@ -334,6 +335,7 @@ export function getMessagesSince(
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
     ORDER BY timestamp
   `;
   return db
