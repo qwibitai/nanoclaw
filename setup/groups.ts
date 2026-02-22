@@ -2,7 +2,7 @@
  * Step: groups — Connect to WhatsApp, fetch group metadata, write to DB.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
-import { execFileSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
