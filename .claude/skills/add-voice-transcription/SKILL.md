@@ -15,7 +15,11 @@ Read `.nanoclaw/state.yaml`. If `voice-transcription` is in `applied_skills`, sk
 
 ### Ask the user
 
-1. **Do they have an OpenAI API key?** If yes, collect it now. If no, they'll need to create one at https://platform.openai.com/api-keys.
+Use `AskUserQuestion` to collect information:
+
+AskUserQuestion: Do you have an OpenAI API key for Whisper transcription?
+
+If yes, collect it now. If no, direct them to create one at https://platform.openai.com/api-keys.
 
 ## Phase 2: Apply Code Changes
 
@@ -93,7 +97,8 @@ The container reads environment from `data/env/env`, not `.env` directly.
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 ## Phase 4: Verify

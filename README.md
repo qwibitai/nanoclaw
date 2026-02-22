@@ -98,7 +98,7 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 
 ### RFS (Request for Skills)
 
-Skills we'd love to see:
+Skills we'd like to see:
 
 **Communication Channels**
 - `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
