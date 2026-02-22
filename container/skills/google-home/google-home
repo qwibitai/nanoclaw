@@ -35,13 +35,15 @@ write_task() {
   mv "$tmp_file" "$task_file"
 }
 
-# Poll for a response file, timeout after TIMEOUT seconds
+# Poll for a response file, timeout after MAX_ATTEMPTS * POLL_INTERVAL seconds
+MAX_ATTEMPTS=60  # 60 * 0.5s = 30s
+
 poll_response() {
   local request_id="$1"
   local response_file="${RESPONSES_DIR}/${request_id}.json"
-  local elapsed=0
+  local attempt=0
 
-  while (( $(echo "$elapsed < $TIMEOUT" | bc -l) )); do
+  while (( attempt < MAX_ATTEMPTS )); do
     if [[ -f "$response_file" ]]; then
       local content
       content=$(cat "$response_file")
@@ -61,7 +63,7 @@ poll_response() {
     fi
 
     sleep "$POLL_INTERVAL"
-    elapsed=$(echo "$elapsed + $POLL_INTERVAL" | bc -l)
+    (( attempt++ ))
   done
 
   echo "Error: Timed out waiting for response after ${TIMEOUT}s" >&2
