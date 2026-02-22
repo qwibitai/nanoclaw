@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { isValidGroupFolder } from './group-folder.js';
+import { logger } from './logger.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
@@ -520,6 +522,13 @@ export function getRegisteredGroup(
       }
     | undefined;
   if (!row) return undefined;
+  if (!isValidGroupFolder(row.folder)) {
+    logger.warn(
+      { jid: row.jid, folder: row.folder },
+      'Skipping registered group with invalid folder',
+    );
+    return undefined;
+  }
   return {
     jid: row.jid,
     name: row.name,
@@ -537,6 +546,9 @@ export function setRegisteredGroup(
   jid: string,
   group: RegisteredGroup,
 ): void {
+  if (!isValidGroupFolder(group.folder)) {
+    throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
+  }
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -565,6 +577,13 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
+    if (!isValidGroupFolder(row.folder)) {
+      logger.warn(
+        { jid: row.jid, folder: row.folder },
+        'Skipping registered group with invalid folder',
+      );
+      continue;
+    }
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
@@ -629,7 +648,14 @@ function migrateJsonState(): void {
   > | null;
   if (groups) {
     for (const [jid, group] of Object.entries(groups)) {
-      setRegisteredGroup(jid, group);
+      try {
+        setRegisteredGroup(jid, group);
+      } catch (err) {
+        logger.warn(
+          { jid, folder: group.folder, err },
+          'Skipping migrated registered group with invalid folder',
+        );
+      }
     }
   }
 }

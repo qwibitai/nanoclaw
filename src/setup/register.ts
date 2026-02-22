@@ -10,6 +10,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../config.js';
+import { isValidGroupFolder } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { emitStatus } from './status.js';
 
@@ -54,6 +55,15 @@ export async function run(args: string[]): Promise<void> {
     emitStatus('REGISTER_CHANNEL', {
       STATUS: 'failed',
       ERROR: 'missing_required_args',
+      LOG: 'logs/setup.log',
+    });
+    process.exit(4);
+  }
+
+  if (!isValidGroupFolder(parsed.folder)) {
+    emitStatus('REGISTER_CHANNEL', {
+      STATUS: 'failed',
+      ERROR: 'invalid_folder',
       LOG: 'logs/setup.log',
     });
     process.exit(4);
