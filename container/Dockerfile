@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Chromium and document processing
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -23,6 +23,9 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    && pip3 install --break-system-packages python-docx openpyxl python-pptx \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -46,6 +49,9 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Copy document conversion tools
+COPY tools/ /usr/local/bin/nanoclaw-tools/
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
