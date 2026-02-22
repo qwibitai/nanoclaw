@@ -38,6 +38,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { inferChannelFromJid, tracePromptEvent } from './prompt-trace.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -144,6 +145,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  tracePromptEvent({
+    event: 'agent_prompt_ready',
+    direction: 'external',
+    groupFolder: group.folder,
+    chatJid,
+    channel: inferChannelFromJid(chatJid),
+    sessionId: sessions[group.folder],
+    payload: prompt,
+    meta: {
+      messageCount: missedMessages.length,
+      isMainGroup,
+    },
+  });
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -179,6 +193,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+      tracePromptEvent({
+        event: 'agent_output_filtered',
+        direction: 'external',
+        groupFolder: group.folder,
+        chatJid,
+        channel: inferChannelFromJid(chatJid),
+        sessionId: sessions[group.folder],
+        payload: text,
+        meta: {
+          rawLength: raw.length,
+        },
+      });
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
@@ -192,6 +218,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (result.status === 'error') {
+      tracePromptEvent({
+        event: 'agent_output_error',
+        direction: 'internal',
+        groupFolder: group.folder,
+        chatJid,
+        channel: inferChannelFromJid(chatJid),
+        sessionId: sessions[group.folder],
+        meta: {
+          error: result.error || 'unknown',
+        },
+      });
       hadError = true;
     }
   });
@@ -360,6 +397,18 @@ async function startMessageLoop(): Promise<void> {
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
+          tracePromptEvent({
+            event: 'active_container_followup_prompt',
+            direction: 'internal',
+            groupFolder: group.folder,
+            chatJid,
+            channel: inferChannelFromJid(chatJid),
+            sessionId: sessions[group.folder],
+            payload: formatted,
+            meta: {
+              messageCount: messagesToSend.length,
+            },
+          });
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
@@ -427,7 +476,23 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      tracePromptEvent({
+        event: 'channel_inbound_message',
+        direction: 'external',
+        groupFolder: registeredGroups[chatJid]?.folder,
+        chatJid,
+        channel: inferChannelFromJid(chatJid),
+        payload: msg.content,
+        meta: {
+          sender: msg.sender,
+          senderName: msg.sender_name,
+          timestamp: msg.timestamp,
+          isFromMe: !!msg.is_from_me,
+        },
+      });
+      storeMessage(msg);
+    },
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
       storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
@@ -450,14 +515,40 @@ async function main(): Promise<void> {
         console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
         return;
       }
+      tracePromptEvent({
+        event: 'scheduler_output_raw',
+        direction: 'internal',
+        groupFolder: registeredGroups[jid]?.folder,
+        chatJid: jid,
+        channel: inferChannelFromJid(jid),
+        payload: rawText,
+      });
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) {
+        tracePromptEvent({
+          event: 'scheduler_output_outbound',
+          direction: 'external',
+          groupFolder: registeredGroups[jid]?.folder,
+          chatJid: jid,
+          channel: inferChannelFromJid(jid),
+          payload: text,
+        });
+        await channel.sendMessage(jid, text);
+      }
     },
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      tracePromptEvent({
+        event: 'ipc_outbound_message',
+        direction: 'external',
+        groupFolder: registeredGroups[jid]?.folder,
+        chatJid: jid,
+        channel: inferChannelFromJid(jid),
+        payload: text,
+      });
       return channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
