@@ -15,11 +15,15 @@ Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase
 
 ### Ask the user
 
-1. **Mode**: Replace WhatsApp or add alongside it?
-   - Replace → will set `TELEGRAM_ONLY=true`
-   - Alongside → both channels active (default)
+Use `AskUserQuestion` to collect configuration:
 
-2. **Do they already have a bot token?** If yes, collect it now. If no, we'll create one in Phase 3.
+AskUserQuestion: Should Telegram replace WhatsApp or run alongside it?
+- **Replace WhatsApp** - Telegram will be the only channel (sets TELEGRAM_ONLY=true)
+- **Alongside** - Both Telegram and WhatsApp channels active
+
+AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
+
+If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
@@ -219,9 +223,9 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 ## Agent Swarms (Teams)
 
-After completing the Telegram setup, ask the user:
+After completing the Telegram setup, use `AskUserQuestion`:
 
-> Would you like to add Agent Swarm support? Without it, Agent Teams still work — they just operate behind the scenes. With Swarm support, each subagent appears as a different bot in the Telegram group so you can see who's saying what and have interactive team sessions.
+AskUserQuestion: Would you like to add Agent Swarm support? Without it, Agent Teams still work — they just operate behind the scenes. With Swarm support, each subagent appears as a different bot in the Telegram group so you can see who's saying what and have interactive team sessions.
 
 If they say yes, invoke the `/add-telegram-swarm` skill.
 

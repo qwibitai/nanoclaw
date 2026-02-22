@@ -21,11 +21,10 @@ Run all steps automatically. Only pause for user input when explicitly needed.
 
 ### 1. Get Parallel AI API Key
 
-Ask the user:
-> Do you have a Parallel AI API key, or should I help you get one?
+Use `AskUserQuestion: Do you have a Parallel AI API key, or should I help you get one?`
 
 **If they have one:**
-Ask them to provide it.
+Collect it now.
 
 **If they need one:**
 Tell them:
@@ -168,12 +167,11 @@ You have access to two Parallel AI research tools:
 
 **Speed:** Slower (1-20 minutes depending on depth)
 **Cost:** Higher (varies by processor tier)
-**Permission:** ALWAYS ask the user first before using this tool
+**Permission:** ALWAYS use `AskUserQuestion` before using this tool
 
 **How to ask permission:**
 ```
-I can do deep research on [topic] using Parallel's Task API. This will take
-2-5 minutes and provide comprehensive analysis with citations. Should I proceed?
+AskUserQuestion: I can do deep research on [topic] using Parallel's Task API. This will take 2-5 minutes and provide comprehensive analysis with citations. Should I proceed?
 ```
 
 **After permission - DO NOT BLOCK! Use scheduler instead:**
