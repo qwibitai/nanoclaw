@@ -133,11 +133,47 @@ function buildVolumeMounts(
       fs.cpSync(srcDir, dstDir, { recursive: true });
     }
   }
+
+  // Sync plugins from host ~/.claude/plugins/ into each group's .claude/plugins/
+  // Rewrites installPath values so they resolve inside the container
+  const hostPluginsConfig = path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json');
+  if (fs.existsSync(hostPluginsConfig)) {
+    try {
+      const pluginsConfig = JSON.parse(fs.readFileSync(hostPluginsConfig, 'utf-8'));
+      const containerHome = '/home/node';
+      for (const entries of Object.values(pluginsConfig.plugins || {})) {
+        for (const entry of (entries as Array<{ installPath?: string }>)) {
+          if (typeof entry.installPath === 'string') {
+            entry.installPath = entry.installPath.replace(homeDir, containerHome);
+          }
+        }
+      }
+      const groupPluginsDir = path.join(groupSessionsDir, 'plugins');
+      fs.mkdirSync(groupPluginsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(groupPluginsDir, 'installed_plugins.json'),
+        JSON.stringify(pluginsConfig, null, 2) + '\n',
+      );
+    } catch (err) {
+      logger.warn({ error: err }, 'Failed to sync plugins config');
+    }
+  }
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Mount host plugins cache (read-only) so the SDK can load plugin skills
+  const hostPluginsCache = path.join(homeDir, '.claude', 'plugins', 'cache');
+  if (fs.existsSync(hostPluginsCache)) {
+    mounts.push({
+      hostPath: hostPluginsCache,
+      containerPath: '/home/node/.claude/plugins/cache',
+      readonly: true,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
