@@ -28,6 +28,16 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+| `/create-skill` | Build new skills: scaffold, test, QA, and optionally PR upstream |
+
+## Skill System
+
+- Skills live in `.claude/skills/{name}/` — structure: SKILL.md, manifest.yaml, add/, modify/, tests/
+- Canonical SKILL.md template: `.claude/skills/create-skill/templates/SKILL.md.template`
+- State tracked in `.nanoclaw/state.yaml` — created skills: draft → tested → submitted
+- Generated skills MUST pass tests on clean NanoClaw base before upstreaming
+- Only generate skills within current skills engine limits
+- No upstream PR without explicit user approval
 
 ## Development
 
