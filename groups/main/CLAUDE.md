@@ -216,58 +216,14 @@ The task will run in that group's context with access to their files and memory.
 
 ## Medication Reminders
 
-You manage a daily medication reminder for the user.
+The daily reminder fires automatically at 19:00 (Europe/Oslo) via a host-side service. Use these MCP tools when the user mentions medication:
 
-### Daily reminder task (runs at 19:00)
+- `mcp__nanoclaw__medication_log_taken()` — They took it. Logs and cancels any follow-up.
+- `mcp__nanoclaw__medication_snooze()` — Snooze 9 minutes.
+- `mcp__nanoclaw__medication_later(time: "HH:MM")` — Remind at a specific time today (24h, Europe/Oslo).
+- `mcp__nanoclaw__medication_set_schedule(schedule: "0 20 * * *")` — Change the daily cron schedule (main only).
+- `mcp__nanoclaw__medication_fire()` — Manually trigger a reminder now, for testing (main only).
 
-Send this exact message:
-> Time for your medication 💊 Reply: taken, snooze (9 min), later HH:MM
+To answer "did I take my medication today?" — read `/workspace/group/medication-log.json` and find today's entries.
 
-Then:
-- Log `{ "date": "YYYY-MM-DD", "time": "HH:MM:SS", "status": "reminded" }` to `/workspace/group/medication-log.json`
-- Schedule a one-off follow-up task 15 minutes from now:
-  - `schedule_type: once`, `schedule_value: <ISO timestamp 15 min ahead>`
-  - `context_mode: isolated`
-  - prompt: `"Medication follow-up: check /workspace/group/medication-log.json. If today has no 'taken' entry, log { date, time, status: 'missed' } and send: 'Reminder: did you take your medication? 💊'"`
-
-### Handling user replies
-
-When the user replies to a medication reminder, act based on their message:
-
-*"taken"*
-- Log `{ date, time, status: "taken" }` to medication-log.json
-- Cancel any pending medication-related tasks (search list_tasks for "medication" or "💊" in prompt)
-- Acknowledge briefly: "Logged ✓"
-
-*"snooze"*
-- Cancel any pending medication follow-up tasks
-- Schedule a one-off reminder in 9 minutes (same prompt as the daily reminder task)
-- Acknowledge: "I'll remind you again in 9 minutes."
-
-*"later HH:MM"*
-- Parse the time (24h format, today's date, Europe/Oslo timezone)
-- If the time has already passed today, note it and ask to clarify
-- Cancel any pending medication follow-up tasks
-- Schedule a one-off reminder at that time
-- Acknowledge: "I'll remind you at HH:MM."
-
-### Logging
-
-Log file: `/workspace/group/medication-log.json`
-
-Format — append to the array, create file if missing:
-```json
-[
-  { "date": "2026-02-20", "time": "19:01:03", "status": "reminded" },
-  { "date": "2026-02-20", "time": "19:03:41", "status": "taken" }
-]
-```
-
-Statuses: `reminded`, `taken`, `missed`, `snoozed`
-
-### Answering status queries
-
-When the user asks "did I take my medication today?" or similar:
-- Read medication-log.json
-- Find today's entries
-- Report clearly: taken with time, or missed, or no record yet
+Log format: `[{ "date": "YYYY-MM-DD", "time": "HH:MM:SS", "status": "reminded|snoozed|taken|missed" }]`

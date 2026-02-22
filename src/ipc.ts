@@ -13,6 +13,7 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { MedicationService } from './medication-service.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
@@ -27,6 +28,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  medicationService?: MedicationService;
 }
 
 let ipcWatcherRunning = false;
@@ -170,6 +172,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For medication IPC
+    hhmm?: string;
+    cron?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -377,6 +382,71 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'medication_fire':
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized medication_fire attempt blocked');
+        break;
+      }
+      if (deps.medicationService) {
+        await deps.medicationService.fireReminder();
+      } else {
+        logger.warn('medication_fire: MedicationService not available');
+      }
+      break;
+
+    case 'medication_log_taken':
+      if (deps.medicationService) {
+        await deps.medicationService.logTaken();
+      } else {
+        logger.warn('medication_log_taken: MedicationService not available');
+      }
+      break;
+
+    case 'medication_snooze':
+      if (deps.medicationService) {
+        await deps.medicationService.snooze();
+      } else {
+        logger.warn('medication_snooze: MedicationService not available');
+      }
+      break;
+
+    case 'medication_later':
+      if (data.hhmm && deps.medicationService) {
+        try {
+          await deps.medicationService.scheduleLater(data.hhmm);
+        } catch (err) {
+          logger.warn({ hhmm: data.hhmm, err }, 'medication_later failed');
+        }
+      } else {
+        logger.warn(
+          { hhmm: data.hhmm },
+          'medication_later: missing hhmm or MedicationService not available',
+        );
+      }
+      break;
+
+    case 'medication_set_schedule':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized medication_set_schedule attempt blocked',
+        );
+        break;
+      }
+      if (data.cron && deps.medicationService) {
+        try {
+          await deps.medicationService.setSchedule(data.cron);
+        } catch (err) {
+          logger.warn({ cron: data.cron, err }, 'medication_set_schedule failed');
+        }
+      } else {
+        logger.warn(
+          { cron: data.cron },
+          'medication_set_schedule: missing cron or MedicationService not available',
         );
       }
       break;

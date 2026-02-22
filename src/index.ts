@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
+  TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -27,6 +28,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  deleteTask,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -40,6 +42,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { MedicationService } from './medication-service.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -437,6 +440,16 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Migrate: remove legacy LLM-based medication tasks from scheduled_tasks
+  const allTasks = getAllTasks();
+  for (const task of allTasks) {
+    if (task.prompt.startsWith('Medication daily reminder:') ||
+        task.prompt.startsWith('Daily medication reminder')) {
+      deleteTask(task.id);
+      logger.info({ taskId: task.id }, 'Removed legacy medication scheduled task');
+    }
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -468,6 +481,19 @@ async function main(): Promise<void> {
     await telegram.connect();
   }
 
+  // Instantiate and start the medication reminder service
+  const medicationService = new MedicationService({
+    sendMessage: async (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      await channel.sendMessage(jid, text);
+    },
+    logPath: path.join(DATA_DIR, '..', 'groups', 'main', 'medication-log.json'),
+    configPath: path.join(DATA_DIR, '..', 'groups', 'main', 'medication-config.json'),
+    tz: TIMEZONE,
+  });
+  medicationService.start();
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -492,6 +518,7 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    medicationService,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

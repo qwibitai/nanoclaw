@@ -280,6 +280,94 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'medication_log_taken',
+  'Log that the user took their medication. Cancels any pending follow-up reminder.',
+  {},
+  async () => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'medication_log_taken',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Medication logged as taken.' }] };
+  },
+);
+
+server.tool(
+  'medication_snooze',
+  'Snooze the medication reminder for 9 minutes.',
+  {},
+  async () => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'medication_snooze',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Medication reminder snoozed for 9 minutes.' }] };
+  },
+);
+
+server.tool(
+  'medication_later',
+  'Schedule a one-off medication reminder at a specific time today.',
+  {
+    time: z.string().describe('Time in HH:MM format (24h, Europe/Oslo)'),
+  },
+  async (args) => {
+    writeIpcFile(TASKS_DIR, {
+      type: 'medication_later',
+      hhmm: args.time,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: `Medication reminder scheduled for ${args.time}.` }] };
+  },
+);
+
+server.tool(
+  'medication_set_schedule',
+  'Change the daily medication reminder schedule. Main group only.',
+  {
+    schedule: z.string().describe('Cron expression, e.g. "0 20 * * *" for 20:00 daily'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can change the medication schedule.' }],
+        isError: true,
+      };
+    }
+    writeIpcFile(TASKS_DIR, {
+      type: 'medication_set_schedule',
+      cron: args.schedule,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: `Medication schedule updated to: ${args.schedule}` }] };
+  },
+);
+
+server.tool(
+  'medication_fire',
+  'Manually trigger a medication reminder immediately (for testing). Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can manually fire medication reminders.' }],
+        isError: true,
+      };
+    }
+    writeIpcFile(TASKS_DIR, {
+      type: 'medication_fire',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    return { content: [{ type: 'text' as const, text: 'Medication reminder fired.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
