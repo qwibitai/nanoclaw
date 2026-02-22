@@ -491,6 +491,18 @@ async function main(): Promise<void> {
     await warrenChannel.connect();
   }
 
+  // ntfy.sh channel (optional — enabled via NTFY_TOPIC)
+  if (process.env.NTFY_TOPIC) {
+    const { NtfyChannel } = await import('./channels/ntfy.js');
+    const ntfyChannel = new NtfyChannel({
+      serverUrl: process.env.NTFY_SERVER || 'https://ntfy.sh',
+      topic: process.env.NTFY_TOPIC,
+      token: process.env.NTFY_TOKEN,
+    });
+    channels.push(ntfyChannel);
+    await ntfyChannel.connect();
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
