@@ -117,12 +117,16 @@ def load_credentials() -> google.oauth2.credentials.Credentials:
         scopes=cred_data.get("scopes"),
     )
 
-    # Refresh if expired
-    if credentials.expired or not credentials.token:
-        sys.stderr.write("Refreshing expired credentials...\n")
+    # Always refresh on load — access tokens expire after 1 hour and we
+    # don't persist the expiry timestamp, so we can't tell if it's stale.
+    if cred_data.get("refresh_token"):
+        sys.stderr.write("Refreshing access token...\n")
         credentials.refresh(google.auth.transport.requests.Request())
         _save_credentials(credentials)
-        sys.stderr.write("Credentials refreshed.\n")
+        sys.stderr.write("Access token refreshed.\n")
+    elif not credentials.token:
+        sys.stderr.write("ERROR: No token and no refresh_token available.\n")
+        sys.exit(1)
 
     return credentials
 
@@ -243,8 +247,11 @@ class AssistantClient:
                     raw_html = response.screen_out.data.decode("utf-8", errors="replace")
 
         except grpc.RpcError as e:
-            sys.stderr.write(f"gRPC error: {e}\n")
-            sys.stderr.write("Reconnecting...\n")
+            sys.stderr.write(f"gRPC error: {e.code().name}: {e.details()}\n")
+            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+                sys.stderr.write("Token expired, refreshing and reconnecting...\n")
+                self.credentials.refresh(google.auth.transport.requests.Request())
+                _save_credentials(self.credentials)
             self._connect()
             return {"error": f"gRPC error: {e.code().name}: {e.details()}"}
 
