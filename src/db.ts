@@ -445,10 +445,12 @@ export function updateTaskAfterRun(
 }
 
 export function logTaskRun(log: TaskRunLog): void {
+  // Use SELECT ... WHERE EXISTS to skip gracefully if the task was deleted while running.
   db.prepare(
     `
     INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
-    VALUES (?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?
+    WHERE EXISTS (SELECT 1 FROM scheduled_tasks WHERE id = ?)
   `,
   ).run(
     log.task_id,
@@ -457,6 +459,7 @@ export function logTaskRun(log: TaskRunLog): void {
     log.status,
     log.result,
     log.error,
+    log.task_id,
   );
 }
 

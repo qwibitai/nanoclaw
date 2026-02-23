@@ -63,6 +63,6 @@ export const TRIGGER_PATTERN = new RegExp(
 );
 
 // Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
-export const TIMEZONE =
-  process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Defaults to UTC — cron expressions are written in UTC by convention.
+// Override with TZ=Europe/Copenhagen (or similar) in .env if you want local-time crons.
+export const TIMEZONE = process.env.TZ || 'UTC';

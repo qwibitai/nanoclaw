@@ -153,6 +153,9 @@ StandardError=append:${PROJECT_PATH}/logs/nanoclaw.error.log
 WantedBy=default.target
 UNITEOF
 
+    log "Enabling linger so service survives logout"
+    loginctl enable-linger "$(whoami)" >> "$LOG_FILE" 2>&1 || true
+
     log "Enabling and starting systemd service"
     systemctl --user daemon-reload >> "$LOG_FILE" 2>&1 || true
     systemctl --user enable nanoclaw >> "$LOG_FILE" 2>&1 || true
