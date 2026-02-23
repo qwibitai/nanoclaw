@@ -471,16 +471,23 @@ async function runQuery(
           url: 'https://mcp.deepwiki.com/mcp',
         },
         context7: {
-          command: 'npx',
-          args: ['-y', '@upstash/context7-mcp'],
+          command: 'context7-mcp',
+          args: [],
         },
         'token-efficient': {
           command: 'node',
           args: ['/workspace/mcp-servers/token-efficient-mcp/dist/index.js'],
         },
         'chrome-devtools': {
-          command: 'npx',
-          args: ['-y', 'chrome-devtools-mcp', '--channel=beta'],
+          command: 'chrome-devtools-mcp',
+          args: [
+            '--headless',
+            '--isolated',
+            '--executablePath',
+            '/usr/bin/chromium',
+            '--chromeArg=--disable-dev-shm-usage',
+            '--chromeArg=--no-sandbox',
+          ],
         },
       },
       hooks: {

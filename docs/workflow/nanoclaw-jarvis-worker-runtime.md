@@ -7,9 +7,11 @@ Runtime contract for OpenCode-based worker containers.
 - Default image: `nanoclaw-worker:latest` (`WORKER_CONTAINER_IMAGE`)
 - Built from: `container/worker/Dockerfile`
 - Runtime: OpenCode CLI (`opencode-ai`) with pinned free-model defaults and runtime fallback handling
-- Build path is network-minimal in buildkit:
+- Browser runtime: in-container Chromium (`/usr/bin/chromium`) for local browser testing
+- Build path:
   - `container/worker/build.sh` prepares `container/worker/vendor/opencode-ai-node_modules.tgz` via `container run`
-  - Docker build then uses local bundle only (no apt/npm registry dependency inside buildkit)
+  - bundle includes `opencode-ai`, `chrome-devtools-mcp`, `context7-mcp`, and `mcp-remote`
+  - Docker build installs Chromium with retry logic for Apple Container network variance
 
 ## OpenCode Runtime Config
 
@@ -19,10 +21,10 @@ Runtime contract for OpenCode-based worker containers.
 - instructions: `/workspace/group/CLAUDE.md`
 - skills path: `/home/node/.claude/skills`
 - default MCP servers:
-  - `deepwiki` (remote: `https://mcp.deepwiki.com/mcp`)
-  - `context7` (local: `npx -y @upstash/context7-mcp`)
+  - `deepwiki` (local: `mcp-remote https://mcp.deepwiki.com/mcp --transport streamable-http`)
+  - `context7` (local: `context7-mcp`)
   - `token-efficient` (local: `/workspace/mcp-servers/token-efficient-mcp/dist/index.js`)
-  - `chrome-devtools` (local: `npx -y chrome-devtools-mcp --channel=beta`)
+  - `chrome-devtools` (local: `chrome-devtools-mcp --executablePath /usr/bin/chromium`)
 
 Model can be overridden per-group via `containerConfig.model`.
 

@@ -19,12 +19,12 @@ Task received
     ├─► FEATURE? (has feature-list.json)
     │       └─► implementation skill (IMPLEMENT state)
     │               └─► UI-impacting delta?
-    │                       ├─► YES → browser-testing skill (WebMCP gate, default)
+    │                       ├─► YES → browser-testing skill (container Chromium gate, default)
     │                       └─► NO  → continue
     │
     ├─► TESTING?
     │       ├─► UNIT/API ──► testing skill
-    │       └─► BROWSER ──► browser-testing skill (WebMCP)
+    │       └─► BROWSER ──► browser-testing skill (chrome-devtools MCP)
     │
     ├─► RESEARCH? (URL/article shared)
     │       └─► research-evaluator skill
@@ -101,47 +101,30 @@ Detect failure
 
 ---
 
-## Browser Testing (WebMCP)
+## Browser Testing (Container Chromium)
 
 Required by default for UI-impacting changes.
 
 **REQUIREMENTS:**
 
-1. WebMCP-capable browser runtime (Chrome 146+ path; Beta channel is the standard path) with `chrome://flags/#enable-webmcp-testing` enabled
-2. App MUST expose WebMCP tools (imperative `registerTool()/provideContext()` or declarative form annotations like `toolname`)
-3. Server must be running
-4. Browser context required (not headless)
-5. If environment lacks WebMCP capability, report blocker to Andy-developer (do not claim pass)
+1. In-container Chromium available at `/usr/bin/chromium`
+2. `chrome-devtools` MCP is available and starts successfully
+3. Server must be running inside the same container
+4. Use container-local route (`127.0.0.1`) for browser assertions
+5. If browser tooling is unavailable, report blocker to Andy-developer (do not claim pass)
 6. DOM fallback allowed only when dispatch explicitly permits fallback
 
 **Verification before testing:**
 
-```javascript
-// Check API availability and registration
-if (!navigator.modelContext || !navigator.modelContextTesting) {
-  throw new Error("WebMCP API unavailable in current browser runtime");
-}
-const tools = await navigator.modelContextTesting.listTools();
-if (!Array.isArray(tools) || tools.length === 0) {
-  throw new Error("App missing WebMCP registration - cannot test");
-}
-```
+Run readiness probe first, then execute at least one `chrome-devtools` MCP action.
 
 **Assertion execution:**
 
-```javascript
-// Input arguments must be JSON string
-const raw = await navigator.modelContextTesting.executeTool(
-  "<task-specific-tool>",
-  "<json-string>"
-);
-```
+Include tool names and key outputs in completion evidence.
 
-Include tool names, inputs, and outputs in completion evidence.
+**If browser tooling is unavailable:**
 
-**If app doesn't support WebMCP:**
-
-- Report: "App missing WebMCP registration"
+- Report exact browser/MCP blocker with command output
 - Fallback: Use DOM scraping only if dispatch explicitly allows fallback
 
 ---
@@ -180,4 +163,4 @@ Workers stay focused on implementation/test execution and should escalate contro
 | GH_TOKEN invalid | Re-auth via keyring: `gh auth refresh` |
 | Server won't start | Check port, kill existing, retry |
 | Tests fail | Fix + re-run, don't ask |
-| WebMCP not available | Report, skip browser tests |
+| Browser tooling unavailable | Report blocker, skip browser tests |

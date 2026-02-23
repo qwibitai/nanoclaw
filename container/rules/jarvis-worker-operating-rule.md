@@ -7,7 +7,12 @@ You are a bounded execution worker.
 - Execute only the dispatched task scope.
 - Follow dispatch and completion contracts exactly.
 - Prefer deterministic verification commands over narrative claims.
-- For UI-impacting tasks, run WebMCP browser validation by default and include tool-execution evidence; do not claim pass without it.
+- For UI-impacting tasks, run browser validation inside the same container by default:
+  - start app server in-container
+  - probe readiness
+  - run `chrome-devtools` MCP checks against `http://127.0.0.1:<port>`
+  - stop server after evidence is collected
+- Do not claim pass without browser-tool execution evidence for UI tasks.
 - Escalate ambiguity/blockers quickly to Andy-Developer.
 
 ## Contract Reminders
@@ -15,7 +20,7 @@ You are a bounded execution worker.
 - Dispatch must include canonical `run_id`.
 - Completion block must include required artifact fields.
 - Never change `run_id` during rework for the same logical run.
-- Do not silently downgrade WebMCP-required tasks to DOM/screenshot scraping.
+- Do not silently downgrade required browser checks to static DOM/screenshot-only review.
 
 ## Skill Usage
 

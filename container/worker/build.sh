@@ -58,8 +58,19 @@ prepare_opencode_bundle() {
        npm config set fetch-retry-maxtimeout 120000;
        npm config set fetch-timeout 180000;
        npm view opencode-ai version >/dev/null;
-       npm install -g --no-audit --no-fund --loglevel=warn opencode-ai;
-       tar -C /usr/local/lib/node_modules -czf /out/opencode-ai-node_modules.tgz opencode-ai"; then
+       npm view chrome-devtools-mcp version >/dev/null;
+       npm view @upstash/context7-mcp version >/dev/null;
+       npm view mcp-remote version >/dev/null;
+       npm install -g --no-audit --no-fund --loglevel=warn \
+         opencode-ai \
+         chrome-devtools-mcp \
+         @upstash/context7-mcp \
+         mcp-remote;
+       tar -C /usr/local/lib/node_modules -czf /out/opencode-ai-node_modules.tgz \
+         opencode-ai \
+         chrome-devtools-mcp \
+         @upstash/context7-mcp \
+         mcp-remote"; then
       echo "Prepared OpenCode bundle: ${OPENCODE_BUNDLE}"
       return
     fi

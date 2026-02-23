@@ -39,8 +39,13 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install browser-testing and MCP tooling globally for deterministic runtime startup.
+# Avoid npx-on-demand network fetches during agent execution.
+RUN npm install -g \
+    agent-browser \
+    @anthropic-ai/claude-code \
+    @upstash/context7-mcp \
+    chrome-devtools-mcp
 
 # Create app directory
 WORKDIR /app

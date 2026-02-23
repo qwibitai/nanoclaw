@@ -1,18 +1,19 @@
-# WebMCP Review Gate
+# Container Browser Review Gate
 
 Use this before dispatching or approving browser-testing work.
 
-## What WebMCP Is
+## Default Policy
 
-- WebMCP is a browser/page contract (`navigator.modelContext`), not a regular standalone MCP server.
-- Browser tasks can use MCP tooling, but WebMCP success still depends on page-side registration.
+- Browser testing must run inside worker containers by default.
+- Use stable Chromium + `chrome-devtools` MCP.
+- Validate routes through `http://127.0.0.1:<port>` inside the same container namespace.
 
 ## Andy Decision Flow
 
 1. Classify whether the task is UI-impacting.
-2. For UI-impacting tasks, set WebMCP as default required validation.
-3. If app lacks WebMCP registration, dispatch an implementation task first.
-4. Allow DOM-style fallback only when explicitly requested by project/task owner.
+2. For UI-impacting tasks, require in-container browser validation by default.
+3. Require worker to run app server in-container, probe readiness, then run browser assertions.
+4. Allow DOM-only fallback only when explicitly approved.
 
 UI-impacting examples:
 - edits under `src/app`, `src/components`, `pages`, `public`
@@ -24,36 +25,25 @@ UI-impacting examples:
 When creating worker dispatch JSON for browser work:
 
 - Keep `task_type` bounded (`test` or `ui-browser`).
-- In `input`, state:
-  - `webmcp_required: true` (default for UI-impacting tasks)
-  - `webmcp_required: false` only when explicit fallback is approved
-- Include task-specific WebMCP assertions in `input` (tool names + expected pass criteria).
-- Include acceptance tests that prove readiness, for example:
-  - app/server up check
-  - WebMCP API + registration verification
-  - tool execution result(s) for the changed behavior
+- In `input`, require:
+  - in-container server startup command
+  - readiness probe command
+  - target route(s) on `127.0.0.1`
+  - task-specific browser assertions
+- Keep fallback explicit (`fallback_allowed: true`) only when approved.
 
-## Readiness Signals To Require In Evidence
+## Evidence Required In Worker Completion
 
 Require all of:
 
-- Runtime check: `navigator.modelContext` and `navigator.modelContextTesting` exist.
-- Runtime check: `await navigator.modelContextTesting.listTools()` is non-empty.
-- Runtime check: at least one task-relevant `await navigator.modelContextTesting.executeTool("<tool>", "<json-string>")` result.
-- Code reference proving registration path:
-  - imperative: `registerTool()` or `provideContext()`
-  - declarative: `<form toolname="...">` (+ optional `toolautosubmit`, `toolparam*`)
+1. server startup command and readiness output
+2. tested in-container URL(s)
+3. `chrome-devtools` MCP tool calls with key outputs
+4. pass/fail decision tied to expected UI behavior
 
-## Environment Gate
-
-For WebMCP-required testing, require worker to confirm:
-
-- Chrome 146+ capability with WebMCP testing flag enabled (`chrome://flags/#enable-webmcp-testing`)
-- or report explicit environment blocker if unavailable
-
-Do not approve "passed browser tests" without environment evidence when WebMCP is required.
+Do not approve "passed browser tests" without browser-tool evidence.
 
 ## Review Outcomes
 
-- Approve: readiness evidence + task-relevant tool execution evidence + expected browser behavior + required checks pass.
-- Rework: missing WebMCP evidence, ambiguous fallback use, or unbounded browser claims.
+- Approve: readiness evidence + browser-tool evidence + expected behavior checks pass.
+- Rework: missing readiness evidence, missing browser-tool output, ambiguous fallback, or unbounded claims.

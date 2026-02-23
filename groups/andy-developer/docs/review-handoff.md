@@ -11,7 +11,7 @@ Prepare the app in `NanoClawWorkspace` and provide a runnable handoff so the use
 1. Validate worker evidence
 - Completion contract is present and valid (`run_id`, branch, commit, tests, risk).
 - Andy review decision is `approve` before starting user handoff.
-- For UI-impacting changes, worker evidence must include WebMCP validation results (tools discovered + task-relevant tool execution output).
+- For UI-impacting changes, worker evidence must include container browser validation results (server readiness + task-relevant `chrome-devtools` tool execution output).
 - If evidence is incomplete, return `rework` instead of handoff.
 
 2. Stage review workspace

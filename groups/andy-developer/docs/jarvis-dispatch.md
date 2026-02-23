@@ -24,22 +24,22 @@ Worker tasks MUST be sent as a JSON object string. Plain text dispatch is reject
 | `output_contract.required_fields` | Yes | Must include run completion fields |
 | `priority` | No | `low`, `normal`, `high` |
 
-## Browser/WebMCP Dispatch Profile
+## Browser Dispatch Profile (Container Chromium)
 
 For browser-testing tasks, include explicit mode in `input`:
 
-- `webmcp_required: true` by default for UI-impacting changes.
-- `webmcp_required: false` only when fallback is explicitly approved.
-- `webmcp_assertions: [...]` with task-relevant tool names and expected pass criteria.
+- `browser_required: true` by default for UI-impacting changes.
+- `browser_required: false` only when fallback is explicitly approved.
+- `browser_assertions: [...]` with task-relevant checks and expected pass criteria.
 - `fallback_allowed: false` unless explicitly approved.
 
-When `webmcp_required: true`, acceptance tests must include:
+When `browser_required: true`, acceptance tests must include:
 
 1. app/server readiness check
-2. WebMCP API/registration check (`navigator.modelContext`, `navigator.modelContextTesting`, `modelContextTesting.listTools()`)
-3. task-specific `modelContextTesting.executeTool()` assertion(s)
+2. in-container route probe (`127.0.0.1:<port>`)
+3. task-specific `chrome-devtools` MCP assertion(s)
 
-If WebMCP prerequisites are missing, worker must return blocker evidence instead of silent fallback.
+If browser tooling prerequisites are missing, worker must return blocker evidence instead of silent fallback.
 
 ## Agreement-Sync Dispatch Profile
 

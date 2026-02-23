@@ -93,5 +93,5 @@ Use `pr_skipped_reason` when no PR is opened.
 - Use same `run_id` for rework on the same logical task.
 - Escalate to Andy-Developer instead of guessing when requirements are ambiguous.
 - Prefer deterministic verification over prose claims.
-- Do not silently downgrade WebMCP-required tasks to DOM scraping.
-- Do not skip WebMCP evidence on UI-impacting changes unless fallback is explicitly approved.
+- Do not silently downgrade required browser validation to DOM-only scraping.
+- Do not skip `chrome-devtools` evidence on UI-impacting changes unless fallback is explicitly approved.

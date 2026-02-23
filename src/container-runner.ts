@@ -119,17 +119,30 @@ const WORKER_DEFAULT_OPENCODE_CONFIG = JSON.stringify({
     deepwiki: {
       type: 'local',
       enabled: true,
-      command: ['npx', '-y', 'mcp-remote', 'https://mcp.deepwiki.com/mcp', '--transport', 'streamable-http'],
+      command: ['mcp-remote', 'https://mcp.deepwiki.com/mcp', '--transport', 'streamable-http'],
     },
     context7: {
       type: 'local',
       enabled: true,
-      command: ['npx', '-y', '@upstash/context7-mcp'],
+      command: ['context7-mcp'],
     },
     'token-efficient': {
       type: 'local',
       enabled: true,
       command: ['node', '/workspace/mcp-servers/token-efficient-mcp/dist/index.js'],
+    },
+    'chrome-devtools': {
+      type: 'local',
+      enabled: true,
+      command: [
+        'chrome-devtools-mcp',
+        '--headless',
+        '--isolated',
+        '--executablePath',
+        '/usr/bin/chromium',
+        '--chromeArg=--disable-dev-shm-usage',
+        '--chromeArg=--no-sandbox',
+      ],
     },
   },
 });
@@ -367,12 +380,23 @@ function buildVolumeMounts(
           url: 'https://mcp.deepwiki.com/mcp',
         },
         context7: {
-          command: 'npx',
-          args: ['-y', '@upstash/context7-mcp'],
+          command: 'context7-mcp',
+          args: [],
         },
         'token-efficient': {
           command: 'node',
           args: ['/workspace/mcp-servers/token-efficient-mcp/dist/index.js'],
+        },
+        'chrome-devtools': {
+          command: 'chrome-devtools-mcp',
+          args: [
+            '--headless',
+            '--isolated',
+            '--executablePath',
+            '/usr/bin/chromium',
+            '--chromeArg=--disable-dev-shm-usage',
+            '--chromeArg=--no-sandbox',
+          ],
         },
       },
     };
