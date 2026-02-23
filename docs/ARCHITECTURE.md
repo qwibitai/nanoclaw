@@ -96,6 +96,7 @@ flowchart LR
 
 - **Where it runs**: Inside the container. The container image ([container/Dockerfile](container/Dockerfile)) installs **agent-browser** and **claude-code** globally; [container/skills/agent-browser/SKILL.md](container/skills/agent-browser/SKILL.md) is synced into each group's `.claude/skills/` so every agent run can use it.
 - **How it's used**: The agent uses **Bash** to run `agent-browser` CLI (e.g. `agent-browser open <url>`, `agent-browser snapshot -i`, `agent-browser click @e1`). Chromium runs inside the container; no host browser is involved for this path. So "browser automation" here is container-scoped, snapshot/element-ref based, and available to all groups that get the default container skills.
+- **Output capture**: When each `agent-browser` call runs in a separate Bash invocation, stdout/stderr from commands like `get title` or `snapshot` can be lost (buffering or SDK capture). The skill doc instructs chaining open + get in one Bash call and using `2>&1`; the container's [PreToolUse Bash hook](container/agent-runner/src/index.ts) automatically appends `2>&1` to `agent-browser get` and `agent-browser snapshot` commands so stderr is merged into stdout.
 
 ---
 

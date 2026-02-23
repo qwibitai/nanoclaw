@@ -23,6 +23,18 @@ agent-browser close             # Close browser
 3. Interact using refs from the snapshot
 4. Re-snapshot after navigation or significant DOM changes
 
+## Reliable output capture (important)
+
+When running inside automation (e.g. Bash from Claude), command output can be lost if each command runs in a separate process. To get page title, snapshot, or other data reliably:
+
+- **Chain navigate and get in one Bash call** so the same process captures output:
+  ```bash
+  agent-browser open https://example.com && agent-browser get title 2>&1
+  agent-browser open <url> && agent-browser snapshot -i 2>&1
+  ```
+- **Always append `2>&1`** to get/snapshot commands so stderr is merged into stdout and captured.
+- For machine-readable output: add `--json` (e.g. `agent-browser get title --json 2>&1`).
+
 ## Commands
 
 ### Navigation
@@ -157,3 +169,11 @@ agent-browser get text @e1  # Get product title
 agent-browser get attr @e2 href  # Get link URL
 agent-browser screenshot products.png
 ```
+
+## Troubleshooting: no output from get title / snapshot
+
+If `agent-browser get title` or `agent-browser snapshot -i` returns nothing in automation:
+
+1. **Use one Bash call** that chains open and get: `agent-browser open <url> && agent-browser get title 2>&1`
+2. **Append `2>&1`** to merge stderr into stdout so all output is captured
+3. **Fallback**: write to a file then cat: `agent-browser open <url> && agent-browser get title > /tmp/out 2>&1 && cat /tmp/out`

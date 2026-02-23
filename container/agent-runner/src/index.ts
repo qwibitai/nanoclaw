@@ -192,6 +192,9 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 // be visible to commands Kit runs.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
+// Commands that need 2>&1 so stdout+stderr are captured (avoids lost output when agent-browser runs in Bash)
+const AGENT_BROWSER_OUTPUT_CMDS = /agent-browser\s+(get|snapshot)\s/;
+
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -199,12 +202,16 @@ function createSanitizeBashHook(): HookCallback {
     if (!command) return {};
 
     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
+    let finalCommand = unsetPrefix + command;
+    if (AGENT_BROWSER_OUTPUT_CMDS.test(command) && !/\s2>\s*&1\s*$/.test(command.trim())) {
+      finalCommand += ' 2>&1';
+    }
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         updatedInput: {
           ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
+          command: finalCommand,
         },
       },
     };
