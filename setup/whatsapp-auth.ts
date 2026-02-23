@@ -2,9 +2,11 @@
  * Step: whatsapp-auth — Full WhatsApp auth flow with polling.
  * Replaces 04-auth-whatsapp.sh
  */
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+
+import QRCode from 'qrcode';
 
 import { logger } from '../src/logger.js';
 import { openBrowser, isHeadless } from './platform.js';
@@ -156,6 +158,7 @@ export async function run(args: string[]): Promise<void> {
     cwd: projectRoot,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: false,
+    shell: true,
   });
 
   const logFile = path.join(projectRoot, 'logs', 'setup.log');
@@ -209,10 +212,7 @@ async function handleQrBrowser(
   // Generate QR SVG and HTML
   const qrData = fs.readFileSync(qrFile, 'utf-8');
   try {
-    const svg = execSync(
-      `node -e "const QR=require('qrcode');const data=${JSON.stringify(qrData)};QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
-      { cwd: projectRoot, encoding: 'utf-8' },
-    );
+    const svg = await QRCode.toString(qrData, { type: 'svg' });
     const html = QR_AUTH_TEMPLATE.replace('{{QR_SVG}}', svg);
     const htmlPath = path.join(projectRoot, 'store', 'qr-auth.html');
     fs.writeFileSync(htmlPath, html);

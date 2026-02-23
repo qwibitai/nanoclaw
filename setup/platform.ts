@@ -56,6 +56,10 @@ export function hasSystemd(): boolean {
 export function openBrowser(url: string): boolean {
   try {
     const platform = getPlatform();
+    if (os.platform() === 'win32') {
+      execSync(`start "" ${JSON.stringify(url)}`, { stdio: 'ignore', shell: true });
+      return true;
+    }
     if (platform === 'macos') {
       execSync(`open ${JSON.stringify(url)}`, { stdio: 'ignore' });
       return true;
@@ -98,7 +102,9 @@ export function getServiceManager(): ServiceManager {
 
 export function getNodePath(): string {
   try {
-    return execSync('command -v node', { encoding: 'utf-8' }).trim();
+    const isWindows = os.platform() === 'win32';
+    const cmd = isWindows ? 'where node' : 'command -v node';
+    return execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0];
   } catch {
     return process.execPath;
   }
@@ -106,7 +112,13 @@ export function getNodePath(): string {
 
 export function commandExists(name: string): boolean {
   try {
-    execSync(`command -v ${name}`, { stdio: 'ignore' });
+    // 'command -v' is a bash builtin; on Windows use 'where' instead
+    const isWindows = os.platform() === 'win32';
+    if (isWindows) {
+      execSync(`where ${name}`, { stdio: 'ignore' });
+    } else {
+      execSync(`command -v ${name}`, { stdio: 'ignore' });
+    }
     return true;
   } catch {
     return false;
