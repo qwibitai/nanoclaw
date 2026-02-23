@@ -46,7 +46,7 @@ export async function ensureTokenFresh(): Promise<boolean> {
 }
 
 export function refreshOAuthToken(): Promise<boolean> {
-  const script = path.join(process.cwd(), 'scripts', 'refresh-oauth.sh');
+  const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
   return new Promise((resolve) => {
     execFile(script, (err) => {
       if (err) {
