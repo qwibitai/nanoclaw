@@ -27,6 +27,7 @@ Use this before changing any behavior:
 | Worker skills/rules baseline content | Runtime-staged from repo (mounted RO) | `container/skills/*`, `container/rules/*`, staging logic in `src/container-runner.ts` |
 | Per-worker task behavior/instructions | Runtime local | `groups/jarvis-worker-*/CLAUDE.md`, `groups/jarvis-worker-*/docs/workflow/*` |
 | Andy control-plane behavior/instructions | Runtime local | `groups/andy-developer/CLAUDE.md`, `groups/andy-developer/docs/*` |
+| Group runtime configuration files | Runtime local (tracked subset) | `groups/**/.mcp.json`, `groups/**/opencode.json`, `groups/**/container-config.*` |
 | Role authority + delegation gates | Host orchestrator primitive | `src/ipc.ts`, `container/rules/*-operating-rule.md`, `docs/operations/roles-classification.md` |
 | Dispatch/completion contract | Host orchestrator primitive + docs/tests | `src/dispatch-validator.ts`, `src/jarvis-worker-dispatch.test.ts`, `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` |
 | GitHub workflow/review governance | Control-plane (repo tracked) | `.github/workflows/*`, `docs/workflow/nanoclaw-github-control-plane.md` |
@@ -51,5 +52,5 @@ Use this before changing any behavior:
 
 ## Notes
 
-- `groups/*` is runtime-local in this repo setup (gitignored), so lane docs there are not commit-tracked by default.
+- Runtime-lane docs/config agreement updates must follow `docs/operations/agreement-sync-protocol.md`.
 - For workflow setup matrix and exact ownership map, see `docs/operations/workflow-setup-responsibility-map.md`.

@@ -21,6 +21,7 @@ docs/
 - GitHub control-plane: `docs/workflow/nanoclaw-github-control-plane.md`
 - Operational ownership: `docs/operations/roles-classification.md`
 - Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`
+- Agreement-driven auto-sync discipline: `docs/operations/agreement-sync-protocol.md`
 - Runtime vs prebaked boundary: `docs/operations/runtime-vs-prebaked-boundary.md`
 - Change impact: `docs/operations/update-requirements-matrix.md`
 - Debug loop: `docs/troubleshooting/DEBUG_CHECKLIST.md`

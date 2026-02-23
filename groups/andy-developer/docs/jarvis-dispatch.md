@@ -39,6 +39,16 @@ When `webmcp_required: true`, acceptance tests must include:
 
 If WebMCP prerequisites are missing, worker must return blocker evidence instead of silent fallback.
 
+## Agreement-Sync Dispatch Profile
+
+When Andy accepts a Jarvis workflow/policy agreement, dispatch must include a docs-sync objective.
+
+Required outcome:
+
+1. update affected `groups/jarvis-worker-*/docs/workflow/*`
+2. update `groups/jarvis-worker-*/CLAUDE.md` Docs Index trigger lines when retrieval paths changed
+3. report changed docs files in completion evidence
+
 ## Required Completion Fields
 
 `output_contract.required_fields` must include:

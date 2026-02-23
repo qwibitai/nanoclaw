@@ -24,7 +24,8 @@ Worker tasks must come from Andy-developer dispatch contract, not direct Andy-bo
 2. Select only required skills from the routing table below.
 3. Execute in bounded scope.
 4. Run required verification commands.
-5. Return the completion contract.
+5. For Andy-approved workflow/policy agreements, run `/workspace/group/docs/workflow/agreement-sync.md`.
+6. Return the completion contract.
 
 ## Skill Routing (Task Mode)
 

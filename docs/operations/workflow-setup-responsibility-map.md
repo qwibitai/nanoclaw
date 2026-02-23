@@ -24,12 +24,13 @@ Canonical map for selecting workflow setup, assigning responsibility, and knowin
 ## Update Protocol
 
 1. Classify the change using the table above.
-2. Update repository-tracked source-of-truth docs/code first.
-3. Update runtime-local `groups/*` docs only for lane execution behavior.
-4. Keep root `CLAUDE.md` compressed: add or change only trigger lines, not long procedures.
+2. Apply the agreement sync protocol: `docs/operations/agreement-sync-protocol.md`.
+3. Update repository-tracked source-of-truth docs/code first.
+4. Update `groups/*` lane docs for execution behavior in the same change set.
+5. Keep root `CLAUDE.md` compressed: add or change only trigger lines, not long procedures.
 
 ## Notes
 
-- `groups/*` is runtime-local in this repo setup (gitignored), so operational lane docs there are not commit-tracked by default.
+- `groups/*` instruction surfaces are commit-tracked in this repo (`CLAUDE.md`, `docs/*`, memory markdown, and selected runtime config files per `.gitignore`).
 - For change impact matrix, see `docs/operations/update-requirements-matrix.md`.
 - For placement decisions (runtime vs prebaked), see `docs/operations/runtime-vs-prebaked-boundary.md`.

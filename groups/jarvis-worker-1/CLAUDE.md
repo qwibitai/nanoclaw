@@ -35,6 +35,7 @@ BEFORE any GitHub push or auth setup → read /workspace/group/docs/workflow/git
 BEFORE starting a new task → read /workspace/group/docs/workflow/execution-loop.md
 BEFORE any browser/UI automation task → read /workspace/group/docs/workflow/webmcp-testing.md
 BEFORE selecting skills for a task → read /workspace/group/docs/workflow/worker-skill-policy.md
+BEFORE applying an Andy-approved workflow/policy agreement → read /workspace/group/docs/workflow/agreement-sync.md
 BEFORE modifying CLAUDE/workflow docs → read /home/node/.claude/rules/compression-loop.md
 
 ## Task Format

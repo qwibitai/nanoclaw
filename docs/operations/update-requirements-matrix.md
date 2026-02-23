@@ -10,6 +10,7 @@ Where updates are required for each change type.
 | Runtime vs prebaked placement boundary changes | `docs/operations/runtime-vs-prebaked-boundary.md`, `docs/operations/workflow-setup-responsibility-map.md`, root `CLAUDE.md` trigger index |
 | Role authority changes (`andy-bot`, `andy-developer`, workers) | `docs/operations/roles-classification.md`, `src/ipc.ts` auth gates, `container/rules/*-operating-rule.md`, `docs/architecture/nanoclaw-jarvis.md` |
 | Workflow setup mode / review policy ownership changes | `docs/workflow/nanoclaw-github-control-plane.md`, `docs/operations/workflow-setup-responsibility-map.md`, `docs/operations/roles-classification.md`, relevant `.github/workflows/*` |
+| Accepted Andy/Jarvis operating agreement changes | `docs/operations/agreement-sync-protocol.md`, affected `docs/operations/*` or `docs/workflow/*`, affected `groups/*` lane docs, root `CLAUDE.md` trigger lines |
 | Debug workflow/playbook changes | `.claude/rules/nanoclaw-jarvis-debug-loop.md`, `docs/troubleshooting/DEBUG_CHECKLIST.md` or `docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md` as applicable, `DOCS.md` map |
 | Worker workflow policy changes | `groups/jarvis-worker-*/docs/workflow/execution-loop.md`, `groups/jarvis-worker-*/docs/workflow/worker-skill-policy.md`, relevant role rules |
 | Root documentation structure/classification | `DOCS.md`, `README.md` docs link, `CLAUDE.md` trigger index |

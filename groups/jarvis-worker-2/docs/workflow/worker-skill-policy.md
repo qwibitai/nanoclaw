@@ -24,7 +24,8 @@ Worker tasks must come from Andy-developer dispatch contract, not direct Andy-bo
 2. Select only required skills from the routing table below.
 3. Execute in bounded scope.
 4. Run required verification commands.
-5. Return the completion contract.
+5. For Andy-approved workflow/policy agreements, run `/workspace/group/docs/workflow/agreement-sync.md`.
+6. Return the completion contract.
 
 ## Skill Routing (Task Mode)
 
@@ -35,6 +36,8 @@ Worker tasks must come from Andy-developer dispatch contract, not direct Andy-bo
 | `research` | `research-evaluator` | `token-efficient` |
 | `parallel` | `worktree-orchestrator` | `testing`, `react-best-practices` |
 | `ui-browser` | `browser-testing` | `agent-browser` |
+
+For `test` and `ui-browser` tasks, apply `/workspace/group/docs/workflow/webmcp-testing.md` first.
 
 ## Skills Available But Not Default
 
@@ -88,3 +91,4 @@ Use `pr_skipped_reason` when no PR is opened.
 - Use same `run_id` for rework on the same logical task.
 - Escalate to Andy-Developer instead of guessing when requirements are ambiguous.
 - Prefer deterministic verification over prose claims.
+- Do not silently downgrade WebMCP-required tasks to DOM scraping.
