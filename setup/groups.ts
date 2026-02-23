@@ -2,8 +2,9 @@
  * Step: groups — Connect to WhatsApp, fetch group metadata, write to DB.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import Database from 'better-sqlite3';
@@ -153,14 +154,28 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const output = execSync(`node --input-type=module -e ${JSON.stringify(syncScript)}`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      timeout: 45000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    syncOk = output.includes('SYNCED:');
-    logger.info({ output: output.trim() }, 'Sync output');
+    // Write script to project root to avoid shell quoting issues on Windows
+    // (node resolves imports relative to the script file, so it must be in project root)
+    const tmpScript = path.join(projectRoot, '.nanoclaw-sync-groups.mjs');
+    fs.writeFileSync(tmpScript, syncScript);
+    let stdout = '';
+    try {
+      stdout = execFileSync(process.execPath, [tmpScript], {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 45000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (execErr: any) {
+      // stdout may still contain SYNCED: even if process exits non-zero
+      // (race condition: connection.update 'close' fires after sock.end() and exits 1)
+      stdout = execErr.stdout ?? '';
+      if (!stdout.includes('SYNCED:')) throw execErr;
+    } finally {
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
+    }
+    syncOk = stdout.includes('SYNCED:');
+    logger.info({ output: stdout.trim() }, 'Sync output');
   } catch (err) {
     logger.error({ err }, 'Sync failed');
   }

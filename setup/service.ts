@@ -55,6 +55,8 @@ export async function run(_args: string[]): Promise<void> {
     setupLaunchd(projectRoot, nodePath, homeDir);
   } else if (platform === 'linux') {
     setupLinux(projectRoot, nodePath, homeDir);
+  } else if (os.platform() === 'win32') {
+    setupWindows(projectRoot, nodePath);
   } else {
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
@@ -66,6 +68,60 @@ export async function run(_args: string[]): Promise<void> {
     });
     process.exit(1);
   }
+}
+
+function setupWindows(projectRoot: string, nodePath: string): void {
+  const distEntry = path.join(projectRoot, 'dist', 'index.js');
+  const logFile = path.join(projectRoot, 'logs', 'nanoclaw.log');
+  const errorLog = path.join(projectRoot, 'logs', 'nanoclaw.error.log');
+  const wrapperPath = path.join(projectRoot, 'start-nanoclaw.bat');
+
+  // Write a batch startup script
+  const bat = [
+    '@echo off',
+    `cd /d "${projectRoot}"`,
+    'echo Starting NanoClaw...',
+    `start "" /B "${nodePath}" "${distEntry}" >> "${logFile}" 2>> "${errorLog}"`,
+    'echo NanoClaw started.',
+    `echo Logs: ${logFile}`,
+  ].join('\r\n') + '\r\n';
+
+  fs.writeFileSync(wrapperPath, bat);
+  logger.info({ wrapperPath }, 'Wrote Windows startup script');
+
+  // Register Task Scheduler task for auto-start on login
+  const taskName = 'NanoClaw';
+  const ps1Lines = [
+    `$action = New-ScheduledTaskAction -Execute '${nodePath.replace(/'/g, "''")}' -Argument '"${distEntry.replace(/'/g, "''")}"' -WorkingDirectory '${projectRoot.replace(/'/g, "''")}'`,
+    `$trigger = New-ScheduledTaskTrigger -AtLogOn`,
+    `$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0`,
+    `Unregister-ScheduledTask -TaskName '${taskName}' -Confirm:$false -ErrorAction SilentlyContinue`,
+    `Register-ScheduledTask -TaskName '${taskName}' -Action $action -Trigger $trigger -Settings $settings -RunLevel Limited -Force`,
+  ];
+  const ps1Path = path.join(os.tmpdir(), 'nanoclaw-task.ps1');
+  fs.writeFileSync(ps1Path, ps1Lines.join('\r\n') + '\r\n');
+
+  let taskScheduled = false;
+  try {
+    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -File "${ps1Path}"`, { stdio: 'ignore' });
+    taskScheduled = true;
+    logger.info('Registered Windows Task Scheduler task for auto-start on login');
+    // Start immediately
+    execSync(`powershell -NoProfile -Command "Start-ScheduledTask -TaskName '${taskName}'"`, { stdio: 'ignore' });
+    logger.info('Started NanoClaw via Task Scheduler');
+  } catch (err) {
+    logger.warn({ err }, 'Could not register Task Scheduler task — use start-nanoclaw.bat to start manually');
+  }
+
+  emitStatus('SETUP_SERVICE', {
+    SERVICE_TYPE: 'windows-task-scheduler',
+    NODE_PATH: nodePath,
+    PROJECT_PATH: projectRoot,
+    WRAPPER_PATH: wrapperPath,
+    SERVICE_LOADED: taskScheduled,
+    STATUS: 'success',
+    LOG: 'logs/setup.log',
+  });
 }
 
 function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): void {

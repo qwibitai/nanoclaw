@@ -56,6 +56,28 @@ export async function run(_args: string[]): Promise<void> {
         // systemctl not available
       }
     }
+  } else if (os.platform() === 'win32') {
+    // Windows: check Task Scheduler task status, or look for running node process
+    try {
+      const out = execSync(
+        `powershell -NoProfile -Command "(Get-ScheduledTask -TaskName 'NanoClaw' -ErrorAction Stop).State"`,
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
+      ).trim();
+      if (out === 'Running') service = 'running';
+      else if (out === 'Ready' || out === 'Queued') {
+        // Task exists but not currently running — check if node is running dist/index.js
+        try {
+          const tasks = execSync('tasklist /FI "IMAGENAME eq node.exe" /FO CSV /NH', { encoding: 'utf-8' });
+          service = tasks.includes('node.exe') ? 'running' : 'stopped';
+        } catch { service = 'stopped'; }
+      } else service = 'stopped';
+    } catch {
+      // No task — check for running node process
+      try {
+        const tasks = execSync('tasklist /FI "IMAGENAME eq node.exe" /FO CSV /NH', { encoding: 'utf-8' });
+        service = tasks.includes('node.exe') ? 'running' : 'not_found';
+      } catch { /* not_found */ }
+    }
   } else {
     // Check for nohup PID file
     const pidFile = path.join(projectRoot, 'nanoclaw.pid');
@@ -76,7 +98,8 @@ export async function run(_args: string[]): Promise<void> {
   // 2. Check container runtime
   let containerRuntime = 'none';
   try {
-    execSync('command -v container', { stdio: 'ignore' });
+    const checkCmd = os.platform() === 'win32' ? 'where container' : 'command -v container';
+    execSync(checkCmd, { stdio: 'ignore' });
     containerRuntime = 'apple-container';
   } catch {
     try {
