@@ -10,6 +10,20 @@ import { logger } from '../src/logger.js';
 import { isRoot } from './platform.js';
 import { emitStatus } from './status.js';
 
+/**
+ * Normalize an allowedRoots entry: map legacy `write` key to `allowReadWrite`
+ * so that the saved allowlist matches the shape expected by mount-security.ts.
+ */
+function normalizeAllowedRoot(root: unknown): unknown {
+  if (typeof root !== 'object' || root === null) return root;
+  const r = root as Record<string, unknown>;
+  if ('write' in r && !('allowReadWrite' in r)) {
+    const { write, ...rest } = r;
+    return { ...rest, allowReadWrite: Boolean(write) };
+  }
+  return r;
+}
+
 function parseArgs(args: string[]): { empty: boolean; json: string } {
   let empty = false;
   let json = '';
@@ -62,8 +76,14 @@ export async function run(args: string[]): Promise<void> {
       return; // unreachable but satisfies TS
     }
 
-    fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
-    allowedRoots = Array.isArray(parsed.allowedRoots) ? parsed.allowedRoots.length : 0;
+    const normalized = {
+      ...parsed,
+      allowedRoots: Array.isArray(parsed.allowedRoots)
+        ? parsed.allowedRoots.map(normalizeAllowedRoot)
+        : [],
+    };
+    fs.writeFileSync(configFile, JSON.stringify(normalized, null, 2) + '\n');
+    allowedRoots = normalized.allowedRoots.length;
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   } else {
     // Read from stdin
@@ -86,8 +106,14 @@ export async function run(args: string[]): Promise<void> {
       return;
     }
 
-    fs.writeFileSync(configFile, JSON.stringify(parsed, null, 2) + '\n');
-    allowedRoots = Array.isArray(parsed.allowedRoots) ? parsed.allowedRoots.length : 0;
+    const normalized = {
+      ...parsed,
+      allowedRoots: Array.isArray(parsed.allowedRoots)
+        ? parsed.allowedRoots.map(normalizeAllowedRoot)
+        : [],
+    };
+    fs.writeFileSync(configFile, JSON.stringify(normalized, null, 2) + '\n');
+    allowedRoots = normalized.allowedRoots.length;
     nonMainReadOnly = parsed.nonMainReadOnly === false ? 'false' : 'true';
   }
 
