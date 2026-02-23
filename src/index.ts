@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -488,8 +489,8 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       await channel.sendMessage(jid, text);
     },
-    logPath: path.join(DATA_DIR, '..', 'groups', 'main', 'medication-log.json'),
-    configPath: path.join(DATA_DIR, '..', 'groups', 'main', 'medication-config.json'),
+    logPath: path.join(GROUPS_DIR, 'main', 'medication-log.json'),
+    configPath: path.join(GROUPS_DIR, 'main', 'medication-config.json'),
     tz: TIMEZONE,
   });
   medicationService.start();
