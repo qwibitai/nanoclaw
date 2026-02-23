@@ -10,11 +10,15 @@ Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 
 
 ### Ask the user
 
-1. **Mode**: Replace WhatsApp or add alongside it?
-   - Replace → will set `DISCORD_ONLY=true`
-   - Alongside → both channels active (default)
+Use `AskUserQuestion` to collect configuration:
 
-2. **Do they already have a bot token?** If yes, collect it now. If no, we'll create one in Phase 3.
+AskUserQuestion: Should Discord replace WhatsApp or run alongside it?
+- **Replace WhatsApp** - Discord will be the only channel (sets DISCORD_ONLY=true)
+- **Alongside** - Both Discord and WhatsApp channels active
+
+AskUserQuestion: Do you have a Discord bot token, or do you need to create one?
+
+If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 

@@ -1,23 +1,23 @@
 import fs from 'fs';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 
 import { cleanup, createTempDir, initGitRepo, setupNanoclawDir } from './test-helpers.js';
 
-// We need to mock process.cwd() since update.ts uses it
 let tmpDir: string;
+const originalCwd = process.cwd();
 
 describe('update', () => {
   beforeEach(() => {
     tmpDir = createTempDir();
     setupNanoclawDir(tmpDir);
     initGitRepo(tmpDir);
-    vi.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+    process.chdir(tmpDir);
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    process.chdir(originalCwd);
     cleanup(tmpDir);
   });
 

@@ -12,21 +12,11 @@ This skill adds Gmail capabilities to NanoClaw. It can be configured in two mode
 
 ## Initial Questions
 
-Ask the user:
+Use `AskUserQuestion` to determine the configuration:
 
-> How do you want to use Gmail with NanoClaw?
->
-> **Option 1: Tool Mode**
-> - Agent can read and send emails when you ask it to
-> - Triggered only from WhatsApp (e.g., "@Andy check my email" or "@Andy send an email to...")
-> - Simpler setup, no email polling
->
-> **Option 2: Channel Mode**
-> - Everything in Tool Mode, plus:
-> - Emails to a specific address/label trigger the agent
-> - Agent replies via email (not WhatsApp)
-> - Can schedule tasks via email
-> - Requires email polling infrastructure
+AskUserQuestion: How do you want to use Gmail with NanoClaw?
+- **Tool Mode** - Agent can read/send emails when triggered from WhatsApp (simpler setup)
+- **Channel Mode** - Emails can trigger the agent, schedule tasks, and receive email replies (requires polling)
 
 Store their choice and proceed to the appropriate section.
 
@@ -283,38 +273,17 @@ Channel Mode includes everything from Tool Mode, plus email polling and routing.
 
 ### Additional Questions for Channel Mode
 
-Ask the user:
+Use `AskUserQuestion` to configure email triggering:
 
-> How should the agent be triggered from email?
->
-> **Option A: Specific Label**
-> - Create a Gmail label (e.g., "NanoClaw")
-> - Emails with this label trigger the agent
-> - You manually label emails or set up Gmail filters
->
-> **Option B: Email Address Pattern**
-> - Emails to a specific address pattern (e.g., andy+task@gmail.com)
-> - Uses Gmail's plus-addressing feature
->
-> **Option C: Subject Prefix**
-> - Emails with a subject starting with a keyword (e.g., "[Andy]")
-> - Anyone can trigger the agent by using the prefix
+AskUserQuestion: How should the agent be triggered from email?
+- **Specific Label** - Create a Gmail label (e.g., "NanoClaw"), emails with this label trigger the agent
+- **Email Address Pattern** - Emails to a specific address pattern (e.g., andy+task@gmail.com) via plus-addressing
+- **Subject Prefix** - Emails with a subject starting with a keyword (e.g., "[Andy]")
 
-Also ask:
-
-> How should email conversations be grouped?
->
-> **Option A: Per Email Thread**
-> - Each email thread gets its own conversation context
-> - Agent remembers the thread history
->
-> **Option B: Per Sender**
-> - All emails from the same sender share context
-> - Agent remembers all interactions with that person
->
-> **Option C: Single Context**
-> - All emails share the main group context
-> - Like an additional input to the main channel
+AskUserQuestion: How should email conversations be grouped?
+- **Per Email Thread** - Each email thread gets its own conversation context
+- **Per Sender** - All emails from the same sender share context
+- **Single Context** - All emails share the main group context
 
 Store their choices for implementation.
 
