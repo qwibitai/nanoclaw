@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ANTHROPIC_MODEL,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -125,6 +126,7 @@ function buildVolumeMounts(
             // Enable Claude's memory feature (persists user preferences between sessions)
             // https://code.claude.com/docs/en/memory#manage-auto-memory
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            ...(ANTHROPIC_MODEL ? { ANTHROPIC_MODEL } : {}),
           },
         },
         null,
