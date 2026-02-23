@@ -325,11 +325,15 @@ Optionally specify a branch to checkout before pulling. The container will termi
 const SONOS_CONTROL_MODE = process.env.SONOS_CONTROL_MODE || 'local'; // 'local' | 'cloud'
 const SONOS_SPEAKER_IP = process.env.SONOS_SPEAKER_IP;
 const SONOS_TTS_ENDPOINT = process.env.SONOS_TTS_ENDPOINT || 'https://api.streamelements.com/kappa/v2/speech';
-const SONOS_ACCESS_TOKEN = process.env.SONOS_ACCESS_TOKEN;
+const SONOS_REFRESH_TOKEN = process.env.SONOS_REFRESH_TOKEN;
+const SONOS_CLIENT_ID = process.env.SONOS_CLIENT_ID;
+const SONOS_CLIENT_SECRET = process.env.SONOS_CLIENT_SECRET;
 const SONOS_HOUSEHOLD_ID = process.env.SONOS_HOUSEHOLD_ID;
 
 let sonosDevice: SonosDevice | null = null;
 let sonosManager: SonosManager | null = null;
+let sonosAccessToken: string | null = process.env.SONOS_ACCESS_TOKEN || null;
+let tokenExpiresAt: number = 0;
 
 async function getSonosDevice(): Promise<SonosDevice> {
   if (sonosDevice) return sonosDevice;
@@ -344,18 +348,67 @@ async function getSonosDevice(): Promise<SonosDevice> {
 }
 
 // Cloud API helpers
-async function sonosCloudRequest(endpoint: string, options: { method?: string; body?: unknown } = {}): Promise<unknown> {
-  if (!SONOS_ACCESS_TOKEN) {
-    throw new Error('SONOS_ACCESS_TOKEN not set. Run OAuth setup first.');
+async function refreshSonosToken(): Promise<string> {
+  if (!SONOS_REFRESH_TOKEN) {
+    throw new Error('SONOS_REFRESH_TOKEN not set. Cannot refresh token.');
   }
+  if (!SONOS_CLIENT_ID || !SONOS_CLIENT_SECRET) {
+    throw new Error('SONOS_CLIENT_ID and SONOS_CLIENT_SECRET required for token refresh.');
+  }
+
+  const credentials = Buffer.from(`${SONOS_CLIENT_ID}:${SONOS_CLIENT_SECRET}`).toString('base64');
+
+  const response = await fetch('https://api.sonos.com/login/v3/oauth/access', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `grant_type=refresh_token&refresh_token=${SONOS_REFRESH_TOKEN}`,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to refresh Sonos token: ${response.status} ${error}`);
+  }
+
+  const data = await response.json() as { access_token: string; expires_in: number };
+  sonosAccessToken = data.access_token;
+  tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 300000; // Refresh 5min early
+
+  return data.access_token;
+}
+
+async function getSonosAccessToken(): Promise<string> {
+  // Check if token needs refresh (expires in <5 min or already expired)
+  if (sonosAccessToken && Date.now() < tokenExpiresAt) {
+    return sonosAccessToken;
+  }
+
+  // Token expired or will expire soon - refresh it
+  if (SONOS_REFRESH_TOKEN && SONOS_CLIENT_ID && SONOS_CLIENT_SECRET) {
+    return await refreshSonosToken();
+  }
+
+  // No refresh capability - use static token from env
+  if (sonosAccessToken) {
+    return sonosAccessToken;
+  }
+
+  throw new Error('SONOS_ACCESS_TOKEN not set. Run OAuth setup first.');
+}
+
+async function sonosCloudRequest(endpoint: string, options: { method?: string; body?: unknown } = {}): Promise<unknown> {
   if (!SONOS_HOUSEHOLD_ID) {
     throw new Error('SONOS_HOUSEHOLD_ID not set. Run OAuth setup first.');
   }
 
+  const token = await getSonosAccessToken();
+
   const response = await fetch(`https://api.ws.sonos.com/control/api/v1/households/${SONOS_HOUSEHOLD_ID}${endpoint}`, {
     method: options.method || 'GET',
     headers: {
-      'Authorization': `Bearer ${SONOS_ACCESS_TOKEN}`,
+      'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
