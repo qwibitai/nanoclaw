@@ -2,11 +2,65 @@ import fs from 'fs';
 import path from 'path';
 import type { FileOperation, FileOpsResult } from './types.js';
 
+function isWithinRoot(rootPath: string, targetPath: string): boolean {
+  return targetPath === rootPath || targetPath.startsWith(rootPath + path.sep);
+}
+
+function nearestExistingPathOrSymlink(candidateAbsPath: string): string {
+  let current = candidateAbsPath;
+  while (true) {
+    try {
+      fs.lstatSync(current);
+      return current;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        throw new Error(`Invalid file operation path: "${candidateAbsPath}"`);
+      }
+      current = parent;
+    }
+  }
+}
+
+function resolveRealPathWithSymlinkAwareAnchor(candidateAbsPath: string): string {
+  const anchorPath = nearestExistingPathOrSymlink(candidateAbsPath);
+  const anchorStat = fs.lstatSync(anchorPath);
+  let realAnchor: string;
+
+  if (anchorStat.isSymbolicLink()) {
+    const linkTarget = fs.readlinkSync(anchorPath);
+    const linkResolved = path.resolve(path.dirname(anchorPath), linkTarget);
+    realAnchor = fs.realpathSync(linkResolved);
+  } else {
+    realAnchor = fs.realpathSync(anchorPath);
+  }
+
+  const relativeRemainder = path.relative(anchorPath, candidateAbsPath);
+  return relativeRemainder
+    ? path.resolve(realAnchor, relativeRemainder)
+    : realAnchor;
+}
+
 function safePath(projectRoot: string, relativePath: string): string | null {
-  const resolved = path.resolve(projectRoot, relativePath);
-  if (!resolved.startsWith(projectRoot + path.sep) && resolved !== projectRoot) {
+  if (typeof relativePath !== 'string' || relativePath.trim() === '') {
     return null;
   }
+
+  const root = path.resolve(projectRoot);
+  const resolved = path.resolve(root, relativePath);
+  if (!isWithinRoot(root, resolved)) {
+    return null;
+  }
+  if (resolved === root) {
+    return null;
+  }
+
+  const realRoot = fs.realpathSync(root);
+  const realParent = resolveRealPathWithSymlinkAwareAnchor(path.dirname(resolved));
+  if (!isWithinRoot(realRoot, realParent)) {
+    return null;
+  }
+
   return resolved;
 }
 
