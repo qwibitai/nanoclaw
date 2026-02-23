@@ -1,0 +1,5 @@
+processing:
+  depth: standard
+self_evolution:
+  observation_threshold: 10
+  tension_threshold: 5

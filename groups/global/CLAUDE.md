@@ -59,26 +59,6 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 
 No ## headings. No [links](url). No **double stars**.
 
-## Response Structure
-
-Keep responses brief and digestible:
-
-- **Lead with summary**: 2-3 sentences or bullets
-- **Ask before elaborating**: "Want more details on X?"
-- **Use scannable format**: Bullets, short paragraphs, <200 words
-- **Simple questions = simple answers**
-- **Complex topics**: TL;DR → key points → offer to elaborate
-
-Be very proactive - suggest ideas, anticipate needs, offer solutions without waiting to be asked.
-
-## Git Workflow
-
-When making changes to code or files:
-
-- **Always create a branch before committing changes** (never commit directly to `main`)
-- Use descriptive branch names like `feat/feature-name` or `fix/bug-description`
-- Write clear commit messages with context
-
 ## Users
 
 Messages include `user` and `role` attributes when the sender is a known user:
