@@ -209,10 +209,11 @@ async function handleQrBrowser(
   // Generate QR SVG and HTML
   const qrData = fs.readFileSync(qrFile, 'utf-8');
   try {
-    const svg = execSync(
-      `node -e "const QR=require('qrcode');const data=${JSON.stringify(qrData)};QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
-      { cwd: projectRoot, encoding: 'utf-8' },
-    );
+    // Write a temp script to avoid shell quoting issues with QR data
+    const tmpScript = path.join(projectRoot, 'store', '.qr-gen.cjs');
+    fs.writeFileSync(tmpScript, `const QR=require('qrcode');const data=${JSON.stringify(qrData)};QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)});`);
+    const svg = execSync(`node ${tmpScript}`, { cwd: projectRoot, encoding: 'utf-8' });
+    fs.unlinkSync(tmpScript);
     const html = QR_AUTH_TEMPLATE.replace('{{QR_SVG}}', svg);
     const htmlPath = path.join(projectRoot, 'store', 'qr-auth.html');
     fs.writeFileSync(htmlPath, html);
