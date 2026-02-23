@@ -139,7 +139,9 @@ Run `npx tsx setup/index.ts --step service` and parse the status block.
 
 **If FALLBACK=wsl_no_systemd:** WSL without systemd detected. Tell user they can either enable systemd in WSL (`echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf` then restart WSL) or use the generated `start-nanoclaw.sh` wrapper.
 
-**If DOCKER_GROUP_STALE=true:** The user was added to the docker group after their session started — the systemd service can't reach the Docker socket. Ask user to run these two commands:
+**If DOCKER_GROUP_STALE=true and DOCKER_GROUP_REMEDIATED=true and STATUS=success:** auto-remediation worked. Continue setup.
+
+**If STATUS=failed and ERROR=docker_group_stale:** auto-remediation did not resolve stale Docker access. Ask user to run:
 
 1. Immediate fix: `sudo setfacl -m u:$(whoami):rw /var/run/docker.sock`
 2. Persistent fix (re-applies after every Docker restart):
@@ -151,7 +153,7 @@ ExecStartPost=/usr/bin/setfacl -m u:USERNAME:rw /var/run/docker.sock
 EOF
 sudo systemctl daemon-reload
 ```
-Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` commands separately — the `tee` heredoc first, then `daemon-reload`. After user confirms setfacl ran, re-run the service step.
+Replace `USERNAME` with the actual username (from `whoami`). Re-run the service step after this.
 
 **If SERVICE_LOADED=false:**
 - Read `logs/setup.log` for the error.
