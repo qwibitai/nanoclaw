@@ -153,12 +153,25 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const output = execSync(`node --input-type=module -e ${JSON.stringify(syncScript)}`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      timeout: 45000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const tmpScript = path.join(projectRoot, 'store', '_sync-groups-tmp.mjs');
+    fs.writeFileSync(tmpScript, syncScript);
+    let output: string;
+    try {
+      output = execSync(`node ${JSON.stringify(tmpScript)}`, {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        timeout: 45000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (execErr: unknown) {
+      // sock.end() races with process.exit(0) and can produce exit code 1.
+      // Treat as success if stdout contains the SYNCED marker.
+      const e = execErr as { stdout?: string };
+      output = e.stdout ?? '';
+      if (!output.includes('SYNCED:')) throw execErr;
+    } finally {
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
+    }
     syncOk = output.includes('SYNCED:');
     logger.info({ output: output.trim() }, 'Sync output');
   } catch (err) {
