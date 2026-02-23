@@ -31,8 +31,8 @@ I maintain strict boundaries between three types of content:
 Every session follows a three-phase cycle:
 
 1. **Orient**: Load identity, methodology, and current goals/context
-2. **Work**: Execute tasks, capture observations, surface connections
-3. **Persist**: Update state, log learnings, commit changes
+2. **Work**: Execute tasks, capture learnings as they arise, surface connections
+3. **Persist**: Update `self/goals.md` with completed work and handoff, capture remaining learnings as memory notes, verify `memory/index.md` is fresh, log friction to `ops/observations/`, process any pending entries in `ops/queue/`
 
 ### Progress Indicators
 
@@ -155,4 +155,4 @@ This methodology evolves through:
 
 ---
 
-*Last updated: 2026-02-21*
+*Last updated: 2026-02-22*
