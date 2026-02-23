@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Graph — Gandalf's Memory</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; color: #e0e0e0; font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }
+  
+  #controls {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+    background: rgba(10,10,15,0.95); border-bottom: 1px solid #1a1a2e;
+    padding: 12px 20px; display: flex; align-items: center; gap: 16px;
+  }
+  #controls h1 { font-size: 16px; color: #7c5cbf; white-space: nowrap; }
+  #controls .stats { font-size: 12px; color: #666; white-space: nowrap; }
+  #search { 
+    flex: 1; max-width: 300px; padding: 6px 12px; border-radius: 6px;
+    background: #12121a; border: 1px solid #2a2a3e; color: #e0e0e0;
+    font-size: 13px; outline: none;
+  }
+  #search:focus { border-color: #7c5cbf; }
+  .filter-btn {
+    padding: 4px 10px; border-radius: 12px; font-size: 11px;
+    border: 1px solid #2a2a3e; background: transparent; color: #888;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .filter-btn:hover, .filter-btn.active { border-color: #7c5cbf; color: #c0a0ff; background: rgba(124,92,191,0.1); }
+  
+  #graph { width: 100vw; height: 100vh; }
+  
+  #tooltip {
+    position: fixed; display: none; z-index: 20;
+    background: rgba(15,15,25,0.97); border: 1px solid #2a2a3e; border-radius: 8px;
+    padding: 12px 16px; max-width: 350px; font-size: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  #tooltip h3 { color: #7c5cbf; margin-bottom: 6px; font-size: 14px; }
+  #tooltip .fact { color: #aaa; margin: 2px 0; }
+  #tooltip .fact .key { color: #5cb8bf; }
+  #tooltip .rel { color: #8a8; margin: 2px 0; }
+  
+  #legend {
+    position: fixed; bottom: 16px; left: 16px; z-index: 10;
+    background: rgba(10,10,15,0.9); border: 1px solid #1a1a2e; border-radius: 8px;
+    padding: 12px 16px; font-size: 11px;
+  }
+  #legend .item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  #legend .dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <h1>🧙‍♂️ Knowledge Graph</h1>
+  <input type="text" id="search" placeholder="Search entities...">
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="person">People</button>
+  <button class="filter-btn" data-filter="project">Projects</button>
+  <button class="filter-btn" data-filter="infrastructure">Infra</button>
+  <button class="filter-btn" data-filter="document">Docs</button>
+  <button class="filter-btn" data-filter="identity">Identity</button>
+  <span class="stats" id="stats"></span>
+</div>
+
+<div id="tooltip"></div>
+
+<div id="legend">
+  <div class="item"><div class="dot" style="background:#e06060"></div> People</div>
+  <div class="item"><div class="dot" style="background:#7c5cbf"></div> Projects</div>
+  <div class="item"><div class="dot" style="background:#5cb8bf"></div> Infrastructure</div>
+  <div class="item"><div class="dot" style="background:#bf9b30"></div> Documents</div>
+  <div class="item"><div class="dot" style="background:#60b060"></div> Community</div>
+  <div class="item"><div class="dot" style="background:#c070c0"></div> Identity</div>
+  <div class="item"><div class="dot" style="background:#888"></div> Other</div>
+</div>
+
+<svg id="graph"></svg>
+
+<script>
+// Graph data will be injected by the build script or loaded from JSON
+let GRAPH_DATA = null;
+
+const COLORS = {
+  person: '#e06060', date: '#e06060', contact: '#e06060',
+  project: '#7c5cbf',
+  infrastructure: '#5cb8bf',
+  document: '#bf9b30',
+  community: '#60b060',
+  identity: '#c070c0',
+  event: '#e0a030',
+  preference: '#e06060',
+  credential: '#5cb8bf',
+  convention: '#bf9b30',
+  decision: '#bf9b30',
+  default: '#888'
+};
+
+const PREDICATE_COLORS = {
+  partner_of: '#e06060', parent_of: '#e06060', child_of: '#e06060',
+  mother_of: '#e06060', daughter_of: '#e06060', sibling_of: '#e06060',
+  stepparent_of: '#e06060', stepdaughter_of: '#e06060', stepson_of: '#e06060',
+  married_to: '#e06060', friend_of: '#e09060', pet_of: '#e06060',
+  owns: '#7c5cbf', uses: '#5cb8bf', runs_on: '#5cb8bf',
+  hosts: '#5cb8bf', hosted_on: '#5cb8bf', domain: '#5cb8bf',
+  member_of: '#60b060', certified_by: '#60b060',
+  lives_in: '#bf9b30', from: '#bf9b30',
+  agent_role: '#c070c0', identity: '#c070c0', serves: '#c070c0',
+  prevents: '#e0a030', covers: '#e0a030', described_in: '#bf9b30',
+};
+
+async function loadData() {
+  try {
+    const resp = await fetch('/api/graph');
+    GRAPH_DATA = await resp.json();
+  } catch(e) {
+    try {
+      // Fallback: load from graph-data.json in same directory
+      const resp2 = await fetch('graph-data.json');
+      GRAPH_DATA = await resp2.json();
+    } catch(e2) {
+      console.log('No data source available');
+    }
+  }
+  if (!GRAPH_DATA) return;
+  renderGraph();
+}
+
+function renderGraph() {
+  const { nodes, edges, facts } = GRAPH_DATA;
+  const svg = document.getElementById('graph');
+  const W = window.innerWidth, H = window.innerHeight;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = '';
+  
+  document.getElementById('stats').textContent = 
+    `${nodes.length} entities · ${edges.length} relations · ${Object.values(facts).reduce((a,b) => a+b.length, 0)} facts`;
+
+  // Force simulation (simple spring-based)
+  const nodeMap = {};
+  const simNodes = nodes.map((n, i) => {
+    const angle = (i / nodes.length) * Math.PI * 2;
+    const r = Math.min(W, H) * 0.3;
+    const node = { 
+      ...n, 
+      x: W/2 + Math.cos(angle) * r + (Math.random()-0.5)*100,
+      y: H/2 + Math.sin(angle) * r + (Math.random()-0.5)*100,
+      vx: 0, vy: 0,
+      edges: 0
+    };
+    nodeMap[n.id] = node;
+    return node;
+  });
+  
+  const simEdges = edges.filter(e => nodeMap[e.source] && nodeMap[e.target]).map(e => {
+    if(nodeMap[e.source]) nodeMap[e.source].edges++;
+    if(nodeMap[e.target]) nodeMap[e.target].edges++;
+    return { ...e, s: nodeMap[e.source], t: nodeMap[e.target] };
+  });
+
+  // Run simulation
+  for (let iter = 0; iter < 300; iter++) {
+    // Repulsion
+    for (let i = 0; i < simNodes.length; i++) {
+      for (let j = i+1; j < simNodes.length; j++) {
+        let dx = simNodes[j].x - simNodes[i].x;
+        let dy = simNodes[j].y - simNodes[i].y;
+        let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+        let force = 8000 / (dist * dist);
+        let fx = dx/dist * force, fy = dy/dist * force;
+        simNodes[i].vx -= fx; simNodes[i].vy -= fy;
+        simNodes[j].vx += fx; simNodes[j].vy += fy;
+      }
+    }
+    // Attraction (edges)
+    for (const e of simEdges) {
+      let dx = e.t.x - e.s.x, dy = e.t.y - e.s.y;
+      let dist = Math.sqrt(dx*dx + dy*dy) || 1;
+      let force = (dist - 120) * 0.02;
+      let fx = dx/dist * force, fy = dy/dist * force;
+      e.s.vx += fx; e.s.vy += fy;
+      e.t.vx -= fx; e.t.vy -= fy;
+    }
+    // Center gravity
+    for (const n of simNodes) {
+      n.vx += (W/2 - n.x) * 0.001;
+      n.vy += (H/2 - n.y) * 0.001;
+      n.vx *= 0.85; n.vy *= 0.85;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(40, Math.min(W-40, n.x));
+      n.y = Math.max(60, Math.min(H-40, n.y));
+    }
+  }
+
+  // Draw edges
+  const edgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  for (const e of simEdges) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', e.s.x); line.setAttribute('y1', e.s.y);
+    line.setAttribute('x2', e.t.x); line.setAttribute('y2', e.t.y);
+    const color = PREDICATE_COLORS[e.predicate] || '#333';
+    line.setAttribute('stroke', color); line.setAttribute('stroke-opacity', '0.3');
+    line.setAttribute('stroke-width', '1');
+    line.dataset.source = e.source; line.dataset.target = e.target;
+    line.dataset.predicate = e.predicate;
+    edgeGroup.appendChild(line);
+    
+    // Edge label
+    const mx = (e.s.x + e.t.x)/2, my = (e.s.y + e.t.y)/2;
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', mx); label.setAttribute('y', my - 4);
+    label.setAttribute('text-anchor', 'middle'); label.setAttribute('font-size', '8');
+    label.setAttribute('fill', color); label.setAttribute('fill-opacity', '0.5');
+    label.textContent = e.predicate.replace(/_/g, ' ');
+    label.dataset.source = e.source; label.dataset.target = e.target;
+    edgeGroup.appendChild(label);
+  }
+  svg.appendChild(edgeGroup);
+
+  // Draw nodes
+  const nodeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  for (const n of simNodes) {
+    const color = COLORS[n.category] || COLORS.default;
+    const r = Math.max(5, Math.min(18, 5 + n.edges * 1.5));
+    
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', n.x); circle.setAttribute('cy', n.y);
+    circle.setAttribute('r', r); circle.setAttribute('fill', color);
+    circle.setAttribute('fill-opacity', '0.7'); circle.setAttribute('stroke', color);
+    circle.setAttribute('stroke-width', '1.5'); circle.setAttribute('cursor', 'pointer');
+    circle.dataset.id = n.id; circle.dataset.category = n.category;
+    
+    circle.addEventListener('mouseenter', (e) => showTooltip(e, n, facts[n.id] || []));
+    circle.addEventListener('mouseleave', hideTooltip);
+    circle.addEventListener('click', () => highlightNode(n.id, simNodes, simEdges));
+    nodeGroup.appendChild(circle);
+    
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', n.x); text.setAttribute('y', n.y + r + 12);
+    text.setAttribute('text-anchor', 'middle'); text.setAttribute('font-size', '10');
+    text.setAttribute('fill', '#ccc'); text.setAttribute('pointer-events', 'none');
+    text.textContent = n.id.length > 16 ? n.id.slice(0,14) + '…' : n.id;
+    text.dataset.id = n.id;
+    nodeGroup.appendChild(text);
+  }
+  svg.appendChild(nodeGroup);
+
+  // Search
+  document.getElementById('search').addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase();
+    nodeGroup.querySelectorAll('circle').forEach(c => {
+      const match = !q || c.dataset.id.toLowerCase().includes(q);
+      c.setAttribute('fill-opacity', match ? '0.8' : '0.1');
+    });
+    nodeGroup.querySelectorAll('text').forEach(t => {
+      const match = !q || (t.dataset.id || '').toLowerCase().includes(q);
+      t.setAttribute('fill-opacity', match ? '1' : '0.15');
+    });
+  });
+
+  // Filter buttons
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const filter = btn.dataset.filter;
+      nodeGroup.querySelectorAll('circle').forEach(c => {
+        const match = filter === 'all' || c.dataset.category === filter;
+        c.setAttribute('fill-opacity', match ? '0.8' : '0.1');
+      });
+      nodeGroup.querySelectorAll('text').forEach(t => {
+        if (!t.dataset.id) return;
+        const node = simNodes.find(n => n.id === t.dataset.id);
+        const match = filter === 'all' || (node && node.category === filter);
+        t.setAttribute('fill-opacity', match ? '1' : '0.15');
+      });
+    });
+  });
+}
+
+function showTooltip(event, node, nodeFacts) {
+  const tip = document.getElementById('tooltip');
+  let html = `<h3>${node.id}</h3><div style="color:#666;margin-bottom:6px">${node.category}</div>`;
+  for (const f of nodeFacts.slice(0, 8)) {
+    html += `<div class="fact"><span class="key">${f.key}:</span> ${f.value}</div>`;
+  }
+  // Show relations
+  const { edges } = GRAPH_DATA;
+  const rels = edges.filter(e => e.source === node.id);
+  if (rels.length) {
+    html += '<div style="margin-top:6px;border-top:1px solid #222;padding-top:4px">';
+    for (const r of rels.slice(0, 6)) {
+      html += `<div class="rel">→ ${r.predicate.replace(/_/g,' ')} → ${r.target}</div>`;
+    }
+    html += '</div>';
+  }
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  tip.style.left = (event.clientX + 15) + 'px';
+  tip.style.top = (event.clientY - 10) + 'px';
+}
+
+function hideTooltip() { document.getElementById('tooltip').style.display = 'none'; }
+
+function highlightNode(id, nodes, edges) {
+  const connected = new Set([id]);
+  edges.forEach(e => {
+    if (e.source === id) connected.add(e.target);
+    if (e.target === id) connected.add(e.source);
+  });
+  document.querySelectorAll('#graph circle').forEach(c => {
+    c.setAttribute('fill-opacity', connected.has(c.dataset.id) ? '0.9' : '0.1');
+  });
+  document.querySelectorAll('#graph text').forEach(t => {
+    if (t.dataset.id) t.setAttribute('fill-opacity', connected.has(t.dataset.id) ? '1' : '0.15');
+  });
+  document.querySelectorAll('#graph line').forEach(l => {
+    const match = (l.dataset.source === id || l.dataset.target === id);
+    l.setAttribute('stroke-opacity', match ? '0.7' : '0.05');
+    l.setAttribute('stroke-width', match ? '2' : '1');
+  });
+}
+
+// Load embedded data
+fetch('graph-data.json').then(r => r.json()).then(d => { GRAPH_DATA = d; renderGraph(); })
+  .catch(() => console.error('Load graph-data.json or set GRAPH_DATA'));
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "id": "graph-memory",
+  "name": "Knowledge Graph Memory Search",
+  "description": "Augments memory search with knowledge graph lookups from facts.db (entities, relations, aliases). Runs graph search against user queries and injects results via prependContext.",
+  "version": "1.0.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable/disable graph memory injection"
+      },
+      "maxResults": {
+        "type": "number",
+        "default": 6,
+        "description": "Max graph search results to inject"
+      },
+      "minScore": {
+        "type": "number",
+        "default": 40,
+        "description": "Minimum score threshold for injection (0-100)"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "default": 2000,
+        "description": "Timeout for graph search subprocess"
+      },
+      "dbPath": {
+        "type": "string",
+        "description": "Path to facts.db (default: <workspace>/memory/facts.db)"
+      },
+      "scriptPath": {
+        "type": "string",
+        "description": "Path to graph-search.py (default: <workspace>/scripts/graph-search.py)"
+      }
+    }
+  }
+}

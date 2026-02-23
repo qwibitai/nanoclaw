@@ -1,0 +1,27 @@
+{
+  "name": "graph-memory",
+  "version": "1.0.0",
+  "description": "Knowledge Graph Memory Search plugin for OpenClaw \u2014 augments memory with entity/relation lookups from facts.db",
+  "main": "index.js",
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "memory",
+    "knowledge-graph",
+    "facts"
+  ],
+  "author": "Gandalf",
+  "license": "MIT",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2"
+  }
+}
