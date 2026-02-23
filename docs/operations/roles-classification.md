@@ -16,7 +16,8 @@ Role contract for NanoClaw + Jarvis operation.
 1. `andy-bot` gathers context and risk signal.
 2. `andy-developer` emits strict JSON dispatch (`run_id`, branch, tests, output contract).
 3. `jarvis-worker-*` executes and returns `<completion>`.
-4. `andy-developer` reviews and resolves to done/rework.
+4. `andy-developer` reviews and resolves to approve/rework.
+5. For user QA requests, `andy-developer` stages the approved branch/commit in `NanoClawWorkspace`, runs local preflight (`build` + `server start/health`), verifies no duplicate same-lane running containers, then provides testing commands + URL.
 
 ## Access Policy
 
@@ -24,6 +25,7 @@ Role contract for NanoClaw + Jarvis operation.
 - Only `andy-developer` has worker delegation authority in IPC lanes.
 - `andy-developer` owns GitHub workflow/review governance changes; workers focus on repository implementation tasks.
 - `andy-developer` decides whether `@claude` review is required, optional, or disabled per project requirement profile.
+- Local review handoff checks are default behavior for `andy-developer` when declaring "ready for user review" (not reminder-driven).
 
 ## Related Map
 

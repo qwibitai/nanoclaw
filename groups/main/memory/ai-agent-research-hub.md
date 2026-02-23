@@ -140,6 +140,67 @@
 
 ---
 
+## Token Efficiency & Harness Architecture (This Week - Feb 17-23, 2026)
+
+### Latest Research on Maximizing Productivity Per Token
+
+#### 1. **Improving Deep Agents with Harness Engineering** (LangChain, Feb 17, 2026)
+- **URL:** https://blog.langchain.com/improving-deep-agents-with-harness-engineering/
+- **Key Finding:** LangChain's coding agent jumped from Top 30 to Top 5 on Terminal Bench 2.0 by *only changing the harness* — not the model
+- **Techniques:** Self-verification and tracing patterns to reduce token waste
+- **Impact on andy-developer:** Harness architecture matters more than model choice for performance and token efficiency
+- **Token Optimization:** Better verification loops = fewer iteration tokens needed
+
+#### 2. **I Improved 15 LLMs at Coding in One Afternoon. Only the Harness Changed** (Can.ac, Feb 12, 2026)
+- **URL:** https://blog.can.ac/2026/02/12/the-harness-problem/
+- **Key Finding:** Tested 15 different LLMs (Claude, GPT-5.2, Gemini, etc.) with the *same optimized harness* — performance improved dramatically across all models
+- **Critical Insight:** "The Harness > Model Choice" — harness engineering yields bigger gains than switching models
+- **Token Efficiency:** Better harness architecture = fewer tokens needed per task regardless of underlying model
+- **Applicability:** Shows that investing in harness design is higher ROI than model selection
+
+#### 3. **Opus 4.6 Adaptive Thinking for Token Optimization**
+- **Source:** https://www.anthropic.com/news/claude-opus-4-6
+- **Feature:** "Adaptive Thinking" — model autonomously decides when to use extended reasoning based on task difficulty
+- **Token Benefit:** Avoids wasting expensive reasoning tokens on simple tasks
+- **Effort Controls:** 4 levels (low/medium/high/max) to balance latency vs reasoning quality per task
+- **For andy-developer:** Can set effort levels per task type to avoid overspending tokens
+
+---
+
+## Key Optimization Patterns (Emerging This Week)
+
+### Harness Design Principles for Token Efficiency
+
+1. **Self-Verification Loops** - Build verification into the harness to catch errors early, reducing iteration cycles and tokens spent on debugging
+
+2. **Adaptive Reasoning** - Use Opus 4.6's adaptive thinking to avoid wasted tokens; reserve extended reasoning for complex tasks only
+
+3. **Progressive Tool Loading** - Load only tools/skills an agent actually needs, not all available options upfront (saves 150k-250k tokens vs 5k-15k with progressive loading)
+
+4. **Strategic Context Management** - Offload old context to disk as session grows; use summarization at 85-95% context threshold rather than truncating
+
+5. **Multi-Agent Token Isolation** - Delegate complex sub-tasks to specialized sub-agents in isolated contexts (67% fewer tokens vs loading all skills in single conversation)
+
+6. **Model Routing by Complexity** - Use cheap router model (Haiku/4o-mini) to classify task difficulty and route to appropriate tier (40-50% cost reduction)
+
+7. **Output Token Control** - Set hard limits on response length (output tokens cost 3-10x more than input tokens)
+
+---
+
+## Strategic Focus for andy-developer
+
+**From this week's research consensus:**
+
+• **Harness Engineering > Model Selection** — Invest in feedback loops, verification patterns, and context management
+• **Adaptive Reasoning** — Use Opus 4.6's effort controls to avoid token waste on routine tasks
+• **Context Offloading** — Implement disk-based caching for session history; summarize rather than truncate
+• **Task Specialization** — Use agent teams for different task types to keep context isolated
+• **Verification-First Design** — Build self-checking into agent workflows to prevent expensive iteration loops
+
+**Expected ROI:** 60-80% reduction in token costs while maintaining or improving response quality
+
+---
+
 ## Key Themes Across Both Organizations
 
 ### Engineering Role Transformation

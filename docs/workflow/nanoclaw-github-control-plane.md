@@ -52,3 +52,16 @@ Andy-developer should choose the minimum bundle that satisfies reliability and g
 - Keep control-plane changes on admin branches (`jarvis-admin-*` recommended).
 - Keep product implementation branches on worker branches (`jarvis-*`).
 - Do not bypass branch protection except for explicit emergency procedure.
+
+## User QA Handoff Gate (Andy-Owned)
+
+When work is marked ready for user testing:
+
+1. Andy reviews worker completion and explicitly approves branch/commit.
+2. Andy syncs approved branch/commit into `NanoClawWorkspace`.
+3. Andy runs local preflight (`build` + `server start/health`) and records outcomes.
+4. Andy verifies no duplicate same-lane running containers before handoff:
+   - `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
+5. Andy sends handoff block with repo path, branch/commit, install/start/health/stop commands, and URL.
+
+If preflight fails or lane state is inconsistent, do not mark ready; return blocker/rework path first.

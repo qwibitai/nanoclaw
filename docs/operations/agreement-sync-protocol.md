@@ -15,6 +15,8 @@ Do not defer this to a later task.
 - WebMCP/browser-testing policy changes
 - workflow/review-mode defaults (`@claude`, CI governance)
 - runtime-vs-prebaked placement decisions
+- user-review handoff readiness rules
+- container lifecycle reliability/recovery rules
 
 ## Required Sync Targets
 
@@ -22,6 +24,7 @@ Do not defer this to a later task.
 2. Runtime lane docs under `groups/*` (affected `CLAUDE.md` + `docs/*`)
 3. Root `CLAUDE.md` trigger index line(s) if retrieval paths changed
 4. Relevant rule files under `.claude/rules/*` when process discipline changed
+5. Troubleshooting playbooks under `docs/troubleshooting/*` when recovery/runbook commands changed
 
 ## Andy -> Jarvis Agreement Handshake
 
@@ -41,6 +44,7 @@ No deferred "will update later" step is allowed after agreement acceptance.
 - affected lane docs updated for execution behavior
 - outdated references removed
 - root `CLAUDE.md` trigger lines aligned
+- troubleshooting/runbook docs updated when runtime recovery changed
 - `git status` shows all sync files in one cohesive commit/PR
 
 ## Ownership

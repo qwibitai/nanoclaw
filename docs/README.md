@@ -19,6 +19,7 @@ docs/
 - Workflow contract: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
 - Runtime behavior: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
 - GitHub control-plane: `docs/workflow/nanoclaw-github-control-plane.md`
+- User review readiness gate: `docs/workflow/nanoclaw-github-control-plane.md` (QA handoff section) + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
 - Operational ownership: `docs/operations/roles-classification.md`
 - Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`
 - Agreement-driven auto-sync discipline: `docs/operations/agreement-sync-protocol.md`
