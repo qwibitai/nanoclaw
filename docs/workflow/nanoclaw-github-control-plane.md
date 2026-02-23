@@ -58,10 +58,11 @@ Andy-developer should choose the minimum bundle that satisfies reliability and g
 When work is marked ready for user testing:
 
 1. Andy reviews worker completion and explicitly approves branch/commit.
-2. Andy syncs approved branch/commit into `NanoClawWorkspace`.
+2. Andy syncs approved branch/commit into `NanoClawWorkspace` (clone first if repo missing).
 3. Andy runs local preflight (`build` + `server start/health`) and records outcomes.
 4. Andy verifies no duplicate same-lane running containers before handoff:
    - `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
-5. Andy sends handoff block with repo path, branch/commit, install/start/health/stop commands, and URL.
+5. Andy confirms preflight was executed on the same approved branch/commit under test.
+6. Andy sends handoff block with repo path, branch/commit, and user-run install/start/health/stop commands.
 
 If preflight fails or lane state is inconsistent, do not mark ready; return blocker/rework path first.

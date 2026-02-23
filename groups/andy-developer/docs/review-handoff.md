@@ -15,14 +15,16 @@ Prepare the app in `NanoClawWorkspace` and provide a runnable handoff so the use
 
 2. Stage review workspace
 - Use path `/workspace/extra/repos/<repo-name>` (host path: `~/Documents/remote-claude/NanoClawWorkspace/<repo-name>`).
+- If repository is missing in `NanoClawWorkspace`, clone it before preflight checks.
 - Ensure branch and commit match the approved worker output.
+- Never run preflight or handoff from a different branch than the one containing the approved fix under test.
 - Sync explicitly from remote before checks (`git fetch`, checkout approved branch/commit, `git pull --ff-only` when applicable).
 - Do not author new product feature code during handoff prep.
 
 3. Prepare run instructions
 - Derive exact install/start command from repository scripts.
 - Prefer deterministic commands (`npm ci` over `npm install` when lockfile exists).
-- Provide an explicit URL and health check command.
+- Provide exact commands the user should run locally (install/start/health/stop).
 - Provide stop command.
 
 4. Preflight verification (mandatory)
@@ -50,14 +52,13 @@ Local Review Handoff
 - Build check: <passed/failed + command>
 - Server start check: <passed/failed + command/probe>
 - Install: <exact command>
-- Start: <exact command>
-- URL: http://127.0.0.1:<port>
+- User start: <exact command user runs locally>
 - Health: <exact command>
 - Stop: <exact command>
-- Notes: <env vars, seed data, known limitations>
+- Notes: <env vars, seed data, known limitations, route to open (e.g. /dashboard)>
 ```
 
 ## Prohibited
 
-- Claiming review readiness without commands/URL.
+- Claiming review readiness without verified startup checks and user-run commands.
 - Asking the user to clone the repository again when it is already staged in `NanoClawWorkspace`.

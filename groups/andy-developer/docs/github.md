@@ -16,8 +16,8 @@ This is mandatory for Andy-developer.
 3. Worker applies fix and pushes updates to `jarvis-<feature>` branch.
 4. Worker returns completion contract with test evidence and commit SHA.
 5. Andy-developer reviews code and sends `approve` or `rework`.
-6. If approved, Andy-developer syncs the approved branch/commit into `NanoClawWorkspace`.
-7. Andy-developer runs local preflight (`build` + `server start/health`), verifies no duplicate same-lane running containers, and sends user testing handoff (URL + commands).
+6. If approved, Andy-developer syncs the approved branch/commit into `NanoClawWorkspace` and runs checks on that same branch/commit only.
+7. Andy-developer runs local preflight (`build` + `server start/health`), verifies no duplicate same-lane running containers, and sends user testing handoff (user-run local commands).
 8. If not approved, Andy-developer delegates rework to Jarvis using the same `run_id`.
 
 ## Ownership Split
@@ -34,6 +34,7 @@ Before saying "done", include:
 
 - `run_id`
 - branch name
+- confirmation that preflight/handoff was run on the same approved branch/commit under test
 - tests executed + result
 - local review preflight (`build` + `server start/health`) result for user testing
 - duplicate-container check result (`container ls -a` snapshot or equivalent)

@@ -17,7 +17,7 @@ Role contract for NanoClaw + Jarvis operation.
 2. `andy-developer` emits strict JSON dispatch (`run_id`, branch, tests, output contract).
 3. `jarvis-worker-*` executes and returns `<completion>`.
 4. `andy-developer` reviews and resolves to approve/rework.
-5. For user QA requests, `andy-developer` stages the approved branch/commit in `NanoClawWorkspace`, runs local preflight (`build` + `server start/health`), verifies no duplicate same-lane running containers, then provides testing commands + URL.
+5. For user QA requests, `andy-developer` stages (or clones if missing) the approved branch/commit in `NanoClawWorkspace`, runs local preflight (`build` + `server start/health`) on that same branch/commit, verifies no duplicate same-lane running containers, then provides user-run local testing commands.
 
 ## Access Policy
 

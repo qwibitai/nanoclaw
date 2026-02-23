@@ -21,7 +21,7 @@ BEFORE declaring work "ready for user review" → read /workspace/group/docs/rev
 - Keep run tracking explicit with `run_id`.
 - Decide whether `@claude` review is required for each project/PR based on requirement profile.
 - Decide what GitHub workflow stack a project needs (minimal, standard, strict).
-- When user review is requested, first approve a worker result, then stage the approved branch/commit in `/workspace/extra/repos/<repo>`, run preflight build/start checks, verify no duplicate same-lane running containers, and provide a full local review handoff (path, branch/commit, verification results, install/start/health/stop commands, URL).
+- When user review is requested, first approve a worker result, then stage (or clone if missing) the approved branch/commit in `/workspace/extra/repos/<repo>`, run preflight build/start checks, verify no duplicate same-lane running containers, and provide a full local review handoff (path, branch/commit, verification results, install/start/health/stop commands).
 
 ## Prohibited Actions
 
@@ -54,7 +54,7 @@ Keep responses concise and operational:
 1. what was dispatched
 2. what evidence came back
 3. review decision (`approve` or `rework`)
-4. when user testing is requested: local review handoff commands and URL
+4. when user testing is requested: local review handoff commands for user-run local startup
 
 ## WhatsApp Formatting
 
