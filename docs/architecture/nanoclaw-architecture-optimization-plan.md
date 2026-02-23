@@ -33,7 +33,7 @@ This document captures a full-architecture optimization audit for NanoClaw, with
 | P1 | Completed (2026-02-23) | Persist outbound WhatsApp queue across restart | Outbound queue is in-memory only today | `src/channels/whatsapp.ts:23`, `src/channels/whatsapp.ts:45`, `src/channels/whatsapp.ts:318` | Reliable response delivery across crash/reconnect |
 | P1 | Pending | Remove always-on permission bypass or gate it by role/task class | Full bypass mode broadens accidental/dangerous tool execution scope | `container/agent-runner/src/index.ts:456` | Better least-privilege and containment |
 | P1 | Pending | Narrow main-lane write scope on host mounts | Main lane currently has read-write project-root mount | `src/container-runner.ts:266`, `docs/reference/SECURITY.md:85` | Better host integrity and change safety |
-| P1 | Pending | Make browser-test evidence enforceable in code contract, not only docs/rules | Current browser gate is largely process/policy-driven | `container/rules/andy-developer-operating-rule.md`, `container/rules/jarvis-worker-operating-rule.md`, `src/dispatch-validator.ts` | Higher QA reliability, fewer false handoffs |
+| P1 | Completed (2026-02-23) | Make browser-test evidence enforceable in code contract, not only docs/rules | Current browser gate is largely process/policy-driven | `src/dispatch-validator.ts:95`, `src/dispatch-validator.ts:220`, `src/index.ts:315`, `src/jarvis-worker-dispatch.test.ts:235` | Higher QA reliability, fewer false handoffs |
 | P2 | Completed (2026-02-23) | Add explicit container CPU/memory limits (Apple Container run args) | Runaway tasks can degrade host runtime | `src/config.ts:49`, `src/container-runner.ts:480` | Better runtime stability under load |
 | P2 | Completed (2026-02-23) | Reduce `getAllTasks()` snapshot overhead per run | Every run writes full task snapshot | `src/index.ts:365`, `src/task-scheduler.ts:70` | Lower startup latency and I/O pressure |
 | P2 | Completed (2026-02-23) | Expand automated tests for container-side runtime behavior | Host tests are strong; container runtime paths still need deeper automated coverage | `vitest.config.ts:5`, `container/worker/runner/src/lib.test.ts:1`, `src/container-runner.test.ts:221` | Earlier regression detection, lower production risk |
@@ -50,6 +50,7 @@ This document captures a full-architecture optimization audit for NanoClaw, with
 4. Explicit container CPU/memory run limits (`P2`).
 5. Per-group task snapshot optimization for non-main runs (`P2`).
 6. Expanded automated container/runtime test coverage (`P2`).
+7. Browser-evidence contract enforcement at parser/validator layer (`P1`).
 
 ## Recommended Execution Order
 
@@ -67,7 +68,7 @@ This document captures a full-architecture optimization audit for NanoClaw, with
 
 1. Reduce permission bypass surface.
 2. Reduce writable mount scope for main lane.
-3. Enforce browser-evidence contract at parser/validator layer.
+3. Enforce browser-evidence contract at parser/validator layer. ✅ Completed (2026-02-23)
 
 ### Phase 4 (Scale + Operability)
 

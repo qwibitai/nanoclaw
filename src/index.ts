@@ -40,6 +40,7 @@ import {
 } from './db.js';
 import {
   type DispatchPayload,
+  requiresBrowserEvidence,
   parseDispatchPayload,
   validateDispatchPayload,
   parseCompletionContract,
@@ -314,6 +315,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const contract = parseCompletionContract(lastWorkerOutput);
       const { valid, missing } = validateCompletionContract(contract, {
         expectedRunId: runId,
+        requiredFields: dispatchPayload?.output_contract?.required_fields,
+        browserEvidenceRequired: dispatchPayload
+          ? requiresBrowserEvidence(dispatchPayload)
+          : false,
       });
       if (valid && contract) {
         updateWorkerRunCompletion(runId, {

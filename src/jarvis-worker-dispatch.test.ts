@@ -9,6 +9,7 @@ import {
 } from './db.js';
 import {
   parseDispatchPayload,
+  requiresBrowserEvidence,
   validateDispatchPayload,
   parseCompletionContract,
   validateCompletionContract,
@@ -230,6 +231,44 @@ describe('dispatch payload validation', () => {
     expect(valid).toBe(false);
     expect(errors.some((e) => e.includes('output_contract.required_fields missing commit_sha'))).toBe(true);
   });
+
+  it('requires browser_evidence field for explicit UI-impacting dispatch', () => {
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      ui_impacting: true,
+      output_contract: {
+        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
+      },
+    });
+    expect(valid).toBe(false);
+    expect(
+      errors.includes('output_contract.required_fields must include browser_evidence for UI-impacting tasks'),
+    ).toBe(true);
+  });
+
+  it('accepts UI-impacting dispatch when browser_evidence is required in contract', () => {
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      ui_impacting: true,
+      output_contract: {
+        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    });
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('detects browser evidence requirement from UI hints when flag is omitted', () => {
+    const payload = {
+      ...validPayload,
+      input: 'Fix dashboard sidebar UI spacing',
+      acceptance_tests: ['run chrome-devtools checks on http://127.0.0.1:3000/dashboard'],
+      output_contract: {
+        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    };
+    expect(requiresBrowserEvidence(payload)).toBe(true);
+  });
 });
 
 describe('completion contract parsing', () => {
@@ -360,6 +399,76 @@ describe('completion contract validation', () => {
     );
     expect(valid).toBe(false);
     expect(missing).toContain('run_id mismatch');
+  });
+
+  it('fails when browser evidence is required but missing', () => {
+    const { valid, missing } = validateCompletionContract(
+      {
+        run_id: 'task-1',
+        branch: 'jarvis-feat',
+        commit_sha: 'abc1234',
+        files_changed: ['src/a.ts'],
+        pr_url: 'url',
+        test_result: 'pass',
+        risk: 'low',
+      },
+      {
+        expectedRunId: 'task-1',
+        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    );
+    expect(valid).toBe(false);
+    expect(missing).toContain('browser_evidence');
+  });
+
+  it('accepts valid browser evidence when required', () => {
+    const { valid, missing } = validateCompletionContract(
+      {
+        run_id: 'task-1',
+        branch: 'jarvis-feat',
+        commit_sha: 'abc1234',
+        files_changed: ['src/a.ts'],
+        pr_url: 'url',
+        test_result: 'pass',
+        risk: 'low',
+        browser_evidence: {
+          base_url: 'http://127.0.0.1:3000/dashboard',
+          tools_listed: ['chrome-devtools', 'token-efficient'],
+          execute_tool_evidence: ['navigate /dashboard -> sidebar visible'],
+        },
+      },
+      {
+        expectedRunId: 'task-1',
+        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    );
+    expect(valid).toBe(true);
+    expect(missing).toHaveLength(0);
+  });
+
+  it('rejects browser evidence with non-local base_url', () => {
+    const { valid, missing } = validateCompletionContract(
+      {
+        run_id: 'task-1',
+        branch: 'jarvis-feat',
+        commit_sha: 'abc1234',
+        files_changed: ['src/a.ts'],
+        pr_url: 'url',
+        test_result: 'pass',
+        risk: 'low',
+        browser_evidence: {
+          base_url: 'https://example.com',
+          tools_listed: ['chrome-devtools'],
+          execute_tool_evidence: ['checked /dashboard'],
+        },
+      },
+      {
+        expectedRunId: 'task-1',
+        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    );
+    expect(valid).toBe(false);
+    expect(missing).toContain('browser_evidence.base_url');
   });
 });
 
