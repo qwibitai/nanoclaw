@@ -27,6 +27,11 @@ if [[ -z "$access_token" || "$access_token" == "null" ]]; then
   exit 1
 fi
 
+if [[ -z "$expires_at" || "$expires_at" == "null" ]]; then
+  log "WARN: no expiresAt in credentials, forcing refresh"
+  expires_at=0
+fi
+
 now_ms=$(($(date +%s) * 1000))
 remaining_ms=$((expires_at - now_ms))
 
@@ -61,7 +66,8 @@ if (( remaining_ms <= BUFFER_MS )); then
       exit 1
     fi
   else
-    log "ERROR: claude CLI refresh failed (exit $?). User may need to run 'claude login'."
+    cli_exit=$?
+    log "ERROR: claude CLI refresh failed (exit $cli_exit). User may need to run 'claude login'."
     exit 1
   fi
 else
@@ -69,11 +75,13 @@ else
 fi
 
 # --- Update .env ---
-if grep -q '^CLAUDE_CODE_OAUTH_TOKEN=' "$DOTENV" 2>/dev/null; then
-  sed -i "s|^CLAUDE_CODE_OAUTH_TOKEN=.*|CLAUDE_CODE_OAUTH_TOKEN=${access_token}|" "$DOTENV"
+if [[ -f "$DOTENV" ]]; then
+  grep -v '^CLAUDE_CODE_OAUTH_TOKEN=' "$DOTENV" > "$DOTENV.tmp" || true
 else
-  echo "CLAUDE_CODE_OAUTH_TOKEN=${access_token}" >> "$DOTENV"
+  : > "$DOTENV.tmp"
 fi
+echo "CLAUDE_CODE_OAUTH_TOKEN=${access_token}" >> "$DOTENV.tmp"
+mv "$DOTENV.tmp" "$DOTENV"
 log "Updated .env with token (expires_at=$expires_at)"
 
 # --- Schedule next run ---
