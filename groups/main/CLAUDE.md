@@ -75,11 +75,11 @@ Main has read-only access to the project and read-write access to its group fold
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
-| `/workspace/extra/obsidian` | `~/personal` | read-only |
+| `/workspace/extra/obsidian` | `~/personal` | read-write |
 
 ### Obsidian Vault (`/workspace/extra/obsidian`)
 
-The user's personal Obsidian vault is mounted read-only. It uses the PARA structure:
+The user's personal Obsidian vault is mounted read-write. It uses the PARA structure:
 - `00_Inbox/` — unsorted notes
 - `01_Projects/` — active projects
 - `02_Areas/` — areas of responsibility
@@ -139,25 +139,19 @@ sqlite3 /workspace/project/store/messages.db "
 
 ### Registered Groups Config
 
-Groups are registered in `/workspace/project/data/registered_groups.json`:
+Groups are stored in the SQLite database (`/workspace/project/store/messages.db`, table `registered_groups`):
 
-```json
-{
-  "1234567890-1234567890@g.us": {
-    "name": "Family Chat",
-    "folder": "family-chat",
-    "trigger": "@Andy",
-    "added_at": "2024-01-31T12:00:00.000Z"
-  }
-}
+```bash
+sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, requires_trigger, container_config FROM registered_groups;"
 ```
 
 Fields:
-- **Key**: The WhatsApp JID (unique identifier for the chat)
+- **jid**: Unique identifier for the chat (e.g. `sig:+447447518300`, `sig:group.xxx`, `120363@g.us`, `tg:-100xxx`)
 - **name**: Display name for the group
 - **folder**: Folder name under `groups/` for this group's files and memory
-- **trigger**: The trigger word (usually same as global, but could differ)
-- **requiresTrigger**: Whether `@trigger` prefix is needed (default: `true`). Set to `false` for solo/personal chats where all messages should be processed
+- **trigger_pattern**: The trigger word (usually same as global, but could differ)
+- **requires_trigger**: Whether `@trigger` prefix is needed (default: `1`). Set to `0` for solo/personal chats where all messages should be processed
+- **container_config**: JSON with `additionalMounts`, `timeout`, `memory`
 - **added_at**: ISO timestamp when registered
 
 ### Trigger Behavior
@@ -168,54 +162,57 @@ Fields:
 
 ### Adding a Group
 
-1. Query the database to find the group's JID
-2. Read `/workspace/project/data/registered_groups.json`
-3. Add the new group entry with `containerConfig` if needed
-4. Write the updated JSON back
-5. Create the group folder: `/workspace/project/groups/{folder-name}/`
-6. Optionally create an initial `CLAUDE.md` for the group
+Use the IPC `register_group` command (only main group can do this):
+
+```bash
+cat > /workspace/ipc/messages/register_$(date +%s).json << 'EOF'
+{
+  "type": "register_group",
+  "jid": "sig:group.abc123",
+  "name": "Dev Team",
+  "folder": "dev-team",
+  "trigger": "@Gyoska",
+  "groupFolder": "main"
+}
+EOF
+```
+
+Then create the group folder and CLAUDE.md:
+```bash
+mkdir -p /workspace/project/groups/dev-team
+```
 
 Example folder name conventions:
 - "Family Chat" → `family-chat`
 - "Work Team" → `work-team`
 - Use lowercase, hyphens instead of spaces
 
-#### Adding Additional Directories for a Group
+#### Adding Additional Mounts
 
-Groups can have extra directories mounted. Add `containerConfig` to their entry:
-
-```json
-{
-  "1234567890@g.us": {
-    "name": "Dev Team",
-    "folder": "dev-team",
-    "trigger": "@Andy",
-    "added_at": "2026-01-31T12:00:00Z",
-    "containerConfig": {
-      "additionalMounts": [
-        {
-          "hostPath": "~/projects/webapp",
-          "containerPath": "webapp",
-          "readonly": false
-        }
-      ]
-    }
-  }
-}
+Update `container_config` in the DB:
+```bash
+sqlite3 /workspace/project/store/messages.db "
+  UPDATE registered_groups
+  SET container_config = '{\"additionalMounts\":[{\"hostPath\":\"~/projects/webapp\",\"containerPath\":\"webapp\",\"readonly\":false}]}'
+  WHERE folder = 'dev-team';
+"
 ```
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
-4. The group folder and its files remain (don't delete them)
+```bash
+sqlite3 /workspace/project/store/messages.db "DELETE FROM registered_groups WHERE folder = 'dev-team';"
+```
+
+The group folder and its files remain (don't delete them).
 
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+```bash
+sqlite3 /workspace/project/store/messages.db "SELECT jid, name, folder, requires_trigger FROM registered_groups;"
+```
 
 ---
 
