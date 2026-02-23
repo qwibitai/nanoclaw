@@ -4,7 +4,6 @@
  */
 import { ChildProcess, exec, execFileSync, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
@@ -16,6 +15,7 @@ import {
   IDLE_TIMEOUT,
 } from './config.js';
 import { readEnvFile } from './env.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -79,7 +79,6 @@ function getHomeDir(): string {
   }
   return home;
 }
-
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -118,27 +117,31 @@ function buildVolumeMounts(
   configMounts?: VolumeMount[],
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
-  const homeDir = getHomeDir();
   const projectRoot = process.cwd();
+  const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // Main gets the entire project root mounted
+    // Main gets the project root read-only. Writable paths the agent needs
+    // (group folder, IPC, .claude/) are mounted separately below.
+    // Read-only prevents the agent from modifying host application code
+    // (src/, dist/, package.json, etc.) which would bypass the sandbox
+    // entirely on next restart.
     mounts.push({
       hostPath: toHostPath(projectRoot),
       containerPath: '/workspace/project',
-      readonly: false,
+      readonly: true,
     });
 
     // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: toHostPath(path.join(GROUPS_DIR, group.folder)),
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: toHostPath(path.join(GROUPS_DIR, group.folder)),
+      hostPath: toHostPath(groupDir),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -205,7 +208,7 @@ function buildVolumeMounts(
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+  const groupIpcDir = resolveGroupIpcPath(group.folder);
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
@@ -215,15 +218,20 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Mount agent-runner source for live recompilation in dev.
-  // In DinD (production), /app is baked into the image — not a volume — so this
-  // path doesn't exist on the Docker host. The entrypoint falls back to pre-built dist.
-  if (!dindMapping) {
-    const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  // Copy agent-runner source into a per-group writable location so agents
+  // can customize it (add tools, change behavior) without affecting other
+  // groups. Recompiled on container startup via entrypoint.sh.
+  // In DinD (production), the source may be baked into the image — skip if missing.
+  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  }
+  if (fs.existsSync(groupAgentRunnerDir)) {
     mounts.push({
-      hostPath: agentRunnerSrc,
+      hostPath: toHostPath(groupAgentRunnerDir),
       containerPath: '/app/src',
-      readonly: true,
+      readonly: false,
     });
   }
 
@@ -297,7 +305,7 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
-  const groupDir = path.join(GROUPS_DIR, group.folder);
+  const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain, configMounts);
@@ -328,7 +336,7 @@ export async function runContainerAgent(
     'Spawning container agent',
   );
 
-  const logsDir = path.join(GROUPS_DIR, group.folder, 'logs');
+  const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
@@ -678,7 +686,7 @@ export function writeTasksSnapshot(
   }>,
 ): void {
   // Write filtered tasks to the group's IPC directory
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all tasks, others only see their own
@@ -749,7 +757,7 @@ export function writeGroupsSnapshot(
   groups: AvailableGroup[],
   registeredJids: Set<string>,
 ): void {
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
   // Main sees all groups; others see nothing (they can't activate groups)
