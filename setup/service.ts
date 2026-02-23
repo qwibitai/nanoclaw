@@ -55,6 +55,8 @@ export async function run(_args: string[]): Promise<void> {
     setupLaunchd(projectRoot, nodePath, homeDir);
   } else if (platform === 'linux') {
     setupLinux(projectRoot, nodePath, homeDir);
+  } else if (platform === 'windows') {
+    setupWindows(projectRoot, nodePath);
   } else {
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
@@ -279,6 +281,94 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
+    STATUS: 'success',
+    LOG: 'logs/setup.log',
+  });
+}
+
+function setupWindows(projectRoot: string, nodePath: string): void {
+  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const ctlScript = path.join(projectRoot, 'nanoclaw-ctl.ps1');
+
+  const ps1 = `# nanoclaw-ctl.ps1 - Control NanoClaw: start, stop, restart, status
+param([string]$Command = 'start')
+
+$ProjectRoot = $PSScriptRoot
+$NodeExe = ${JSON.stringify(nodePath)}
+$MainScript = Join-Path $ProjectRoot 'dist\\index.js'
+$PidFile = Join-Path $ProjectRoot 'nanoclaw.pid'
+$LogFile = Join-Path $ProjectRoot 'logs\\nanoclaw.log'
+$ErrFile = Join-Path $ProjectRoot 'logs\\nanoclaw.error.log'
+
+function Get-RunningPid {
+    if (-not (Test-Path $PidFile)) { return $null }
+    $saved = Get-Content $PidFile -ErrorAction SilentlyContinue
+    if ($saved -and (Get-Process -Id $saved -ErrorAction SilentlyContinue)) { return [int]$saved }
+    return $null
+}
+
+function Stop-Nanoclaw {
+    $running = Get-RunningPid
+    if ($running) {
+        Write-Host "Stopping NanoClaw (PID $running)..."
+        Stop-Process -Id $running -Force -ErrorAction SilentlyContinue
+        Remove-Item $PidFile -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+        Write-Host 'Stopped.'
+    } else { Write-Host 'NanoClaw is not running.' }
+}
+
+function Start-Nanoclaw {
+    $running = Get-RunningPid
+    if ($running) { Write-Host "NanoClaw is already running (PID $running)."; return }
+    New-Item -ItemType Directory -Path (Split-Path $LogFile) -Force | Out-Null
+    $proc = Start-Process -FilePath $NodeExe -ArgumentList $MainScript -WorkingDirectory $ProjectRoot -RedirectStandardOutput $LogFile -RedirectStandardError $ErrFile -WindowStyle Hidden -PassThru
+    $proc.Id | Out-File $PidFile -Encoding ascii
+    Write-Host "NanoClaw started (PID $($proc.Id))"
+    Write-Host "Logs: $LogFile"
+}
+
+switch ($Command.ToLower()) {
+    'start'   { Start-Nanoclaw }
+    'stop'    { Stop-Nanoclaw }
+    'restart' { Stop-Nanoclaw; Start-Sleep -Seconds 1; Start-Nanoclaw }
+    'status'  { $r = Get-RunningPid; if ($r) { Write-Host "Running (PID $r)" } else { Write-Host 'Stopped' } }
+    default   { Write-Error 'Usage: nanoclaw-ctl.ps1 [start|stop|restart|status]' }
+}
+`;
+
+  const bat = (cmd: string) =>
+    `@echo off\npowershell.exe -ExecutionPolicy Bypass -File "%~dp0nanoclaw-ctl.ps1" ${cmd}\n`;
+
+  fs.writeFileSync(ctlScript, ps1);
+  fs.writeFileSync(path.join(projectRoot, 'start.bat'), bat('start'));
+  fs.writeFileSync(path.join(projectRoot, 'stop.bat'), bat('stop'));
+  fs.writeFileSync(path.join(projectRoot, 'restart.bat'), bat('restart'));
+  logger.info({ ctlScript }, 'Wrote Windows control scripts');
+
+  // Start the service
+  try {
+    execSync(
+      `powershell.exe -ExecutionPolicy Bypass -File "${ctlScript}" start`,
+      { cwd: projectRoot, stdio: 'ignore' },
+    );
+  } catch {
+    logger.error('Failed to start NanoClaw via PowerShell');
+  }
+
+  // Verify by checking PID file
+  let serviceLoaded = false;
+  try {
+    const saved = fs.readFileSync(pidFile, 'utf-8').trim();
+    serviceLoaded = !!saved;
+  } catch { /* PID file not written */ }
+
+  emitStatus('SETUP_SERVICE', {
+    SERVICE_TYPE: 'task-scheduler',
+    NODE_PATH: nodePath,
+    PROJECT_PATH: projectRoot,
+    CTL_SCRIPT: ctlScript,
+    SERVICE_LOADED: serviceLoaded,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
