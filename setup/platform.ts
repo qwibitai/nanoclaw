@@ -5,13 +5,14 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 
-export type Platform = 'macos' | 'linux' | 'unknown';
-export type ServiceManager = 'launchd' | 'systemd' | 'none';
+export type Platform = 'macos' | 'linux' | 'windows' | 'unknown';
+export type ServiceManager = 'launchd' | 'systemd' | 'task-scheduler' | 'none';
 
 export function getPlatform(): Platform {
   const platform = os.platform();
   if (platform === 'darwin') return 'macos';
   if (platform === 'linux') return 'linux';
+  if (platform === 'win32') return 'windows';
   return 'unknown';
 }
 
@@ -56,6 +57,10 @@ export function hasSystemd(): boolean {
 export function openBrowser(url: string): boolean {
   try {
     const platform = getPlatform();
+    if (platform === 'windows') {
+      execSync(`start "" ${JSON.stringify(url)}`, { stdio: 'ignore', shell: true });
+      return true;
+    }
     if (platform === 'macos') {
       execSync(`open ${JSON.stringify(url)}`, { stdio: 'ignore' });
       return true;
@@ -89,6 +94,7 @@ export function openBrowser(url: string): boolean {
 export function getServiceManager(): ServiceManager {
   const platform = getPlatform();
   if (platform === 'macos') return 'launchd';
+  if (platform === 'windows') return 'task-scheduler';
   if (platform === 'linux') {
     if (hasSystemd()) return 'systemd';
     return 'none';
@@ -98,7 +104,8 @@ export function getServiceManager(): ServiceManager {
 
 export function getNodePath(): string {
   try {
-    return execSync('command -v node', { encoding: 'utf-8' }).trim();
+    const cmd = os.platform() === 'win32' ? 'where node' : 'command -v node';
+    return execSync(cmd, { encoding: 'utf-8' }).trim().split('\n')[0].trim();
   } catch {
     return process.execPath;
   }
@@ -106,7 +113,8 @@ export function getNodePath(): string {
 
 export function commandExists(name: string): boolean {
   try {
-    execSync(`command -v ${name}`, { stdio: 'ignore' });
+    const cmd = os.platform() === 'win32' ? `where ${name}` : `command -v ${name}`;
+    execSync(cmd, { stdio: 'ignore' });
     return true;
   } catch {
     return false;

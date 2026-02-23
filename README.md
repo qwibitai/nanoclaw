@@ -121,10 +121,10 @@ Skills we'd like to see:
 
 ## Requirements
 
-- macOS or Linux
+- macOS, Linux, or Windows 11
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux/Windows)
 
 ## Architecture
 
@@ -153,11 +153,15 @@ Because I use WhatsApp. Fork it and run a skill to change it. That's the whole p
 
 **Why Docker?**
 
-Docker provides cross-platform support (macOS and Linux) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
+Docker provides cross-platform support (macOS, Linux, and Windows) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
 
 **Can I run this on Linux?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
+Yes. Docker is the default runtime and works on macOS, Linux, and Windows. Just run `/setup`.
+
+**Can I run this on Windows?**
+
+Yes. Install [Docker Desktop](https://docker.com/products/docker-desktop) and the [Visual C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (needed to compile native Node modules), then run `/setup`. The setup wizard handles the rest and generates `start.bat` / `stop.bat` / `restart.bat` scripts for service management.
 
 **Is this secure?**
 
