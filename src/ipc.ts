@@ -390,7 +390,7 @@ export async function processTaskIpc(
       break;
 
     case 'refresh_oauth': {
-      const script = path.join(process.cwd(), 'scripts', 'refresh-oauth.sh');
+      const script = path.join(process.cwd(), 'scripts', 'oauth', 'refresh.sh');
       exec(script, (err, stdout, stderr) => {
         if (err) {
           logger.error({ err, stderr, sourceGroup }, 'OAuth refresh failed');
