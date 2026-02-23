@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -18,7 +18,12 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
-import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  readonlyMountArgs,
+  stopRunningContainersByPrefix,
+  stopContainerWithVerification,
+} from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -443,6 +448,36 @@ export async function runContainerAgent(
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+  const groupContainerPrefix = `nanoclaw-${safeName}-`;
+  try {
+    const cleanup = stopRunningContainersByPrefix(groupContainerPrefix);
+    if (cleanup.stopped.length > 0) {
+      logger.info(
+        {
+          group: group.name,
+          count: cleanup.stopped.length,
+          names: cleanup.stopped,
+        },
+        'Stopped stale running containers before launch',
+      );
+    }
+    if (cleanup.failures.length > 0) {
+      logger.warn(
+        {
+          group: group.name,
+          count: cleanup.failures.length,
+          failures: cleanup.failures,
+        },
+        'Failed to stop stale running containers before launch',
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { group: group.name, err },
+      'Failed pre-launch stale container cleanup',
+    );
+  }
+
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName, group);
 
@@ -580,12 +615,18 @@ export async function runContainerAgent(
     const killOnTimeout = () => {
       timedOut = true;
       logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
-          container.kill('SIGKILL');
-        }
-      });
+      const stopResult = stopContainerWithVerification(containerName);
+      if (!stopResult.stopped) {
+        logger.warn(
+          { group: group.name, containerName, attempts: stopResult.attempts },
+          'Container stop verification failed; forcing local process kill',
+        );
+      }
+      try {
+        container.kill('SIGKILL');
+      } catch {
+        // ignore local process kill errors
+      }
     };
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);

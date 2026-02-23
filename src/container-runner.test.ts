@@ -49,6 +49,24 @@ vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
+// Mock container-runtime helpers used by container-runner
+vi.mock('./container-runtime.js', () => ({
+  CONTAINER_RUNTIME_BIN: 'container',
+  readonlyMountArgs: (hostPath: string, containerPath: string) => [
+    '--mount',
+    `type=bind,source=${hostPath},target=${containerPath},readonly`,
+  ],
+  stopRunningContainersByPrefix: vi.fn(() => ({
+    matched: [],
+    stopped: [],
+    failures: [],
+  })),
+  stopContainerWithVerification: vi.fn(() => ({
+    stopped: true,
+    attempts: ['ok: container stop test'],
+  })),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
@@ -74,10 +92,6 @@ vi.mock('child_process', async () => {
   return {
     ...actual,
     spawn: vi.fn(() => fakeProc),
-    exec: vi.fn((_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
-      if (cb) cb(null);
-      return new EventEmitter();
-    }),
   };
 });
 

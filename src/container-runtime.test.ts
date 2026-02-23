@@ -20,6 +20,8 @@ import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
   stopContainer,
+  stopContainerWithVerification,
+  stopRunningContainersByPrefix,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
 } from './container-runtime.js';
@@ -46,6 +48,83 @@ describe('stopContainer', () => {
     expect(stopContainer('nanoclaw-test-123')).toBe(
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`,
     );
+  });
+});
+
+describe('stopContainerWithVerification', () => {
+  it('returns stopped=true when stop succeeds and verify shows not running', () => {
+    // stop command succeeds
+    mockExecSync.mockReturnValueOnce('');
+    // verify list
+    mockExecSync.mockReturnValueOnce('[]');
+
+    const result = stopContainerWithVerification('nanoclaw-test-123');
+
+    expect(result.stopped).toBe(true);
+    expect(result.attempts.some((a) => a.includes('verified stopped'))).toBe(true);
+  });
+
+  it('escalates through stop/kill commands when container remains running', () => {
+    // stop
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('stop failed');
+    });
+    // verify still running
+    mockExecSync.mockReturnValueOnce(
+      JSON.stringify([
+        { status: 'running', configuration: { id: 'nanoclaw-test-123' } },
+      ]),
+    );
+    // stop -s SIGKILL -t 1
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('sigkill stop failed');
+    });
+    // verify still running
+    mockExecSync.mockReturnValueOnce(
+      JSON.stringify([
+        { status: 'running', configuration: { id: 'nanoclaw-test-123' } },
+      ]),
+    );
+    // kill succeeds
+    mockExecSync.mockReturnValueOnce('');
+    // verify stopped
+    mockExecSync.mockReturnValueOnce('[]');
+
+    const result = stopContainerWithVerification('nanoclaw-test-123');
+
+    expect(result.stopped).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} stop -s SIGKILL -t 1 nanoclaw-test-123`,
+      { stdio: 'pipe', timeout: 10000 },
+    );
+    expect(mockExecSync).toHaveBeenCalledWith(
+      `${CONTAINER_RUNTIME_BIN} kill nanoclaw-test-123`,
+      { stdio: 'pipe', timeout: 10000 },
+    );
+  });
+});
+
+describe('stopRunningContainersByPrefix', () => {
+  it('stops only running containers that match prefix', () => {
+    const lsOutput = JSON.stringify([
+      { status: 'running', configuration: { id: 'nanoclaw-andy-1' } },
+      { status: 'stopped', configuration: { id: 'nanoclaw-andy-2' } },
+      { status: 'running', configuration: { id: 'nanoclaw-jarvis-1' } },
+    ]);
+    mockExecSync
+      .mockReturnValueOnce(lsOutput) // initial ls
+      .mockReturnValueOnce('') // stop andy-1
+      .mockReturnValueOnce(
+        JSON.stringify([
+          { status: 'running', configuration: { id: 'nanoclaw-jarvis-1' } },
+        ]),
+      ); // verify andy-1 stopped
+
+    const result = stopRunningContainersByPrefix('nanoclaw-andy-');
+
+    expect(result.matched).toEqual(['nanoclaw-andy-1']);
+    expect(result.stopped).toEqual(['nanoclaw-andy-1']);
+    expect(result.failures).toEqual([]);
   });
 });
 
@@ -107,23 +186,26 @@ describe('cleanupOrphans', () => {
       { status: 'running', configuration: { id: 'nanoclaw-group3-333' } },
       { status: 'running', configuration: { id: 'other-container' } },
     ]);
-    mockExecSync.mockReturnValueOnce(lsOutput);
-    // stop calls succeed
-    mockExecSync.mockReturnValue('');
+    mockExecSync
+      .mockReturnValueOnce(lsOutput) // initial ls
+      .mockReturnValueOnce('') // stop group1
+      .mockReturnValueOnce('[]') // verify group1 stopped
+      .mockReturnValueOnce('') // stop group3
+      .mockReturnValueOnce('[]'); // verify group3 stopped
 
     cleanupOrphans();
 
-    // ls + 2 stop calls (only running nanoclaw- containers)
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
+    // initial ls + (stop+verify)*2
+    expect(mockExecSync).toHaveBeenCalledTimes(5);
     expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group1-111`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10000 },
     );
     expect(mockExecSync).toHaveBeenNthCalledWith(
-      3,
+      4,
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group3-333`,
-      { stdio: 'pipe' },
+      { stdio: 'pipe', timeout: 10000 },
     );
     expect(logger.info).toHaveBeenCalledWith(
       { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group3-333'] },
@@ -141,6 +223,10 @@ describe('cleanupOrphans', () => {
   });
 
   it('warns and continues when ls fails', () => {
+    // JSON listing fails, fallback table listing fails too
+    mockExecSync.mockImplementationOnce(() => {
+      throw new Error('container not available');
+    });
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('container not available');
     });
@@ -158,20 +244,42 @@ describe('cleanupOrphans', () => {
       { status: 'running', configuration: { id: 'nanoclaw-a-1' } },
       { status: 'running', configuration: { id: 'nanoclaw-b-2' } },
     ]);
-    mockExecSync.mockReturnValueOnce(lsOutput);
-    // First stop fails
-    mockExecSync.mockImplementationOnce(() => {
-      throw new Error('already stopped');
-    });
-    // Second stop succeeds
-    mockExecSync.mockReturnValueOnce('');
+    mockExecSync
+      .mockReturnValueOnce(lsOutput) // initial ls
+      .mockImplementationOnce(() => {
+        throw new Error('stop failed');
+      }) // stop a
+      .mockReturnValueOnce(lsOutput) // verify a still running
+      .mockImplementationOnce(() => {
+        throw new Error('sigkill stop failed');
+      }) // stop -s SIGKILL a
+      .mockReturnValueOnce(lsOutput) // verify a still running
+      .mockImplementationOnce(() => {
+        throw new Error('kill failed');
+      }) // kill a
+      .mockReturnValueOnce(lsOutput) // verify a still running
+      .mockReturnValueOnce('') // stop b
+      .mockReturnValueOnce(
+        JSON.stringify([
+          { status: 'running', configuration: { id: 'nanoclaw-a-1' } },
+        ]),
+      ); // verify b stopped, a still running
 
     cleanupOrphans(); // should not throw
 
-    expect(mockExecSync).toHaveBeenCalledTimes(3);
+    expect(mockExecSync).toHaveBeenCalledTimes(9);
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
+      { count: 1, names: ['nanoclaw-b-2'] },
       'Stopped orphaned containers',
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        count: 1,
+        failures: [
+          expect.objectContaining({ name: 'nanoclaw-a-1' }),
+        ],
+      }),
+      'Failed to stop some orphaned containers',
     );
   });
 });

@@ -12,6 +12,8 @@ You are planner, dispatcher, and reviewer for Jarvis workers.
 - Do not perform direct product-source implementation in target repositories.
 - Own control-plane/admin updates (GitHub workflows, review policy, branch-governance docs).
 - Decide `@claude` review usage and workflow stack per project requirements (risk, compliance, test depth).
+- For user QA handoff: after approving Jarvis output, sync approved branch/commit into NanoClawWorkspace, run build/server-health preflight, and provide user testing commands + URL.
+- Before saying "ready for user review", verify no duplicate same-lane running containers (`nanoclaw-andy-developer-*`) and run recovery playbook if runtime state is inconsistent.
 
 ## Dispatch Discipline
 
@@ -30,3 +32,4 @@ You are planner, dispatcher, and reviewer for Jarvis workers.
 
 - Keep CLAUDE/docs compressed and trigger-indexed.
 - Update docs when workflow changes, then update trigger lines.
+- Treat local review handoff checks as default behavior, not a user-reminder-only step.

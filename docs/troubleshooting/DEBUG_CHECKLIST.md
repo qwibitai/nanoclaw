@@ -49,6 +49,31 @@ Action:
 2. Wait for reset or switch that group to an available model/runtime.
 3. For worker execution lane, continue routing bounded tasks to OpenCode workers (`jarvis-worker-*`) via `andy-developer`.
 
+### 6. [FIXED 2026-02-23] Duplicate running group containers
+Symptom:
+
+- Two `nanoclaw-andy-developer-*` (or same-group) containers appear as `running`.
+- New runs may race with stale prior runs, causing unstable behavior.
+
+Cause:
+
+- Stop path did not always verify runtime-level container shutdown before new launch.
+- Runtime could report inconsistent stop state without escalation.
+
+Fix:
+
+- Startup orphan cleanup now uses verified stop escalation (`stop` -> `stop SIGKILL` -> `kill` + running-state verification).
+- Pre-launch cleanup now stops any already-running container with same group prefix before new spawn.
+- Timeout shutdown now uses verified stop escalation and logs attempt history.
+
+Verification:
+
+1. `npm run build`
+2. `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+3. Trigger one message in Andy lane.
+4. Confirm only one running group container:
+   `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
+
 ## Quick Status Check
 
 ```bash
@@ -56,20 +81,33 @@ Action:
 launchctl list | grep nanoclaw
 # Expected: PID  0  com.nanoclaw (PID = running, "-" = not running, non-zero exit = crashed)
 
-# 2. Any running containers?
-container ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
+# 2. Container state snapshot (running + stopped)
+container ls -a | rg nanoclaw
 
-# 3. Any stopped/orphaned containers?
-container ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
-
-# 4. Recent errors in service log?
+# 3. Recent errors in service log?
 grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# 5. Is WhatsApp connected? (look for last connection event)
+# 4. Is WhatsApp connected? (look for last connection event)
 grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/nanoclaw.log | tail -5
 
-# 6. Are groups loaded?
+# 5. Are groups loaded?
 grep 'groupCount' logs/nanoclaw.log | tail -3
+```
+
+## Duplicate Container Recovery (if runtime state is inconsistent)
+
+```bash
+# 1) Restart Apple Container services
+/bin/zsh -lc "launchctl kickstart -k gui/$(id -u)/com.apple.container.apiserver && launchctl kickstart -k gui/$(id -u)/com.apple.container.container-runtime-linux.buildkit"
+
+# 2) Ensure runtime is up
+container system start
+
+# 3) Restart NanoClaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+
+# 4) Re-check group container state
+container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'
 ```
 
 ## Session Transcript Branching

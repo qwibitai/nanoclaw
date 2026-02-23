@@ -98,6 +98,32 @@ Worker runner communicates with NanoClaw host using marker-framed JSON:
 
 This is shared with the host parser and supports robust extraction from stdout.
 
+## Container Lifecycle Safety
+
+As of 2026-02-23, container lifecycle adds hard guards against duplicate-running
+group containers and stuck orphan cleanup:
+
+1. Startup orphan cleanup (`src/index.ts` -> `cleanupOrphans()`)
+   - On service start, NanoClaw scans running `nanoclaw-*` containers.
+   - Each stop is verified; stop escalation order is:
+     - `container stop <name>`
+     - `container stop -s SIGKILL -t 1 <name>`
+     - `container kill <name>`
+
+2. Pre-launch same-group cleanup (`src/container-runner.ts`)
+   - Before spawning `nanoclaw-<group>-<timestamp>`, NanoClaw stops any already-running
+     container with prefix `nanoclaw-<group>-`.
+   - This prevents two active containers for the same group lane.
+
+3. Timeout cleanup with verification (`src/container-runner.ts`)
+   - Timeout shutdown uses the same verified stop escalation instead of a single blind stop.
+   - Failed attempts are logged with full command history for debugging.
+
+Operational logs:
+- Success: `Stopped orphaned containers`
+- Pre-launch cleanup: `Stopped stale running containers before launch`
+- Failure with attempts: `Failed to stop some orphaned containers`
+
 ## Usage Stats
 
 Current usage payload includes:
