@@ -30,7 +30,7 @@ interface ContainerInput {
 }
 
 interface ContainerOutput {
-  status: 'success' | 'error';
+  status: 'success' | 'error' | 'heartbeat';
   result: string | null;
   newSessionId?: string;
   error?: string;
@@ -57,6 +57,7 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+const HEARTBEAT_INTERVAL_MS = 120_000;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -385,6 +386,11 @@ async function runQuery(
   };
   setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
+  const heartbeatTimer = setInterval(() => {
+    log('Emitting heartbeat');
+    writeOutput({ status: 'heartbeat', result: null });
+  }, HEARTBEAT_INTERVAL_MS);
+
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
@@ -485,6 +491,7 @@ async function runQuery(
   }
 
   ipcPolling = false;
+  clearInterval(heartbeatTimer);
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }

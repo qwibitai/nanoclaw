@@ -257,6 +257,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    // Heartbeat: agent is actively working, reset idle timer but don't send to user
+    if (result.status === 'heartbeat') {
+      resetIdleTimer();
+      return;
+    }
+
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
