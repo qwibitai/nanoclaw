@@ -9,14 +9,46 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
+# Groups - track role instructions only (CLAUDE.md + docs/)
 groups/*
 !groups/main/
 !groups/global/
+!groups/andy-developer/
+!groups/jarvis-worker-*/
+
+# Default-ignore everything inside allowed group directories
 groups/main/*
 groups/global/*
+groups/andy-developer/*
+groups/jarvis-worker-*/*
+
+# Keep instruction surfaces tracked
 !groups/main/CLAUDE.md
+!groups/main/docs/
+!groups/main/docs/**
 !groups/global/CLAUDE.md
+!groups/global/docs/
+!groups/global/docs/**
+!groups/andy-developer/CLAUDE.md
+!groups/andy-developer/docs/
+!groups/andy-developer/docs/**
+!groups/jarvis-worker-*/CLAUDE.md
+!groups/jarvis-worker-*/docs/
+!groups/jarvis-worker-*/docs/**
+!groups/**/.mcp.json
+!groups/**/opencode.json
+!groups/**/container-config.json
+!groups/**/container-config.yaml
+!groups/**/container-config.yml
+
+# Always ignore runtime artifacts under groups
+groups/**/logs/
+groups/**/logs/**
+groups/**/memory/**
+!groups/**/memory/
+!groups/**/memory/**/*.md
+groups/**/.smoke-*.txt
+groups/**/smoke-*.txt
 
 # Secrets
 *.keys.json
