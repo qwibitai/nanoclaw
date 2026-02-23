@@ -301,6 +301,23 @@ describe('register_group authorization', () => {
     // registeredGroups should not have changed
     expect(groups['new@g.us']).toBeUndefined();
   });
+
+  it('main group cannot register with unsafe folder path', async () => {
+    await processTaskIpc(
+      {
+        type: 'register_group',
+        jid: 'new@g.us',
+        name: 'New Group',
+        folder: '../../outside',
+        trigger: '@Andy',
+      },
+      'main',
+      true,
+      deps,
+    );
+
+    expect(groups['new@g.us']).toBeUndefined();
+  });
 });
 
 // --- refresh_groups authorization ---

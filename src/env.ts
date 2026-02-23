@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { logger } from './logger.js';
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -12,7 +13,8 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   let content: string;
   try {
     content = fs.readFileSync(envFile, 'utf-8');
-  } catch {
+  } catch (err) {
+    logger.debug({ err }, '.env file not found, using defaults');
     return {};
   }
 
