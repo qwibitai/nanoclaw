@@ -14,6 +14,7 @@ import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './contai
 import {
   getAllTasks,
   getDueTasks,
+  getTasksForGroup,
   getTaskById,
   logTaskRun,
   updateTaskAfterRun,
@@ -66,7 +67,7 @@ async function runTask(
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
-  const tasks = getAllTasks();
+  const tasks = isMain ? getAllTasks() : getTasksForGroup(task.group_folder);
   writeTasksSnapshot(
     task.group_folder,
     isMain,

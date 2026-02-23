@@ -36,6 +36,10 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      readFileSync: vi.fn(() => '[]'),
+      writeFileSync: vi.fn(),
+      renameSync: vi.fn(),
+      unlinkSync: vi.fn(),
     },
   };
 });
@@ -204,6 +208,52 @@ describe('WhatsAppChannel', () => {
         'test@g.us',
         { text: 'Andy: Queued message' },
       );
+    });
+
+    it('loads persisted outgoing queue from disk and flushes on connect', async () => {
+      const fs = await import('fs');
+      vi.mocked(fs.default.readFileSync).mockReturnValueOnce(
+        JSON.stringify([{ jid: 'persisted@g.us', text: 'Andy: Persisted' }]),
+      );
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
+        'persisted@g.us',
+        { text: 'Andy: Persisted' },
+      );
+    });
+
+    it('keeps queued messages when flush send fails', async () => {
+      const fs = await import('fs');
+      vi.mocked(fs.default.readFileSync).mockReturnValueOnce('[]');
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+      await connectChannel(channel);
+
+      // Queue while disconnected
+      (channel as any).connected = false;
+      await channel.sendMessage('retry@g.us', 'Retry me');
+      expect((channel as any).outgoingQueue).toHaveLength(1);
+
+      // First flush fails; queued item must remain for later retry
+      fakeSocket.sendMessage.mockClear();
+      fakeSocket.sendMessage.mockRejectedValueOnce(new Error('send failed'));
+      (channel as any).connected = true;
+      await (channel as any).flushOutgoingQueue();
+      expect((channel as any).outgoingQueue).toHaveLength(1);
+
+      // Second flush succeeds and drains queue
+      fakeSocket.sendMessage.mockResolvedValue(undefined);
+      await (channel as any).flushOutgoingQueue();
+      expect((channel as any).outgoingQueue).toHaveLength(0);
+
+      expect(fs.default.writeFileSync).toHaveBeenCalled();
     });
 
     it('disconnects cleanly', async () => {

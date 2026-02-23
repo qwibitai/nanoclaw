@@ -8,12 +8,15 @@ import os from 'os';
 import path from 'path';
 
 import {
+  CONTAINER_CPU_LIMIT,
   CONTAINER_IMAGE,
+  CONTAINER_MEMORY_LIMIT,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  MAIN_GROUP_FOLDER,
   WORKER_CONTAINER_IMAGE,
 } from './config.js';
 import { readEnvFile } from './env.js';
@@ -470,13 +473,52 @@ function getContainerImage(group: RegisteredGroup): string {
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(group: RegisteredGroup): Record<string, string> {
-  const isWorker = isWorkerGroup(group);
-  if (isWorker) return readEnvFile(['GITHUB_TOKEN']);
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
+  const env = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'GITHUB_TOKEN',
+    'GITHUB_TOKEN_WORKER',
+    'GITHUB_TOKEN_ANDY_DEVELOPER',
+    'GITHUB_TOKEN_ANDY_BOT',
+  ]);
+
+  const secrets: Record<string, string> = {};
+
+  if (!isWorkerGroup(group)) {
+    if (env.CLAUDE_CODE_OAUTH_TOKEN) {
+      secrets.CLAUDE_CODE_OAUTH_TOKEN = env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+    if (env.ANTHROPIC_API_KEY) {
+      secrets.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY;
+    }
+  }
+
+  let githubToken: string | undefined;
+  if (isWorkerGroup(group)) {
+    githubToken = env.GITHUB_TOKEN_WORKER || env.GITHUB_TOKEN;
+  } else if (isAndyDeveloperGroup(group)) {
+    githubToken = env.GITHUB_TOKEN_ANDY_DEVELOPER || env.GITHUB_TOKEN;
+  } else if (isAndyBotGroup(group)) {
+    githubToken = env.GITHUB_TOKEN_ANDY_BOT || env.GITHUB_TOKEN;
+  } else if (group.folder === MAIN_GROUP_FOLDER) {
+    githubToken = env.GITHUB_TOKEN;
+  }
+
+  if (githubToken) {
+    secrets.GITHUB_TOKEN = githubToken;
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string, group: RegisteredGroup): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  if (CONTAINER_CPU_LIMIT) {
+    args.push('--cpus', CONTAINER_CPU_LIMIT);
+  }
+  if (CONTAINER_MEMORY_LIMIT) {
+    args.push('--memory', CONTAINER_MEMORY_LIMIT);
+  }
 
   // Run as host user so bind-mounted files are accessible (Docker only).
   // Apple Container uses a Linux VM — macOS UIDs (e.g. 501) can't be mapped to the

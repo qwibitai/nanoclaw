@@ -25,7 +25,8 @@ For UI-impacting changes, browser verification is default:
 
 ## Access Policy
 
-- `andy-bot` and `andy-developer` both retain GitHub access (`GITHUB_TOKEN`/`GH_TOKEN`) for `openclaw-gurusharan` activity.
+- `andy-bot`, `andy-developer`, and `jarvis-worker-*` retain GitHub access via role-scoped env vars:
+  `GITHUB_TOKEN_ANDY_BOT`, `GITHUB_TOKEN_ANDY_DEVELOPER`, `GITHUB_TOKEN_WORKER` (each with fallback to `GITHUB_TOKEN`).
 - Only `andy-developer` has worker delegation authority in IPC lanes.
 - `andy-developer` owns GitHub workflow/review governance changes; workers focus on repository implementation tasks.
 - `andy-developer` decides whether `@claude` review is required, optional, or disabled per project requirement profile.

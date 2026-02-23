@@ -22,8 +22,11 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getChatIngestSeqAtOrBeforeTimestamp,
+  getIngestSeqAtOrBeforeTimestamp,
   getMessagesSince,
   getNewMessages,
+  getTasksForGroup,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -52,10 +55,10 @@ import { logger } from './logger.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
-let lastTimestamp = '';
+let lastIngestSeq = 0;
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
+let lastAgentIngestSeq: Record<string, number> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
@@ -63,16 +66,42 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 function loadState(): void {
-  lastTimestamp = getRouterState('last_timestamp') || '';
-  const agentTs = getRouterState('last_agent_timestamp');
+  const lastIngest = parseInt(getRouterState('last_ingest_seq') || '0', 10);
+  if (Number.isFinite(lastIngest) && lastIngest > 0) {
+    lastIngestSeq = lastIngest;
+  } else {
+    const lastTimestamp = getRouterState('last_timestamp') || '';
+    lastIngestSeq = getIngestSeqAtOrBeforeTimestamp(lastTimestamp);
+  }
+
+  const agentSeq = getRouterState('last_agent_ingest_seq');
   try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    if (agentSeq) {
+      const parsed = JSON.parse(agentSeq) as Record<string, unknown>;
+      const normalized: Record<string, number> = {};
+      for (const [chatJid, value] of Object.entries(parsed)) {
+        const seq = typeof value === 'number' ? value : parseInt(String(value), 10);
+        if (Number.isFinite(seq) && seq > 0) normalized[chatJid] = seq;
+      }
+      lastAgentIngestSeq = normalized;
+    } else {
+      const legacyAgentTs = getRouterState('last_agent_timestamp');
+      const parsedLegacy = legacyAgentTs
+        ? (JSON.parse(legacyAgentTs) as Record<string, string>)
+        : {};
+      const migrated: Record<string, number> = {};
+      for (const [chatJid, timestamp] of Object.entries(parsedLegacy)) {
+        migrated[chatJid] = getChatIngestSeqAtOrBeforeTimestamp(chatJid, timestamp);
+      }
+      lastAgentIngestSeq = migrated;
+    }
   } catch {
-    logger.warn('Corrupted last_agent_timestamp in DB, resetting');
-    lastAgentTimestamp = {};
+    logger.warn('Corrupted last_agent_ingest_seq in DB, resetting');
+    lastAgentIngestSeq = {};
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  saveState();
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -80,10 +109,10 @@ function loadState(): void {
 }
 
 function saveState(): void {
-  setRouterState('last_timestamp', lastTimestamp);
+  setRouterState('last_ingest_seq', String(lastIngestSeq));
   setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
+    'last_agent_ingest_seq',
+    JSON.stringify(lastAgentIngestSeq),
   );
 }
 
@@ -162,8 +191,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const sinceIngestSeq = lastAgentIngestSeq[chatJid] || 0;
+  const missedMessages = getMessagesSince(chatJid, sinceIngestSeq, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
@@ -179,9 +208,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || '';
-  lastAgentTimestamp[chatJid] =
-    missedMessages[missedMessages.length - 1].timestamp;
+  const previousCursor = lastAgentIngestSeq[chatJid] || 0;
+  lastAgentIngestSeq[chatJid] =
+    missedMessages[missedMessages.length - 1].ingest_seq || previousCursor;
   saveState();
 
   logger.info(
@@ -313,7 +342,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
     // Roll back cursor so retries can re-process these messages
-    lastAgentTimestamp[chatJid] = previousCursor;
+    lastAgentIngestSeq[chatJid] = previousCursor;
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     return false;
@@ -333,7 +362,7 @@ async function runAgent(
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
+  const tasks = isMain ? getAllTasks() : getTasksForGroup(group.folder);
   writeTasksSnapshot(
     group.folder,
     isMain,
@@ -416,13 +445,13 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       const jids = Object.keys(registeredGroups);
-      const { messages, newTimestamp } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
+      const { messages, newIngestSeq } = getNewMessages(jids, lastIngestSeq, ASSISTANT_NAME);
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
 
         // Advance the "seen" cursor for all messages immediately
-        lastTimestamp = newTimestamp;
+        lastIngestSeq = newIngestSeq;
         saveState();
 
         // Deduplicate by group
@@ -459,11 +488,11 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
+          // Pull all messages since the per-chat ingest cursor so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || '',
+            lastAgentIngestSeq[chatJid] || 0,
             ASSISTANT_NAME,
           );
           const messagesToSend =
@@ -475,8 +504,8 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
+            const lastSeq = messagesToSend[messagesToSend.length - 1].ingest_seq;
+            lastAgentIngestSeq[chatJid] = lastSeq || (lastAgentIngestSeq[chatJid] || 0);
             saveState();
             // Show typing indicator while the container processes the piped message
             channel.setTyping?.(chatJid, true)?.catch((err) =>
@@ -497,12 +526,12 @@ async function startMessageLoop(): Promise<void> {
 
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing lastTimestamp and processing messages.
+ * Handles crash between advancing global ingest cursor and processing messages.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    const sinceIngestSeq = lastAgentIngestSeq[chatJid] || 0;
+    const pending = getMessagesSince(chatJid, sinceIngestSeq, ASSISTANT_NAME);
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },

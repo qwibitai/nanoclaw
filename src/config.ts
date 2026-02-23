@@ -46,6 +46,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+export const CONTAINER_CPU_LIMIT =
+  process.env.CONTAINER_CPU_LIMIT || '2';
+export const CONTAINER_MEMORY_LIMIT =
+  process.env.CONTAINER_MEMORY_LIMIT || '4096M';
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || '1800000',

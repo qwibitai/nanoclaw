@@ -87,9 +87,11 @@ Andy-bot rules include:
 
 ## Secrets and Identity
 
-- Worker receives only `GITHUB_TOKEN` from host env loading.
+- Worker receives `GITHUB_TOKEN_WORKER` (fallback: `GITHUB_TOKEN`).
 - Worker sets `GH_TOKEN = GITHUB_TOKEN` for CLI compatibility.
-- `andy-bot` and `andy-developer` both receive `GITHUB_TOKEN`/`GH_TOKEN` for `openclaw-gurusharan` GitHub activity.
+- `andy-developer` receives `GITHUB_TOKEN_ANDY_DEVELOPER` (fallback: `GITHUB_TOKEN`).
+- `andy-bot` receives `GITHUB_TOKEN_ANDY_BOT` (fallback: `GITHUB_TOKEN`).
+- Resolved token is exposed in-container as `GITHUB_TOKEN`/`GH_TOKEN` for CLI compatibility.
 - `andy-bot` GitHub usage scope: research, repository inspection, and reporting (not worker dispatch control).
 - Git identity defaults:
   - `WORKER_GIT_NAME=Andy (openclaw-gurusharan)`

@@ -20,6 +20,7 @@ import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const OUTGOING_QUEUE_FILE = path.join(STORE_DIR, 'whatsapp-outgoing-queue.json');
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -41,6 +42,7 @@ export class WhatsAppChannel implements Channel {
 
   constructor(opts: WhatsAppChannelOpts) {
     this.opts = opts;
+    this.loadOutgoingQueue();
   }
 
   async connect(): Promise<void> {
@@ -212,6 +214,7 @@ export class WhatsAppChannel implements Channel {
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
+      this.persistOutgoingQueue();
       logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
       return;
     }
@@ -221,6 +224,7 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
+      this.persistOutgoingQueue();
       logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
     }
   }
@@ -317,13 +321,63 @@ export class WhatsAppChannel implements Channel {
     try {
       logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
       while (this.outgoingQueue.length > 0) {
-        const item = this.outgoingQueue.shift()!;
-        // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        const item = this.outgoingQueue[0];
+        try {
+          // Send directly — queued items are already prefixed by sendMessage
+          await this.sock.sendMessage(item.jid, { text: item.text });
+          this.outgoingQueue.shift();
+          this.persistOutgoingQueue();
+          logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        } catch (err) {
+          logger.warn({ jid: item.jid, err }, 'Queued send failed, keeping message for retry');
+          break;
+        }
       }
     } finally {
       this.flushing = false;
+    }
+  }
+
+  private loadOutgoingQueue(): void {
+    try {
+      if (!fs.existsSync(OUTGOING_QUEUE_FILE)) return;
+      const raw = fs.readFileSync(OUTGOING_QUEUE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      this.outgoingQueue = parsed
+        .filter((item): item is { jid: string; text: string } =>
+          item &&
+          typeof item === 'object' &&
+          typeof (item as { jid?: unknown }).jid === 'string' &&
+          typeof (item as { text?: unknown }).text === 'string',
+        )
+        .map((item) => ({ jid: item.jid, text: item.text }));
+      if (this.outgoingQueue.length > 0) {
+        logger.info(
+          { count: this.outgoingQueue.length },
+          'Loaded persisted outgoing WhatsApp queue',
+        );
+      }
+    } catch (err) {
+      logger.warn({ err }, 'Failed to load persisted WhatsApp outgoing queue');
+      this.outgoingQueue = [];
+    }
+  }
+
+  private persistOutgoingQueue(): void {
+    try {
+      if (this.outgoingQueue.length === 0) {
+        if (fs.existsSync(OUTGOING_QUEUE_FILE)) {
+          fs.unlinkSync(OUTGOING_QUEUE_FILE);
+        }
+        return;
+      }
+      fs.mkdirSync(STORE_DIR, { recursive: true });
+      const tempFile = `${OUTGOING_QUEUE_FILE}.tmp`;
+      fs.writeFileSync(tempFile, JSON.stringify(this.outgoingQueue, null, 2));
+      fs.renameSync(tempFile, OUTGOING_QUEUE_FILE);
+    } catch (err) {
+      logger.warn({ err }, 'Failed to persist WhatsApp outgoing queue');
     }
   }
 }

@@ -263,7 +263,17 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `
+    INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id, chat_jid) DO UPDATE SET
+      sender = excluded.sender,
+      sender_name = excluded.sender_name,
+      content = excluded.content,
+      timestamp = excluded.timestamp,
+      is_from_me = excluded.is_from_me,
+      is_bot_message = excluded.is_bot_message
+  `,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -290,7 +300,17 @@ export function storeMessageDirect(msg: {
   is_bot_message?: boolean;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `
+    INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id, chat_jid) DO UPDATE SET
+      sender = excluded.sender,
+      sender_name = excluded.sender_name,
+      content = excluded.content,
+      timestamp = excluded.timestamp,
+      is_from_me = excluded.is_from_me,
+      is_bot_message = excluded.is_bot_message
+  `,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -305,51 +325,81 @@ export function storeMessageDirect(msg: {
 
 export function getNewMessages(
   jids: string[],
-  lastTimestamp: string,
+  lastIngestSeq: number,
   botPrefix: string,
-): { messages: NewMessage[]; newTimestamp: string } {
-  if (jids.length === 0) return { messages: [], newTimestamp: lastTimestamp };
+): { messages: NewMessage[]; newIngestSeq: number } {
+  if (jids.length === 0) return { messages: [], newIngestSeq: lastIngestSeq };
 
   const placeholders = jids.map(() => '?').join(',');
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT rowid AS ingest_seq, id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders})
+    WHERE rowid > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
-    ORDER BY timestamp
+    ORDER BY rowid
   `;
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
+    .all(lastIngestSeq, ...jids, `${botPrefix}:%`) as NewMessage[];
 
-  let newTimestamp = lastTimestamp;
-  for (const row of rows) {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
-  }
+  const newIngestSeq = rows.length > 0
+    ? (rows[rows.length - 1].ingest_seq || lastIngestSeq)
+    : lastIngestSeq;
 
-  return { messages: rows, newTimestamp };
+  return { messages: rows, newIngestSeq };
 }
 
 export function getMessagesSince(
   chatJid: string,
-  sinceTimestamp: string,
+  sinceIngestSeq: number,
   botPrefix: string,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT rowid AS ingest_seq, id, chat_jid, sender, sender_name, content, timestamp
     FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
+    WHERE chat_jid = ? AND rowid > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
-    ORDER BY timestamp
+    ORDER BY rowid
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceIngestSeq, `${botPrefix}:%`) as NewMessage[];
+}
+
+export function getIngestSeqAtOrBeforeTimestamp(timestamp: string): number {
+  if (!timestamp) return 0;
+  const row = db
+    .prepare(
+      `
+      SELECT COALESCE(MAX(rowid), 0) AS ingest_seq
+      FROM messages
+      WHERE timestamp <= ?
+    `,
+    )
+    .get(timestamp) as { ingest_seq: number } | undefined;
+  return row?.ingest_seq || 0;
+}
+
+export function getChatIngestSeqAtOrBeforeTimestamp(
+  chatJid: string,
+  timestamp: string,
+): number {
+  if (!timestamp) return 0;
+  const row = db
+    .prepare(
+      `
+      SELECT COALESCE(MAX(rowid), 0) AS ingest_seq
+      FROM messages
+      WHERE chat_jid = ? AND timestamp <= ?
+    `,
+    )
+    .get(chatJid, timestamp) as { ingest_seq: number } | undefined;
+  return row?.ingest_seq || 0;
 }
 
 export function createTask(
@@ -716,8 +766,19 @@ function migrateJsonState(): void {
   const routerState = migrateFile('router_state.json') as {
     last_timestamp?: string;
     last_agent_timestamp?: Record<string, string>;
+    last_ingest_seq?: number;
+    last_agent_ingest_seq?: Record<string, number>;
   } | null;
   if (routerState) {
+    if (routerState.last_ingest_seq !== undefined) {
+      setRouterState('last_ingest_seq', String(routerState.last_ingest_seq));
+    }
+    if (routerState.last_agent_ingest_seq) {
+      setRouterState(
+        'last_agent_ingest_seq',
+        JSON.stringify(routerState.last_agent_ingest_seq),
+      );
+    }
     if (routerState.last_timestamp) {
       setRouterState('last_timestamp', routerState.last_timestamp);
     }

@@ -13,6 +13,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const DEAD_LETTER_RETRY_MS = 5 * 60 * 1000;
 
 interface GroupState {
   active: boolean;
@@ -33,6 +34,48 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+
+  private deadLetterFile(groupJid: string): string {
+    const safe = groupJid.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    return path.join(DATA_DIR, 'dead-letter', 'message-retries', `${safe}.json`);
+  }
+
+  private persistDeadLetter(groupJid: string, retryCount: number, delayMs: number): void {
+    try {
+      const file = this.deadLetterFile(groupJid);
+      const dir = path.dirname(file);
+      fs.mkdirSync(dir, { recursive: true });
+      const temp = `${file}.tmp`;
+      const payload = {
+        groupJid,
+        retryCount,
+        failedAt: new Date().toISOString(),
+        nextRetryAt: new Date(Date.now() + delayMs).toISOString(),
+        reason: 'max_retries_exceeded',
+      };
+      fs.writeFileSync(temp, JSON.stringify(payload, null, 2));
+      fs.renameSync(temp, file);
+    } catch (err) {
+      logger.warn({ groupJid, err }, 'Failed to persist dead-letter retry state');
+    }
+  }
+
+  private clearDeadLetter(groupJid: string): void {
+    try {
+      const file = this.deadLetterFile(groupJid);
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    } catch (err) {
+      logger.warn({ groupJid, err }, 'Failed to clear dead-letter retry state');
+    }
+  }
+
+  private scheduleRetryTimer(groupJid: string, delayMs: number): void {
+    setTimeout(() => {
+      if (!this.shuttingDown) {
+        this.enqueueMessageCheck(groupJid);
+      }
+    }, delayMs);
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -202,6 +245,7 @@ export class GroupQueue {
         const success = await this.processMessagesFn(groupJid);
         if (success) {
           state.retryCount = 0;
+          this.clearDeadLetter(groupJid);
         } else {
           this.scheduleRetry(groupJid, state);
         }
@@ -249,11 +293,14 @@ export class GroupQueue {
   private scheduleRetry(groupJid: string, state: GroupState): void {
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
+      const delayMs = DEAD_LETTER_RETRY_MS;
       logger.error(
-        { groupJid, retryCount: state.retryCount },
-        'Max retries exceeded, dropping messages (will retry on next incoming message)',
+        { groupJid, retryCount: state.retryCount, delayMs },
+        'Max retries exceeded, moving to dead-letter retry flow',
       );
-      state.retryCount = 0;
+      this.persistDeadLetter(groupJid, state.retryCount, delayMs);
+      state.retryCount = MAX_RETRIES;
+      this.scheduleRetryTimer(groupJid, delayMs);
       return;
     }
 
@@ -262,11 +309,7 @@ export class GroupQueue {
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
-    setTimeout(() => {
-      if (!this.shuttingDown) {
-        this.enqueueMessageCheck(groupJid);
-      }
-    }, delayMs);
+    this.scheduleRetryTimer(groupJid, delayMs);
   }
 
   private drainGroup(groupJid: string): void {

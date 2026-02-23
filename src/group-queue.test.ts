@@ -182,7 +182,9 @@ describe('GroupQueue', () => {
 
   // --- Max retries exceeded ---
 
-  it('stops retrying after MAX_RETRIES and resets', async () => {
+  it('moves to dead-letter retry flow after MAX_RETRIES and keeps retrying', async () => {
+    const fs = await import('fs');
+    vi.mocked(fs.default.writeFileSync).mockClear();
     let callCount = 0;
 
     const processMessages = vi.fn(async () => {
@@ -205,10 +207,16 @@ describe('GroupQueue', () => {
       expect(callCount).toBe(i + 2);
     }
 
-    // After 5 retries (6 total calls), should stop — no more retries
-    const countAfterMaxRetries = callCount;
-    await vi.advanceTimersByTimeAsync(200000); // Wait a long time
-    expect(callCount).toBe(countAfterMaxRetries);
+    // After max retries, queue should switch to durable dead-letter cadence (5 minutes)
+    await vi.advanceTimersByTimeAsync(300000 + 10);
+    expect(callCount).toBe(7);
+
+    const deadLetterWrites = vi
+      .mocked(fs.default.writeFileSync)
+      .mock.calls.filter((call) =>
+        typeof call[0] === 'string' && call[0].includes('/dead-letter/message-retries/'),
+      );
+    expect(deadLetterWrites.length).toBeGreaterThan(0);
   });
 
   // --- Waiting groups get drained when slots free up ---

@@ -25,32 +25,43 @@ This document captures a full-architecture optimization audit for NanoClaw, with
 
 ## Prioritized Optimization Backlog
 
-| Priority | Item | Why it matters | Key evidence | Expected benefit |
-|---|---|---|---|---|
-| P0 | Restrict secret exposure by role (remove `GITHUB_TOKEN` from untrusted non-worker groups; sanitize all git tokens in Bash hooks) | Current trust model marks non-main as untrusted but token scope remains broad; combined with bypass permissions this increases exfiltration risk | `docs/reference/SECURITY.md`, `src/container-runner.ts:475`, `container/agent-runner/src/index.ts:197`, `container/agent-runner/src/index.ts:456` | Major reduction in account/repo compromise blast radius |
-| P0 | Replace timestamp-only cursor semantics with a monotonic ingest sequence cursor | `timestamp > cursor` with second-level message timestamps can drop same-second arrivals | `src/channels/whatsapp.ts:156`, `src/db.ts:319`, `src/db.ts:346`, `src/index.ts:425` | Eliminates silent message loss, improves correctness |
-| P1 | Replace retry-drop behavior with durable retry/dead-letter flow | After max retries, pending work can be dropped until a new user message arrives | `src/group-queue.ts:249` | Fewer stuck conversations, lower MTTR |
-| P1 | Persist outbound WhatsApp queue across restart | Outbound queue is in-memory only today | `src/channels/whatsapp.ts:36`, `src/channels/whatsapp.ts:214` | Reliable response delivery across crash/reconnect |
-| P1 | Remove always-on permission bypass or gate it by role/task class | Full bypass mode broadens accidental/dangerous tool execution scope | `container/agent-runner/src/index.ts:456` | Better least-privilege and containment |
-| P1 | Narrow main-lane write scope on host mounts | Main lane currently has read-write project-root mount | `src/container-runner.ts:266`, `docs/reference/SECURITY.md:85` | Better host integrity and change safety |
-| P1 | Make browser-test evidence enforceable in code contract, not only docs/rules | Current browser gate is largely process/policy-driven | `container/rules/andy-developer-operating-rule.md`, `container/rules/jarvis-worker-operating-rule.md`, `src/dispatch-validator.ts` | Higher QA reliability, fewer false handoffs |
-| P2 | Add explicit container CPU/memory limits (Apple Container run args) | Runaway tasks can degrade host runtime | `src/container-runner.ts:479` | Better runtime stability under load |
-| P2 | Reduce `getAllTasks()` snapshot overhead per run | Every run writes full task snapshot | `src/index.ts:336`, `src/task-scheduler.ts:69` | Lower startup latency and I/O pressure |
-| P2 | Expand automated tests for container-side runtime behavior | Host tests are strong; container runtime paths still need deeper automated coverage | `vitest.config.ts:5` | Earlier regression detection, lower production risk |
-| P2 | Harden mount allowlist guardrails against permissive roots | Allowlist misconfiguration can become a high-impact risk | `src/mount-security.ts:282`, `src/mount-security.ts:297` | Improved defense against operator misconfiguration |
-| P2 | Keep security docs and runtime behavior tightly synced | Documentation drift creates operational mistakes | `docs/reference/SECURITY.md`, `docs/operations/roles-classification.md` | Better operator reliability and incident response quality |
+| Priority | Status | Item | Why it matters | Key evidence | Expected benefit |
+|---|---|---|---|---|---|
+| P0 | Pending | Restrict secret exposure by role (remove `GITHUB_TOKEN` from untrusted non-worker groups; sanitize all git tokens in Bash hooks) | Current trust model marks non-main as untrusted but token scope remains broad; combined with bypass permissions this increases exfiltration risk | `docs/reference/SECURITY.md`, `src/container-runner.ts:475`, `container/agent-runner/src/index.ts:197`, `container/agent-runner/src/index.ts:456` | Major reduction in account/repo compromise blast radius |
+| P0 | Completed (2026-02-23) | Replace timestamp-only cursor semantics with a monotonic ingest sequence cursor | `timestamp > cursor` with second-level message timestamps can drop same-second arrivals | `src/db.ts:326`, `src/db.ts:355`, `src/index.ts:58`, `src/index.ts:448` | Eliminates silent message loss, improves correctness |
+| P1 | Completed (2026-02-23) | Replace retry-drop behavior with durable retry/dead-letter flow | After max retries, pending work can be dropped until a new user message arrives | `src/group-queue.ts:16`, `src/group-queue.ts:38`, `src/group-queue.ts:293` | Fewer stuck conversations, lower MTTR |
+| P1 | Completed (2026-02-23) | Persist outbound WhatsApp queue across restart | Outbound queue is in-memory only today | `src/channels/whatsapp.ts:23`, `src/channels/whatsapp.ts:45`, `src/channels/whatsapp.ts:318` | Reliable response delivery across crash/reconnect |
+| P1 | Pending | Remove always-on permission bypass or gate it by role/task class | Full bypass mode broadens accidental/dangerous tool execution scope | `container/agent-runner/src/index.ts:456` | Better least-privilege and containment |
+| P1 | Pending | Narrow main-lane write scope on host mounts | Main lane currently has read-write project-root mount | `src/container-runner.ts:266`, `docs/reference/SECURITY.md:85` | Better host integrity and change safety |
+| P1 | Pending | Make browser-test evidence enforceable in code contract, not only docs/rules | Current browser gate is largely process/policy-driven | `container/rules/andy-developer-operating-rule.md`, `container/rules/jarvis-worker-operating-rule.md`, `src/dispatch-validator.ts` | Higher QA reliability, fewer false handoffs |
+| P2 | Completed (2026-02-23) | Add explicit container CPU/memory limits (Apple Container run args) | Runaway tasks can degrade host runtime | `src/config.ts:49`, `src/container-runner.ts:480` | Better runtime stability under load |
+| P2 | Completed (2026-02-23) | Reduce `getAllTasks()` snapshot overhead per run | Every run writes full task snapshot | `src/index.ts:365`, `src/task-scheduler.ts:70` | Lower startup latency and I/O pressure |
+| P2 | Completed (2026-02-23) | Expand automated tests for container-side runtime behavior | Host tests are strong; container runtime paths still need deeper automated coverage | `vitest.config.ts:5`, `container/worker/runner/src/lib.test.ts:1`, `src/container-runner.test.ts:221` | Earlier regression detection, lower production risk |
+| P2 | Pending | Harden mount allowlist guardrails against permissive roots | Allowlist misconfiguration can become a high-impact risk | `src/mount-security.ts:282`, `src/mount-security.ts:297` | Improved defense against operator misconfiguration |
+| P2 | Pending | Keep security docs and runtime behavior tightly synced | Documentation drift creates operational mistakes | `docs/reference/SECURITY.md`, `docs/operations/roles-classification.md` | Better operator reliability and incident response quality |
+
+## Completion Log
+
+### Completed in this pass (2026-02-23)
+
+1. Monotonic ingest-sequence message cursor migration (`P0`).
+2. Durable dead-letter retry flow for message processing (`P1`).
+3. Persistent WhatsApp outbound queue with safe replay semantics (`P1`).
+4. Explicit container CPU/memory run limits (`P2`).
+5. Per-group task snapshot optimization for non-main runs (`P2`).
+6. Expanded automated container/runtime test coverage (`P2`).
 
 ## Recommended Execution Order
 
 ### Phase 1 (Immediate)
 
 1. Secret scope hardening by role and Bash hook token sanitization.
-2. Cursor model correction (`ingest_seq` style message cursoring).
+2. Cursor model correction (`ingest_seq` style message cursoring). ✅ Completed (2026-02-23)
 
 ### Phase 2 (Reliability)
 
-1. Durable retry + dead-letter strategy for `MAX_RETRIES` exhaustion.
-2. Durable outbound message queue with replay on reconnect/restart.
+1. Durable retry + dead-letter strategy for `MAX_RETRIES` exhaustion. ✅ Completed (2026-02-23)
+2. Durable outbound message queue with replay on reconnect/restart. ✅ Completed (2026-02-23)
 
 ### Phase 3 (Safety + Enforceability)
 
@@ -60,9 +71,9 @@ This document captures a full-architecture optimization audit for NanoClaw, with
 
 ### Phase 4 (Scale + Operability)
 
-1. Container resource limits.
-2. Task snapshot optimization.
-3. Expanded test matrix for container-side runtimes.
+1. Container resource limits. ✅ Completed (2026-02-23)
+2. Task snapshot optimization. ✅ Completed (2026-02-23)
+3. Expanded test matrix for container-side runtimes. ✅ Completed (2026-02-23)
 4. Allowlist guardrail hardening and docs drift checks.
 
 ## Success Metrics
