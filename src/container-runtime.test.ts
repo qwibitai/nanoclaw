@@ -64,11 +64,11 @@ describe('ensureContainerRuntimeRunning', () => {
 
   it('throws when docker info fails', () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('Cannot connect to the Docker daemon');
+      throw new Error('Cannot connect to Docker daemon');
     });
 
     expect(() => ensureContainerRuntimeRunning()).toThrow(
-      'Container runtime is required but failed to start',
+      'Container runtime is required but not reachable',
     );
     expect(logger.error).toHaveBeenCalled();
   });
@@ -78,7 +78,7 @@ describe('ensureContainerRuntimeRunning', () => {
 
 describe('cleanupOrphans', () => {
   it('stops orphaned nanoclaw containers', () => {
-    // docker ps returns container names, one per line
+    // docker ps returns newline-separated container names
     mockExecSync.mockReturnValueOnce('nanoclaw-group1-111\nnanoclaw-group2-222\n');
     // stop calls succeed
     mockExecSync.mockReturnValue('');

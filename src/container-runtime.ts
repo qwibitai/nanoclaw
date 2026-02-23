@@ -30,7 +30,7 @@ export function ensureContainerRuntimeRunning(): void {
       '\n╔════════════════════════════════════════════════════════════════╗',
     );
     console.error(
-      '║  FATAL: Container runtime failed to start                      ║',
+      '║  FATAL: Container runtime not reachable                        ║',
     );
     console.error(
       '║                                                                ║',
@@ -42,15 +42,12 @@ export function ensureContainerRuntimeRunning(): void {
       '║  1. Ensure Docker is installed and running                     ║',
     );
     console.error(
-      '║  2. Run: docker info                                           ║',
-    );
-    console.error(
-      '║  3. Restart NanoClaw                                           ║',
+      '║  2. Restart NanoClaw                                           ║',
     );
     console.error(
       '╚════════════════════════════════════════════════════════════════╝\n',
     );
-    throw new Error('Container runtime is required but failed to start');
+    throw new Error('Container runtime is required but not reachable');
   }
 }
 
@@ -58,7 +55,7 @@ export function ensureContainerRuntimeRunning(): void {
 export function cleanupOrphans(): void {
   try {
     const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} ps --filter name=nanoclaw- --format '{{.Names}}'`,
+      `${CONTAINER_RUNTIME_BIN} ps --filter "name=nanoclaw-" --format "{{.Names}}"`,
       { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
     );
     const orphans = output.trim().split('\n').filter(Boolean);

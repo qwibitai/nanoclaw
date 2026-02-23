@@ -514,6 +514,15 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
+  // Expose read-only tool tokens to process.env so Bash subprocesses (gh, etc.) can use them.
+  // Only non-sensitive tool tokens go here — never API keys or OAuth tokens.
+  const BASH_SAFE_SECRETS = ['GH_TOKEN'];
+  for (const key of BASH_SAFE_SECRETS) {
+    if (containerInput.secrets?.[key]) {
+      process.env[key] = containerInput.secrets[key];
+    }
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 

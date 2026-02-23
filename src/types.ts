@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  memory?: string; // Container memory limit, e.g. '4GiB'. Default: '4GiB'
 }
 
 export interface RegisteredGroup {
