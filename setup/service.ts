@@ -313,37 +313,22 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
     if (staleAfterRemediation) {
       logger.error('Docker group remains stale in systemd session after remediation attempt');
-      console.error(
-        '\nDocker access is stale in the systemd user session.',
-      );
-      console.error('Your user was added to the docker group but the change has not taken effect.\n');
+      console.error('\nDocker group is stale in the systemd session.\n');
 
-      // Provide context-specific guidance based on what failed
+      const retryCmd = 'npx tsx setup/index.ts --step service';
+      const aclCmd = `sudo setfacl -m u:${username}:rw ${aclResult.socketPath}`;
+
       if (aclResult.failureReason === 'setfacl_missing') {
-        console.error('Option A: Install ACL tools and apply socket permissions');
+        console.error('Install ACL tools, then run:');
         console.error('  Ubuntu/Debian: sudo apt install acl');
         console.error('  Fedora/RHEL:   sudo dnf install acl');
-        console.error('  Arch:          sudo pacman -S acl');
-        console.error(`  Then run:      sudo setfacl -m u:${username}:rw ${aclResult.socketPath}`);
-        console.error('  Then re-run:   npx tsx setup/index.ts --step service\n');
+        console.error('  Arch:          sudo pacman -S acl\n');
+        console.error(`Then fix and re-run:\n  ${aclCmd} && ${retryCmd}\n`);
       } else {
-        console.error('Option A: Apply socket ACL (requires sudo)');
-        console.error(`  sudo setfacl -m u:${username}:rw ${aclResult.socketPath}`);
-        console.error('  Then re-run: npx tsx setup/index.ts --step service\n');
+        console.error(`Run this command:\n  ${aclCmd} && ${retryCmd}\n`);
       }
 
-      console.error('Option B: Log out and back in (refreshes group membership)');
-      console.error('  This is the simplest fix if ACL is not available.');
-      console.error('  After logging back in, re-run: npx tsx setup/index.ts --step service\n');
-
-      console.error('Option C: Persistent ACL (survives Docker restarts)');
-      console.error('  1) sudo mkdir -p /etc/systemd/system/docker.service.d');
-      console.error('  2) Create /etc/systemd/system/docker.service.d/socket-acl.conf:');
-      console.error('     [Service]');
-      console.error(`     ExecStartPost=/usr/bin/setfacl -m u:${username}:rw ${aclResult.socketPath}`);
-      console.error('  3) sudo systemctl daemon-reload');
-      console.error('  4) sudo systemctl restart docker');
-      console.error('  5) npx tsx setup/index.ts --step service');
+      console.error(`Alternative: Log out and back in, then re-run:\n  ${retryCmd}\n`);
 
       emitStatus('SETUP_SERVICE', {
         SERVICE_TYPE: 'systemd-user',
@@ -356,12 +341,8 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
         ...(aclResult.failureReason ? { ACL_FAILURE_REASON: aclResult.failureReason } : {}),
         STATUS: 'failed',
         ERROR: 'docker_group_stale',
-        REMEDIATION_OPTION_A: aclResult.failureReason === 'setfacl_missing'
-          ? 'Install acl package, then: sudo setfacl -m u:USERNAME:rw SOCKET_PATH'
-          : `sudo setfacl -m u:${username}:rw ${aclResult.socketPath}`,
-        REMEDIATION_OPTION_B: 'Log out and back in to refresh group membership',
-        REMEDIATION_OPTION_C: 'Create persistent ACL via systemd drop-in (see console output)',
-        RETRY_COMMAND: 'npx tsx setup/index.ts --step service',
+        FIX_COMMAND: `${aclCmd} && ${retryCmd}`,
+        FIX_ALTERNATIVE: 'Log out and back in, then re-run setup',
         LOG: 'logs/setup.log',
       });
       process.exit(1);
