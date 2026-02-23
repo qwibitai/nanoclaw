@@ -17,7 +17,7 @@ Write a JSON file to the IPC tasks directory:
 echo '{"type":"refresh_oauth"}' > /workspace/ipc/tasks/refresh-oauth-$(date +%s).json
 ```
 
-The host picks this up within a few seconds, syncs the latest token from `~/.claude/.credentials.json` into `.env`, and reschedules the next refresh.
+The host picks this up within a few seconds. If the token is still fresh, it syncs it from `~/.claude/.credentials.json` into `.env`. If expired, it invokes the Claude CLI to refresh the token first, then syncs the new one. See `scripts/oauth/README.md` for details.
 
 ## After triggering
 
