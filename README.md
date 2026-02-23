@@ -88,6 +88,16 @@ Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
 
+## Updating
+
+Pull the latest NanoClaw changes into your fork:
+
+```bash
+claude
+```
+
+Then run `/update`. Claude Code fetches upstream, previews changes, merges with your customizations, runs migrations, and verifies the result.
+
 ## Contributing
 
 **Don't add features. Add skills.**
@@ -101,9 +111,7 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 Skills we'd like to see:
 
 **Communication Channels**
-- `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
 - `/add-slack` - Add Slack
-- `/add-discord` - Add Discord
 
 **Platform Support**
 - `/setup-windows` - Windows via WSL2 + Docker

@@ -28,6 +28,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+| `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
 
 ## Development
 
