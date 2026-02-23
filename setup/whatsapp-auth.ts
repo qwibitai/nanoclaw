@@ -207,10 +207,12 @@ async function handleQrBrowser(
   }
 
   // Generate QR SVG and HTML
-  const qrData = fs.readFileSync(qrFile, 'utf-8');
+  const qrData = fs.readFileSync(qrFile, 'utf-8').trim();
   try {
+    // Use base64 to safely pass QR data through shell (avoids escaping issues with special chars)
+    const b64 = Buffer.from(qrData).toString('base64');
     const svg = execSync(
-      `node -e "const QR=require('qrcode');const data=${JSON.stringify(qrData)};QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
+      `node -e "const QR=require('qrcode');const data=Buffer.from('${b64}','base64').toString();QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
       { cwd: projectRoot, encoding: 'utf-8' },
     );
     const html = QR_AUTH_TEMPLATE.replace('{{QR_SVG}}', svg);
