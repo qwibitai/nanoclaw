@@ -531,15 +531,25 @@ export function getRegisteredGroup(
     );
     return undefined;
   }
+  let containerConfig: RegisteredGroup['containerConfig'];
+  if (row.container_config) {
+    try {
+      containerConfig = JSON.parse(row.container_config);
+    } catch (err) {
+      logger.warn(
+        { jid: row.jid, error: err },
+        'Registered group has corrupt container_config',
+      );
+      return undefined;
+    }
+  }
   return {
     jid: row.jid,
     name: row.name,
     folder: row.folder,
     trigger: row.trigger_pattern,
     added_at: row.added_at,
-    containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
-      : undefined,
+    containerConfig,
     requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
   };
 }
@@ -586,14 +596,24 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       );
       continue;
     }
+    let containerConfig: RegisteredGroup['containerConfig'];
+    if (row.container_config) {
+      try {
+        containerConfig = JSON.parse(row.container_config);
+      } catch (err) {
+        logger.warn(
+          { jid: row.jid, error: err },
+          'Skipping registered group with corrupt container_config',
+        );
+        continue;
+      }
+    }
     result[row.jid] = {
       name: row.name,
       folder: row.folder,
       trigger: row.trigger_pattern,
       added_at: row.added_at,
-      containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
-        : undefined,
+      containerConfig,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
     };
   }

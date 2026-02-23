@@ -70,6 +70,18 @@ function buildVolumeMounts(
       readonly: true,
     });
 
+    // Mask .env inside the container to prevent secret leakage.
+    // Secrets are delivered securely via stdin — the .env file must not
+    // be readable from within the container despite the project root mount.
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
