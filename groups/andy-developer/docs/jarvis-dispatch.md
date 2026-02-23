@@ -28,14 +28,16 @@ Worker tasks MUST be sent as a JSON object string. Plain text dispatch is reject
 
 For browser-testing tasks, include explicit mode in `input`:
 
-- `webmcp_required: true` when task must validate WebMCP behavior.
+- `webmcp_required: true` by default for UI-impacting changes.
 - `webmcp_required: false` only when fallback is explicitly approved.
+- `webmcp_assertions: [...]` with task-relevant tool names and expected pass criteria.
+- `fallback_allowed: false` unless explicitly approved.
 
 When `webmcp_required: true`, acceptance tests must include:
 
 1. app/server readiness check
-2. WebMCP registration check (`navigator.modelContext` + tool discovery)
-3. task-specific browser assertion
+2. WebMCP API/registration check (`navigator.modelContext`, `navigator.modelContextTesting`, `modelContextTesting.listTools()`)
+3. task-specific `modelContextTesting.executeTool()` assertion(s)
 
 If WebMCP prerequisites are missing, worker must return blocker evidence instead of silent fallback.
 

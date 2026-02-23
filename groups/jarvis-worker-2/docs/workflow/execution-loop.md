@@ -18,6 +18,9 @@ Task received
     │
     ├─► FEATURE? (has feature-list.json)
     │       └─► implementation skill (IMPLEMENT state)
+    │               └─► UI-impacting delta?
+    │                       ├─► YES → browser-testing skill (WebMCP gate, default)
+    │                       └─► NO  → continue
     │
     ├─► TESTING?
     │       ├─► UNIT/API ──► testing skill
@@ -100,27 +103,46 @@ Detect failure
 
 ## Browser Testing (WebMCP)
 
+Required by default for UI-impacting changes.
+
 **REQUIREMENTS:**
 
-1. Chrome 146+ with `chrome://flags/#enable-webmcp-testing` enabled
-2. App MUST register tools via `navigator.modelContext.registerTool()`
+1. WebMCP-capable browser runtime (Chrome 146+ path; Beta channel is the standard path) with `chrome://flags/#enable-webmcp-testing` enabled
+2. App MUST expose WebMCP tools (imperative `registerTool()/provideContext()` or declarative form annotations like `toolname`)
 3. Server must be running
 4. Browser context required (not headless)
+5. If environment lacks WebMCP capability, report blocker to Andy-developer (do not claim pass)
+6. DOM fallback allowed only when dispatch explicitly permits fallback
 
 **Verification before testing:**
 
 ```javascript
-// Check if app registered tools
-const tools = await navigator.modelContext.getTools();
-if (tools.length === 0) {
+// Check API availability and registration
+if (!navigator.modelContext || !navigator.modelContextTesting) {
+  throw new Error("WebMCP API unavailable in current browser runtime");
+}
+const tools = await navigator.modelContextTesting.listTools();
+if (!Array.isArray(tools) || tools.length === 0) {
   throw new Error("App missing WebMCP registration - cannot test");
 }
 ```
 
+**Assertion execution:**
+
+```javascript
+// Input arguments must be JSON string
+const raw = await navigator.modelContextTesting.executeTool(
+  "<task-specific-tool>",
+  "<json-string>"
+);
+```
+
+Include tool names, inputs, and outputs in completion evidence.
+
 **If app doesn't support WebMCP:**
 
 - Report: "App missing WebMCP registration"
-- Fallback: Use DOM scraping only if explicitly required
+- Fallback: Use DOM scraping only if dispatch explicitly allows fallback
 
 ---
 

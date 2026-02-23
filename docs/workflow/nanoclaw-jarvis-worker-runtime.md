@@ -18,6 +18,11 @@ Runtime contract for OpenCode-based worker containers.
 - model: `opencode/minimax-m2.5-free`
 - instructions: `/workspace/group/CLAUDE.md`
 - skills path: `/home/node/.claude/skills`
+- default MCP servers:
+  - `deepwiki` (remote: `https://mcp.deepwiki.com/mcp`)
+  - `context7` (local: `npx -y @upstash/context7-mcp`)
+  - `token-efficient` (local: `/workspace/mcp-servers/token-efficient-mcp/dist/index.js`)
+  - `chrome-devtools` (local: `npx -y chrome-devtools-mcp --channel=beta`)
 
 Model can be overridden per-group via `containerConfig.model`.
 

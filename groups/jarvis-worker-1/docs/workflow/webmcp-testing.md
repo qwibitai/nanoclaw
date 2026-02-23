@@ -1,95 +1,83 @@
 # WebMCP Testing
 
-Alternative to DOM scraping for browser testing. Uses structured tools instead of screen-scraping.
+Default browser-testing gate for UI-impacting work.
 
 WebMCP is a browser/page capability (`navigator.modelContext`), not a standalone MCP server entry.
 
-## Why WebMCP
+## Default Trigger (Mandatory)
 
-| Approach | Tokens | Reliability |
-|----------|--------|--------------|
-| DOM scraping | High | Brittle |
-| WebMCP tools | Low | Robust |
+Run this workflow by default when any of the following are true:
 
-## Setup
+- dispatched `task_type` is `ui-browser` or `test`
+- dispatch/input includes `webmcp_required: true`
+- task changes UI paths (`src/app`, `src/components`, `pages`, `public`, `*.css`, layout/theme/navigation code)
 
-1. Use a WebMCP-capable Chrome runtime (146+ path; Beta channel is the standard path)
-2. Enable Chrome flag: `chrome://flags/#enable-webmcp-testing`
-3. Install [Model Context Tool Inspector Extension](https://chromewebstore.google.com/detail/model-context-tool-inspec/gbpdfapgefenggkahomfgkhfehlcenpd)
+If trigger conditions are met, do not skip browser validation.
+
+## Environment Requirements
+
+1. Chrome 146+ runtime with `chrome://flags/#enable-webmcp-testing` enabled
+2. Non-headless browsing context available
+3. App server running and reachable on the target route
+4. App registers WebMCP tools (imperative or declarative)
+
+Optional for manual debugging: Model Context Tool Inspector extension.
 
 ## Server Requirement
 
-**ALWAYS:**
-1. Start server before testing: `npm run dev` (or equivalent)
-2. Verify health: `curl localhost:<port>/health`
-3. Stop server after testing: `pkill -f` or kill PID
+Before browser checks:
 
-## WebMCP Registration Verification
+1. Start server (`npm run dev` or project equivalent)
+2. Probe readiness (`curl` on expected route or health endpoint)
+3. Keep server running during tool execution
 
-**BEFORE browser testing:**
+## WebMCP API + Registration Verification (Mandatory)
+
+Use runtime checks before assertions:
 
 ```javascript
-// In browser console or via browser tool
-if (!window.navigator.modelContext) {
+if (!navigator.modelContext || !navigator.modelContextTesting) {
   throw new Error("WebMCP API unavailable in current browser runtime");
 }
-const tools = await navigator.modelContext.getTools();
-if (tools.length === 0) {
+const tools = await navigator.modelContextTesting.listTools();
+if (!Array.isArray(tools) || tools.length === 0) {
   throw new Error("App missing WebMCP registration - cannot test");
 }
 ```
 
-**If tools not registered:**
-- Fail loudly: "WebMCP not available"
-- Do NOT fallback to DOM scraping unless explicitly required
+## Task Assertion Execution (Mandatory)
 
-## Usage
-
-### Register Tools (Imperative)
+Execute at least one task-relevant tool:
 
 ```javascript
-window.navigator.modelContext.registerTool({
-  name: "searchFlights",
-  description: "Search for flights between origin and destination",
-  inputSchema: {
-    type: "object",
-    properties: {
-      origin: { type: "string" },
-      destination: { type: "string" }
-    }
-  },
-  execute: ({ origin, destination }) => {
-    // Your logic here
-    return { content: [{ type: "text", text: "Results..." }] };
-  }
-});
+const raw = await navigator.modelContextTesting.executeTool(
+  "check_sidebar_contrast",
+  "{}"
+);
 ```
 
-### Or Declarative (HTML)
+Notes:
 
-```html
-<form toolname="submitOrder" toolautosubmit action="/order">
-  <input name="item" type="text">
-  <input name="quantity" type="number">
-</form>
-```
+- `executeTool` input arguments must be a JSON string
+- choose tool/assertion based on task objective, not generic smoke only
 
-Declarative forms should include meaningful names/descriptions and parameter metadata where needed (`toolparamtitle`, `toolparamdescription`).
+## Evidence Required In Completion
 
-## WebMCP vs DOM Scraping
+Include a compact WebMCP evidence block with:
 
-| Scenario | Choice |
-|----------|--------|
-| App has WebMCP tools | WebMCP (preferred) |
-| App missing WebMCP | Report error, skip browser test |
-| Browser runtime missing WebMCP API/flag | Report env blocker, escalate to Andy |
-| Critical path needs DOM fallback | Only if explicitly requested |
+1. browser runtime/version evidence
+2. API availability (`modelContext` + `modelContextTesting`)
+3. tool discovery result (`listTools` count + names)
+4. executed tool name(s), input JSON string, and output
+5. pass/fail decision tied to expected behavior
 
-## For Jarvis
+No "browser pass" claims without tool execution evidence.
 
-Use WebMCP when:
-- Testing forms with complex validation
-- Need reliable UI interactions
-- Token efficiency matters
+## Fallback Policy
 
-See: [WebMCP Documentation](https://github.com/GoogleChromeLabs/webmcp-tools)
+DOM/screenshot fallback is allowed only when dispatch explicitly sets:
+
+- `webmcp_required: false`
+- or `fallback_allowed: true`
+
+Otherwise, report blocker and escalate to Andy-Developer.

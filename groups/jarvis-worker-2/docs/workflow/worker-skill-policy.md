@@ -23,21 +23,23 @@ Worker tasks must come from Andy-developer dispatch contract, not direct Andy-bo
 1. Parse task contract (`run_id`, objective, repo, branch, scope, verification).
 2. Select only required skills from the routing table below.
 3. Execute in bounded scope.
-4. Run required verification commands.
-5. For Andy-approved workflow/policy agreements, run `/workspace/group/docs/workflow/agreement-sync.md`.
-6. Return the completion contract.
+4. If task is UI-impacting, apply `/workspace/group/docs/workflow/webmcp-testing.md` by default.
+5. Run required verification commands.
+6. For Andy-approved workflow/policy agreements, run `/workspace/group/docs/workflow/agreement-sync.md`.
+7. Return the completion contract.
 
 ## Skill Routing (Task Mode)
 
 | Task Type | Primary Skills | Optional Skills |
 |-----------|----------------|-----------------|
-| `code` / `fix` / `refactor` | `implementation`, `testing` | `token-efficient`, `react-best-practices` |
+| `code` / `fix` / `refactor` | `implementation`, `testing` | `browser-testing`, `token-efficient`, `react-best-practices` |
 | `test` | `testing` | `browser-testing`, `agent-browser` |
 | `research` | `research-evaluator` | `token-efficient` |
 | `parallel` | `worktree-orchestrator` | `testing`, `react-best-practices` |
 | `ui-browser` | `browser-testing` | `agent-browser` |
 
 For `test` and `ui-browser` tasks, apply `/workspace/group/docs/workflow/webmcp-testing.md` first.
+For `code` / `fix` / `refactor`, apply it when diffs are UI-impacting.
 
 ## Skills Available But Not Default
 
@@ -92,3 +94,4 @@ Use `pr_skipped_reason` when no PR is opened.
 - Escalate to Andy-Developer instead of guessing when requirements are ambiguous.
 - Prefer deterministic verification over prose claims.
 - Do not silently downgrade WebMCP-required tasks to DOM scraping.
+- Do not skip WebMCP evidence on UI-impacting changes unless fallback is explicitly approved.

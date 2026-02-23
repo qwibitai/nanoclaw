@@ -22,6 +22,7 @@ docs/
 - User review readiness gate: `docs/workflow/nanoclaw-github-control-plane.md` (QA handoff section) + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
 - Operational ownership: `docs/operations/roles-classification.md`
 - Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`
+- Skill source-of-truth (global symlinked skills for testing/browser-testing): `docs/operations/roles-classification.md` + `docs/operations/workflow-setup-responsibility-map.md`
 - Agreement-driven auto-sync discipline: `docs/operations/agreement-sync-protocol.md`
 - Runtime vs prebaked boundary: `docs/operations/runtime-vs-prebaked-boundary.md`
 - Change impact: `docs/operations/update-requirements-matrix.md`

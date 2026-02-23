@@ -110,6 +110,35 @@ const ANDY_BOT_PREBAKED_RULES = new Set([
   'andy-bot-operating-rule.md',
 ]);
 
+const WORKER_DEFAULT_OPENCODE_CONFIG = JSON.stringify({
+  model: 'opencode/minimax-m2.5-free',
+  autoupdate: false,
+  instructions: ['/workspace/group/CLAUDE.md'],
+  skills: { paths: ['/home/node/.claude/skills'] },
+  mcp: {
+    deepwiki: {
+      type: 'remote',
+      enabled: true,
+      url: 'https://mcp.deepwiki.com/mcp',
+    },
+    context7: {
+      type: 'local',
+      enabled: true,
+      command: ['npx', '-y', '@upstash/context7-mcp'],
+    },
+    'token-efficient': {
+      type: 'local',
+      enabled: true,
+      command: ['node', '/workspace/mcp-servers/token-efficient-mcp/dist/index.js'],
+    },
+    'chrome-devtools': {
+      type: 'local',
+      enabled: true,
+      command: ['npx', '-y', 'chrome-devtools-mcp', '--channel=beta'],
+    },
+  },
+});
+
 function getPrebakedSkillFilter(group: RegisteredGroup): Set<string> | null {
   if (isWorkerGroup(group)) return WORKER_PREBAKED_SKILLS;
   if (isAndyDeveloperGroup(group)) return ANDY_DEVELOPER_PREBAKED_SKILLS;
@@ -428,6 +457,11 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, group:
     } else {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
+  }
+
+  if (isWorkerGroup(group)) {
+    // Enforce worker MCP defaults at runtime even if the worker image is stale.
+    args.push('-e', `OPENCODE_CONFIG_CONTENT=${WORKER_DEFAULT_OPENCODE_CONFIG}`);
   }
 
   args.push(getContainerImage(group));

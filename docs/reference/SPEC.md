@@ -341,7 +341,7 @@ Sessions enable conversation continuity - Claude remembers what you talked about
    ├── cwd: groups/{group-name}/
    ├── prompt: conversation history + current message
    ├── resume: session_id (for continuity)
-   └── mcpServers: nanoclaw (scheduler)
+   └── mcpServers: nanoclaw + deepwiki + context7 + token-efficient + chrome-devtools
    │
    ▼
 8. Claude processes message:

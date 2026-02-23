@@ -19,6 +19,10 @@ Role contract for NanoClaw + Jarvis operation.
 4. `andy-developer` reviews and resolves to approve/rework.
 5. For user QA requests, `andy-developer` stages (or clones if missing) the approved branch/commit in `NanoClawWorkspace`, runs local preflight (`build` + `server start/health`) on that same branch/commit, verifies no duplicate same-lane running containers, then provides user-run local testing commands.
 
+For UI-impacting changes, browser verification is default:
+- `andy-developer` dispatches WebMCP-required acceptance checks unless fallback is explicitly approved.
+- `jarvis-worker-*` must return WebMCP evidence (`modelContextTesting.listTools()` and task-relevant `executeTool()` output) before approval is eligible.
+
 ## Access Policy
 
 - `andy-bot` and `andy-developer` both retain GitHub access (`GITHUB_TOKEN`/`GH_TOKEN`) for `openclaw-gurusharan` activity.
@@ -26,6 +30,13 @@ Role contract for NanoClaw + Jarvis operation.
 - `andy-developer` owns GitHub workflow/review governance changes; workers focus on repository implementation tasks.
 - `andy-developer` decides whether `@claude` review is required, optional, or disabled per project requirement profile.
 - Local review handoff checks are default behavior for `andy-developer` when declaring "ready for user review" (not reminder-driven).
+
+## Skill Source Of Truth
+
+- `container/skills/testing` is a symlink to `~/.claude/skills/testing`.
+- `container/skills/browser-testing` is a symlink to `~/.claude/skills/browser-testing`.
+- Update WebMCP testing behavior in those global `SKILL.md` targets so Andy and Jarvis lanes receive the same policy.
+- `container/skills/agent-browser/SKILL.md` remains local in-repo and is not part of the global testing/browser-testing sync path.
 
 ## Related Map
 

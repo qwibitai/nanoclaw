@@ -446,7 +446,11 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__deepwiki__*',
+        'mcp__context7__*',
+        'mcp__token-efficient__*',
+        'mcp__chrome-devtools__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -461,6 +465,22 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
+        },
+        deepwiki: {
+          type: 'http',
+          url: 'https://mcp.deepwiki.com/mcp',
+        },
+        context7: {
+          command: 'npx',
+          args: ['-y', '@upstash/context7-mcp'],
+        },
+        'token-efficient': {
+          command: 'node',
+          args: ['/workspace/mcp-servers/token-efficient-mcp/dist/index.js'],
+        },
+        'chrome-devtools': {
+          command: 'npx',
+          args: ['-y', 'chrome-devtools-mcp', '--channel=beta'],
         },
       },
       hooks: {

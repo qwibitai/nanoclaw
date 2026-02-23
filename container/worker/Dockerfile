@@ -19,7 +19,7 @@ COPY runner/index.js /app/index.js
 
 # OpenCode config via OPENCODE_CONFIG_CONTENT env var (highest precedence).
 # Keep a pinned free model; load group CLAUDE.md and skill path deterministically.
-ENV OPENCODE_CONFIG_CONTENT='{"model":"opencode/minimax-m2.5-free","autoupdate":false,"instructions":["/workspace/group/CLAUDE.md"],"skills":{"paths":["/home/node/.claude/skills"]}}'
+ENV OPENCODE_CONFIG_CONTENT='{"model":"opencode/minimax-m2.5-free","autoupdate":false,"instructions":["/workspace/group/CLAUDE.md"],"skills":{"paths":["/home/node/.claude/skills"]},"mcp":{"deepwiki":{"type":"remote","enabled":true,"url":"https://mcp.deepwiki.com/mcp"},"context7":{"type":"local","enabled":true,"command":["npx","-y","@upstash/context7-mcp"]},"token-efficient":{"type":"local","enabled":true,"command":["node","/workspace/mcp-servers/token-efficient-mcp/dist/index.js"]},"chrome-devtools":{"type":"local","enabled":true,"command":["npx","-y","chrome-devtools-mcp","--channel=beta"]}}}'
 ENV WORKER_GIT_NAME='Andy (openclaw-gurusharan)'
 ENV WORKER_GIT_EMAIL='openclaw-gurusharan@users.noreply.github.com'
 

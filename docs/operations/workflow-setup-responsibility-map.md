@@ -19,6 +19,7 @@ Canonical map for selecting workflow setup, assigning responsibility, and knowin
 | Role boundaries (Andy vs Jarvis) | `andy-developer` + core maintainer | `docs/operations/roles-classification.md`, `container/rules/andy-developer-operating-rule.md`, `src/ipc.ts` | `groups/andy-developer/CLAUDE.md`, `groups/jarvis-worker-*/CLAUDE.md` |
 | Worker dispatch/completion contract | core maintainer + `andy-developer` | `src/dispatch-validator.ts`, `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`, `src/jarvis-worker-dispatch.test.ts` | `groups/andy-developer/docs/jarvis-dispatch.md` |
 | Worker runtime setup (OpenCode/image/mounts) | core maintainer + `andy-developer` | `container/worker/*`, `src/container-runner.ts`, `docs/workflow/nanoclaw-jarvis-worker-runtime.md` | `groups/jarvis-worker-*/docs/workflow/*` |
+| Browser test skill behavior (WebMCP gate, pass/fail evidence) | core maintainer + `andy-developer` | `docs/operations/roles-classification.md`, `container/rules/andy-developer-operating-rule.md`, `container/rules/jarvis-worker-operating-rule.md` | `~/.claude/skills/testing/SKILL.md`, `~/.claude/skills/browser-testing/SKILL.md` (mounted via `container/skills/testing` and `container/skills/browser-testing` symlinks) |
 | Product implementation tasks | `jarvis-worker-*` | product repo source + tests | worker group docs/memory as needed |
 
 ## Update Protocol
@@ -32,5 +33,6 @@ Canonical map for selecting workflow setup, assigning responsibility, and knowin
 ## Notes
 
 - `groups/*` instruction surfaces are commit-tracked in this repo (`CLAUDE.md`, `docs/*`, memory markdown, and selected runtime config files per `.gitignore`).
+- `container/skills/testing` and `container/skills/browser-testing` are symlinks to `~/.claude/skills/*`; edit the target files, not copied files in-repo.
 - For change impact matrix, see `docs/operations/update-requirements-matrix.md`.
 - For placement decisions (runtime vs prebaked), see `docs/operations/runtime-vs-prebaked-boundary.md`.
