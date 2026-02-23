@@ -21,6 +21,7 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  unregisterGroup: (jid: string) => boolean;
   syncGroupMetadata: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -386,6 +387,26 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'unregister_group':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized unregister_group attempt blocked',
+        );
+        break;
+      }
+      if (data.jid) {
+        const deleted = deps.unregisterGroup(data.jid);
+        if (deleted) {
+          logger.info({ jid: data.jid, sourceGroup }, 'Group unregistered via IPC');
+        } else {
+          logger.warn({ jid: data.jid, sourceGroup }, 'unregister_group: JID not found');
+        }
+      } else {
+        logger.warn({ data }, 'Invalid unregister_group request - missing jid');
       }
       break;
 
