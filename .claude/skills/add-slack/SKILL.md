@@ -79,6 +79,7 @@ If the user doesn't have tokens, walk them through creating a Slack app:
 >    - `im:history` — read DMs
 >    - `mpim:history` — read group DMs
 >    - `users:read` — resolve display names
+>    - `files:write` — upload files
 > 5. In **Event Subscriptions**: enable events and subscribe to the **Bot Events**:
 >    - `message.channels`
 >    - `message.groups`
@@ -198,6 +199,23 @@ tail -f logs/nanoclaw.log
 ### Replies appear in History tab instead of Chat tab
 
 Enable **Agents & Assistants** in the Slack app settings (see Phase 4b). Without this, `chat.postMessage` posts standalone messages that land in History. With it enabled, the `Assistant` middleware routes replies into the correct Chat tab thread.
+
+### Container exits with code 1 after restart ("error_during_execution")
+
+After killing and restarting NanoClaw, the DB may hold a stale session ID that no longer exists on disk. The container tries to resume it, fails, and exits with code 1.
+
+Fix — clear the stale session from the DB:
+
+```bash
+node --input-type=module << 'EOF'
+import Database from 'better-sqlite3';
+const db = new Database('store/messages.db');
+db.prepare("DELETE FROM sessions WHERE group_folder = 'main'").run();
+console.log('Cleared');
+EOF
+```
+
+The next message will start a fresh session automatically.
 
 ### Missing scopes error
 

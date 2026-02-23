@@ -7,6 +7,11 @@ adds:
 modifies:
   - src/index.ts
   - src/config.ts
+  - src/types.ts
+  - src/ipc.ts
+  - src/router.ts
+  - src/db.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
 structured:
   npm_dependencies:
     "@slack/bolt": "^4.0.0"

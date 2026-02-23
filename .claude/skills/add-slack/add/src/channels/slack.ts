@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 import { App, Assistant, LogLevel } from '@slack/bolt';
 
 import { SLACK_APP_TOKEN, SLACK_BOT_TOKEN } from '../config.js';
@@ -188,5 +191,40 @@ export class SlackChannel implements Channel {
 
   async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
     // Slack doesn't support typing indicators via API; no-op
+  }
+
+  async sendFile(jid: string, filePath: string, comment?: string): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    const threadTs = this.activeThreads.get(jid);
+    const filename = path.basename(filePath);
+    const fileContent = fs.readFileSync(filePath);
+
+    try {
+      // Step 1: Get upload URL
+      const { upload_url, file_id } = await this.app.client.files.getUploadURLExternal({
+        filename,
+        length: fileContent.length,
+      }) as { upload_url: string; file_id: string };
+
+      // Step 2: Upload file content
+      await fetch(upload_url, {
+        method: 'POST',
+        body: fileContent,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      });
+
+      // Step 3: Complete upload and post to channel
+      await this.app.client.files.completeUploadExternal({
+        files: [{ id: file_id, title: filename }],
+        channel_id: channelId,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+        ...(comment ? { initial_comment: comment } : {}),
+      });
+
+      logger.info({ jid, filename, threadTs }, 'Slack file sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Slack file');
+      throw err;
+    }
   }
 }
