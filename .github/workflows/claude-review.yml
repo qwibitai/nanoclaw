@@ -1,0 +1,33 @@
+name: Claude Review (On Demand)
+
+on:
+  pull_request:
+    types: [opened, synchronize, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-review:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.body, '@claude')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this pull request with a reviewer mindset.
+            Prioritize:
+            1) correctness and regressions
+            2) security and policy risks
+            3) missing tests and verification gaps
+            4) alignment with repository CLAUDE.md and workflow contracts
+
+            Return concise, actionable findings first.

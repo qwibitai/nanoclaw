@@ -18,7 +18,10 @@ docs/
 - Architecture first: `docs/architecture/nanoclaw-system-architecture.md`
 - Workflow contract: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
 - Runtime behavior: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
+- GitHub control-plane: `docs/workflow/nanoclaw-github-control-plane.md`
 - Operational ownership: `docs/operations/roles-classification.md`
+- Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`
+- Runtime vs prebaked boundary: `docs/operations/runtime-vs-prebaked-boundary.md`
 - Change impact: `docs/operations/update-requirements-matrix.md`
 - Debug loop: `docs/troubleshooting/DEBUG_CHECKLIST.md`
 

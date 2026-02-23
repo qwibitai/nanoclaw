@@ -19,6 +19,9 @@ BEFORE changing Jarvis architecture/state machine → read docs/architecture/nan
 BEFORE changing worker contract code/docs → read .claude/rules/jarvis-dispatch-contract-discipline.md
 BEFORE changing worker dispatch validation/contracts → read docs/workflow/nanoclaw-jarvis-dispatch-contract.md
 BEFORE changing worker container runtime/mounts/model config → read docs/workflow/nanoclaw-jarvis-worker-runtime.md
+BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/nanoclaw-github-control-plane.md
+BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
+BEFORE deciding runtime-local vs prebaked container placement → read docs/operations/runtime-vs-prebaked-boundary.md
 BEFORE debugging Andy/Jarvis worker flow issues → read .claude/rules/nanoclaw-jarvis-debug-loop.md
 BEFORE debugging Apple Container build/runtime issues → read docs/troubleshooting/DEBUG_CHECKLIST.md and docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md
 ```

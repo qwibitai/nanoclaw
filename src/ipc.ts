@@ -9,6 +9,7 @@ import {
   MAIN_GROUP_FOLDER,
   TIMEZONE,
 } from './config.js';
+import { parseDispatchPayload, validateDispatchPayload } from './dispatch-validator.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { logger } from './logger.js';
@@ -64,6 +65,33 @@ function canIpcAccessTaskGroup(
   return false;
 }
 
+function validateAndyWorkerDispatchMessage(
+  sourceGroup: string,
+  targetGroup: RegisteredGroup | undefined,
+  text: string,
+): { valid: boolean; reason?: string } {
+  // For andy-developer -> jarvis-worker messages, enforce strict dispatch contract.
+  if (
+    sourceGroup !== 'andy-developer'
+    || !targetGroup
+    || !isJarvisWorkerFolder(targetGroup.folder)
+  ) {
+    return { valid: true };
+  }
+
+  const parsed = parseDispatchPayload(text);
+  if (!parsed) {
+    return { valid: false, reason: 'andy-developer -> jarvis-worker message must be strict JSON dispatch payload' };
+  }
+
+  const { valid, errors } = validateDispatchPayload(parsed);
+  if (!valid) {
+    return { valid: false, reason: `invalid dispatch payload: ${errors.join('; ')}` };
+  }
+
+  return { valid: true };
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -108,7 +136,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                if (canIpcAccessTarget(sourceGroup, isMain, targetGroup)) {
+                const canAccessTarget = canIpcAccessTarget(sourceGroup, isMain, targetGroup);
+                const dispatchValidation = validateAndyWorkerDispatchMessage(
+                  sourceGroup,
+                  targetGroup,
+                  data.text,
+                );
+
+                if (canAccessTarget && dispatchValidation.valid) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
@@ -116,7 +151,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 } else {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      reason: canAccessTarget
+                        ? dispatchValidation.reason
+                        : 'target authorization failed',
+                    },
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
@@ -236,6 +277,28 @@ export async function processTaskIpc(
             'Unauthorized schedule_task attempt blocked',
           );
           break;
+        }
+
+        if (
+          sourceGroup === 'andy-developer'
+          && isJarvisWorkerFolder(targetFolder)
+        ) {
+          const parsed = parseDispatchPayload(data.prompt);
+          if (!parsed) {
+            logger.warn(
+              { sourceGroup, targetFolder },
+              'Blocked schedule_task: andy-developer worker prompt must be strict dispatch JSON',
+            );
+            break;
+          }
+          const { valid, errors } = validateDispatchPayload(parsed);
+          if (!valid) {
+            logger.warn(
+              { sourceGroup, targetFolder, errors },
+              'Blocked schedule_task: invalid worker dispatch payload',
+            );
+            break;
+          }
         }
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';

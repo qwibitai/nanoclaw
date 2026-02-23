@@ -50,6 +50,26 @@ const JARVIS_WORKER_GROUP: RegisteredGroup = {
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
 
+const VALID_WORKER_DISPATCH_PROMPT = JSON.stringify({
+  run_id: 'run-20260223-001',
+  task_type: 'implement',
+  input: 'Implement and validate the requested feature',
+  repo: 'openclaw-gurusharan/nanoclaw',
+  branch: 'jarvis-feature-dispatch-contract',
+  acceptance_tests: ['npm run build', 'npm test'],
+  output_contract: {
+    required_fields: [
+      'run_id',
+      'branch',
+      'commit_sha',
+      'files_changed',
+      'test_result',
+      'risk',
+      'pr_skipped_reason',
+    ],
+  },
+});
+
 beforeEach(() => {
   _initTestDatabase();
 
@@ -146,7 +166,7 @@ describe('schedule_task authorization', () => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: 'delegate to worker',
+        prompt: VALID_WORKER_DISPATCH_PROMPT,
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
         targetJid: 'jarvis-1@g.us',
@@ -159,6 +179,24 @@ describe('schedule_task authorization', () => {
     const allTasks = getAllTasks();
     expect(allTasks.length).toBe(1);
     expect(allTasks[0].group_folder).toBe('jarvis-worker-1');
+  });
+
+  it('andy-developer cannot schedule worker task with invalid dispatch payload', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'delegate to worker',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'jarvis-1@g.us',
+      },
+      'andy-developer',
+      false,
+      deps,
+    );
+
+    const allTasks = getAllTasks();
+    expect(allTasks.length).toBe(0);
   });
 
   it('andy-developer cannot schedule for non-worker group', async () => {
