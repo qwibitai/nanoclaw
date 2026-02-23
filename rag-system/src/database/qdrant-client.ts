@@ -71,7 +71,7 @@ class QdrantClientWrapper {
             distance: config.qdrant.distance,
           },
           optimizers_config: {
-            indexing_threshold: 10000,
+            indexing_threshold: 100,
           },
         });
 
