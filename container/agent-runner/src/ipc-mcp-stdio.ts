@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { SonosDevice, SonosManager } from '@svrooij/sonos';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -317,6 +318,148 @@ Optionally specify a branch to checkout before pulling. The container will termi
         },
       ],
     };
+  },
+);
+
+// Sonos control
+const SONOS_SPEAKER_IP = process.env.SONOS_SPEAKER_IP;
+const SONOS_TTS_ENDPOINT = process.env.SONOS_TTS_ENDPOINT || 'https://api.streamelements.com/kappa/v2/speech';
+
+let sonosDevice: SonosDevice | null = null;
+let sonosManager: SonosManager | null = null;
+
+async function getSonosDevice(): Promise<SonosDevice> {
+  if (sonosDevice) return sonosDevice;
+
+  if (!SONOS_SPEAKER_IP) {
+    throw new Error('SONOS_SPEAKER_IP environment variable not set. Please configure a speaker IP address.');
+  }
+
+  sonosDevice = new SonosDevice(SONOS_SPEAKER_IP);
+  await sonosDevice.LoadDeviceData();
+  return sonosDevice;
+}
+
+server.tool(
+  'sonos',
+  `Control Sonos speakers - play/pause music, adjust volume, send TTS announcements.
+
+Actions:
+- discover: Find all Sonos speakers on network
+- play: Resume playback
+- pause: Pause playback
+- next: Skip to next track
+- previous: Go to previous track
+- volume: Get or set volume (0-100)
+- tts: Send text-to-speech announcement
+- status: Get current playback status`,
+  {
+    action: z.enum(['play', 'pause', 'next', 'previous', 'volume', 'tts', 'discover', 'status']).describe('Action to perform'),
+    volume: z.number().min(0).max(100).optional().describe('Volume level (0-100) for volume or tts actions'),
+    text: z.string().optional().describe('Text to speak for TTS action'),
+    lang: z.string().optional().describe('Language code for TTS (e.g., en-US, es-ES)'),
+  },
+  async (args) => {
+    try {
+      let result: string;
+
+      switch (args.action) {
+        case 'discover': {
+          if (!sonosManager) {
+            sonosManager = new SonosManager();
+          }
+          await sonosManager.InitializeWithDiscovery(10);
+          const devices = sonosManager.Devices.map(d =>
+            `- ${d.Name} (${d.Host}) - Group: ${d.GroupName}`
+          ).join('\n');
+          result = `Found ${sonosManager.Devices.length} Sonos speaker(s):\n${devices}`;
+          break;
+        }
+
+        case 'play': {
+          const device = await getSonosDevice();
+          await device.Play();
+          result = `▶️ Playing on ${device.Name}`;
+          break;
+        }
+
+        case 'pause': {
+          const device = await getSonosDevice();
+          await device.Pause();
+          result = `⏸️ Paused on ${device.Name}`;
+          break;
+        }
+
+        case 'next': {
+          const device = await getSonosDevice();
+          await device.Next();
+          result = `⏭️ Skipped to next track on ${device.Name}`;
+          break;
+        }
+
+        case 'previous': {
+          const device = await getSonosDevice();
+          await device.Previous();
+          result = `⏮️ Back to previous track on ${device.Name}`;
+          break;
+        }
+
+        case 'volume': {
+          const device = await getSonosDevice();
+          if (args.volume === undefined) {
+            const vol = await device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' });
+            result = `🔊 Current volume: ${vol.CurrentVolume}`;
+          } else {
+            await device.SetVolume(args.volume);
+            result = `🔊 Volume set to ${args.volume} on ${device.Name}`;
+          }
+          break;
+        }
+
+        case 'tts': {
+          if (!args.text) {
+            throw new Error('TTS requires text parameter');
+          }
+          const device = await getSonosDevice();
+          await device.PlayTTS({
+            text: args.text,
+            lang: args.lang || 'en-US',
+            gender: 'male',
+            volume: args.volume || 50,
+            endpoint: SONOS_TTS_ENDPOINT,
+          });
+          result = `🔊 TTS announcement sent to ${device.Name}`;
+          break;
+        }
+
+        case 'status': {
+          const device = await getSonosDevice();
+          const state = await device.AVTransportService.GetTransportInfo();
+          const position = await device.AVTransportService.GetPositionInfo();
+          const volume = await device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' });
+
+          result = [
+            `📊 Status for ${device.Name}:`,
+            `State: ${state.CurrentTransportState}`,
+            `Track: ${position.TrackMetaData ? 'Playing' : 'Stopped'}`,
+            `Volume: ${volume.CurrentVolume}`,
+            `Group: ${device.GroupName}`,
+          ].join('\n');
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown action: ${args.action}`);
+      }
+
+      return { content: [{ type: 'text' as const, text: result }] };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text' as const, text: `❌ Sonos error: ${errorMessage}` }],
+        isError: true,
+      };
+    }
   },
 );
 
