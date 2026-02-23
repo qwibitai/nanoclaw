@@ -388,6 +388,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -461,6 +462,18 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Track the last assistant text so we can use it as fallback when the
+      // result event has no text (e.g. agent wrote text then did a final tool call)
+      const content = (message as { message?: { content?: unknown } }).message?.content;
+      if (Array.isArray(content)) {
+        const textBlocks = content
+          .filter((b: { type: string }) => b.type === 'text')
+          .map((b: { text: string }) => b.text)
+          .join('');
+        if (textBlocks) lastAssistantText = textBlocks;
+      } else if (typeof content === 'string' && content) {
+        lastAssistantText = content;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -476,12 +489,17 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      // When the agent writes text then does a final tool call (e.g. closing the
+      // browser), the result event has no text. Fall back to the last assistant
+      // text so the user still gets the response.
+      const effectiveResult = textResult || lastAssistantText || null;
+      log(`Result #${resultCount}: subtype=${message.subtype}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId
       });
+      lastAssistantText = undefined;
     }
   }
 
