@@ -7,10 +7,9 @@
 ## Active Threads
 
 ### System Enhancement
-- **Ars Contexta Integration**: Implementing three-space architecture and discovery-first memory design
+- **Knowledge System Maintenance**: Processing skills and post-merge automation
   - Status: In progress
-  - Branch: feat/ars-contexta-integration
-  - Next: Complete self/ space setup, create processing skills
+  - Next: Verify /remember, /reflect, /review skills work correctly
 
 ### User Assistance
 - No active assistance threads currently
@@ -21,25 +20,27 @@
 
 ## Recently Completed
 
-- Cloned and analyzed Ars Contexta repository
-- Created three-space architecture (self/, memory/, ops/)
-- Drafted identity.md and methodology.md
-- Created feature branch for integration work
+- **Ars Contexta Integration** (PR #6, merged) — Three-space architecture (self/, memory/, ops/), identity.md, methodology.md, discovery-first memory design
+- **Self-Edit Workflow** (PR #7, merged) — Safe PR-based workflow for modifying own source code, boot auto-pull, rollback
+- **Personality Interview** (PR #8, merged) — Communication preferences, response structure guidelines, proactivity settings
+- **Sonos Integration** — Speaker control via local and cloud API with OAuth support
+- **Agent Heartbeat** — Prevents container timeout during long SDK turns
+- **IPC-MCP Bridge** — Message debounce, GH_TOKEN passthrough, gh REST API hook
 
 ## Learnings This Session
 
-- Discovered Ars Contexta's research-backed approach to agent memory
-- Learned about three-space separation and its failure modes
-- Understood discovery-first design principles
-- Mapped out integration strategy for WhatsApp bot context
+- Knowledge system drifts when feature branches merge without updating memory/goals
+- Processing skills (/remember, /reflect, /review) needed as invocable skills, not just documentation references
+- Post-merge automation can prevent future knowledge drift
 
 ## Next Session
 
 When starting next session:
 1. Review this goals file for context
-2. Check ops/observations/ for any friction points
-3. Continue with pending todo items (processing skills, session rhythm)
+2. Check `ops/queue/` for pending knowledge updates
+3. Check ops/observations/ for any friction points
+4. Run `/review` if queue entries are pending
 
 ---
 
-*Last updated: 2026-02-21 05:05 UTC*
+*Last updated: 2026-02-22*

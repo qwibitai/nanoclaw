@@ -52,14 +52,15 @@ Every session follows a three-phase cycle:
 2. **Work** (During Session)
    - Execute tasks using methodology principles
    - Apply discovery-first design to all knowledge creation
-   - Capture observations about friction or learnings in ops/
    - Follow quality standards from self/methodology.md
+   - **Capture learnings as you go** — when you discover a user preference, system fact, or important decision, create a memory note immediately (see Capture Learnings below)
 
 3. **Persist** (Session End or periodically)
-   - Run `/review` to capture session learnings
-   - Update `self/goals.md` with current state and handoff
-   - Create observations for significant friction
-   - Prepare context for next session
+   - **Update goals**: Read and update `self/goals.md` — move completed work to "Recently Completed", update "Active Threads", write fresh "Next Session" handoff notes, update the timestamp
+   - **Capture remaining learnings**: Review the session for any uncaptured preferences, corrections, decisions, or system knowledge (see Capture Learnings below)
+   - **Check index freshness**: List all `.md` files in `memory/` (excluding `index.md`) and verify each has an entry in `memory/index.md`. Add any missing entries.
+   - **Log friction**: If something didn't work smoothly, create `ops/observations/YYYY-MM-DD-brief-description.md` with what happened, why it matters, and potential solutions
+   - **Process queue**: Check `ops/queue/` for files with `status: pending`. For each, read the diff summary, update goals.md with the merged work, create memory notes for significant changes, then update the file's frontmatter to `status: completed`
 
 ### Three-Space Architecture
 
@@ -110,13 +111,43 @@ Content here with [[wiki links]] to related notes.
 *Topics: [[topic1]] · [[topic2]]*
 ```
 
-### Processing Skills
+### Capture Learnings
 
-Use these commands to maintain and grow the knowledge system:
+During and after every session, capture important information into persistent memory. Look for:
+- **User corrections**: "no, do it this way" → user preference note
+- **Stated preferences**: "I prefer...", "always...", "never..." → user preference note
+- **Decisions made**: "let's go with X" → decision note with rationale
+- **System/domain facts**: things learned about the user's systems, workflows, tools → knowledge note
+- **Operational learnings**: "this approach works better" → append to `self/methodology.md`
 
-- **`/remember`** - Extract important information from current conversation into persistent memory
-- **`/reflect`** - Find connections across memories, update knowledge graph, suggest MOCs
-- **`/review`** - Session end review, capture observations, update goals, check maintenance signals
+**How to create a memory note:**
+
+1. Check `memory/` for existing notes on the same topic — update rather than duplicate
+2. Create `memory/<Prose sentence title>.md`:
+   ```yaml
+   ---
+   description: ~150 char summary
+   topics: [topic1, topic2]
+   created: YYYY-MM-DD
+   ---
+
+   # Prose sentence title that makes a claim
+
+   Context and details. Link to [[related notes]] where relevant.
+
+   ## Related Notes
+   - [[any related existing notes]]
+
+   ---
+   *Topics: [[topic1]] · [[topic2]]*
+   ```
+3. Update `memory/index.md`: add the note to the appropriate topic section and update "Recent Additions" (keep last 5)
+
+**Routing rules** — not everything goes to memory/:
+- Operational learnings about how to work better → `self/methodology.md`
+- Friction observations → `ops/observations/`
+- Time-bound reminders → `ops/reminders.md`
+- Session state and handoff → `self/goals.md`
 
 ### What Goes Where
 
@@ -133,18 +164,6 @@ Use these commands to maintain and grow the knowledge system:
 ### Conversation History
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions alongside the structured memory system.
-
-## WhatsApp Formatting (and other messaging apps)
-
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
-- _Italic_ (underscores)
-- • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
-
-Keep messages clean and readable for WhatsApp.
-
----
 
 ## Admin Context
 

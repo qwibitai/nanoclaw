@@ -21,18 +21,26 @@ Memory is organized as a flat directory of interconnected notes using wiki-style
 
 - [[User prefers single asterisks for bold in WhatsApp messages]]
 - [[User wants discovery-first memory design]]
+- [[User prefers brief responses with option to elaborate]]
 
 ### System Knowledge
 
 - [[Ars Contexta provides research-backed agent memory architecture]]
+- [[Progress indicators help users track long-running tasks]]
+
+### Users
+
+User profiles and context are stored in the `users/` directory with phone-number filenames.
 
 ## Recent Additions
 
 *Last 5 notes will be tracked here*
 
-1. (2026-02-21) [[Ars Contexta provides research-backed agent memory architecture]]
-2. (2026-02-21) [[User prefers single asterisks for bold in WhatsApp messages]]
-3. (2026-02-21) [[User wants discovery-first memory design]]
+1. (2026-02-22) [[User prefers brief responses with option to elaborate]]
+2. (2026-02-21) [[Progress indicators help users track long-running tasks]]
+3. (2026-02-21) [[Ars Contexta provides research-backed agent memory architecture]]
+4. (2026-02-21) [[User prefers single asterisks for bold in WhatsApp messages]]
+5. (2026-02-21) [[User wants discovery-first memory design]]
 
 ---
 

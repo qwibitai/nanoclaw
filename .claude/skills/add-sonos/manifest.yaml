@@ -1,0 +1,16 @@
+skill: sonos
+version: 1.0.0
+description: "Sonos speaker control with music playback and TTS announcements"
+core_version: 0.1.0
+adds:
+  - container/tools/sonos.ts
+modifies: []
+structured:
+  npm_dependencies:
+    "@svrooij/sonos": "^2.5.0"
+  env_additions:
+    - SONOS_SPEAKER_IP
+    - SONOS_TTS_ENDPOINT
+conflicts: []
+depends: []
+test: ""

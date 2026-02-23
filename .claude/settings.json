@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/session-orient.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

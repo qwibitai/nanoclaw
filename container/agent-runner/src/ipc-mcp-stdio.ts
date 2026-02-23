@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { SonosDevice, SonosManager } from '@svrooij/sonos';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -317,6 +318,302 @@ Optionally specify a branch to checkout before pulling. The container will termi
         },
       ],
     };
+  },
+);
+
+// Sonos control
+const SONOS_CONTROL_MODE = process.env.SONOS_CONTROL_MODE || 'local'; // 'local' | 'cloud'
+const SONOS_SPEAKER_IP = process.env.SONOS_SPEAKER_IP;
+const SONOS_TTS_ENDPOINT = process.env.SONOS_TTS_ENDPOINT || 'https://api.streamelements.com/kappa/v2/speech';
+const SONOS_REFRESH_TOKEN = process.env.SONOS_REFRESH_TOKEN;
+const SONOS_CLIENT_ID = process.env.SONOS_CLIENT_ID;
+const SONOS_CLIENT_SECRET = process.env.SONOS_CLIENT_SECRET;
+const SONOS_HOUSEHOLD_ID = process.env.SONOS_HOUSEHOLD_ID;
+
+let sonosDevice: SonosDevice | null = null;
+let sonosManager: SonosManager | null = null;
+let sonosAccessToken: string | null = process.env.SONOS_ACCESS_TOKEN || null;
+let tokenExpiresAt: number = 0;
+
+async function getSonosDevice(): Promise<SonosDevice> {
+  if (sonosDevice) return sonosDevice;
+
+  if (!SONOS_SPEAKER_IP) {
+    throw new Error('SONOS_SPEAKER_IP environment variable not set. Please configure a speaker IP address.');
+  }
+
+  sonosDevice = new SonosDevice(SONOS_SPEAKER_IP);
+  await sonosDevice.LoadDeviceData();
+  return sonosDevice;
+}
+
+// Cloud API helpers
+async function refreshSonosToken(): Promise<string> {
+  if (!SONOS_REFRESH_TOKEN) {
+    throw new Error('SONOS_REFRESH_TOKEN not set. Cannot refresh token.');
+  }
+  if (!SONOS_CLIENT_ID || !SONOS_CLIENT_SECRET) {
+    throw new Error('SONOS_CLIENT_ID and SONOS_CLIENT_SECRET required for token refresh.');
+  }
+
+  const credentials = Buffer.from(`${SONOS_CLIENT_ID}:${SONOS_CLIENT_SECRET}`).toString('base64');
+
+  const response = await fetch('https://api.sonos.com/login/v3/oauth/access', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${credentials}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: `grant_type=refresh_token&refresh_token=${SONOS_REFRESH_TOKEN}`,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to refresh Sonos token: ${response.status} ${error}`);
+  }
+
+  const data = await response.json() as { access_token: string; expires_in: number };
+  sonosAccessToken = data.access_token;
+  tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 300000; // Refresh 5min early
+
+  return data.access_token;
+}
+
+async function getSonosAccessToken(): Promise<string> {
+  // Check if token needs refresh (expires in <5 min or already expired)
+  if (sonosAccessToken && Date.now() < tokenExpiresAt) {
+    return sonosAccessToken;
+  }
+
+  // Token expired or will expire soon - refresh it
+  if (SONOS_REFRESH_TOKEN && SONOS_CLIENT_ID && SONOS_CLIENT_SECRET) {
+    return await refreshSonosToken();
+  }
+
+  // No refresh capability - use static token from env
+  if (sonosAccessToken) {
+    return sonosAccessToken;
+  }
+
+  throw new Error('SONOS_ACCESS_TOKEN not set. Run OAuth setup first.');
+}
+
+async function sonosCloudRequest(endpoint: string, options: { method?: string; body?: unknown } = {}): Promise<unknown> {
+  if (!SONOS_HOUSEHOLD_ID) {
+    throw new Error('SONOS_HOUSEHOLD_ID not set. Run OAuth setup first.');
+  }
+
+  const token = await getSonosAccessToken();
+
+  const response = await fetch(`https://api.ws.sonos.com/control/api/v1/households/${SONOS_HOUSEHOLD_ID}${endpoint}`, {
+    method: options.method || 'GET',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Sonos Cloud API error: ${response.status} ${error}`);
+  }
+
+  return response.json();
+}
+
+server.tool(
+  'sonos',
+  `Control Sonos speakers - play/pause music, adjust volume, send TTS announcements.
+
+Mode: ${SONOS_CONTROL_MODE} (local = LAN control, cloud = OAuth API)
+
+Actions:
+- discover: Find all Sonos speakers on network (local mode only)
+- play: Resume playback
+- pause: Pause playback
+- next: Skip to next track
+- previous: Go to previous track
+- volume: Get or set volume (0-100)
+- tts: Send text-to-speech announcement (local mode only)
+- status: Get current playback status
+- groups: List available groups/rooms (cloud mode only)`,
+  {
+    action: z.enum(['play', 'pause', 'next', 'previous', 'volume', 'tts', 'discover', 'status', 'groups']).describe('Action to perform'),
+    volume: z.number().min(0).max(100).optional().describe('Volume level (0-100) for volume or tts actions'),
+    text: z.string().optional().describe('Text to speak for TTS action'),
+    lang: z.string().optional().describe('Language code for TTS (e.g., en-US, es-ES)'),
+    groupId: z.string().optional().describe('Group ID for cloud mode operations'),
+  },
+  async (args) => {
+    try {
+      let result: string;
+      const useCloud = SONOS_CONTROL_MODE === 'cloud';
+
+      switch (args.action) {
+        case 'discover': {
+          if (useCloud) {
+            throw new Error('Discovery only available in local mode. Use "groups" action for cloud mode.');
+          }
+          if (!sonosManager) {
+            sonosManager = new SonosManager();
+          }
+          await sonosManager.InitializeWithDiscovery(10);
+          const devices = sonosManager.Devices.map(d =>
+            `- ${d.Name} (${d.Host}) - Group: ${d.GroupName}`
+          ).join('\n');
+          result = `Found ${sonosManager.Devices.length} Sonos speaker(s):\n${devices}`;
+          break;
+        }
+
+        case 'groups': {
+          if (!useCloud) {
+            throw new Error('Groups action only available in cloud mode.');
+          }
+          const data = await sonosCloudRequest('/groups') as { groups: Array<{ id: string; name: string }> };
+          const groupsList = data.groups.map(g => `- ${g.name} (${g.id})`).join('\n');
+          result = `Available groups:\n${groupsList}`;
+          break;
+        }
+
+        case 'play': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            await sonosCloudRequest(`/groups/${groupId}/playback/play`, { method: 'POST' });
+            result = `▶️ Playing on group ${groupId}`;
+          } else {
+            const device = await getSonosDevice();
+            await device.Play();
+            result = `▶️ Playing on ${device.Name}`;
+          }
+          break;
+        }
+
+        case 'pause': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            await sonosCloudRequest(`/groups/${groupId}/playback/pause`, { method: 'POST' });
+            result = `⏸️ Paused on group ${groupId}`;
+          } else {
+            const device = await getSonosDevice();
+            await device.Pause();
+            result = `⏸️ Paused on ${device.Name}`;
+          }
+          break;
+        }
+
+        case 'next': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            await sonosCloudRequest(`/groups/${groupId}/playback/skipToNextTrack`, { method: 'POST' });
+            result = `⏭️ Skipped to next track on group ${groupId}`;
+          } else {
+            const device = await getSonosDevice();
+            await device.Next();
+            result = `⏭️ Skipped to next track on ${device.Name}`;
+          }
+          break;
+        }
+
+        case 'previous': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            await sonosCloudRequest(`/groups/${groupId}/playback/skipToPreviousTrack`, { method: 'POST' });
+            result = `⏮️ Back to previous track on group ${groupId}`;
+          } else {
+            const device = await getSonosDevice();
+            await device.Previous();
+            result = `⏮️ Back to previous track on ${device.Name}`;
+          }
+          break;
+        }
+
+        case 'volume': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            if (args.volume === undefined) {
+              const data = await sonosCloudRequest(`/groups/${groupId}/groupVolume`) as { volume: number };
+              result = `🔊 Current volume: ${data.volume}`;
+            } else {
+              await sonosCloudRequest(`/groups/${groupId}/groupVolume`, {
+                method: 'POST',
+                body: { volume: args.volume },
+              });
+              result = `🔊 Volume set to ${args.volume} on group ${groupId}`;
+            }
+          } else {
+            const device = await getSonosDevice();
+            if (args.volume === undefined) {
+              const vol = await device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' });
+              result = `🔊 Current volume: ${vol.CurrentVolume}`;
+            } else {
+              await device.SetVolume(args.volume);
+              result = `🔊 Volume set to ${args.volume} on ${device.Name}`;
+            }
+          }
+          break;
+        }
+
+        case 'tts': {
+          if (useCloud) {
+            throw new Error('TTS only available in local mode. Cloud API does not support TTS.');
+          }
+          if (!args.text) {
+            throw new Error('TTS requires text parameter');
+          }
+          const device = await getSonosDevice();
+          await device.PlayTTS({
+            text: args.text,
+            lang: args.lang || 'en-US',
+            gender: 'male',
+            volume: args.volume || 50,
+            endpoint: SONOS_TTS_ENDPOINT,
+          });
+          result = `🔊 TTS announcement sent to ${device.Name}`;
+          break;
+        }
+
+        case 'status': {
+          if (useCloud) {
+            const groupId = args.groupId || SONOS_HOUSEHOLD_ID;
+            const data = await sonosCloudRequest(`/groups/${groupId}/playbackMetadata`) as {
+              container: { name: string };
+              currentItem: { track: { name: string; artist: { name: string } } };
+            };
+            result = [
+              `📊 Status for group ${groupId}:`,
+              `Playing: ${data.currentItem?.track?.name || 'Unknown'}`,
+              `Artist: ${data.currentItem?.track?.artist?.name || 'Unknown'}`,
+            ].join('\n');
+          } else {
+            const device = await getSonosDevice();
+            const state = await device.AVTransportService.GetTransportInfo();
+            const position = await device.AVTransportService.GetPositionInfo();
+            const volume = await device.RenderingControlService.GetVolume({ InstanceID: 0, Channel: 'Master' });
+
+            result = [
+              `📊 Status for ${device.Name}:`,
+              `State: ${state.CurrentTransportState}`,
+              `Track: ${position.TrackMetaData ? 'Playing' : 'Stopped'}`,
+              `Volume: ${volume.CurrentVolume}`,
+              `Group: ${device.GroupName}`,
+            ].join('\n');
+          }
+          break;
+        }
+
+        default:
+          throw new Error(`Unknown action: ${args.action}`);
+      }
+
+      return { content: [{ type: 'text' as const, text: result }] };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{ type: 'text' as const, text: `❌ Sonos error: ${errorMessage}` }],
+        isError: true,
+      };
+    }
   },
 );
 
