@@ -100,7 +100,7 @@ describe('GroupQueue', () => {
 
   // --- Tasks prioritized over messages ---
 
-  it('preempts active container when scheduled task is enqueued', async () => {
+  it('preempts idle-waiting active container when scheduled task is enqueued', async () => {
     let resolveFirst: () => void;
     const closeSpy = vi.spyOn(queue, 'closeStdin');
 
@@ -116,6 +116,7 @@ describe('GroupQueue', () => {
     // Start message processing so state.active becomes true.
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
+    queue.notifyIdle('group1@g.us');
 
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
