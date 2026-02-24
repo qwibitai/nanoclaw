@@ -77,6 +77,11 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS processed_events (
+      delivery_id TEXT PRIMARY KEY,
+      processed_at TEXT NOT NULL
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -114,6 +119,7 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`);
     database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
+    database.exec(`UPDATE chats SET channel = 'github', is_group = 1 WHERE jid LIKE 'gh:%'`);
   } catch {
     /* columns already exist */
   }
@@ -254,7 +260,7 @@ export function storeMessage(msg: NewMessage): void {
 }
 
 /**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
+ * Store a message with explicit field values (used by channels that build messages directly).
  */
 export function storeMessageDirect(msg: {
   id: string;
@@ -660,4 +666,24 @@ function migrateJsonState(): void {
       }
     }
   }
+}
+
+// --- Processed events (webhook idempotency) ---
+
+export function isEventProcessed(deliveryId: string): boolean {
+  const row = db
+    .prepare('SELECT 1 FROM processed_events WHERE delivery_id = ?')
+    .get(deliveryId);
+  return !!row;
+}
+
+export function markEventProcessed(deliveryId: string): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO processed_events (delivery_id, processed_at) VALUES (?, ?)',
+  ).run(deliveryId, new Date().toISOString());
+}
+
+export function cleanupProcessedEvents(maxAgeMs: number = 86400000): void {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  db.prepare('DELETE FROM processed_events WHERE processed_at < ?').run(cutoff);
 }

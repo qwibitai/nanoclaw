@@ -35,6 +35,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  /** Path to a repo checkout on the host to mount at /workspace/repo. */
+  repoCheckoutPath?: string;
 }
 
 export interface ContainerOutput {
@@ -53,10 +55,20 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  repoCheckoutPath?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+
+  // Mount repo checkout if available (GitHub channel)
+  if (repoCheckoutPath) {
+    mounts.push({
+      hostPath: repoCheckoutPath,
+      containerPath: '/workspace/repo',
+      readonly: false,
+    });
+  }
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -186,6 +198,14 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
+/**
+ * Add a GitHub installation token to the secrets object.
+ * Called by the orchestrator before running a container for GitHub events.
+ */
+export function addGitHubToken(secrets: Record<string, string>, token: string): void {
+  secrets.GITHUB_TOKEN = token;
+}
+
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -226,7 +246,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, input.repoCheckoutPath);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);

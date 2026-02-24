@@ -2,7 +2,8 @@ import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
 
-const GROUP_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// Allow owner--repo format for GitHub repos (e.g., "octocat--hello-world")
+const GROUP_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const RESERVED_FOLDERS = new Set(['global']);
 
 export function isValidGroupFolder(folder: string): boolean {

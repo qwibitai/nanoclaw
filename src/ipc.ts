@@ -17,6 +17,7 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendStructuredMessage?: (jid: string, text: string, target: unknown) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -72,23 +73,46 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
+
+              // Authorization: verify this group can send to this chatJid.
+              // For GitHub JIDs (gh:owner/repo#...), extract the repo-level JID.
+              const chatJid = data.chatJid as string | undefined;
+              if (chatJid) {
+                const repoJid = chatJid.startsWith('gh:') ? chatJid.split('#')[0] : chatJid;
+                const targetGroup = registeredGroups[repoJid] || registeredGroups[chatJid];
+                const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
+
+                if (!authorized) {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                } else if (data.type === 'message' && data.text) {
+                  await deps.sendMessage(chatJid, data.text);
+                  logger.info({ chatJid, sourceGroup }, 'IPC message sent');
+                } else if (data.type === 'github_comment' && data.text && deps.sendStructuredMessage) {
+                  await deps.sendStructuredMessage(chatJid, data.text, {
+                    type: chatJid.includes('#pr:') ? 'pr_comment' : 'issue_comment',
+                    issueNumber: data.issueNumber,
+                    prNumber: data.prNumber,
+                  });
+                  logger.info({ chatJid, sourceGroup, type: 'github_comment' }, 'GitHub comment sent via IPC');
+                } else if (data.type === 'github_review' && data.body && deps.sendStructuredMessage) {
+                  await deps.sendStructuredMessage(chatJid, data.body, {
+                    type: 'pr_review',
+                    prNumber: data.prNumber,
+                    reviewAction: data.event,
+                    reviewComments: data.comments,
+                  });
+                  logger.info({ chatJid, sourceGroup, type: 'github_review' }, 'GitHub review sent via IPC');
+                } else if (data.type === 'github_create_pr' && data.title && deps.sendStructuredMessage) {
+                  await deps.sendStructuredMessage(chatJid, data.body || '', {
+                    type: 'new_pr',
+                    title: data.title,
+                    head: data.head,
+                    base: data.base,
+                  });
+                  logger.info({ chatJid, sourceGroup, type: 'github_create_pr' }, 'GitHub PR created via IPC');
                 }
               }
               fs.unlinkSync(filePath);

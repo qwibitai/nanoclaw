@@ -515,6 +515,13 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
+  // GitHub token: set in process.env so gh CLI and git can use it from Bash.
+  // This is intentional — unlike Anthropic keys, agents need gh/git access.
+  if (containerInput.secrets?.GITHUB_TOKEN) {
+    process.env.GH_TOKEN = containerInput.secrets.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = containerInput.secrets.GITHUB_TOKEN;
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 

@@ -8,15 +8,13 @@ import { readEnvFile } from './env.js';
 // where needed (container-runner.ts) to avoid leaking to child processes.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
-  'ASSISTANT_HAS_OWN_NUMBER',
 ]);
 
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
-export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
-export const POLL_INTERVAL = 2000;
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'NanoClaw';
 export const SCHEDULER_POLL_INTERVAL = 60000;
+// Reconciliation loop: checks for unprocessed events missed by webhooks
+export const RECONCILIATION_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
@@ -54,14 +52,8 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
-  'i',
-);
+// HTTP server port for webhooks (standard for Fly.io, Railway)
+export const PORT = parseInt(process.env.PORT || '3000', 10);
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

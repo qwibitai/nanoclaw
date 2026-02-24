@@ -246,14 +246,14 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new repository or group so the agent can respond to events there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_groups.json to find available groups. The folder name should be lowercase with hyphens (e.g., "owner--repo-name").`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    jid: z.string().describe('The group JID (e.g., "gh:owner/repo" for GitHub)'),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    folder: z.string().describe('Folder name for group files (e.g., "owner--repo-name")'),
+    trigger: z.string().describe('Trigger pattern (e.g., "@bot-name")'),
   },
   async (args) => {
     if (!isMain) {
@@ -275,8 +275,93 @@ Use available_groups.json to find the JID for a group. The folder name should be
     writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving events immediately.` }],
     };
+  },
+);
+
+// --- GitHub-specific tools ---
+
+server.tool(
+  'github_comment',
+  'Post a comment on a GitHub issue or pull request. Defaults to the current thread.',
+  {
+    text: z.string().describe('The comment body (Markdown supported)'),
+    issue_number: z.number().optional().describe('Issue/PR number. Defaults to current thread.'),
+  },
+  async (args) => {
+    const data = {
+      type: 'github_comment',
+      chatJid: args.issue_number
+        ? chatJid.split('#')[0] + `#issue:${args.issue_number}`
+        : chatJid,
+      text: args.text,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Comment posted.' }] };
+  },
+);
+
+server.tool(
+  'github_review',
+  'Submit a review on a pull request (approve, request changes, or comment).',
+  {
+    body: z.string().describe('Overall review comment'),
+    event: z.enum(['APPROVE', 'REQUEST_CHANGES', 'COMMENT']).describe('Review action'),
+    pr_number: z.number().optional().describe('PR number. Defaults to current thread.'),
+    comments: z.array(z.object({
+      path: z.string().describe('File path relative to repo root'),
+      line: z.number().describe('Line number in the diff'),
+      body: z.string().describe('Inline comment text'),
+    })).optional().describe('Optional inline comments on specific lines'),
+  },
+  async (args) => {
+    const data = {
+      type: 'github_review',
+      chatJid: args.pr_number
+        ? chatJid.split('#')[0] + `#pr:${args.pr_number}`
+        : chatJid,
+      body: args.body,
+      event: args.event,
+      comments: args.comments,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Review submitted (${args.event}).` }] };
+  },
+);
+
+server.tool(
+  'github_create_pr',
+  'Create a new pull request. Make sure to commit and push changes to a branch first using git/gh CLI.',
+  {
+    title: z.string().describe('PR title'),
+    body: z.string().describe('PR description (Markdown supported)'),
+    head: z.string().describe('Source branch name'),
+    base: z.string().default('main').describe('Target branch (default: main)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'github_create_pr',
+      chatJid,
+      title: args.title,
+      body: args.body,
+      head: args.head,
+      base: args.base,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `PR creation requested: "${args.title}" (${args.head} → ${args.base})` }] };
   },
 );
 
