@@ -11,7 +11,11 @@ set -e
 # 1. Start Docker daemon in the background
 # ---------------------------------------------------------------------------
 echo "[entrypoint] Starting Docker daemon..."
+# --iptables=false: Railway kernels use nf_tables backend which dockerd cannot
+# manage without host-level privileges. Disabling iptables management avoids
+# the "Permission denied" crash; container networking still works via CNI.
 dockerd --host unix:///var/run/docker.sock \
+        --iptables=false \
         --log-level error \
         &
 DOCKERD_PID=$!
