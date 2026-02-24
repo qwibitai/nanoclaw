@@ -68,16 +68,32 @@ Messages and task operations are verified against group identity:
 
 Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
 
-**How it works:**
+**Supported authentication methods:**
+
+| Method | Required `.env` Variables |
+|--------|--------------------------|
+| API Key | `ANTHROPIC_API_KEY` |
+| OAuth Token | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` + GCP credentials file |
+
+**How it works (API Key / OAuth):**
 1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
-2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
+2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and a placeholder credential
 3. The SDK sends API requests to the proxy with the placeholder key
 4. The proxy strips placeholder auth, injects real credentials (`x-api-key` or `Authorization: Bearer`), and forwards to `api.anthropic.com`
 5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
 
+**How it works (Vertex AI):**
+1. The same credential proxy handles Vertex AI requests
+2. Containers receive `ANTHROPIC_VERTEX_BASE_URL=http://host.docker.internal:<port>` and `CLAUDE_CODE_SKIP_VERTEX_AUTH=1`
+3. The SDK sends Vertex AI requests to the proxy with no real Google auth
+4. The proxy obtains Google OAuth2 tokens using host-side Application Default Credentials, injects `Authorization: Bearer <token>`, and forwards to `{region}-aiplatform.googleapis.com`
+5. GCP credentials never enter the container — no mounted `.gcloud` directory, no credentials file, no service account keys
+
 **NOT Mounted:**
 - WhatsApp session (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
+- GCP credentials directory (`.gcloud`) — blocked pattern
 - Any credentials matching blocked patterns
 - `.env` is shadowed with `/dev/null` in the project root mount
 
