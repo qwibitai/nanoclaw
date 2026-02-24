@@ -84,18 +84,35 @@ export async function run(args: string[]): Promise<void> {
   db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
     jid TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    folder TEXT NOT NULL UNIQUE,
+    folder TEXT NOT NULL,
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1
-  )`);
+    requires_trigger INTEGER DEFAULT 1,
+    channel TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
+  `);
+
+  // Infer channel from JID format
+  let channel = 'unknown';
+  if (parsed.jid.startsWith('tg:')) channel = 'telegram';
+  else if (parsed.jid.startsWith('dc:')) channel = 'discord';
+  else if (parsed.jid.includes('@g.us') || parsed.jid.includes('@s.whatsapp.net')) channel = 'whatsapp';
 
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-  ).run(parsed.jid, parsed.name, parsed.folder, parsed.trigger, timestamp, requiresTriggerInt);
+    `INSERT INTO registered_groups
+     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+     ON CONFLICT(jid) DO UPDATE SET
+       name = excluded.name,
+       folder = excluded.folder,
+       trigger_pattern = excluded.trigger_pattern,
+       added_at = excluded.added_at,
+       container_config = excluded.container_config,
+       requires_trigger = excluded.requires_trigger,
+       channel = excluded.channel`,
+  ).run(parsed.jid, parsed.name, parsed.folder, parsed.trigger, timestamp, requiresTriggerInt, channel);
 
   db.close();
   logger.info('Wrote registration to SQLite');
