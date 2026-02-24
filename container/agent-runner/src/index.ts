@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -36,17 +36,6 @@ interface ContainerOutput {
   error?: string;
 }
 
-interface SessionEntry {
-  sessionId: string;
-  fullPath: string;
-  summary: string;
-  firstPrompt: string;
-}
-
-interface SessionsIndex {
-  entries: SessionEntry[];
-}
-
 interface SDKUserMessage {
   type: 'user';
   message: { role: 'user'; content: string };
@@ -57,6 +46,9 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+const CONVERSATIONS_DIR = '/workspace/group/conversations';
+const LOG_TZ = process.env.TZ || 'Europe/Madrid';
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -117,71 +109,54 @@ function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
 }
 
-function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
-  const projectDir = path.dirname(transcriptPath);
-  const indexPath = path.join(projectDir, 'sessions-index.json');
-
-  if (!fs.existsSync(indexPath)) {
-    log(`Sessions index not found at ${indexPath}`);
-    return null;
-  }
-
+/**
+ * Append a single turn to the daily conversation file.
+ * File: conversations/YYYY-MM-DD.md (one per day, Europe/Madrid by default).
+ */
+function appendToConversation(role: string, text: string, isoTime?: string): void {
   try {
-    const index: SessionsIndex = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
-    const entry = index.entries.find(e => e.sessionId === sessionId);
-    if (entry?.summary) {
-      return entry.summary;
+    const refDate = isoTime ? new Date(isoTime) : new Date();
+    const dateStr = refDate.toLocaleDateString('sv', { timeZone: LOG_TZ }); // YYYY-MM-DD
+    const timeStr = refDate.toLocaleTimeString('en', {
+      hour: '2-digit', minute: '2-digit', hour12: false, timeZone: LOG_TZ,
+    });
+    const filePath = path.join(CONVERSATIONS_DIR, `${dateStr}.md`);
+    fs.mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, `# ${dateStr}\n\n`);
     }
+    const clean = text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+    if (clean) fs.appendFileSync(filePath, `**${role}** (${timeStr}): ${clean}\n\n`);
   } catch (err) {
-    log(`Failed to read sessions index: ${err instanceof Error ? err.message : String(err)}`);
+    log(`Failed to append to conversation log: ${err instanceof Error ? err.message : String(err)}`);
   }
-
-  return null;
 }
 
 /**
- * Archive the full transcript to conversations/ before compaction.
+ * Parse and log user messages from a prompt string.
+ * Handles XML message format from host: <message sender="..." time="...">text</message>
+ * Falls back to plain text for IPC follow-up messages.
  */
-function createPreCompactHook(): HookCallback {
-  return async (input, _toolUseId, _context) => {
-    const preCompact = input as PreCompactHookInput;
-    const transcriptPath = preCompact.transcript_path;
-    const sessionId = preCompact.session_id;
-
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      log('No transcript found for archiving');
-      return {};
-    }
-
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf-8');
-      const messages = parseTranscript(content);
-
-      if (messages.length === 0) {
-        log('No messages to archive');
-        return {};
-      }
-
-      const summary = getSessionSummary(sessionId, transcriptPath);
-      const name = summary ? sanitizeFilename(summary) : generateFallbackName();
-
-      const conversationsDir = '/workspace/group/conversations';
-      fs.mkdirSync(conversationsDir, { recursive: true });
-
-      const date = new Date().toISOString().split('T')[0];
-      const filename = `${date}-${name}.md`;
-      const filePath = path.join(conversationsDir, filename);
-
-      const markdown = formatTranscriptMarkdown(messages, summary);
-      fs.writeFileSync(filePath, markdown);
-
-      log(`Archived conversation to ${filePath}`);
-    } catch (err) {
-      log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    return {};
-  };
+function logUserMessages(text: string): void {
+  const msgPattern = /<message\b([^>]*)>([\s\S]*?)<\/message>/g;
+  let match;
+  let found = false;
+  while ((match = msgPattern.exec(text)) !== null) {
+    found = true;
+    const attrs = match[1];
+    const content = match[2].trim();
+    if (!content) continue;
+    const senderMatch = /sender="([^"]*)"/.exec(attrs);
+    const timeMatch = /time="([^"]*)"/.exec(attrs);
+    appendToConversation(
+      senderMatch?.[1] || 'User',
+      content,
+      timeMatch?.[1],
+    );
+  }
+  if (!found && text.trim()) {
+    appendToConversation('User', text.trim());
+  }
 }
 
 // Secrets to strip from Bash tool subprocess environments.
@@ -206,80 +181,6 @@ function createSanitizeBashHook(): HookCallback {
       },
     };
   };
-}
-
-function sanitizeFilename(summary: string): string {
-  return summary
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50);
-}
-
-function generateFallbackName(): string {
-  const time = new Date();
-  return `conversation-${time.getHours().toString().padStart(2, '0')}${time.getMinutes().toString().padStart(2, '0')}`;
-}
-
-interface ParsedMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-function parseTranscript(content: string): ParsedMessage[] {
-  const messages: ParsedMessage[] = [];
-
-  for (const line of content.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const entry = JSON.parse(line);
-      if (entry.type === 'user' && entry.message?.content) {
-        const text = typeof entry.message.content === 'string'
-          ? entry.message.content
-          : entry.message.content.map((c: { text?: string }) => c.text || '').join('');
-        if (text) messages.push({ role: 'user', content: text });
-      } else if (entry.type === 'assistant' && entry.message?.content) {
-        const textParts = entry.message.content
-          .filter((c: { type: string }) => c.type === 'text')
-          .map((c: { text: string }) => c.text);
-        const text = textParts.join('');
-        if (text) messages.push({ role: 'assistant', content: text });
-      }
-    } catch {
-    }
-  }
-
-  return messages;
-}
-
-function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | null): string {
-  const now = new Date();
-  const formatDateTime = (d: Date) => d.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
-  });
-
-  const lines: string[] = [];
-  lines.push(`# ${title || 'Conversation'}`);
-  lines.push('');
-  lines.push(`Archived: ${formatDateTime(now)}`);
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  for (const msg of messages) {
-    const sender = msg.role === 'user' ? 'User' : 'Andy';
-    const content = msg.content.length > 2000
-      ? msg.content.slice(0, 2000) + '...'
-      : msg.content;
-    lines.push(`**${sender}**: ${content}`);
-    lines.push('');
-  }
-
-  return lines.join('\n');
 }
 
 /**
@@ -360,6 +261,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  onResult?: (text: string) => void,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -449,7 +351,6 @@ async function runQuery(
         },
       },
       hooks: {
-        PreCompact: [{ hooks: [createPreCompactHook()] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
       },
     }
@@ -481,6 +382,7 @@ async function runQuery(
         result: textResult || null,
         newSessionId
       });
+      if (textResult && onResult) onResult(textResult);
     }
   }
 
@@ -534,13 +436,26 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  const logConversation = !containerInput.isScheduledTask;
+
+  // Log initial user message(s) before the first query
+  if (logConversation) logUserMessages(containerInput.prompt);
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(
+        prompt,
+        sessionId,
+        mcpServerPath,
+        containerInput,
+        sdkEnv,
+        resumeAt,
+        logConversation ? (text) => appendToConversation(process.env.ASSISTANT_NAME || 'Nano', text) : undefined,
+      );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -569,6 +484,7 @@ async function main(): Promise<void> {
       }
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
+      if (logConversation) logUserMessages(nextMessage);
       prompt = nextMessage;
     }
   } catch (err) {

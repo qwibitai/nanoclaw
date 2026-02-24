@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 
 import {
+  ASSISTANT_NAME,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -209,6 +210,8 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
+
+  args.push('-e', `ASSISTANT_NAME=${ASSISTANT_NAME}`);
 
   for (const mount of mounts) {
     if (mount.readonly) {
