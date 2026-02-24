@@ -29,7 +29,7 @@ npx tsx scripts/apply-skill.ts --init
 
 ### Path A: Tool-only (user chose "No")
 
-Do NOT run the full apply script. Only two source files need changes. This avoids adding dead code (`gmail.ts`, `gmail.test.ts`, config flags, index.ts channel logic, routing tests, `googleapis` dependency).
+Do NOT run the full apply script. Only two source files need changes. This avoids adding dead code (`gmail.ts`, `gmail.test.ts`, index.ts channel logic, routing tests, `googleapis` dependency).
 
 #### 1. Mount Gmail credentials in container
 
@@ -63,19 +63,16 @@ This deterministically:
 
 - Adds `src/channels/gmail.ts` (GmailChannel class implementing Channel interface)
 - Adds `src/channels/gmail.test.ts` (unit tests)
-- Three-way merges Gmail support into `src/index.ts` (conditional GmailChannel creation)
-- Three-way merges Gmail config into `src/config.ts` (`GMAIL_CHANNEL_ENABLED`)
+- Three-way merges Gmail channel wiring into `src/index.ts` (GmailChannel creation)
 - Three-way merges Gmail credentials mount into `src/container-runner.ts` (~/.gmail-mcp -> /home/node/.gmail-mcp)
 - Three-way merges Gmail MCP server into `container/agent-runner/src/index.ts` (@gongrzhe/server-gmail-autoauth-mcp)
 - Three-way merges Gmail JID tests into `src/routing.test.ts`
 - Installs the `googleapis` npm dependency
-- Updates `.env.example` with `GMAIL_CHANNEL_ENABLED`
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
 
 - `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
-- `modify/src/config.ts.intent.md` — what changed for config.ts
 - `modify/src/container-runner.ts.intent.md` — what changed for container-runner.ts
 - `modify/container/agent-runner/src/index.ts.intent.md` — what changed for agent-runner
 
@@ -106,7 +103,7 @@ All tests must pass (including the new gmail tests) and build must be clean befo
 ls -la ~/.gmail-mcp/ 2>/dev/null || echo "No Gmail config found"
 ```
 
-If `credentials.json` already exists, skip to "Configure environment" below.
+If `credentials.json` already exists, skip to "Build and restart" below.
 
 ### GCP Project Setup
 
@@ -146,20 +143,6 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp auth
 
 If that fails (some versions don't have an auth subcommand), try `timeout 60 npx -y @gongrzhe/server-gmail-autoauth-mcp || true`. Verify with `ls ~/.gmail-mcp/credentials.json`.
 
-### Configure environment
-
-**Channel mode only** — add to `.env`:
-
-```
-GMAIL_CHANNEL_ENABLED=true
-```
-
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
 ### Build and restart
 
 Clear stale per-group agent-runner copies (they only get re-created if missing, so existing copies won't pick up the new Gmail server):
@@ -188,7 +171,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 Tell the user:
 
-> Gmail is connected! Send this in your WhatsApp main channel:
+> Gmail is connected! Send this in your main channel:
 >
 > `@Andy check my recent emails` or `@Andy list my Gmail labels`
 
@@ -228,9 +211,8 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 - Verify `~/.gmail-mcp` is mounted: check `src/container-runner.ts` for the `.gmail-mcp` mount
 - Check container logs: `cat groups/main/logs/container-*.log | tail -50`
 
-### Emails not being detected (Channel Mode only)
+### Emails not being detected (Channel mode only)
 
-- Check `GMAIL_CHANNEL_ENABLED=true` in `.env` AND `data/env/env`
 - By default, the channel polls unread Primary inbox emails (`is:unread category:primary`)
 - Check logs for Gmail polling errors
 
@@ -248,12 +230,10 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 
 1. Delete `src/channels/gmail.ts` and `src/channels/gmail.test.ts`
 2. Remove `GmailChannel` import and creation from `src/index.ts`
-3. Remove Gmail config (`GMAIL_CHANNEL_ENABLED`) from `src/config.ts`
-4. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
-5. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
-6. Remove Gmail JID tests from `src/routing.test.ts`
-7. Uninstall: `npm uninstall googleapis`
-8. Remove env var from `.env` and `data/env/env`
-9. Remove `gmail` from `.nanoclaw/state.yaml`
-10. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-11. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+3. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
+4. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
+5. Remove Gmail JID tests from `src/routing.test.ts`
+6. Uninstall: `npm uninstall googleapis`
+7. Remove `gmail` from `.nanoclaw/state.yaml`
+8. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
+9. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

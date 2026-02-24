@@ -7,15 +7,12 @@ adds:
   - src/channels/gmail.test.ts
 modifies:
   - src/index.ts
-  - src/config.ts
   - src/container-runner.ts
   - container/agent-runner/src/index.ts
   - src/routing.test.ts
 structured:
   npm_dependencies:
     googleapis: "^144.0.0"
-  env_additions:
-    - GMAIL_CHANNEL_ENABLED
 conflicts: []
 depends: []
 test: "npx vitest run src/channels/gmail.test.ts"

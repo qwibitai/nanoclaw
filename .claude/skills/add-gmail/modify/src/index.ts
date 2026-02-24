@@ -3,7 +3,6 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  GMAIL_CHANNEL_ENABLED,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -451,11 +450,9 @@ async function main(): Promise<void> {
   channels.push(whatsapp);
   await whatsapp.connect();
 
-  if (GMAIL_CHANNEL_ENABLED) {
-    const gmail = new GmailChannel(channelOpts);
-    channels.push(gmail);
-    await gmail.connect();
-  }
+  const gmail = new GmailChannel(channelOpts);
+  channels.push(gmail);
+  await gmail.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

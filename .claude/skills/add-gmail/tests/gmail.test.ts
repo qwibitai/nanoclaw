@@ -29,10 +29,6 @@ describe('add-gmail skill', () => {
     expect(fs.existsSync(path.join(root, 'src/channels/gmail.ts'))).toBe(true);
   });
 
-  it.skipIf(channelOnly)('config exports GMAIL_CHANNEL_ENABLED', () => {
-    expect(read('src/config.ts')).toContain('GMAIL_CHANNEL_ENABLED');
-  });
-
   it.skipIf(channelOnly)('index.ts wires up GmailChannel', () => {
     expect(read('src/index.ts')).toContain('GmailChannel');
   });

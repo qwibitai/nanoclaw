@@ -2,24 +2,21 @@
 
 ## What changed
 
-Added Gmail as a channel option alongside WhatsApp (and any other channels).
+Added Gmail as a channel.
 
 ## Key sections
 
 ### Imports (top of file)
 
 - Added: `GmailChannel` from `./channels/gmail.js`
-- Added: `GMAIL_CHANNEL_ENABLED` from `./config.js`
 
 ### main()
 
-- Added: conditional Gmail channel creation after WhatsApp:
+- Added Gmail channel creation:
   ```
-  if (GMAIL_CHANNEL_ENABLED) {
-    const gmail = new GmailChannel(channelOpts);
-    channels.push(gmail);
-    await gmail.connect();
-  }
+  const gmail = new GmailChannel(channelOpts);
+  channels.push(gmail);
+  await gmail.connect();
   ```
 - Gmail uses the same `channelOpts` callbacks as other channels
 - Incoming emails are delivered to the main group (agent decides how to respond, user can configure)
@@ -31,7 +28,7 @@ Added Gmail as a channel option alongside WhatsApp (and any other channels).
 - State management (loadState/saveState) is unchanged
 - Recovery logic is unchanged
 - Container runtime check is unchanged
-- WhatsApp and any other channel creation is untouched
+- Any other channel creation is untouched
 - Shutdown iterates `channels` array (Gmail is included automatically)
 
 ## Must-keep
