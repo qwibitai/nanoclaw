@@ -24,6 +24,10 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  /** Timestamp of the latest message piped via IPC to the active container.
+   *  Used to avoid re-piping the same messages on each poll cycle.
+   *  Reset when the container exits so the safety-net can re-process. */
+  lastPipedTimestamp: string | null;
 }
 
 export class GroupQueue {
@@ -47,6 +51,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        lastPipedTimestamp: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -145,8 +150,10 @@ export class GroupQueue {
   /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
+   * @param latestTimestamp - Timestamp of the newest message in this batch.
+   *   Tracked to avoid re-piping the same messages on subsequent poll cycles.
    */
-  sendMessage(groupJid: string, text: string): boolean {
+  sendMessage(groupJid: string, text: string, latestTimestamp?: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
@@ -157,12 +164,21 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text, containerTag: state.containerName }));
       fs.renameSync(tempPath, filepath);
+      if (latestTimestamp) state.lastPipedTimestamp = latestTimestamp;
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Get the timestamp of the latest message piped via IPC.
+   * Returns null if no messages have been piped for this container session.
+   */
+  getLastPipedTimestamp(groupJid: string): string | null {
+    return this.getGroup(groupJid).lastPipedTimestamp;
   }
 
   /**
@@ -214,6 +230,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.lastPipedTimestamp = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -241,6 +258,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.lastPipedTimestamp = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
