@@ -372,6 +372,7 @@ export async function processTaskIpc(
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
+          channel: data.channel,
         });
       } else {
         logger.warn(

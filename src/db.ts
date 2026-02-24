@@ -71,12 +71,14 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
-      requires_trigger INTEGER DEFAULT 1
+      requires_trigger INTEGER DEFAULT 1,
+      channel TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -116,6 +118,69 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
   } catch {
     /* columns already exist */
+  }
+
+  // Migration: remove UNIQUE constraint from registered_groups.folder and add channel column.
+  // This allows multiple JIDs (from different channels) to share the same group folder.
+  migrateRegisteredGroupsSchema(database);
+}
+
+/**
+ * Infer the channel name from a JID format.
+ */
+export function inferChannelFromJid(jid: string): string {
+  if (jid.startsWith('tg:')) return 'telegram';
+  if (jid.startsWith('dc:')) return 'discord';
+  if (jid.includes('@g.us') || jid.includes('@s.whatsapp.net')) return 'whatsapp';
+  return 'unknown';
+}
+
+function migrateRegisteredGroupsSchema(database: Database.Database): void {
+  // Check the actual CREATE TABLE statement to see if folder still has UNIQUE
+  const tableInfo = database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'",
+  ).get() as { sql: string } | undefined;
+
+  if (!tableInfo) return; // Table doesn't exist yet (will be created fresh)
+
+  const needsUniqueRemoval = tableInfo.sql.includes('UNIQUE');
+
+  // Try to add channel column (may already exist)
+  let needsChannelColumn = false;
+  try {
+    database.exec(`ALTER TABLE registered_groups ADD COLUMN channel TEXT`);
+    needsChannelColumn = true;
+  } catch {
+    /* column already exists */
+  }
+
+  if (needsUniqueRemoval) {
+    // SQLite doesn't support DROP CONSTRAINT — recreate the table
+    database.exec(`
+      CREATE TABLE registered_groups_new (
+        jid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        trigger_pattern TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        container_config TEXT,
+        requires_trigger INTEGER DEFAULT 1,
+        channel TEXT
+      );
+      INSERT INTO registered_groups_new
+        SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel
+        FROM registered_groups;
+      DROP TABLE registered_groups;
+      ALTER TABLE registered_groups_new RENAME TO registered_groups;
+      CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
+    `);
+  }
+
+  // Backfill channel from JID patterns where NULL
+  if (needsChannelColumn || needsUniqueRemoval) {
+    database.exec(`UPDATE registered_groups SET channel = 'whatsapp' WHERE channel IS NULL AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')`);
+    database.exec(`UPDATE registered_groups SET channel = 'telegram' WHERE channel IS NULL AND jid LIKE 'tg:%'`);
+    database.exec(`UPDATE registered_groups SET channel = 'discord' WHERE channel IS NULL AND jid LIKE 'dc:%'`);
   }
 }
 
@@ -521,6 +586,7 @@ export function getRegisteredGroup(
         added_at: string;
         container_config: string | null;
         requires_trigger: number | null;
+        channel: string | null;
       }
     | undefined;
   if (!row) return undefined;
@@ -541,6 +607,7 @@ export function getRegisteredGroup(
       ? JSON.parse(row.container_config)
       : undefined,
     requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+    channel: row.channel || undefined,
   };
 }
 
@@ -551,9 +618,18 @@ export function setRegisteredGroup(
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
+  const channel = group.channel || inferChannelFromJid(jid);
   db.prepare(
-    `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(jid) DO UPDATE SET
+       name = excluded.name,
+       folder = excluded.folder,
+       trigger_pattern = excluded.trigger_pattern,
+       added_at = excluded.added_at,
+       container_config = excluded.container_config,
+       requires_trigger = excluded.requires_trigger,
+       channel = excluded.channel`,
   ).run(
     jid,
     group.name,
@@ -562,6 +638,7 @@ export function setRegisteredGroup(
     group.added_at,
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
+    channel,
   );
 }
 
@@ -576,6 +653,7 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     added_at: string;
     container_config: string | null;
     requires_trigger: number | null;
+    channel: string | null;
   }>;
   const result: Record<string, RegisteredGroup> = {};
   for (const row of rows) {
@@ -595,9 +673,21 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
         ? JSON.parse(row.container_config)
         : undefined,
       requiresTrigger: row.requires_trigger === null ? undefined : row.requires_trigger === 1,
+      channel: row.channel || undefined,
     };
   }
   return result;
+}
+
+/**
+ * Get all JIDs that share a given group folder.
+ * Useful for broadcasting to all channels connected to the same group.
+ */
+export function getJidsForFolder(folder: string): string[] {
+  const rows = db
+    .prepare('SELECT jid FROM registered_groups WHERE folder = ?')
+    .all(folder) as Array<{ jid: string }>;
+  return rows.map((r) => r.jid);
 }
 
 // --- JSON migration ---

@@ -5,9 +5,14 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllRegisteredGroups,
+  getJidsForFolder,
   getMessagesSince,
   getNewMessages,
+  getRegisteredGroup,
   getTaskById,
+  inferChannelFromJid,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -323,5 +328,137 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- inferChannelFromJid ---
+
+describe('inferChannelFromJid', () => {
+  it('detects WhatsApp group JIDs', () => {
+    expect(inferChannelFromJid('123456@g.us')).toBe('whatsapp');
+  });
+
+  it('detects WhatsApp personal JIDs', () => {
+    expect(inferChannelFromJid('123456@s.whatsapp.net')).toBe('whatsapp');
+  });
+
+  it('detects Telegram JIDs', () => {
+    expect(inferChannelFromJid('tg:-100123456')).toBe('telegram');
+  });
+
+  it('detects Discord JIDs', () => {
+    expect(inferChannelFromJid('dc:987654321')).toBe('discord');
+  });
+
+  it('returns unknown for unrecognized JIDs', () => {
+    expect(inferChannelFromJid('custom:abc')).toBe('unknown');
+  });
+});
+
+// --- Multi-channel registered groups ---
+
+describe('multi-channel registered groups', () => {
+  it('allows multiple JIDs to share the same folder', () => {
+    setRegisteredGroup('123@g.us', {
+      name: 'WA Group',
+      folder: 'my-team',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    setRegisteredGroup('tg:-100999', {
+      name: 'TG Group',
+      folder: 'my-team',
+      trigger: '@Andy',
+      added_at: '2024-01-02T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(Object.keys(groups)).toHaveLength(2);
+    expect(groups['123@g.us'].folder).toBe('my-team');
+    expect(groups['tg:-100999'].folder).toBe('my-team');
+    expect(groups['123@g.us'].channel).toBe('whatsapp');
+    expect(groups['tg:-100999'].channel).toBe('telegram');
+  });
+
+  it('auto-infers channel from JID when not explicitly set', () => {
+    setRegisteredGroup('456@g.us', {
+      name: 'Test',
+      folder: 'test',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const group = getRegisteredGroup('456@g.us');
+    expect(group).toBeDefined();
+    expect(group!.channel).toBe('whatsapp');
+  });
+
+  it('uses explicit channel when provided', () => {
+    setRegisteredGroup('custom:abc', {
+      name: 'Custom',
+      folder: 'custom',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      channel: 'slack',
+    });
+
+    const group = getRegisteredGroup('custom:abc');
+    expect(group!.channel).toBe('slack');
+  });
+
+  it('getJidsForFolder returns all JIDs for a shared folder', () => {
+    setRegisteredGroup('wa@g.us', {
+      name: 'WA',
+      folder: 'shared',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+    setRegisteredGroup('tg:-555', {
+      name: 'TG',
+      folder: 'shared',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+    setRegisteredGroup('dc:777', {
+      name: 'DC',
+      folder: 'other',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const jids = getJidsForFolder('shared');
+    expect(jids).toHaveLength(2);
+    expect(jids).toContain('wa@g.us');
+    expect(jids).toContain('tg:-555');
+  });
+
+  it('upserts on same JID without affecting other JIDs for the same folder', () => {
+    setRegisteredGroup('123@g.us', {
+      name: 'Original',
+      folder: 'my-team',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+    setRegisteredGroup('tg:-100', {
+      name: 'Telegram',
+      folder: 'my-team',
+      trigger: '@Andy',
+      added_at: '2024-01-02T00:00:00.000Z',
+    });
+
+    // Update the WA group name
+    setRegisteredGroup('123@g.us', {
+      name: 'Updated WA',
+      folder: 'my-team',
+      trigger: '@Bot',
+      added_at: '2024-01-03T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(Object.keys(groups)).toHaveLength(2);
+    expect(groups['123@g.us'].name).toBe('Updated WA');
+    expect(groups['123@g.us'].trigger).toBe('@Bot');
+    expect(groups['tg:-100'].name).toBe('Telegram');
   });
 });
