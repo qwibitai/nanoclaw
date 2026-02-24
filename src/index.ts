@@ -476,6 +476,7 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    createWhatsAppGroup: (name, participants) => whatsapp.createGroup(name, participants),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

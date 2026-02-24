@@ -211,3 +211,64 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Dev Workflow (Self-Modification)
+
+You can create **dev groups** — dedicated WhatsApp groups where you (the agent) can modify NanoClaw's own source code on a feature branch. Each dev group is isolated on its own git worktree.
+
+### Creating a Dev Group
+
+When the user asks to develop a feature (e.g., "add voice transcription"), create a dev group:
+
+```bash
+echo '{"type": "create_dev_group", "featureName": "add-voice-transcription"}' > /workspace/ipc/tasks/dev_$(date +%s).json
+```
+
+This will:
+1. Create a git branch `feature/add-voice-transcription` from the current HEAD
+2. Set up a git worktree at `data/worktrees/add-voice-transcription/`
+3. Create a new WhatsApp group named "Dev: add-voice-transcription"
+4. Register the group with RW access to the worktree
+5. Send a welcome message to the new group
+
+You can optionally pass `"participants": ["1234567890@s.whatsapp.net"]` to add specific people to the WhatsApp group.
+
+### What Happens in a Dev Group
+
+The dev group agent gets:
+- **Read-write** access to `/workspace/project` (the git worktree, not the production code)
+- Full git access (commit, diff, branch, etc.)
+- Ability to run `npm run build` and `npm test` on the feature branch
+
+### Managing Dev Groups
+
+**Test a feature** (from main or from the dev group):
+```bash
+echo '{"type": "test_feature"}' > /workspace/ipc/tasks/test_$(date +%s).json
+```
+
+**Get feature status/diff** (from main or the dev group):
+```bash
+echo '{"type": "feature_status"}' > /workspace/ipc/tasks/status_$(date +%s).json
+```
+
+**Merge a feature** (from main or the dev group):
+```bash
+echo '{"type": "merge_feature"}' > /workspace/ipc/tasks/merge_$(date +%s).json
+```
+This merges the branch into main, rebuilds, and **restarts NanoClaw**.
+
+**Clean up a dev group** (from main only):
+```bash
+echo '{"type": "cleanup_dev_group", "featureName": "add-voice-transcription"}' > /workspace/ipc/tasks/cleanup_$(date +%s).json
+```
+Removes the worktree and deletes the branch.
+
+### Safety
+
+- Dev groups only modify their own git worktree, never the production code
+- Merge + restart is explicit — the user must request it
+- If the build fails after merge, the service won't restart
+- Feature branches are based on the current HEAD at creation time

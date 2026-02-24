@@ -15,6 +15,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { getWorktreePath, sanitizeFeatureName } from './dev-workflow.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -58,7 +59,24 @@ function buildVolumeMounts(
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
 
-  if (isMain) {
+  if (group.isDev && group.featureBranch) {
+    // Dev groups get a git worktree mounted READ-WRITE so the agent
+    // can modify NanoClaw source code on a feature branch.
+    const featureName = group.featureBranch.replace(/^feature\//, '');
+    const worktreePath = getWorktreePath(featureName);
+    mounts.push({
+      hostPath: worktreePath,
+      containerPath: '/workspace/project',
+      readonly: false,
+    });
+
+    // Dev group also gets its own group folder
+    mounts.push({
+      hostPath: groupDir,
+      containerPath: '/workspace/group',
+      readonly: false,
+    });
+  } else if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
     // (group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code

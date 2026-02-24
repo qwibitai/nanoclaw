@@ -240,6 +240,23 @@ export class WhatsAppChannel implements Channel {
     this.sock?.end(undefined);
   }
 
+  /**
+   * Create a new WhatsApp group with the given name.
+   * Returns the new group's JID.
+   */
+  async createGroup(name: string, participants?: string[]): Promise<string> {
+    if (!this.connected) {
+      throw new Error('WhatsApp not connected');
+    }
+
+    const members = participants || [];
+    const result = await this.sock.groupCreate(name, members);
+    const groupJid = result.id;
+
+    logger.info({ groupJid, name, participants: members.length }, 'WhatsApp group created');
+    return groupJid;
+  }
+
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
       const status = isTyping ? 'composing' : 'paused';

@@ -4,6 +4,7 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import {
+  ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -11,6 +12,18 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  cleanupDevBranch,
+  createDevBranch,
+  createDevGroupClaudeMd,
+  devGroupFolder,
+  getFeatureDiff,
+  mergeFeatureBranch,
+  rebuildProject,
+  restartService,
+  sanitizeFeatureName,
+  testFeature,
+} from './dev-workflow.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -27,6 +40,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  createWhatsAppGroup?: (name: string, participants?: string[]) => Promise<string>;
 }
 
 let ipcWatcherRunning = false;
@@ -170,6 +184,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For dev workflow
+    featureName?: string;
+    participants?: string[];
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -380,6 +397,266 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'create_dev_group': {
+      // Only main group can create dev groups
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized create_dev_group attempt blocked');
+        break;
+      }
+      if (!data.featureName) {
+        logger.warn({ data }, 'Invalid create_dev_group - missing featureName');
+        break;
+      }
+
+      const featureName = data.featureName;
+
+      try {
+        // 1. Create git branch + worktree
+        const { branchName } = createDevBranch(featureName);
+        const folder = devGroupFolder(featureName);
+
+        // 2. Create WhatsApp group if the channel supports it
+        let groupJid: string | undefined;
+        if (deps.createWhatsAppGroup) {
+          const groupName = `Dev: ${featureName}`;
+          groupJid = await deps.createWhatsAppGroup(groupName, data.participants);
+        }
+
+        if (!groupJid) {
+          // No WhatsApp group creation available — log for manual setup
+          logger.info(
+            { featureName, branchName, folder },
+            'Dev branch created. Create a WhatsApp group manually and register it.',
+          );
+          // Find the chat JID that sent the request so we can notify them
+          const mainJid = Object.entries(registeredGroups)
+            .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+          if (mainJid) {
+            await deps.sendMessage(
+              mainJid,
+              `${ASSISTANT_NAME}: Dev branch \`${branchName}\` created. Create a WhatsApp group and register it with folder \`${folder}\`.`,
+            );
+          }
+          break;
+        }
+
+        // 3. Create CLAUDE.md for the dev group
+        createDevGroupClaudeMd(folder, featureName, branchName);
+
+        // 4. Register the group
+        deps.registerGroup(groupJid, {
+          name: `Dev: ${featureName}`,
+          folder,
+          trigger: `@${ASSISTANT_NAME}`,
+          added_at: new Date().toISOString(),
+          requiresTrigger: false, // Dev groups process all messages
+          isDev: true,
+          featureBranch: branchName,
+        });
+
+        // 5. Notify the main group
+        const mainJid = Object.entries(registeredGroups)
+          .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+        if (mainJid) {
+          await deps.sendMessage(
+            mainJid,
+            `${ASSISTANT_NAME}: Dev group created for *${featureName}*\nBranch: \`${branchName}\`\nGroup registered and ready to use.`,
+          );
+        }
+
+        // Send welcome message to the new dev group
+        await deps.sendMessage(
+          groupJid,
+          `${ASSISTANT_NAME}: Dev group ready!\n\nBranch: \`${branchName}\`\nDescribe what you want to build and I'll implement it.`,
+        );
+
+        logger.info(
+          { featureName, branchName, groupJid, folder },
+          'Dev group created successfully',
+        );
+      } catch (err) {
+        logger.error({ featureName, err }, 'Failed to create dev group');
+        const mainJid = Object.entries(registeredGroups)
+          .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+        if (mainJid) {
+          await deps.sendMessage(
+            mainJid,
+            `${ASSISTANT_NAME}: Failed to create dev group: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      break;
+    }
+
+    case 'test_feature': {
+      // Can be called from the dev group itself or from main
+      const devGroup = Object.values(registeredGroups).find(
+        (g) => g.folder === sourceGroup && g.isDev,
+      );
+      if (!devGroup && !isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized test_feature attempt');
+        break;
+      }
+
+      const featureBranchName = devGroup?.featureBranch || data.featureName;
+      if (!featureBranchName) {
+        logger.warn({ sourceGroup }, 'test_feature: no feature branch found');
+        break;
+      }
+
+      const feature = featureBranchName.replace(/^feature\//, '');
+      const testResult = testFeature(feature);
+
+      // Send result to the requesting group
+      const requestJid = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === sourceGroup)?.[0];
+      if (requestJid) {
+        const status = testResult.success ? 'passed' : 'FAILED';
+        const output = testResult.output.slice(-500); // Last 500 chars
+        await deps.sendMessage(
+          requestJid,
+          `${ASSISTANT_NAME}: Tests ${status}\n\`\`\`\n${output}\n\`\`\``,
+        );
+      }
+
+      logger.info(
+        { feature, success: testResult.success, sourceGroup },
+        'Feature test completed',
+      );
+      break;
+    }
+
+    case 'feature_status': {
+      const devGroupStatus = Object.values(registeredGroups).find(
+        (g) => g.folder === sourceGroup && g.isDev,
+      );
+      if (!devGroupStatus && !isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized feature_status attempt');
+        break;
+      }
+
+      const branchForStatus = devGroupStatus?.featureBranch || data.featureName;
+      if (!branchForStatus) {
+        logger.warn({ sourceGroup }, 'feature_status: no feature branch found');
+        break;
+      }
+
+      const featureForStatus = branchForStatus.replace(/^feature\//, '');
+      const diff = getFeatureDiff(featureForStatus);
+
+      const statusJid = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === sourceGroup)?.[0];
+      if (statusJid) {
+        await deps.sendMessage(
+          statusJid,
+          `${ASSISTANT_NAME}: Feature status for \`${branchForStatus}\`:\n\`\`\`\n${diff}\n\`\`\``,
+        );
+      }
+      break;
+    }
+
+    case 'merge_feature': {
+      // Only main group or the dev group itself can merge
+      const devGroupMerge = Object.values(registeredGroups).find(
+        (g) => g.folder === sourceGroup && g.isDev,
+      );
+      if (!devGroupMerge && !isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized merge_feature attempt');
+        break;
+      }
+
+      const branchToMerge = devGroupMerge?.featureBranch || data.featureName;
+      if (!branchToMerge) {
+        logger.warn({ sourceGroup }, 'merge_feature: no feature branch found');
+        break;
+      }
+
+      const mergeJid = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === sourceGroup)?.[0];
+
+      // 1. Merge the branch
+      const mergeResult = mergeFeatureBranch(branchToMerge);
+      if (!mergeResult.success) {
+        if (mergeJid) {
+          await deps.sendMessage(
+            mergeJid,
+            `${ASSISTANT_NAME}: Merge failed:\n\`\`\`\n${mergeResult.output.slice(-500)}\n\`\`\``,
+          );
+        }
+        break;
+      }
+
+      // 2. Rebuild
+      const buildResult = rebuildProject();
+      if (!buildResult.success) {
+        if (mergeJid) {
+          await deps.sendMessage(
+            mergeJid,
+            `${ASSISTANT_NAME}: Merge succeeded but build failed:\n\`\`\`\n${buildResult.output.slice(-500)}\n\`\`\``,
+          );
+        }
+        break;
+      }
+
+      // 3. Notify before restart
+      const mainJidForMerge = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+      if (mainJidForMerge) {
+        await deps.sendMessage(
+          mainJidForMerge,
+          `${ASSISTANT_NAME}: Feature \`${branchToMerge}\` merged and built successfully. Restarting...`,
+        );
+      }
+
+      // 4. Clean up worktree (keep branch for history)
+      const featureToClean = branchToMerge.replace(/^feature\//, '');
+      cleanupDevBranch(featureToClean, true);
+
+      // 5. Restart (this will kill the process)
+      logger.info({ branchToMerge }, 'Merge complete, restarting service');
+      // Small delay to let the notification message send
+      setTimeout(() => restartService(), 2000);
+      break;
+    }
+
+    case 'cleanup_dev_group': {
+      // Only main group can clean up dev groups
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized cleanup_dev_group attempt');
+        break;
+      }
+
+      if (!data.featureName) {
+        logger.warn({ data }, 'cleanup_dev_group: missing featureName');
+        break;
+      }
+
+      const featureToRemove = data.featureName;
+      const folderToRemove = devGroupFolder(featureToRemove);
+
+      // Find and unregister the group
+      const devJid = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === folderToRemove)?.[0];
+
+      // Clean up git worktree and branch
+      cleanupDevBranch(sanitizeFeatureName(featureToRemove), true);
+
+      logger.info(
+        { featureName: featureToRemove, folder: folderToRemove, jid: devJid },
+        'Dev group cleaned up',
+      );
+
+      const mainJidCleanup = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+      if (mainJidCleanup) {
+        await deps.sendMessage(
+          mainJidCleanup,
+          `${ASSISTANT_NAME}: Dev group for *${featureToRemove}* cleaned up. Worktree and branch removed.`,
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

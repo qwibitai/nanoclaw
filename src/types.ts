@@ -39,6 +39,8 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isDev?: boolean; // Dev groups get RW access to a git worktree of the project
+  featureBranch?: string; // Git branch name for this dev group (e.g., "feature/add-voice")
 }
 
 export interface NewMessage {
