@@ -97,7 +97,7 @@ async function runAgent(prompt: string): Promise<string | null> {
     }));
   writeGroupsSnapshot(groupFolder, true, availableGroups, new Set());
 
-  try {
+  try {    
     const output = await runContainerAgent(
       tuiGroup,
       {
@@ -106,9 +106,10 @@ async function runAgent(prompt: string): Promise<string | null> {
         groupFolder,
         chatJid: TUI_CHAT_JID,
         isMain: true,
+        assistantName: ASSISTANT_NAME,
       },
       // onProcess callback — no-op for TUI (no need to track child process)
-      () => {},
+      () => {}
     );
 
     if (output.newSessionId) {
@@ -118,6 +119,13 @@ async function runAgent(prompt: string): Promise<string | null> {
     if (output.status === 'error') {
       logger.error({ error: output.error }, 'Container agent error');
       return `[Error] ${output.error}`;
+    }
+
+    // Process the result and strip internal tags
+    if (output.result) {
+      const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
+      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      return text || output.result;
     }
 
     return output.result;
