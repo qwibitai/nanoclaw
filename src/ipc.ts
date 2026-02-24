@@ -17,10 +17,12 @@ import {
   createDevBranch,
   createDevGroupClaudeMd,
   devGroupFolder,
+  getCurrentHead,
   getFeatureDiff,
   mergeFeatureBranch,
   rebuildProject,
   restartService,
+  revertToCommit,
   sanitizeFeatureName,
   testFeature,
 } from './dev-workflow.js';
@@ -575,7 +577,34 @@ export async function processTaskIpc(
       const mergeJid = Object.entries(registeredGroups)
         .find(([, g]) => g.folder === sourceGroup)?.[0];
 
-      // 1. Merge the branch
+      // 1. Pre-merge validation: build + test the worktree before touching main
+      const featureForTest = branchToMerge.replace(/^feature\//, '');
+      if (mergeJid) {
+        await deps.sendMessage(
+          mergeJid,
+          `${ASSISTANT_NAME}: Running pre-merge validation (build + tests) on the feature branch...`,
+        );
+      }
+      const preMergeTest = testFeature(featureForTest);
+      if (!preMergeTest.success) {
+        if (mergeJid) {
+          await deps.sendMessage(
+            mergeJid,
+            `${ASSISTANT_NAME}: Pre-merge validation *failed*. Fix the issues before merging:\n\`\`\`\n${preMergeTest.output.slice(-500)}\n\`\`\``,
+          );
+        }
+        break;
+      }
+
+      // 2. Save current HEAD for rollback
+      let rollbackCommit: string;
+      try {
+        rollbackCommit = getCurrentHead();
+      } catch {
+        rollbackCommit = '';
+      }
+
+      // 3. Merge the branch
       const mergeResult = mergeFeatureBranch(branchToMerge);
       if (!mergeResult.success) {
         if (mergeJid) {
@@ -587,19 +616,31 @@ export async function processTaskIpc(
         break;
       }
 
-      // 2. Rebuild
+      // 4. Rebuild from merged code
       const buildResult = rebuildProject();
       if (!buildResult.success) {
-        if (mergeJid) {
-          await deps.sendMessage(
-            mergeJid,
-            `${ASSISTANT_NAME}: Merge succeeded but build failed:\n\`\`\`\n${buildResult.output.slice(-500)}\n\`\`\``,
-          );
+        // Automatic rollback: revert the merge so we don't leave main broken
+        if (rollbackCommit) {
+          const revert = revertToCommit(rollbackCommit);
+          rebuildProject(); // Rebuild from the reverted state
+          if (mergeJid) {
+            await deps.sendMessage(
+              mergeJid,
+              `${ASSISTANT_NAME}: Build failed after merge — *automatically rolled back* to ${rollbackCommit}.\n\`\`\`\n${buildResult.output.slice(-500)}\n\`\`\`\n${revert.success ? 'Rollback successful.' : 'Rollback also failed! Manual intervention needed.'}`,
+            );
+          }
+        } else {
+          if (mergeJid) {
+            await deps.sendMessage(
+              mergeJid,
+              `${ASSISTANT_NAME}: Build failed after merge and rollback unavailable:\n\`\`\`\n${buildResult.output.slice(-500)}\n\`\`\``,
+            );
+          }
         }
         break;
       }
 
-      // 3. Notify before restart
+      // 5. Notify before restart
       const mainJidForMerge = Object.entries(registeredGroups)
         .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
       if (mainJidForMerge) {
@@ -609,11 +650,10 @@ export async function processTaskIpc(
         );
       }
 
-      // 4. Clean up worktree (keep branch for history)
-      const featureToClean = branchToMerge.replace(/^feature\//, '');
-      cleanupDevBranch(featureToClean, true);
+      // 6. Clean up worktree and branch
+      cleanupDevBranch(featureForTest, true);
 
-      // 5. Restart (this will kill the process)
+      // 7. Restart (this will kill the process)
       logger.info({ branchToMerge }, 'Merge complete, restarting service');
       // Small delay to let the notification message send
       setTimeout(() => restartService(), 2000);

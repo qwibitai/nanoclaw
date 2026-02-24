@@ -148,6 +148,17 @@ export function testFeature(featureName: string): {
 }
 
 /**
+ * Get the current HEAD commit hash (short form).
+ */
+export function getCurrentHead(): string {
+  return execSync('git rev-parse --short HEAD', {
+    cwd: process.cwd(),
+    stdio: 'pipe',
+    encoding: 'utf-8',
+  }).trim();
+}
+
+/**
  * Merge a feature branch into the current branch.
  * Must be called from the project root (main worktree).
  */
@@ -175,6 +186,37 @@ export function mergeFeatureBranch(featureBranch: string): {
         ? String((err as { stdout: unknown }).stdout)
         : String(err);
     logger.error({ featureBranch, output }, 'Failed to merge feature branch');
+    return { success: false, output };
+  }
+}
+
+/**
+ * Revert to a specific commit (used for rollback after failed post-merge build).
+ */
+export function revertToCommit(commitHash: string): {
+  success: boolean;
+  output: string;
+} {
+  const projectRoot = process.cwd();
+
+  try {
+    const output = execSync(
+      `git reset --hard "${commitHash}"`,
+      {
+        cwd: projectRoot,
+        stdio: 'pipe',
+        encoding: 'utf-8',
+        timeout: 10000,
+      },
+    );
+    logger.info({ commitHash }, 'Reverted to commit');
+    return { success: true, output };
+  } catch (err) {
+    const output =
+      err instanceof Error && 'stdout' in err
+        ? String((err as { stdout: unknown }).stdout)
+        : String(err);
+    logger.error({ commitHash, output }, 'Failed to revert');
     return { success: false, output };
   }
 }
@@ -326,6 +368,19 @@ You have all standard Claude Code tools available (Edit, Write, Bash, Grep, Glob
 5. **Commit**: \`git add <files> && git commit -m "description"\`
 6. **Check your work**: \`git diff\`, \`git log --oneline -5\`
 
+## Testing Before Merge
+
+Always verify your changes before merging:
+
+1. **Build check**: \`npm run build\` — ensures TypeScript compiles
+2. **Unit tests**: \`npm test\` — runs the test suite
+3. **Smoke test** (optional): \`node -e "import('./dist/index.js').then(() => { console.log('OK'); process.exit(0); }).catch(e => { console.error(e); process.exit(1); })"\`
+
+You can also request a host-side test via IPC (builds and tests from the host):
+\`\`\`bash
+echo '{"type": "test_feature"}' > /workspace/ipc/tasks/test_$(date +%s).json
+\`\`\`
+
 ## Merging Back to Main
 
 When the feature is ready and tests pass, request a merge via IPC:
@@ -334,12 +389,18 @@ When the feature is ready and tests pass, request a merge via IPC:
 echo '{"type": "merge_feature"}' > /workspace/ipc/tasks/merge_$(date +%s).json
 \`\`\`
 
-This will merge your branch into main, rebuild, and restart NanoClaw.
+The merge process will:
+1. Run build + tests on the feature branch (pre-merge validation)
+2. If tests fail → merge is blocked, you'll get the error output
+3. If tests pass → merge into main
+4. Rebuild from merged code
+5. If post-merge build fails → *automatic rollback* to the previous commit
+6. If build succeeds → restart NanoClaw with the new code
 
 ## Important Notes
 
 - **Commit frequently** — small, focused commits are easier to review and revert
-- **Always run build + tests** before requesting a merge
+- The merge process validates automatically, but running tests yourself first saves time
 - **Don't modify** \`.env\`, \`store/\`, or \`data/\` directories
 - You have full git access — branches, stash, rebase, etc.
 - The project uses TypeScript, Node.js 22, and builds with \`tsc\`
