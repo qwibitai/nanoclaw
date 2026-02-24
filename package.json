@@ -33,6 +33,7 @@
     "@types/qrcode-terminal": "^0.12.2",
     "@vitest/coverage-v8": "^4.0.18",
     "prettier": "^3.8.1",
+    "qrcode": "^1.5.4",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
