@@ -71,6 +71,7 @@ Use `input` as the actual task objective. Always acknowledge and preserve the sa
 - Lead with what you did, follow with findings
 - Be concise — Andy reads many parallel results
 - Use `<internal>...</internal>` for reasoning you don't want sent upstream
+- Do not capture/analyze screenshots for browser validation; use text-based evidence only
 - Commit and push work when complete unless told otherwise
 - Report blockers immediately rather than guessing
 

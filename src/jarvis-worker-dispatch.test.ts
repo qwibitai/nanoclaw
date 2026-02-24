@@ -269,6 +269,31 @@ describe('dispatch payload validation', () => {
     };
     expect(requiresBrowserEvidence(payload)).toBe(true);
   });
+
+  it('rejects dispatch input that requests screenshot capture/analysis', () => {
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      input: 'Run browser tests and take a screenshot of dashboard for confirmation',
+      output_contract: {
+        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    });
+    expect(valid).toBe(false);
+    expect(errors).toContain('input must not request screenshot capture/analysis; use text-based browser evidence');
+  });
+
+  it('rejects acceptance tests that include screenshot commands', () => {
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      input: 'Validate dashboard via evaluate_script assertions',
+      acceptance_tests: ['mcp chrome-devtools take_screenshot /dashboard'],
+      output_contract: {
+        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    });
+    expect(valid).toBe(false);
+    expect(errors).toContain('acceptance_tests must not include screenshot commands; use text-based checks');
+  });
 });
 
 describe('completion contract parsing', () => {
@@ -469,6 +494,31 @@ describe('completion contract validation', () => {
     );
     expect(valid).toBe(false);
     expect(missing).toContain('browser_evidence.base_url');
+  });
+
+  it('rejects browser evidence that references screenshots', () => {
+    const { valid, missing } = validateCompletionContract(
+      {
+        run_id: 'task-1',
+        branch: 'jarvis-feat',
+        commit_sha: 'abc1234',
+        files_changed: ['src/a.ts'],
+        pr_url: 'url',
+        test_result: 'pass',
+        risk: 'low',
+        browser_evidence: {
+          base_url: 'http://127.0.0.1:3000/dashboard',
+          tools_listed: ['chrome-devtools'],
+          execute_tool_evidence: ['take_screenshot /dashboard and compare pixels'],
+        },
+      },
+      {
+        expectedRunId: 'task-1',
+        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+      },
+    );
+    expect(valid).toBe(false);
+    expect(missing).toContain('browser_evidence.no_screenshots');
   });
 });
 

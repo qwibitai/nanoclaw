@@ -30,6 +30,7 @@ BEFORE declaring work "ready for user review" → read /workspace/group/docs/rev
 - Do not claim task completion without worker evidence (tests + completion contract).
 - Do not claim "ready for user review" without the local review handoff bundle from `/workspace/group/docs/review-handoff.md`.
 - Do not wait for user reminders to run review-handoff preflight; it is required by default.
+- Do not request or use screenshot capture/analysis for browser validation; use text-based evidence only.
 
 ## Allowed Actions
 

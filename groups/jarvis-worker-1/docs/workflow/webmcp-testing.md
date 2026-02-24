@@ -40,6 +40,7 @@ Run at least one task-relevant `chrome-devtools` MCP action after readiness:
 - inspect console/network if task requires it
 
 Use task-specific assertions, not generic smoke-only checks.
+Do not capture/analyze screenshots; use text outputs only.
 
 ## Evidence Required In Completion
 
@@ -49,6 +50,7 @@ Include a compact browser evidence block with:
 2. route(s) tested (127.0.0.1 URL)
 3. `chrome-devtools` tool calls executed (name + key output)
 4. pass/fail decision tied to expected behavior
+5. explicit confirmation that screenshot capture/analysis was not used
 
 No "browser pass" claims without MCP tool execution evidence.
 

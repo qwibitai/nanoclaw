@@ -24,6 +24,10 @@ Worker tasks MUST be sent as a JSON object string. Plain text dispatch is reject
 | `output_contract.required_fields` | Yes | Must include run completion fields |
 | `priority` | No | `low`, `normal`, `high` |
 
+No-screenshot policy:
+- Do not request screenshot capture/analysis in `input` or `acceptance_tests`.
+- Use text-based browser evidence only (`evaluate_script`, console/network output, curl probes).
+
 ## Browser Dispatch Profile (Container Chromium)
 
 For browser-testing tasks, include explicit mode in `input`:
@@ -38,6 +42,7 @@ When `browser_required: true`, acceptance tests must include:
 1. app/server readiness check
 2. in-container route probe (`127.0.0.1:<port>`)
 3. task-specific `chrome-devtools` MCP assertion(s)
+4. no screenshot commands/evidence
 
 If browser tooling prerequisites are missing, worker must return blocker evidence instead of silent fallback.
 

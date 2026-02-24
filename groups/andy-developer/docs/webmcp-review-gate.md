@@ -14,6 +14,7 @@ Use this before dispatching or approving browser-testing work.
 2. For UI-impacting tasks, require in-container browser validation by default.
 3. Require worker to run app server in-container, probe readiness, then run browser assertions.
 4. Allow DOM-only fallback only when explicitly approved.
+5. Never require screenshots or screenshot analysis; they are prohibited for token/runtime reasons.
 
 UI-impacting examples:
 - edits under `src/app`, `src/components`, `pages`, `public`
@@ -30,6 +31,7 @@ When creating worker dispatch JSON for browser work:
   - readiness probe command
   - target route(s) on `127.0.0.1`
   - task-specific browser assertions
+  - explicit no-screenshot instruction (`no screenshots; use evaluate_script/curl/console output`)
 - Keep fallback explicit (`fallback_allowed: true`) only when approved.
 
 ## Evidence Required In Worker Completion
@@ -40,6 +42,7 @@ Require all of:
 2. tested in-container URL(s)
 3. `chrome-devtools` MCP tool calls with key outputs
 4. pass/fail decision tied to expected UI behavior
+5. confirmation that no screenshot capture/analysis was used
 
 Do not approve "passed browser tests" without browser-tool evidence.
 

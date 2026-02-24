@@ -59,6 +59,7 @@ const ALLOWED_TASK_TYPES: Set<DispatchTaskType> = new Set([
 ]);
 const UI_HINT_PATTERN = /\b(ui|frontend|dashboard|page|component|layout|css|style|browser|webmcp|chrome-devtools|visual|route|navigation)\b/i;
 const LOCAL_BASE_URL_PATTERN = /^https?:\/\/127\.0\.0\.1(?::\d+)?(?:\/|$)/i;
+const SCREENSHOT_PATTERN = /\b(screenshot|screen[\s-]?shot|take_screenshot|browser_take_screenshot|comet_screenshot|image analysis|analyze screenshot)\b/i;
 const COMPLETION_REQUIRED_FIELDS = [
   'run_id',
   'branch',
@@ -78,6 +79,10 @@ function parseJsonObject(raw: string): Record<string, unknown> | null {
     // ignore parse errors
   }
   return null;
+}
+
+function hasScreenshotDirective(text: string): boolean {
+  return SCREENSHOT_PATTERN.test(text);
 }
 
 /**
@@ -125,6 +130,8 @@ export function validateDispatchPayload(payload: DispatchPayload): { valid: bool
 
   if (!payload.input || !payload.input.trim()) {
     errors.push('input is required');
+  } else if (hasScreenshotDirective(payload.input)) {
+    errors.push('input must not request screenshot capture/analysis; use text-based browser evidence');
   }
 
   if (!payload.repo || !REPO_PATTERN.test(payload.repo)) {
@@ -139,6 +146,8 @@ export function validateDispatchPayload(payload: DispatchPayload): { valid: bool
     errors.push('acceptance_tests must be a non-empty array');
   } else if (payload.acceptance_tests.some((test) => typeof test !== 'string' || !test.trim())) {
     errors.push('acceptance_tests entries must be non-empty strings');
+  } else if (payload.acceptance_tests.some((test) => hasScreenshotDirective(test))) {
+    errors.push('acceptance_tests must not include screenshot commands; use text-based checks');
   }
 
   if (!payload.output_contract || typeof payload.output_contract !== 'object') {
@@ -268,6 +277,11 @@ export function validateCompletionContract(
         )
       ) {
         missing.push('browser_evidence.execute_tool_evidence');
+      } else if (evidence.execute_tool_evidence.some((item) => hasScreenshotDirective(item))) {
+        missing.push('browser_evidence.no_screenshots');
+      }
+      if (evidence.tools_listed.some((item) => hasScreenshotDirective(item))) {
+        missing.push('browser_evidence.no_screenshots');
       }
     }
   }
