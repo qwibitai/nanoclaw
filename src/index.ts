@@ -41,6 +41,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { initShabbatSchedule, isShabbatOrYomTov } from './shabbat.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
 import { AUTH_ERROR_PATTERN, ensureTokenFresh, refreshOAuthToken } from './oauth.js';
 
@@ -59,6 +60,7 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -200,13 +202,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Mark last user message as thinking (container is spawning)
+  const lastUserMsg = [...missedMessages].reverse().find((m) => !m.is_from_me && !m.is_bot_message);
+  if (lastUserMsg) {
+    statusTracker.markThinking(lastUserMsg.id);
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        if (lastUserMsg) statusTracker.markWorking(lastUserMsg.id);
+      }
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
@@ -239,6 +252,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         lastAgentTimestamp[chatJid] = cursorBeforePipe[chatJid];
         saveState();
         logger.warn({ group: group.name }, 'Agent error after output, rolled back piped messages for retry');
+        statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
         delete cursorBeforePipe[chatJid];
         return false;
       }
@@ -249,11 +263,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
+    statusTracker.markAllFailed(chatJid, 'Task crashed — retrying.');
     delete cursorBeforePipe[chatJid];
     return false;
   }
 
   // Success — clear pipe tracking
+  statusTracker.markAllDone(chatJid);
   delete cursorBeforePipe[chatJid];
   return true;
 }
@@ -439,6 +455,13 @@ async function startMessageLoop(): Promise<void> {
               if (!hasTrigger) continue;
             }
 
+            // Mark each user message as received (main group only, status emoji)
+            for (const msg of groupMessages) {
+              if (!msg.is_from_me && !msg.is_bot_message) {
+                statusTracker.markReceived(msg.id, chatJid, !!msg.is_from_me);
+              }
+            }
+
             // Pull all messages since lastAgentTimestamp so non-trigger
             // context that accumulated between triggers is included.
             const allPending = getMessagesSince(
@@ -510,6 +533,26 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => {
+      const group = registeredGroups[chatJid];
+      return group?.folder === MAIN_GROUP_FOLDER;
+    },
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  await statusTracker.recover();
+
   initShabbatSchedule();
 
   // Ensure token is fresh at startup so the first container doesn't hit an expired token
