@@ -90,10 +90,20 @@ import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
+import os from 'os';
 
 const logger = pino({ level: 'silent' });
 const authDir = path.join('store', 'auth');
 const dbPath = path.join('store', 'messages.db');
+
+// Select appropriate browser based on platform
+const getBrowser = () => {
+  const platform = os.platform();
+  if (platform === 'darwin') {
+    return Browsers.macOS('Chrome');
+  }
+  return Browsers.unix('Chrome');
+};
 
 if (!fs.existsSync(authDir)) {
   console.error('NO_AUTH');
@@ -114,7 +124,7 @@ const sock = makeWASocket({
   auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
   printQRInTerminal: false,
   logger,
-  browser: Browsers.macOS('Chrome'),
+  browser: getBrowser(),
 });
 
 const timeout = setTimeout(() => {
