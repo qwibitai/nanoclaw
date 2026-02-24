@@ -165,6 +165,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Memory vault (Obsidian-compatible knowledge base)
+  // Main has read-write so the agent can create/update person pages, daily notes, etc.
+  // All other groups get read-only so they can recall context but not pollute the vault.
+  const memoryVaultDir = path.join(GROUPS_DIR, 'memory');
+  fs.mkdirSync(memoryVaultDir, { recursive: true });
+  mounts.push({
+    hostPath: memoryVaultDir,
+    containerPath: '/workspace/memory',
+    readonly: !isMain,
+  });
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
