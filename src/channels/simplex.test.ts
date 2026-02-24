@@ -67,7 +67,7 @@ function createFakeWebSocket() {
 
 type FakeWs = ReturnType<typeof createFakeWebSocket>;
 
-import { SimplexChannel, SimplexChannelOpts } from './simplex.js';
+import { SimplexChannel, SimplexChannelOpts, formatForSimplex } from './simplex.js';
 
 // --- Test helpers ---
 
@@ -695,5 +695,53 @@ describe('SimplexChannel', () => {
       const channel = new SimplexChannel(5225, createTestOpts());
       expect(channel.name).toBe('simplex');
     });
+  });
+});
+
+// --- formatForSimplex ---
+
+describe('formatForSimplex', () => {
+  it('converts headings to bold', () => {
+    expect(formatForSimplex('## Summary')).toBe('*Summary*');
+    expect(formatForSimplex('### Details')).toBe('*Details*');
+    expect(formatForSimplex('# Title')).toBe('*Title*');
+  });
+
+  it('converts **double asterisks** to *single*', () => {
+    expect(formatForSimplex('This is **bold** text')).toBe('This is *bold* text');
+  });
+
+  it('converts __double underscores__ to *bold*', () => {
+    expect(formatForSimplex('This is __bold__ text')).toBe('This is *bold* text');
+  });
+
+  it('strips fenced code block markers but keeps content', () => {
+    const input = 'Before\n```js\nconst x = 1;\nconsole.log(x);\n```\nAfter';
+    const expected = 'Before\nconst x = 1;\nconsole.log(x);\nAfter';
+    expect(formatForSimplex(input)).toBe(expected);
+  });
+
+  it('strips blockquote prefixes', () => {
+    expect(formatForSimplex('> quoted text')).toBe('quoted text');
+    expect(formatForSimplex('> line one\n> line two')).toBe('line one\nline two');
+  });
+
+  it('handles empty blockquote lines', () => {
+    expect(formatForSimplex('> first\n>\n> second')).toBe('first\n\nsecond');
+  });
+
+  it('leaves already-compatible formatting alone', () => {
+    expect(formatForSimplex('*bold* and _italic_ and `code`')).toBe('*bold* and _italic_ and `code`');
+  });
+
+  it('handles mixed formatting in one message', () => {
+    const input = '## Title\n\nSome **bold** and _italic_ text.\n\n```\ncode here\n```\n\n> A quote';
+    const expected = '*Title*\n\nSome *bold* and _italic_ text.\n\ncode here\n\nA quote';
+    expect(formatForSimplex(input)).toBe(expected);
+  });
+
+  it('passes plain text through unchanged', () => {
+    const plain = 'Just a normal message with no formatting.';
+    expect(formatForSimplex(plain)).toBe(plain);
   });
 });

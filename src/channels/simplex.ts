@@ -22,6 +22,61 @@ export interface SimplexChannelOpts {
   createWebSocket?: (url: string) => WebSocket;
 }
 
+/**
+ * Convert standard Markdown to SimpleX-compatible formatting.
+ *
+ * SimpleX uses a minimal custom markup (not Markdown):
+ *   *bold*  _italic_  ~strikethrough~  `inline code`  #spoiler#
+ *
+ * It does NOT support: ## headings, **double-asterisk bold**,
+ * fenced code blocks, blockquotes, bullet/numbered lists, or tables.
+ */
+export function formatForSimplex(text: string): string {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let inCodeBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Toggle fenced code blocks — keep content, strip the fences
+    if (line.trimStart().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      out.push(line);
+      continue;
+    }
+
+    let l = line;
+
+    // Headings → bold (strip leading #s)
+    const headingMatch = l.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      l = `*${headingMatch[2]}*`;
+      out.push(l);
+      continue;
+    }
+
+    // Blockquotes → strip > prefix
+    if (l.startsWith('> ')) {
+      l = l.slice(2);
+    } else if (l === '>') {
+      l = '';
+    }
+
+    // **bold** or __bold__ → *bold*
+    l = l.replace(/\*\*(.+?)\*\*/g, '*$1*');
+    l = l.replace(/__(.+?)__/g, '*$1*');
+
+    out.push(l);
+  }
+
+  return out.join('\n');
+}
+
 export class SimplexChannel implements Channel {
   name = 'simplex';
 
@@ -418,22 +473,24 @@ export class SimplexChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
+    const formatted = formatForSimplex(text);
+
     if (!this.connected) {
-      this.outgoingQueue.push({ jid, text });
-      logger.info({ jid, length: text.length, queueSize: this.outgoingQueue.length }, 'SimpleX disconnected, message queued');
+      this.outgoingQueue.push({ jid, text: formatted });
+      logger.info({ jid, length: formatted.length, queueSize: this.outgoingQueue.length }, 'SimpleX disconnected, message queued');
       return;
     }
 
     try {
-      const cmd = this.buildSendCommand(jid, text);
+      const cmd = this.buildSendCommand(jid, formatted);
       if (!cmd) {
         logger.warn({ jid }, 'Cannot build SimpleX send command for JID');
         return;
       }
       this.sendCommand(cmd);
-      logger.info({ jid, length: text.length }, 'SimpleX message sent');
+      logger.info({ jid, length: formatted.length }, 'SimpleX message sent');
     } catch (err) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text: formatted });
       logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send SimpleX message, queued');
     }
   }
