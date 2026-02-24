@@ -1,14 +1,11 @@
 import { exec } from 'child_process';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import makeWASocket, {
   Browsers,
   DisconnectReason,
-  WAMessage,
   WASocket,
-  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -28,76 +25,13 @@ import {
   OnChatMetadata,
   RegisteredGroup,
 } from '../types.js';
+import {
+  downloadAndSaveMedia,
+  getMediaInfo,
+  unwrapMessage,
+} from '../whatsapp-media.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-// Map WhatsApp message keys to media type and Baileys MediaType
-const MEDIA_MESSAGE_MAP: Record<
-  string,
-  {
-    type: string;
-    baileysType: 'image' | 'video' | 'audio' | 'document' | 'sticker';
-  }
-> = {
-  imageMessage: { type: 'image', baileysType: 'image' },
-  videoMessage: { type: 'video', baileysType: 'video' },
-  audioMessage: { type: 'audio', baileysType: 'audio' },
-  documentMessage: { type: 'document', baileysType: 'document' },
-  stickerMessage: { type: 'sticker', baileysType: 'sticker' },
-};
-
-// Safe MIME types we'll download (block executables, scripts, etc.)
-const SAFE_MIME_PREFIXES = [
-  'image/',
-  'audio/',
-  'video/',
-  'text/',
-  'application/pdf',
-  'application/json',
-  'application/csv',
-  'application/zip',
-  'application/x-zip-compressed',
-  'application/x-tar',
-  'application/gzip',
-  'application/octet-stream',
-  'application/vnd.openxmlformats-officedocument',
-  'application/vnd.ms-excel',
-  'application/vnd.ms-powerpoint',
-  'application/msword',
-];
-
-// Extension lookup for common MIME types
-const MIME_TO_EXT: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-  'video/mp4': 'mp4',
-  'video/3gpp': '3gp',
-  'audio/ogg': 'ogg',
-  'audio/mpeg': 'mp3',
-  'audio/mp4': 'm4a',
-  'text/plain': 'txt',
-  'application/pdf': 'pdf',
-  'application/json': 'json',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-    'docx',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/msword': 'doc',
-  'application/vnd.ms-excel': 'xls',
-};
-
-function isSafeMime(mime: string): boolean {
-  return SAFE_MIME_PREFIXES.some((prefix) => mime.startsWith(prefix));
-}
-
-function getExtension(mime: string, filename?: string): string {
-  if (filename) {
-    const ext = path.extname(filename).slice(1);
-    if (ext) return ext;
-  }
-  return MIME_TO_EXT[mime] || mime.split('/')[1] || 'bin';
-}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -266,19 +200,12 @@ export class WhatsAppChannel implements Channel {
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
+        const group = groups[chatJid];
+        if (group) {
           // Unwrap nested containers for text extraction
-          let msgContent = msg.message!;
-          if (msgContent.ephemeralMessage?.message)
-            msgContent = msgContent.ephemeralMessage.message;
-          if (msgContent.viewOnceMessage?.message)
-            msgContent = msgContent.viewOnceMessage.message;
-          if (msgContent.viewOnceMessageV2?.message)
-            msgContent = msgContent.viewOnceMessageV2.message;
-          if (msgContent.documentWithCaptionMessage?.message)
-            msgContent = msgContent.documentWithCaptionMessage.message;
+          const msgContent = unwrapMessage(msg.message!) ?? msg.message!;
 
-          const content =
+          let content =
             msgContent.conversation ||
             msgContent.extendedTextMessage?.text ||
             msgContent.imageMessage?.caption ||
@@ -286,17 +213,25 @@ export class WhatsAppChannel implements Channel {
             msgContent.documentMessage?.caption ||
             '';
 
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
-
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
 
+          // Attempt media download for supported types
+          const mediaResult = getMediaInfo(msg)
+            ? await downloadAndSaveMedia(msg, group.folder, GROUPS_DIR)
+            : null;
+
+          if (mediaResult) {
+            // If text content is empty, add a placeholder describing the media
+            if (!content) {
+              content = `[${mediaResult.mediaType}${mediaResult.filename ? ': ' + mediaResult.filename : ''}]`;
+            }
+          } else if (!content) {
+            // Skip protocol messages with no text content and no media
+            continue;
+          }
+
           const fromMe = msg.key.fromMe || false;
-          // Detect bot messages: with own number, fromMe is reliable
-          // since only the bot sends from that number.
-          // With shared number, bot messages carry the assistant name prefix
-          // (even in DMs/self-chat) so we check for that.
           const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
@@ -310,11 +245,11 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            media_type: mediaResult?.mediaType,
+            media_path: mediaResult?.filePath,
+            media_mime: mediaResult?.mimetype,
+            media_filename: mediaResult?.filename,
           };
-
-          // Attempt media download for supported types
-          const group = groups[chatJid];
-          await this.downloadMedia(msg, group.folder, newMsg);
 
           this.opts.onMessage(chatJid, newMsg);
         }
@@ -441,81 +376,6 @@ export class WhatsAppChannel implements Channel {
       logger.info({ count }, 'Group metadata synced');
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
-    }
-  }
-
-  /**
-   * Download media from a WhatsApp message and populate media fields on newMsg.
-   * Silently skips unsupported/unsafe media types.
-   */
-  private async downloadMedia(
-    msg: WAMessage,
-    groupFolder: string,
-    newMsg: import('../types.js').NewMessage,
-  ): Promise<void> {
-    if (!msg.message) return;
-
-    // Unwrap nested message containers (ephemeral, viewOnce, documentWithCaption)
-    let innerMessage = msg.message;
-    if (innerMessage.ephemeralMessage?.message)
-      innerMessage = innerMessage.ephemeralMessage.message;
-    if (innerMessage.viewOnceMessage?.message)
-      innerMessage = innerMessage.viewOnceMessage.message;
-    if (innerMessage.viewOnceMessageV2?.message)
-      innerMessage = innerMessage.viewOnceMessageV2.message;
-    if (innerMessage.documentWithCaptionMessage?.message)
-      innerMessage = innerMessage.documentWithCaptionMessage.message;
-
-    // Find which media message key is present
-    let mediaKey: string | undefined;
-    let mediaInfo: (typeof MEDIA_MESSAGE_MAP)[string] | undefined;
-    for (const [key, info] of Object.entries(MEDIA_MESSAGE_MAP)) {
-      if ((innerMessage as Record<string, unknown>)[key]) {
-        mediaKey = key;
-        mediaInfo = info;
-        break;
-      }
-    }
-
-    if (!mediaKey || !mediaInfo) return;
-
-    const mediaMsg = (innerMessage as Record<string, Record<string, unknown>>)[
-      mediaKey
-    ];
-    const mime = (mediaMsg.mimetype as string) || '';
-    const origFilename = mediaMsg.fileName as string | undefined;
-
-    if (!isSafeMime(mime)) {
-      logger.info({ mime, mediaKey }, 'Skipping unsafe media MIME type');
-      return;
-    }
-
-    try {
-      const buffer = await downloadMediaMessage(msg, 'buffer', {});
-
-      const ext = getExtension(mime, origFilename);
-      const filename = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
-      const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
-      fs.mkdirSync(mediaDir, { recursive: true });
-      const filePath = path.join(mediaDir, filename);
-      fs.writeFileSync(filePath, buffer);
-
-      newMsg.media_type = mediaInfo.type;
-      newMsg.media_path = filePath;
-      newMsg.media_mime = mime;
-      newMsg.media_filename = origFilename;
-
-      // If text content is empty, add a placeholder describing the media
-      if (!newMsg.content) {
-        newMsg.content = `[${mediaInfo.type}${origFilename ? ': ' + origFilename : ''}]`;
-      }
-
-      logger.info(
-        { type: mediaInfo.type, mime, filename, size: buffer.length },
-        'Media downloaded',
-      );
-    } catch (err) {
-      logger.warn({ err, mediaKey, mime }, 'Failed to download media');
     }
   }
 
