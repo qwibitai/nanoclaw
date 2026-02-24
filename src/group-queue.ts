@@ -18,6 +18,7 @@ interface GroupState {
   active: boolean;
   idleWaiting: boolean;
   isTaskContainer: boolean;
+  runningTaskId: string | null;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
@@ -41,6 +42,7 @@ export class GroupQueue {
         active: false,
         idleWaiting: false,
         isTaskContainer: false,
+        runningTaskId: null,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
@@ -88,9 +90,9 @@ export class GroupQueue {
 
     const state = this.getGroup(groupJid);
 
-    // Prevent double-queuing of the same task
-    if (state.pendingTasks.some((t) => t.id === taskId)) {
-      logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
+    // Prevent double-queuing of the same task (already running or already pending)
+    if (state.runningTaskId === taskId || state.pendingTasks.some((t) => t.id === taskId)) {
+      logger.debug({ groupJid, taskId }, 'Task already running or queued, skipping');
       return;
     }
 
@@ -220,6 +222,7 @@ export class GroupQueue {
     state.active = true;
     state.idleWaiting = false;
     state.isTaskContainer = true;
+    state.runningTaskId = task.id;
     this.activeCount++;
 
     logger.debug(
@@ -234,6 +237,7 @@ export class GroupQueue {
     } finally {
       state.active = false;
       state.isTaskContainer = false;
+      state.runningTaskId = null;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;

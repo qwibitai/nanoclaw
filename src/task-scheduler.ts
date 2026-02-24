@@ -89,6 +89,10 @@ async function runTask(
   const sessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
+  // Use a separate queue key for tasks so they don't block interactive sessions.
+  // task.chat_jid is still used as the message destination.
+  const taskQueueJid = `task:${task.chat_jid}`;
+
   // After the task produces a result, close the container promptly.
   // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
   // query loop to time out. A short delay handles any final MCP calls.
@@ -99,7 +103,7 @@ async function runTask(
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug({ taskId: task.id }, 'Closing task container after result');
-      deps.queue.closeStdin(task.chat_jid);
+      deps.queue.closeStdin(taskQueueJid);
     }, TASK_CLOSE_DELAY_MS);
   };
 
@@ -114,7 +118,7 @@ async function runTask(
         isMain,
         isScheduledTask: true,
       },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (proc, containerName) => deps.onProcess(taskQueueJid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -123,7 +127,7 @@ async function runTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
+          deps.queue.notifyIdle(taskQueueJid);
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -206,7 +210,7 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         }
 
         deps.queue.enqueueTask(
-          currentTask.chat_jid,
+          `task:${currentTask.chat_jid}`,
           currentTask.id,
           () => runTask(currentTask, deps),
         );

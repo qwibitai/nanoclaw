@@ -244,6 +244,16 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Scheduled Task Files
+
+When a scheduled task uses or generates files, create a dedicated folder for it inside `/workspace/group/tasks/` (host: `groups/main/tasks/`). Use a descriptive slug as the folder name.
+
+Example: a task that maintains `ideas-mejoras.md` → `/workspace/group/tasks/ideas-mejoras-nano/ideas-mejoras.md`
+
+Only skip this if dm explicitly specifies a different location.
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
