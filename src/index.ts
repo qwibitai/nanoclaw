@@ -12,6 +12,7 @@ import {
   MAIN_GROUP_FOLDER,
   MONITOR_ENABLED,
   POLL_INTERVAL,
+  SMART_BATCH_DELAY,
   TRIGGER_PATTERN,
   WHATSAPP_ENABLED,
 } from './config.js';
@@ -49,6 +50,7 @@ import { startMonitorServer } from './monitor-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { looksLikeExpectingFollowUp } from './smart-batch.js';
 import { lookupUser, normalizePhone } from './users.js';
 
 // Re-export for backwards compatibility during refactor
@@ -212,7 +214,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  let missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
@@ -225,6 +227,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       TRIGGER_PATTERN.test(m.content.trim()),
     );
     if (!hasTrigger) return true;
+  }
+
+  // Smart batch: if the last message looks like it expects a follow-up (e.g. a URL),
+  // wait a bit longer for the companion message to arrive (iMessage link previews
+  // can take 5-10+ seconds, longer than the normal debounce window).
+  if (SMART_BATCH_DELAY > 0) {
+    const lastContent = missedMessages[missedMessages.length - 1].content;
+    if (looksLikeExpectingFollowUp(lastContent)) {
+      logger.info(
+        { group: group.name, lastContent: lastContent.slice(0, 100) },
+        'Smart batch: waiting for follow-up message',
+      );
+      await new Promise((resolve) => setTimeout(resolve, SMART_BATCH_DELAY));
+      missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+    }
   }
 
   const prompt = formatMessages(missedMessages, lookupUser);
