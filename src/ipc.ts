@@ -441,6 +441,18 @@ export async function processTaskIpc(
       const text = data.text as string | undefined;
       if (!requestId || !text) {
         logger.warn({ data }, 'Invalid google_assistant_command: missing requestId or text');
+        // Write error response so the bash script doesn't hang
+        if (requestId) {
+          const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+          fs.mkdirSync(responsesDir, { recursive: true });
+          const responseFile = path.join(responsesDir, `${requestId}.json`);
+          const tempFile = `${responseFile}.tmp`;
+          fs.writeFileSync(tempFile, JSON.stringify({
+            status: 'error',
+            error: `Invalid google_assistant_command: missing ${!text ? 'text' : 'requestId'}`,
+          }));
+          fs.renameSync(tempFile, responseFile);
+        }
         break;
       }
 
@@ -451,6 +463,11 @@ export async function processTaskIpc(
             : text === '__health__'
               ? await googleAssistantHealth()
               : await sendGoogleAssistantCommand(text);
+
+        // Surface empty responses as explicit errors
+        if (result.warning === 'no_response_text') {
+          result.error = 'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
+        }
 
         // Write response to the group's responses directory
         const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');

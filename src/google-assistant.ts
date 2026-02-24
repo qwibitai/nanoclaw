@@ -1,4 +1,5 @@
 import { ChildProcess, spawn } from 'child_process';
+import * as crypto from 'crypto';
 import * as path from 'path';
 import * as readline from 'readline';
 
@@ -8,6 +9,7 @@ export interface GoogleAssistantResponse {
   status: string;
   text?: string;
   error?: string;
+  warning?: string;
   raw_html?: string;
 }
 
@@ -16,11 +18,17 @@ const PYTHON_DAEMON = path.join(process.cwd(), 'scripts', 'google-assistant-daem
 
 // ── Python daemon management ──────────────────────────────────────
 
+interface PendingCommand {
+  resolve: (value: any) => void;
+  reject: (reason: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 let daemon: ChildProcess | null = null;
 let daemonRL: readline.Interface | null = null;
-let pendingResolve: ((value: any) => void) | null = null;
-let pendingReject: ((reason: any) => void) | null = null;
+const pendingCommands = new Map<string, PendingCommand>();
 let daemonReady = false;
+let consecutiveFailures = 0;
 
 async function ensureDaemon(): Promise<void> {
   if (daemon && !daemon.killed && daemonReady) return;
@@ -55,11 +63,12 @@ async function ensureDaemon(): Promise<void> {
       daemon = null;
       daemonRL = null;
       daemonReady = false;
-      if (pendingReject) {
-        pendingReject(new Error(`Daemon exited with code ${code}`));
-        pendingResolve = null;
-        pendingReject = null;
+      // Reject all pending commands
+      for (const [id, pending] of pendingCommands) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error(`Daemon exited with code ${code}`));
       }
+      pendingCommands.clear();
     });
 
     const rl = readline.createInterface({ input: proc.stdout! });
@@ -80,12 +89,24 @@ async function ensureDaemon(): Promise<void> {
         return;
       }
 
-      // Subsequent messages are responses to commands
-      if (pendingResolve) {
-        const res = pendingResolve;
-        pendingResolve = null;
-        pendingReject = null;
-        res(parsed);
+      // Route response to the correct pending command by ID
+      const cmdId = parsed.id as string | undefined;
+      if (cmdId && pendingCommands.has(cmdId)) {
+        const pending = pendingCommands.get(cmdId)!;
+        pendingCommands.delete(cmdId);
+        clearTimeout(pending.timer);
+        pending.resolve(parsed);
+      } else if (pendingCommands.size === 1) {
+        // Fallback for responses without id (backward compat)
+        const entry = pendingCommands.entries().next().value;
+        if (entry) {
+          const [fallbackId, pending] = entry;
+          pendingCommands.delete(fallbackId);
+          clearTimeout(pending.timer);
+          pending.resolve(parsed);
+        }
+      } else if (pendingCommands.size > 0) {
+        logger.warn({ cmdId, pending: pendingCommands.size }, 'Unroutable response from daemon (no matching id)');
       }
     });
 
@@ -103,26 +124,35 @@ async function ensureDaemon(): Promise<void> {
 }
 
 async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
+  // Auto-restart daemon after consecutive failures
+  if (consecutiveFailures >= 3 && daemon && !daemon.killed) {
+    logger.warn({ consecutiveFailures }, 'Too many consecutive failures, restarting daemon');
+    daemon.kill();
+    daemon = null;
+    daemonRL = null;
+    daemonReady = false;
+    consecutiveFailures = 0;
+  }
+
   await ensureDaemon();
 
   if (!daemon || !daemon.stdin) {
     throw new Error('Google Assistant daemon not available');
   }
 
+  const id = crypto.randomUUID();
+
   return new Promise((resolve, reject) => {
-    pendingResolve = resolve;
-    pendingReject = reject;
-
-    daemon!.stdin!.write(JSON.stringify(cmd) + '\n');
-
-    // Timeout per command (30s)
-    setTimeout(() => {
-      if (pendingReject) {
-        pendingReject(new Error('Command timed out'));
-        pendingResolve = null;
-        pendingReject = null;
+    const timer = setTimeout(() => {
+      if (pendingCommands.has(id)) {
+        pendingCommands.delete(id);
+        reject(new Error('Command timed out'));
       }
     }, 30_000);
+
+    pendingCommands.set(id, { resolve, reject, timer });
+
+    daemon!.stdin!.write(JSON.stringify({ ...cmd, id }) + '\n');
   });
 }
 
@@ -132,13 +162,30 @@ async function sendCommand(cmd: Record<string, unknown>): Promise<any> {
  * Send a text command to Google Assistant and return the response.
  */
 export async function sendGoogleAssistantCommand(text: string): Promise<GoogleAssistantResponse> {
-  const result = await sendCommand({ cmd: 'command', text });
+  let result: any;
+  try {
+    result = await sendCommand({ cmd: 'command', text });
+  } catch (err) {
+    consecutiveFailures++;
+    throw err;
+  }
 
   if (result.error) {
+    consecutiveFailures++;
     throw new Error(result.error);
   }
 
-  return result;
+  consecutiveFailures = 0;
+
+  const response: GoogleAssistantResponse = {
+    status: result.status,
+    text: result.text,
+    raw_html: result.raw_html,
+  };
+  if (result.warning) {
+    response.warning = result.warning;
+  }
+  return response;
 }
 
 /**
@@ -172,5 +219,11 @@ export function shutdownGoogleAssistant(): void {
     daemonRL?.close();
     daemonRL = null;
     daemonReady = false;
+    // Reject all pending commands
+    for (const [id, pending] of pendingCommands) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Google Assistant daemon shut down'));
+    }
+    pendingCommands.clear();
   }
 }

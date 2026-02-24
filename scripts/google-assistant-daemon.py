@@ -229,7 +229,7 @@ class AssistantClient:
         raw_html = ""
 
         try:
-            for response in self.assistant.Assist(iter([request])):
+            for response in self.assistant.Assist(iter([request]), timeout=25):
                 # Update conversation state for multi-turn
                 if response.dialog_state_out.conversation_state:
                     self.conversation_state = (
@@ -248,10 +248,13 @@ class AssistantClient:
 
         except grpc.RpcError as e:
             sys.stderr.write(f"gRPC error: {e.code().name}: {e.details()}\n")
-            if e.code() == grpc.StatusCode.UNAUTHENTICATED:
-                sys.stderr.write("Token expired, refreshing and reconnecting...\n")
-                self.credentials.refresh(google.auth.transport.requests.Request())
-                _save_credentials(self.credentials)
+            if e.code() in (grpc.StatusCode.UNAUTHENTICATED, grpc.StatusCode.DEADLINE_EXCEEDED):
+                if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+                    sys.stderr.write("Token expired, refreshing and reconnecting...\n")
+                    self.credentials.refresh(google.auth.transport.requests.Request())
+                    _save_credentials(self.credentials)
+                else:
+                    sys.stderr.write("Request timed out, reconnecting...\n")
             self._connect()
             return {"error": f"gRPC error: {e.code().name}: {e.details()}"}
 
@@ -262,6 +265,8 @@ class AssistantClient:
         result = {"status": "ok", "text": response_text}
         if raw_html:
             result["raw_html"] = raw_html
+        if not response_text:
+            result["warning"] = "no_response_text"
         return result
 
     def reset_conversation(self):
@@ -275,21 +280,27 @@ class AssistantClient:
 def handle_command(client: AssistantClient, cmd: dict) -> dict:
     """Process a single command and return a response dict."""
     command = cmd.get("cmd")
+    cmd_id = cmd.get("id")
 
     if command == "health":
-        return {"status": "ok"}
-
-    if command == "command":
+        response = {"status": "ok"}
+    elif command == "command":
         text = cmd.get("text")
         if not text:
-            return {"error": "missing text field"}
-        return client.send_text_query(text)
-
-    if command == "reset_conversation":
+            response = {"error": "missing text field"}
+        else:
+            response = client.send_text_query(text)
+    elif command == "reset_conversation":
         client.reset_conversation()
-        return {"status": "ok"}
+        response = {"status": "ok"}
+    else:
+        response = {"error": f"unknown command: {command}"}
 
-    return {"error": f"unknown command: {command}"}
+    # Echo back the command ID for response routing
+    if cmd_id is not None:
+        response["id"] = cmd_id
+
+    return response
 
 
 # ---------------------------------------------------------------------------
