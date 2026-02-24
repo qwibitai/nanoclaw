@@ -1,0 +1,16 @@
+skill: reactions
+version: 1.0.0
+description: "WhatsApp emoji reaction support"
+core_version: 0.1.0
+adds:
+  - scripts/migrate-reactions.ts
+modifies:
+  - src/db.ts
+  - src/channels/whatsapp.ts
+  - src/types.ts
+  - src/ipc.ts
+  - src/index.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+conflicts: []
+depends: []
+test: "npx tsc --noEmit"

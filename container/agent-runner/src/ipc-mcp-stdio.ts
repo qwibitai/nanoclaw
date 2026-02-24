@@ -63,6 +63,29 @@ server.tool(
 );
 
 server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z.string().describe('The emoji to react with (e.g. "👍", "❤️", "🔥")'),
+    message_id: z.string().optional().describe('The message ID to react to. If omitted, reacts to the latest message in the chat.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Reaction ${args.emoji} sent.` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

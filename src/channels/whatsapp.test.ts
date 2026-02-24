@@ -23,7 +23,10 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   getLastGroupSync: vi.fn(() => null),
+  getLatestMessage: vi.fn(() => undefined),
+  getMessageFromMe: vi.fn(() => false),
   setLastGroupSync: vi.fn(),
+  storeReaction: vi.fn(),
   updateChatName: vi.fn(),
 }));
 
@@ -110,6 +113,7 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
+    fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 2413, 1] }),
     makeCacheableSignalKeyStore: vi.fn((keys: unknown) => keys),
     useMultiFileAuthState: vi.fn().mockResolvedValue({
       state: {

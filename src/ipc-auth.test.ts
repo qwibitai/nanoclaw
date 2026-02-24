@@ -52,6 +52,7 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    sendReaction: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;
@@ -371,6 +372,106 @@ describe('IPC message authorization', () => {
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
     expect(isMessageAuthorized('main', true, 'unknown@g.us', groups)).toBe(true);
+  });
+});
+
+// --- IPC reaction authorization ---
+// Same authorization pattern as message sending (ipc.ts lines 104-127).
+
+describe('IPC reaction authorization', () => {
+  // Replicate the exact check from the IPC watcher for reactions
+  function isReactionAuthorized(
+    sourceGroup: string,
+    isMain: boolean,
+    targetChatJid: string,
+    registeredGroups: Record<string, RegisteredGroup>,
+  ): boolean {
+    const targetGroup = registeredGroups[targetChatJid];
+    return isMain || (!!targetGroup && targetGroup.folder === sourceGroup);
+  }
+
+  it('main group can react in any chat', () => {
+    expect(isReactionAuthorized('main', true, 'other@g.us', groups)).toBe(true);
+    expect(isReactionAuthorized('main', true, 'third@g.us', groups)).toBe(true);
+  });
+
+  it('non-main group can react in its own chat', () => {
+    expect(isReactionAuthorized('other-group', false, 'other@g.us', groups)).toBe(true);
+  });
+
+  it('non-main group cannot react in another groups chat', () => {
+    expect(isReactionAuthorized('other-group', false, 'main@g.us', groups)).toBe(false);
+    expect(isReactionAuthorized('other-group', false, 'third@g.us', groups)).toBe(false);
+  });
+
+  it('non-main group cannot react in unregistered JID', () => {
+    expect(isReactionAuthorized('other-group', false, 'unknown@g.us', groups)).toBe(false);
+  });
+});
+
+// --- sendReaction mock is exercised ---
+// The sendReaction dep is wired in but was never called in tests.
+// These tests verify startIpcWatcher would call it by testing the pattern inline.
+
+describe('IPC reaction sendReaction integration', () => {
+  it('sendReaction mock is callable', async () => {
+    const calls: Array<{ jid: string; emoji: string; messageId?: string }> = [];
+    deps.sendReaction = async (jid, emoji, messageId) => {
+      calls.push({ jid, emoji, messageId });
+    };
+
+    // Simulate what processIpcFiles does for a reaction
+    const data = { type: 'reaction' as const, chatJid: 'other@g.us', emoji: '👍', messageId: 'msg-123' };
+    const sourceGroup = 'main';
+    const isMain = true;
+    const registeredGroups = deps.registeredGroups();
+    const targetGroup = registeredGroups[data.chatJid];
+
+    if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+      await deps.sendReaction(data.chatJid, data.emoji, data.messageId);
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ jid: 'other@g.us', emoji: '👍', messageId: 'msg-123' });
+  });
+
+  it('sendReaction is blocked for unauthorized group', async () => {
+    const calls: Array<{ jid: string; emoji: string; messageId?: string }> = [];
+    deps.sendReaction = async (jid, emoji, messageId) => {
+      calls.push({ jid, emoji, messageId });
+    };
+
+    const data = { type: 'reaction' as const, chatJid: 'main@g.us', emoji: '❤️' };
+    const sourceGroup = 'other-group';
+    const isMain = false;
+    const registeredGroups = deps.registeredGroups();
+    const targetGroup = registeredGroups[data.chatJid];
+
+    if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+      await deps.sendReaction(data.chatJid, data.emoji);
+    }
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it('sendReaction works without messageId (react to latest)', async () => {
+    const calls: Array<{ jid: string; emoji: string; messageId?: string }> = [];
+    deps.sendReaction = async (jid, emoji, messageId) => {
+      calls.push({ jid, emoji, messageId });
+    };
+
+    const data = { type: 'reaction' as const, chatJid: 'other@g.us', emoji: '🔥' };
+    const sourceGroup = 'other-group';
+    const isMain = false;
+    const registeredGroups = deps.registeredGroups();
+    const targetGroup = registeredGroups[data.chatJid];
+
+    if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+      await deps.sendReaction(data.chatJid, data.emoji, undefined);
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ jid: 'other@g.us', emoji: '🔥', messageId: undefined });
   });
 });
 

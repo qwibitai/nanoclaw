@@ -57,6 +57,12 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## Logs
+
+```bash
+tail -f ~/code/yonibot/nanoclaw/logs/nanoclaw.log
+```
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
