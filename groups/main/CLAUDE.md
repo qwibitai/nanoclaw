@@ -260,6 +260,17 @@ echo '{"type": "merge_feature"}' > /workspace/ipc/tasks/merge_$(date +%s).json
 ```
 This merges the branch into main, rebuilds, and **restarts NanoClaw**.
 
+**Start a test bot** (live-test the modified code as a separate bot):
+```bash
+echo '{"type": "start_test_bot", "featureName": "add-voice-transcription", "testName": "TestAndy"}' > /workspace/ipc/tasks/testbot_$(date +%s).json
+```
+Starts a second NanoClaw process from the worktree with trigger `@TestAndy`. The main bot ignores `@TestAndy` messages. First time requires a WhatsApp QR scan (sent to the chat).
+
+**Stop a test bot**:
+```bash
+echo '{"type": "stop_test_bot", "featureName": "add-voice-transcription"}' > /workspace/ipc/tasks/stopbot_$(date +%s).json
+```
+
 **Clean up a dev group** (from main only):
 ```bash
 echo '{"type": "cleanup_dev_group", "featureName": "add-voice-transcription"}' > /workspace/ipc/tasks/cleanup_$(date +%s).json
@@ -270,5 +281,6 @@ Removes the worktree and deletes the branch.
 
 - Dev groups only modify their own git worktree, never the production code
 - Merge + restart is explicit — the user must request it
-- If the build fails after merge, the service won't restart
+- If the build fails after merge, automatic rollback to the previous commit
 - Feature branches are based on the current HEAD at creation time
+- Test bots run as separate processes with their own WhatsApp connection and database

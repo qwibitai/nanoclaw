@@ -69,6 +69,14 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
+        // If NANOCLAW_QR_FILE is set, write QR data to file (for test bot headless auth)
+        const qrFile = process.env.NANOCLAW_QR_FILE;
+        if (qrFile) {
+          fs.writeFileSync(qrFile, qr);
+          logger.info({ qrFile }, 'QR code written to file for scanning');
+          return; // Don't exit — wait for the user to scan
+        }
+
         const msg =
           'WhatsApp authentication required. Run /setup in Claude Code.';
         logger.error(msg);

@@ -24,6 +24,8 @@ import {
   restartService,
   revertToCommit,
   sanitizeFeatureName,
+  startTestBot,
+  stopTestBot,
   testFeature,
 } from './dev-workflow.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -189,6 +191,7 @@ export async function processTaskIpc(
     // For dev workflow
     featureName?: string;
     participants?: string[];
+    testName?: string; // For start_test_bot (e.g., "TestAndy")
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -693,6 +696,128 @@ export async function processTaskIpc(
         await deps.sendMessage(
           mainJidCleanup,
           `${ASSISTANT_NAME}: Dev group for *${featureToRemove}* cleaned up. Worktree and branch removed.`,
+        );
+      }
+      break;
+    }
+
+    case 'start_test_bot': {
+      // Only main group or the dev group itself can start test bots
+      if (!isMain) {
+        const devGroupTest = Object.values(registeredGroups).find(
+          (g) => g.folder === sourceGroup && g.isDev,
+        );
+        if (!devGroupTest) {
+          logger.warn({ sourceGroup }, 'Unauthorized start_test_bot attempt');
+          break;
+        }
+      }
+
+      const featureForTestBot = data.featureName;
+      if (!featureForTestBot) {
+        logger.warn({ data }, 'start_test_bot: missing featureName');
+        break;
+      }
+
+      const testBotName = data.testName || 'TestAndy';
+      const requestJidTest = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === sourceGroup)?.[0];
+
+      try {
+        const result = startTestBot(featureForTestBot, testBotName);
+
+        if (result.alreadyRunning) {
+          if (requestJidTest) {
+            await deps.sendMessage(
+              requestJidTest,
+              `${ASSISTANT_NAME}: Test bot for *${featureForTestBot}* is already running.`,
+            );
+          }
+          break;
+        }
+
+        if (requestJidTest) {
+          await deps.sendMessage(
+            requestJidTest,
+            `${ASSISTANT_NAME}: Test bot starting as *@${testBotName}*.\nMessages starting with @${testBotName} will be handled by the test instance.\nMain bot will ignore those messages.`,
+          );
+        }
+
+        // Watch for QR file (test bot needs WhatsApp auth)
+        const qrPath = result.qrFilePath;
+        if (qrPath) {
+          // Poll for QR file up to 30 seconds
+          let qrSent = false;
+          for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 1000));
+            try {
+              if (fs.existsSync(qrPath)) {
+                const qrData = fs.readFileSync(qrPath, 'utf-8').trim();
+                if (qrData && requestJidTest) {
+                  await deps.sendMessage(
+                    requestJidTest,
+                    `${ASSISTANT_NAME}: Test bot needs WhatsApp authentication. Scan this QR code in WhatsApp > Linked Devices:\n\n\`\`\`\n${qrData}\n\`\`\`\n\n(Or use a QR code generator with this data)`,
+                  );
+                  qrSent = true;
+                  // Remove the file so we detect new QR codes
+                  try { fs.unlinkSync(qrPath); } catch { /* ignore */ }
+                  break;
+                }
+              }
+            } catch { /* ignore */ }
+          }
+
+          // If no QR appeared, it was already authenticated
+          if (!qrSent && requestJidTest) {
+            await deps.sendMessage(
+              requestJidTest,
+              `${ASSISTANT_NAME}: Test bot authenticated and running. Send messages starting with @${testBotName} to test.`,
+            );
+          }
+        }
+
+        logger.info(
+          { featureName: featureForTestBot, testBotName },
+          'Test bot started via IPC',
+        );
+      } catch (err) {
+        if (requestJidTest) {
+          await deps.sendMessage(
+            requestJidTest,
+            `${ASSISTANT_NAME}: Failed to start test bot: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      break;
+    }
+
+    case 'stop_test_bot': {
+      if (!isMain) {
+        const devGroupStop = Object.values(registeredGroups).find(
+          (g) => g.folder === sourceGroup && g.isDev,
+        );
+        if (!devGroupStop) {
+          logger.warn({ sourceGroup }, 'Unauthorized stop_test_bot attempt');
+          break;
+        }
+      }
+
+      const featureToStop = data.featureName;
+      if (!featureToStop) {
+        logger.warn({ data }, 'stop_test_bot: missing featureName');
+        break;
+      }
+
+      const stopped = stopTestBot(featureToStop);
+      const stopJid = Object.entries(registeredGroups)
+        .find(([, g]) => g.folder === sourceGroup)?.[0];
+
+      if (stopJid) {
+        await deps.sendMessage(
+          stopJid,
+          stopped
+            ? `${ASSISTANT_NAME}: Test bot for *${featureToStop}* stopped.`
+            : `${ASSISTANT_NAME}: No test bot running for *${featureToStop}*.`,
         );
       }
       break;

@@ -10,7 +10,7 @@
  * 3. User requests test → builds and runs tests on the worktree
  * 4. User requests merge → merges branch, rebuilds, restarts NanoClaw
  */
-import { execSync } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -18,6 +18,16 @@ import { ASSISTANT_NAME, DATA_DIR, GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
 
 const WORKTREES_DIR = path.join(DATA_DIR, 'worktrees');
+
+// Track active test bot processes
+const activeTestBots = new Map<string, { process: ChildProcess; testName: string }>();
+
+/**
+ * Get the set of active test bot trigger patterns (for the main bot to ignore).
+ */
+export function getActiveTestTriggers(): string[] {
+  return Array.from(activeTestBots.values()).map((b) => `@${b.testName}`);
+}
 
 /**
  * Sanitize a feature name into a valid branch/folder name.
@@ -332,6 +342,110 @@ export function restartService(): void {
 }
 
 /**
+ * Start a test bot instance from a feature worktree.
+ * The test bot runs as a separate NanoClaw process with a different trigger name.
+ * It links as a separate WhatsApp device (multi-device).
+ *
+ * Returns the path to the QR file if authentication is needed, or null if already authed.
+ */
+export function startTestBot(
+  featureName: string,
+  testName = 'TestAndy',
+): { qrFilePath: string; alreadyRunning: boolean } {
+  const sanitized = sanitizeFeatureName(featureName);
+  const worktreePath = getWorktreePath(featureName);
+
+  if (!fs.existsSync(worktreePath)) {
+    throw new Error(`No worktree found for feature: ${featureName}`);
+  }
+
+  if (activeTestBots.has(sanitized)) {
+    return { qrFilePath: '', alreadyRunning: true };
+  }
+
+  // Build the worktree first
+  execSync('npm run build', {
+    cwd: worktreePath,
+    stdio: 'pipe',
+    encoding: 'utf-8',
+    timeout: 60000,
+  });
+
+  // Create separate store directory for test bot's auth + database
+  const testStoreDir = path.join(worktreePath, 'store-test');
+  fs.mkdirSync(path.join(testStoreDir, 'auth'), { recursive: true });
+
+  const qrFilePath = path.join(testStoreDir, 'qr.txt');
+  // Remove stale QR file
+  try { fs.unlinkSync(qrFilePath); } catch { /* ignore */ }
+
+  // Create logs directory
+  const logsDir = path.join(worktreePath, 'logs');
+  fs.mkdirSync(logsDir, { recursive: true });
+
+  // Start the test bot process
+  const logStream = fs.createWriteStream(path.join(logsDir, 'test-bot.log'), { flags: 'a' });
+  const proc = spawn('node', ['dist/index.js'], {
+    cwd: worktreePath,
+    env: {
+      ...process.env,
+      ASSISTANT_NAME: testName,
+      // Override store dir by setting env var that config.ts reads
+      NANOCLAW_STORE_DIR: testStoreDir,
+      NANOCLAW_QR_FILE: qrFilePath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  });
+
+  proc.stdout?.pipe(logStream);
+  proc.stderr?.pipe(logStream);
+  proc.unref();
+
+  activeTestBots.set(sanitized, { process: proc, testName });
+
+  proc.on('exit', (code) => {
+    logger.info({ featureName: sanitized, code }, 'Test bot process exited');
+    activeTestBots.delete(sanitized);
+  });
+
+  logger.info(
+    { featureName: sanitized, testName, pid: proc.pid, worktreePath },
+    'Test bot started',
+  );
+
+  return { qrFilePath, alreadyRunning: false };
+}
+
+/**
+ * Stop a test bot instance.
+ */
+export function stopTestBot(featureName: string): boolean {
+  const sanitized = sanitizeFeatureName(featureName);
+  const entry = activeTestBots.get(sanitized);
+
+  if (!entry) {
+    return false;
+  }
+
+  try {
+    // Kill the process group (detached process)
+    if (entry.process.pid) {
+      process.kill(-entry.process.pid, 'SIGTERM');
+    }
+  } catch {
+    // Process may have already exited
+    try {
+      entry.process.kill('SIGTERM');
+    } catch { /* ignore */ }
+  }
+
+  activeTestBots.delete(sanitized);
+  logger.info({ featureName: sanitized }, 'Test bot stopped');
+  return true;
+}
+
+/**
  * Create the CLAUDE.md for a dev group from the template.
  */
 export function createDevGroupClaudeMd(
@@ -379,6 +493,20 @@ Always verify your changes before merging:
 You can also request a host-side test via IPC (builds and tests from the host):
 \`\`\`bash
 echo '{"type": "test_feature"}' > /workspace/ipc/tasks/test_$(date +%s).json
+\`\`\`
+
+### Live testing with a test bot
+
+Start a second NanoClaw instance from your worktree to test the modified code live:
+\`\`\`bash
+echo '{"type": "start_test_bot", "featureName": "${featureName}", "testName": "TestAndy"}' > /workspace/ipc/tasks/testbot_$(date +%s).json
+\`\`\`
+
+This starts a separate bot process using your modified code. Users can interact with it via \`@TestAndy\` — the main bot ignores these messages. First time requires a WhatsApp QR scan (sent to the chat).
+
+Stop the test bot when done:
+\`\`\`bash
+echo '{"type": "stop_test_bot", "featureName": "${featureName}"}' > /workspace/ipc/tasks/stopbot_$(date +%s).json
 \`\`\`
 
 ## Merging Back to Main

@@ -8,6 +8,7 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
+import { getActiveTestTriggers } from './dev-workflow.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -351,6 +352,18 @@ async function startMessageLoop(): Promise<void> {
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+
+          // Skip messages addressed to active test bots (e.g., @TestAndy).
+          // Test bots run as separate processes and handle these themselves.
+          const testTriggers = getActiveTestTriggers();
+          if (testTriggers.length > 0) {
+            const allForTestBot = groupMessages.every((m) =>
+              testTriggers.some((t) =>
+                m.content.trim().toLowerCase().startsWith(t.toLowerCase()),
+              ),
+            );
+            if (allForTestBot) continue;
+          }
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
