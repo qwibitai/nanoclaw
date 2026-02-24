@@ -155,6 +155,124 @@ describe('StatusTracker', () => {
     });
   });
 
+  describe('recover', () => {
+    it('marks orphaned non-terminal entries as failed and sends error message', async () => {
+      const fs = await import('fs');
+      const persisted = JSON.stringify([
+        { messageId: 'orphan1', chatJid: 'main@s.whatsapp.net', fromMe: false, state: 0, terminal: null, trackedAt: 1000 },
+        { messageId: 'orphan2', chatJid: 'main@s.whatsapp.net', fromMe: false, state: 2, terminal: null, trackedAt: 2000 },
+        { messageId: 'done1', chatJid: 'main@s.whatsapp.net', fromMe: false, state: 3, terminal: 'done', trackedAt: 3000 },
+      ]);
+      (fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (fs.default.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(persisted);
+
+      await tracker.recover();
+
+      // Should send ❌ reaction for the 2 non-terminal entries only
+      const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
+      expect(failCalls).toHaveLength(2);
+
+      // Should send one error message per chatJid
+      expect(deps.sendMessage).toHaveBeenCalledWith(
+        'main@s.whatsapp.net',
+        '[system] Restarted — reprocessing your message.',
+      );
+      expect(deps.sendMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles missing persistence file gracefully', async () => {
+      const fs = await import('fs');
+      (fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(false);
+
+      await tracker.recover(); // should not throw
+      expect(deps.sendReaction).not.toHaveBeenCalled();
+    });
+
+    it('skips error message when sendErrorMessage is false', async () => {
+      const fs = await import('fs');
+      const persisted = JSON.stringify([
+        { messageId: 'orphan1', chatJid: 'main@s.whatsapp.net', fromMe: false, state: 1, terminal: null, trackedAt: 1000 },
+      ]);
+      (fs.default.existsSync as ReturnType<typeof vi.fn>).mockReturnValue(true);
+      (fs.default.readFileSync as ReturnType<typeof vi.fn>).mockReturnValue(persisted);
+
+      await tracker.recover(false);
+
+      // Still sends ❌ reaction
+      expect(deps.sendReaction).toHaveBeenCalledTimes(1);
+      expect(deps.sendReaction.mock.calls[0][2]).toBe('❌');
+      // But no text message
+      expect(deps.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('heartbeatCheck', () => {
+    it('marks messages as failed when container is dead', async () => {
+      deps.isContainerAlive.mockReturnValue(false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markThinking('msg1');
+
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
+      const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
+      expect(failCalls).toHaveLength(1);
+      expect(deps.sendMessage).toHaveBeenCalledWith(
+        'main@s.whatsapp.net',
+        '[system] Task crashed — retrying.',
+      );
+    });
+
+    it('does nothing when container is alive', async () => {
+      deps.isContainerAlive.mockReturnValue(true);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markThinking('msg1');
+
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
+      // Only the 👀 and 💭 reactions, no ❌
+      expect(deps.sendReaction).toHaveBeenCalledTimes(2);
+      const emojis = deps.sendReaction.mock.calls.map((c) => c[2]);
+      expect(emojis).toEqual(['👀', '💭']);
+    });
+
+    it('skips messages still in RECEIVED state', async () => {
+      deps.isContainerAlive.mockReturnValue(false);
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      // Don't advance to THINKING
+
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
+      // Only the 👀 reaction, no ❌ (RECEIVED < THINKING, so heartbeat skips it)
+      expect(deps.sendReaction).toHaveBeenCalledTimes(1);
+      expect(deps.sendReaction.mock.calls[0][2]).toBe('👀');
+    });
+
+    it('detects stuck messages beyond timeout', async () => {
+      vi.useFakeTimers();
+      deps.isContainerAlive.mockReturnValue(true); // container "alive" but hung
+
+      tracker.markReceived('msg1', 'main@s.whatsapp.net', false);
+      tracker.markThinking('msg1');
+
+      // Advance time beyond container timeout (default 1800000ms = 30min)
+      vi.advanceTimersByTime(1_800_001);
+
+      tracker.heartbeatCheck();
+      await tracker.flush();
+
+      const failCalls = deps.sendReaction.mock.calls.filter((c) => c[2] === '❌');
+      expect(failCalls).toHaveLength(1);
+      expect(deps.sendMessage).toHaveBeenCalledWith(
+        'main@s.whatsapp.net',
+        '[system] Task timed out — retrying.',
+      );
+      vi.useRealTimers();
+    });
+  });
+
   describe('cleanup', () => {
     it('removes terminal messages after delay', async () => {
       vi.useFakeTimers();

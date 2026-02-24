@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, CONTAINER_TIMEOUT } from './config.js';
 import { logger } from './logger.js';
 
 export enum StatusState {
@@ -188,12 +188,21 @@ export class StatusTracker {
    * Call this from the IPC poll cycle.
    */
   heartbeatCheck(): void {
+    const now = Date.now();
     for (const [id, msg] of this.tracked) {
       if (msg.terminal !== null) continue;
-      if (msg.state >= StatusState.THINKING && !this.deps.isContainerAlive(msg.chatJid)) {
+      if (msg.state < StatusState.THINKING) continue;
+
+      if (!this.deps.isContainerAlive(msg.chatJid)) {
         logger.warn({ messageId: id, chatJid: msg.chatJid }, 'Heartbeat: container dead, marking failed');
         this.markAllFailed(msg.chatJid, 'Task crashed \u{2014} retrying.');
-        return; // markAllFailed handles all messages for this chat
+        return;
+      }
+
+      if (now - msg.trackedAt > CONTAINER_TIMEOUT) {
+        logger.warn({ messageId: id, chatJid: msg.chatJid, age: now - msg.trackedAt }, 'Heartbeat: message stuck beyond timeout');
+        this.markAllFailed(msg.chatJid, 'Task timed out \u{2014} retrying.');
+        return;
       }
     }
   }
@@ -238,6 +247,7 @@ export class StatusTracker {
     });
   }
 
+  /** Must remain async (setTimeout) — synchronous deletion would break iteration in markAllDone/markAllFailed. */
   private scheduleCleanup(messageId: string): void {
     setTimeout(() => {
       this.tracked.delete(messageId);
