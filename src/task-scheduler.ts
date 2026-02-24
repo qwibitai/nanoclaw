@@ -199,6 +199,14 @@ async function runTask(
             async (streamedOutput: ContainerOutput) => {
               if (streamedOutput.result) {
                 result = streamedOutput.result;
+                // Safety: never send scheduled task results to a group chat
+                if (task.chat_jid.endsWith('@g.us')) {
+                  logger.error(
+                    { taskId: task.id, chatJid: task.chat_jid },
+                    'Blocked scheduled task result from being sent to group chat',
+                  );
+                  return;
+                }
                 await deps.sendMessage(task.chat_jid, streamedOutput.result);
               }
               if (streamedOutput.status === 'error') {
