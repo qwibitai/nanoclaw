@@ -181,6 +181,12 @@ export class GroupQueue {
     }
   }
 
+  /** Check if a group has an active container running. */
+  isActive(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.active ?? false;
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',

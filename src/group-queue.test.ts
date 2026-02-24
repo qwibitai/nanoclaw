@@ -421,4 +421,28 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  describe('isActive', () => {
+    it('returns false for unknown groups', () => {
+      expect(queue.isActive('unknown@g.us')).toBe(false);
+    });
+
+    it('returns true when group has active container', async () => {
+      let resolve: () => void;
+      const block = new Promise<void>((r) => { resolve = r; });
+
+      queue.setProcessMessagesFn(async () => {
+        await block;
+        return true;
+      });
+      queue.enqueueMessageCheck('group@g.us');
+
+      // Let the microtask start running
+      await vi.advanceTimersByTimeAsync(0);
+      expect(queue.isActive('group@g.us')).toBe(true);
+
+      resolve!();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  });
 });
