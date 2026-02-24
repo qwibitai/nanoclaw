@@ -35,8 +35,24 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
 
+    // Whitelist: only allow specific user IDs
+    const allowedUsers = (process.env.ALLOWED_TELEGRAM_USERS || '')
+      .split(',')
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id));
+
+    const isAllowed = (userId: number | undefined): boolean => {
+      if (!userId) return false;
+      if (allowedUsers.length === 0) return true; // No whitelist = allow all
+      return allowedUsers.includes(userId);
+    };
+
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
+      if (!isAllowed(ctx.from?.id)) {
+        ctx.reply('Unauthorized');
+        return;
+      }
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
       const chatName =
@@ -46,18 +62,63 @@ export class TelegramChannel implements Channel {
 
       ctx.reply(
         `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
-        { parse_mode: 'Markdown' },
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
+      if (!isAllowed(ctx.from?.id)) {
+        ctx.reply('Unauthorized');
+        return;
+      }
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to check system status
+    this.bot.command('status', async (ctx) => {
+      if (!isAllowed(ctx.from?.id)) {
+        ctx.reply('Unauthorized');
+        return;
+      }
+      const uptime = process.uptime();
+      const hours = Math.floor(uptime / 3600);
+      const minutes = Math.floor((uptime % 3600) / 60);
+      const memory = process.memoryUsage();
+      const memMB = Math.round(memory.heapUsed / 1024 / 1024);
+
+      // Read Claude Code usage (if available)
+      let claudeUsage = '';
+      try {
+        const usageFile = '/tmp/nanoclaw_claude_usage.txt';
+        if (fs.existsSync(usageFile)) {
+          claudeUsage = fs.readFileSync(usageFile, 'utf-8').trim();
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+
+      let statusMsg = `*${ASSISTANT_NAME} Status*\n\n` +
+        `Uptime: ${hours}h ${minutes}m\n` +
+        `Memory: ${memMB} MB\n` +
+        `Node: ${process.version}`;
+
+      if (claudeUsage) {
+        statusMsg += `\nClaude: ${claudeUsage}`;
+      }
+
+      await ctx.reply(statusMsg, { parse_mode: 'MarkdownV2' });
     });
 
     this.bot.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
+
+      // Check whitelist for messages
+      if (!isAllowed(ctx.from?.id)) {
+        logger.debug({ userId: ctx.from?.id }, 'Unauthorized Telegram user');
+        return;
+      }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
@@ -204,12 +265,13 @@ export class TelegramChannel implements Channel {
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await this.bot.api.sendMessage(numericId, text, { parse_mode: 'MarkdownV2' });
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
             numericId,
             text.slice(i, i + MAX_LENGTH),
+            { parse_mode: 'MarkdownV2' },
           );
         }
       }
@@ -301,10 +363,10 @@ export async function sendPoolMessage(
     // Send message through the assigned pool bot
     const MAX_LENGTH = 4096;
     if (text.length <= MAX_LENGTH) {
-      await poolApi.sendMessage(numericId, text);
+      await poolApi.sendMessage(numericId, text, { parse_mode: 'MarkdownV2' });
     } else {
       for (let i = 0; i < text.length; i += MAX_LENGTH) {
-        await poolApi.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
+        await poolApi.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), { parse_mode: 'MarkdownV2' });
       }
     }
     logger.info({ jid: chatId, sender, poolIndex: botInfo.botIndex }, 'Pool message sent');

@@ -220,12 +220,36 @@ async function gmailReply(token, args) {
 
 // --- Calendar ---
 
+async function calendarListCalendars(token, args) {
+  const url = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
+  const data = await gapi(token, 'GET', url);
+  const calendars = (data.items || []).map(c => ({
+    id: c.id,
+    name: c.summary,
+    primary: c.primary || false,
+    accessRole: c.accessRole,
+  }));
+  out({ calendars });
+}
+
 async function calendarList(token, args) {
-  const days = parseInt(args.days || '7');
-  const now = new Date();
-  const until = new Date(now.getTime() + days * 86400000);
   const calId = encodeURIComponent(args.calendar || 'primary');
-  const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${now.toISOString()}&timeMax=${until.toISOString()}&singleEvents=true&orderBy=startTime&maxResults=50`;
+  let timeMin, timeMax;
+
+  if (args.date) {
+    // Specific date: YYYY-MM-DD
+    const d = new Date(args.date);
+    timeMin = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
+    timeMax = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).toISOString();
+  } else {
+    // Future events (days from now)
+    const days = parseInt(args.days || '7');
+    const now = new Date();
+    timeMin = now.toISOString();
+    timeMax = new Date(now.getTime() + days * 86400000).toISOString();
+  }
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&orderBy=startTime&maxResults=50`;
   const data = await gapi(token, 'GET', url);
   const events = (data.items || []).map(e => ({
     id: e.id,
@@ -425,7 +449,7 @@ async function main() {
 
   const handlers = {
     gmail: { list: gmailList, read: gmailRead, send: gmailSend, search: gmailSearch, reply: gmailReply },
-    calendar: { list: calendarList, create: calendarCreate },
+    calendar: { list: calendarList, calendars: calendarListCalendars, create: calendarCreate },
     drive: { list: driveList, search: driveSearch, read: driveRead },
     sheets: { read: sheetsRead, write: sheetsWrite, append: sheetsAppend },
     docs: { read: docsRead, create: docsCreate },

@@ -46,14 +46,35 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.
 
-## Memory
+## Memory System (3 Layers)
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+### 1. Knowledge Base (`knowledge/`)
+Permanent facts organized by category. Read relevant sections at conversation start.
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+- `trabajo/` - Work (Better, DWolf, TSAMonster)
+- `salud/` - Health tracking
+- `finanzas/` - Finance management
+- `personal/` - Goals and life areas
+- `herramientas/` - Technical config (calendars, repos, accounts)
+
+**Usage:** Consult for facts about dm. Only suggest updates, never modify without permission.
+
+### 2. Daily Notes (`daily/YYYY-MM/`)
+Temporal context. Record important decisions and events from conversations.
+
+**Usage:** Check recent daily notes for context. Update current day's note with decisions.
+
+### 3. Tacit Knowledge (`tacit/`)
+Behavior rules. Read automatically at session start.
+
+- `preferences.md` - Location, platform, technical setup
+- `communication.md` - Style and tone rules
+
+**Usage:** Follow these rules always. Never modify.
+
+### Other
+- `plans/` - Pending tasks and plans
+- `conversations/` - Conversation history (searchable)
 
 ## Message Formatting
 
