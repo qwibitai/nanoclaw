@@ -20,10 +20,61 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+/**
+ * Convert markdown formatting to WhatsApp-compatible markup.
+ * WhatsApp supports: *bold*, _italic_, ~strikethrough~, ```monospace```
+ */
+export function markdownToWhatsApp(text: string): string {
+  // Convert markdown headings to bold
+  // ## Heading → *Heading*
+  let result = text.replace(/^#{1,6}\s+(.+)$/gm, '*$1*');
+
+  // Convert **bold** or __bold__ to *bold* (WhatsApp bold is single *)
+  // Must avoid converting already-single * patterns
+  result = result.replace(/\*\*(.+?)\*\*/g, '*$1*');
+  result = result.replace(/__(.+?)__/g, '*$1*');
+
+  // Convert [text](url) links to "text (url)" since WhatsApp auto-links URLs
+  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
+
+  // Convert horizontal rules to a visual separator
+  result = result.replace(/^[-*_]{3,}$/gm, '─────────────');
+
+  return result;
+}
+
+/**
+ * Split a long message into chunks at natural boundaries.
+ * WhatsApp handles long messages but readability drops past ~3000 chars.
+ */
+export function chunkMessage(text: string, maxLen = 3000): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > maxLen) {
+    // Try to split at a paragraph break
+    let splitAt = remaining.lastIndexOf('\n\n', maxLen);
+    // Fall back to a single newline
+    if (splitAt <= 0) splitAt = remaining.lastIndexOf('\n', maxLen);
+    // Fall back to a space
+    if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', maxLen);
+    // Last resort: hard split
+    if (splitAt <= 0) splitAt = maxLen;
+
+    chunks.push(remaining.slice(0, splitAt).trimEnd());
+    remaining = remaining.slice(splitAt).trimStart();
+  }
+
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
-  return text;
+  return markdownToWhatsApp(text);
 }
 
 export function routeOutbound(

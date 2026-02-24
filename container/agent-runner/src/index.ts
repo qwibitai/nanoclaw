@@ -36,6 +36,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  isProgress?: boolean;
 }
 
 interface SessionEntry {
@@ -350,6 +351,43 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Create a brief human-readable summary of a tool use for progress updates.
+ * Returns empty string for tools that aren't worth reporting.
+ */
+function summarizeToolUse(toolName: string, input: Record<string, unknown>): string {
+  switch (toolName) {
+    case 'Edit':
+      return `Editing ${shortPath(input.file_path as string)}`;
+    case 'Write':
+      return `Writing ${shortPath(input.file_path as string)}`;
+    case 'Read':
+      return `Reading ${shortPath(input.file_path as string)}`;
+    case 'Bash': {
+      const cmd = String(input.command || '').slice(0, 60);
+      return `Running \`${cmd}${String(input.command || '').length > 60 ? '...' : ''}\``;
+    }
+    case 'Glob':
+      return `Searching for ${input.pattern}`;
+    case 'Grep':
+      return `Searching for "${input.pattern}"`;
+    case 'WebSearch':
+      return `Searching web: ${input.query}`;
+    case 'WebFetch':
+      return `Fetching ${input.url}`;
+    case 'Task':
+      return `Spawning subagent`;
+    default:
+      return '';
+  }
+}
+
+function shortPath(filePath: string | undefined): string {
+  if (!filePath) return 'file';
+  // Strip /workspace/project/ prefix for brevity
+  return filePath.replace(/^\/workspace\/project\//, '');
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -426,6 +464,11 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  // For dev groups, throttle progress updates to avoid spamming the chat.
+  // At most one progress message per PROGRESS_THROTTLE_MS.
+  const PROGRESS_THROTTLE_MS = 3000;
+  let lastProgressTime = 0;
+
   for await (const message of query({
     prompt: stream,
     options: {
@@ -473,6 +516,31 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+    }
+
+    // Dev groups: stream tool use progress so the user sees what Claude is doing
+    if (isDev && message.type === 'assistant' && 'message' in message) {
+      const now = Date.now();
+      if (now - lastProgressTime >= PROGRESS_THROTTLE_MS) {
+        const assistantMsg = message as { message?: { content?: Array<{ type: string; name?: string; input?: Record<string, unknown> }> } };
+        const toolUses = assistantMsg.message?.content?.filter(
+          (c: { type: string }) => c.type === 'tool_use',
+        ) || [];
+        if (toolUses.length > 0) {
+          const summaries = toolUses.map((t: { name?: string; input?: Record<string, unknown> }) => {
+            return summarizeToolUse(t.name || 'unknown', t.input || {});
+          });
+          const progressText = summaries.filter(Boolean).join('\n');
+          if (progressText) {
+            lastProgressTime = now;
+            writeOutput({
+              status: 'success',
+              result: `_${progressText}_`,
+              isProgress: true,
+            });
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

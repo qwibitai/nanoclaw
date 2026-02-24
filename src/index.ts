@@ -35,7 +35,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { chunkMessage, findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -187,14 +187,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+      const text = formatOutbound(raw);
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // Split long messages into readable chunks for WhatsApp
+        const chunks = chunkMessage(text);
+        for (const chunk of chunks) {
+          await channel.sendMessage(chatJid, chunk);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
+      resetIdleTimer();
+    }
+
+    // Progress updates from dev groups (tool use summaries)
+    if (result.isProgress && result.result) {
+      await channel.sendMessage(chatJid, result.result);
       resetIdleTimer();
     }
 
