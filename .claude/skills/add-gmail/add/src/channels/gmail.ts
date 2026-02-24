@@ -34,9 +34,10 @@ export class GmailChannel implements Channel {
   private gmail: gmail_v1.Gmail | null = null;
   private opts: GmailChannelOpts;
   private pollIntervalMs: number;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private processedIds = new Set<string>();
   private threadMeta = new Map<string, ThreadMeta>();
+  private consecutiveErrors = 0;
   private userEmail = '';
 
   constructor(opts: GmailChannelOpts, pollIntervalMs = 60000) {
@@ -50,9 +51,10 @@ export class GmailChannel implements Channel {
     const tokensPath = path.join(credDir, 'credentials.json');
 
     if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
-      throw new Error(
-        'Gmail credentials not found in ~/.gmail-mcp/. Run Gmail OAuth setup first.',
+      logger.warn(
+        'Gmail credentials not found in ~/.gmail-mcp/. Skipping Gmail channel. Run /add-gmail to set up.',
       );
+      return;
     }
 
     const keys = JSON.parse(fs.readFileSync(keysPath, 'utf-8'));
@@ -86,17 +88,23 @@ export class GmailChannel implements Channel {
     this.userEmail = profile.data.emailAddress || '';
     logger.info({ email: this.userEmail }, 'Gmail channel connected');
 
-    // Start polling
-    this.pollTimer = setInterval(
-      () =>
-        this.pollForMessages().catch((err) =>
-          logger.error({ err }, 'Gmail poll error'),
-        ),
-      this.pollIntervalMs,
-    );
+    // Start polling with error backoff
+    const schedulePoll = () => {
+      const backoffMs = this.consecutiveErrors > 0
+        ? Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000)
+        : this.pollIntervalMs;
+      this.pollTimer = setTimeout(() => {
+        this.pollForMessages()
+          .catch((err) => logger.error({ err }, 'Gmail poll error'))
+          .finally(() => {
+            if (this.gmail) schedulePoll();
+          });
+      }, backoffMs);
+    };
 
     // Initial poll
     await this.pollForMessages();
+    schedulePoll();
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -158,7 +166,7 @@ export class GmailChannel implements Channel {
 
   async disconnect(): Promise<void> {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer);
+      clearTimeout(this.pollTimer);
       this.pollTimer = null;
     }
     this.gmail = null;
@@ -197,8 +205,12 @@ export class GmailChannel implements Channel {
         const ids = [...this.processedIds];
         this.processedIds = new Set(ids.slice(ids.length - 2500));
       }
+
+      this.consecutiveErrors = 0;
     } catch (err) {
-      logger.error({ err }, 'Gmail poll failed');
+      this.consecutiveErrors++;
+      const backoffMs = Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000);
+      logger.error({ err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs }, 'Gmail poll failed');
     }
   }
 

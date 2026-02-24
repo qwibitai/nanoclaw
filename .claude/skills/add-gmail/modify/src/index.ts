@@ -452,7 +452,11 @@ async function main(): Promise<void> {
 
   const gmail = new GmailChannel(channelOpts);
   channels.push(gmail);
-  await gmail.connect();
+  try {
+    await gmail.connect();
+  } catch (err) {
+    logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
