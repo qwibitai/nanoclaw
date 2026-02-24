@@ -428,16 +428,21 @@ export function stopTestBot(featureName: string): boolean {
     return false;
   }
 
-  try {
-    // Kill the process group (detached process)
-    if (entry.process.pid) {
+  // Try killing the process group first (works on Unix for detached processes),
+  // then fall back to killing the process directly.
+  let killed = false;
+  if (entry.process.pid) {
+    try {
       process.kill(-entry.process.pid, 'SIGTERM');
+      killed = true;
+    } catch {
+      // Negative PID (process group kill) can fail on non-Unix or if the group doesn't exist
     }
-  } catch {
-    // Process may have already exited
+  }
+  if (!killed) {
     try {
       entry.process.kill('SIGTERM');
-    } catch { /* ignore */ }
+    } catch { /* process may have already exited */ }
   }
 
   activeTestBots.delete(sanitized);
