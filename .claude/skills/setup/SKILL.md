@@ -158,10 +158,11 @@ onecli secrets list
 
 If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
 
-AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+AskUserQuestion: Do you want to use your **Claude subscription** (Pro/Max), an **Anthropic API key**, or **Google Vertex AI**?
 
 1. **Claude subscription (Pro/Max)** — description: "Uses your existing Claude Pro or Max subscription. You'll run `claude setup-token` in another terminal to get your token."
 2. **Anthropic API key** — description: "Pay-per-use API key from console.anthropic.com."
+3. **Google Vertex AI** — description: "Use Claude via your Google Cloud Platform project."
 
 ### Subscription path
 
@@ -188,6 +189,16 @@ Ask them to let you know when done.
 **If the user's response happens to contain a token or key** (starts with `sk-ant-`): handle it gracefully — run the `onecli secrets create` command with that value on their behalf.
 
 **After user confirms:** verify with `onecli secrets list` that an Anthropic secret exists. If not, ask again.
+
+### Google Vertex AI path
+
+Ask user for their GCP project ID and region. Add these to `.env`:
+```
+CLAUDE_CODE_USE_VERTEX=1
+CLOUD_ML_REGION=<region>
+ANTHROPIC_VERTEX_PROJECT_ID=<project-id>
+```
+The GCP credentials file must exist at `~/.config/gcloud/application_default_credentials.json` (created by `gcloud auth application-default login`). Verify it exists. If not, tell the user to run `gcloud auth application-default login` first. Optionally, if the user's credentials file is at a non-default path, they can add `GOOGLE_APPLICATION_CREDENTIALS=<path>` to `.env`. Do NOT set `ANTHROPIC_MODEL`.
 
 ## 5. Set Up Channels
 
