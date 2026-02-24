@@ -423,17 +423,18 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
-  initDatabase();
-  logger.info('Database initialized');
-  loadState();
-
-  // Start HTTP server when PORT is set (Railway and other cloud environments).
-  // Provides /health for uptime checks and /qr for WhatsApp authentication.
+  // Start HTTP server first so /health is reachable immediately.
+  // This lets Railway's healthcheck pass while Docker and the DB are still
+  // initialising (important on first deploy when the agent image is being built).
   const httpPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
   if (httpPort) {
     httpServer = startHttpServer(httpPort);
   }
+
+  ensureContainerSystemRunning();
+  initDatabase();
+  logger.info('Database initialized');
+  loadState();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
