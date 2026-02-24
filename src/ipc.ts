@@ -439,19 +439,23 @@ export async function processTaskIpc(
     case 'google_assistant_command': {
       const requestId = data.requestId as string | undefined;
       const text = data.text as string | undefined;
+
+      const writeIpcResponse = (reqId: string, response: object) => {
+        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(responsesDir, `${reqId}.json`);
+        const tempFile = `${responseFile}.tmp`;
+        fs.writeFileSync(tempFile, JSON.stringify(response));
+        fs.renameSync(tempFile, responseFile);
+      };
+
       if (!requestId || !text) {
         logger.warn({ data }, 'Invalid google_assistant_command: missing requestId or text');
-        // Write error response so the bash script doesn't hang
         if (requestId) {
-          const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
-          fs.mkdirSync(responsesDir, { recursive: true });
-          const responseFile = path.join(responsesDir, `${requestId}.json`);
-          const tempFile = `${responseFile}.tmp`;
-          fs.writeFileSync(tempFile, JSON.stringify({
+          writeIpcResponse(requestId, {
             status: 'error',
             error: `Invalid google_assistant_command: missing ${!text ? 'text' : 'requestId'}`,
-          }));
-          fs.renameSync(tempFile, responseFile);
+          });
         }
         break;
       }
@@ -466,28 +470,17 @@ export async function processTaskIpc(
 
         // Surface empty responses as explicit errors
         if (result.warning === 'no_response_text') {
+          result.status = 'error';
           result.error = 'Google Assistant returned no response text. This often happens with compound commands (e.g. "set lights to X and Y"). Try splitting into separate commands.';
         }
 
-        // Write response to the group's responses directory
-        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
-        fs.mkdirSync(responsesDir, { recursive: true });
-        const responseFile = path.join(responsesDir, `${requestId}.json`);
-        const tempFile = `${responseFile}.tmp`;
-        fs.writeFileSync(tempFile, JSON.stringify(result));
-        fs.renameSync(tempFile, responseFile);
-
+        writeIpcResponse(requestId, result);
         logger.info({ requestId, sourceGroup, text: text.slice(0, 50) }, 'Google Assistant command processed');
       } catch (err) {
-        const responsesDir = path.join(DATA_DIR, 'ipc', sourceGroup, 'responses');
-        fs.mkdirSync(responsesDir, { recursive: true });
-        const responseFile = path.join(responsesDir, `${requestId}.json`);
-        const tempFile = `${responseFile}.tmp`;
-        fs.writeFileSync(tempFile, JSON.stringify({
+        writeIpcResponse(requestId, {
           status: 'error',
           error: err instanceof Error ? err.message : String(err),
-        }));
-        fs.renameSync(tempFile, responseFile);
+        });
         logger.error({ err, requestId, sourceGroup }, 'Google Assistant command failed');
       }
       break;

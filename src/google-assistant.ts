@@ -198,6 +198,7 @@ export async function resetGoogleAssistantConversation(): Promise<GoogleAssistan
     throw new Error(result.error);
   }
 
+  consecutiveFailures = 0;
   return result;
 }
 
@@ -206,6 +207,7 @@ export async function resetGoogleAssistantConversation(): Promise<GoogleAssistan
  */
 export async function googleAssistantHealth(): Promise<GoogleAssistantResponse> {
   const result = await sendCommand({ cmd: 'health' });
+  consecutiveFailures = 0;
   return result;
 }
 
