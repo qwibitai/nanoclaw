@@ -47,6 +47,38 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+### Memory Vault
+
+A shared knowledge base is at `/workspace/memory/` (Obsidian vault). Use it to build persistent, structured memory across conversations.
+
+**People** — `/workspace/memory/People/{Name}.md`
+Create or update a person page when:
+- Someone new is introduced or mentioned
+- You learn something notable about them (role, preferences, context)
+- A commitment is made or resolved (theirs or yours)
+- A meaningful interaction happens worth recalling later
+
+Use `_template.md` as the starting structure. Link related pages with `[[Name]]`.
+
+**Companies** — `/workspace/memory/Companies/{Name}.md`
+Create when a company is discussed in depth. Link to relevant people.
+
+**Projects** — `/workspace/memory/Projects/{Name}.md`
+Track active projects: goal, status, key decisions, blockers.
+
+**Daily Notes** — `/workspace/memory/Daily Notes/YYYY-MM-DD.md`
+Use for date-specific log entries — decisions made, tasks completed, things to follow up on.
+
+**Learning** — `/workspace/memory/Learning/preferences.md`
+When you observe a clear pattern in how the user works or communicates, add it here. Check this file at the start of sessions to calibrate your behavior.
+
+**Rules:**
+- Always check the relevant person/project page before responding about them
+- Update pages after interactions — don't defer it
+- Keep entries concise; prefer bullet points over prose
+- Date all entries you add (format: YYYY-MM-DD)
+- Never delete existing entries; cross them out with `~~text~~` if resolved
+
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:

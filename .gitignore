@@ -18,6 +18,28 @@ groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
 
+# Memory vault - track structure/templates, ignore personal content
+!groups/memory/
+groups/memory/*
+!groups/memory/README.md
+!groups/memory/.obsidian/
+groups/memory/.obsidian/*
+!groups/memory/.obsidian/app.json
+!groups/memory/People/
+groups/memory/People/*
+!groups/memory/People/_template.md
+!groups/memory/Companies/
+groups/memory/Companies/*
+!groups/memory/Companies/_template.md
+!groups/memory/Projects/
+groups/memory/Projects/*
+!groups/memory/Projects/.gitkeep
+!groups/memory/Daily Notes/
+groups/memory/Daily Notes/*
+!groups/memory/Daily Notes/.gitkeep
+!groups/memory/Learning/
+groups/memory/Learning/*
+
 # Secrets
 *.keys.json
 .env
