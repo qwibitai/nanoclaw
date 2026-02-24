@@ -3,6 +3,7 @@ import fs from 'fs';
 import { Bot, Api } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { markdownToTelegramHtml } from '../markdown-to-telegram.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -91,7 +92,7 @@ export class TelegramChannel implements Channel {
         // Ignore errors
       }
 
-      let statusMsg = `*${ASSISTANT_NAME} Status*\n\n` +
+      let statusMsg = `<b>${ASSISTANT_NAME} Status</b>\n\n` +
         `Uptime: ${hours}h ${minutes}m\n` +
         `Memory: ${memMB} MB\n` +
         `Node: ${process.version}`;
@@ -100,7 +101,7 @@ export class TelegramChannel implements Channel {
         statusMsg += `\nClaude: ${claudeUsage}`;
       }
 
-      await ctx.reply(statusMsg, { parse_mode: 'MarkdownV2' });
+      await ctx.reply(statusMsg, { parse_mode: 'HTML' });
     });
 
     this.bot.on('message:text', async (ctx) => {
@@ -249,16 +250,18 @@ export class TelegramChannel implements Channel {
     try {
       const numericId = jid.replace(/^tg:/, '');
 
+      const html = markdownToTelegramHtml(text);
+
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text, { parse_mode: 'MarkdownV2' });
+      if (html.length <= MAX_LENGTH) {
+        await this.bot.api.sendMessage(numericId, html, { parse_mode: 'HTML' });
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        for (let i = 0; i < html.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
             numericId,
-            text.slice(i, i + MAX_LENGTH),
-            { parse_mode: 'MarkdownV2' },
+            html.slice(i, i + MAX_LENGTH),
+            { parse_mode: 'HTML' },
           );
         }
       }
@@ -348,12 +351,13 @@ export async function sendPoolMessage(
     }
 
     // Send message through the assigned pool bot
+    const html = markdownToTelegramHtml(text);
     const MAX_LENGTH = 4096;
-    if (text.length <= MAX_LENGTH) {
-      await poolApi.sendMessage(numericId, text, { parse_mode: 'MarkdownV2' });
+    if (html.length <= MAX_LENGTH) {
+      await poolApi.sendMessage(numericId, html, { parse_mode: 'HTML' });
     } else {
-      for (let i = 0; i < text.length; i += MAX_LENGTH) {
-        await poolApi.sendMessage(numericId, text.slice(i, i + MAX_LENGTH), { parse_mode: 'MarkdownV2' });
+      for (let i = 0; i < html.length; i += MAX_LENGTH) {
+        await poolApi.sendMessage(numericId, html.slice(i, i + MAX_LENGTH), { parse_mode: 'HTML' });
       }
     }
     logger.info({ jid: chatId, sender, poolIndex: botInfo.botIndex }, 'Pool message sent');
