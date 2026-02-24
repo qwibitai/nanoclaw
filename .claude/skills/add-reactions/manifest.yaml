@@ -1,0 +1,14 @@
+skill: reactions
+version: 1.0.0
+description: "WhatsApp emoji reaction support with voice commands"
+core_version: 0.1.0
+adds:
+  - src/reaction-commands.ts
+  - scripts/migrate-reactions.ts
+modifies:
+  - src/db.ts
+  - src/channels/whatsapp.ts
+  - src/types.ts
+conflicts: []
+depends: []
+test: "npx tsc --noEmit"
