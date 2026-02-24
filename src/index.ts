@@ -6,8 +6,11 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SIMPLEX_ENABLED,
+  SIMPLEX_PORT,
   TRIGGER_PATTERN,
 } from './config.js';
+import { SimplexChannel } from './channels/simplex.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -445,9 +448,17 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (SIMPLEX_ENABLED) {
+    const simplex = new SimplexChannel(SIMPLEX_PORT, channelOpts);
+    channels.push(simplex);
+    await simplex.connect();
+  }
+
+  if (!SIMPLEX_ENABLED) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

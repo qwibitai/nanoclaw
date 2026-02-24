@@ -71,7 +71,7 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
@@ -114,6 +114,8 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'whatsapp', is_group = 0 WHERE jid LIKE '%@s.whatsapp.net'`);
     database.exec(`UPDATE chats SET channel = 'discord', is_group = 1 WHERE jid LIKE 'dc:%'`);
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
+    database.exec(`UPDATE chats SET channel = 'simplex', is_group = 0 WHERE jid LIKE 'sx:%' AND jid NOT LIKE 'sx:g:%'`);
+    database.exec(`UPDATE chats SET channel = 'simplex', is_group = 1 WHERE jid LIKE 'sx:g:%'`);
   } catch {
     /* columns already exist */
   }
@@ -563,6 +565,10 @@ export function setRegisteredGroup(
     group.containerConfig ? JSON.stringify(group.containerConfig) : null,
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
   );
+}
+
+export function removeRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
