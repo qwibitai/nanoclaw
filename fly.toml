@@ -1,0 +1,27 @@
+# NanoClaw Fly.io Configuration
+# Deploy with: fly launch / fly deploy
+
+app = "nanoclaw"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile.deploy"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1024mb"
+
+[mounts]
+  source = "nanoclaw_data"
+  destination = "/data"

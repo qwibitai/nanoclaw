@@ -1,12 +1,21 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import { ASSISTANT_NAME } from './config.js';
 import {
   escapeXml,
   formatMessages,
   formatOutbound,
   stripInternalTags,
 } from './router.js';
+
+// Trigger pattern: matches @name at start of message (case-insensitive)
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+const TRIGGER_PATTERN = new RegExp(
+  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  'i',
+);
 import { NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {

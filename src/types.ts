@@ -50,6 +50,19 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  /** GitHub-specific metadata, present when the message originates from a webhook. */
+  github_metadata?: GitHubEventMetadata;
+}
+
+export interface GitHubEventMetadata {
+  issueNumber?: number;
+  prNumber?: number;
+  commentId?: number;
+  reviewId?: number;
+  isReviewComment?: boolean;
+  sha?: string;
+  path?: string;
+  line?: number;
 }
 
 export interface ScheduledTask {
@@ -94,7 +107,7 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
+// channels that sync names separately omit it.
 export type OnChatMetadata = (
   chatJid: string,
   timestamp: string,
