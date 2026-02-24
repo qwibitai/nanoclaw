@@ -6,9 +6,16 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_ACCESS_FILE,
+  TELEGRAM_ADMIN_USER_ID,
+  TELEGRAM_ALLOWED_USER_IDS,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { TelegramChannel, type RegisterMainResult } from './channels/telegram.js';
+import { TelegramAccessControl } from './channels/telegram-access-control.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -99,6 +106,37 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+function registerTelegramMain(chatJid: string, chatName: string): RegisterMainResult {
+  const existingForChat = registeredGroups[chatJid];
+  if (existingForChat?.folder === MAIN_GROUP_FOLDER) {
+    return { status: 'already-main' };
+  }
+
+  const existingMain = Object.entries(registeredGroups).find(
+    ([jid, group]) => group.folder === MAIN_GROUP_FOLDER && jid !== chatJid,
+  );
+  if (existingMain) {
+    const [existingJid, group] = existingMain;
+    return {
+      status: 'main-exists',
+      existingJid,
+      existingName: group.name,
+    };
+  }
+
+  const now = new Date().toISOString();
+  registerGroup(chatJid, {
+    name: chatName || existingForChat?.name || 'Telegram Main',
+    folder: MAIN_GROUP_FOLDER,
+    trigger: `@${ASSISTANT_NAME}`,
+    added_at: existingForChat?.added_at || now,
+    containerConfig: existingForChat?.containerConfig,
+    requiresTrigger: false,
+  });
+
+  return { status: 'registered' };
 }
 
 /**
@@ -426,6 +464,12 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  const telegramAccessControl = new TelegramAccessControl(
+    TELEGRAM_ACCESS_FILE,
+    TELEGRAM_ADMIN_USER_ID,
+    TELEGRAM_ALLOWED_USER_IDS,
+  );
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -441,13 +485,31 @@ async function main(): Promise<void> {
     onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
     onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
       storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onRegisterMain: async (chatJid: string, chatName: string) => {
+      storeChatMetadata(
+        chatJid,
+        new Date().toISOString(),
+        chatName,
+        'telegram',
+      );
+      return registerTelegramMain(chatJid, chatName);
+    },
     registeredGroups: () => registeredGroups,
+    accessControl: telegramAccessControl,
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
+
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

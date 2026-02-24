@@ -9,6 +9,10 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'TELEGRAM_ADMIN_USER_ID',
+  'TELEGRAM_ALLOWED_USER_IDS',
 ]);
 
 export const ASSISTANT_NAME =
@@ -33,6 +37,7 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 export const MAIN_GROUP_FOLDER = 'main';
+export const TELEGRAM_ACCESS_FILE = path.join(DATA_DIR, 'telegram-access.json');
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
@@ -67,3 +72,18 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+export const TELEGRAM_ADMIN_USER_ID =
+  process.env.TELEGRAM_ADMIN_USER_ID || envConfig.TELEGRAM_ADMIN_USER_ID || '';
+export const TELEGRAM_ALLOWED_USER_IDS =
+  (process.env.TELEGRAM_ALLOWED_USER_IDS ||
+    envConfig.TELEGRAM_ALLOWED_USER_IDS ||
+    '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
