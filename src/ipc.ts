@@ -32,6 +32,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  statusHeartbeat?: () => void;
 }
 
 let ipcWatcherRunning = false;
@@ -179,6 +180,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
     }
+
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    deps.statusHeartbeat?.();
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };
