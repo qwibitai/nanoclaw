@@ -11,13 +11,7 @@ import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { isCustomizeActive } from './customize.js';
 import { acquireLock } from './lock.js';
-import {
-  cleanupMergeState,
-  isGitRepo,
-  mergeFile,
-  runRerere,
-  setupRerereAdapter,
-} from './merge.js';
+import { mergeFile } from './merge.js';
 import { recordPathRemap } from './path-remap.js';
 import { computeFileHash, readState, writeState } from './state.js';
 import {
@@ -172,8 +166,6 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
       }
 
       // Three-way merge: current ← base → newCore
-      // Save current content before merge overwrites it (needed for rerere stage 2 = "ours")
-      const oursContent = fs.readFileSync(currentPath, 'utf-8');
       const tmpCurrent = path.join(
         os.tmpdir(),
         `nanoclaw-update-${crypto.randomUUID()}-${path.basename(relPath)}`,
@@ -186,27 +178,9 @@ export async function applyUpdate(newCorePath: string): Promise<UpdateResult> {
         fs.copyFileSync(tmpCurrent, currentPath);
         fs.unlinkSync(tmpCurrent);
       } else {
-        // Copy conflict markers to working tree path before rerere
+        // Conflict — copy markers to working tree
         fs.copyFileSync(tmpCurrent, currentPath);
         fs.unlinkSync(tmpCurrent);
-
-        if (isGitRepo()) {
-          const baseContent = fs.readFileSync(basePath, 'utf-8');
-          const theirsContent = fs.readFileSync(newCoreSrcPath, 'utf-8');
-
-          setupRerereAdapter(relPath, baseContent, oursContent, theirsContent);
-          const autoResolved = runRerere(currentPath);
-
-          if (autoResolved) {
-            execFileSync('git', ['add', relPath], { stdio: 'pipe' });
-            execSync('git rerere', { stdio: 'pipe' });
-            cleanupMergeState(relPath);
-            continue;
-          }
-
-          cleanupMergeState(relPath);
-        }
-
         mergeConflicts.push(relPath);
       }
     }

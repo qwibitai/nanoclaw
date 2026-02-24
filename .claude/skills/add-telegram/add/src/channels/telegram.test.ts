@@ -255,6 +255,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Test Group',
+        'telegram',
+        true,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
@@ -281,6 +283,8 @@ describe('TelegramChannel', () => {
         'tg:999999',
         expect.any(String),
         'Test Group',
+        'telegram',
+        true,
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -367,6 +371,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Alice', // Private chats use sender name
+        'telegram',
+        false,
       );
     });
 
@@ -386,6 +392,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Project Team',
+        'telegram',
+        true,
       );
     });
 
