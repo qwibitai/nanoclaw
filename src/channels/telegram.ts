@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import { Bot, Api } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
@@ -35,24 +37,23 @@ export class TelegramChannel implements Channel {
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
 
-    // Whitelist: only allow specific user IDs
+    // Single entry-point security gate — applies to ALL incoming updates
     const allowedUsers = (process.env.ALLOWED_TELEGRAM_USERS || '')
       .split(',')
-      .map(id => parseInt(id.trim()))
-      .filter(id => !isNaN(id));
+      .map((id) => parseInt(id.trim()))
+      .filter((id) => !isNaN(id));
 
-    const isAllowed = (userId: number | undefined): boolean => {
-      if (!userId) return false;
-      if (allowedUsers.length === 0) return true; // No whitelist = allow all
-      return allowedUsers.includes(userId);
-    };
+    this.bot.use(async (ctx, next) => {
+      const userId = ctx.from?.id;
+      if (allowedUsers.length > 0 && (!userId || !allowedUsers.includes(userId))) {
+        logger.debug({ userId }, 'Unauthorized Telegram user, dropping');
+        return;
+      }
+      await next();
+    });
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
-      if (!isAllowed(ctx.from?.id)) {
-        ctx.reply('Unauthorized');
-        return;
-      }
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
       const chatName =
@@ -68,19 +69,11 @@ export class TelegramChannel implements Channel {
 
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
-      if (!isAllowed(ctx.from?.id)) {
-        ctx.reply('Unauthorized');
-        return;
-      }
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
     // Command to check system status
     this.bot.command('status', async (ctx) => {
-      if (!isAllowed(ctx.from?.id)) {
-        ctx.reply('Unauthorized');
-        return;
-      }
       const uptime = process.uptime();
       const hours = Math.floor(uptime / 3600);
       const minutes = Math.floor((uptime % 3600) / 60);
@@ -113,12 +106,6 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
-
-      // Check whitelist for messages
-      if (!isAllowed(ctx.from?.id)) {
-        logger.debug({ userId: ctx.from?.id }, 'Unauthorized Telegram user');
-        return;
-      }
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
