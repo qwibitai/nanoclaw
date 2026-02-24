@@ -82,6 +82,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import { spawn } from 'child_process';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -199,5 +200,114 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('container-runner network isolation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function getSpawnArgs(): string[] {
+    const mockSpawn = spawn as unknown as ReturnType<typeof vi.fn>;
+    const lastCall = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1];
+    return lastCall[1] as string[];
+  }
+
+  it('non-main containers get --network none by default', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: false },
+      () => {},
+    );
+
+    // Verify spawn was called with --network none
+    const args = getSpawnArgs();
+    const networkIdx = args.indexOf('--network');
+    expect(networkIdx).toBeGreaterThan(-1);
+    expect(args[networkIdx + 1]).toBe('none');
+
+    // Clean up: emit output and close
+    emitOutputMarker(fakeProc, { status: 'success', result: null });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('main containers get full network by default', async () => {
+    const resultPromise = runContainerAgent(
+      testGroup,
+      { ...testInput, isMain: true },
+      () => {},
+    );
+
+    // Verify spawn was NOT called with --network none
+    const args = getSpawnArgs();
+    const networkIdx = args.indexOf('--network');
+    expect(networkIdx).toBe(-1);
+
+    // Clean up
+    emitOutputMarker(fakeProc, { status: 'success', result: null });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('non-main containers can opt into full network via containerConfig', async () => {
+    const groupWithNetwork: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { networkMode: 'full' },
+    };
+
+    const resultPromise = runContainerAgent(
+      groupWithNetwork,
+      { ...testInput, isMain: false },
+      () => {},
+    );
+
+    // Verify --network none is NOT present
+    const args = getSpawnArgs();
+    const networkIdx = args.indexOf('--network');
+    expect(networkIdx).toBe(-1);
+
+    // Clean up
+    emitOutputMarker(fakeProc, { status: 'success', result: null });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+  });
+
+  it('main containers can be restricted to no network via containerConfig', async () => {
+    const groupNoNetwork: RegisteredGroup = {
+      ...testGroup,
+      containerConfig: { networkMode: 'none' },
+    };
+
+    const resultPromise = runContainerAgent(
+      groupNoNetwork,
+      { ...testInput, isMain: true },
+      () => {},
+    );
+
+    // Verify --network none IS present
+    const args = getSpawnArgs();
+    const networkIdx = args.indexOf('--network');
+    expect(networkIdx).toBeGreaterThan(-1);
+    expect(args[networkIdx + 1]).toBe('none');
+
+    // Clean up
+    emitOutputMarker(fakeProc, { status: 'success', result: null });
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
   });
 });
