@@ -10,6 +10,9 @@ dockerfilePath = "Dockerfile.railway"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 
+# Required for Docker-in-Docker: allows dockerd to run inside the container.
+privileged = true
+
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 
@@ -33,8 +36,5 @@ restartPolicyMaxRetries = 3
 #   Mount path: /app/groups   Persists per-group CLAUDE.md memory files
 #
 # ---------------------------------------------------------------------------
-# Required service setting:
-#
-#   Settings → Deploy → Enable "Privileged" mode
-#   (needed for the Docker daemon to run inside the container)
+# Note: Privileged mode is set above via `privileged = true`.
 # ---------------------------------------------------------------------------
