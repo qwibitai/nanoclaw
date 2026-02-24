@@ -14,9 +14,7 @@ import {
   getPlatform,
   getNodePath,
   getServiceManager,
-  hasSystemd,
   isRoot,
-  isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
 
@@ -159,6 +157,69 @@ function killOrphanedProcesses(projectRoot: string): void {
   }
 }
 
+function getCurrentUsername(): string {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return process.env.USER || 'USERNAME';
+  }
+}
+
+/**
+ * Find the Docker socket path. Modern systems use /run/docker.sock,
+ * older systems may use /var/run/docker.sock (often a symlink).
+ */
+function getDockerSocketPath(): string {
+  // Check /run first (modern default), fall back to /var/run
+  try {
+    fs.accessSync('/run/docker.sock', fs.constants.F_OK);
+    return '/run/docker.sock';
+  } catch {
+    // Fall through
+  }
+  try {
+    fs.accessSync('/var/run/docker.sock', fs.constants.F_OK);
+    return '/var/run/docker.sock';
+  } catch {
+    // Default to the most common path
+    return '/var/run/docker.sock';
+  }
+}
+
+interface AclRemediationResult {
+  success: boolean;
+  socketPath: string;
+  failureReason?: 'setfacl_missing' | 'sudo_failed';
+}
+
+/**
+ * Attempt an immediate Docker socket ACL remediation for stale user systemd sessions.
+ *
+ * Uses non-interactive sudo (-n) so setup never hangs waiting for a password prompt.
+ */
+function tryRemediateDockerSocketAcl(username: string): AclRemediationResult {
+  const socketPath = getDockerSocketPath();
+
+  try {
+    execSync('command -v setfacl', { stdio: 'ignore' });
+  } catch {
+    logger.warn('setfacl not found; cannot auto-remediate stale docker group');
+    return { success: false, socketPath, failureReason: 'setfacl_missing' };
+  }
+
+  try {
+    execSync(`sudo -n setfacl -m u:${username}:rw ${socketPath}`, {
+      stdio: 'ignore',
+      timeout: 10000,
+    });
+    logger.info({ socketPath }, 'Applied temporary docker socket ACL remediation');
+    return { success: true, socketPath };
+  } catch (err) {
+    logger.warn({ err, socketPath }, 'Failed docker socket ACL remediation attempt');
+    return { success: false, socketPath, failureReason: 'sudo_failed' };
+  }
+}
+
 /**
  * Detect stale docker group membership in the user systemd session.
  *
@@ -233,16 +294,60 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   fs.writeFileSync(unitPath, unit);
   logger.info({ unitPath }, 'Wrote systemd unit');
 
+  // Always clean up orphans before any start attempt to prevent WhatsApp conflicts.
+  killOrphanedProcesses(projectRoot);
+
   // Detect stale docker group before starting (user systemd only)
   const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
+  let dockerGroupRemediated = false;
+
   if (dockerGroupStale) {
     logger.warn(
       'Docker group not active in systemd session — user was likely added to docker group mid-session',
     );
-  }
 
-  // Kill orphaned nanoclaw processes to avoid WhatsApp conflict errors
-  killOrphanedProcesses(projectRoot);
+    const username = getCurrentUsername();
+    const aclResult = tryRemediateDockerSocketAcl(username);
+    dockerGroupRemediated = aclResult.success;
+    const staleAfterRemediation = checkDockerGroupStale();
+
+    if (staleAfterRemediation) {
+      logger.error('Docker group remains stale in systemd session after remediation attempt');
+      console.error('\nDocker group is stale in the systemd session.\n');
+
+      const retryCmd = 'npx tsx setup/index.ts --step service';
+      const aclCmd = `sudo setfacl -m u:${username}:rw ${aclResult.socketPath}`;
+
+      if (aclResult.failureReason === 'setfacl_missing') {
+        console.error('Install ACL tools, then run:');
+        console.error('  Ubuntu/Debian: sudo apt install acl');
+        console.error('  Fedora/RHEL:   sudo dnf install acl');
+        console.error('  Arch:          sudo pacman -S acl\n');
+        console.error(`Then fix and re-run:\n  ${aclCmd} && ${retryCmd}\n`);
+      } else {
+        console.error(`Run this command:\n  ${aclCmd} && ${retryCmd}\n`);
+      }
+
+      console.error(`Alternative: Log out and back in, then re-run:\n  ${retryCmd}\n`);
+
+      emitStatus('SETUP_SERVICE', {
+        SERVICE_TYPE: 'systemd-user',
+        NODE_PATH: nodePath,
+        PROJECT_PATH: projectRoot,
+        UNIT_PATH: unitPath,
+        SERVICE_LOADED: false,
+        DOCKER_GROUP_STALE: true,
+        DOCKER_SOCKET_PATH: aclResult.socketPath,
+        ...(aclResult.failureReason ? { ACL_FAILURE_REASON: aclResult.failureReason } : {}),
+        STATUS: 'failed',
+        ERROR: 'docker_group_stale',
+        FIX_COMMAND: `${aclCmd} && ${retryCmd}`,
+        FIX_ALTERNATIVE: 'Log out and back in, then re-run setup',
+        LOG: 'logs/setup.log',
+      });
+      process.exit(1);
+    }
+  }
 
   // Enable and start
   try {
@@ -272,6 +377,8 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     // Not active
   }
 
+  const status = serviceLoaded ? 'success' : 'failed';
+
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: runningAsRoot ? 'systemd-system' : 'systemd-user',
     NODE_PATH: nodePath,
@@ -279,12 +386,16 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
-    STATUS: 'success',
+    ...(dockerGroupRemediated ? { DOCKER_GROUP_REMEDIATED: true } : {}),
+    ...(serviceLoaded ? {} : { ERROR: 'service_not_active' }),
+    STATUS: status,
     LOG: 'logs/setup.log',
   });
+
+  if (!serviceLoaded) process.exit(1);
 }
 
-function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: string): void {
+function setupNohupFallback(projectRoot: string, nodePath: string, _homeDir: string): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
   const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
