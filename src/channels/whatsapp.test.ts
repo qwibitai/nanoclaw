@@ -514,11 +514,8 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Still delivered but with empty content
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ content: '' }),
-      );
+      // Skipped — no text content to process
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
     it('uses sender JID when pushName is absent', async () => {

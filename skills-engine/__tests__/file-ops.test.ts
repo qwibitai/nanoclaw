@@ -4,6 +4,19 @@ import path from 'path';
 import { executeFileOps } from '../file-ops.js';
 import { createTempDir, cleanup } from './test-helpers.js';
 
+function shouldSkipSymlinkTests(err: unknown): boolean {
+  return !!(
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (
+      (err as { code?: string }).code === 'EPERM' ||
+      (err as { code?: string }).code === 'EACCES' ||
+      (err as { code?: string }).code === 'ENOSYS'
+    )
+  );
+}
+
 describe('file-ops', () => {
   let tmpDir: string;
   const originalCwd = process.cwd();
@@ -89,5 +102,54 @@ describe('file-ops', () => {
     ], tmpDir);
     expect(result.success).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it('move rejects symlink escape to outside project root', () => {
+    const outsideDir = createTempDir();
+
+    try {
+      fs.symlinkSync(outsideDir, path.join(tmpDir, 'linkdir'));
+    } catch (err) {
+      cleanup(outsideDir);
+      if (shouldSkipSymlinkTests(err)) return;
+      throw err;
+    }
+
+    fs.writeFileSync(path.join(tmpDir, 'source.ts'), 'content');
+
+    const result = executeFileOps([
+      { type: 'move', from: 'source.ts', to: 'linkdir/pwned.ts' },
+    ], tmpDir);
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('escapes project root'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, 'source.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(outsideDir, 'pwned.ts'))).toBe(false);
+
+    cleanup(outsideDir);
+  });
+
+  it('delete rejects symlink escape to outside project root', () => {
+    const outsideDir = createTempDir();
+    const outsideFile = path.join(outsideDir, 'victim.ts');
+    fs.writeFileSync(outsideFile, 'secret');
+
+    try {
+      fs.symlinkSync(outsideDir, path.join(tmpDir, 'linkdir'));
+    } catch (err) {
+      cleanup(outsideDir);
+      if (shouldSkipSymlinkTests(err)) return;
+      throw err;
+    }
+
+    const result = executeFileOps([
+      { type: 'delete', path: 'linkdir/victim.ts' },
+    ], tmpDir);
+
+    expect(result.success).toBe(false);
+    expect(result.errors.some((e) => e.includes('escapes project root'))).toBe(true);
+    expect(fs.existsSync(outsideFile)).toBe(true);
+
+    cleanup(outsideDir);
   });
 });
