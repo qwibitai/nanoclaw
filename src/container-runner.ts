@@ -189,6 +189,13 @@ function readSecrets(): Record<string, string> {
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // On Railway, bridge networking is disabled (--bridge=none) so dockerd can
+  // start without iptables. Use host networking so containers can reach the
+  // internet (Anthropic API) without a bridge.
+  if (process.env.RAILWAY_ENVIRONMENT) {
+    args.push('--network=host');
+  }
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 

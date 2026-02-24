@@ -16,6 +16,7 @@ echo "[entrypoint] Starting Docker daemon..."
 # the "Permission denied" crash; container networking still works via CNI.
 dockerd --host unix:///var/run/docker.sock \
         --iptables=false \
+        --bridge=none \
         --log-level error \
         &
 DOCKERD_PID=$!
