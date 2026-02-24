@@ -26,6 +26,7 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  isDev?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
 }
@@ -410,6 +411,17 @@ async function runQuery(
       }
     }
   }
+
+  // Dev groups: Claude Code works directly in the project (worktree) as CWD.
+  // The group folder is added as an additional directory so its CLAUDE.md
+  // (with dev-specific instructions) is still loaded alongside the project's.
+  const isDev = containerInput.isDev === true;
+  const workingDir = isDev ? '/workspace/project' : '/workspace/group';
+  if (isDev) {
+    extraDirs.push('/workspace/group');
+    log('Dev mode: CWD=/workspace/project, /workspace/group added as additional directory');
+  }
+
   if (extraDirs.length > 0) {
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
@@ -417,7 +429,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: workingDir,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,

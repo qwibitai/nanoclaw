@@ -280,6 +280,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        isDev: group.isDev,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
