@@ -57,13 +57,17 @@ export async function run(_args: string[]): Promise<void> {
       }
     }
   } else {
-    // Check for nohup PID file
+    // Check for PID file (nohup on Linux/macOS, PowerShell script on Windows)
     const pidFile = path.join(projectRoot, 'nanoclaw.pid');
     if (fs.existsSync(pidFile)) {
       try {
         const pid = fs.readFileSync(pidFile, 'utf-8').trim();
         if (pid) {
-          execSync(`kill -0 ${pid}`, { stdio: 'ignore' });
+          if (os.platform() === 'win32') {
+            execSync(`powershell.exe -Command "Get-Process -Id ${pid} -ErrorAction Stop"`, { stdio: 'ignore' });
+          } else {
+            execSync(`kill -0 ${pid}`, { stdio: 'ignore' });
+          }
           service = 'running';
         }
       } catch {

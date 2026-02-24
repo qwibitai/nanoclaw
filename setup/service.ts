@@ -55,6 +55,8 @@ export async function run(_args: string[]): Promise<void> {
     setupLaunchd(projectRoot, nodePath, homeDir);
   } else if (platform === 'linux') {
     setupLinux(projectRoot, nodePath, homeDir);
+  } else if (os.platform() === 'win32') {
+    setupWindows(projectRoot, nodePath);
   } else {
     emitStatus('SETUP_SERVICE', {
       SERVICE_TYPE: 'unknown',
@@ -279,6 +281,98 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
+    STATUS: 'success',
+    LOG: 'logs/setup.log',
+  });
+}
+
+function setupWindows(projectRoot: string, nodePath: string): void {
+  logger.info('Setting up Windows service via Task Scheduler');
+  fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true });
+
+  const psScriptPath = path.join(projectRoot, 'start-nanoclaw.ps1');
+  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const logFile = path.join(projectRoot, 'logs', 'nanoclaw.log');
+  const errFile = path.join(projectRoot, 'logs', 'nanoclaw.error.log');
+  const indexJs = path.join(projectRoot, 'dist', 'index.js');
+
+  const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
+  const psLines = [
+    '# start-nanoclaw.ps1 — Start NanoClaw on Windows',
+    `$nodePath = ${q(nodePath)}`,
+    `$indexJs  = ${q(indexJs)}`,
+    `$workDir  = ${q(projectRoot)}`,
+    `$logFile  = ${q(logFile)}`,
+    `$errFile  = ${q(errFile)}`,
+    `$pidFile  = ${q(pidFile)}`,
+    '',
+    '# Stop existing instance if running',
+    'if (Test-Path $pidFile) {',
+    '  $oldPid = Get-Content $pidFile -ErrorAction SilentlyContinue',
+    '  if ($oldPid -and (Get-Process -Id ([int]$oldPid) -ErrorAction SilentlyContinue)) {',
+    '    Stop-Process -Id ([int]$oldPid) -Force -ErrorAction SilentlyContinue',
+    '    Start-Sleep -Seconds 2',
+    '  }',
+    '}',
+    '',
+    '# Wait for Docker daemon to be ready (up to 120 seconds)',
+    'Write-Host "Waiting for Docker..."',
+    '$dockerReady = $false',
+    'for ($i = 0; $i -lt 24; $i++) {',
+    '  $result = & docker info 2>&1',
+    '  if ($LASTEXITCODE -eq 0) { $dockerReady = $true; break }',
+    '  Start-Sleep -Seconds 5',
+    '}',
+    'if (-not $dockerReady) {',
+    '  Write-Host "Docker did not become ready in time — NanoClaw will start anyway"',
+    '}',
+    '',
+    'Write-Host "Starting NanoClaw..."',
+    '$proc = Start-Process -FilePath $nodePath -ArgumentList $indexJs -WorkingDirectory $workDir -WindowStyle Hidden -RedirectStandardOutput $logFile -RedirectStandardError $errFile -PassThru',
+    '$proc.Id | Set-Content $pidFile',
+    'Write-Host "NanoClaw started (PID $($proc.Id))"',
+  ];
+  fs.writeFileSync(psScriptPath, psLines.join('\r\n') + '\r\n');
+  logger.info({ psScriptPath }, 'Wrote PowerShell startup script');
+
+  // Register with Task Scheduler via PowerShell Register-ScheduledTask
+  const taskName = 'NanoClaw';
+  try { execSync(`schtasks /delete /tn "${taskName}" /f`, { stdio: 'ignore', shell: true }); } catch { /* ok */ }
+
+  let serviceLoaded = false;
+  const psRegister = [
+    `$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-WindowStyle Hidden -File "${psScriptPath}"'`,
+    `$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME`,
+    `$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit 0`,
+    `Register-ScheduledTask -TaskName '${taskName}' -Action $action -Trigger $trigger -Settings $settings -Force`,
+  ].join('; ');
+  try {
+    execSync(`powershell.exe -Command "${psRegister.replace(/"/g, '\\"')}"`, { stdio: 'ignore', shell: true });
+    logger.info('Task Scheduler task registered via PowerShell');
+    serviceLoaded = true;
+  } catch (err) {
+    logger.error({ err }, 'Failed to register Task Scheduler task');
+  }
+
+  // Start immediately
+  try {
+    execSync(`schtasks /run /tn "${taskName}"`, { stdio: 'ignore', shell: true });
+    logger.info('NanoClaw started via Task Scheduler');
+  } catch {
+    try {
+      execSync(`powershell.exe -WindowStyle Hidden -File "${psScriptPath}"`, { stdio: 'ignore', shell: true });
+      logger.info('NanoClaw started via PowerShell script directly');
+    } catch (err) {
+      logger.error({ err }, 'Failed to start NanoClaw process');
+    }
+  }
+
+  emitStatus('SETUP_SERVICE', {
+    SERVICE_TYPE: 'task-scheduler',
+    NODE_PATH: nodePath,
+    PROJECT_PATH: projectRoot,
+    SCRIPT_PATH: psScriptPath,
+    SERVICE_LOADED: String(serviceLoaded),
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
