@@ -71,7 +71,7 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
@@ -116,6 +116,37 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`);
   } catch {
     /* columns already exist */
+  }
+
+  // Drop UNIQUE constraint on registered_groups.folder if it exists.
+  // Multi-channel setups need multiple JIDs (one per channel) to share the
+  // same folder. The old UNIQUE constraint silently deleted previous entries
+  // on INSERT OR REPLACE, leaving only the last-registered channel active.
+  // Guard: only run if the unique index on folder is present.
+  // Check for UNIQUE on folder by inspecting the table DDL itself,
+  // since inline UNIQUE creates autoindexes with sql=NULL in sqlite_master.
+  const tableDdl = database
+    .prepare(
+      `SELECT sql FROM sqlite_master
+       WHERE type='table' AND name='registered_groups'`,
+    )
+    .get() as { sql: string } | undefined;
+  const hasUniqueFolder = tableDdl?.sql?.includes('folder TEXT NOT NULL UNIQUE') ?? false;
+  if (hasUniqueFolder) {
+    database.exec(`
+      CREATE TABLE registered_groups_new (
+        jid TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        folder TEXT NOT NULL,
+        trigger_pattern TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        container_config TEXT,
+        requires_trigger INTEGER DEFAULT 1
+      );
+      INSERT INTO registered_groups_new SELECT * FROM registered_groups;
+      DROP TABLE registered_groups;
+      ALTER TABLE registered_groups_new RENAME TO registered_groups;
+    `);
   }
 }
 
