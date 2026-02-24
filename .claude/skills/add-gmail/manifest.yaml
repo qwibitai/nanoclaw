@@ -1,0 +1,18 @@
+skill: gmail
+version: 1.0.0
+description: "Gmail integration via Google APIs"
+core_version: 0.1.0
+adds:
+  - src/channels/gmail.ts
+  - src/channels/gmail.test.ts
+modifies:
+  - src/index.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies:
+    googleapis: "^144.0.0"
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/gmail.test.ts"
