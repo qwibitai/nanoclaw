@@ -30,6 +30,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.6",
     "@types/qrcode-terminal": "^0.12.2",
     "@vitest/coverage-v8": "^4.0.18",
     "prettier": "^3.8.1",
