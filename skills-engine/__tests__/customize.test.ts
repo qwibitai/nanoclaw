@@ -115,9 +115,11 @@ describe('customize', () => {
     // Modify the tracked file
     fs.writeFileSync(trackedFile, 'export const x = 2;');
 
-    // Make the base file a directory to cause diff to exit with code 2
+    // Make the base file unreadable to cause diff to exit with code 2
     const baseFilePath = path.join(tmpDir, '.nanoclaw', 'base', 'src', 'app.ts');
-    fs.mkdirSync(baseFilePath, { recursive: true });
+    fs.mkdirSync(path.dirname(baseFilePath), { recursive: true });
+    fs.writeFileSync(baseFilePath, 'base content');
+    fs.chmodSync(baseFilePath, 0o000);
 
     expect(() => commitCustomize()).toThrow(/diff error/i);
   });
