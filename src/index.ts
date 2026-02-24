@@ -424,7 +424,14 @@ function ensureContainerSystemRunning(): void {
     }
   }
 
-  // Kill and clean up orphaned NanoClaw containers from previous runs
+  cleanupOrphanedContainers();
+}
+
+/**
+ * Stop all running NanoClaw containers.
+ * Used both at startup (to clean up orphans) and during shutdown.
+ */
+function cleanupOrphanedContainers(): void {
   try {
     const output = execSync('container ls --format json', {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -436,14 +443,14 @@ function ensureContainerSystemRunning(): void {
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
-        execSync(`container stop ${name}`, { stdio: 'pipe' });
+        execSync(`container stop ${name}`, { stdio: 'pipe', timeout: 15000 });
       } catch { /* already stopped */ }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info({ count: orphans.length, names: orphans }, 'Stopped NanoClaw containers');
     }
   } catch (err) {
-    logger.warn({ err }, 'Failed to clean up orphaned containers');
+    logger.warn({ err }, 'Failed to clean up containers');
   }
 }
 
@@ -458,6 +465,8 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     await whatsapp.disconnect();
+    cleanupOrphanedContainers();
+    logger.info('Shutdown complete');
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

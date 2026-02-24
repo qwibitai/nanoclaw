@@ -1,0 +1,28 @@
+[Unit]
+Description=NanoClaw WhatsApp Assistant
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tiger
+Group=tiger
+SupplementaryGroups=docker
+WorkingDirectory=/home/tiger/nanoclaw
+ExecStart=/home/tiger/.nvm/versions/node/v24.13.0/bin/node /home/tiger/nanoclaw/dist/index.js
+Restart=always
+RestartSec=10
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/home/tiger/.nvm/versions/node/v24.13.0/bin:/home/tiger/.local/bin
+Environment=HOME=/home/tiger
+Environment=NODE_ENV=production
+EnvironmentFile=/home/tiger/nanoclaw/.env
+
+# Graceful shutdown: give containers 30s to stop before SIGKILL
+TimeoutStopSec=30
+KillMode=mixed
+
+StandardOutput=append:/home/tiger/nanoclaw/logs/nanoclaw.log
+StandardError=append:/home/tiger/nanoclaw/logs/nanoclaw.error.log
+
+[Install]
+WantedBy=multi-user.target
