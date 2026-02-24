@@ -32,6 +32,10 @@ export const MESSAGE_DEBOUNCE = parseInt(
   process.env.MESSAGE_DEBOUNCE || '4000',
   10,
 );
+export const SMART_BATCH_DELAY = parseInt(
+  process.env.SMART_BATCH_DELAY || '6000',
+  10,
+);
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
