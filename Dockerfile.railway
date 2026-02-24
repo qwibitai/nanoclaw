@@ -1,0 +1,48 @@
+# Dockerfile for Railway deployment.
+# Bundles the main NanoClaw orchestrator together with a Docker daemon so
+# agent containers can be spawned inside the same Railway service.
+#
+# REQUIREMENTS:
+#   Railway service must have "Privileged" mode enabled (Settings → Deploy).
+#   Create two persistent volumes in the Railway dashboard:
+#     /app/store   — SQLite database + WhatsApp auth credentials
+#     /app/groups  — Per-group CLAUDE.md memory files
+
+FROM node:20-bookworm-slim
+
+# Install Docker CE so the app can spawn agent containers
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    iptables \
+    kmod \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg \
+       -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+       https://download.docker.com/linux/debian \
+       $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+       | tee /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+       docker-ce docker-ce-cli containerd.io docker-buildx-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Node.js dependencies first (layer cache)
+COPY package*.json ./
+RUN npm ci
+
+# Copy source and build TypeScript
+COPY . .
+RUN npm run build
+
+EXPOSE 3000
+
+COPY scripts/railway-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

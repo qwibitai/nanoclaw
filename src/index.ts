@@ -33,6 +33,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { startHttpServer, HttpServer } from './http-server.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -49,6 +50,7 @@ let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
+let httpServer: HttpServer | null = null;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -426,6 +428,13 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start HTTP server when PORT is set (Railway and other cloud environments).
+  // Provides /health for uptime checks and /qr for WhatsApp authentication.
+  const httpPort = process.env.PORT ? parseInt(process.env.PORT, 10) : null;
+  if (httpPort) {
+    httpServer = startHttpServer(httpPort);
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
@@ -445,7 +454,11 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
+  whatsapp = new WhatsAppChannel({
+    ...channelOpts,
+    onQrCode: httpServer ? (qr) => httpServer!.setQrCode(qr) : undefined,
+    onAuthenticated: httpServer ? () => httpServer!.setAuthenticated() : undefined,
+  });
   channels.push(whatsapp);
   await whatsapp.connect();
 

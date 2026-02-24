@@ -26,6 +26,10 @@ export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Called with the raw QR string when WhatsApp auth is needed. If provided, the process will NOT exit on QR. */
+  onQrCode?: (qr: string) => void;
+  /** Called once the WhatsApp connection is established. */
+  onAuthenticated?: () => void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -75,13 +79,17 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        if (this.opts.onQrCode) {
+          this.opts.onQrCode(qr);
+        } else {
+          const msg =
+            'WhatsApp authentication required. Run /setup in Claude Code.';
+          logger.error(msg);
+          exec(
+            `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          );
+          setTimeout(() => process.exit(1), 1000);
+        }
       }
 
       if (connection === 'close') {
@@ -141,6 +149,9 @@ export class WhatsAppChannel implements Channel {
             );
           }, GROUP_SYNC_INTERVAL_MS);
         }
+
+        // Notify HTTP server that auth is complete
+        this.opts.onAuthenticated?.();
 
         // Signal first connection to caller
         if (onFirstOpen) {
