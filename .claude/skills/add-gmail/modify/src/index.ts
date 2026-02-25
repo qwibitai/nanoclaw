@@ -3,14 +3,12 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  DISCORD_BOT_TOKEN,
-  DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { DiscordChannel } from './channels/discord.js';
+import { GmailChannel } from './channels/gmail.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -448,16 +446,16 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (DISCORD_BOT_TOKEN) {
-    const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
-    channels.push(discord);
-    await discord.connect();
-  }
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
-  if (!DISCORD_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
+  const gmail = new GmailChannel(channelOpts);
+  channels.push(gmail);
+  try {
+    await gmail.connect();
+  } catch (err) {
+    logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
   }
 
   // Start subsystems (independently of connection handler)
