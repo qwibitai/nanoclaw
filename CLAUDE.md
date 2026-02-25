@@ -20,6 +20,7 @@ Folder-level docs index: [`docs/README.md`](docs/README.md)
 ```text
 BEFORE editing root CLAUDE.md → read .claude/rules/nanoclaw-root-claude-compression.md
 BEFORE adding/removing/renaming docs → read .claude/rules/docs-pruning-loop.md
+BEFORE starting implementation/debug/setup/update work → read .claude/rules/skill-routing-preflight.md
 BEFORE changing core orchestrator/channel/IPC/scheduler behavior → read docs/reference/REQUIREMENTS.md, docs/reference/SPEC.md, docs/reference/SECURITY.md
 BEFORE changing high-level orchestration methodology → read docs/architecture/harness-engineering-alignment.md
 BEFORE changing Jarvis architecture/state machine → read docs/architecture/nanoclaw-jarvis.md
@@ -28,6 +29,7 @@ BEFORE changing worker dispatch validation/contracts → read docs/workflow/nano
 BEFORE changing worker container runtime/mounts/model config → read docs/workflow/nanoclaw-jarvis-worker-runtime.md
 BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/nanoclaw-github-control-plane.md
 BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
+BEFORE deciding whether to run a skill workflow or docs-first workflow → read docs/operations/skills-vs-docs-map.md
 BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md
 BEFORE finalizing any Andy/Jarvis operating agreement change → read docs/operations/agreement-sync-protocol.md
 BEFORE deciding runtime-local vs prebaked container placement → read docs/operations/runtime-vs-prebaked-boundary.md
@@ -54,14 +56,21 @@ NanoClaw baseline is the default. Jarvis docs apply only when working on the `ja
 
 ## Skills
 
-| Skill | When to Use |
-|-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
-| `/debug` | Container issues, logs, troubleshooting |
-| `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
-| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
-| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+Decision boundary: `docs/operations/skills-vs-docs-map.md`
+
+Mandatory preflight:
+- New feature/custom behavior work starts with `/customize` (or a more specific `/add-*` skill if available)
+- Runtime/auth/container issue debugging starts with `/debug`
+- For browser/docs/repo tasks, use intent-matched MCP routing from `docs/operations/skills-vs-docs-map.md` (`chrome-devtools` preferred for browser tasks)
+
+Primary ops:
+- `/setup`, `/customize`, `/debug`, `/update`, `/convert-to-apple-container`
+
+Channel/integration skills:
+- `/add-telegram`, `/add-telegram-swarm`, `/add-discord`, `/add-gmail`, `/add-voice-transcription`, `/add-parallel`, `/x-integration`
+
+Quality/governance helpers:
+- `/get-qodo-rules`, `/qodo-pr-resolver`
 
 ## Development
 

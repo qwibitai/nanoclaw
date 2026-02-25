@@ -17,20 +17,31 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  completeWorkerRun,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getWorkerRun,
   getRouterState,
   initDatabase,
+  insertWorkerRun,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateWorkerRunCompletion,
+  updateWorkerRunStatus,
 } from './db.js';
+import {
+  parseCompletionContract,
+  parseDispatchPayload,
+  validateDispatchPayload,
+  validateCompletionContract,
+} from './dispatch-validator.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -51,6 +62,41 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+interface WorkerRunContext {
+  runId: string;
+  requiredFields: string[];
+  browserEvidenceRequired?: boolean;
+}
+
+function isJarvisWorkerGroup(folder: string): boolean {
+  return folder.startsWith('jarvis-worker');
+}
+
+function extractWorkerRunContext(
+  group: RegisteredGroup,
+  messages: NewMessage[],
+): WorkerRunContext | null {
+  if (!isJarvisWorkerGroup(group.folder)) return null;
+
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const payload = parseDispatchPayload(messages[i].content);
+    if (!payload) continue;
+    const validity = validateDispatchPayload(payload);
+    if (!validity.valid) continue;
+    return {
+      runId: payload.run_id,
+      requiredFields: payload.output_contract.required_fields,
+      browserEvidenceRequired: payload.output_contract.browser_evidence_required,
+    };
+  }
+
+  return null;
+}
+
+function isActiveOrTerminalWorkerStatus(status: string): boolean {
+  return status === 'running' || status === 'review_requested' || status === 'done';
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -154,6 +200,46 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  const workerRun = extractWorkerRunContext(group, missedMessages);
+  let workerOutputBuffer = '';
+
+  if (workerRun) {
+    const existingRun = getWorkerRun(workerRun.runId);
+    if (existingRun && isActiveOrTerminalWorkerStatus(existingRun.status)) {
+      lastAgentTimestamp[chatJid] =
+        missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+      logger.warn(
+        {
+          runId: workerRun.runId,
+          status: existingRun.status,
+          group: group.name,
+        },
+        'Skipping duplicate worker run execution',
+      );
+      return true;
+    }
+
+    if (!existingRun || existingRun.status === 'failed' || existingRun.status === 'failed_contract') {
+      const insertState = insertWorkerRun(workerRun.runId, group.folder);
+      if (insertState === 'duplicate') {
+        lastAgentTimestamp[chatJid] =
+          missedMessages[missedMessages.length - 1].timestamp;
+        saveState();
+        logger.warn(
+          { runId: workerRun.runId, group: group.name },
+          'Duplicate worker run blocked before execution',
+        );
+        return true;
+      }
+      logger.info(
+        { runId: workerRun.runId, queueState: insertState, group: group.name },
+        'Worker run queued from worker chat context',
+      );
+    }
+
+    updateWorkerRunStatus(workerRun.runId, 'running');
+  }
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -186,6 +272,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+      if (workerRun) {
+        workerOutputBuffer += `${raw}\n`;
+      }
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
@@ -208,6 +297,59 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  if (workerRun) {
+    const completion = parseCompletionContract(workerOutputBuffer);
+    const completionCheck = validateCompletionContract(completion, {
+      expectedRunId: workerRun.runId,
+      requiredFields: workerRun.requiredFields,
+      browserEvidenceRequired: workerRun.browserEvidenceRequired,
+    });
+
+    if (completion && completionCheck.valid) {
+      updateWorkerRunCompletion(workerRun.runId, {
+        branch_name: completion.branch,
+        pr_url: completion.pr_url,
+        commit_sha: completion.commit_sha,
+        files_changed: completion.files_changed,
+        test_summary: completion.test_result,
+        risk_summary: completion.risk,
+      });
+      updateWorkerRunStatus(workerRun.runId, 'review_requested');
+      logger.info(
+        { runId: workerRun.runId, group: group.name },
+        'Worker completion contract accepted',
+      );
+    } else if (output === 'error' || hadError) {
+      completeWorkerRun(
+        workerRun.runId,
+        'failed',
+        completionCheck.missing.join(', ') || 'worker execution failed',
+      );
+      logger.warn(
+        {
+          runId: workerRun.runId,
+          group: group.name,
+          missing: completionCheck.missing,
+        },
+        'Worker run marked failed',
+      );
+    } else {
+      completeWorkerRun(
+        workerRun.runId,
+        'failed_contract',
+        completionCheck.missing.join(', ') || 'invalid completion contract',
+      );
+      logger.warn(
+        {
+          runId: workerRun.runId,
+          group: group.name,
+          missing: completionCheck.missing,
+        },
+        'Worker run marked failed_contract',
+      );
+    }
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —

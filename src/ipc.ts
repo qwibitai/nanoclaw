@@ -11,7 +11,14 @@ import {
 } from './config.js';
 import { parseDispatchPayload, validateDispatchPayload } from './dispatch-validator.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  completeWorkerRun,
+  createTask,
+  deleteTask,
+  getTaskById,
+  insertWorkerRun,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -107,6 +114,45 @@ export function validateAndyWorkerDispatchMessage(
   return { valid: true };
 }
 
+export interface WorkerDispatchQueueDecision {
+  allowSend: boolean;
+  runId?: string;
+  queueState?: 'new' | 'retry';
+  reason?: string;
+}
+
+export function queueAndyWorkerDispatchRun(
+  sourceGroup: string,
+  targetGroup: RegisteredGroup | undefined,
+  text: string,
+): WorkerDispatchQueueDecision {
+  if (
+    sourceGroup !== 'andy-developer'
+    || !targetGroup
+    || !isJarvisWorkerFolder(targetGroup.folder)
+  ) {
+    return { allowSend: true };
+  }
+
+  const parsed = parseDispatchPayload(text);
+  if (!parsed) return { allowSend: true };
+
+  const queueState = insertWorkerRun(parsed.run_id, targetGroup.folder);
+  if (queueState === 'duplicate') {
+    return {
+      allowSend: false,
+      runId: parsed.run_id,
+      reason: `duplicate run_id blocked: ${parsed.run_id}`,
+    };
+  }
+
+  return {
+    allowSend: true,
+    runId: parsed.run_id,
+    queueState,
+  };
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -157,9 +203,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   targetGroup,
                   data.text,
                 );
+                const queueDecision = (
+                  canAccessTarget && dispatchValidation.valid
+                )
+                  ? queueAndyWorkerDispatchRun(sourceGroup, targetGroup, data.text)
+                  : { allowSend: true };
 
-                if (canAccessTarget && dispatchValidation.valid) {
+                if (canAccessTarget && dispatchValidation.valid && queueDecision.allowSend) {
                   await deps.sendMessage(data.chatJid, data.text, sourceGroup);
+                  if (queueDecision.runId && queueDecision.queueState) {
+                    logger.info(
+                      {
+                        runId: queueDecision.runId,
+                        queueState: queueDecision.queueState,
+                        sourceGroup,
+                        targetFolder: targetGroup?.folder,
+                      },
+                      'Worker dispatch queued',
+                    );
+                  }
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -169,9 +231,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     {
                       chatJid: data.chatJid,
                       sourceGroup,
-                      reason: canAccessTarget
-                        ? dispatchValidation.reason
-                        : 'target authorization failed',
+                      reason: !canAccessTarget
+                        ? 'target authorization failed'
+                        : !dispatchValidation.valid
+                          ? dispatchValidation.reason
+                          : queueDecision.reason,
                     },
                     'Unauthorized IPC message attempt blocked',
                   );
@@ -179,6 +243,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
               }
               fs.unlinkSync(filePath);
             } catch (err) {
+              const queuedDispatch = (() => {
+                try {
+                  const parsed = parseDispatchPayload(
+                    JSON.parse(fs.readFileSync(filePath, 'utf-8')).text || '',
+                  );
+                  return parsed?.run_id;
+                } catch {
+                  return undefined;
+                }
+              })();
+              if (queuedDispatch) {
+                completeWorkerRun(
+                  queuedDispatch,
+                  'failed',
+                  `dispatch delivery failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+              }
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing IPC message',

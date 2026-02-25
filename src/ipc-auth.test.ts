@@ -5,13 +5,16 @@ import {
   createTask,
   getAllTasks,
   getRegisteredGroup,
+  getWorkerRun,
   getTaskById,
   setRegisteredGroup,
+  updateWorkerRunStatus,
 } from './db.js';
 import {
   canIpcAccessTarget,
   processTaskIpc,
   IpcDeps,
+  queueAndyWorkerDispatchRun,
   validateAndyWorkerDispatchMessage,
 } from './ipc.js';
 import { RegisteredGroup } from './types.js';
@@ -555,6 +558,59 @@ describe('andy worker dispatch payload guardrails', () => {
     );
 
     expect(result.valid).toBe(true);
+  });
+});
+
+describe('andy worker dispatch run queueing', () => {
+  it('queues a new worker run when dispatch is valid', () => {
+    const decision = queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-1@g.us'],
+      VALID_WORKER_DISPATCH_PROMPT,
+    );
+
+    expect(decision.allowSend).toBe(true);
+    expect(decision.queueState).toBe('new');
+    expect(decision.runId).toBe('run-20260223-001');
+    expect(getWorkerRun('run-20260223-001')?.status).toBe('queued');
+  });
+
+  it('blocks duplicate run_id dispatch', () => {
+    const first = queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-1@g.us'],
+      VALID_WORKER_DISPATCH_PROMPT,
+    );
+    const second = queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-1@g.us'],
+      VALID_WORKER_DISPATCH_PROMPT,
+    );
+
+    expect(first.allowSend).toBe(true);
+    expect(second.allowSend).toBe(false);
+    expect(second.reason).toContain('duplicate run_id');
+  });
+
+  it('allows retry for failed_contract run_id', () => {
+    queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-1@g.us'],
+      VALID_WORKER_DISPATCH_PROMPT,
+    );
+    updateWorkerRunStatus('run-20260223-001', 'failed_contract');
+
+    const retry = queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-1@g.us'],
+      VALID_WORKER_DISPATCH_PROMPT,
+    );
+
+    const row = getWorkerRun('run-20260223-001');
+    expect(retry.allowSend).toBe(true);
+    expect(retry.queueState).toBe('retry');
+    expect(row?.status).toBe('queued');
+    expect(row?.retry_count).toBe(1);
   });
 });
 
