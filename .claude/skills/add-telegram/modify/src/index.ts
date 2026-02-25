@@ -10,8 +10,8 @@ import {
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
 import { TelegramChannel } from './channels/telegram.js';
+import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -448,16 +448,16 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
-
   if (TELEGRAM_BOT_TOKEN) {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     await telegram.connect();
+  }
+
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
   }
 
   // Start subsystems (independently of connection handler)
