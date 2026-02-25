@@ -50,6 +50,9 @@ node /home/node/.claude/skills/google-workspace/google-workspace.js calendar cre
   --timezone "Europe/Madrid" \
   --attendees "alice@company.com,bob@company.com" \
   --description "Weekly sync"
+
+# Delete an event (use id from list/create)
+node /home/node/.claude/skills/google-workspace/google-workspace.js calendar delete --account workspace --id EVENT_ID
 ```
 
 ## Drive

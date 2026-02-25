@@ -14,6 +14,7 @@
  *   node google-workspace.js gmail search --account workspace --query "from:boss@company.com"
  *   node google-workspace.js calendar list --account workspace --days 7
  *   node google-workspace.js calendar create --account workspace --title "Meeting" --start "2026-02-25T10:00" --end "2026-02-25T11:00"
+ *   node google-workspace.js calendar delete --account workspace --id EVENT_ID
  *   node google-workspace.js drive list --account workspace
  *   node google-workspace.js drive search --account workspace --query "budget 2026"
  *   node google-workspace.js drive read --account workspace --id FILE_ID
@@ -284,6 +285,21 @@ async function calendarCreate(token, args) {
   out({ created: true, id: result.id, link: result.htmlLink });
 }
 
+async function calendarDelete(token, args) {
+  if (!args.id) die('--id required');
+  const calId = encodeURIComponent(args.calendar || 'primary');
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${encodeURIComponent(args.id)}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    die(`Google API error ${res.status}: ${text}`);
+  }
+  out({ deleted: true, id: args.id });
+}
+
 // --- Drive ---
 
 async function driveList(token, args) {
@@ -449,7 +465,7 @@ async function main() {
 
   const handlers = {
     gmail: { list: gmailList, read: gmailRead, send: gmailSend, search: gmailSearch, reply: gmailReply },
-    calendar: { list: calendarList, calendars: calendarListCalendars, create: calendarCreate },
+    calendar: { list: calendarList, calendars: calendarListCalendars, create: calendarCreate, delete: calendarDelete },
     drive: { list: driveList, search: driveSearch, read: driveRead },
     sheets: { read: sheetsRead, write: sheetsWrite, append: sheetsAppend },
     docs: { read: docsRead, create: docsCreate },
