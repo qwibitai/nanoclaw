@@ -58,7 +58,7 @@ async function runMatrixEntry(
 
     // Initialize nanoclaw dir
     execSync(
-      'npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index.js\'; initNanoclawDir();"',
+      'npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index\'; initNanoclawDir();"',
       {
         cwd: tmpDir,
         stdio: 'pipe',

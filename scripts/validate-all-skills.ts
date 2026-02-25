@@ -71,7 +71,7 @@ function resetWorkingTree(): void {
 
 function initNanoclaw(): void {
   execSync(
-    'npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index.js\'; initNanoclawDir();"',
+    'npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index\'; initNanoclawDir();"',
     { stdio: 'pipe', timeout: 30_000 },
   );
 }
