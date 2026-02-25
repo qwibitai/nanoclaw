@@ -33,6 +33,16 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# Install gtasks (Google Tasks CLI)
+ARG GTASKS_VERSION=0.12.0
+RUN ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL "https://github.com/BRO3886/gtasks/releases/download/v${GTASKS_VERSION}/gtasks_linux_${ARCH}_v${GTASKS_VERSION}.tar.gz" \
+    | tar -xz -C /usr/local/bin/ gtasks \
+    && chmod +x /usr/local/bin/gtasks
+
+# Set timezone
+ENV TZ=Europe/Madrid
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

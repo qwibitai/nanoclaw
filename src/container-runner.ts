@@ -177,6 +177,16 @@ function buildVolumeMounts(
     });
   }
 
+  // gtasks token: mounted read-write so the container can refresh expired tokens
+  const gtasksDir = path.join(homeDir, '.gtasks');
+  if (fs.existsSync(gtasksDir)) {
+    mounts.push({
+      hostPath: gtasksDir,
+      containerPath: '/home/node/.gtasks',
+      readonly: false,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
