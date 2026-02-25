@@ -67,3 +67,7 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Anton's brain: company context cloned from a git repo
+export const BRAIN_REPO_URL = process.env.BRAIN_REPO_URL || '';
+export const BRAIN_DIR = path.resolve(DATA_DIR, 'brain');
