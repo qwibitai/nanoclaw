@@ -1,0 +1,12 @@
+skill: google-drive
+version: 1.0.0
+description: "Google Drive integration via @modelcontextprotocol/server-gdrive (tool-only: search, read, upload, share)"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run .claude/skills/add-google-drive/tests/gdrive.test.ts"
