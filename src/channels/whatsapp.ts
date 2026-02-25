@@ -172,6 +172,15 @@ export class WhatsAppChannel implements Channel {
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
+        // Skip protocol/system messages that aren't user-generated content.
+        // These are delivered as messages.upsert but carry no user text —
+        // e.g. encryption key distribution, ephemeral timer changes,
+        // reactions, message edits/deletions.
+        // Note: senderKeyDistributionMessage is NOT filtered here because
+        // group messages often include it alongside actual text content
+        // (key rotation happens transparently within normal messages).
+        const m = msg.message;
+        if (m.protocolMessage || m.reactionMessage || m.editedMessage) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
 
