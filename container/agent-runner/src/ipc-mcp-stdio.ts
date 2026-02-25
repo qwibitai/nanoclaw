@@ -246,13 +246,13 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new chat group (WhatsApp, Slack, etc.) so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_groups.json to find the JID for a group. Each group MUST have its own unique folder name — never use "main" (that is reserved for the primary DM channel). The folder name should be lowercase with hyphens (e.g., "family-chat", "work-team").`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us" for WhatsApp, "C0ABC123@slack" for Slack)'),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+    folder: z.string().describe('Unique folder name for group files (lowercase, hyphens, e.g., "family-chat"). NEVER use "main".'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
