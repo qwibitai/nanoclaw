@@ -56,6 +56,9 @@ let whatsapp: WhatsAppChannel | null = null;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
+// Track Slack threads where the bot has replied (trigger bypass)
+const botRepliedThreads = new Set<string>();
+
 // Track active runs for shutdown rollback
 interface ActiveRunState {
   chatJid: string;
@@ -159,11 +162,30 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
     return true;
   }
 
+  // Thread-as-group isolation: derive a thread-specific group when threadTs is present
+  let effectiveGroup = group;
+  if (threadTs) {
+    const sanitizedTs = threadTs.replace(/\./g, '-');
+    const threadFolder = `${group.folder}-t-${sanitizedTs}`;
+    const threadGroupDir = resolveGroupFolderPath(threadFolder);
+
+    if (!fs.existsSync(threadGroupDir)) {
+      fs.mkdirSync(path.join(threadGroupDir, 'logs'), { recursive: true });
+      fs.writeFileSync(
+        path.join(threadGroupDir, 'CLAUDE.md'),
+        `# Thread workspace\n\nBase group context is loaded automatically from the channel group.\n`,
+      );
+    }
+
+    effectiveGroup = { ...group, folder: threadFolder, name: `${group.name} (thread)` };
+  }
+
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isBotThread = threadTs != null && botRepliedThreads.has(threadTs);
   const cKey = cursorKey(chatJid, threadTs);
 
   // Check for WIP recovery file from a previous interrupted run
-  const groupDir = resolveGroupFolderPath(group.folder);
+  const groupDir = resolveGroupFolderPath(effectiveGroup.folder);
   const wipPath = path.join(groupDir, 'wip.md');
   let wipContent = '';
   if (fs.existsSync(wipPath)) {
@@ -182,7 +204,7 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   if (missedMessages.length === 0 && !wipContent) return true;
 
   // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  if (!isMainGroup && group.requiresTrigger !== false && !isBotThread) {
     const hasTrigger = missedMessages.some((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
@@ -194,7 +216,7 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   let messagesToProcess = missedMessages;
   let hasRemainder = false;
 
-  if (!isMainGroup && group.requiresTrigger !== false && missedMessages.length > 1) {
+  if (!isMainGroup && group.requiresTrigger !== false && !isBotThread && missedMessages.length > 1) {
     const firstTriggerIdx = missedMessages.findIndex((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
@@ -254,7 +276,7 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
 
-  const output = await runAgent(group, prompt, chatJid, threadTs, async (result) => {
+  const output = await runAgent(effectiveGroup, prompt, chatJid, threadTs, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
@@ -262,7 +284,9 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text, replyThreadTs ? { thread_ts: replyThreadTs } : undefined);
+        const sentTs = await channel.sendMessage(chatJid, text, replyThreadTs ? { thread_ts: replyThreadTs } : undefined);
+        if (replyThreadTs) botRepliedThreads.add(replyThreadTs);
+        if (typeof sentTs === 'string') botRepliedThreads.add(sentTs);
         const rs = activeRunState.get(runKey);
         if (rs) rs.outputSentToUser = true;
       }
@@ -433,7 +457,8 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const isBotThread = threadTs != null && botRepliedThreads.has(threadTs);
+          const needsTrigger = !isMainGroup && group.requiresTrigger !== false && !isBotThread;
 
           // For non-main groups, only act on trigger messages.
           if (needsTrigger) {
@@ -666,10 +691,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: async (jid, text) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      await channel.sendMessage(jid, text);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

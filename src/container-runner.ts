@@ -96,6 +96,23 @@ function buildVolumeMounts(
     }
   }
 
+  // Mount base group folder read-only for thread groups
+  if (group.folder.includes('-t-')) {
+    const baseFolder = group.folder.split('-t-')[0];
+    try {
+      const baseFolderDir = resolveGroupFolderPath(baseFolder);
+      if (fs.existsSync(baseFolderDir)) {
+        mounts.push({
+          hostPath: baseFolderDir,
+          containerPath: '/workspace/group-base',
+          readonly: true,
+        });
+      }
+    } catch {
+      // Invalid base folder name — skip mount
+    }
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -183,7 +200,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string, isMain: boolean): string[] {

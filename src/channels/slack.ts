@@ -127,7 +127,7 @@ export class SlackChannel implements Channel {
     setInterval(() => this.cleanupDedup(), 60_000);
   }
 
-  async sendMessage(jid: string, text: string, options?: { thread_ts?: string }): Promise<void> {
+  async sendMessage(jid: string, text: string, options?: { thread_ts?: string }): Promise<string | void> {
     const channelId = jid.replace(/@slack$/, '');
     const threadTs = options?.thread_ts;
 
@@ -137,17 +137,24 @@ export class SlackChannel implements Channel {
     // Chunk long messages
     const chunks = this.chunkMessage(prefixed);
 
+    let firstTs: string | undefined;
+
     for (const chunk of chunks) {
       try {
-        await this.app.client.chat.postMessage({
+        const result = await this.app.client.chat.postMessage({
           channel: channelId,
           text: chunk,
           thread_ts: threadTs,
         });
+        if (!firstTs && result.ts) {
+          firstTs = result.ts;
+        }
       } catch (err) {
         logger.error({ jid, err }, 'Failed to send Slack message');
       }
     }
+
+    return firstTs;
   }
 
   isConnected(): boolean {
