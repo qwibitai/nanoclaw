@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { syncBrain } from './brain-sync.js';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
@@ -577,6 +578,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  syncBrain();
 
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {
