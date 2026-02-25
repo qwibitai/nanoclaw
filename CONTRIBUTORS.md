@@ -6,3 +6,4 @@ Thanks to everyone who has contributed to NanoClaw!
 - [tydev-new](https://github.com/tydev-new)
 - [pottertech](https://github.com/pottertech) — Skip Potter
 - [rgarcia](https://github.com/rgarcia) — Rafael
+- [AmaxGuan](https://github.com/AmaxGuan) — Lingfeng Guan
