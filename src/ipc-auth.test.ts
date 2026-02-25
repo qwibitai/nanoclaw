@@ -58,7 +58,7 @@ beforeEach(() => {
       setRegisteredGroup(jid, group);
       // Mock the fs.mkdirSync that registerGroup does
     },
-    syncGroupMetadata: async () => {},
+    syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
   };

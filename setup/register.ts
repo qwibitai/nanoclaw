@@ -19,6 +19,7 @@ interface RegisterArgs {
   name: string;
   trigger: string;
   folder: string;
+  channel: string;
   requiresTrigger: boolean;
   assistantName: string;
 }
@@ -29,6 +30,7 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
+    channel: 'whatsapp',
     requiresTrigger: true,
     assistantName: 'Andy',
   };
@@ -46,6 +48,9 @@ function parseArgs(args: string[]): RegisterArgs {
         break;
       case '--folder':
         result.folder = args[++i] || '';
+        break;
+      case '--channel':
+        result.channel = (args[++i] || 'whatsapp').toLowerCase();
         break;
       case '--no-trigger-required':
         result.requiresTrigger = false;
@@ -174,6 +179,7 @@ export async function run(args: string[]): Promise<void> {
     JID: parsed.jid,
     NAME: parsed.name,
     FOLDER: parsed.folder,
+    CHANNEL: parsed.channel,
     TRIGGER: parsed.trigger,
     REQUIRES_TRIGGER: parsed.requiresTrigger,
     ASSISTANT_NAME: parsed.assistantName,

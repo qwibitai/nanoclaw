@@ -8,6 +8,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
+import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
@@ -45,6 +46,11 @@ export async function run(_args: string[]): Promise<void> {
   const authDir = path.join(projectRoot, 'store', 'auth');
   const hasAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
+  // Check ENABLED_CHANNELS from .env (or default)
+  const envVars = readEnvFile(['ENABLED_CHANNELS']);
+  const enabledChannels =
+    process.env.ENABLED_CHANNELS || envVars.ENABLED_CHANNELS || 'whatsapp';
+
   let hasRegisteredGroups = false;
   // Check JSON file first (pre-migration)
   if (fs.existsSync(path.join(projectRoot, 'data', 'registered_groups.json'))) {
@@ -75,6 +81,7 @@ export async function run(_args: string[]): Promise<void> {
       hasEnv,
       hasAuth,
       hasRegisteredGroups,
+      enabledChannels,
     },
     'Environment check complete',
   );
@@ -88,6 +95,7 @@ export async function run(_args: string[]): Promise<void> {
     HAS_ENV: hasEnv,
     HAS_AUTH: hasAuth,
     HAS_REGISTERED_GROUPS: hasRegisteredGroups,
+    ENABLED_CHANNELS: enabledChannels,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });

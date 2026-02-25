@@ -104,8 +104,8 @@ describe('Docker detection logic', () => {
   });
 });
 
-describe('WhatsApp auth detection', () => {
-  it('detects non-empty auth directory logic', () => {
+describe('channel auth detection', () => {
+  it('detects non-empty auth directory for WhatsApp', () => {
     // Simulate the check: directory exists and has files
     const hasAuth = (authDir: string) => {
       try {
@@ -117,5 +117,34 @@ describe('WhatsApp auth detection', () => {
 
     // Non-existent directory
     expect(hasAuth('/tmp/nonexistent_auth_dir_xyz')).toBe(false);
+  });
+});
+
+describe('ENABLED_CHANNELS parsing', () => {
+  it('parses comma-separated channels', () => {
+    const raw = 'whatsapp, telegram , slack';
+    const channels = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(channels).toEqual(['whatsapp', 'telegram', 'slack']);
+  });
+
+  it('defaults to whatsapp when empty', () => {
+    const raw = '';
+    const channels = (raw || 'whatsapp')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(channels).toEqual(['whatsapp']);
+  });
+
+  it('handles single channel', () => {
+    const raw = 'telegram';
+    const channels = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(channels).toEqual(['telegram']);
   });
 });
