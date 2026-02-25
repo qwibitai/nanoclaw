@@ -6,12 +6,13 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, GROUPS_DIR, STORE_DIR } from '../config.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
@@ -21,6 +22,65 @@ import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const MEDIA_DIR_MODE = 0o700;
+const MEDIA_FILE_INITIAL_MODE = 0o600;
+const MEDIA_FILE_FINAL_MODE = 0o400;
+
+function normalizeMimeType(mimeType?: string | null): string | undefined {
+  const normalized = mimeType?.trim().toLowerCase().split(';', 1)[0];
+  return normalized || undefined;
+}
+
+function sniffMimeType(buffer: Buffer): string | undefined {
+  if (buffer.length >= 4 && buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return 'application/pdf';
+  }
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (buffer.length >= 6) {
+    const header = buffer.subarray(0, 6).toString('ascii');
+    if (header === 'GIF87a' || header === 'GIF89a') return 'image/gif';
+  }
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  ) {
+    return 'image/webp';
+  }
+  return undefined;
+}
+
+function extensionForMimeType(mimeType: string | undefined, isDocument: boolean): string {
+  switch (mimeType) {
+    case 'application/pdf':
+      return 'pdf';
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/png':
+      return 'png';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    default:
+      return isDocument ? 'bin' : 'jpg';
+  }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -172,15 +232,46 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          // Download media if present (images or documents)
+          let mediaPath: string | undefined;
+          let mediaMimeType: string | undefined;
+          const group = groups[chatJid];
+          if (group) {
+            const imgMsg = msg.message?.imageMessage;
+            const docMsg = msg.message?.documentMessage;
+            const mediaMsg = imgMsg || docMsg;
+            if (mediaMsg) {
+              try {
+                const buffer = await downloadMediaMessage(
+                  msg, 'buffer', {},
+                  { reuploadRequest: this.sock.updateMediaMessage, logger }
+                ) as Buffer;
+                mediaMimeType = sniffMimeType(buffer) || normalizeMimeType(mediaMsg.mimetype);
+                const ext = extensionForMimeType(mediaMimeType, Boolean(docMsg));
+                const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+                fs.mkdirSync(mediaDir, { recursive: true, mode: MEDIA_DIR_MODE });
+                fs.chmodSync(mediaDir, MEDIA_DIR_MODE);
+                const filename = `${msg.key.id || Date.now()}.${ext}`;
+                const fullPath = path.join(mediaDir, filename);
+                fs.writeFileSync(fullPath, buffer, { mode: MEDIA_FILE_INITIAL_MODE });
+                fs.chmodSync(fullPath, MEDIA_FILE_FINAL_MODE);
+                mediaPath = `media/${filename}`;
+              } catch (err) {
+                logger.warn({ err }, 'Failed to download media');
+              }
+            }
+          }
+
           const content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
+            msg.message?.documentMessage?.caption ||
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          if (!content && !mediaPath) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -203,6 +294,8 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            media_path: mediaPath,
+            media_mime_type: mediaMimeType,
           });
         }
       }

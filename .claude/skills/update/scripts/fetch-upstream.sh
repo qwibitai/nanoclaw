@@ -25,11 +25,18 @@ if [ -z "$REMOTE" ]; then
   REMOTE="upstream"
 fi
 
+UPSTREAM_BRANCH=""
 echo "Fetching from $REMOTE..."
-if ! git fetch "$REMOTE" main 2>&1; then
+if git fetch "$REMOTE" main 2>&1; then
+  UPSTREAM_BRANCH="main"
+elif git fetch "$REMOTE" master 2>&1; then
+  UPSTREAM_BRANCH="master"
+fi
+
+if [ -z "$UPSTREAM_BRANCH" ]; then
   echo "<<< STATUS"
   echo "STATUS=error"
-  echo "ERROR=Failed to fetch from $REMOTE"
+  echo "ERROR=Failed to fetch main or master from $REMOTE"
   echo "STATUS >>>"
   exit 1
 fi
@@ -45,7 +52,7 @@ fi
 # plus always include migrations/ for the migration runner.
 TEMP_DIR=$(mktemp -d /tmp/nanoclaw-update-XXXX)
 trap 'rm -rf "$TEMP_DIR"' ERR
-echo "Extracting $REMOTE/main to $TEMP_DIR..."
+echo "Extracting $REMOTE/$UPSTREAM_BRANCH to $TEMP_DIR..."
 
 CANDIDATES=$(node -e "
   const fs = require('fs');
@@ -61,12 +68,12 @@ CANDIDATES=$(node -e "
 # git archive errors if a path doesn't exist, so we check first.
 PATHS=""
 for candidate in $CANDIDATES; do
-  if [ -n "$(git ls-tree --name-only "$REMOTE/main" "$candidate" 2>/dev/null)" ]; then
+  if [ -n "$(git ls-tree --name-only "$REMOTE/$UPSTREAM_BRANCH" "$candidate" 2>/dev/null)" ]; then
     PATHS="$PATHS $candidate"
   fi
 done
 
-git archive "$REMOTE/main" -- $PATHS | tar -x -C "$TEMP_DIR"
+git archive "$REMOTE/$UPSTREAM_BRANCH" -- $PATHS | tar -x -C "$TEMP_DIR"
 
 # Get new version from extracted package.json
 NEW_VERSION="unknown"
@@ -78,6 +85,7 @@ echo ""
 echo "<<< STATUS"
 echo "TEMP_DIR=$TEMP_DIR"
 echo "REMOTE=$REMOTE"
+echo "BRANCH=$UPSTREAM_BRANCH"
 echo "CURRENT_VERSION=$CURRENT_VERSION"
 echo "NEW_VERSION=$NEW_VERSION"
 echo "STATUS=success"

@@ -21,6 +21,7 @@ import { fileURLToPath } from 'url';
 
 interface ContainerInput {
   prompt: string;
+  attachments?: ClaudeAttachment[];
   sessionId?: string;
   groupFolder: string;
   chatJid: string;
@@ -28,6 +29,16 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+}
+
+interface ClaudeAttachment {
+  path: string;
+  mimeType: string;
+}
+
+interface IpcInputMessage {
+  text: string;
+  attachments?: ClaudeAttachment[];
 }
 
 interface ContainerOutput {
@@ -50,10 +61,21 @@ interface SessionsIndex {
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | SDKUserContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
+
+type SDKUserContentBlock =
+  | { type: 'text'; text: string }
+  | {
+      type: 'image';
+      source: { type: 'base64'; media_type: string; data: string };
+    }
+  | {
+      type: 'document';
+      source: { type: 'base64'; media_type: string; data: string };
+    };
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
@@ -68,10 +90,11 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(input: IpcInputMessage): void {
+    const contentBlocks = buildUserContentBlocks(input.text, input.attachments);
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content: contentBlocks ?? input.text },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -116,6 +139,59 @@ function writeOutput(output: ContainerOutput): void {
 
 function log(message: string): void {
   console.error(`[agent-runner] ${message}`);
+}
+
+const SUPPORTED_IMAGE_MIME_TYPES = new Set([
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+
+function normalizeMimeType(mimeType?: string): string | null {
+  if (!mimeType) return null;
+  const normalized = mimeType.trim().toLowerCase().split(';', 1)[0];
+  return normalized || null;
+}
+
+function buildUserContentBlocks(
+  text: string,
+  attachments?: ClaudeAttachment[],
+): SDKUserContentBlock[] | null {
+  if (!attachments || attachments.length === 0) return null;
+
+  const blocks: SDKUserContentBlock[] = [{ type: 'text', text }];
+
+  for (const attachment of attachments) {
+    const mimeType = normalizeMimeType(attachment.mimeType);
+    if (!mimeType) continue;
+    if (!attachment.path.startsWith('/workspace/group/')) {
+      log(`Skipping attachment outside group mount: ${attachment.path}`);
+      continue;
+    }
+    try {
+      const data = fs.readFileSync(attachment.path).toString('base64');
+      if (SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: mimeType, data },
+        });
+        continue;
+      }
+      if (mimeType === 'application/pdf') {
+        blocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: mimeType, data },
+        });
+        continue;
+      }
+      log(`Skipping unsupported attachment mime type: ${mimeType}`);
+    } catch (err) {
+      log(`Failed to read attachment ${attachment.path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return blocks.length > 1 ? blocks : null;
 }
 
 function getSessionSummary(sessionId: string, transcriptPath: string): string | null {
@@ -298,21 +374,24 @@ function shouldClose(): boolean {
  * Drain all pending IPC input messages.
  * Returns messages found, or empty array.
  */
-function drainIpcInput(): string[] {
+function drainIpcInput(): IpcInputMessage[] {
   try {
     fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
     const files = fs.readdirSync(IPC_INPUT_DIR)
       .filter(f => f.endsWith('.json'))
       .sort();
 
-    const messages: string[] = [];
+    const messages: IpcInputMessage[] = [];
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
+        if (data.type === 'message' && typeof data.text === 'string') {
+          messages.push({
+            text: data.text,
+            attachments: Array.isArray(data.attachments) ? data.attachments : undefined,
+          });
         }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -328,9 +407,9 @@ function drainIpcInput(): string[] {
 
 /**
  * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
+ * Returns the messages as a single combined payload, or null if _close.
  */
-function waitForIpcMessage(): Promise<string | null> {
+function waitForIpcMessage(): Promise<IpcInputMessage | null> {
   return new Promise((resolve) => {
     const poll = () => {
       if (shouldClose()) {
@@ -339,7 +418,12 @@ function waitForIpcMessage(): Promise<string | null> {
       }
       const messages = drainIpcInput();
       if (messages.length > 0) {
-        resolve(messages.join('\n'));
+        const first = messages[0];
+        const rest = messages.slice(1);
+        resolve({
+          text: [first.text, ...rest.map((m) => m.text)].join('\n'),
+          attachments: messages.flatMap((m) => m.attachments || []),
+        });
         return;
       }
       setTimeout(poll, IPC_POLL_MS);
@@ -355,7 +439,7 @@ function waitForIpcMessage(): Promise<string | null> {
  * Also pipes IPC messages into the stream during the query.
  */
 async function runQuery(
-  prompt: string,
+  prompt: IpcInputMessage,
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
@@ -378,9 +462,9 @@ async function runQuery(
       return;
     }
     const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
+    for (const message of messages) {
+      log(`Piping IPC message into active query (${message.text.length} chars)`);
+      stream.push(message);
     }
     setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
@@ -525,14 +609,20 @@ async function main(): Promise<void> {
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
-  let prompt = containerInput.prompt;
+  let prompt: IpcInputMessage = {
+    text: containerInput.prompt,
+    attachments: containerInput.attachments,
+  };
   if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    prompt.text = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt.text}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    prompt = {
+      text: [prompt.text, ...pending.map((m) => m.text)].join('\n'),
+      attachments: [...(prompt.attachments || []), ...pending.flatMap((m) => m.attachments || [])],
+    };
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
@@ -569,7 +659,7 @@ async function main(): Promise<void> {
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      log(`Got new message (${nextMessage.text.length} chars), starting new query`);
       prompt = nextMessage;
     }
   } catch (err) {
