@@ -1,0 +1,73 @@
+name: Sync Fork From Upstream
+
+on:
+  schedule:
+    # Runs daily at 03:17 UTC
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-fork-main
+  cancel-in-progress: false
+
+jobs:
+  sync-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/qwibitai/nanoclaw.git || true
+          git fetch upstream main
+
+      - name: Prepare upstream changes for PR
+        id: prepare_sync
+        run: |
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse upstream/main)" ]; then
+            echo "Fork main is already up to date."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Replace the checked-out tree with upstream/main so create-pull-request
+          # can commit the delta onto a dedicated sync branch and open/update a PR.
+          git reset --hard upstream/main
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update sync PR
+        id: create_pr
+        if: steps.prepare_sync.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/sync-upstream-main
+          base: main
+          commit-message: "chore: sync fork with upstream main"
+          title: "chore: sync fork with upstream main"
+          body: |
+            Automated sync PR to bring this fork's `main` up to date with `qwibitai/nanoclaw:main`.
+
+            - Source: `qwibitai/nanoclaw:main`
+            - Trigger: scheduled workflow
+          labels: automated
+          delete-branch: true
+
+      - name: Enable auto-merge for sync PR
+        if: steps.create_pr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
+          merge-method: merge
