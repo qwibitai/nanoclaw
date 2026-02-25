@@ -10,14 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import {
-  createTask,
-  deleteTask,
-  getJidsForFolder,
-  getTaskById,
-  inferChannelFromJid,
-  updateTask,
-} from './db.js';
+import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -177,7 +170,6 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-    channel?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -373,33 +365,13 @@ export async function processTaskIpc(
           );
           break;
         }
-
-        // If folder is already taken by a different JID, append channel suffix
-        let folder = data.folder;
-        const existingJids = getJidsForFolder(folder);
-        if (existingJids.length > 0 && !existingJids.includes(data.jid)) {
-          const channel = data.channel || inferChannelFromJid(data.jid);
-          const suffixMap: Record<string, string> = {
-            whatsapp: 'wa',
-            telegram: 'tg',
-            discord: 'dc',
-          };
-          const suffix = suffixMap[channel] || channel;
-          folder = `${data.folder}-${suffix}`;
-          logger.info(
-            { originalFolder: data.folder, folder, jid: data.jid, channel },
-            'Folder already taken, using suffixed name',
-          );
-        }
-
         deps.registerGroup(data.jid, {
           name: data.name,
-          folder,
+          folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
           requiresTrigger: data.requiresTrigger,
-          channel: data.channel,
         });
       } else {
         logger.warn(

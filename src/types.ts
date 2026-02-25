@@ -39,7 +39,6 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
-  channel?: string; // e.g. 'whatsapp', 'telegram', 'discord'
 }
 
 export interface NewMessage {

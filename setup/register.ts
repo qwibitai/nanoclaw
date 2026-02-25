@@ -100,32 +100,13 @@ export async function run(args: string[]): Promise<void> {
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1,
-    channel TEXT
-  );`);
-
-  // Infer channel from JID format
-  let channel = 'unknown';
-  if (parsed.jid.startsWith('tg:')) channel = 'telegram';
-  else if (parsed.jid.startsWith('dc:')) channel = 'discord';
-  else if (
-    parsed.jid.includes('@g.us') ||
-    parsed.jid.includes('@s.whatsapp.net')
-  )
-    channel = 'whatsapp';
+    requires_trigger INTEGER DEFAULT 1
+  )`);
 
   db.prepare(
-    `INSERT INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-     ON CONFLICT(jid) DO UPDATE SET
-       name = excluded.name,
-       folder = excluded.folder,
-       trigger_pattern = excluded.trigger_pattern,
-       added_at = excluded.added_at,
-       container_config = excluded.container_config,
-       requires_trigger = excluded.requires_trigger,
-       channel = excluded.channel`,
+    `INSERT OR REPLACE INTO registered_groups
+     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+     VALUES (?, ?, ?, ?, ?, NULL, ?)`,
   ).run(
     parsed.jid,
     parsed.name,
@@ -133,7 +114,6 @@ export async function run(args: string[]): Promise<void> {
     parsed.trigger,
     timestamp,
     requiresTriggerInt,
-    channel,
   );
 
   db.close();

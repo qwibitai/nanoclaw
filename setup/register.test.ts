@@ -18,9 +18,8 @@ function createTestDb(): Database.Database {
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1,
-    channel TEXT
-  );`);
+    requires_trigger INTEGER DEFAULT 1
+  )`);
   return db;
 }
 
@@ -33,14 +32,9 @@ describe('parameterized SQL registration', () => {
 
   it('registers a group with parameterized query', () => {
     db.prepare(
-      `INSERT INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET
-         name = excluded.name, folder = excluded.folder,
-         trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
-         container_config = excluded.container_config,
-         requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     ).run(
       '123@g.us',
       'Test Group',
@@ -48,7 +42,6 @@ describe('parameterized SQL registration', () => {
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       1,
-      'whatsapp',
     );
 
     const row = db
@@ -72,14 +65,9 @@ describe('parameterized SQL registration', () => {
     const name = "O'Brien's Group";
 
     db.prepare(
-      `INSERT INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET
-         name = excluded.name, folder = excluded.folder,
-         trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
-         container_config = excluded.container_config,
-         requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     ).run(
       '456@g.us',
       name,
@@ -87,7 +75,6 @@ describe('parameterized SQL registration', () => {
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       0,
-      'whatsapp',
     );
 
     const row = db
@@ -103,23 +90,10 @@ describe('parameterized SQL registration', () => {
     const maliciousJid = "'; DROP TABLE registered_groups; --";
 
     db.prepare(
-      `INSERT INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET
-         name = excluded.name, folder = excluded.folder,
-         trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
-         container_config = excluded.container_config,
-         requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
-    ).run(
-      maliciousJid,
-      'Evil',
-      'evil',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-      'unknown',
-    );
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(maliciousJid, 'Evil', 'evil', '@Andy', '2024-01-01T00:00:00.000Z', 1);
 
     // Table should still exist and have the row
     const count = db
@@ -137,14 +111,9 @@ describe('parameterized SQL registration', () => {
 
   it('handles requiresTrigger=false', () => {
     db.prepare(
-      `INSERT INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET
-         name = excluded.name, folder = excluded.folder,
-         trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
-         container_config = excluded.container_config,
-         requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     ).run(
       '789@s.whatsapp.net',
       'Personal',
@@ -152,7 +121,6 @@ describe('parameterized SQL registration', () => {
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       0,
-      'whatsapp',
     );
 
     const row = db
@@ -164,14 +132,9 @@ describe('parameterized SQL registration', () => {
 
   it('upserts on conflict', () => {
     const stmt = db.prepare(
-      `INSERT INTO registered_groups
-       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel)
-       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-       ON CONFLICT(jid) DO UPDATE SET
-         name = excluded.name, folder = excluded.folder,
-         trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
-         container_config = excluded.container_config,
-         requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     );
 
     stmt.run(
@@ -181,7 +144,6 @@ describe('parameterized SQL registration', () => {
       '@Andy',
       '2024-01-01T00:00:00.000Z',
       1,
-      'whatsapp',
     );
     stmt.run(
       '123@g.us',
@@ -190,7 +152,6 @@ describe('parameterized SQL registration', () => {
       '@Bot',
       '2024-02-01T00:00:00.000Z',
       0,
-      'whatsapp',
     );
 
     const rows = db.prepare('SELECT * FROM registered_groups').all();
