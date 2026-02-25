@@ -1,7 +1,7 @@
 {
-  "name": "nanoclaw",
-  "version": "1.1.2",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "name": "solclaw",
+  "version": "0.1.0",
+  "description": "Solana AI Agent - Optimized for Solana DeFi protocols",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -13,8 +13,12 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "setup": "tsx setup/index.ts",
+    "setup:all": "./setup-all.sh",
+    "setup:solana": "npx tsx setup/index.ts --step solana",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:solana": "tsx src/solana/test.ts",
+    "example:swap": "tsx src/solana/examples/simple-swap.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
@@ -25,7 +29,18 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "yaml": "^2.8.2",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@inquirer/prompts": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "chalk": "^5.3.0",
+    "solana-agent-kit": "^2.0.0",
+    "@solana-agent-kit/plugin-token": "^2.0.0",
+    "@solana-agent-kit/plugin-nft": "^2.0.0",
+    "@solana-agent-kit/plugin-defi": "^2.0.0",
+    "@solana-agent-kit/plugin-misc": "^2.0.0",
+    "@solana-agent-kit/plugin-blinks": "^2.0.0",
+    "@solana/web3.js": "^1.95.0",
+    "bs58": "^6.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",

@@ -38,6 +38,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { requireSolanaConfig } from './solana/startup-check.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -421,6 +422,9 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  // Check Solana configuration (mandatory for SolClaw)
+  await requireSolanaConfig();
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');

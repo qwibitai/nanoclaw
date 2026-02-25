@@ -1,0 +1,238 @@
+// ============================================================================
+// Surfpool Infrastructure as Code - Deployment Runbook
+// ============================================================================
+//
+// This runbook demonstrates Infrastructure as Code (IaC) for Solana
+// program deployment and initialization using txtx DSL.
+//
+// Usage:
+//   surfpool start -r deployment
+//   surfpool start -r deployment --unsupervised
+//
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// SIGNERS
+// ---------------------------------------------------------------------------
+// Define the signing authorities for transactions
+
+// Deployer signer from environment variable
+signer "deployer" "svm::secret_key" {
+  secret_key = env.DEPLOYER_PRIVATE_KEY
+}
+
+// Alternative: Load from file
+signer "deployer_file" "svm::secret_key" {
+  mnemonic   = file("./keypairs/deployer.json")
+}
+
+// Upgrade authority (can be same as deployer or different)
+signer "upgrade_authority" "svm::secret_key" {
+  secret_key = env.UPGRADE_AUTHORITY_KEY
+}
+
+// ---------------------------------------------------------------------------
+// PROGRAM DEPLOYMENT
+// ---------------------------------------------------------------------------
+
+// Deploy main program
+action "deploy_program" "svm::deploy_program" {
+  description  = "Deploy main program to Surfnet"
+  program_path = "./target/deploy/my_program.so"
+  signer       = signer.deployer
+
+  // Optional: Set specific program ID
+  // program_id = "YourProgramId111111111111111111111111111111"
+}
+
+// Output the deployed program ID
+output "program_id" {
+  value       = action.deploy_program.program_id
+  description = "Deployed program ID"
+}
+
+// ---------------------------------------------------------------------------
+// PROGRAM INITIALIZATION
+// ---------------------------------------------------------------------------
+
+// Initialize program after deployment
+action "initialize_program" "svm::send_transaction" {
+  description = "Initialize program state"
+
+  // Wait for deployment to complete
+  depends_on = [action.deploy_program]
+
+  transaction {
+    // Initialize instruction
+    instruction {
+      program_id = action.deploy_program.program_id
+
+      // Anchor-style discriminator for "initialize"
+      data = encode_anchor_instruction("initialize", {
+        admin: signer.deployer.public_key
+      })
+
+      // Account metas
+      accounts = [
+        {
+          pubkey     = pda(action.deploy_program.program_id, ["config"])
+          is_signer  = false
+          is_writable = true
+        },
+        {
+          pubkey     = signer.deployer.public_key
+          is_signer  = true
+          is_writable = true
+        },
+        {
+          pubkey     = "11111111111111111111111111111111" // System Program
+          is_signer  = false
+          is_writable = false
+        }
+      ]
+    }
+  }
+
+  signers = [signer.deployer]
+}
+
+// ---------------------------------------------------------------------------
+// TOKEN SETUP (Optional)
+// ---------------------------------------------------------------------------
+
+// Create program token mint
+action "create_mint" "svm::send_transaction" {
+  description = "Create program token mint"
+  depends_on  = [action.initialize_program]
+
+  transaction {
+    instruction {
+      program_id = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+
+      data = encode_spl_token_instruction("initializeMint", {
+        decimals: 9,
+        mint_authority: signer.deployer.public_key,
+        freeze_authority: null
+      })
+
+      accounts = [
+        {
+          pubkey     = keypair.mint.public_key
+          is_signer  = false
+          is_writable = true
+        },
+        {
+          pubkey     = "SysvarRent111111111111111111111111111111111"
+          is_signer  = false
+          is_writable = false
+        }
+      ]
+    }
+  }
+
+  signers = [signer.deployer, keypair.mint]
+}
+
+// Generate mint keypair
+keypair "mint" {
+  // Generates a new keypair for the mint
+}
+
+output "mint_address" {
+  value       = keypair.mint.public_key
+  description = "Token mint address"
+}
+
+// ---------------------------------------------------------------------------
+// AIRDROP SETUP (For Testing)
+// ---------------------------------------------------------------------------
+
+// Airdrop SOL to test accounts
+action "airdrop_test_accounts" "svm::airdrop" {
+  description = "Airdrop SOL to test accounts"
+
+  recipients = [
+    signer.deployer.public_key,
+    "TestAccount111111111111111111111111111111111"
+  ]
+
+  amount = 10000000000 // 10 SOL in lamports
+}
+
+// ---------------------------------------------------------------------------
+// VERIFICATION
+// ---------------------------------------------------------------------------
+
+// Verify deployment succeeded
+action "verify_deployment" "svm::get_account" {
+  description = "Verify program is deployed"
+  depends_on  = [action.deploy_program]
+
+  pubkey = action.deploy_program.program_id
+
+  // Assert account exists and is executable
+  assert {
+    condition = result.executable == true
+    message   = "Program should be executable"
+  }
+}
+
+// Verify initialization succeeded
+action "verify_initialization" "svm::get_account" {
+  description = "Verify program is initialized"
+  depends_on  = [action.initialize_program]
+
+  pubkey = pda(action.deploy_program.program_id, ["config"])
+
+  assert {
+    condition = result.data != null
+    message   = "Config account should have data"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// UPGRADE (Optional)
+// ---------------------------------------------------------------------------
+
+// Upgrade program with new binary
+action "upgrade_program" "svm::upgrade_program" {
+  description  = "Upgrade program to new version"
+
+  // Only run if explicitly requested
+  enabled = var.run_upgrade
+
+  program_id   = action.deploy_program.program_id
+  program_path = "./target/deploy/my_program_v2.so"
+  authority    = signer.upgrade_authority
+}
+
+// ---------------------------------------------------------------------------
+// VARIABLES
+// ---------------------------------------------------------------------------
+
+variable "run_upgrade" {
+  type        = bool
+  default     = false
+  description = "Whether to run program upgrade"
+}
+
+variable "network" {
+  type        = string
+  default     = "surfnet"
+  description = "Target network (surfnet, devnet, mainnet)"
+}
+
+// ---------------------------------------------------------------------------
+// OUTPUTS
+// ---------------------------------------------------------------------------
+
+output "deployment_summary" {
+  value = {
+    program_id     = action.deploy_program.program_id
+    config_address = pda(action.deploy_program.program_id, ["config"])
+    mint_address   = keypair.mint.public_key
+    deployer       = signer.deployer.public_key
+    network        = var.network
+  }
+  description = "Complete deployment summary"
+}

@@ -1,0 +1,175 @@
+# ============================================================================
+# Surfpool Configuration Template
+# ============================================================================
+#
+# This is a complete Surfpool.toml configuration template.
+# Place this file in your project root directory.
+#
+# Usage: surfpool start -m ./Surfpool.toml
+#
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Network Configuration
+# ----------------------------------------------------------------------------
+[network]
+# Slot time in milliseconds (default: 400)
+# Lower values = faster block production (useful for testing)
+slot_time = 400
+
+# Epoch duration in slots (default: 432000)
+# Mainnet uses 432,000 slots per epoch (~2-3 days)
+epoch_duration = 432000
+
+# Source RPC URL for fetching mainnet state
+# Options:
+#   - https://api.mainnet-beta.solana.com (free, rate-limited)
+#   - https://api.devnet.solana.com (devnet)
+#   - Your own RPC endpoint (Helius, QuickNode, etc.)
+rpc_url = "https://api.mainnet-beta.solana.com"
+
+# ----------------------------------------------------------------------------
+# Behavior Configuration
+# ----------------------------------------------------------------------------
+[behavior]
+# Start from genesis (clean state, no mainnet data)
+# Set to true for isolated testing without mainnet accounts
+genesis = false
+
+# Fork from mainnet at a specific point
+# Enables lazy-loading of mainnet accounts
+point_fork = true
+
+# ----------------------------------------------------------------------------
+# Account Pre-loading
+# ----------------------------------------------------------------------------
+[accounts]
+# Accounts to pre-clone from mainnet before starting
+# These accounts will be available immediately without lazy-loading delay
+clone = [
+  # System programs (usually not needed, auto-loaded)
+  # "11111111111111111111111111111111",
+
+  # Token programs
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  # Token Program
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", # Associated Token Program
+
+  # Popular DeFi protocols (uncomment as needed)
+  # "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4",  # Jupiter
+  # "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc",  # Orca Whirlpools
+  # "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK",  # Raydium CLMM
+  # "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",  # Raydium AMM
+
+  # Oracles
+  # "SW1TCH7qEPTdLsDHRgPuMQjbQxKdH2aBStViMFnt64f",  # Switchboard
+  # "FsJ3A3u2vn5cTVofAjvy6y5kwABJAqYWpe4975bi2epH",  # Pyth
+
+  # Stablecoins
+  # "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",  # USDC Mint
+  # "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",  # USDT Mint
+]
+
+# Accounts to stream live from mainnet (real-time updates)
+stream = [
+  # Add oracle price accounts here for live price feeds
+  # "OraclePriceAccount..."
+]
+
+# ----------------------------------------------------------------------------
+# Program Deployment
+# ----------------------------------------------------------------------------
+[programs]
+# Programs to auto-deploy when Surfpool starts
+# Paths can be absolute or relative to Surfpool.toml location
+deploy = [
+  # Anchor projects: deploy all programs in target/deploy
+  # "./target/deploy/*.so",
+
+  # Or specify individual programs
+  # "./target/deploy/my_program.so",
+]
+
+# Program IDLs to register for account parsing
+idls = [
+  # "./target/idl/my_program.json",
+]
+
+# ----------------------------------------------------------------------------
+# Airdrop Configuration
+# ----------------------------------------------------------------------------
+[airdrop]
+# Addresses to automatically airdrop SOL on startup
+addresses = [
+  # Add wallet addresses here
+  # "YourWalletPubkey...",
+]
+
+# Amount to airdrop in lamports (default: 10,000 SOL)
+amount = 10000000000000
+
+# Keypair files to load and airdrop to
+keypair_paths = [
+  # "./keypairs/deployer.json",
+  # "./keypairs/test-user.json",
+]
+
+# ----------------------------------------------------------------------------
+# Runbook Configuration
+# ----------------------------------------------------------------------------
+[runbooks]
+# Default runbook to execute (from ./runbooks/ directory)
+default = "deployment"
+
+# Run runbooks automatically without prompts
+unsupervised = false
+
+# Runbook search paths
+paths = [
+  "./runbooks/",
+  "./.surfpool/runbooks/",
+]
+
+# ----------------------------------------------------------------------------
+# Studio Configuration
+# ----------------------------------------------------------------------------
+[studio]
+# Enable/disable Surfpool Studio dashboard
+enabled = true
+
+# Studio port (default: 18488)
+port = 18488
+
+# Host address (default: 127.0.0.1)
+host = "127.0.0.1"
+
+# ----------------------------------------------------------------------------
+# Logging Configuration
+# ----------------------------------------------------------------------------
+[logging]
+# Log level: error, warn, info, debug, trace
+level = "info"
+
+# Log format: text, json
+format = "text"
+
+# Log file (optional)
+# file = "./surfpool.log"
+
+# ----------------------------------------------------------------------------
+# Advanced Configuration
+# ----------------------------------------------------------------------------
+[advanced]
+# RPC port (default: 8899)
+rpc_port = 8899
+
+# WebSocket port (default: 8900)
+ws_port = 8900
+
+# Host address (default: 127.0.0.1)
+host = "127.0.0.1"
+
+# Maximum number of accounts to cache
+# max_account_cache = 10000
+
+# Enable transaction simulation caching
+# simulation_cache = true
