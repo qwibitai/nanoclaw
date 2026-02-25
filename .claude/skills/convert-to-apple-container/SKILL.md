@@ -8,6 +8,7 @@ description: Switch from Docker to Apple Container for macOS-native container is
 This skill switches NanoClaw's container runtime from Docker to Apple Container (macOS-only). It uses the skills engine for deterministic code changes, then walks through verification.
 
 **What this changes:**
+
 - Container runtime binary: `docker` → `container`
 - Mount syntax: `-v path:path:ro` → `--mount type=bind,source=...,target=...,readonly`
 - Startup check: `docker info` → `container system status` (with auto-start)
@@ -15,6 +16,7 @@ This skill switches NanoClaw's container runtime from Docker to Apple Container 
 - Build script default: `docker` → `container`
 
 **What stays the same:**
+
 - Dockerfile (shared by both runtimes)
 - Container runner code (`src/container-runner.ts`)
 - Mount security/allowlist validation
@@ -29,6 +31,7 @@ container --version && echo "Apple Container ready" || echo "Install Apple Conta
 ```
 
 If not installed:
+
 - Download from https://github.com/apple/container/releases
 - Install the `.pkg` file
 - Verify: `container --version`
@@ -70,12 +73,14 @@ npx tsx scripts/apply-skill.ts .claude/skills/convert-to-apple-container
 ```
 
 This deterministically:
+
 - Replaces `src/container-runtime.ts` with the Apple Container implementation
 - Replaces `src/container-runtime.test.ts` with Apple Container-specific tests
 - Updates `container/build.sh` to default to `container` runtime
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
+
 - `modify/src/container-runtime.ts.intent.md` — what changed and invariants
 - `modify/container/build.sh.intent.md` — what changed for build script
 
@@ -93,7 +98,7 @@ All tests must pass and build must be clean before proceeding.
 ### Ensure Apple Container runtime is running
 
 ```bash
-container system status || container system start
+yes | container system start 2>/dev/null; container system status
 ```
 
 ### Build the container image
@@ -101,6 +106,8 @@ container system status || container system start
 ```bash
 ./container/build.sh
 ```
+
+First build may fail with `EAI_AGAIN` — retry after a few seconds.
 
 ### Test basic execution
 
@@ -146,17 +153,20 @@ Send a message via WhatsApp and verify the agent responds.
 ## Troubleshooting
 
 **Apple Container not found:**
+
 - Download from https://github.com/apple/container/releases
 - Install the `.pkg` file
 - Verify: `container --version`
 
 **Runtime won't start:**
+
 ```bash
 container system start
 container system status
 ```
 
 **Image build fails:**
+
 ```bash
 # Clean rebuild — Apple Container caches aggressively
 container builder stop && container builder rm && container builder start
@@ -168,8 +178,8 @@ Check directory permissions on the host. The container runs as uid 1000.
 
 ## Summary of Changed Files
 
-| File | Type of Change |
-|------|----------------|
-| `src/container-runtime.ts` | Full replacement — Docker → Apple Container API |
+| File                            | Type of Change                                        |
+| ------------------------------- | ----------------------------------------------------- |
+| `src/container-runtime.ts`      | Full replacement — Docker → Apple Container API       |
 | `src/container-runtime.test.ts` | Full replacement — tests for Apple Container behavior |
-| `container/build.sh` | Default runtime: `docker` → `container` |
+| `container/build.sh`            | Default runtime: `docker` → `container`               |
