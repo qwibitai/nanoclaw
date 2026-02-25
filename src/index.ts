@@ -3,11 +3,16 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_MODEL,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
+  DORA_TELEGRAM_BOT_TOKEN,
 } from './config.js';
+import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -15,8 +20,10 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { synthesizeSpeech } from './elevenlabs.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -178,6 +185,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Detect if this conversation started with a voice message
+  const lastUserMsg = missedMessages[missedMessages.length - 1];
+  const isVoiceConversation = lastUserMsg?.content?.startsWith('[Voice:');
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -190,7 +201,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        let sent = false;
+        // Try voice response if conversation started with a voice message
+        if (isVoiceConversation && channel.sendVoiceMessage) {
+          const audioBuffer = await synthesizeSpeech(text);
+          if (audioBuffer) {
+            sent = await channel.sendVoiceMessage(chatJid, audioBuffer);
+          }
+        }
+        // Fall back to text
+        if (!sent) {
+          await channel.sendMessage(chatJid, text);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -281,6 +303,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model: DEFAULT_MODEL,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
@@ -345,6 +368,22 @@ async function startMessageLoop(): Promise<void> {
           const channel = findChannel(channels, chatJid);
           if (!channel) {
             console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+            continue;
+          }
+
+          // Handle /reset command — clear session and close active container
+          const hasReset = groupMessages.some((m) =>
+            /^\/?reset$/i.test(m.content.trim()),
+          );
+          if (hasReset) {
+            delete sessions[group.folder];
+            deleteSession(group.folder);
+            queue.closeStdin(chatJid);
+            lastAgentTimestamp[chatJid] =
+              groupMessages[groupMessages.length - 1].timestamp;
+            saveState();
+            await channel.sendMessage(chatJid, '🔄 Session reset. Next message starts fresh.');
+            logger.info({ group: group.folder }, 'Session reset via /reset command');
             continue;
           }
 
@@ -445,9 +484,29 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // IMPORTANT: Dora's channel must be pushed BEFORE Ruby's catch-all Telegram channel
+  // because findChannel() returns the first channel where ownsJid() returns true.
+  if (DORA_TELEGRAM_BOT_TOKEN) {
+    const doraTelegram = new TelegramChannel(DORA_TELEGRAM_BOT_TOKEN, {
+      ...channelOpts,
+      forGroupFolder: 'dora',
+      botName: 'Dora',
+    });
+    channels.push(doraTelegram);
+    await doraTelegram.connect();
+  }
+
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
+
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

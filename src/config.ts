@@ -9,6 +9,9 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'DORA_TELEGRAM_BOT_TOKEN',
 ]);
 
 export const ASSISTANT_NAME =
@@ -54,6 +57,10 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
+// Default Claude model for agents. Override per-group via ContainerInput.model.
+export const DEFAULT_MODEL =
+  process.env.NANOCLAW_DEFAULT_MODEL || 'sonnet';
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -67,3 +74,13 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+// Dora research bot (separate Telegram bot)
+export const DORA_TELEGRAM_BOT_TOKEN =
+  process.env.DORA_TELEGRAM_BOT_TOKEN || envConfig.DORA_TELEGRAM_BOT_TOKEN || '';

@@ -87,6 +87,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: send a voice message (OGG Opus buffer). Returns true on success.
+  sendVoiceMessage?(jid: string, audioBuffer: Buffer, caption?: string): Promise<boolean>;
 }
 
 // Callback type that channels use to deliver inbound messages

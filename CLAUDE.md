@@ -31,6 +31,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/dora` | Etsy product research — browses Etsy + EverBee via Chrome to find profitable digital art niches |
 
 ## Development
 

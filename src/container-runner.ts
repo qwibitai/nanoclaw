@@ -34,6 +34,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   secrets?: Record<string, string>;
 }
 

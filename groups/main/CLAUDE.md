@@ -211,3 +211,49 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Etsy Research (Dora)
+
+You CANNOT research Etsy or EverBee yourself. Etsy blocks all non-browser access.
+
+Dora is a Chrome-based skill that must be run by the owner from their Claude Code terminal (it needs a live Chrome session with EverBee). You cannot launch it yourself.
+
+When you need Etsy research:
+1. Tell the owner what you need researched (niche, keywords, criteria)
+2. Ask them to run `/dora` from Claude Code
+3. When Dora finishes, she sends a notification to this chat automatically
+
+### Processing Research Reports
+
+When you receive a "📊 New research report ready" notification (or the owner asks you to process research):
+
+1. Read the report from `research/<filename>.md`
+2. Read `research/research-index.md` for context on all reports
+3. Organize to Google Drive using `mcp__gdrive__*` tools:
+
+*Folder structure:*
+```
+Etsy Research/
+├── [YYYY-MM] Niche Name/
+│   ├── Research Report (Google Doc — formatted summary)
+│   └── Listings Data (Google Sheet — structured data)
+```
+
+*Google Sheet format:*
+- Tab 1 "Listings" — one row per listing with columns: #, Concept, Category, Mo. Sales, Daily Sales, List. Age, Shop Sales, Price, Keywords, Why Selling, Opportunity, Shop Name
+- Tab 2 "Summary" — key patterns, price bands, what sells vs. what doesn't
+- Sort by Mo. Sales descending, Rising Stars first
+
+*Google Doc format:*
+- Brief executive summary (5 bullets max)
+- Link to the Sheet
+- Key opportunities and recommended next steps
+
+4. Report back to the owner:
+   - Link to the Drive folder
+   - Top 3 opportunities highlighted
+   - Any action items
+
+Do NOT attempt to research Etsy yourself via WebFetch, WebSearch, agent-browser, Task sub-agents, or `launch_skill`.

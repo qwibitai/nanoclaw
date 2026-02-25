@@ -1,3 +1,4 @@
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -11,6 +12,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { readEnvFile } from './env.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -163,6 +165,9 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
+    // For launch_skill
+    skillName?: string;
+    skillArgs?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -380,6 +385,139 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'launch_skill': {
+      // Groups can launch skills matching their own folder name (e.g., "dora" group → "dora" skill).
+      // Main group can launch any skill.
+      if (!isMain && sourceGroup !== (data.skillName as string)) {
+        logger.warn({ sourceGroup, skillName: data.skillName }, 'Unauthorized launch_skill attempt blocked');
+        break;
+      }
+
+      const ALLOWED_SKILLS = ['dora'];
+      const skillName = data.skillName as string;
+      const skillArgs = data.skillArgs as string || '';
+      const skillChatJid = data.chatJid as string;
+
+      if (!skillName || !ALLOWED_SKILLS.includes(skillName)) {
+        logger.warn({ skillName }, 'Unknown or disallowed skill');
+        break;
+      }
+
+      if (!skillChatJid) {
+        logger.warn({ skillName }, 'launch_skill missing chatJid');
+        break;
+      }
+
+      // Read the SKILL.md and inject it as system prompt context.
+      // In -p mode, /skillname doesn't trigger the skill loader —
+      // we must inject the instructions explicitly.
+      const projectRoot = path.resolve(DATA_DIR, '..');
+      const skillPath = path.join(projectRoot, '.claude', 'skills', skillName, 'SKILL.md');
+      if (!fs.existsSync(skillPath)) {
+        logger.error({ skillName, skillPath }, 'Skill file not found');
+        await deps.sendMessage(skillChatJid, `❌ Skill "${skillName}" not found.`);
+        break;
+      }
+
+      let skillContent = fs.readFileSync(skillPath, 'utf-8');
+      // Strip YAML frontmatter
+      skillContent = skillContent.replace(/^---[\s\S]*?---\n*/, '');
+
+      logger.info({ skillName, skillArgs, sourceGroup }, 'Launching skill on host');
+
+      // Notify the group that the skill is starting
+      await deps.sendMessage(skillChatJid, `🔍 Launching /${skillName} ${skillArgs}...`);
+
+      // Build the user prompt. The Chrome MCP bridge takes ~10 seconds
+      // to connect to the Unix sockets. We MUST tell the model to wait
+      // before its first Chrome tool call, otherwise it will fail and
+      // respond with text instead of browsing.
+      const userPrompt = [
+        `You are running the /${skillName} skill. Follow your system prompt instructions precisely.`,
+        `IMPORTANT: The Chrome MCP bridge needs ~10 seconds to initialize.`,
+        `Before your FIRST Chrome tool call, you MUST wait 12 seconds using the computer tool's wait action (action: "wait", duration: 12).`,
+        `After waiting, call mcp__Claude_in_Chrome__tabs_context_mcp with createIfEmpty: true.`,
+        `If it returns an error, wait 5 more seconds and retry — up to 3 times.`,
+        `Once Chrome is connected, proceed with the full workflow from your system prompt.`,
+        `Do NOT skip the wait. Do NOT respond with just text. You MUST browse with Chrome tools.`,
+        skillArgs ? `\nUser request: ${skillArgs}` : '',
+      ].filter(Boolean).join('\n');
+
+      // Spawn claude CLI async — don't block IPC loop.
+      // Uses sonnet (not haiku) because complex multi-step Chrome
+      // browsing requires stronger reasoning.
+      // Read API credentials from .env (not in process.env by design).
+      const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
+      const startTime = Date.now();
+      const child = spawn('claude', [
+        '-p',
+        '--chrome',
+        '--model', 'sonnet',
+        '--permission-mode', 'bypassPermissions',
+        '--append-system-prompt', skillContent,
+        userPrompt,
+      ], {
+        cwd: projectRoot,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ...secrets },
+        detached: false,
+      });
+
+      let skillStdout = '';
+      let skillStderr = '';
+      child.stdout.on('data', (chunk: Buffer) => {
+        if (skillStdout.length < 10000) skillStdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        if (skillStderr.length < 5000) skillStderr += chunk.toString();
+      });
+
+      child.on('close', async (code) => {
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        // Find main group JID for cross-group notifications
+        const currentGroups = deps.registeredGroups();
+        const mainJid = Object.entries(currentGroups).find(
+          ([_, g]) => g.folder === MAIN_GROUP_FOLDER,
+        )?.[0];
+
+        if (code === 0) {
+          logger.info({ skillName, elapsed, stdout: skillStdout.slice(0, 1000) }, 'Skill completed');
+          if (elapsed < 30) {
+            // Suspiciously fast — model probably just responded with text
+            logger.warn({ skillName, elapsed, stdout: skillStdout.slice(0, 2000) }, 'Skill completed too fast — likely did not browse');
+            await deps.sendMessage(skillChatJid, `⚠️ /${skillName} finished in ${elapsed}s (too fast — may not have browsed). Output: ${skillStdout.slice(0, 300)}`);
+          } else {
+            await deps.sendMessage(skillChatJid, `✅ /${skillName} completed (${elapsed}s). Research report saved.`);
+
+            // Notify main group (Ruby) if skill was launched by a different group
+            if (sourceGroup !== MAIN_GROUP_FOLDER && mainJid) {
+              await deps.sendMessage(
+                mainJid,
+                `📊 Dora completed research (${elapsed}s). New report saved in research/. Please review and organize to Google Drive.`,
+              );
+            }
+          }
+        } else {
+          const output = (skillStderr || skillStdout).slice(0, 500);
+          logger.error({ skillName, code, elapsed, stderr: skillStderr.slice(0, 500), stdout: skillStdout.slice(0, 500) }, 'Skill failed');
+          await deps.sendMessage(skillChatJid, `❌ /${skillName} failed (exit ${code}). ${output}`);
+
+          // Also notify main on failure if from a different group
+          if (sourceGroup !== MAIN_GROUP_FOLDER && mainJid) {
+            await deps.sendMessage(mainJid, `⚠️ Dora research failed (exit ${code}). Check logs.`);
+          }
+        }
+      });
+
+      child.on('error', async (err) => {
+        logger.error({ skillName, err }, 'Failed to spawn skill process');
+        await deps.sendMessage(skillChatJid, `❌ Failed to launch /${skillName}: ${err.message}`);
+      });
+
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

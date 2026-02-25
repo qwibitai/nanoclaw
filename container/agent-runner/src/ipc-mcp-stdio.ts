@@ -280,6 +280,44 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'launch_skill',
+  `Launch a Claude Code skill on the host machine. The skill runs on the host with access to Chrome and other host-only resources.
+
+Groups can launch skills matching their own name (e.g., the "dora" group can launch the "dora" skill). The main group can launch any skill.
+
+Available skills:
+• dora — Etsy product research using Chrome + EverBee. Requires Chrome to be open with the Claude in Chrome extension connected.`,
+  {
+    skill_name: z.string().describe('Skill to launch (e.g., "dora")'),
+    args: z.string().describe('Arguments for the skill (e.g., \'research "minimalist line art"\')'),
+  },
+  async (args) => {
+    // Groups can launch skills matching their own folder name; main can launch any skill
+    if (!isMain && args.skill_name !== groupFolder) {
+      return {
+        content: [{ type: 'text' as const, text: `You can only launch the "${groupFolder}" skill from this group.` }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'launch_skill',
+      skillName: args.skill_name,
+      skillArgs: args.args,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Skill "${args.skill_name}" launch requested. It will run on the host with Chrome access. Check research/ for output when complete.` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
