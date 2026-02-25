@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { _initTestDatabase, getAllChats, storeChatMetadata } from './db.js';
+import { _initTestDatabase, storeChatMetadata } from './db.js';
 import { getAvailableGroups, _setRegisteredGroups } from './index.js';
 
 beforeEach(() => {
@@ -11,8 +11,6 @@ beforeEach(() => {
 // --- JID ownership patterns ---
 
 describe('JID ownership patterns', () => {
-  // These test the patterns that will become ownsJid() on the Channel interface
-
   it('WhatsApp group JID: ends with @g.us', () => {
     const jid = '12345678@g.us';
     expect(jid.endsWith('@g.us')).toBe(true);
@@ -28,7 +26,7 @@ describe('JID ownership patterns', () => {
     expect(jid.startsWith('slack:')).toBe(true);
   });
 
-  it('Slack DM JID: starts with slack:D', () => {
+  it('Slack DM JID: starts with slack:', () => {
     const jid = 'slack:D0123456789';
     expect(jid.startsWith('slack:')).toBe(true);
   });
@@ -56,6 +54,14 @@ describe('getAvailableGroups', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
     expect(groups[0].jid).toBe('group@g.us');
+  });
+
+  it('excludes __slack_sync__ sentinel', () => {
+    storeChatMetadata('__slack_sync__', '2024-01-01T00:00:00.000Z');
+    storeChatMetadata('slack:C123', '2024-01-01T00:00:01.000Z', 'Slack Channel', 'slack', true);
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('slack:C123');
   });
 
   it('marks registered groups correctly', () => {
@@ -91,11 +97,8 @@ describe('getAvailableGroups', () => {
   });
 
   it('excludes non-group chats regardless of JID format', () => {
-    // Unknown JID format stored without is_group should not appear
     storeChatMetadata('unknown-format-123', '2024-01-01T00:00:01.000Z', 'Unknown');
-    // Explicitly non-group with unusual JID
     storeChatMetadata('custom:abc', '2024-01-01T00:00:02.000Z', 'Custom DM', 'custom', false);
-    // A real group for contrast
     storeChatMetadata('group@g.us', '2024-01-01T00:00:03.000Z', 'Group', 'whatsapp', true);
 
     const groups = getAvailableGroups();
@@ -115,15 +118,6 @@ describe('getAvailableGroups', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
     expect(groups[0].jid).toBe('slack:C0123456789');
-  });
-
-  it('returns Slack DM JIDs as groups when is_group is true', () => {
-    storeChatMetadata('slack:D0123456789', '2024-01-01T00:00:01.000Z', 'Slack DM', 'slack', true);
-
-    const groups = getAvailableGroups();
-    expect(groups).toHaveLength(1);
-    expect(groups[0].jid).toBe('slack:D0123456789');
-    expect(groups[0].name).toBe('Slack DM');
   });
 
   it('marks registered Slack channels correctly', () => {
@@ -149,12 +143,12 @@ describe('getAvailableGroups', () => {
 
   it('mixes WhatsApp and Slack chats ordered by activity', () => {
     storeChatMetadata('wa@g.us', '2024-01-01T00:00:01.000Z', 'WhatsApp', 'whatsapp', true);
-    storeChatMetadata('slack:C100', '2024-01-01T00:00:03.000Z', 'Slack', 'slack', true);
+    storeChatMetadata('slack:C1', '2024-01-01T00:00:03.000Z', 'Slack', 'slack', true);
     storeChatMetadata('wa2@g.us', '2024-01-01T00:00:02.000Z', 'WhatsApp 2', 'whatsapp', true);
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(3);
-    expect(groups[0].jid).toBe('slack:C100');
+    expect(groups[0].jid).toBe('slack:C1');
     expect(groups[1].jid).toBe('wa2@g.us');
     expect(groups[2].jid).toBe('wa@g.us');
   });

@@ -1,21 +1,31 @@
 skill: slack
-version: 1.0.0
-description: "Slack Bot integration via @slack/bolt with Socket Mode"
+version: 0.1.2
+description: 'Slack Bot (Socket Mode) integration via @slack/bolt — ported from claudecode-slackbot'
 core_version: 0.1.0
 adds:
   - src/channels/slack.ts
   - src/channels/slack.test.ts
+  - src/channels/reconnect-policy.ts
+  - scripts/slack/canary-checkpoint.sh
+  - scripts/slack/soak-monitor.sh
+  - scripts/slack/recovery-outage-drill.sh
+  - src/recovery.integration.test.ts
 modifies:
   - src/index.ts
   - src/config.ts
+  - src/group-queue.ts
   - src/routing.test.ts
+  - src/db.ts
+  - src/ipc.ts
+  - groups/main/CLAUDE.md
 structured:
   npm_dependencies:
-    "@slack/bolt": "^4.6.0"
+    '@slack/bolt': '^4.6.0'
   env_additions:
     - SLACK_BOT_TOKEN
     - SLACK_APP_TOKEN
     - SLACK_ONLY
+    - SLACK_FILTER_BOT_MESSAGES
 conflicts: []
 depends: []
-test: "npx vitest run src/channels/slack.test.ts"
+test: 'npx vitest run src/channels/slack.test.ts src/recovery.integration.test.ts'

@@ -1,3 +1,4 @@
+import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
@@ -8,19 +9,24 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'RECOVERY_EXHAUSTED_GATE_MS',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
   'SLACK_ONLY',
+  'SLACK_FILTER_BOT_MESSAGES',
 ]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
 export const ASSISTANT_HAS_OWN_NUMBER =
-  (process.env.ASSISTANT_HAS_OWN_NUMBER || envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
+  (process.env.ASSISTANT_HAS_OWN_NUMBER ||
+    envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || '/Users/user';
+const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -45,14 +51,21 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(
-  process.env.IDLE_TIMEOUT || '1800000',
-  10,
-); // 30min default — how long to keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+const recoveryExhaustedGateMsRaw =
+  process.env.RECOVERY_EXHAUSTED_GATE_MS ||
+  envConfig.RECOVERY_EXHAUSTED_GATE_MS ||
+  '0';
+const parsedRecoveryExhaustedGateMs = parseInt(recoveryExhaustedGateMsRaw, 10);
+export const RECOVERY_EXHAUSTED_GATE_MS =
+  Number.isFinite(parsedRecoveryExhaustedGateMs) &&
+  parsedRecoveryExhaustedGateMs >= 0
+    ? parsedRecoveryExhaustedGateMs
+    : 0;
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -69,7 +82,13 @@ export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Slack configuration
-// SLACK_BOT_TOKEN and SLACK_APP_TOKEN are read directly by SlackChannel
-// from .env via readEnvFile() to keep secrets off process.env.
+export const SLACK_BOT_TOKEN =
+  process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN =
+  process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
 export const SLACK_ONLY =
   (process.env.SLACK_ONLY || envConfig.SLACK_ONLY) === 'true';
+export const SLACK_FILTER_BOT_MESSAGES =
+  (process.env.SLACK_FILTER_BOT_MESSAGES ||
+    envConfig.SLACK_FILTER_BOT_MESSAGES ||
+    'true') === 'true';

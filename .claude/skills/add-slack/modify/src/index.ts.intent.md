@@ -1,60 +1,63 @@
 # Intent: src/index.ts modifications
 
 ## What changed
-Refactored from single WhatsApp channel to multi-channel architecture supporting Slack alongside WhatsApp.
+
+Refactored from single WhatsApp channel to multi-channel architecture using the `Channel` interface (same pattern as add-telegram skill).
+Also fixed a pipe-path race where `lastAgentTimestamp` could advance before a shutting-down container actually processed piped messages.
 
 ## Key sections
 
 ### Imports (top of file)
+
 - Added: `SlackChannel` from `./channels/slack.js`
-- Added: `SLACK_ONLY` from `./config.js`
-- Added: `readEnvFile` from `./env.js`
-- Existing: `findChannel` from `./router.js` and `Channel` type from `./types.js` are already present
+- Added: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_FILTER_BOT_MESSAGES`, `SLACK_ONLY` from `./config.js`
+- Added: `findChannel` from `./router.js`
+- Added: `Channel` type from `./types.js`
 
 ### Module-level state
+
+- Added: `const channels: Channel[] = []` — array of all active channels
 - Kept: `let whatsapp: WhatsAppChannel` — still needed for `syncGroupMetadata` reference
-- Added: `let slack: SlackChannel | undefined` — direct reference for `syncChannelMetadata`
-- Kept: `const channels: Channel[] = []` — array of all active channels
 
 ### processGroupMessages()
-- Uses `findChannel(channels, chatJid)` lookup (already exists in base)
-- Uses `channel.setTyping?.()` and `channel.sendMessage()` (already exists in base)
+
+- Added: `findChannel(channels, chatJid)` lookup at the start
+- Added: `hasBotResponseAfter(chatJid, lastMsgTs)` fast-path before spawn; when true, advance cursor and skip duplicate processing
+- Changed: `whatsapp.setTyping()` → `channel.setTyping?.()` (optional chaining)
+- Changed: `whatsapp.sendMessage()` → `channel.sendMessage()` in output callback
 
 ### startMessageLoop()
-- Uses `findChannel(channels, chatJid)` per group (already exists in base)
-- Uses `channel.setTyping?.()` for typing indicators (already exists in base)
+
+- Added: `findChannel(channels, chatJid)` lookup per group in message processing
+- Fixed race: when `queue.sendMessage()` succeeds, do not advance `lastAgentTimestamp`; enqueue a drain check instead so cursor only advances after verified processing
+- Changed: `whatsapp.setTyping()` → `channel.setTyping?.()` for typing indicators
 
 ### main()
-- Added: Reads Slack tokens via `readEnvFile()` to check if Slack is configured
-- Added: conditional WhatsApp creation (`if (!SLACK_ONLY)`)
-- Added: conditional Slack creation (`if (hasSlackTokens)`)
-- Changed: scheduler `sendMessage` uses `findChannel()` → `channel.sendMessage()`
-- Changed: IPC `syncGroupMetadata` syncs both WhatsApp and Slack metadata
-- Changed: IPC `sendMessage` uses `findChannel()` → `channel.sendMessage()`
 
-### Shutdown handler
-- Changed from `await whatsapp.disconnect()` to `for (const ch of channels) await ch.disconnect()`
-- Disconnects all active channels (WhatsApp, Slack, or any future channels) on SIGTERM/SIGINT
+- Changed: shutdown disconnects all channels via `for (const ch of channels)`
+- Added: shared `channelOpts` object for channel callbacks
+- Added: conditional WhatsApp creation (`if (!SLACK_ONLY)`)
+- Added: conditional Slack creation (`if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN)`) — both tokens required for Socket Mode
+- Changed: scheduler `sendMessage` uses `findChannel()` → `channel.sendMessage()`
+- Changed: IPC `sendMessage` uses `findChannel()` → `channel.sendMessage()`
+- Changed: IPC `syncGroupMetadata` calls both `whatsapp.syncGroupMetadata()` and `slackCh.syncChannelMetadata()` when Slack channel is active
+
+### SLACK_ONLY fail-fast
+
+- When `SLACK_ONLY=true` and either `SLACK_BOT_TOKEN` or `SLACK_APP_TOKEN` is missing, log an error and exit. This prevents a state where WhatsApp is disabled but Slack cannot start.
 
 ## Invariants
+
 - All existing message processing logic (triggers, cursors, idle timers) is preserved
 - The `runAgent` function is completely unchanged
 - State management (loadState/saveState) is unchanged
 - Recovery logic is unchanged
 - Container runtime check is unchanged (ensureContainerSystemRunning)
 
-## Design decisions
-
-### Double readEnvFile for Slack tokens
-`main()` in index.ts reads `SLACK_BOT_TOKEN`/`SLACK_APP_TOKEN` via `readEnvFile()` to check
-whether Slack is configured (controls whether to instantiate SlackChannel). The SlackChannel
-constructor reads them again independently. This is intentional — index.ts needs to decide
-*whether* to create the channel, while SlackChannel needs the actual token values. Keeping
-both reads follows the security pattern of not passing secrets through intermediate variables.
-
 ## Must-keep
+
 - The `escapeXml` and `formatMessages` re-exports
 - The `_setRegisteredGroups` test helper
 - The `isDirectRun` guard at bottom
 - All error handling and cursor rollback logic in processGroupMessages
-- The outgoing queue flush and reconnection logic (in each channel, not here)
+- The outgoing queue flush and reconnection logic (in WhatsAppChannel, not here)
