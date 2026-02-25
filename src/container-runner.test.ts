@@ -8,13 +8,17 @@ const OUTPUT_END_MARKER = '---CAMBOT_AGENT_OUTPUT_END---';
 
 // Mock config
 vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'cambot-agent-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/cambot-agent-test-data',
   GROUPS_DIR: '/tmp/cambot-agent-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+}));
+
+// Mock agents module
+vi.mock('./agents.js', () => ({
+  AgentOptions: {},
 }));
 
 // Mock logger
@@ -83,6 +87,7 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import type { AgentOptions } from './agents.js';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -97,6 +102,11 @@ const testInput = {
   groupFolder: 'test-group',
   chatJid: 'test@g.us',
   isMain: false,
+};
+
+const testAgentOptions: AgentOptions = {
+  containerImage: 'cambot-agent-claude:latest',
+  secretKeys: ['ANTHROPIC_API_KEY'],
 };
 
 function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: ContainerOutput) {
@@ -121,6 +131,7 @@ describe('container-runner timeout behavior', () => {
       testInput,
       () => {},
       onOutput,
+      testAgentOptions,
     );
 
     // Emit output with a result
@@ -157,6 +168,7 @@ describe('container-runner timeout behavior', () => {
       testInput,
       () => {},
       onOutput,
+      testAgentOptions,
     );
 
     // No output emitted — fire the hard timeout
@@ -180,6 +192,7 @@ describe('container-runner timeout behavior', () => {
       testInput,
       () => {},
       onOutput,
+      testAgentOptions,
     );
 
     // Emit output

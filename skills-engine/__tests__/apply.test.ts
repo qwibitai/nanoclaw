@@ -46,6 +46,7 @@ describe('apply', () => {
 
   it('executes post_apply commands on success', async () => {
     const markerFile = path.join(tmpDir, 'post-apply-marker.txt');
+    const markerPathForNode = markerFile.replaceAll('\\', '/');
     const skillDir = createSkillPackage(tmpDir, {
       skill: 'post-test',
       version: '1.0.0',
@@ -53,13 +54,13 @@ describe('apply', () => {
       adds: ['src/newfile.ts'],
       modifies: [],
       addFiles: { 'src/newfile.ts': 'export const x = 1;' },
-      post_apply: [`echo "applied" > "${markerFile}"`],
+      post_apply: [`node -e "require('fs').writeFileSync('${markerPathForNode}', 'applied')"`],
     });
 
     const result = await applySkill(skillDir);
     expect(result.success).toBe(true);
     expect(fs.existsSync(markerFile)).toBe(true);
-    expect(fs.readFileSync(markerFile, 'utf-8').trim()).toBe('applied');
+    expect(fs.readFileSync(markerFile, 'utf-8')).toBe('applied');
   });
 
   it('rolls back on post_apply failure', async () => {

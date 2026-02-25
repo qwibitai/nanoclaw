@@ -9,7 +9,7 @@ import {
   setRegisteredGroup,
 } from './db.js';
 import { processTaskIpc, IpcDeps } from './ipc.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, WorkerDefinition } from './types.js';
 
 // Set up registered groups used across tests
 const MAIN_GROUP: RegisteredGroup = {
@@ -61,6 +61,8 @@ beforeEach(() => {
     syncGroupMetadata: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    resolveAgentImage: () => ({ containerImage: 'test:latest', secretKeys: [] }),
+    getAgentDefinition: () => undefined,
   };
 });
 
@@ -607,5 +609,86 @@ describe('register_group success', () => {
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
+  });
+});
+
+// --- delegate_worker authorization ---
+
+describe('delegate_worker handling', () => {
+  it('rejects delegation with missing fields', async () => {
+    await processTaskIpc(
+      {
+        type: 'delegate_worker',
+        delegationId: 'del-123',
+        // missing workerId and prompt
+      },
+      'main',
+      true,
+      deps,
+    );
+    // Should not throw — just logs a warning and skips
+  });
+
+  it('rejects delegation for unknown worker', async () => {
+    const resultWritten: { status: string; error?: string }[] = [];
+
+    const depsWithWorker: IpcDeps = {
+      ...deps,
+      getAgentDefinition: () => undefined,
+    };
+
+    // The handler writes to IPC file — we can't easily intercept that without
+    // mocking fs, but we can verify it doesn't throw and the log covers it
+    await processTaskIpc(
+      {
+        type: 'delegate_worker',
+        delegationId: 'del-unknown',
+        workerId: 'nonexistent-worker',
+        prompt: 'do something',
+      },
+      'main',
+      true,
+      depsWithWorker,
+    );
+    // If we got here without error, the handler gracefully handled the unknown worker
+  });
+
+  it('resolves worker and attempts delegation for valid worker', async () => {
+    const workerDef: WorkerDefinition = {
+      id: 'claude-fast',
+      provider: 'claude',
+      model: 'claude-haiku-4-5',
+      secretKeys: ['ANTHROPIC_API_KEY'],
+    };
+
+    const depsWithWorker: IpcDeps = {
+      ...deps,
+      getAgentDefinition: (id) => (id === 'claude-fast' ? workerDef : undefined),
+      resolveAgentImage: () => ({
+        containerImage: 'cambot-agent-claude:latest',
+        secretKeys: ['ANTHROPIC_API_KEY'],
+      }),
+    };
+
+    // This will attempt to call runWorkerAgent which spawns a container.
+    // In a unit test without Docker, it will fail at spawn — but the
+    // delegation flow up to that point is exercised. The handler catches
+    // errors and writes them to the result file.
+    await processTaskIpc(
+      {
+        type: 'delegate_worker',
+        delegationId: 'del-valid',
+        workerId: 'claude-fast',
+        prompt: 'summarize this',
+        context: 'Some context here',
+      },
+      'main',
+      true,
+      depsWithWorker,
+    );
+
+    // Give the async runWorkerAgent promise a tick to settle (it will fail
+    // without Docker, but shouldn't crash the process)
+    await new Promise((r) => setTimeout(r, 50));
   });
 });

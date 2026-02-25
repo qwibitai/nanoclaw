@@ -3,11 +3,17 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   _initTestDatabase,
   createTask,
+  deleteAgentDefinition,
   deleteTask,
+  getAgentDefinition,
+  getAllAgentDefinitions,
   getAllChats,
   getMessagesSince,
   getNewMessages,
+  getProviderImage,
   getTaskById,
+  setAgentDefinition,
+  setProviderImage,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -324,5 +330,120 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- Provider images ---
+
+describe('provider images', () => {
+  it('sets and gets a provider image', () => {
+    setProviderImage('claude', 'cambot-agent-claude:latest');
+    expect(getProviderImage('claude')).toBe('cambot-agent-claude:latest');
+  });
+
+  it('returns undefined for unknown provider', () => {
+    expect(getProviderImage('nonexistent')).toBeUndefined();
+  });
+
+  it('upserts on duplicate provider', () => {
+    setProviderImage('claude', 'old:v1');
+    setProviderImage('claude', 'new:v2');
+    expect(getProviderImage('claude')).toBe('new:v2');
+  });
+});
+
+// --- Agent definitions ---
+
+describe('agent definitions', () => {
+  it('sets and gets an agent definition', () => {
+    setAgentDefinition({
+      id: 'claude-default',
+      provider: 'claude',
+      model: 'claude-sonnet-4-6',
+      secretKeys: ['ANTHROPIC_API_KEY'],
+    });
+
+    const def = getAgentDefinition('claude-default');
+    expect(def).toBeDefined();
+    expect(def!.provider).toBe('claude');
+    expect(def!.model).toBe('claude-sonnet-4-6');
+    expect(def!.personality).toBeUndefined();
+    expect(def!.secretKeys).toEqual(['ANTHROPIC_API_KEY']);
+  });
+
+  it('stores and retrieves personality', () => {
+    setAgentDefinition({
+      id: 'claude-deep',
+      provider: 'claude',
+      model: 'claude-opus-4-6',
+      personality: 'Think deeply and thoroughly.',
+      secretKeys: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    });
+
+    const def = getAgentDefinition('claude-deep');
+    expect(def!.personality).toBe('Think deeply and thoroughly.');
+    expect(def!.secretKeys).toEqual(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']);
+  });
+
+  it('returns undefined for unknown agent', () => {
+    expect(getAgentDefinition('nonexistent')).toBeUndefined();
+  });
+
+  it('upserts on duplicate id', () => {
+    setAgentDefinition({
+      id: 'agent-1',
+      provider: 'claude',
+      model: 'old-model',
+      secretKeys: ['KEY1'],
+    });
+    setAgentDefinition({
+      id: 'agent-1',
+      provider: 'openai',
+      model: 'new-model',
+      secretKeys: ['KEY2'],
+    });
+
+    const def = getAgentDefinition('agent-1');
+    expect(def!.provider).toBe('openai');
+    expect(def!.model).toBe('new-model');
+    expect(def!.secretKeys).toEqual(['KEY2']);
+  });
+
+  it('getAllAgentDefinitions returns all agents', () => {
+    setAgentDefinition({
+      id: 'agent-a',
+      provider: 'claude',
+      model: 'model-a',
+      secretKeys: ['KEY_A'],
+    });
+    setAgentDefinition({
+      id: 'agent-b',
+      provider: 'openai',
+      model: 'model-b',
+      personality: 'Creative',
+      secretKeys: ['KEY_B'],
+    });
+
+    const all = getAllAgentDefinitions();
+    expect(all).toHaveLength(2);
+    const ids = all.map((a) => a.id).sort();
+    expect(ids).toEqual(['agent-a', 'agent-b']);
+  });
+
+  it('deleteAgentDefinition removes an agent', () => {
+    setAgentDefinition({
+      id: 'to-delete',
+      provider: 'claude',
+      model: 'model',
+      secretKeys: [],
+    });
+
+    expect(getAgentDefinition('to-delete')).toBeDefined();
+    deleteAgentDefinition('to-delete');
+    expect(getAgentDefinition('to-delete')).toBeUndefined();
+  });
+
+  it('deleteAgentDefinition is safe for nonexistent id', () => {
+    expect(() => deleteAgentDefinition('nope')).not.toThrow();
   });
 });

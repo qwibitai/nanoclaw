@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, PostToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -30,11 +30,39 @@ interface ContainerInput {
   ipcToken?: string;
 }
 
+interface ContainerTelemetry {
+  totalCostUsd: number;
+  durationMs: number;
+  durationApiMs: number;
+  numTurns: number;
+  usage: { inputTokens: number; outputTokens: number };
+  modelUsage: Record<string, { inputTokens: number; outputTokens: number; costUSD: number }>;
+  toolInvocations: Array<{
+    toolName: string;
+    durationMs?: number;
+    status: 'success' | 'error';
+    inputSummary?: string;
+    outputSummary?: string;
+    error?: string;
+  }>;
+}
+
+interface ToolInvocationEntry {
+  toolName: string;
+  startTime: number;
+  durationMs?: number;
+  status: 'success' | 'error';
+  inputSummary?: string;
+  outputSummary?: string;
+  error?: string;
+}
+
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  telemetry?: ContainerTelemetry;
 }
 
 interface SessionEntry {
@@ -221,6 +249,70 @@ function createPreCompactHook(): HookCallback {
 // be visible to commands Kit runs.
 const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
+function truncate(str: string | undefined, maxLen: number): string | undefined {
+  if (!str) return undefined;
+  return str.length > maxLen ? str.slice(0, maxLen) + '...' : str;
+}
+
+function createPostToolUseHook(invocations: ToolInvocationEntry[], startTimes: Map<string, number>): HookCallback {
+  return async (input, toolUseId, _context) => {
+    const postInput = input as PostToolUseHookInput;
+    const endTime = Date.now();
+    const startTime = toolUseId ? startTimes.get(toolUseId) : undefined;
+
+    invocations.push({
+      toolName: postInput.tool_name,
+      startTime: startTime ?? endTime,
+      durationMs: startTime ? endTime - startTime : undefined,
+      status: 'success',
+      inputSummary: truncate(
+        typeof postInput.tool_input === 'string'
+          ? postInput.tool_input
+          : JSON.stringify(postInput.tool_input),
+        200,
+      ),
+      outputSummary: truncate(
+        typeof postInput.tool_response === 'string'
+          ? postInput.tool_response
+          : JSON.stringify(postInput.tool_response),
+        500,
+      ),
+    });
+
+    return {};
+  };
+}
+
+function createPostToolUseFailureHook(invocations: ToolInvocationEntry[]): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const failInput = input as { hook_event_name: string; tool_name: string; tool_input: unknown; error: string };
+
+    invocations.push({
+      toolName: failInput.tool_name,
+      startTime: Date.now(),
+      status: 'error',
+      inputSummary: truncate(
+        typeof failInput.tool_input === 'string'
+          ? failInput.tool_input
+          : JSON.stringify(failInput.tool_input),
+        200,
+      ),
+      error: truncate(failInput.error, 500),
+    });
+
+    return {};
+  };
+}
+
+function createPreToolUseTimingHook(startTimes: Map<string, number>): HookCallback {
+  return async (_input, toolUseId, _context) => {
+    if (toolUseId) {
+      startTimes.set(toolUseId, Date.now());
+    }
+    return {};
+  };
+}
+
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
     const preInput = input as PreToolUseHookInput;
@@ -391,6 +483,21 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+function buildModelUsage(
+  raw: Record<string, Record<string, unknown>> | undefined,
+): Record<string, { inputTokens: number; outputTokens: number; costUSD: number }> {
+  if (!raw) return {};
+  const result: Record<string, { inputTokens: number; outputTokens: number; costUSD: number }> = {};
+  for (const [model, usage] of Object.entries(raw)) {
+    result[model] = {
+      inputTokens: (usage.inputTokens as number) ?? 0,
+      outputTokens: (usage.outputTokens as number) ?? 0,
+      costUSD: (usage.costUSD as number) ?? 0,
+    };
+  }
+  return result;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -404,9 +511,13 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; unconsumedMessages: string[] }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; unconsumedMessages: string[]; telemetry?: ContainerTelemetry }> {
   const stream = new MessageStream();
   stream.push(prompt);
+
+  // Telemetry: collect tool invocations during the query
+  const toolInvocations: ToolInvocationEntry[] = [];
+  const toolStartTimes = new Map<string, number>();
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -434,6 +545,7 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
   let lastResultText: string | null = null;
+  let queryTelemetry: ContainerTelemetry | undefined;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -495,7 +607,12 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [createSanitizeBashHook()] },
+          { hooks: [createPreToolUseTimingHook(toolStartTimes)] },
+        ],
+        PostToolUse: [{ hooks: [createPostToolUseHook(toolInvocations, toolStartTimes)] }],
+        PostToolUseFailure: [{ hooks: [createPostToolUseFailureHook(toolInvocations)] }],
       },
     }
   })) {
@@ -527,6 +644,32 @@ async function runQuery(
       lastResultText = textResult || null;
       resultCount++;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Extract telemetry from SDK result message
+      const resultMsg = message as Record<string, unknown>;
+      if (typeof resultMsg.total_cost_usd === 'number') {
+        queryTelemetry = {
+          totalCostUsd: resultMsg.total_cost_usd as number,
+          durationMs: (resultMsg.duration_ms as number) ?? 0,
+          durationApiMs: (resultMsg.duration_api_ms as number) ?? 0,
+          numTurns: (resultMsg.num_turns as number) ?? 0,
+          usage: {
+            inputTokens: ((resultMsg.usage as Record<string, number>)?.input_tokens) ?? 0,
+            outputTokens: ((resultMsg.usage as Record<string, number>)?.output_tokens) ?? 0,
+          },
+          modelUsage: buildModelUsage(resultMsg.modelUsage as Record<string, Record<string, unknown>> | undefined),
+          toolInvocations: toolInvocations.map(t => ({
+            toolName: t.toolName,
+            durationMs: t.durationMs,
+            status: t.status,
+            inputSummary: t.inputSummary,
+            outputSummary: t.outputSummary,
+            error: t.error,
+          })),
+        };
+        log(`Telemetry: cost=$${queryTelemetry.totalCostUsd.toFixed(4)}, turns=${queryTelemetry.numTurns}, tools=${toolInvocations.length}`);
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -545,7 +688,7 @@ async function runQuery(
   }
 
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery, unconsumedMessages };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, unconsumedMessages, telemetry: queryTelemetry };
 }
 
 async function main(): Promise<void> {
@@ -615,6 +758,11 @@ async function main(): Promise<void> {
       }
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
+      }
+
+      // Emit telemetry for the completed query (separate from user-visible results)
+      if (queryResult.telemetry) {
+        writeOutput({ status: 'success', result: null, newSessionId: sessionId, telemetry: queryResult.telemetry });
       }
 
       // If _close was consumed during the query, exit immediately.

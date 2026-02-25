@@ -9,11 +9,12 @@ import {
   MAIN_GROUP_FOLDER,
   TIMEZONE,
 } from './config.js';
-import { AvailableGroup } from './container-runner.js';
+import { AgentOptions } from './agents.js';
+import { AvailableGroup, runWorkerAgent } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, WorkerDefinition } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -27,6 +28,8 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  resolveAgentImage: (agentId: string) => AgentOptions;
+  getAgentDefinition: (id: string) => WorkerDefinition | undefined;
 }
 
 let ipcWatcherRunning = false;
@@ -152,6 +155,20 @@ export function startIpcWatcher(deps: IpcDeps): void {
   logger.info('IPC watcher started (per-group namespaces)');
 }
 
+function writeDelegationResult(
+  sourceGroup: string,
+  delegationId: string,
+  result: { status: string; result?: string | null; error?: string },
+): void {
+  const resultDir = path.join(resolveGroupIpcPath(sourceGroup), 'worker-results');
+  fs.mkdirSync(resultDir, { recursive: true });
+
+  const resultFile = path.join(resultDir, `${delegationId}.json`);
+  const tempFile = `${resultFile}.tmp`;
+  fs.writeFileSync(tempFile, JSON.stringify(result, null, 2));
+  fs.renameSync(tempFile, resultFile);
+}
+
 export async function processTaskIpc(
   data: {
     type: string;
@@ -170,6 +187,10 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For delegate_worker
+    delegationId?: string;
+    workerId?: string;
+    context?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -380,6 +401,72 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'delegate_worker': {
+      const { delegationId, workerId, prompt, context } = data;
+      if (!delegationId || !workerId || !prompt) {
+        logger.warn({ data }, 'Invalid delegate_worker request — missing fields');
+        break;
+      }
+
+      const workerDef = deps.getAgentDefinition(workerId);
+      if (!workerDef) {
+        logger.warn({ workerId }, 'Worker not found for delegation');
+        writeDelegationResult(sourceGroup, delegationId, {
+          status: 'error',
+          error: `Worker "${workerId}" not found`,
+        });
+        break;
+      }
+
+      let agentOpts: AgentOptions;
+      try {
+        agentOpts = deps.resolveAgentImage(workerId);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        logger.error({ workerId, error }, 'Failed to resolve worker image');
+        writeDelegationResult(sourceGroup, delegationId, {
+          status: 'error',
+          error,
+        });
+        break;
+      }
+
+      const fullPrompt = context
+        ? `${prompt}\n\n--- Context ---\n${context}`
+        : prompt;
+
+      logger.info(
+        { delegationId, workerId, sourceGroup },
+        'Delegating to worker',
+      );
+
+      // Run worker asynchronously — result written to IPC when done
+      runWorkerAgent(sourceGroup, delegationId, fullPrompt, agentOpts)
+        .then((output) => {
+          writeDelegationResult(sourceGroup, delegationId, {
+            status: output.status,
+            result: output.result,
+            error: output.error,
+          });
+          logger.info(
+            { delegationId, workerId, status: output.status },
+            'Worker delegation completed',
+          );
+        })
+        .catch((err) => {
+          const error = err instanceof Error ? err.message : String(err);
+          writeDelegationResult(sourceGroup, delegationId, {
+            status: 'error',
+            error,
+          });
+          logger.error(
+            { delegationId, workerId, error },
+            'Worker delegation failed',
+          );
+        });
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

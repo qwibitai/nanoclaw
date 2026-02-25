@@ -7,7 +7,6 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
@@ -20,7 +19,8 @@ import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, WorkerDefinition } from './types.js';
+import { AgentOptions } from './agents.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---CAMBOT_AGENT_OUTPUT_START---';
@@ -34,6 +34,26 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   secrets?: Record<string, string>;
+  /** Unique token identifying this container. Used by the agent-runner to
+   *  detect when it has been superseded by a newer container (orphan self-exit). */
+  ipcToken?: string;
+}
+
+export interface ContainerTelemetry {
+  totalCostUsd: number;
+  durationMs: number;
+  durationApiMs: number;
+  numTurns: number;
+  usage: { inputTokens: number; outputTokens: number };
+  modelUsage: Record<string, { inputTokens: number; outputTokens: number; costUSD: number }>;
+  toolInvocations: Array<{
+    toolName: string;
+    durationMs?: number;
+    status: 'success' | 'error';
+    inputSummary?: string;
+    outputSummary?: string;
+    error?: string;
+  }>;
 }
 
 export interface ContainerOutput {
@@ -41,6 +61,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  telemetry?: ContainerTelemetry;
 }
 
 interface VolumeMount {
@@ -144,18 +165,20 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'worker-results'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
+  // Sync agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
+  // Always sync from canonical source to pick up code changes.
   const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
   const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  if (fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
@@ -181,11 +204,11 @@ function buildVolumeMounts(
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
-function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+function readSecrets(secretKeys: string[]): Record<string, string> {
+  return readEnvFile(secretKeys);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string, containerImage: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -209,7 +232,7 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     }
   }
 
-  args.push(CONTAINER_IMAGE);
+  args.push(containerImage);
 
   return args;
 }
@@ -218,7 +241,8 @@ export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
+  onOutput: ((output: ContainerOutput) => Promise<void>) | undefined,
+  agentOptions: AgentOptions,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -228,7 +252,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `cambot-agent-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, agentOptions.containerImage);
 
   logger.debug(
     {
@@ -256,6 +280,13 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Write owner token so the agent-runner can detect orphan status.
+  // If a new container is spawned for the same group, the old container
+  // will see the token change and self-exit on its next poll cycle.
+  const groupIpcDir = resolveGroupIpcPath(group.folder);
+  fs.writeFileSync(path.join(groupIpcDir, '_owner'), containerName);
+  input.ipcToken = containerName;
+
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -269,11 +300,12 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    input.secrets = readSecrets(agentOptions.secretKeys);
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
+    // Remove secrets and ephemeral fields from input so they don't appear in logs
     delete input.secrets;
+    delete input.ipcToken;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
@@ -321,7 +353,17 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            // CRITICAL: .catch() prevents a single onOutput failure from
+            // permanently breaking the chain (which would cause resolve()
+            // in the close handler to never fire, leaking the container).
+            outputChain = outputChain
+              .then(() => onOutput(parsed))
+              .catch((err) => {
+                logger.error(
+                  { group: group.name, error: err },
+                  'onOutput callback failed — output dropped but chain preserved',
+                );
+              });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -405,13 +447,20 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          outputChain
+            .catch((err) => {
+              logger.error(
+                { group: group.name, error: err },
+                'Output chain had unhandled error during timeout cleanup',
+              );
+            })
+            .then(() => {
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
             });
-          });
           return;
         }
 
@@ -506,19 +555,27 @@ export async function runContainerAgent(
         return;
       }
 
-      // Streaming mode: wait for output chain to settle, return completion marker
+      // Streaming mode: wait for output chain to settle, return completion marker.
+      // Use .catch() to ensure resolve() fires even if the chain was rejected.
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        outputChain
+          .catch((err) => {
+            logger.error(
+              { group: group.name, error: err },
+              'Output chain had unhandled error, resolving anyway',
+            );
+          })
+          .then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
           });
-        });
         return;
       }
 
@@ -645,4 +702,228 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+}
+
+/**
+ * Write available workers snapshot for the container to read.
+ */
+export function writeWorkersSnapshot(
+  groupFolder: string,
+  workers: WorkerDefinition[],
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const workersFile = path.join(groupIpcDir, 'available_workers.json');
+  fs.writeFileSync(workersFile, JSON.stringify(workers, null, 2));
+}
+
+/**
+ * Run a stateless worker agent for delegation.
+ * Simplified single-turn: no session management, no idle timeout, no follow-up messages.
+ */
+export async function runWorkerAgent(
+  leadGroupFolder: string,
+  delegationId: string,
+  prompt: string,
+  agentOptions: AgentOptions,
+): Promise<ContainerOutput> {
+  const startTime = Date.now();
+  const WORKER_TIMEOUT_MS = 300_000; // 5 minutes
+
+  // Create a temporary workspace for the worker
+  const workerDir = path.join(DATA_DIR, 'workers', delegationId);
+  fs.mkdirSync(workerDir, { recursive: true });
+
+  const mounts: VolumeMount[] = [
+    {
+      hostPath: workerDir,
+      containerPath: '/workspace/group',
+      readonly: false,
+    },
+  ];
+
+  // Give worker read-only access to the lead group's data for context
+  const leadGroupDir = resolveGroupFolderPath(leadGroupFolder);
+  if (fs.existsSync(leadGroupDir)) {
+    mounts.push({
+      hostPath: leadGroupDir,
+      containerPath: '/workspace/lead-context',
+      readonly: true,
+    });
+  }
+
+  // Worker gets its own minimal .claude/ directory
+  const workerSessionDir = path.join(workerDir, '.claude');
+  fs.mkdirSync(workerSessionDir, { recursive: true });
+  const settingsFile = path.join(workerSessionDir, 'settings.json');
+  if (!fs.existsSync(settingsFile)) {
+    fs.writeFileSync(settingsFile, JSON.stringify({}, null, 2) + '\n');
+  }
+  mounts.push({
+    hostPath: workerSessionDir,
+    containerPath: '/home/node/.claude',
+    readonly: false,
+  });
+
+  // Worker gets agent-runner source (read-only from canonical source)
+  const agentRunnerSrc = path.join(process.cwd(), 'container', 'agent-runner', 'src');
+  if (fs.existsSync(agentRunnerSrc)) {
+    mounts.push({
+      hostPath: agentRunnerSrc,
+      containerPath: '/app/src',
+      readonly: true,
+    });
+  }
+
+  // Minimal IPC directory (worker doesn't need full IPC)
+  const workerIpcDir = path.join(workerDir, 'ipc');
+  fs.mkdirSync(path.join(workerIpcDir, 'messages'), { recursive: true });
+  fs.mkdirSync(path.join(workerIpcDir, 'tasks'), { recursive: true });
+  mounts.push({
+    hostPath: workerIpcDir,
+    containerPath: '/workspace/ipc',
+    readonly: false,
+  });
+
+  const containerName = `cambot-worker-${delegationId}`;
+  const containerArgs = buildContainerArgs(mounts, containerName, agentOptions.containerImage);
+
+  logger.info(
+    { delegationId, containerName },
+    'Spawning worker container',
+  );
+
+  const input: ContainerInput = {
+    prompt,
+    groupFolder: leadGroupFolder,
+    chatJid: 'worker',
+    isMain: false,
+    isScheduledTask: true, // Single-turn behavior
+  };
+
+  return new Promise((resolve) => {
+    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let parseBuffer = '';
+    let stderr = '';
+    let resolved = false;
+
+    const cleanup = () => {
+      // Clean up temp worker directory
+      try {
+        fs.rmSync(workerDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup
+      }
+    };
+
+    const resolveOnce = (output: ContainerOutput) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeout);
+      cleanup();
+      resolve(output);
+
+      // Stop the container — worker is done, no need to wait for idle loop
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+        if (err) container.kill('SIGKILL');
+      });
+    };
+
+    // Pass secrets via stdin
+    input.secrets = readSecrets(agentOptions.secretKeys);
+    container.stdin.write(JSON.stringify(input));
+    container.stdin.end();
+    delete input.secrets;
+
+    // Stream-parse stdout for output markers as they arrive.
+    // The agent-runner's idle loop keeps the container alive after output,
+    // so we must parse incrementally rather than waiting for close.
+    container.stdout.on('data', (data) => {
+      parseBuffer += data.toString();
+
+      const startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER);
+      if (startIdx === -1) return;
+      const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
+      if (endIdx === -1) return; // Incomplete pair, wait for more data
+
+      const jsonStr = parseBuffer
+        .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
+        .trim();
+
+      try {
+        const output: ContainerOutput = JSON.parse(jsonStr);
+        const duration = Date.now() - startTime;
+        logger.info({ delegationId, duration }, 'Worker completed');
+        resolveOnce(output);
+      } catch (err) {
+        resolveOnce({
+          status: 'error',
+          result: null,
+          error: `Failed to parse worker output: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+    });
+
+    container.stderr.on('data', (data) => {
+      const chunk = data.toString();
+      if (stderr.length < CONTAINER_MAX_OUTPUT_SIZE) {
+        stderr += chunk.slice(0, CONTAINER_MAX_OUTPUT_SIZE - stderr.length);
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      logger.warn({ delegationId, containerName }, 'Worker timeout, killing');
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+        if (err) container.kill('SIGKILL');
+      });
+    }, WORKER_TIMEOUT_MS);
+
+    container.on('close', (code) => {
+      clearTimeout(timeout);
+      const duration = Date.now() - startTime;
+
+      // If we already resolved from streaming output, nothing to do
+      if (resolved) {
+        cleanup();
+        return;
+      }
+
+      cleanup();
+
+      if (code !== 0) {
+        logger.error(
+          { delegationId, code, duration },
+          'Worker container error',
+        );
+        resolve({
+          status: 'error',
+          result: null,
+          error: `Worker exited with code ${code}: ${stderr.slice(-200)}`,
+        });
+        return;
+      }
+
+      resolve({
+        status: 'error',
+        result: null,
+        error: 'Worker exited without producing output markers',
+      });
+    });
+
+    container.on('error', (err) => {
+      clearTimeout(timeout);
+      if (!resolved) {
+        cleanup();
+        resolve({
+          status: 'error',
+          result: null,
+          error: `Worker spawn error: ${err.message}`,
+        });
+      }
+    });
+  });
 }

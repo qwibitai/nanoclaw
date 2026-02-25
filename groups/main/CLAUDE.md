@@ -36,12 +36,15 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+Your long-term memory is managed automatically by an external system. Facts about
+people, places, projects, and preferences are extracted from conversations and
+provided to you in `<system-context>` tags at the start of each prompt. This is
+your source of truth for what you know about the user and their world.
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+**Do NOT create your own memory files.** Do not write to `memory/`, `conversations/`,
+or any other folder to store facts about the user. The external memory system handles
+this for you. If the `<system-context>` block is empty or missing, it means no facts
+have been learned yet — do not assume knowledge you don't have.
 
 ## WhatsApp Formatting (and other messaging apps)
 

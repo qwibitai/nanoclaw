@@ -280,6 +280,51 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'delegate_to_worker',
+  'Delegate a sub-task to a specialized worker agent. The worker runs independently and returns a result. Check available_workers.json for available worker IDs.',
+  {
+    worker_id: z.string().describe('Worker agent ID from available_workers.json'),
+    prompt: z.string().describe('Task description for the worker'),
+    context: z.string().optional().describe('Additional context from the conversation'),
+  },
+  async (args) => {
+    const delegationId = `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Write delegation request to IPC tasks directory
+    writeIpcFile(TASKS_DIR, {
+      type: 'delegate_worker',
+      delegationId,
+      workerId: args.worker_id,
+      prompt: args.prompt,
+      context: args.context,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for result (synchronous — blocks until worker completes)
+    const resultDir = path.join(IPC_DIR, 'worker-results');
+    const resultFile = path.join(resultDir, `${delegationId}.json`);
+    const TIMEOUT_MS = 300_000; // 5 minutes
+    const POLL_MS = 500;
+    const start = Date.now();
+
+    while (Date.now() - start < TIMEOUT_MS) {
+      if (fs.existsSync(resultFile)) {
+        const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+        try { fs.unlinkSync(resultFile); } catch { /* best-effort cleanup */ }
+        if (result.status === 'error') {
+          return { content: [{ type: 'text' as const, text: `Worker error: ${result.error}` }], isError: true };
+        }
+        return { content: [{ type: 'text' as const, text: result.result }] };
+      }
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+
+    return { content: [{ type: 'text' as const, text: 'Worker delegation timed out after 5 minutes' }], isError: true };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

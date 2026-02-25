@@ -1,0 +1,12 @@
+images:
+  claude: cambot-agent-claude:latest
+
+lead: claude-default
+
+agents:
+  claude-default:
+    provider: claude
+    model: claude-sonnet-4-6
+    secrets:
+      - ANTHROPIC_API_KEY
+      - CLAUDE_CODE_OAUTH_TOKEN

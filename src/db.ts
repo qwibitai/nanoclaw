@@ -5,7 +5,7 @@ import path from 'path';
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
+import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, WorkerDefinition } from './types.js';
 
 let db: Database.Database;
 
@@ -76,6 +76,17 @@ function createSchema(database: Database.Database): void {
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS provider_images (
+      provider TEXT PRIMARY KEY,
+      container_image TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS agent_definitions (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      personality TEXT,
+      secret_keys TEXT NOT NULL
     );
   `);
 
@@ -278,6 +289,37 @@ export function storeMessageDirect(msg: {
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
   );
+}
+
+export interface HistoryMessage {
+  id: string;
+  content: string;
+  sender_name: string;
+  timestamp: string;
+  is_bot_message: number;
+}
+
+/**
+ * Get full conversation history for a chat (both user and bot messages).
+ * Returns oldest-first ordering.
+ */
+export function getConversationHistory(
+  chatJid: string,
+  limit = 200,
+): HistoryMessage[] {
+  return (
+    db
+      .prepare(
+        `
+      SELECT id, content, sender_name, timestamp, is_bot_message
+      FROM messages
+      WHERE chat_jid = ?
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `,
+      )
+      .all(chatJid, limit) as HistoryMessage[]
+  ).reverse();
 }
 
 export function getNewMessages(
@@ -596,6 +638,72 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Provider image accessors ---
+
+export function setProviderImage(provider: string, containerImage: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO provider_images (provider, container_image) VALUES (?, ?)',
+  ).run(provider, containerImage);
+}
+
+export function getProviderImage(provider: string): string | undefined {
+  const row = db
+    .prepare('SELECT container_image FROM provider_images WHERE provider = ?')
+    .get(provider) as { container_image: string } | undefined;
+  return row?.container_image;
+}
+
+// --- Agent definition accessors ---
+
+export function setAgentDefinition(def: WorkerDefinition): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO agent_definitions (id, provider, model, personality, secret_keys) VALUES (?, ?, ?, ?, ?)',
+  ).run(def.id, def.provider, def.model, def.personality ?? null, JSON.stringify(def.secretKeys));
+}
+
+export function getAgentDefinition(id: string): WorkerDefinition | undefined {
+  const row = db
+    .prepare('SELECT * FROM agent_definitions WHERE id = ?')
+    .get(id) as {
+      id: string;
+      provider: string;
+      model: string;
+      personality: string | null;
+      secret_keys: string;
+    } | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    provider: row.provider,
+    model: row.model,
+    personality: row.personality ?? undefined,
+    secretKeys: JSON.parse(row.secret_keys),
+  };
+}
+
+export function getAllAgentDefinitions(): WorkerDefinition[] {
+  const rows = db
+    .prepare('SELECT * FROM agent_definitions')
+    .all() as Array<{
+      id: string;
+      provider: string;
+      model: string;
+      personality: string | null;
+      secret_keys: string;
+    }>;
+  return rows.map((row) => ({
+    id: row.id,
+    provider: row.provider,
+    model: row.model,
+    personality: row.personality ?? undefined,
+    secretKeys: JSON.parse(row.secret_keys),
+  }));
+}
+
+export function deleteAgentDefinition(id: string): void {
+  db.prepare('DELETE FROM agent_definitions WHERE id = ?').run(id);
 }
 
 // --- JSON migration ---

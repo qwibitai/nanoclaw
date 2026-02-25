@@ -100,7 +100,7 @@ describe('resolution-cache', () => {
 
     const result = findResolutionDir(['alpha', 'beta'], tmpDir);
     expect(result).not.toBeNull();
-    expect(result).toContain('.claude/resolutions/alpha+beta');
+    expect(result).toContain(path.join('.claude', 'resolutions', 'alpha+beta'));
   });
 
   it('findResolutionDir prefers shipped over project-level', () => {
@@ -117,7 +117,7 @@ describe('resolution-cache', () => {
     );
 
     const result = findResolutionDir(['a', 'b'], tmpDir);
-    expect(result).toContain('.claude/resolutions/a+b');
+    expect(result).toContain(path.join('.claude', 'resolutions', 'a+b'));
   });
 
   it('skills are sorted so order does not matter', () => {

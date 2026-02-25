@@ -227,6 +227,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let lastSentTime = 0;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
+    // Record telemetry if present (separate from user-visible results)
+    if (result.telemetry && interceptor) {
+      interceptor.recordTelemetry(result.telemetry, chatJid);
+    }
+
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);

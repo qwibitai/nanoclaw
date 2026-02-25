@@ -239,7 +239,7 @@ function findPreimagePairs(
     } else if (entry.name.endsWith('.preimage') && !entry.name.endsWith('.preimage.hash')) {
       const resolutionPath = fullPath.replace(/\.preimage$/, '.resolution');
       if (fs.existsSync(resolutionPath)) {
-        const relPath = path.relative(baseDir, fullPath).replace(/\.preimage$/, '');
+        const relPath = path.relative(baseDir, fullPath).replaceAll('\\', '/').replace(/\.preimage$/, '');
         pairs.push({ relPath, preimage: fullPath, resolution: resolutionPath });
       }
     }

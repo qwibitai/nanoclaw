@@ -41,6 +41,14 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface WorkerDefinition {
+  id: string;
+  provider: string;
+  model: string;
+  personality?: string;
+  secretKeys: string[];
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
