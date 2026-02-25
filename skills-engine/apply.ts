@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from 'child_process';
+import { execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -18,14 +18,7 @@ import {
   readManifest,
 } from './manifest.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
-import {
-  cleanupMergeState,
-  isGitRepo,
-  mergeFile,
-  runRerere,
-  setupRerereAdapter,
-} from './merge.js';
-import { loadResolutions } from './resolution-cache.js';
+import { mergeFile } from './merge.js';
 import { computeFileHash, readState, recordSkillApplication, writeState } from './state.js';
 import {
   mergeDockerComposeServices,
@@ -171,10 +164,6 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     // --- Merge modified files ---
     const mergeConflicts: string[] = [];
 
-    // Load pre-computed resolutions into git's rr-cache before merging
-    const appliedSkillNames = currentState.applied_skills.map((s) => s.name);
-    loadResolutions([...appliedSkillNames, manifest.skill], projectRoot, skillDir);
-
     for (const relPath of manifest.modifies) {
       const resolvedPath = resolvePathRemap(relPath, pathRemap);
       const currentPath = path.join(projectRoot, resolvedPath);
@@ -200,8 +189,6 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       }
 
       // Three-way merge: current ← base → skill
-      // Save current content before merge overwrites it (needed for rerere stage 2 = "ours")
-      const oursContent = fs.readFileSync(currentPath, 'utf-8');
       // git merge-file modifies the first argument in-place, so use a temp copy
       const tmpCurrent = path.join(
         os.tmpdir(),
@@ -215,36 +202,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         fs.copyFileSync(tmpCurrent, currentPath);
         fs.unlinkSync(tmpCurrent);
       } else {
-        // Copy conflict markers to working tree path BEFORE rerere
-        // rerere looks at the working tree file at relPath, not at tmpCurrent
+        // Conflict — copy markers to working tree
         fs.copyFileSync(tmpCurrent, currentPath);
         fs.unlinkSync(tmpCurrent);
-
-        if (isGitRepo()) {
-          const baseContent = fs.readFileSync(basePath, 'utf-8');
-          const theirsContent = fs.readFileSync(skillPath, 'utf-8');
-
-          setupRerereAdapter(resolvedPath, baseContent, oursContent, theirsContent);
-          const autoResolved = runRerere(currentPath);
-
-          if (autoResolved) {
-            // rerere resolved the conflict — currentPath now has resolved content
-            // Record the resolution: git add + git rerere
-            execFileSync('git', ['add', resolvedPath], { stdio: 'pipe' });
-            execSync('git rerere', { stdio: 'pipe' });
-            cleanupMergeState(resolvedPath);
-            // Unstage the file — cleanupMergeState clears unmerged entries
-            // but the git add above leaves the file staged at stage 0
-            try {
-              execFileSync('git', ['restore', '--staged', resolvedPath], { stdio: 'pipe' });
-            } catch { /* may fail if file is new or not tracked */ }
-            continue;
-          }
-
-          cleanupMergeState(resolvedPath);
-        }
-
-        // Unresolved conflict — currentPath already has conflict markers
         mergeConflicts.push(relPath);
       }
     }
