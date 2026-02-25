@@ -6,11 +6,9 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
-import { TelegramChannel } from './channels/telegram.js';
+import { GmailChannel } from './channels/gmail.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -182,18 +180,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
-  // Telegram's typing action expires after ~5s; keep it alive during long responses
-  let typingInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
-    channel.setTyping?.(chatJid, true);
-  }, 4000);
-  const stopTyping = () => {
-    if (typingInterval) {
-      clearInterval(typingInterval);
-      typingInterval = null;
-    }
-    channel.setTyping?.(chatJid, false);
-  };
-
   let hadError = false;
   let outputSentToUser = false;
 
@@ -205,8 +191,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        // Stop typing before sending so the indicator clears immediately
-        stopTyping();
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
@@ -223,7 +207,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  stopTyping();
+  await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -462,16 +446,16 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (TELEGRAM_BOT_TOKEN) {
-    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
-    channels.push(telegram);
-    await telegram.connect();
-  }
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
+  const gmail = new GmailChannel(channelOpts);
+  channels.push(gmail);
+  try {
+    await gmail.connect();
+  } catch (err) {
+    logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
   }
 
   // Start subsystems (independently of connection handler)
