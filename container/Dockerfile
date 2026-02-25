@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
+    jq \
     git \
     python3 \
     python3-pip \
