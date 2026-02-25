@@ -23,6 +23,11 @@ describe('fetch-upstream.sh', () => {
       path.join(os.tmpdir(), 'nanoclaw-seed-'),
     );
     execSync('git init', { cwd: seedDir, stdio: 'pipe' });
+    // Ensure branch is named 'main' regardless of system git default
+    execSync('git symbolic-ref HEAD refs/heads/main', {
+      cwd: seedDir,
+      stdio: 'pipe',
+    });
     execSync('git config user.email "test@test.com"', {
       cwd: seedDir,
       stdio: 'pipe',
