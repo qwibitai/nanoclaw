@@ -16,6 +16,10 @@ Added Signal as a channel option alongside WhatsApp, using the existing multi-ch
 - Uses existing `findChannel(channels, chatJid)` routing
 - No changes to message processing, typing indicators, or send logic
 
+### channelOpts
+- Added: `assistantName: ASSISTANT_NAME` to the shared channelOpts object
+- This allows the Signal channel to resolve @mentions to the assistant's trigger name
+
 ### main()
 - Added: conditional Signal creation (`if (SIGNAL_PHONE_NUMBER)`)
 - Changed: WhatsApp conditional to `if (!SIGNAL_ONLY)` (or combined with existing `*_ONLY` flags)

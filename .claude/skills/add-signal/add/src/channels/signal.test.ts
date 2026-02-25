@@ -11,7 +11,7 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
-import { SignalChannel, SignalChannelOpts } from './signal.js';
+import { SignalChannel, SignalChannelOpts, resolveMentions } from './signal.js';
 
 // --- Test helpers ---
 
@@ -48,6 +48,7 @@ function createEnvelope(overrides: {
   groupName?: string;
   attachments?: Array<{ contentType?: string; filename?: string; id?: string }>;
   quote?: { author?: string; authorName?: string };
+  mentions?: Array<Record<string, unknown>>;
 }) {
   const envelope: Record<string, any> = {
     source: overrides.source ?? '+1234567890',
@@ -76,6 +77,46 @@ function createEnvelope(overrides: {
 
   if (overrides.quote) {
     envelope.dataMessage.quote = overrides.quote;
+  }
+
+  if (overrides.mentions) {
+    envelope.dataMessage.mentions = overrides.mentions;
+  }
+
+  return { envelope };
+}
+
+function createSyncEnvelope(overrides: {
+  sourceName?: string;
+  timestamp?: number;
+  message?: string;
+  destination?: string;
+  groupId?: string;
+  groupName?: string;
+  mentions?: Array<Record<string, unknown>>;
+}) {
+  const envelope: Record<string, any> = {
+    source: '+9999999999',
+    sourceName: overrides.sourceName ?? 'Me',
+    timestamp: overrides.timestamp ?? 1704067200000,
+    syncMessage: {
+      sentMessage: {
+        timestamp: overrides.timestamp ?? 1704067200000,
+        message: overrides.message ?? 'Sync message',
+        destination: overrides.destination,
+      },
+    },
+  };
+
+  if (overrides.groupId) {
+    envelope.syncMessage.sentMessage.groupInfo = {
+      groupId: overrides.groupId,
+      groupName: overrides.groupName,
+    };
+  }
+
+  if (overrides.mentions) {
+    envelope.syncMessage.sentMessage.mentions = overrides.mentions;
   }
 
   return { envelope };
@@ -149,6 +190,7 @@ describe('SignalChannel', () => {
           sender_name: 'Alice',
           content: 'Hello',
           is_from_me: false,
+          is_bot_message: false,
         }),
       );
     });
@@ -207,7 +249,7 @@ describe('SignalChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('marks own messages with is_from_me', () => {
+    it('marks own messages with is_from_me and is_bot_message', () => {
       const opts = createTestOpts();
       const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
 
@@ -228,7 +270,10 @@ describe('SignalChannel', () => {
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'sig:+9999999999',
-        expect.objectContaining({ is_from_me: true }),
+        expect.objectContaining({
+          is_from_me: true,
+          is_bot_message: true,
+        }),
       );
     });
 
@@ -279,6 +324,175 @@ describe('SignalChannel', () => {
         'Signal Group',
         'signal',
         true,
+      );
+    });
+  });
+
+  // --- Sync messages ---
+
+  describe('syncMessage handling', () => {
+    it('delivers sync message as bot message', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+
+      channel.handleEnvelope(createSyncEnvelope({
+        message: 'Sent from phone',
+        destination: '+1234567890',
+      }));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'sig:+1234567890',
+        expect.objectContaining({
+          chat_jid: 'sig:+1234567890',
+          content: 'Sent from phone',
+          is_from_me: true,
+          is_bot_message: true,
+        }),
+      );
+    });
+
+    it('treats Note-to-Self as user input (not bot message)', () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'sig:+9999999999': {
+            name: 'Note to Self',
+            folder: 'main',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+
+      channel.handleEnvelope(createSyncEnvelope({
+        message: 'Remind me to buy milk',
+        destination: '+9999999999',
+      }));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'sig:+9999999999',
+        expect.objectContaining({
+          content: 'Remind me to buy milk',
+          is_from_me: true,
+          is_bot_message: false,
+        }),
+      );
+    });
+
+    it('delivers sync group message', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+
+      channel.handleEnvelope(createSyncEnvelope({
+        message: 'Group sync',
+        groupId: 'testGroupId==',
+        groupName: 'Signal Group',
+      }));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'sig:g:testGroupId==',
+        expect.objectContaining({
+          chat_jid: 'sig:g:testGroupId==',
+          content: 'Group sync',
+          is_from_me: true,
+          is_bot_message: true,
+        }),
+      );
+    });
+  });
+
+  // --- /chatid command ---
+
+  describe('/chatid command', () => {
+    it('responds with chat JID and suppresses normal delivery', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+      const sendSpy = vi.spyOn(channel, 'sendMessage').mockResolvedValue();
+
+      channel.handleEnvelope(createEnvelope({
+        source: '+1234567890',
+        message: '/chatid',
+      }));
+
+      expect(sendSpy).toHaveBeenCalledWith('sig:+1234567890', 'Chat ID: sig:+1234567890');
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('is case-insensitive', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+      const sendSpy = vi.spyOn(channel, 'sendMessage').mockResolvedValue();
+
+      channel.handleEnvelope(createEnvelope({
+        source: '+1234567890',
+        message: '/ChatID',
+      }));
+
+      expect(sendSpy).toHaveBeenCalled();
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('works for group chats', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+      const sendSpy = vi.spyOn(channel, 'sendMessage').mockResolvedValue();
+
+      channel.handleEnvelope(createEnvelope({
+        source: '+5555555555',
+        message: '/chatid',
+        groupId: 'testGroupId==',
+      }));
+
+      expect(sendSpy).toHaveBeenCalledWith('sig:g:testGroupId==', 'Chat ID: sig:g:testGroupId==');
+    });
+  });
+
+  // --- Mention resolution ---
+
+  describe('resolveMentions', () => {
+    it('returns text unchanged when no mentions', () => {
+      expect(resolveMentions('Hello world', undefined, '+999', 'Andy')).toBe('Hello world');
+      expect(resolveMentions('Hello world', [], '+999', 'Andy')).toBe('Hello world');
+    });
+
+    it('returns undefined for undefined text', () => {
+      expect(resolveMentions(undefined, [], '+999', 'Andy')).toBeUndefined();
+    });
+
+    it('replaces U+FFFC placeholder with @name', () => {
+      const text = 'Hey \uFFFC check this';
+      const mentions = [{ start: 4, length: 1, name: 'Bob', number: '+111' }];
+      expect(resolveMentions(text, mentions, '+999', 'Andy')).toBe('Hey @Bob check this');
+    });
+
+    it('maps bot phone number mentions to assistant name', () => {
+      const text = '\uFFFC hello';
+      const mentions = [{ start: 0, length: 1, name: 'Bot', number: '+9999999999' }];
+      expect(resolveMentions(text, mentions, '+9999999999', 'Andy')).toBe('@Andy hello');
+    });
+
+    it('handles multiple mentions sorted correctly', () => {
+      const text = '\uFFFC and \uFFFC';
+      const mentions = [
+        { start: 0, length: 1, name: 'Alice', number: '+111' },
+        { start: 6, length: 1, name: 'Bob', number: '+222' },
+      ];
+      expect(resolveMentions(text, mentions, '+999', 'Andy')).toBe('@Alice and @Bob');
+    });
+
+    it('resolves mentions in handleEnvelope', () => {
+      const opts = createTestOpts();
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', opts);
+
+      channel.handleEnvelope(createEnvelope({
+        source: '+1234567890',
+        message: '\uFFFC check this out',
+        mentions: [{ start: 0, length: 1, name: 'Andy', number: '+9999999999' }],
+      }));
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'sig:+1234567890',
+        expect.objectContaining({ content: '@Andy check this out' }),
       );
     });
   });
@@ -430,23 +644,118 @@ describe('SignalChannel', () => {
       });
     });
 
-    it('does nothing when not connected', async () => {
+    it('queues message when not connected', async () => {
       const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
 
-      const rpcSpy = vi.spyOn(channel as any, 'rpcCall');
       await channel.sendMessage('sig:+1234567890', 'Hello');
 
-      expect(rpcSpy).not.toHaveBeenCalled();
+      expect((channel as any).outgoingQueue).toHaveLength(1);
+      expect((channel as any).outgoingQueue[0]).toEqual({ jid: 'sig:+1234567890', text: 'Hello' });
     });
 
-    it('handles send failure gracefully', async () => {
+    it('queues message on send failure', async () => {
       const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
       (channel as any).connected = true;
 
       vi.spyOn(channel as any, 'rpcCall').mockRejectedValue(new Error('TCP error'));
 
-      // Should not throw
-      await expect(channel.sendMessage('sig:+1234567890', 'fail')).resolves.toBeUndefined();
+      await channel.sendMessage('sig:+1234567890', 'fail');
+
+      expect((channel as any).outgoingQueue).toHaveLength(1);
+      expect((channel as any).outgoingQueue[0]).toEqual({ jid: 'sig:+1234567890', text: 'fail' });
+    });
+  });
+
+  // --- Outgoing queue ---
+
+  describe('outgoing queue', () => {
+    it('drops oldest message when queue exceeds cap', () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      const queue = (channel as any).outgoingQueue as Array<{ jid: string; text: string }>;
+
+      // Fill to cap
+      for (let i = 0; i < 1000; i++) {
+        queue.push({ jid: 'sig:+111', text: `msg-${i}` });
+      }
+
+      // Enqueue one more via sendMessage (not connected → enqueues)
+      channel.sendMessage('sig:+1234567890', 'overflow');
+
+      expect(queue).toHaveLength(1000);
+      expect(queue[0].text).toBe('msg-1');
+      expect(queue[queue.length - 1].text).toBe('overflow');
+    });
+  });
+
+  // --- RPC cap ---
+
+  describe('pending RPC cap', () => {
+    it('rejects when pending requests exceed cap', async () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      (channel as any).connected = true;
+      (channel as any).socket = {
+        write: vi.fn((_d: string, cb: (e?: Error) => void) => cb()),
+      };
+
+      // Fill pending requests to cap
+      const pending = (channel as any).pendingRequests;
+      for (let i = 0; i < 100; i++) {
+        pending.set(i, { resolve: vi.fn(), reject: vi.fn(), timer: setTimeout(() => {}, 99999) });
+      }
+
+      // Next RPC call should be rejected
+      await expect(
+        (channel as any).rpcCall('send', { message: 'test' }),
+      ).rejects.toThrow('RPC cap exceeded');
+
+      // Cleanup timers
+      for (const [, p] of pending) clearTimeout(p.timer);
+    });
+  });
+
+  // --- Disconnect cleanup ---
+
+  describe('disconnect cleanup', () => {
+    it('clears buffer, queue, and flushing flag', async () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      (channel as any).connected = true;
+      (channel as any).buffer = 'some leftover data';
+      (channel as any).outgoingQueue = [{ jid: 'sig:+111', text: 'queued' }];
+      (channel as any).flushing = true;
+
+      await channel.disconnect();
+
+      expect((channel as any).buffer).toBe('');
+      expect((channel as any).outgoingQueue).toHaveLength(0);
+      expect((channel as any).flushing).toBe(false);
+    });
+
+    it('clears pending RPC timers and rejects them', async () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      (channel as any).connected = true;
+
+      const rejectFn = vi.fn();
+      const timer = setTimeout(() => {}, 99999);
+      const clearSpy = vi.spyOn(global, 'clearTimeout');
+      (channel as any).pendingRequests.set(1, { resolve: vi.fn(), reject: rejectFn, timer });
+
+      await channel.disconnect();
+
+      expect(clearSpy).toHaveBeenCalledWith(timer);
+      expect(rejectFn).toHaveBeenCalledWith(expect.any(Error));
+      expect((channel as any).pendingRequests.size).toBe(0);
+    });
+
+    it('destroys socket', async () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      (channel as any).connected = true;
+      const mockSocket = { destroy: vi.fn() };
+      (channel as any).socket = mockSocket;
+
+      await channel.disconnect();
+
+      expect(mockSocket.destroy).toHaveBeenCalled();
+      expect((channel as any).socket).toBeNull();
     });
   });
 
@@ -485,6 +794,16 @@ describe('SignalChannel', () => {
       const channel = new SignalChannel('+9999999999', 'tcp://localhost:8080', createTestOpts());
       expect((channel as any).host).toBe('localhost');
       expect((channel as any).port).toBe(8080);
+    });
+
+    it('uses custom assistantName from opts', () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts({ assistantName: 'Jarvis' }));
+      expect((channel as any).assistantName).toBe('Jarvis');
+    });
+
+    it('defaults assistantName to Andy', () => {
+      const channel = new SignalChannel('+9999999999', 'localhost:7583', createTestOpts());
+      expect((channel as any).assistantName).toBe('Andy');
     });
   });
 });

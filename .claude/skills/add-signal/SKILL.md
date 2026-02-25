@@ -159,6 +159,8 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 Tell the user:
 
+> **Easiest method:** Send `/chatid` in any Signal chat with the bot. It will reply with the JID.
+>
 > **For 1:1 chats:** The JID is the phone number with `sig:` prefix, e.g., `sig:+1234567890`
 >
 > **For group chats:** Get the group ID:
@@ -166,6 +168,8 @@ Tell the user:
 > signal-cli -a +YOUR_NUMBER listGroups
 > ```
 > The JID format is `sig:g:<groupId>`, e.g., `sig:g:ABC123base64==`
+>
+> **Note to Self:** Register your own number's JID (e.g., `sig:+YOUR_NUMBER`) to use Signal's "Note to Self" as a private chat with the bot. Messages you send there are treated as user input, not bot echoes.
 
 Wait for the user to provide the chat JID.
 
