@@ -71,14 +71,13 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL,
+      folder TEXT NOT NULL UNIQUE,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1,
       channel TEXT
     );
-    CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -136,16 +135,13 @@ export function inferChannelFromJid(jid: string): string {
 }
 
 function migrateRegisteredGroupsSchema(database: Database.Database): void {
-  // Check the actual CREATE TABLE statement to see if folder still has UNIQUE
   const tableInfo = database.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'",
   ).get() as { sql: string } | undefined;
 
   if (!tableInfo) return; // Table doesn't exist yet (will be created fresh)
 
-  const needsUniqueRemoval = tableInfo.sql.includes('UNIQUE');
-
-  // Try to add channel column (may already exist)
+  // Add channel column if missing
   let needsChannelColumn = false;
   try {
     database.exec(`ALTER TABLE registered_groups ADD COLUMN channel TEXT`);
@@ -154,30 +150,32 @@ function migrateRegisteredGroupsSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  if (needsUniqueRemoval) {
-    // SQLite doesn't support DROP CONSTRAINT — recreate the table
+  // Ensure folder has UNIQUE constraint (may have been removed by an earlier migration)
+  const needsUniqueRestore = !tableInfo.sql.includes('UNIQUE');
+  if (needsUniqueRestore) {
+    // SQLite doesn't support ADD CONSTRAINT — recreate the table with UNIQUE
+    // Use INSERT OR IGNORE so duplicate folders keep only the first row
     database.exec(`
       CREATE TABLE registered_groups_new (
         jid TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        folder TEXT NOT NULL,
+        folder TEXT NOT NULL UNIQUE,
         trigger_pattern TEXT NOT NULL,
         added_at TEXT NOT NULL,
         container_config TEXT,
         requires_trigger INTEGER DEFAULT 1,
         channel TEXT
       );
-      INSERT INTO registered_groups_new
+      INSERT OR IGNORE INTO registered_groups_new
         SELECT jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, channel
         FROM registered_groups;
       DROP TABLE registered_groups;
       ALTER TABLE registered_groups_new RENAME TO registered_groups;
-      CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
     `);
   }
 
   // Backfill channel from JID patterns where NULL
-  if (needsChannelColumn || needsUniqueRemoval) {
+  if (needsChannelColumn || needsUniqueRestore) {
     database.exec(`UPDATE registered_groups SET channel = 'whatsapp' WHERE channel IS NULL AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')`);
     database.exec(`UPDATE registered_groups SET channel = 'telegram' WHERE channel IS NULL AND jid LIKE 'tg:%'`);
     database.exec(`UPDATE registered_groups SET channel = 'discord' WHERE channel IS NULL AND jid LIKE 'dc:%'`);

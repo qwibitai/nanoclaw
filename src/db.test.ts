@@ -358,7 +358,7 @@ describe('inferChannelFromJid', () => {
 // --- Multi-channel registered groups ---
 
 describe('multi-channel registered groups', () => {
-  it('allows multiple JIDs to share the same folder', () => {
+  it('enforces UNIQUE folder constraint across different JIDs', () => {
     setRegisteredGroup('123@g.us', {
       name: 'WA Group',
       folder: 'my-team',
@@ -366,19 +366,15 @@ describe('multi-channel registered groups', () => {
       added_at: '2024-01-01T00:00:00.000Z',
     });
 
-    setRegisteredGroup('tg:-100999', {
-      name: 'TG Group',
-      folder: 'my-team',
-      trigger: '@Andy',
-      added_at: '2024-01-02T00:00:00.000Z',
-    });
-
-    const groups = getAllRegisteredGroups();
-    expect(Object.keys(groups)).toHaveLength(2);
-    expect(groups['123@g.us'].folder).toBe('my-team');
-    expect(groups['tg:-100999'].folder).toBe('my-team');
-    expect(groups['123@g.us'].channel).toBe('whatsapp');
-    expect(groups['tg:-100999'].channel).toBe('telegram');
+    // Second JID with the same folder should throw UNIQUE constraint error
+    expect(() =>
+      setRegisteredGroup('tg:-100999', {
+        name: 'TG Group',
+        folder: 'my-team',
+        trigger: '@Andy',
+        added_at: '2024-01-02T00:00:00.000Z',
+      }),
+    ).toThrow();
   });
 
   it('auto-infers channel from JID when not explicitly set', () => {
@@ -407,15 +403,9 @@ describe('multi-channel registered groups', () => {
     expect(group!.channel).toBe('slack');
   });
 
-  it('getJidsForFolder returns all JIDs for a shared folder', () => {
+  it('getJidsForFolder returns the JID registered to a folder', () => {
     setRegisteredGroup('wa@g.us', {
       name: 'WA',
-      folder: 'shared',
-      trigger: '@Andy',
-      added_at: '2024-01-01T00:00:00.000Z',
-    });
-    setRegisteredGroup('tg:-555', {
-      name: 'TG',
       folder: 'shared',
       trigger: '@Andy',
       added_at: '2024-01-01T00:00:00.000Z',
@@ -428,26 +418,19 @@ describe('multi-channel registered groups', () => {
     });
 
     const jids = getJidsForFolder('shared');
-    expect(jids).toHaveLength(2);
+    expect(jids).toHaveLength(1);
     expect(jids).toContain('wa@g.us');
-    expect(jids).toContain('tg:-555');
   });
 
-  it('upserts on same JID without affecting other JIDs for the same folder', () => {
+  it('upserts on same JID preserving the folder', () => {
     setRegisteredGroup('123@g.us', {
       name: 'Original',
       folder: 'my-team',
       trigger: '@Andy',
       added_at: '2024-01-01T00:00:00.000Z',
     });
-    setRegisteredGroup('tg:-100', {
-      name: 'Telegram',
-      folder: 'my-team',
-      trigger: '@Andy',
-      added_at: '2024-01-02T00:00:00.000Z',
-    });
 
-    // Update the WA group name
+    // Update the same JID — same folder, should upsert cleanly
     setRegisteredGroup('123@g.us', {
       name: 'Updated WA',
       folder: 'my-team',
@@ -456,9 +439,29 @@ describe('multi-channel registered groups', () => {
     });
 
     const groups = getAllRegisteredGroups();
-    expect(Object.keys(groups)).toHaveLength(2);
+    expect(Object.keys(groups)).toHaveLength(1);
     expect(groups['123@g.us'].name).toBe('Updated WA');
     expect(groups['123@g.us'].trigger).toBe('@Bot');
-    expect(groups['tg:-100'].name).toBe('Telegram');
+  });
+
+  it('allows different JIDs with different folders', () => {
+    setRegisteredGroup('123@g.us', {
+      name: 'WA Group',
+      folder: 'my-team-wa',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    setRegisteredGroup('tg:-100', {
+      name: 'TG Group',
+      folder: 'my-team-tg',
+      trigger: '@Andy',
+      added_at: '2024-01-02T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    expect(Object.keys(groups)).toHaveLength(2);
+    expect(groups['123@g.us'].folder).toBe('my-team-wa');
+    expect(groups['tg:-100'].folder).toBe('my-team-tg');
   });
 });

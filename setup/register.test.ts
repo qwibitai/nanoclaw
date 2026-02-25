@@ -14,15 +14,13 @@ function createTestDb(): Database.Database {
   db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
     jid TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    folder TEXT NOT NULL,
+    folder TEXT NOT NULL UNIQUE,
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
     requires_trigger INTEGER DEFAULT 1,
     channel TEXT
-  );
-  CREATE INDEX IF NOT EXISTS idx_registered_groups_folder ON registered_groups(folder);
-  `);
+  );`);
   return db;
 }
 
