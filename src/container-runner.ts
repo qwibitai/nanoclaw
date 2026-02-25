@@ -26,6 +26,13 @@ import { RegisteredGroup } from './types.js';
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
+export interface ImageAttachment {
+  /** Marker ID to match in prompt text, e.g. "[Image: /workspace/group/media/foo.jpg]" */
+  marker: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  base64: string;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -35,6 +42,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  images?: ImageAttachment[];
 }
 
 export interface ContainerOutput {
@@ -215,6 +223,34 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   return args;
 }
 
+const IMAGE_MARKER_RE = /\[Image: (\/workspace\/group\/media\/[^\]]+)\]/g;
+const MEDIA_TYPE_MAP: Record<string, ImageAttachment['mediaType']> = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+};
+
+function extractImageAttachments(prompt: string, groupFolder: string): ImageAttachment[] {
+  const images: ImageAttachment[] = [];
+  for (const match of prompt.matchAll(IMAGE_MARKER_RE)) {
+    const containerPath = match[1]; // e.g. /workspace/group/media/sx-123.jpg
+    const relativePath = containerPath.replace('/workspace/group/', '');
+    const hostPath = path.join(GROUPS_DIR, groupFolder, relativePath);
+    try {
+      const data = fs.readFileSync(hostPath);
+      const ext = path.extname(hostPath).toLowerCase();
+      const mediaType = MEDIA_TYPE_MAP[ext] || 'image/jpeg';
+      images.push({
+        marker: match[0],
+        mediaType,
+        base64: data.toString('base64'),
+      });
+    } catch (err) {
+      logger.warn({ hostPath, err }, 'Failed to read image for container input');
+    }
+  }
+  return images;
+}
+
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
@@ -269,12 +305,19 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    // Extract image attachments from prompt text
+    input.images = extractImageAttachments(input.prompt, group.folder);
+    if (input.images.length > 0) {
+      logger.debug({ count: input.images.length, sizes: input.images.map(i => i.base64.length) }, 'Extracted image attachments for container');
+    }
+
     // Pass secrets via stdin (never written to disk or mounted as files)
     input.secrets = readSecrets();
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
+    // Remove secrets/images from input so they don't appear in logs
     delete input.secrets;
+    delete input.images;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';

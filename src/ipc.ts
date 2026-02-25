@@ -10,7 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { createTask, deleteTask, getTaskById, removeRegisteredGroup, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -378,6 +378,23 @@ export async function processTaskIpc(
           { data },
           'Invalid register_group request - missing required fields',
         );
+      }
+      break;
+
+    case 'unregister_group':
+      // Only main group can unregister groups
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized unregister_group attempt blocked',
+        );
+        break;
+      }
+      if (data.jid) {
+        removeRegisteredGroup(data.jid);
+        logger.info({ jid: data.jid, sourceGroup }, 'Group unregistered via IPC');
+      } else {
+        logger.warn({ data }, 'Invalid unregister_group request - missing jid');
       }
       break;
 

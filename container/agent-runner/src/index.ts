@@ -19,6 +19,12 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface ImageAttachment {
+  marker: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  base64: string;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -28,6 +34,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  images?: ImageAttachment[];
 }
 
 interface ContainerOutput {
@@ -48,9 +55,13 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -72,6 +83,35 @@ class MessageStream {
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+      session_id: '',
+    });
+    this.waiting?.();
+  }
+
+  pushWithImages(text: string, images: ImageAttachment[]): void {
+    // Build multipart content: replace image markers with image content blocks
+    const content: ContentBlock[] = [];
+    let remaining = text;
+    for (const img of images) {
+      const idx = remaining.indexOf(img.marker);
+      if (idx >= 0) {
+        const before = remaining.slice(0, idx).trim();
+        if (before) content.push({ type: 'text', text: before });
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+        });
+        remaining = remaining.slice(idx + img.marker.length);
+      }
+    }
+    const after = remaining.trim();
+    if (after) content.push({ type: 'text', text: after });
+    if (content.length === 0) content.push({ type: 'text', text });
+
+    this.queue.push({
+      type: 'user',
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -363,7 +403,11 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  if (containerInput.images && containerInput.images.length > 0) {
+    stream.pushWithImages(prompt, containerInput.images);
+  } else {
+    stream.push(prompt);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
