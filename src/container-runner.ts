@@ -15,7 +15,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
-import { syncBrain } from './brain-sync.js';
+import { getBrainPath } from './brain-sync.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -196,7 +196,7 @@ function buildVolumeMounts(
   // Mount Anton's brain (company context) as an additional directory.
   // The agent-runner auto-discovers /workspace/extra/* and passes them
   // to the SDK as additionalDirectories, which loads their CLAUDE.md.
-  const brainPath = syncBrain();
+  const brainPath = getBrainPath();
   if (brainPath) {
     mounts.push({
       hostPath: brainPath,
