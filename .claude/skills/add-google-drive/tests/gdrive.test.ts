@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect } from 'vitest';
 
-const root = path.resolve(__dirname, '../../..');
+const root = process.cwd();
 
 function read(relPath: string): string {
   return fs.readFileSync(path.join(root, relPath), 'utf-8');
