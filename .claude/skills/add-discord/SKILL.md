@@ -6,7 +6,17 @@ This skill adds Discord support to NanoClaw using the skills engine for determin
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, verify the code changes are actually in place before skipping:
+
+```bash
+# Check key files and imports
+test -f src/channels/discord.ts && echo "FILE=exists" || echo "FILE=missing"
+grep -q "DiscordChannel" src/index.ts 2>/dev/null && echo "IMPORT=present" || echo "IMPORT=missing"
+grep -q "DISCORD_BOT_TOKEN" src/config.ts 2>/dev/null && echo "CONFIG=present" || echo "CONFIG=missing"
+```
+
+- All three checks pass → skip to Phase 3 (Setup). The code changes are in place.
+- Any check fails → state/code mismatch (e.g., changes were reverted after the skill was recorded). Proceed to Phase 2 to re-apply. The skills engine handles this idempotently.
 
 ### Ask the user
 
@@ -202,9 +212,48 @@ If the bot connects but can't read messages, ensure:
 
 ### Getting Channel ID
 
-If you can't copy the channel ID:
-- Ensure **Developer Mode** is enabled: User Settings > Advanced > Developer Mode
+If you can't copy the channel ID, diagnose in order:
+
+**1. Verify the Discord code is actually loaded:**
+```bash
+test -f src/channels/discord.ts && echo "OK: discord.ts exists" || echo "ERROR: discord.ts missing"
+grep -q "DiscordChannel" src/index.ts && echo "OK: imported" || echo "ERROR: not imported"
+grep -q "DISCORD_BOT_TOKEN" src/config.ts && echo "OK: config present" || echo "ERROR: config missing"
+```
+If any check fails, see **State/code mismatch** below.
+
+**2. Verify the bot connected:**
+```bash
+grep "Discord bot connected" logs/nanoclaw.log | tail -1
+```
+No output means the DiscordChannel never started — check token and state next.
+
+**3. Enable Developer Mode:**
+- User Settings > Advanced > Developer Mode
 - Right-click the channel name in the server sidebar > Copy Channel ID
+
+### State/code mismatch (state.yaml says applied but bot not connecting)
+
+Symptoms:
+- Bot does not respond in Discord
+- No "Discord bot connected" line in `logs/nanoclaw.log`
+- `.nanoclaw/state.yaml` lists `discord` but `src/channels/discord.ts` is missing or `src/index.ts` has no `DiscordChannel` import
+
+Cause: Code changes were undone (e.g., git revert, editor undo) after the skill was recorded in `state.yaml`.
+
+Fix — re-apply the skill (idempotent, safe to re-run):
+
+```bash
+npx tsx scripts/apply-skill.ts .claude/skills/add-discord
+npm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
+```
+
+Verify the bot connected after restart:
+```bash
+grep "Discord bot connected" logs/nanoclaw.log | tail -1
+```
 
 ## After Setup
 
