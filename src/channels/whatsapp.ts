@@ -49,9 +49,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this.connectInternal(resolve).catch(reject);
-    });
+    // Resolve as soon as the socket is set up, not when WA auth completes.
+    // This lets main() proceed to start all subsystems regardless of how long
+    // QR scanning or reconnection takes. The internal reconnect loop handles recovery.
+    await this.connectInternal();
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
