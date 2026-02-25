@@ -1,17 +1,11 @@
 [build]
-# Use the Railway-specific Dockerfile that bundles Node.js + Docker daemon.
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.railway"
 
 [deploy]
 # /health returns HTTP 200 once the Node.js app is listening.
-# Railway waits up to 300s for the first healthy response because
-# the Docker daemon and agent image need to start first.
 healthcheckPath = "/health"
-healthcheckTimeout = 300
-
-# Required for Docker-in-Docker: allows dockerd to run inside the container.
-privileged = true
+healthcheckTimeout = 60
 
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
@@ -24,10 +18,7 @@ restartPolicyMaxRetries = 3
 #   ASSISTANT_NAME      Trigger word (default: Andy)
 #
 # Optional:
-#   SKIP_CONTAINER_BUILD=1   Set after first deploy to skip rebuilding the
-#                            agent image (use when pulling from a registry)
-#   CONTAINER_IMAGE          Agent image name (default: nanoclaw-agent:latest)
-#   TZ                       Timezone for cron tasks (e.g. Asia/Jerusalem)
+#   TZ                  Timezone for cron tasks (e.g. Asia/Jerusalem)
 #
 # ---------------------------------------------------------------------------
 # Required volumes (create in Railway dashboard → service → Volumes):
@@ -35,6 +26,4 @@ restartPolicyMaxRetries = 3
 #   Mount path: /app/store    Persists SQLite DB + WhatsApp auth credentials
 #   Mount path: /app/groups   Persists per-group CLAUDE.md memory files
 #
-# ---------------------------------------------------------------------------
-# Note: Privileged mode is set above via `privileged = true`.
 # ---------------------------------------------------------------------------
