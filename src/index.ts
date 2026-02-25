@@ -14,6 +14,8 @@ import {
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
+  writeWorkerRunsSnapshot,
+  WorkerRunsSnapshot,
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
@@ -24,6 +26,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  getWorkerRuns,
   getWorkerRun,
   getRouterState,
   initDatabase,
@@ -62,6 +65,8 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const ANDY_DEVELOPER_FOLDER = 'andy-developer';
+const ACTIVE_WORKER_RUN_STATUSES = ['queued', 'running', 'review_requested'] as const;
 
 interface WorkerRunContext {
   runId: string;
@@ -71,6 +76,111 @@ interface WorkerRunContext {
 
 function isJarvisWorkerGroup(folder: string): boolean {
   return folder.startsWith('jarvis-worker');
+}
+
+function isSyntheticWorkerGroup(group: RegisteredGroup): boolean {
+  return isJarvisWorkerGroup(group.folder);
+}
+
+function stripCodeFence(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1].trim() : trimmed;
+}
+
+function sanitizeUserFacingOutput(group: RegisteredGroup, text: string): string {
+  if (group.folder !== ANDY_DEVELOPER_FOLDER) return text;
+
+  const parsed = parseDispatchPayload(stripCodeFence(text));
+  if (!parsed) return text;
+
+  return `Dispatched \`${parsed.run_id}\` to \`${parsed.repo}\` on \`${parsed.branch}\` (${parsed.task_type}).`;
+}
+
+function buildWorkerRunsSnapshot(group: RegisteredGroup, isMain: boolean): WorkerRunsSnapshot {
+  let scope: WorkerRunsSnapshot['scope'] = 'group';
+  let groupFolderLike: string | undefined;
+
+  if (isMain) {
+    scope = 'all';
+  } else if (group.folder === ANDY_DEVELOPER_FOLDER) {
+    scope = 'jarvis';
+    groupFolderLike = 'jarvis-worker-%';
+  } else if (isSyntheticWorkerGroup(group)) {
+    scope = 'group';
+    groupFolderLike = group.folder;
+  } else {
+    scope = 'group';
+    groupFolderLike = group.folder;
+  }
+
+  const active = getWorkerRuns({
+    groupFolderLike,
+    statuses: [...ACTIVE_WORKER_RUN_STATUSES],
+    limit: 25,
+  }).map((r) => ({
+    run_id: r.run_id,
+    group_folder: r.group_folder,
+    status: r.status,
+    started_at: r.started_at,
+    completed_at: r.completed_at,
+    retry_count: r.retry_count,
+    result_summary: r.result_summary,
+    error_details: r.error_details,
+  }));
+
+  const recent = getWorkerRuns({
+    groupFolderLike,
+    limit: 25,
+  }).map((r) => ({
+    run_id: r.run_id,
+    group_folder: r.group_folder,
+    status: r.status,
+    started_at: r.started_at,
+    completed_at: r.completed_at,
+    retry_count: r.retry_count,
+    result_summary: r.result_summary,
+    error_details: r.error_details,
+  }));
+
+  return {
+    generated_at: new Date().toISOString(),
+    scope,
+    active,
+    recent,
+  };
+}
+
+function buildAndyPromptWorkerContext(snapshot: WorkerRunsSnapshot): string {
+  const activeLines = snapshot.active.length > 0
+    ? snapshot.active
+      .slice(0, 8)
+      .map((r) => `- ${r.run_id} | ${r.group_folder} | ${r.status} | started ${r.started_at}`)
+      .join('\n')
+    : '- none';
+
+  const recentLines = snapshot.recent.length > 0
+    ? snapshot.recent
+      .slice(0, 8)
+      .map((r) => {
+        const when = r.completed_at ?? r.started_at;
+        const summary = r.result_summary || r.error_details || '-';
+        return `- ${r.run_id} | ${r.group_folder} | ${r.status} | ${when} | ${summary}`;
+      })
+      .join('\n')
+    : '- none';
+
+  return [
+    '<worker_status_source_of_truth>',
+    `generated_at: ${snapshot.generated_at}`,
+    'Use this DB snapshot as the single source of truth when answering status/queue questions.',
+    'Do not rely on memory for queued/running/completed worker state.',
+    'Active worker runs:',
+    activeLines,
+    'Recent worker runs:',
+    recentLines,
+    '</worker_status_source_of_truth>',
+  ].join('\n');
 }
 
 function extractWorkerRunContext(
@@ -179,7 +289,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (!group) return true;
 
   const channel = findChannel(channels, chatJid);
-  if (!channel) {
+  const syntheticWorker = isSyntheticWorkerGroup(group);
+  if (!channel && !syntheticWorker) {
     console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
     return true;
   }
@@ -264,7 +375,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  await channel?.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -279,8 +390,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+        const outboundText = sanitizeUserFacingOutput(group, text);
+        if (outboundText && channel) {
+          await channel.sendMessage(chatJid, outboundText);
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -295,7 +409,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  await channel?.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (workerRun) {
@@ -321,10 +435,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Worker completion contract accepted',
       );
     } else if (output === 'error' || hadError) {
+      const missingSummary = completionCheck.missing.join(', ');
       completeWorkerRun(
         workerRun.runId,
         'failed',
-        completionCheck.missing.join(', ') || 'worker execution failed',
+        missingSummary
+          ? `Worker execution failed; missing: ${missingSummary}`
+          : 'worker execution failed',
+        JSON.stringify({
+          reason: 'worker execution failed',
+          missing: completionCheck.missing,
+          output_status: output,
+          had_error: hadError,
+          output_excerpt: workerOutputBuffer.slice(0, 2000),
+        }),
       );
       logger.warn(
         {
@@ -335,10 +459,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         'Worker run marked failed',
       );
     } else {
+      const missingSummary = completionCheck.missing.join(', ');
       completeWorkerRun(
         workerRun.runId,
         'failed_contract',
-        completionCheck.missing.join(', ') || 'invalid completion contract',
+        missingSummary
+          ? `Completion contract missing: ${missingSummary}`
+          : 'invalid completion contract',
+        JSON.stringify({
+          reason: 'invalid completion contract',
+          missing: completionCheck.missing,
+          output_excerpt: workerOutputBuffer.slice(0, 2000),
+        }),
       );
       logger.warn(
         {
@@ -402,6 +534,12 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  const workerRunsSnapshot = buildWorkerRunsSnapshot(group, isMain);
+  writeWorkerRunsSnapshot(group.folder, workerRunsSnapshot);
+  const effectivePrompt = group.folder === ANDY_DEVELOPER_FOLDER
+    ? `${buildAndyPromptWorkerContext(workerRunsSnapshot)}\n\n${prompt}`
+    : prompt;
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -417,7 +555,7 @@ async function runAgent(
     const output = await runContainerAgent(
       group,
       {
-        prompt,
+        prompt: effectivePrompt,
         sessionId,
         groupFolder: group.folder,
         chatJid,
@@ -485,7 +623,8 @@ async function startMessageLoop(): Promise<void> {
           if (!group) continue;
 
           const channel = findChannel(channels, chatJid);
-          if (!channel) {
+          const syntheticWorker = isSyntheticWorkerGroup(group);
+          if (!channel && !syntheticWorker) {
             console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
             continue;
           }
@@ -523,7 +662,7 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            channel.setTyping?.(chatJid, true)?.catch((err) =>
+            channel?.setTyping?.(chatJid, true)?.catch((err) =>
               logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
             );
           } else {
@@ -608,7 +747,23 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, sourceGroup) => {
+      const target = registeredGroups[jid];
+      if (target && isSyntheticWorkerGroup(target)) {
+        const timestamp = new Date().toISOString();
+        storeMessage({
+          id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: jid,
+          sender: `${sourceGroup}@nanoclaw`,
+          sender_name: sourceGroup,
+          content: text,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+        });
+        storeChatMetadata(jid, timestamp, target.name, 'nanoclaw', true);
+        return Promise.resolve();
+      }
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);

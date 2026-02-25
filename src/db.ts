@@ -639,6 +639,23 @@ export type WorkerRunStatus =
   | 'done'
   | 'failed';
 
+export interface WorkerRunRecord {
+  run_id: string;
+  group_folder: string;
+  status: WorkerRunStatus;
+  started_at: string;
+  completed_at: string | null;
+  retry_count: number;
+  result_summary: string | null;
+  error_details: string | null;
+  branch_name: string | null;
+  pr_url: string | null;
+  commit_sha: string | null;
+  files_changed: string | null;
+  test_summary: string | null;
+  risk_summary: string | null;
+}
+
 /**
  * Insert a worker run record.
  * - 'new': run_id not seen before, inserted with status 'queued'
@@ -709,17 +726,28 @@ export function completeWorkerRun(
   runId: string,
   status: WorkerRunStatus,
   resultSummary?: string,
+  errorDetails?: string,
 ): void {
   db.prepare(
-    `UPDATE worker_runs SET status = ?, completed_at = ?, result_summary = ? WHERE run_id = ?`,
-  ).run(status, new Date().toISOString(), resultSummary ?? null, runId);
+    `UPDATE worker_runs SET status = ?, completed_at = ?, result_summary = ?, error_details = ? WHERE run_id = ?`,
+  ).run(
+    status,
+    new Date().toISOString(),
+    resultSummary ?? null,
+    errorDetails ?? null,
+    runId,
+  );
 }
 
 export function getWorkerRun(runId: string): {
   run_id: string;
+  group_folder: string;
   status: string;
+  started_at: string;
+  completed_at: string | null;
   retry_count: number;
   result_summary: string | null;
+  error_details: string | null;
   branch_name: string | null;
   pr_url: string | null;
   commit_sha: string | null;
@@ -729,9 +757,47 @@ export function getWorkerRun(runId: string): {
 } | undefined {
   return db
     .prepare(
-      `SELECT run_id, status, retry_count, result_summary, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary FROM worker_runs WHERE run_id = ?`,
+      `SELECT run_id, group_folder, status, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary FROM worker_runs WHERE run_id = ?`,
     )
     .get(runId) as ReturnType<typeof getWorkerRun>;
+}
+
+export function getWorkerRuns(options?: {
+  groupFolderLike?: string;
+  statuses?: WorkerRunStatus[];
+  limit?: number;
+}): WorkerRunRecord[] {
+  const whereClauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (options?.groupFolderLike) {
+    whereClauses.push('group_folder LIKE ?');
+    params.push(options.groupFolderLike);
+  }
+
+  if (options?.statuses && options.statuses.length > 0) {
+    whereClauses.push(
+      `status IN (${options.statuses.map(() => '?').join(', ')})`,
+    );
+    params.push(...options.statuses);
+  }
+
+  const where = whereClauses.length > 0
+    ? `WHERE ${whereClauses.join(' AND ')}`
+    : '';
+  const limit = Math.max(1, Math.min(options?.limit ?? 50, 500));
+
+  params.push(limit);
+
+  return db
+    .prepare(
+      `SELECT run_id, group_folder, status, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary
+       FROM worker_runs
+       ${where}
+       ORDER BY started_at DESC
+       LIMIT ?`,
+    )
+    .all(...params) as WorkerRunRecord[];
 }
 
 // --- JSON migration ---

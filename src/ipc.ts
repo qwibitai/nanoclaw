@@ -258,6 +258,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   queuedDispatch,
                   'failed',
                   `dispatch delivery failed: ${err instanceof Error ? err.message : String(err)}`,
+                  JSON.stringify({
+                    reason: 'dispatch delivery failed',
+                    source_group: sourceGroup,
+                    file: filePath,
+                    error: err instanceof Error ? err.message : String(err),
+                  }),
                 );
               }
               logger.error(

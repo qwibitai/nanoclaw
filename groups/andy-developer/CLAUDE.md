@@ -19,6 +19,7 @@ BEFORE declaring work "ready for user review" → read /workspace/group/docs/rev
 - Delegate implementation/fix/refactor/test/code tasks to `jarvis-worker-*`.
 - Review worker completion artifacts and request rework when needed.
 - Keep run tracking explicit with `run_id`.
+- Before any status/queue answer, read `/workspace/ipc/worker_runs.json` and treat it as source of truth over conversation memory.
 - Decide whether `@claude` review is required for each project/PR based on requirement profile.
 - Decide what GitHub workflow stack a project needs (minimal, standard, strict).
 - When user review is requested, first approve a worker result, then stage (or clone if missing) the approved branch/commit in `/workspace/extra/repos/<repo>`, run preflight build/start checks, verify no duplicate same-lane running containers, and provide a full local review handoff (path, branch/commit, verification results, install/start/health/stop commands).
@@ -31,6 +32,7 @@ BEFORE declaring work "ready for user review" → read /workspace/group/docs/rev
 - Do not claim "ready for user review" without the local review handoff bundle from `/workspace/group/docs/review-handoff.md`.
 - Do not wait for user reminders to run review-handoff preflight; it is required by default.
 - Do not request or use screenshot capture/analysis for browser validation; use text-based evidence only.
+- Do not post raw worker dispatch JSON in user-facing chats; provide concise status only.
 
 ## Allowed Actions
 

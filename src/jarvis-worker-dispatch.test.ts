@@ -4,6 +4,7 @@ import {
   insertWorkerRun,
   completeWorkerRun,
   getWorkerRun,
+  getWorkerRuns,
   updateWorkerRunStatus,
   updateWorkerRunCompletion,
 } from './db.js';
@@ -138,6 +139,14 @@ describe('completeWorkerRun (legacy helper)', () => {
     completeWorkerRun('run-leg2', 'failed');
     expect(getWorkerRun('run-leg2')?.status).toBe('failed');
   });
+
+  it('stores error_details when provided', () => {
+    insertWorkerRun('run-leg3', 'jarvis-worker-1');
+    completeWorkerRun('run-leg3', 'failed_contract', 'missing fields', '{"missing":["commit_sha"]}');
+    const row = getWorkerRun('run-leg3');
+    expect(row?.result_summary).toBe('missing fields');
+    expect(row?.error_details).toBe('{"missing":["commit_sha"]}');
+  });
 });
 
 describe('getWorkerRun', () => {
@@ -145,6 +154,30 @@ describe('getWorkerRun', () => {
 
   it('returns undefined for unknown run_id', () => {
     expect(getWorkerRun('nonexistent')).toBeUndefined();
+  });
+});
+
+describe('getWorkerRuns', () => {
+  beforeEach(() => _initTestDatabase());
+
+  it('filters by group folder prefix and status', () => {
+    insertWorkerRun('run-a', 'jarvis-worker-1');
+    insertWorkerRun('run-b', 'jarvis-worker-2');
+    insertWorkerRun('run-c', 'main');
+    updateWorkerRunStatus('run-a', 'running');
+    updateWorkerRunStatus('run-b', 'failed_contract');
+    updateWorkerRunStatus('run-c', 'running');
+
+    const rows = getWorkerRuns({
+      groupFolderLike: 'jarvis-worker-%',
+      statuses: ['running'],
+      limit: 10,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].run_id).toBe('run-a');
+    expect(rows[0].group_folder).toBe('jarvis-worker-1');
+    expect(rows[0].status).toBe('running');
   });
 });
 

@@ -667,6 +667,24 @@ export interface AvailableGroup {
   isRegistered: boolean;
 }
 
+export interface WorkerRunSnapshotEntry {
+  run_id: string;
+  group_folder: string;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  retry_count: number;
+  result_summary: string | null;
+  error_details: string | null;
+}
+
+export interface WorkerRunsSnapshot {
+  generated_at: string;
+  scope: 'all' | 'jarvis' | 'group';
+  active: WorkerRunSnapshotEntry[];
+  recent: WorkerRunSnapshotEntry[];
+}
+
 /**
  * Write available groups snapshot for the container to read.
  * Only main group can see all available groups (for activation).
@@ -696,4 +714,15 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+}
+
+export function writeWorkerRunsSnapshot(
+  groupFolder: string,
+  snapshot: WorkerRunsSnapshot,
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const workerRunsFile = path.join(groupIpcDir, 'worker_runs.json');
+  fs.writeFileSync(workerRunsFile, JSON.stringify(snapshot, null, 2));
 }
