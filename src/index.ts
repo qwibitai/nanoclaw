@@ -39,6 +39,7 @@ import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { startHttpServer } from './http-server.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -395,6 +396,9 @@ function recoverPendingMessages(): void {
 }
 
 async function main(): Promise<void> {
+  const port = parseInt(process.env.PORT || '3000', 10);
+  startHttpServer(port);
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
