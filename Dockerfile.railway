@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+# Dockerfile for Railway deployment.
+# Runs the NanoClaw orchestrator and agent-runner directly as Node.js processes.
+# No Docker-in-Docker required — agents run as child processes of the main app.
+#
+# REQUIREMENTS:
+#   Create two persistent volumes in the Railway dashboard:
+#     /app/store   — SQLite database + WhatsApp auth credentials
+#     /app/groups  — Per-group CLAUDE.md memory files
+
+FROM node:20-bookworm-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install main app dependencies — cache npm registry between builds
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# Copy source and build TypeScript
+COPY . .
+RUN npm run build
+
+# Build the agent-runner (compiled in-place; runs as a child process)
+WORKDIR /app/container/agent-runner
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+RUN npm run build
+
+WORKDIR /app
+
+EXPOSE 3000
+
+COPY scripts/railway-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+CMD ["/entrypoint.sh"]

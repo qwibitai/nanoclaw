@@ -26,6 +26,10 @@ export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  /** Called with the raw QR string when WhatsApp auth is needed. If provided, the process will NOT exit on QR. */
+  onQrCode?: (qr: string) => void;
+  /** Called once the WhatsApp connection is established. */
+  onAuthenticated?: () => void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -33,6 +37,7 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private reconnecting = false;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -45,9 +50,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this.connectInternal(resolve).catch(reject);
-    });
+    // Resolve as soon as the socket is set up, not when WA auth completes.
+    // This lets main() proceed to start all subsystems regardless of how long
+    // QR scanning or reconnection takes. The internal reconnect loop handles recovery.
+    await this.connectInternal();
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
@@ -75,13 +81,17 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        if (this.opts.onQrCode) {
+          this.opts.onQrCode(qr);
+        } else {
+          const msg =
+            'WhatsApp authentication required. Run /setup in Claude Code.';
+          logger.error(msg);
+          exec(
+            `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+          );
+          setTimeout(() => process.exit(1), 1000);
+        }
       }
 
       if (connection === 'close') {
@@ -91,6 +101,11 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
+          if (this.reconnecting) {
+            logger.debug('Reconnect already in progress, skipping duplicate');
+            return;
+          }
+          this.reconnecting = true;
           logger.info('Reconnecting...');
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
@@ -99,6 +114,8 @@ export class WhatsAppChannel implements Channel {
                 logger.error({ err: err2 }, 'Reconnection retry failed');
               });
             }, 5000);
+          }).finally(() => {
+            this.reconnecting = false;
           });
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
@@ -106,6 +123,7 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnecting = false;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -141,6 +159,9 @@ export class WhatsAppChannel implements Channel {
             );
           }, GROUP_SYNC_INTERVAL_MS);
         }
+
+        // Notify HTTP server that auth is complete
+        this.opts.onAuthenticated?.();
 
         // Signal first connection to caller
         if (onFirstOpen) {
