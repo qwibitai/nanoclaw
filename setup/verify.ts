@@ -12,6 +12,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
+import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import {
   getPlatform,
@@ -104,12 +105,60 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 4. Check WhatsApp auth
-  let whatsappAuth = 'not_found';
-  const authDir = path.join(projectRoot, 'store', 'auth');
-  if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
-    whatsappAuth = 'authenticated';
+  // 4. Check channel auth (per enabled channel)
+  const envVars = readEnvFile([
+    'ENABLED_CHANNELS',
+    'TELEGRAM_BOT_TOKEN',
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'DISCORD_BOT_TOKEN',
+  ]);
+  const enabledChannels = (
+    process.env.ENABLED_CHANNELS ||
+    envVars.ENABLED_CHANNELS ||
+    'whatsapp'
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const channelAuth: Record<string, string> = {};
+  for (const ch of enabledChannels) {
+    switch (ch) {
+      case 'whatsapp': {
+        const authDir = path.join(projectRoot, 'store', 'auth');
+        channelAuth[ch] =
+          fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0
+            ? 'authenticated'
+            : 'not_found';
+        break;
+      }
+      case 'telegram':
+        channelAuth[ch] =
+          process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN
+            ? 'configured'
+            : 'not_found';
+        break;
+      case 'slack':
+        channelAuth[ch] =
+          (process.env.SLACK_BOT_TOKEN || envVars.SLACK_BOT_TOKEN) &&
+          (process.env.SLACK_APP_TOKEN || envVars.SLACK_APP_TOKEN)
+            ? 'configured'
+            : 'not_found';
+        break;
+      case 'discord':
+        channelAuth[ch] =
+          process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN
+            ? 'configured'
+            : 'not_found';
+        break;
+      default:
+        channelAuth[ch] = 'unknown';
+    }
   }
+  const allChannelsAuthed = enabledChannels.every(
+    (ch) => channelAuth[ch] !== 'not_found',
+  );
 
   // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
   let registeredGroups = 0;
@@ -141,18 +190,19 @@ export async function run(_args: string[]): Promise<void> {
   const status =
     service === 'running' &&
     credentials !== 'missing' &&
-    whatsappAuth !== 'not_found' &&
+    allChannelsAuthed &&
     registeredGroups > 0
       ? 'success'
       : 'failed';
 
-  logger.info({ status }, 'Verification complete');
+  logger.info({ status, channelAuth }, 'Verification complete');
 
   emitStatus('VERIFY', {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
     CREDENTIALS: credentials,
-    WHATSAPP_AUTH: whatsappAuth,
+    ENABLED_CHANNELS: enabledChannels.join(','),
+    CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
     STATUS: status,
