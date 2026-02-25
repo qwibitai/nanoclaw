@@ -25,10 +25,7 @@ export {
   checkSystemVersion,
   readManifest,
 } from './manifest.js';
-export {
-  isGitRepo,
-  mergeFile,
-} from './merge.js';
+export { isGitRepo, mergeFile } from './merge.js';
 export {
   loadPathRemap,
   recordPathRemap,

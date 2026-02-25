@@ -2,7 +2,12 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { BACKUP_DIR, BASE_DIR, BASE_INCLUDES, NANOCLAW_DIR } from './constants.js';
+import {
+  BACKUP_DIR,
+  BASE_DIR,
+  BASE_INCLUDES,
+  NANOCLAW_DIR,
+} from './constants.js';
 import { isGitRepo } from './merge.js';
 import { writeState } from './state.js';
 import { SkillState } from './types.js';
@@ -68,11 +73,7 @@ export function initNanoclawDir(): void {
   }
 }
 
-function copyDirFiltered(
-  src: string,
-  dest: string,
-  excludes: string[],
-): void {
+function copyDirFiltered(src: string, dest: string, excludes: string[]): void {
   fs.mkdirSync(dest, { recursive: true });
 
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
