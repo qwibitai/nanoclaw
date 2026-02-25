@@ -174,17 +174,32 @@ describe('pause_task authorization', () => {
   });
 
   it('main group can pause any task', async () => {
-    await processTaskIpc({ type: 'pause_task', taskId: 'task-other' }, 'main', true, deps);
+    await processTaskIpc(
+      { type: 'pause_task', taskId: 'task-other' },
+      'main',
+      true,
+      deps,
+    );
     expect(getTaskById('task-other')!.status).toBe('paused');
   });
 
   it('non-main group can pause its own task', async () => {
-    await processTaskIpc({ type: 'pause_task', taskId: 'task-other' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'pause_task', taskId: 'task-other' },
+      'other-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-other')!.status).toBe('paused');
   });
 
   it('non-main group cannot pause another groups task', async () => {
-    await processTaskIpc({ type: 'pause_task', taskId: 'task-main' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'pause_task', taskId: 'task-main' },
+      'other-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-main')!.status).toBe('active');
   });
 });
@@ -208,17 +223,32 @@ describe('resume_task authorization', () => {
   });
 
   it('main group can resume any task', async () => {
-    await processTaskIpc({ type: 'resume_task', taskId: 'task-paused' }, 'main', true, deps);
+    await processTaskIpc(
+      { type: 'resume_task', taskId: 'task-paused' },
+      'main',
+      true,
+      deps,
+    );
     expect(getTaskById('task-paused')!.status).toBe('active');
   });
 
   it('non-main group can resume its own task', async () => {
-    await processTaskIpc({ type: 'resume_task', taskId: 'task-paused' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'resume_task', taskId: 'task-paused' },
+      'other-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-paused')!.status).toBe('active');
   });
 
   it('non-main group cannot resume another groups task', async () => {
-    await processTaskIpc({ type: 'resume_task', taskId: 'task-paused' }, 'third-group', false, deps);
+    await processTaskIpc(
+      { type: 'resume_task', taskId: 'task-paused' },
+      'third-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-paused')!.status).toBe('paused');
   });
 });
@@ -240,7 +270,12 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc({ type: 'cancel_task', taskId: 'task-to-cancel' }, 'main', true, deps);
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-to-cancel' },
+      'main',
+      true,
+      deps,
+    );
     expect(getTaskById('task-to-cancel')).toBeUndefined();
   });
 
@@ -258,7 +293,12 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc({ type: 'cancel_task', taskId: 'task-own' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-own' },
+      'other-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-own')).toBeUndefined();
   });
 
@@ -276,7 +316,12 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc({ type: 'cancel_task', taskId: 'task-foreign' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-foreign' },
+      'other-group',
+      false,
+      deps,
+    );
     expect(getTaskById('task-foreign')).toBeDefined();
   });
 });
@@ -325,7 +370,12 @@ describe('register_group authorization', () => {
 describe('refresh_groups authorization', () => {
   it('non-main group cannot trigger refresh', async () => {
     // This should be silently blocked (no crash, no effect)
-    await processTaskIpc({ type: 'refresh_groups' }, 'other-group', false, deps);
+    await processTaskIpc(
+      { type: 'refresh_groups' },
+      'other-group',
+      false,
+      deps,
+    );
     // If we got here without error, the auth gate worked
   });
 });
@@ -352,21 +402,31 @@ describe('IPC message authorization', () => {
   });
 
   it('non-main group can send to its own chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'other@g.us', groups)).toBe(true);
+    expect(
+      isMessageAuthorized('other-group', false, 'other@g.us', groups),
+    ).toBe(true);
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(false);
-    expect(isMessageAuthorized('other-group', false, 'third@g.us', groups)).toBe(false);
+    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(
+      false,
+    );
+    expect(
+      isMessageAuthorized('other-group', false, 'third@g.us', groups),
+    ).toBe(false);
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(isMessageAuthorized('other-group', false, 'unknown@g.us', groups)).toBe(false);
+    expect(
+      isMessageAuthorized('other-group', false, 'unknown@g.us', groups),
+    ).toBe(false);
   });
 
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
-    expect(isMessageAuthorized('main', true, 'unknown@g.us', groups)).toBe(true);
+    expect(isMessageAuthorized('main', true, 'unknown@g.us', groups)).toBe(
+      true,
+    );
   });
 });
 
@@ -392,7 +452,9 @@ describe('schedule_task schedule types', () => {
     expect(tasks[0].schedule_type).toBe('cron');
     expect(tasks[0].next_run).toBeTruthy();
     // next_run should be a valid ISO date in the future
-    expect(new Date(tasks[0].next_run!).getTime()).toBeGreaterThan(Date.now() - 60000);
+    expect(new Date(tasks[0].next_run!).getTime()).toBeGreaterThan(
+      Date.now() - 60000,
+    );
   });
 
   it('rejects invalid cron expression', async () => {

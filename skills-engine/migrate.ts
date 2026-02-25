@@ -42,11 +42,7 @@ export function migrateExisting(): void {
 
     if (diff.trim()) {
       fs.mkdirSync(customDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(projectRoot, patchRelPath),
-        diff,
-        'utf-8',
-      );
+      fs.writeFileSync(path.join(projectRoot, patchRelPath), diff, 'utf-8');
 
       // Extract modified file paths from the diff
       const filesModified = [...diff.matchAll(/^diff -ruN .+ (.+)$/gm)]
