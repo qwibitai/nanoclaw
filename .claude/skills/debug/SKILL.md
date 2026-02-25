@@ -43,9 +43,11 @@ Set `LOG_LEVEL=debug` for verbose output:
 # For development
 LOG_LEVEL=debug npm run dev
 
-# For launchd service, add to plist EnvironmentVariables:
+# For launchd service (macOS), add to plist EnvironmentVariables:
 <key>LOG_LEVEL</key>
 <string>debug</string>
+# For systemd service (Linux), add to unit [Service] section:
+# Environment=LOG_LEVEL=debug
 ```
 
 Debug level shows:

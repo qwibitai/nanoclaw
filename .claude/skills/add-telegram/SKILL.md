@@ -15,11 +15,15 @@ Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase
 
 ### Ask the user
 
-1. **Mode**: Replace WhatsApp or add alongside it?
-   - Replace → will set `TELEGRAM_ONLY=true`
-   - Alongside → both channels active (default)
+Use `AskUserQuestion` to collect configuration:
 
-2. **Do they already have a bot token?** If yes, collect it now. If no, we'll create one in Phase 3.
+AskUserQuestion: Should Telegram replace WhatsApp or run alongside it?
+- **Replace WhatsApp** - Telegram will be the only channel (sets TELEGRAM_ONLY=true)
+- **Alongside** - Both Telegram and WhatsApp channels active
+
+AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
+
+If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
@@ -118,7 +122,8 @@ Tell the user:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 ## Phase 4: Registration
@@ -183,10 +188,11 @@ tail -f logs/nanoclaw.log
 
 ### Bot not responding
 
-1. Check `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
-2. Check chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`
-3. For non-main chats: message must include trigger pattern
-4. Service is running: `launchctl list | grep nanoclaw`
+Check:
+1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
+3. For non-main chats: message includes trigger pattern
+4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
 
 ### Bot only responds to @mentions in groups
 
@@ -202,6 +208,36 @@ If `/chatid` doesn't work:
 
 ## After Setup
 
-Ask the user:
+If running `npm run dev` while the service is active:
+```bash
+# macOS:
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+npm run dev
+# When done testing:
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+# Linux:
+# systemctl --user stop nanoclaw
+# npm run dev
+# systemctl --user start nanoclaw
+```
 
-> Would you like to add Agent Swarm support? Each subagent appears as a different bot in the Telegram group. If interested, run `/add-telegram-swarm`.
+## Agent Swarms (Teams)
+
+After completing the Telegram setup, use `AskUserQuestion`:
+
+AskUserQuestion: Would you like to add Agent Swarm support? Without it, Agent Teams still work — they just operate behind the scenes. With Swarm support, each subagent appears as a different bot in the Telegram group so you can see who's saying what and have interactive team sessions.
+
+If they say yes, invoke the `/add-telegram-swarm` skill.
+
+## Removal
+
+To remove Telegram integration:
+
+1. Delete `src/channels/telegram.ts`
+2. Remove `TelegramChannel` import and creation from `src/index.ts`
+3. Remove `channels` array and revert to using `whatsapp` directly in `processGroupMessages`, scheduler deps, and IPC deps
+4. Revert `getAvailableGroups()` filter to only include `@g.us` chats
+5. Remove Telegram config (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ONLY`) from `src/config.ts`
+6. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
+7. Uninstall: `npm uninstall grammy`
+8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

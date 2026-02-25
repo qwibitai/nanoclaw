@@ -28,6 +28,9 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
+| `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
+| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
+| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
 ## Development
 
@@ -41,8 +44,15 @@ npm run build        # Compile TypeScript
 
 Service management:
 ```bash
+# macOS (launchd)
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+
+# Linux (systemd)
+systemctl --user start nanoclaw
+systemctl --user stop nanoclaw
+systemctl --user restart nanoclaw
 ```
 
 ## Container Build Cache
