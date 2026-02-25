@@ -2,6 +2,13 @@
 
 Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/reference/REQUIREMENTS.md](docs/reference/REQUIREMENTS.md) for architecture decisions.
 
+## Instruction Sync Contract
+
+- `CLAUDE.md` is the canonical instruction source for this repository.
+- `AGENTS.md` is a mirror/bridge for Codex and must remain fully aligned with this file.
+- Codex task preflight: read this file first, then load only the docs referenced by relevant `Docs Index` trigger lines.
+- Any policy/process change here must be reflected in `AGENTS.md` in the same change.
+
 ## Quick Context
 
 Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
@@ -21,6 +28,7 @@ BEFORE changing worker dispatch validation/contracts → read docs/workflow/nano
 BEFORE changing worker container runtime/mounts/model config → read docs/workflow/nanoclaw-jarvis-worker-runtime.md
 BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/nanoclaw-github-control-plane.md
 BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
+BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md
 BEFORE finalizing any Andy/Jarvis operating agreement change → read docs/operations/agreement-sync-protocol.md
 BEFORE deciding runtime-local vs prebaked container placement → read docs/operations/runtime-vs-prebaked-boundary.md
 BEFORE debugging Andy/Jarvis worker flow issues → read .claude/rules/nanoclaw-jarvis-debug-loop.md

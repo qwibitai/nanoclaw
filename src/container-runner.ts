@@ -50,6 +50,56 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
+  if (!fs.existsSync(skillsSrc)) return;
+
+  fs.mkdirSync(skillsDst, { recursive: true });
+
+  for (const entry of fs.readdirSync(skillsSrc, { withFileTypes: true })) {
+    // Hidden metadata folders (for example ".docs") can be self-referential.
+    if (entry.name.startsWith('.')) continue;
+
+    const srcPath = path.join(skillsSrc, entry.name);
+
+    let isDirectory = false;
+    try {
+      isDirectory = fs.statSync(srcPath).isDirectory();
+    } catch (err) {
+      logger.warn({ err, srcPath }, 'Failed to stat skill source entry');
+      continue;
+    }
+    if (!isDirectory) continue;
+
+    const dstPath = path.join(skillsDst, entry.name);
+
+    // Replace stale symlink destinations with real copied directories.
+    if (fs.existsSync(dstPath)) {
+      try {
+        if (fs.lstatSync(dstPath).isSymbolicLink()) {
+          fs.rmSync(dstPath, { force: true, recursive: true });
+        }
+      } catch (err) {
+        logger.warn({ err, dstPath }, 'Failed to inspect skill destination entry');
+        continue;
+      }
+    }
+
+    const srcReal = fs.realpathSync(srcPath);
+    const dstReal = fs.existsSync(dstPath) ? fs.realpathSync(dstPath) : null;
+    if (
+      dstReal &&
+      (srcReal === dstReal ||
+        srcReal.startsWith(`${dstReal}${path.sep}`) ||
+        dstReal.startsWith(`${srcReal}${path.sep}`))
+    ) {
+      logger.warn({ srcPath, dstPath, srcReal, dstReal }, 'Skipping overlapping skill copy');
+      continue;
+    }
+
+    fs.cpSync(srcPath, dstPath, { recursive: true, dereference: true, force: true });
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -125,14 +175,7 @@ function buildVolumeMounts(
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
-  }
+  syncContainerSkills(skillsSrc, skillsDst);
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',
@@ -192,14 +235,20 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Run as host user so bind-mounted files are accessible.
-  // Skip when running as root (uid 0), as the container's node user (uid 1000),
-  // or when getuid is unavailable (native Windows without WSL).
-  const hostUid = process.getuid?.();
-  const hostGid = process.getgid?.();
-  if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+  // Apple Container runtime crashes with XPC "Connection interrupted"
+  // when using --user. Let the image's default non-root user run instead.
+  // Keep host-user mapping only for non-Apple runtimes.
+  const supportsUserOverride = CONTAINER_RUNTIME_BIN !== 'container';
+  if (supportsUserOverride) {
+    // Run as host user so bind-mounted files are accessible.
+    // Skip when running as root (uid 0), as the container's node user (uid 1000),
+    // or when getuid is unavailable (native Windows without WSL).
+    const hostUid = process.getuid?.();
+    const hostGid = process.getgid?.();
+    if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
+      args.push('--user', `${hostUid}:${hostGid}`);
+      args.push('-e', 'HOME=/home/node');
+    }
   }
 
   for (const mount of mounts) {
