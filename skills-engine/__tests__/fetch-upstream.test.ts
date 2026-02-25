@@ -16,13 +16,13 @@ describe('fetch-upstream.sh', () => {
     upstreamBareDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-upstream-'),
     );
-    execSync('git init --bare', { cwd: upstreamBareDir, stdio: 'pipe' });
+    execSync('git init --bare -b main', { cwd: upstreamBareDir, stdio: 'pipe' });
 
     // Create a working repo, add files, push to the bare repo
     const seedDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-seed-'),
     );
-    execSync('git init', { cwd: seedDir, stdio: 'pipe' });
+    execSync('git init -b main', { cwd: seedDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
       cwd: seedDir,
       stdio: 'pipe',
@@ -45,21 +45,10 @@ describe('fetch-upstream.sh', () => {
       cwd: seedDir,
       stdio: 'pipe',
     });
-    execSync('git push origin main 2>/dev/null || git push origin master', {
+    execSync('git push origin main', {
       cwd: seedDir,
       stdio: 'pipe',
-      shell: '/bin/bash',
     });
-
-    // Rename the default branch to main in the bare repo if needed
-    try {
-      execSync('git symbolic-ref HEAD refs/heads/main', {
-        cwd: upstreamBareDir,
-        stdio: 'pipe',
-      });
-    } catch {
-      // Already on main
-    }
 
     fs.rmSync(seedDir, { recursive: true, force: true });
 
@@ -67,7 +56,7 @@ describe('fetch-upstream.sh', () => {
     projectDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-project-'),
     );
-    execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+    execSync('git init -b main', { cwd: projectDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
       cwd: projectDir,
       stdio: 'pipe',
