@@ -1,16 +1,16 @@
 #!/bin/bash
-# Build the NanoClaw agent container image
+# Build the CodeClaw agent container image
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-IMAGE_NAME="nanoclaw-agent"
+IMAGE_NAME="codeclaw-agent"
 TAG="${1:-latest}"
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-container}"
 
-echo "Building NanoClaw agent container image..."
+echo "Building CodeClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 
 ${CONTAINER_RUNTIME} build -t "${IMAGE_NAME}:${TAG}" .

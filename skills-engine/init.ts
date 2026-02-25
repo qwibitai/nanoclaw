@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { BACKUP_DIR, BASE_DIR, BASE_INCLUDES, NANOCLAW_DIR } from './constants.js';
+import { BACKUP_DIR, BASE_DIR, BASE_INCLUDES, CODECLAW_DIR } from './constants.js';
 import { isGitRepo } from './merge.js';
 import { writeState } from './state.js';
 import { SkillState } from './types.js';
@@ -10,7 +10,7 @@ import { SkillState } from './types.js';
 // Directories/files to always exclude from base snapshot
 const BASE_EXCLUDES = [
   'node_modules',
-  '.nanoclaw',
+  '.codeclaw',
   '.git',
   'dist',
   'data',
@@ -19,9 +19,9 @@ const BASE_EXCLUDES = [
   'logs',
 ];
 
-export function initNanoclawDir(): void {
+export function initCodeclawDir(): void {
   const projectRoot = process.cwd();
-  const nanoclawDir = path.join(projectRoot, NANOCLAW_DIR);
+  const codeclawDir = path.join(projectRoot, CODECLAW_DIR);
   const baseDir = path.join(projectRoot, BASE_DIR);
 
   // Create structure

@@ -1,12 +1,12 @@
 # Add Discord Channel
 
-This skill adds Discord support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Discord support to CodeClaw using the skills engine for deterministic code changes, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Read `.codeclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -26,7 +26,7 @@ Run the skills engine to apply this skill's code package. The package files are 
 
 ### Initialize skills system (if needed)
 
-If `.nanoclaw/` directory doesn't exist yet:
+If `.codeclaw/` directory doesn't exist yet:
 
 ```bash
 npx tsx scripts/apply-skill.ts --init
@@ -48,7 +48,7 @@ This deterministically:
 - Three-way merges updated routing tests into `src/routing.test.ts`
 - Installs the `discord.js` npm dependency
 - Updates `.env.example` with `DISCORD_BOT_TOKEN` and `DISCORD_ONLY`
-- Records the application in `.nanoclaw/state.yaml`
+- Records the application in `.codeclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
 - `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
@@ -111,7 +111,7 @@ The container reads environment from `data/env/env`, not `.env` directly.
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.codeclaw
 ```
 
 ## Phase 4: Registration
@@ -173,7 +173,7 @@ Tell the user:
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/codeclaw.log
 ```
 
 ## Troubleshooting
@@ -183,7 +183,7 @@ tail -f logs/nanoclaw.log
 1. Check `DISCORD_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'dc:%'"`
 3. For non-main channels: message must include trigger pattern (@mention the bot)
-4. Service is running: `launchctl list | grep nanoclaw`
+4. Service is running: `launchctl list | grep codeclaw`
 5. Verify the bot has been invited to the server (check OAuth2 URL was used)
 
 ### Bot only responds to @mentions
@@ -198,7 +198,7 @@ If the bot connects but can't read messages, ensure:
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Select your application > **Bot** tab
 3. Under **Privileged Gateway Intents**, enable **Message Content Intent**
-4. Restart NanoClaw
+4. Restart CodeClaw
 
 ### Getting Channel ID
 
@@ -212,6 +212,6 @@ The Discord bot supports:
 - Text messages in registered channels
 - Attachment descriptions (images, videos, files shown as placeholders)
 - Reply context (shows who the user is replying to)
-- @mention translation (Discord `<@botId>` → NanoClaw trigger format)
+- @mention translation (Discord `<@botId>` → CodeClaw trigger format)
 - Message splitting for responses over 2000 characters
 - Typing indicators while the agent processes

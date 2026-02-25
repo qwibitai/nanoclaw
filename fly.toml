@@ -1,7 +1,7 @@
-# NanoClaw Fly.io Configuration
+# CodeClaw Fly.io Configuration
 # Deploy with: fly launch / fly deploy
 
-app = "nanoclaw"
+app = "codeclaw"
 primary_region = "iad"
 
 [build]
@@ -23,5 +23,5 @@ primary_region = "iad"
   memory = "1024mb"
 
 [mounts]
-  source = "nanoclaw_data"
+  source = "codeclaw_data"
   destination = "/data"

@@ -5,7 +5,7 @@ import { EventEmitter } from 'events';
 
 // Mock config
 vi.mock('../config.js', () => ({
-  STORE_DIR: '/tmp/nanoclaw-test-store',
+  STORE_DIR: '/tmp/codeclaw-test-store',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
 }));

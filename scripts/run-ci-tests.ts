@@ -31,7 +31,7 @@ async function runMatrixEntry(
   projectRoot: string,
   entry: MatrixEntry,
 ): Promise<TestResult> {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-ci-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeclaw-ci-'));
 
   try {
     // Copy project to temp dir (exclude heavy/irrelevant dirs)
@@ -42,7 +42,7 @@ async function runMatrixEntry(
       'data',
       'store',
       'logs',
-      '.nanoclaw',
+      '.codeclaw',
     ]);
 
     // Install dependencies
@@ -52,8 +52,8 @@ async function runMatrixEntry(
       timeout: 120_000,
     });
 
-    // Initialize nanoclaw dir
-    execSync('npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index.js\'; initNanoclawDir();"', {
+    // Initialize codeclaw dir
+    execSync('npx tsx -e "import { initCodeclawDir } from \'./skills-engine/index.js\'; initCodeclawDir();"', {
       cwd: tmpDir,
       stdio: 'pipe',
       timeout: 30_000,

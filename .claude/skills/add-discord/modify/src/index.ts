@@ -298,7 +298,7 @@ async function startMessageLoop(): Promise<void> {
   }
   messageLoopRunning = true;
 
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+  logger.info(`CodeClaw running (trigger: @${ASSISTANT_NAME})`);
 
   while (true) {
     try {
@@ -425,7 +425,7 @@ function ensureContainerSystemRunning(): void {
         '║  2. Run: container system start                               ║',
       );
       console.error(
-        '║  3. Restart NanoClaw                                          ║',
+        '║  3. Restart CodeClaw                                          ║',
       );
       console.error(
         '╚════════════════════════════════════════════════════════════════╝\n',
@@ -434,7 +434,7 @@ function ensureContainerSystemRunning(): void {
     }
   }
 
-  // Kill and clean up orphaned NanoClaw containers from previous runs
+  // Kill and clean up orphaned CodeClaw containers from previous runs
   try {
     const output = execSync('container ls --format json', {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -442,7 +442,7 @@ function ensureContainerSystemRunning(): void {
     });
     const containers: { status: string; configuration: { id: string } }[] = JSON.parse(output || '[]');
     const orphans = containers
-      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('nanoclaw-'))
+      .filter((c) => c.status === 'running' && c.configuration.id.startsWith('codeclaw-'))
       .map((c) => c.configuration.id);
     for (const name of orphans) {
       try {
@@ -531,7 +531,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClaw');
+    logger.error({ err }, 'Failed to start CodeClaw');
     process.exit(1);
   });
 }

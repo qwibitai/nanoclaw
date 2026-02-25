@@ -11,7 +11,7 @@ describe('lock', () => {
 
   beforeEach(() => {
     tmpDir = createTempDir();
-    fs.mkdirSync(path.join(tmpDir, '.nanoclaw'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.codeclaw'), { recursive: true });
     process.chdir(tmpDir);
   });
 

@@ -332,8 +332,8 @@ async function prepareRepoCheckout(
 
   // Set git config for bot identity (token-based auth for pushes)
   try {
-    execSync(`git -C "${repoDir}" config user.name "NanoClaw AI"`, { stdio: 'pipe' });
-    execSync(`git -C "${repoDir}" config user.email "nanoclaw[bot]@users.noreply.github.com"`, { stdio: 'pipe' });
+    execSync(`git -C "${repoDir}" config user.name "CodeClaw AI"`, { stdio: 'pipe' });
+    execSync(`git -C "${repoDir}" config user.email "codeclaw[bot]@users.noreply.github.com"`, { stdio: 'pipe' });
   } catch {
     // Non-fatal
   }
@@ -631,7 +631,7 @@ async function main(): Promise<void> {
       },
       onManifestCallback: async (code: string) => {
         const html = await handleManifestCallback(code);
-        logger.info('GitHub App setup complete! Restart NanoClaw to load credentials.');
+        logger.info('GitHub App setup complete! Restart CodeClaw to load credentials.');
         return html;
       },
     });
@@ -679,7 +679,7 @@ async function main(): Promise<void> {
   recoverPendingMessages();
   startReconciliationLoop();
 
-  logger.info({ port: PORT }, 'NanoClaw running (GitHub webhook mode)');
+  logger.info({ port: PORT }, 'CodeClaw running (GitHub webhook mode)');
 }
 
 // Guard: only run when executed directly, not when imported by tests
@@ -689,7 +689,7 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
-    logger.error({ err }, 'Failed to start NanoClaw');
+    logger.error({ err }, 'Failed to start CodeClaw');
     process.exit(1);
   });
 }

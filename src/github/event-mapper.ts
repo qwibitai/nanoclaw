@@ -1,7 +1,7 @@
 /**
  * GitHub Event Mapper
  * Converts webhook payloads into normalized GitHubEvent objects
- * for the NanoClaw message pipeline.
+ * for the CodeClaw message pipeline.
  */
 import { escapeXml } from '../router.js';
 

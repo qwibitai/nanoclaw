@@ -4,7 +4,7 @@
 Added two new configuration exports for Discord channel support.
 
 ## Key sections
-- **readEnvFile call**: Must include `DISCORD_BOT_TOKEN` and `DISCORD_ONLY` in the keys array. NanoClaw does NOT load `.env` into `process.env` — all `.env` values must be explicitly requested via `readEnvFile()`.
+- **readEnvFile call**: Must include `DISCORD_BOT_TOKEN` and `DISCORD_ONLY` in the keys array. CodeClaw does NOT load `.env` into `process.env` — all `.env` values must be explicitly requested via `readEnvFile()`.
 - **DISCORD_BOT_TOKEN**: Read from `process.env` first, then `envConfig` fallback, defaults to empty string (channel disabled when empty)
 - **DISCORD_ONLY**: Boolean flag from `process.env` or `envConfig`, when `true` disables WhatsApp channel creation
 

@@ -1,20 +1,24 @@
-# NanoClaw
+# CodeClaw
 
-Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
+GitHub AI coding agent. See [README.md](README.md) for setup. See [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) for architecture decisions.
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that receives GitHub webhooks, routes events to Claude Agent SDK running in containers (Linux VMs). Each repo gets isolated filesystem and memory. Agents respond via the GitHub API (comments, reviews, PRs).
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/index.ts` | Orchestrator: webhook handling, repo checkout, agent invocation |
+| `src/webhook-server.ts` | HTTP server for GitHub webhooks |
+| `src/channels/github.ts` | GitHub channel: post comments, reviews, PRs via Octokit |
+| `src/github/auth.ts` | GitHub App JWT auth + installation token caching |
+| `src/github/event-mapper.ts` | Webhook payload → normalized messages |
+| `src/github/access-control.ts` | Permission checking + rate limiting |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
+| `src/config.ts` | Paths, intervals, container config |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
@@ -25,12 +29,10 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 
 | Skill | When to Use |
 |-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
+| `/setup` | First-time installation, GitHub App creation, service configuration |
+| `/customize` | Adding integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
-| `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
-| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
-| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/update` | Pull upstream changes, merge with customizations, run migrations |
 
 ## Development
 
@@ -45,14 +47,14 @@ npm run build        # Compile TypeScript
 Service management:
 ```bash
 # macOS (launchd)
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
+launchctl load ~/Library/LaunchAgents/com.codeclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.codeclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.codeclaw  # restart
 
 # Linux (systemd)
-systemctl --user start nanoclaw
-systemctl --user stop nanoclaw
-systemctl --user restart nanoclaw
+systemctl --user start codeclaw
+systemctl --user stop codeclaw
+systemctl --user restart codeclaw
 ```
 
 ## Container Build Cache

@@ -17,7 +17,7 @@ describe('update-core.ts CLI flags', () => {
     initGitRepo(tmpDir);
 
     // Write state file
-    const statePath = path.join(tmpDir, '.nanoclaw', 'state.yaml');
+    const statePath = path.join(tmpDir, '.codeclaw', 'state.yaml');
     fs.writeFileSync(
       statePath,
       stringify({
@@ -44,7 +44,7 @@ describe('update-core.ts CLI flags', () => {
   }
 
   it('--json --preview-only outputs JSON preview without applying', () => {
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+    const baseDir = path.join(tmpDir, '.codeclaw', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'original');
 

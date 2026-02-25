@@ -1,7 +1,7 @@
 /**
  * GitHub App Authentication
  * Manages JWT generation and installation token caching via @octokit/auth-app.
- * The private key lives at ~/.config/nanoclaw/github-app.pem (outside project root).
+ * The private key lives at ~/.config/codeclaw/github-app.pem (outside project root).
  * Containers only receive short-lived installation tokens, never the private key.
  */
 import fs from 'fs';
@@ -43,7 +43,7 @@ export class GitHubTokenManager {
     });
   }
 
-  /** Get the app slug (login name like "nanoclaw-ai[bot]") */
+  /** Get the app slug (login name like "codeclaw-ai[bot]") */
   async getAppSlug(): Promise<string> {
     if (this.config.appSlug) return this.config.appSlug;
     const { data } = await this.appOctokit.apps.getAuthenticated();
@@ -131,7 +131,7 @@ export function loadGitHubAppConfig(): GitHubAppConfig | null {
   let privateKey = env.GITHUB_PRIVATE_KEY;
   if (!privateKey) {
     const keyPath = env.GITHUB_PRIVATE_KEY_PATH ||
-      path.join(os.homedir(), '.config', 'nanoclaw', 'github-app.pem');
+      path.join(os.homedir(), '.config', 'codeclaw', 'github-app.pem');
     try {
       privateKey = fs.readFileSync(keyPath, 'utf-8');
     } catch {

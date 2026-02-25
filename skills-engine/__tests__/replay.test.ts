@@ -63,7 +63,7 @@ describe('replay', () => {
   describe('replaySkills', () => {
     it('replays a single skill from base', async () => {
       // Set up base file
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
       fs.mkdirSync(baseDir, { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'config.ts'), 'base content\n');
 
@@ -112,7 +112,7 @@ describe('replay', () => {
 
     it('replays two skills in order', async () => {
       // Set up base
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
       fs.mkdirSync(baseDir, { recursive: true });
       fs.writeFileSync(
         path.join(baseDir, 'config.ts'),
@@ -184,7 +184,7 @@ describe('replay', () => {
       // After reset, current=base. Skill 1 merges cleanly (changes line 1).
       // Skill 2 also changes line 1 differently → conflict with skill 1's result.
       // Skill 3 should NOT be processed due to break-on-conflict.
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
       fs.mkdirSync(baseDir, { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'config.ts'), 'line1\n');
 
@@ -253,7 +253,7 @@ describe('replay', () => {
 
     it('resets files to base before replay', async () => {
       // Set up base
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
       fs.mkdirSync(baseDir, { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'config.ts'), 'base content\n');
 

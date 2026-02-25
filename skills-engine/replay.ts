@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
+import { BASE_DIR, CODECLAW_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { readManifest } from './manifest.js';
 import { mergeFile } from './merge.js';
@@ -177,7 +177,7 @@ export async function replaySkills(
 
         const tmpCurrent = path.join(
           os.tmpdir(),
-          `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
+          `codeclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
         );
         fs.copyFileSync(currentPath, tmpCurrent);
 

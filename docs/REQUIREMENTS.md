@@ -1,14 +1,12 @@
-# NanoClaw Requirements
+# CodeClaw Requirements
 
-Original requirements and design decisions from the project creator.
+Architecture decisions and design rationale.
 
 ---
 
 ## Why This Exists
 
-This is a lightweight, secure alternative to OpenClaw (formerly ClawBot). That project became a monstrosity - 4-5 different processes running different gateways, endless configuration files, endless integrations. It's a security nightmare where agents don't run in isolated processes; there's all kinds of leaky workarounds trying to prevent them from accessing parts of the system they shouldn't. It's impossible for anyone to realistically understand the whole codebase. When you run it you're kind of just yoloing it.
-
-NanoClaw gives you the core functionality without that mess.
+A lightweight, secure GitHub coding agent. CodeClaw receives webhook events from your repos, runs Claude agents in isolated containers with the repo checked out, and responds via the GitHub API (comments, reviews, pull requests).
 
 ---
 
@@ -20,177 +18,139 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
 ### Built for One User
 
-This isn't a framework or a platform. It's working software for my specific needs. I use WhatsApp and Email, so it supports WhatsApp and Email. I don't use Telegram, so it doesn't support Telegram. I add the integrations I actually want, not every possible integration.
+This is working software for personal use on your own repos. You install a GitHub App on the repos you want, and the bot responds when mentioned.
 
 ### Customization = Code Changes
 
-No configuration sprawl. If you want different behavior, modify the code. The codebase is small enough that this is safe and practical. Very minimal things like the trigger word are in config. Everything else - just change the code to do what you want.
+No configuration sprawl. If you want different behavior, modify the code. The codebase is small enough that this is safe and practical.
 
 ### AI-Native Development
 
-I don't need an installation wizard - Claude Code guides the setup. I don't need a monitoring dashboard - I ask Claude Code what's happening. I don't need elaborate logging UIs - I ask Claude to read the logs. I don't need debugging tools - I describe the problem and Claude fixes it.
-
-The codebase assumes you have an AI collaborator. It doesn't need to be excessively self-documenting or self-debugging because Claude is always there.
-
-### Skills Over Features
-
-When people contribute, they shouldn't add "Telegram support alongside WhatsApp." They should contribute a skill like `/add-telegram` that transforms the codebase. Users fork the repo, run skills to customize, and end up with clean code that does exactly what they need - not a bloated system trying to support everyone's use case simultaneously.
-
----
-
-## RFS (Request for Skills)
-
-Skills we'd love contributors to build:
-
-### Communication Channels
-Skills to add or switch to different messaging platforms:
-- `/add-telegram` - Add Telegram as an input channel
-- `/add-slack` - Add Slack as an input channel
-- `/add-discord` - Add Discord as an input channel
-- `/add-sms` - Add SMS via Twilio or similar
-- `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
-
-### Container Runtime
-The project uses Docker by default (cross-platform). For macOS users who prefer Apple Container:
-- `/convert-to-apple-container` - Switch from Docker to Apple Container (macOS-only)
-
-### Platform Support
-- `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
-- `/setup-windows` - Windows support via WSL2 + Docker
-
----
-
-## Vision
-
-A personal Claude assistant accessible via WhatsApp, with minimal custom code.
-
-**Core components:**
-- **Claude Agent SDK** as the core agent
-- **Containers** for isolated agent execution (Linux VMs)
-- **WhatsApp** as the primary I/O channel
-- **Persistent memory** per conversation and globally
-- **Scheduled tasks** that run Claude and can message back
-- **Web access** for search and browsing
-- **Browser automation** via agent-browser
-
-**Implementation approach:**
-- Use existing tools (WhatsApp connector, Claude Agent SDK, MCP servers)
-- Minimal glue code
-- File-based systems where possible (CLAUDE.md for memory, folders for groups)
+The codebase assumes you have an AI collaborator (Claude Code). It doesn't need to be excessively self-documenting because Claude is always there.
 
 ---
 
 ## Architecture Decisions
 
+### Webhook-Driven
+
+- GitHub App sends webhook events to CodeClaw's HTTP server
+- Events: `issues`, `issue_comment`, `pull_request`, `pull_request_review`, `pull_request_review_comment`
+- Signature verification via HMAC-SHA256
+- Idempotent processing via `processed_events` table in SQLite
+- Bot loop prevention: events from bot accounts are rejected
+
 ### Message Routing
-- A router listens to WhatsApp and routes messages based on configuration
-- Only messages from registered groups are processed
-- Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
-- Unregistered groups are ignored completely
+
+- Webhook events are normalized into a common message format
+- JID format: `gh:owner/repo` (repo-level), `gh:owner/repo#issue:42` (thread-level)
+- Only installed repos are processed
+- One group per repo (auto-registered on first event)
+
+### Access Control
+
+- Per-repo configuration via `.github/codeclaw.yml`
+- Permission levels checked against GitHub collaborator API
+- Configurable minimum permission (default: `triage`)
+- Optional external contributor access
+- In-memory rate limiting per user per repo
+
+### Repo Checkout
+
+- Repos are cloned/fetched before each agent run
+- Checkout mounted at `/workspace/repo` in the container (read-write)
+- GitHub installation token passed to container via stdin (never in env vars)
+- Agent can push commits, create branches
 
 ### Memory System
-- **Per-group memory**: Each group has a folder with its own `CLAUDE.md`
-- **Global memory**: Root `CLAUDE.md` is read by all groups, but only writable from "main" (self-chat)
-- **Files**: Groups can create/read files in their folder and reference them
-- Agent runs in the group's folder, automatically inherits both CLAUDE.md files
 
-### Session Management
-- Each group maintains a conversation session (via Claude Agent SDK)
-- Sessions auto-compact when context gets too long, preserving critical information
+- **Per-group memory**: Each group (repo) has a folder with its own `CLAUDE.md`
+- **Global memory**: `groups/global/CLAUDE.md` is read by all groups
+- **Files**: Groups can create/read files in their folder
 
 ### Container Isolation
+
 - All agents run inside containers (lightweight Linux VMs)
 - Each agent invocation spawns a container with mounted directories
-- Containers provide filesystem isolation - agents can only see mounted paths
+- Containers provide filesystem isolation — agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
 - Browser automation via agent-browser with Chromium in the container
 
+### Structured Output
+
+- Agents can produce structured GitHub responses via IPC:
+  - `github_comment` — post a comment on an issue/PR
+  - `github_review` — submit a pull request review (approve, request changes, comment)
+  - `github_create_pr` — create a new pull request
+- Plain text output is posted as a comment on the originating thread
+
 ### Scheduled Tasks
-- Users can ask Claude to schedule recurring or one-time tasks from any group
-- Tasks run as full agents in the context of the group that created them
-- Tasks have access to all tools including Bash (safe in container)
-- Tasks can optionally send messages to their group via `send_message` tool, or complete silently
-- Task runs are logged to the database with duration and result
-- Schedule types: cron expressions, intervals (ms), or one-time (ISO timestamp)
-- From main: can schedule tasks for any group, view/manage all tasks
-- From other groups: can only manage that group's tasks
 
-### Group Management
-- New groups are added explicitly via the main channel
-- Groups are registered in SQLite (via the main channel or IPC `register_group` command)
-- Each group gets a dedicated folder under `groups/`
-- Groups can have additional directories mounted via `containerConfig`
+- Users can schedule recurring or one-time tasks
+- Tasks run as full agents in their group's container context
+- Schedule types: cron expressions, intervals, or one-time timestamps
+- Task runs logged to SQLite with duration and result
 
-### Main Channel Privileges
-- Main channel is the admin/control group (typically self-chat)
-- Can write to global memory (`groups/CLAUDE.md`)
-- Can schedule tasks for any group
-- Can view and manage tasks from all groups
-- Can configure additional directory mounts for any group
+### GitHub App Setup
+
+- One-click setup via GitHub App Manifest flow
+- Visit `/github/setup` to create the App automatically
+- Callback handler exchanges the code for App credentials
+- Private key stored at `~/.config/codeclaw/github-app.pem`
 
 ---
 
 ## Integration Points
 
-### WhatsApp
-- Using baileys library for WhatsApp Web connection
-- Messages stored in SQLite, polled by router
-- QR code authentication during setup
+### GitHub
+
+- GitHub App for bot identity (JWT auth, installation tokens)
+- Octokit for API calls (comments, reviews, PRs, permission checks)
+- Webhook signature verification
+- Installation token caching with expiry
 
 ### Scheduler
+
 - Built-in scheduler runs on the host, spawns containers for task execution
-- Custom `nanoclaw` MCP server (inside container) provides scheduling tools
+- Custom `codeclaw` MCP server (inside container) provides scheduling tools
 - Tools: `schedule_task`, `list_tasks`, `pause_task`, `resume_task`, `cancel_task`, `send_message`
 - Tasks stored in SQLite with run history
-- Scheduler loop checks for due tasks every minute
-- Tasks execute Claude Agent SDK in containerized group context
 
 ### Web Access
+
 - Built-in WebSearch and WebFetch tools
 - Standard Claude Agent SDK capabilities
 
 ### Browser Automation
+
 - agent-browser CLI with Chromium in container
-- Snapshot-based interaction with element references (@e1, @e2, etc.)
+- Snapshot-based interaction with element references
 - Screenshots, PDFs, video recording
-- Authentication state persistence
 
 ---
 
-## Setup & Customization
+## Deployment
 
-### Philosophy
-- Minimal configuration files
-- Setup and customization done via Claude Code
-- Users clone the repo and run Claude Code to configure
-- Each user gets a custom setup matching their exact needs
+### Fly.io (Recommended)
 
-### Skills
-- `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
-- `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
-- `/update` - Pull upstream changes, merge with customizations, run migrations
+- `Dockerfile.deploy` builds the host process image
+- Agent containers spawned as sibling containers via Docker socket
+- Persistent volume at `/data` for SQLite and state
+- Auto-stop/auto-start for cost efficiency
 
-### Deployment
-- Runs on local Mac via launchd
-- Single Node.js process handles everything
+### Self-Host
 
----
-
-## Personal Configuration (Reference)
-
-These are the creator's settings, stored here for reference:
-
-- **Trigger**: `@Andy` (case insensitive)
-- **Response prefix**: `Andy:`
-- **Persona**: Default Claude (no custom personality)
-- **Main channel**: Self-chat (messaging yourself in WhatsApp)
+- Single Node.js process
+- Docker required for agent containers
+- macOS: launchd service (`com.codeclaw`)
+- Linux: systemd user service (`codeclaw.service`)
 
 ---
 
 ## Project Name
 
-**NanoClaw** - A reference to Clawdbot (now OpenClaw).
+**CodeClaw** — A GitHub AI coding agent, forked from NanoClaw.

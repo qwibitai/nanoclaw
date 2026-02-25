@@ -24,7 +24,7 @@ export function getSetupPageHtml(webhookUrl: string): string | null {
 
   return `<!DOCTYPE html>
 <html>
-<head><title>NanoClaw Setup</title>
+<head><title>CodeClaw Setup</title>
 <style>
   body { font-family: system-ui; max-width: 600px; margin: 40px auto; padding: 0 20px; }
   h1 { color: #333; }
@@ -34,7 +34,7 @@ export function getSetupPageHtml(webhookUrl: string): string | null {
 </style>
 </head>
 <body>
-  <h1>NanoClaw Setup</h1>
+  <h1>CodeClaw Setup</h1>
   <p>Click below to create a GitHub App with the correct permissions and webhook configuration.</p>
   <form action="https://github.com/settings/apps/new" method="post">
     <input type="hidden" name="manifest" value='${manifestJson.replace(/'/g, '&#39;')}'>
@@ -72,7 +72,7 @@ export async function handleManifestCallback(code: string): Promise<string> {
   };
 
   // Store private key
-  const configDir = path.join(os.homedir(), '.config', 'nanoclaw');
+  const configDir = path.join(os.homedir(), '.config', 'codeclaw');
   fs.mkdirSync(configDir, { recursive: true });
   const pemPath = path.join(configDir, 'github-app.pem');
   fs.writeFileSync(pemPath, data.pem, { mode: 0o600 });
@@ -95,7 +95,7 @@ export async function handleManifestCallback(code: string): Promise<string> {
   const installUrl = `${data.html_url}/installations/new`;
   return `<!DOCTYPE html>
 <html>
-<head><title>NanoClaw Setup Complete</title>
+<head><title>CodeClaw Setup Complete</title>
 <style>
   body { font-family: system-ui; max-width: 600px; margin: 40px auto; padding: 0 20px; }
   h1 { color: #2ea44f; }
@@ -108,7 +108,7 @@ export async function handleManifestCallback(code: string): Promise<string> {
   <p>GitHub App <strong>${data.slug}</strong> has been created.</p>
   <p>Now install it on the repositories you want the bot to monitor:</p>
   <a href="${installUrl}" class="btn">Install on Repositories</a>
-  <p><small>After installing, restart NanoClaw to load the new credentials.</small></p>
+  <p><small>After installing, restart CodeClaw to load the new credentials.</small></p>
 </body>
 </html>`;
 }

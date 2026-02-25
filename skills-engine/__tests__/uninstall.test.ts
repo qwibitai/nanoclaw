@@ -115,7 +115,7 @@ describe('uninstall', () => {
           version: '1.0.0',
           applied_at: new Date().toISOString(),
           file_hashes: {},
-          custom_patch: '.nanoclaw/custom/001.patch',
+          custom_patch: '.codeclaw/custom/001.patch',
           custom_patch_description: 'My tweak',
         },
       ],
@@ -129,7 +129,7 @@ describe('uninstall', () => {
 
   it('uninstalls only skill → files reset to base', async () => {
     // Set up base
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'config.ts'), 'base config\n');
 
@@ -183,7 +183,7 @@ describe('uninstall', () => {
 
   it('uninstalls one of two → other preserved', async () => {
     // Set up base
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(
       path.join(baseDir, 'config.ts'),

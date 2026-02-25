@@ -23,7 +23,7 @@ function parseArgs(args: string[]): { runtime: string } {
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const { runtime } = parseArgs(args);
-  const image = 'nanoclaw-agent:latest';
+  const image = 'codeclaw-agent:latest';
   const logFile = path.join(projectRoot, 'logs', 'setup.log');
 
   if (!runtime) {

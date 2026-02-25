@@ -121,7 +121,7 @@ export class RateLimiter {
 }
 
 /**
- * Parse a .github/nanoclaw.yml config into an AccessPolicy.
+ * Parse a .github/codeclaw.yml config into an AccessPolicy.
  * Falls back to defaults for missing fields.
  */
 export function parseAccessPolicy(config: Record<string, unknown>): AccessPolicy {

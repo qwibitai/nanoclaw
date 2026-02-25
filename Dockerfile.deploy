@@ -1,4 +1,4 @@
-# NanoClaw Deployment Image
+# CodeClaw Deployment Image
 # Runs the host process (webhook server, orchestrator, task scheduler).
 # Agent containers are spawned as sibling containers via the Docker socket.
 
@@ -47,7 +47,7 @@ if [ -d /data ]; then
 fi
 
 # Build agent container image if not already present
-if ! docker image inspect nanoclaw-agent:latest > /dev/null 2>&1; then
+if ! docker image inspect codeclaw-agent:latest > /dev/null 2>&1; then
   echo "Building agent container image..."
   cd /app/container && ./build.sh
 fi

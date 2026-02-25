@@ -1,9 +1,9 @@
 ---
 name: update
-description: "Update NanoClaw from upstream. Fetches latest changes, merges with your customizations and skills, runs migrations. Triggers on \"update\", \"pull upstream\", \"sync with upstream\", \"get latest changes\"."
+description: "Update CodeClaw from upstream. Fetches latest changes, merges with your customizations and skills, runs migrations. Triggers on \"update\", \"pull upstream\", \"sync with upstream\", \"get latest changes\"."
 ---
 
-# Update NanoClaw
+# Update CodeClaw
 
 Pull upstream changes and merge them with the user's installation, preserving skills and customizations. Scripts live in `.claude/skills/update/scripts/`.
 
@@ -16,7 +16,7 @@ Pull upstream changes and merge them with the user's installation, preserving sk
 Check that the skills system is initialized:
 
 ```bash
-test -d .nanoclaw && echo "INITIALIZED" || echo "NOT_INITIALIZED"
+test -d .codeclaw && echo "INITIALIZED" || echo "NOT_INITIALIZED"
 ```
 
 **If NOT_INITIALIZED:** Run `initSkillsSystem()` first:
@@ -165,7 +165,7 @@ Report final status:
 
 **Build fails after update:** Check if `package.json` dependencies changed. Run `npm install` to pick up new dependencies.
 
-**Rollback:** If something goes wrong after applying but before cleanup, the backup is still in `.nanoclaw/backup/`. Run:
+**Rollback:** If something goes wrong after applying but before cleanup, the backup is still in `.codeclaw/backup/`. Run:
 ```bash
 npx tsx -e "import { restoreBackup, clearBackup } from './skills-engine/backup.js'; restoreBackup(); clearBackup();"
 ```

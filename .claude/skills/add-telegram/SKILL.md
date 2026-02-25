@@ -5,13 +5,13 @@ description: Add Telegram as a channel. Can replace WhatsApp entirely or run alo
 
 # Add Telegram Channel
 
-This skill adds Telegram support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Telegram support to CodeClaw using the skills engine for deterministic code changes, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Read `.codeclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -31,7 +31,7 @@ Run the skills engine to apply this skill's code package. The package files are 
 
 ### Initialize skills system (if needed)
 
-If `.nanoclaw/` directory doesn't exist yet:
+If `.codeclaw/` directory doesn't exist yet:
 
 ```bash
 npx tsx scripts/apply-skill.ts --init
@@ -53,7 +53,7 @@ This deterministically:
 - Three-way merges updated routing tests into `src/routing.test.ts`
 - Installs the `grammy` npm dependency
 - Updates `.env.example` with `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ONLY`
-- Records the application in `.nanoclaw/state.yaml`
+- Records the application in `.codeclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
 - `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
@@ -122,8 +122,8 @@ Tell the user:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.codeclaw  # macOS
+# Linux: systemctl --user restart codeclaw
 ```
 
 ## Phase 4: Registration
@@ -181,7 +181,7 @@ Tell the user:
 ### Check logs if needed
 
 ```bash
-tail -f logs/nanoclaw.log
+tail -f logs/codeclaw.log
 ```
 
 ## Troubleshooting
@@ -192,7 +192,7 @@ Check:
 1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
 2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
-4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+4. Service is running: `launchctl list | grep codeclaw` (macOS) or `systemctl --user status codeclaw` (Linux)
 
 ### Bot only responds to @mentions in groups
 
@@ -204,21 +204,21 @@ Group Privacy is enabled (default). Fix:
 
 If `/chatid` doesn't work:
 - Verify token: `curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"`
-- Check bot is started: `tail -f logs/nanoclaw.log`
+- Check bot is started: `tail -f logs/codeclaw.log`
 
 ## After Setup
 
 If running `npm run dev` while the service is active:
 ```bash
 # macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.codeclaw.plist
 npm run dev
 # When done testing:
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.codeclaw.plist
 # Linux:
-# systemctl --user stop nanoclaw
+# systemctl --user stop codeclaw
 # npm run dev
-# systemctl --user start nanoclaw
+# systemctl --user start codeclaw
 ```
 
 ## Agent Swarms (Teams)
@@ -240,4 +240,4 @@ To remove Telegram integration:
 5. Remove Telegram config (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ONLY`) from `src/config.ts`
 6. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
 7. Uninstall: `npm uninstall grammy`
-8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.codeclaw` (macOS) or `npm run build && systemctl --user restart codeclaw` (Linux)

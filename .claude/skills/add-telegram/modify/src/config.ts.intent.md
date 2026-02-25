@@ -4,7 +4,7 @@
 Added two new configuration exports for Telegram channel support.
 
 ## Key sections
-- **readEnvFile call**: Must include `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ONLY` in the keys array. NanoClaw does NOT load `.env` into `process.env` — all `.env` values must be explicitly requested via `readEnvFile()`.
+- **readEnvFile call**: Must include `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ONLY` in the keys array. CodeClaw does NOT load `.env` into `process.env` — all `.env` values must be explicitly requested via `readEnvFile()`.
 - **TELEGRAM_BOT_TOKEN**: Read from `process.env` first, then `envConfig` fallback, defaults to empty string (channel disabled when empty)
 - **TELEGRAM_ONLY**: Boolean flag from `process.env` or `envConfig`, when `true` disables WhatsApp channel creation
 

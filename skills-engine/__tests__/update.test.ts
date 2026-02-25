@@ -22,7 +22,7 @@ describe('update', () => {
   });
 
   function writeStateFile(state: Record<string, unknown>): void {
-    const statePath = path.join(tmpDir, '.nanoclaw', 'state.yaml');
+    const statePath = path.join(tmpDir, '.codeclaw', 'state.yaml');
     fs.writeFileSync(statePath, stringify(state), 'utf-8');
   }
 
@@ -59,7 +59,7 @@ describe('update', () => {
     });
 
     it('detects changed files vs base', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'original');
 
@@ -80,7 +80,7 @@ describe('update', () => {
     });
 
     it('does not list unchanged files', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'same content');
 
@@ -101,7 +101,7 @@ describe('update', () => {
     });
 
     it('identifies conflict risk with applied skills', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'original');
 
@@ -129,7 +129,7 @@ describe('update', () => {
     });
 
     it('identifies custom patches at risk', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/config.ts'), 'original');
 
@@ -142,7 +142,7 @@ describe('update', () => {
             description: 'custom tweak',
             applied_at: new Date().toISOString(),
             files_modified: ['src/config.ts'],
-            patch_file: '.nanoclaw/custom/001-tweak.patch',
+            patch_file: '.codeclaw/custom/001-tweak.patch',
           },
         ],
       });
@@ -175,7 +175,7 @@ describe('update', () => {
     });
 
     it('detects files deleted in new core', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'keep this');
       fs.writeFileSync(path.join(baseDir, 'src/removed.ts'), 'delete this');
@@ -208,7 +208,7 @@ describe('update', () => {
       });
 
       // Create the pending.yaml that indicates active customize
-      const customDir = path.join(tmpDir, '.nanoclaw', 'custom');
+      const customDir = path.join(tmpDir, '.codeclaw', 'custom');
       fs.mkdirSync(customDir, { recursive: true });
       fs.writeFileSync(path.join(customDir, 'pending.yaml'), 'active: true');
 
@@ -246,7 +246,7 @@ describe('update', () => {
 
     it('performs clean three-way merge', async () => {
       // Set up base
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(
         path.join(baseDir, 'src/index.ts'),
@@ -287,7 +287,7 @@ describe('update', () => {
     });
 
     it('updates base directory after successful merge', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'old base');
 
@@ -308,7 +308,7 @@ describe('update', () => {
       await applyUpdate(newCoreDir);
 
       const newBase = fs.readFileSync(
-        path.join(tmpDir, '.nanoclaw', 'base', 'src/index.ts'),
+        path.join(tmpDir, '.codeclaw', 'base', 'src/index.ts'),
         'utf-8',
       );
       expect(newBase).toBe('new base content');
@@ -339,7 +339,7 @@ describe('update', () => {
     });
 
     it('restores backup on merge conflict', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(
         path.join(baseDir, 'src/index.ts'),
@@ -381,7 +381,7 @@ describe('update', () => {
     });
 
     it('removes files deleted in new core', async () => {
-      const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
+      const baseDir = path.join(tmpDir, '.codeclaw', 'base');
       fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
       fs.writeFileSync(path.join(baseDir, 'src/index.ts'), 'keep');
       fs.writeFileSync(path.join(baseDir, 'src/removed.ts'), 'old content');

@@ -14,13 +14,13 @@ describe('fetch-upstream.sh', () => {
   beforeEach(() => {
     // Create a bare repo to act as "upstream"
     upstreamBareDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'nanoclaw-upstream-'),
+      path.join(os.tmpdir(), 'codeclaw-upstream-'),
     );
     execSync('git init --bare', { cwd: upstreamBareDir, stdio: 'pipe' });
 
     // Create a working repo, add files, push to the bare repo
     const seedDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'nanoclaw-seed-'),
+      path.join(os.tmpdir(), 'codeclaw-seed-'),
     );
     execSync('git init', { cwd: seedDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
@@ -30,7 +30,7 @@ describe('fetch-upstream.sh', () => {
     execSync('git config user.name "Test"', { cwd: seedDir, stdio: 'pipe' });
     fs.writeFileSync(
       path.join(seedDir, 'package.json'),
-      JSON.stringify({ name: 'nanoclaw', version: '2.0.0' }),
+      JSON.stringify({ name: 'codeclaw', version: '2.0.0' }),
     );
     fs.mkdirSync(path.join(seedDir, 'src'), { recursive: true });
     fs.writeFileSync(
@@ -65,7 +65,7 @@ describe('fetch-upstream.sh', () => {
 
     // Create the "project" repo that will run the script
     projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'nanoclaw-project-'),
+      path.join(os.tmpdir(), 'codeclaw-project-'),
     );
     execSync('git init', { cwd: projectDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
@@ -78,7 +78,7 @@ describe('fetch-upstream.sh', () => {
     });
     fs.writeFileSync(
       path.join(projectDir, 'package.json'),
-      JSON.stringify({ name: 'nanoclaw', version: '1.0.0' }),
+      JSON.stringify({ name: 'codeclaw', version: '1.0.0' }),
     );
     execSync('git add -A && git commit -m "init"', {
       cwd: projectDir,
@@ -156,7 +156,7 @@ describe('fetch-upstream.sh', () => {
     expect(status.REMOTE).toBe('upstream');
     expect(status.CURRENT_VERSION).toBe('1.0.0');
     expect(status.NEW_VERSION).toBe('2.0.0');
-    expect(status.TEMP_DIR).toMatch(/^\/tmp\/nanoclaw-update-/);
+    expect(status.TEMP_DIR).toMatch(/^\/tmp\/codeclaw-update-/);
 
     // Verify extracted files exist
     expect(

@@ -6,7 +6,7 @@ export {
   SKILLS_SCHEMA_VERSION,
   CUSTOM_DIR,
   LOCK_FILE,
-  NANOCLAW_DIR,
+  CODECLAW_DIR,
   STATE_FILE,
 } from './constants.js';
 export {
@@ -16,7 +16,7 @@ export {
   startCustomize,
 } from './customize.js';
 export { executeFileOps } from './file-ops.js';
-export { initNanoclawDir } from './init.js';
+export { initCodeclawDir } from './init.js';
 export { acquireLock, isLocked, releaseLock } from './lock.js';
 export {
   checkConflicts,

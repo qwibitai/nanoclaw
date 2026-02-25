@@ -69,7 +69,7 @@ describe('apply', () => {
     fs.writeFileSync(existingFile, 'original content');
 
     // Set up base for the modified file
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
+    const baseDir = path.join(tmpDir, '.codeclaw', 'base', 'src');
     fs.mkdirSync(baseDir, { recursive: true });
     fs.writeFileSync(path.join(baseDir, 'existing.ts'), 'original content');
 
@@ -115,7 +115,7 @@ describe('apply', () => {
 
   it('does not allow path_remap symlink targets to write outside project root', async () => {
     const outsideDir = fs.mkdtempSync(
-      path.join(path.dirname(tmpDir), 'nanoclaw-remap-outside-'),
+      path.join(path.dirname(tmpDir), 'codeclaw-remap-outside-'),
     );
     const linkPath = path.join(tmpDir, 'link-out');
 

@@ -1,5 +1,5 @@
 /**
- * Cross-platform detection utilities for NanoClaw setup.
+ * Cross-platform detection utilities for CodeClaw setup.
  */
 import { execSync } from 'child_process';
 import fs from 'fs';

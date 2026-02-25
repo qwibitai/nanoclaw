@@ -1,4 +1,4 @@
-# NanoClaw Agent Container
+# CodeClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with GitHub integration
 
 FROM node:22-slim
@@ -35,8 +35,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Git config for bot identity
-RUN git config --system user.name "NanoClaw AI" \
-    && git config --system user.email "nanoclaw[bot]@users.noreply.github.com"
+RUN git config --system user.name "CodeClaw AI" \
+    && git config --system user.email "codeclaw[bot]@users.noreply.github.com"
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

@@ -1,7 +1,7 @@
 {
-  "name": "nanoclaw",
+  "name": "codeclaw",
   "version": "1.1.2",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "description": "GitHub AI coding agent. Responds to issues and PRs with Claude in containers.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

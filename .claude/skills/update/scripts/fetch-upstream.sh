@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fetch upstream NanoClaw and extract to a temp directory.
+# Fetch upstream CodeClaw and extract to a temp directory.
 # Outputs a structured status block for machine parsing.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -43,7 +43,7 @@ fi
 # Create temp dir and extract only the paths the skills engine tracks.
 # Read BASE_INCLUDES from the single source of truth in skills-engine/constants.ts,
 # plus always include migrations/ for the migration runner.
-TEMP_DIR=$(mktemp -d /tmp/nanoclaw-update-XXXX)
+TEMP_DIR=$(mktemp -d /tmp/codeclaw-update-XXXX)
 trap 'rm -rf "$TEMP_DIR"' ERR
 echo "Extracting $REMOTE/main to $TEMP_DIR..."
 

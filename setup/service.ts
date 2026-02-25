@@ -69,7 +69,7 @@ export async function run(_args: string[]): Promise<void> {
 }
 
 function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): void {
-  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.nanoclaw.plist');
+  const plistPath = path.join(homeDir, 'Library', 'LaunchAgents', 'com.codeclaw.plist');
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -77,7 +77,7 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.nanoclaw</string>
+    <string>com.codeclaw</string>
     <key>ProgramArguments</key>
     <array>
         <string>${nodePath}</string>
@@ -97,9 +97,9 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
         <string>${homeDir}</string>
     </dict>
     <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
+    <string>${projectRoot}/logs/codeclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
+    <string>${projectRoot}/logs/codeclaw.error.log</string>
 </dict>
 </plist>`;
 
@@ -117,7 +117,7 @@ function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): v
   let serviceLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
-    serviceLoaded = output.includes('com.nanoclaw');
+    serviceLoaded = output.includes('com.codeclaw');
   } catch {
     // launchctl list failed
   }
@@ -145,7 +145,7 @@ function setupLinux(projectRoot: string, nodePath: string, homeDir: string): voi
 }
 
 /**
- * Kill any orphaned nanoclaw node processes left from previous runs or debugging.
+ * Kill any orphaned codeclaw node processes left from previous runs or debugging.
  * Prevents WhatsApp "conflict" disconnects when two instances connect simultaneously.
  */
 function killOrphanedProcesses(projectRoot: string): void {
@@ -153,7 +153,7 @@ function killOrphanedProcesses(projectRoot: string): void {
     execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
       stdio: 'ignore',
     });
-    logger.info('Stopped any orphaned nanoclaw processes');
+    logger.info('Stopped any orphaned codeclaw processes');
   } catch {
     // pkill not available or no orphans
   }
@@ -194,7 +194,7 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
   let systemctlPrefix: string;
 
   if (runningAsRoot) {
-    unitPath = '/etc/systemd/system/nanoclaw.service';
+    unitPath = '/etc/systemd/system/codeclaw.service';
     systemctlPrefix = 'systemctl';
     logger.info('Running as root — installing system-level systemd unit');
   } else {
@@ -208,12 +208,12 @@ function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): v
     }
     const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
     fs.mkdirSync(unitDir, { recursive: true });
-    unitPath = path.join(unitDir, 'nanoclaw.service');
+    unitPath = path.join(unitDir, 'codeclaw.service');
     systemctlPrefix = 'systemctl --user';
   }
 
   const unit = `[Unit]
-Description=NanoClaw Personal Assistant
+Description=CodeClaw Personal Assistant
 After=network.target
 
 [Service]
@@ -224,8 +224,8 @@ Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
-StandardOutput=append:${projectRoot}/logs/nanoclaw.log
-StandardError=append:${projectRoot}/logs/nanoclaw.error.log
+StandardOutput=append:${projectRoot}/logs/codeclaw.log
+StandardError=append:${projectRoot}/logs/codeclaw.error.log
 
 [Install]
 WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
@@ -241,7 +241,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     );
   }
 
-  // Kill orphaned nanoclaw processes to avoid WhatsApp conflict errors
+  // Kill orphaned codeclaw processes to avoid WhatsApp conflict errors
   killOrphanedProcesses(projectRoot);
 
   // Enable and start
@@ -252,13 +252,13 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   }
 
   try {
-    execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable codeclaw`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl enable failed');
   }
 
   try {
-    execSync(`${systemctlPrefix} start nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} start codeclaw`, { stdio: 'ignore' });
   } catch (err) {
     logger.error({ err }, 'systemctl start failed');
   }
@@ -266,7 +266,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
   // Verify
   let serviceLoaded = false;
   try {
-    execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} is-active codeclaw`, { stdio: 'ignore' });
     serviceLoaded = true;
   } catch {
     // Not active
@@ -287,12 +287,12 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: string): void {
   logger.warn('No systemd detected — generating nohup wrapper script');
 
-  const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
-  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const wrapperPath = path.join(projectRoot, 'start-codeclaw.sh');
+  const pidFile = path.join(projectRoot, 'codeclaw.pid');
 
   const lines = [
     '#!/bin/bash',
-    '# start-nanoclaw.sh — Start NanoClaw without systemd',
+    '# start-codeclaw.sh — Start CodeClaw without systemd',
     `# To stop: kill \\$(cat ${pidFile})`,
     '',
     'set -euo pipefail',
@@ -303,20 +303,20 @@ function setupNohupFallback(projectRoot: string, nodePath: string, homeDir: stri
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
     `  OLD_PID=$(cat ${JSON.stringify(pidFile)} 2>/dev/null || echo "")`,
     '  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then',
-    '    echo "Stopping existing NanoClaw (PID $OLD_PID)..."',
+    '    echo "Stopping existing CodeClaw (PID $OLD_PID)..."',
     '    kill "$OLD_PID" 2>/dev/null || true',
     '    sleep 2',
     '  fi',
     'fi',
     '',
-    'echo "Starting NanoClaw..."',
+    'echo "Starting CodeClaw..."',
     `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
-    `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
-    `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
+    `  >> ${JSON.stringify(projectRoot + '/logs/codeclaw.log')} \\`,
+    `  2>> ${JSON.stringify(projectRoot + '/logs/codeclaw.error.log')} &`,
     '',
     `echo $! > ${JSON.stringify(pidFile)}`,
-    'echo "NanoClaw started (PID $!)"',
-    `echo "Logs: tail -f ${projectRoot}/logs/nanoclaw.log"`,
+    'echo "CodeClaw started (PID $!)"',
+    `echo "Logs: tail -f ${projectRoot}/logs/codeclaw.log"`,
   ];
   const wrapper = lines.join('\n') + '\n';
 

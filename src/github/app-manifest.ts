@@ -5,8 +5,8 @@
 
 export function buildAppManifest(webhookUrl: string, appName?: string): object {
   return {
-    name: appName || 'NanoClaw AI',
-    url: 'https://github.com/qwibitai/NanoClaw',
+    name: appName || 'CodeClaw AI',
+    url: 'https://github.com/qwibitai/CodeClaw',
     hook_attributes: {
       url: `${webhookUrl}/github/webhooks`,
       active: true,

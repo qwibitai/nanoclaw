@@ -27,7 +27,7 @@ jobs:
       - uses: ./repo-tokens
         id: tokens
         with:
-          include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.nanoclaw.plist CLAUDE.md'
+          include: 'src/**/*.ts container/agent-runner/src/**/*.ts container/Dockerfile container/build.sh launchd/com.codeclaw.plist CLAUDE.md'
           exclude: 'src/**/*.test.ts'
           badge-path: 'repo-tokens/badge.svg'
 

@@ -41,7 +41,7 @@ describe('backup', () => {
     fs.writeFileSync(path.join(tmpDir, 'src', 'app.ts'), 'content');
     createBackup(['src/app.ts']);
 
-    const backupDir = path.join(tmpDir, '.nanoclaw', 'backup');
+    const backupDir = path.join(tmpDir, '.codeclaw', 'backup');
     expect(fs.existsSync(backupDir)).toBe(true);
 
     clearBackup();
@@ -51,7 +51,7 @@ describe('backup', () => {
   it('createBackup writes tombstone for non-existent files', () => {
     createBackup(['src/newfile.ts']);
 
-    const tombstone = path.join(tmpDir, '.nanoclaw', 'backup', 'src', 'newfile.ts.tombstone');
+    const tombstone = path.join(tmpDir, '.codeclaw', 'backup', 'src', 'newfile.ts.tombstone');
     expect(fs.existsSync(tombstone)).toBe(true);
   });
 

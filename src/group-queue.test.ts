@@ -4,7 +4,7 @@ import { GroupQueue } from './group-queue.js';
 
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
-  DATA_DIR: '/tmp/nanoclaw-test-data',
+  DATA_DIR: '/tmp/codeclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
 }));
 
