@@ -137,6 +137,20 @@ Key files:
 - `src/db.ts` - SQLite operations (messages, groups, sessions, state)
 - `groups/*/CLAUDE.md` - Per-group memory
 
+### Example Structure for `groups/{name}/CLAUDE.md`
+
+```text
+## Persona (Tone & Style)
+Voice, warmth, verbosity, and interaction style.
+Persona adjustments should not alter execution or memory rules.
+
+## Execution Preferences
+Tool hierarchy, CLI vs MCP preference, token discipline, task decomposition strategy.
+
+## Memory & Persistence
+Long-term fact storage, indexing approach, and global memory constraints.
+```
+
 ## FAQ
 
 **Why Docker?**
