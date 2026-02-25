@@ -280,6 +280,180 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+// --- X (Twitter) Integration Tools ---
+// These write IPC requests to the host, which runs browser automation.
+
+const X_RESULTS_DIR = path.join(IPC_DIR, 'x_results');
+
+async function waitForXResult(requestId: string, maxWait = 120000): Promise<{ success: boolean; message: string }> {
+  const resultFile = path.join(X_RESULTS_DIR, `${requestId}.json`);
+  const pollInterval = 1000;
+  let elapsed = 0;
+  while (elapsed < maxWait) {
+    if (fs.existsSync(resultFile)) {
+      try {
+        const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
+        fs.unlinkSync(resultFile);
+        return result;
+      } catch (err) {
+        return { success: false, message: `Failed to read result: ${err}` };
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    elapsed += pollInterval;
+  }
+  return { success: false, message: 'Request timed out' };
+}
+
+server.tool(
+  'x_post',
+  'Post a tweet to X (Twitter). Main group only. Max 280 characters.',
+  {
+    content: z.string().max(280).describe('The tweet content to post (max 280 characters)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can post tweets.' }], isError: true };
+    }
+    const requestId = `xpost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, { type: 'x_post', requestId, content: args.content, groupFolder, timestamp: new Date().toISOString() });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+server.tool(
+  'x_like',
+  'Like a tweet on X (Twitter). Main group only.',
+  {
+    tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can interact with X.' }], isError: true };
+    }
+    const requestId = `xlike-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, { type: 'x_like', requestId, tweetUrl: args.tweet_url, groupFolder, timestamp: new Date().toISOString() });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+server.tool(
+  'x_reply',
+  'Reply to a tweet on X (Twitter). Main group only. Max 280 characters.',
+  {
+    tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123)'),
+    content: z.string().max(280).describe('The reply content (max 280 characters)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can interact with X.' }], isError: true };
+    }
+    const requestId = `xreply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, { type: 'x_reply', requestId, tweetUrl: args.tweet_url, content: args.content, groupFolder, timestamp: new Date().toISOString() });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+server.tool(
+  'x_retweet',
+  'Retweet a tweet on X (Twitter). Main group only.',
+  {
+    tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can interact with X.' }], isError: true };
+    }
+    const requestId = `xretweet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, { type: 'x_retweet', requestId, tweetUrl: args.tweet_url, groupFolder, timestamp: new Date().toISOString() });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+server.tool(
+  'x_quote',
+  'Quote tweet on X (Twitter) with your comment. Main group only. Max 280 characters.',
+  {
+    tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123)'),
+    comment: z.string().max(280).describe('Your comment for the quote tweet (max 280 characters)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can interact with X.' }], isError: true };
+    }
+    const requestId = `xquote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, { type: 'x_quote', requestId, tweetUrl: args.tweet_url, comment: args.comment, groupFolder, timestamp: new Date().toISOString() });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+// --- X (Twitter) Read Tools ---
+// These use the X API v2 (bearer token) via the host, not browser automation.
+
+server.tool(
+  'x_search',
+  `Search recent tweets on X (Twitter) by keyword or topic. Returns tweets from the last 7 days.
+
+Use X search query operators for precise results:
+• "exact phrase" — match exact text
+• from:username — tweets from a specific user
+• -keyword — exclude keyword
+• has:links — only tweets with links
+• lang:en — filter by language
+
+Examples: "AI safety", "from:elaborateclaw AI", "machine learning -tutorial lang:en"`,
+  {
+    query: z.string().describe('Search query (supports X query operators like "from:user", "has:links", etc.)'),
+    max_results: z.number().min(10).max(100).default(10).describe('Number of tweets to return (10-100, default 10)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can search X.' }], isError: true };
+    }
+    const requestId = `xsearch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'x_search',
+      requestId,
+      query: args.query,
+      maxResults: args.max_results,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
+server.tool(
+  'x_user_posts',
+  'Get recent tweets from a specific X (Twitter) user. Returns their most recent posts.',
+  {
+    username: z.string().describe('X username (with or without @, e.g. "elonmusk" or "@elonmusk")'),
+    max_results: z.number().min(10).max(100).default(10).describe('Number of tweets to return (10-100, default 10)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return { content: [{ type: 'text' as const, text: 'Only the main group can read X posts.' }], isError: true };
+    }
+    const requestId = `xuser-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    writeIpcFile(TASKS_DIR, {
+      type: 'x_user_timeline',
+      requestId,
+      username: args.username,
+      maxResults: args.max_results,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+    const result = await waitForXResult(requestId);
+    return { content: [{ type: 'text' as const, text: result.message }], isError: !result.success };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
