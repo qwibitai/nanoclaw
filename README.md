@@ -31,11 +31,28 @@ npm start
 
 On first start, CodeClaw launches a setup wizard at `http://localhost:3000/github/setup` to create and install a GitHub App via the manifest flow.
 
+## Claude Authentication
+
+Configure one of these in your `.env` file:
+
+**Option 1: Claude subscription (Pro/Max) — use your existing plan**
+```bash
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+```
+Run `claude setup-token` in a separate terminal to get your token.
+
+**Option 2: Anthropic API key — pay-per-use**
+```bash
+ANTHROPIC_API_KEY=sk-ant-api03-...
+```
+
 ## Deploy to Fly.io
 
 ```bash
 fly launch
-fly secrets set ANTHROPIC_API_KEY=sk-ant-...
+# Set ONE of the following for Claude auth:
+fly secrets set CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+# OR: fly secrets set ANTHROPIC_API_KEY=sk-ant-...
 fly secrets set GITHUB_APP_ID=...
 fly secrets set GITHUB_WEBHOOK_SECRET=...
 # Store your GitHub App private key
@@ -50,7 +67,7 @@ Requirements:
 - Docker (for spawning agent containers)
 
 Set these environment variables:
-- `ANTHROPIC_API_KEY` — Claude API key
+- `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` — Claude authentication (see above)
 - `GITHUB_APP_ID` — from your GitHub App
 - `GITHUB_WEBHOOK_SECRET` — webhook signature secret
 - Store your private key at `~/.config/codeclaw/github-app.pem`
