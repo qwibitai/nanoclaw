@@ -6,12 +6,8 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
-  SIGNAL_CLI_URL,
-  SIGNAL_ONLY,
-  SIGNAL_PHONE_NUMBER,
   TRIGGER_PATTERN,
 } from './config.js';
-import { SignalChannel } from './channels/signal.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -449,17 +445,9 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  if (SIGNAL_PHONE_NUMBER) {
-    const signal = new SignalChannel(SIGNAL_PHONE_NUMBER, SIGNAL_CLI_URL, channelOpts);
-    channels.push(signal);
-    await signal.connect();
-  }
-
-  if (!SIGNAL_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
+  whatsapp = new WhatsAppChannel(channelOpts);
+  channels.push(whatsapp);
+  await whatsapp.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

@@ -18,17 +18,6 @@ describe('JID ownership patterns', () => {
     expect(jid.endsWith('@g.us')).toBe(true);
   });
 
-  it('Signal 1:1 JID: starts with sig:', () => {
-    const jid = 'sig:+1234567890';
-    expect(jid.startsWith('sig:')).toBe(true);
-  });
-
-  it('Signal group JID: starts with sig:g:', () => {
-    const jid = 'sig:g:ABC123base64==';
-    expect(jid.startsWith('sig:g:')).toBe(true);
-    expect(jid.startsWith('sig:')).toBe(true);
-  });
-
   it('WhatsApp DM JID: ends with @s.whatsapp.net', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
@@ -48,36 +37,6 @@ describe('getAvailableGroups', () => {
     expect(groups.map((g) => g.jid)).toContain('group1@g.us');
     expect(groups.map((g) => g.jid)).toContain('group2@g.us');
     expect(groups.map((g) => g.jid)).not.toContain('user@s.whatsapp.net');
-  });
-
-  it('includes Signal group JIDs', () => {
-    storeChatMetadata('sig:g:ABC123==', '2024-01-01T00:00:01.000Z', 'Signal Group', 'signal', true);
-    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM', 'whatsapp', false);
-
-    const groups = getAvailableGroups();
-    expect(groups).toHaveLength(1);
-    expect(groups[0].jid).toBe('sig:g:ABC123==');
-  });
-
-  it('marks registered Signal chats correctly', () => {
-    storeChatMetadata('sig:+1234567890', '2024-01-01T00:00:01.000Z', 'Sig Registered', 'signal', true);
-    storeChatMetadata('sig:+9999999999', '2024-01-01T00:00:02.000Z', 'Sig Unregistered', 'signal', true);
-
-    _setRegisteredGroups({
-      'sig:+1234567890': {
-        name: 'Sig Registered',
-        folder: 'sig-registered',
-        trigger: '@Andy',
-        added_at: '2024-01-01T00:00:00.000Z',
-      },
-    });
-
-    const groups = getAvailableGroups();
-    const sigReg = groups.find((g) => g.jid === 'sig:+1234567890');
-    const sigUnreg = groups.find((g) => g.jid === 'sig:+9999999999');
-
-    expect(sigReg?.isRegistered).toBe(true);
-    expect(sigUnreg?.isRegistered).toBe(false);
   });
 
   it('excludes __group_sync__ sentinel', () => {
@@ -137,17 +96,5 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
-  });
-
-  it('mixes WhatsApp and Signal chats ordered by activity', () => {
-    storeChatMetadata('wa@g.us', '2024-01-01T00:00:01.000Z', 'WhatsApp', 'whatsapp', true);
-    storeChatMetadata('sig:g:ABC==', '2024-01-01T00:00:03.000Z', 'Signal', 'signal', true);
-    storeChatMetadata('wa2@g.us', '2024-01-01T00:00:02.000Z', 'WhatsApp 2', 'whatsapp', true);
-
-    const groups = getAvailableGroups();
-    expect(groups).toHaveLength(3);
-    expect(groups[0].jid).toBe('sig:g:ABC==');
-    expect(groups[1].jid).toBe('wa2@g.us');
-    expect(groups[2].jid).toBe('wa@g.us');
   });
 });
