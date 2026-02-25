@@ -1,0 +1,14 @@
+[phases.install]
+cmds = [
+  "npm ci",
+  "cd container/agent-runner && npm install && cd ../..",
+]
+
+[phases.build]
+cmds = [
+  "npm run build",
+  "cd container/agent-runner && npm run build && cd ../..",
+]
+
+[start]
+cmd = "node dist/index.js"
