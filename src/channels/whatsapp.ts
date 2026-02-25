@@ -37,6 +37,7 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private reconnecting = false;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -100,6 +101,11 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
+          if (this.reconnecting) {
+            logger.debug('Reconnect already in progress, skipping duplicate');
+            return;
+          }
+          this.reconnecting = true;
           logger.info('Reconnecting...');
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
@@ -108,6 +114,8 @@ export class WhatsAppChannel implements Channel {
                 logger.error({ err: err2 }, 'Reconnection retry failed');
               });
             }, 5000);
+          }).finally(() => {
+            this.reconnecting = false;
           });
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
@@ -115,6 +123,7 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnecting = false;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
