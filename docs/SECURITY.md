@@ -21,6 +21,11 @@ Agents execute in containers (lightweight Linux VMs), providing:
 
 This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
 
+**Network Isolation:**
+- Non-main containers run with `--network none` by default, preventing data exfiltration
+- Main containers have full network access (needed for WebFetch/WebSearch tools)
+- Override per-group via `containerConfig.networkMode: 'full' | 'none'`
+
 ### 2. Mount Security
 
 **External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
@@ -90,7 +95,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 | Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
 | Global memory | Implicit via project | `/workspace/global` (ro) |
 | Additional mounts | Configurable | Read-only unless allowed |
-| Network access | Unrestricted | Unrestricted |
+| Network access | Full (default) | None (default, configurable) |
 | MCP tools | All | All |
 
 ## Security Architecture Diagram
@@ -117,7 +122,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • Network access (unrestricted)                                  │
+│  • Network access (none for non-main, full for main)              │
 │  • Cannot modify security config                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```

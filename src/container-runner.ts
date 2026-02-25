@@ -186,8 +186,22 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+  group: RegisteredGroup,
+  isMain: boolean,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+
+  // Network isolation: non-main containers default to no network access.
+  // This prevents prompt-injected agents from exfiltrating data.
+  // Main containers default to full network (needed for WebFetch/WebSearch).
+  // Override per-group via containerConfig.networkMode.
+  const networkMode = group.containerConfig?.networkMode ?? (isMain ? 'full' : 'none');
+  if (networkMode === 'none') {
+    args.push('--network', 'none');
+  }
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
@@ -229,7 +243,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, group, input.isMain);
 
   logger.debug(
     {
