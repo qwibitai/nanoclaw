@@ -397,7 +397,7 @@ function recoverPendingMessages(): void {
 
 async function main(): Promise<void> {
   const port = parseInt(process.env.PORT || '3000', 10);
-  startHttpServer(port);
+  const httpServer = startHttpServer(port);
 
   initDatabase();
   logger.info('Database initialized');
@@ -423,7 +423,11 @@ async function main(): Promise<void> {
 
   // Create and connect channels
   if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
+    whatsapp = new WhatsAppChannel({
+      ...channelOpts,
+      onQrCode: (qr) => httpServer.setQrCode(qr),
+      onAuthenticated: () => httpServer.setAuthenticated(),
+    });
     channels.push(whatsapp);
     await whatsapp.connect();
   }
