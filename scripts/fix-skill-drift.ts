@@ -73,10 +73,10 @@ function fixSkill(skillName: string, projectRoot: string): FixResult[] {
     // Find when the skill's modify file was last changed
     let lastCommit: string;
     try {
-      lastCommit = execSync(
-        `git log -1 --format=%H -- "${modifyPath}"`,
-        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
-      ).trim();
+      lastCommit = execSync(`git log -1 --format=%H -- "${modifyPath}"`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
     } catch {
       results.push({
         skill: skillName,
@@ -136,11 +136,9 @@ function fixSkill(skillName: string, projectRoot: string): FixResult[] {
     // Three-way merge: modify/file ← old_base → current_main
     // git merge-file modifies first argument in-place
     try {
-      execFileSync(
-        'git',
-        ['merge-file', modifyPath, tmpOldBase, currentPath],
-        { stdio: 'pipe' },
-      );
+      execFileSync('git', ['merge-file', modifyPath, tmpOldBase, currentPath], {
+        stdio: 'pipe',
+      });
       results.push({ skill: skillName, file: relPath, status: 'auto-fixed' });
     } catch (err: any) {
       const exitCode = err.status ?? -1;

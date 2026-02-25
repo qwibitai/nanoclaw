@@ -21,7 +21,10 @@ export interface SkillOverlapInfo {
  * @param dirName - The skill's directory name (e.g. 'add-discord'), used in matrix
  *   entries so CI/scripts can locate the skill package on disk.
  */
-export function extractOverlapInfo(manifest: SkillManifest, dirName: string): SkillOverlapInfo {
+export function extractOverlapInfo(
+  manifest: SkillManifest,
+  dirName: string,
+): SkillOverlapInfo {
   const npmDeps = manifest.structured?.npm_dependencies
     ? Object.keys(manifest.structured.npm_dependencies)
     : [];
@@ -38,7 +41,9 @@ export function extractOverlapInfo(manifest: SkillManifest, dirName: string): Sk
  * Two skills overlap if they share any `modifies` entry or both declare
  * `structured.npm_dependencies` for the same package.
  */
-export function computeOverlapMatrix(skills: SkillOverlapInfo[]): MatrixEntry[] {
+export function computeOverlapMatrix(
+  skills: SkillOverlapInfo[],
+): MatrixEntry[] {
   const entries: MatrixEntry[] = [];
 
   for (let i = 0; i < skills.length; i++) {
@@ -78,7 +83,9 @@ export function computeOverlapMatrix(skills: SkillOverlapInfo[]): MatrixEntry[] 
  * Each subdirectory should contain a manifest.yaml.
  * Returns both the parsed manifest and the directory name.
  */
-export function readAllManifests(skillsDir: string): { manifest: SkillManifest; dirName: string }[] {
+export function readAllManifests(
+  skillsDir: string,
+): { manifest: SkillManifest; dirName: string }[] {
   if (!fs.existsSync(skillsDir)) {
     return [];
   }
@@ -105,12 +112,18 @@ export function readAllManifests(skillsDir: string): { manifest: SkillManifest; 
  */
 export function generateMatrix(skillsDir: string): MatrixEntry[] {
   const entries = readAllManifests(skillsDir);
-  const overlapInfos = entries.map((e) => extractOverlapInfo(e.manifest, e.dirName));
+  const overlapInfos = entries.map((e) =>
+    extractOverlapInfo(e.manifest, e.dirName),
+  );
   return computeOverlapMatrix(overlapInfos);
 }
 
 // --- Main ---
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.url.replace('file://', ''))) {
+if (
+  process.argv[1] &&
+  path.resolve(process.argv[1]) ===
+    path.resolve(import.meta.url.replace('file://', ''))
+) {
   const projectRoot = process.cwd();
   const skillsDir = path.join(projectRoot, '.claude', 'skills');
   const matrix = generateMatrix(skillsDir);

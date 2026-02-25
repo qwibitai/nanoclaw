@@ -41,9 +41,19 @@ describe('parameterized SQL registration', () => {
          trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
          container_config = excluded.container_config,
          requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
-    ).run('123@g.us', 'Test Group', 'test-group', '@Andy', '2024-01-01T00:00:00.000Z', 1, 'whatsapp');
+    ).run(
+      '123@g.us',
+      'Test Group',
+      'test-group',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      1,
+      'whatsapp',
+    );
 
-    const row = db.prepare('SELECT * FROM registered_groups WHERE jid = ?').get('123@g.us') as {
+    const row = db
+      .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+      .get('123@g.us') as {
       jid: string;
       name: string;
       folder: string;
@@ -70,9 +80,19 @@ describe('parameterized SQL registration', () => {
          trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
          container_config = excluded.container_config,
          requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
-    ).run('456@g.us', name, 'obriens-group', '@Andy', '2024-01-01T00:00:00.000Z', 0, 'whatsapp');
+    ).run(
+      '456@g.us',
+      name,
+      'obriens-group',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      0,
+      'whatsapp',
+    );
 
-    const row = db.prepare('SELECT name FROM registered_groups WHERE jid = ?').get('456@g.us') as {
+    const row = db
+      .prepare('SELECT name FROM registered_groups WHERE jid = ?')
+      .get('456@g.us') as {
       name: string;
     };
 
@@ -91,15 +111,27 @@ describe('parameterized SQL registration', () => {
          trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
          container_config = excluded.container_config,
          requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
-    ).run(maliciousJid, 'Evil', 'evil', '@Andy', '2024-01-01T00:00:00.000Z', 1, 'unknown');
+    ).run(
+      maliciousJid,
+      'Evil',
+      'evil',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      1,
+      'unknown',
+    );
 
     // Table should still exist and have the row
-    const count = db.prepare('SELECT COUNT(*) as count FROM registered_groups').get() as {
+    const count = db
+      .prepare('SELECT COUNT(*) as count FROM registered_groups')
+      .get() as {
       count: number;
     };
     expect(count.count).toBe(1);
 
-    const row = db.prepare('SELECT jid FROM registered_groups').get() as { jid: string };
+    const row = db.prepare('SELECT jid FROM registered_groups').get() as {
+      jid: string;
+    };
     expect(row.jid).toBe(maliciousJid);
   });
 
@@ -113,9 +145,18 @@ describe('parameterized SQL registration', () => {
          trigger_pattern = excluded.trigger_pattern, added_at = excluded.added_at,
          container_config = excluded.container_config,
          requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
-    ).run('789@s.whatsapp.net', 'Personal', 'main', '@Andy', '2024-01-01T00:00:00.000Z', 0, 'whatsapp');
+    ).run(
+      '789@s.whatsapp.net',
+      'Personal',
+      'main',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      0,
+      'whatsapp',
+    );
 
-    const row = db.prepare('SELECT requires_trigger FROM registered_groups WHERE jid = ?')
+    const row = db
+      .prepare('SELECT requires_trigger FROM registered_groups WHERE jid = ?')
       .get('789@s.whatsapp.net') as { requires_trigger: number };
 
     expect(row.requires_trigger).toBe(0);
@@ -133,13 +174,33 @@ describe('parameterized SQL registration', () => {
          requires_trigger = excluded.requires_trigger, channel = excluded.channel`,
     );
 
-    stmt.run('123@g.us', 'Original', 'main', '@Andy', '2024-01-01T00:00:00.000Z', 1, 'whatsapp');
-    stmt.run('123@g.us', 'Updated', 'main', '@Bot', '2024-02-01T00:00:00.000Z', 0, 'whatsapp');
+    stmt.run(
+      '123@g.us',
+      'Original',
+      'main',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      1,
+      'whatsapp',
+    );
+    stmt.run(
+      '123@g.us',
+      'Updated',
+      'main',
+      '@Bot',
+      '2024-02-01T00:00:00.000Z',
+      0,
+      'whatsapp',
+    );
 
     const rows = db.prepare('SELECT * FROM registered_groups').all();
     expect(rows).toHaveLength(1);
 
-    const row = rows[0] as { name: string; trigger_pattern: string; requires_trigger: number };
+    const row = rows[0] as {
+      name: string;
+      trigger_pattern: string;
+      requires_trigger: number;
+    };
     expect(row.name).toBe('Updated');
     expect(row.trigger_pattern).toBe('@Bot');
     expect(row.requires_trigger).toBe(0);

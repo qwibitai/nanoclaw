@@ -10,7 +10,14 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getJidsForFolder, getTaskById, inferChannelFromJid, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getJidsForFolder,
+  getTaskById,
+  inferChannelFromJid,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';

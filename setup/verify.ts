@@ -13,7 +13,12 @@ import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
-import { getPlatform, getServiceManager, hasSystemd, isRoot } from './platform.js';
+import {
+  getPlatform,
+  getServiceManager,
+  hasSystemd,
+  isRoot,
+} from './platform.js';
 import { emitStatus } from './status.js';
 
 export async function run(_args: string[]): Promise<void> {
@@ -48,7 +53,9 @@ export async function run(_args: string[]): Promise<void> {
       service = 'running';
     } catch {
       try {
-        const output = execSync(`${prefix} list-unit-files`, { encoding: 'utf-8' });
+        const output = execSync(`${prefix} list-unit-files`, {
+          encoding: 'utf-8',
+        });
         if (output.includes('nanoclaw')) {
           service = 'stopped';
         }
@@ -110,9 +117,9 @@ export async function run(_args: string[]): Promise<void> {
   if (fs.existsSync(dbPath)) {
     try {
       const db = new Database(dbPath, { readonly: true });
-      const row = db.prepare(
-        'SELECT COUNT(*) as count FROM registered_groups',
-      ).get() as { count: number };
+      const row = db
+        .prepare('SELECT COUNT(*) as count FROM registered_groups')
+        .get() as { count: number };
       registeredGroups = row.count;
       db.close();
     } catch {
@@ -122,7 +129,11 @@ export async function run(_args: string[]): Promise<void> {
 
   // 6. Check mount allowlist
   let mountAllowlist = 'missing';
-  if (fs.existsSync(path.join(homeDir, '.config', 'nanoclaw', 'mount-allowlist.json'))) {
+  if (
+    fs.existsSync(
+      path.join(homeDir, '.config', 'nanoclaw', 'mount-allowlist.json'),
+    )
+  ) {
     mountAllowlist = 'configured';
   }
 

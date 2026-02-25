@@ -13,7 +13,11 @@ interface TestResult {
   error?: string;
 }
 
-function copyDirRecursive(src: string, dest: string, exclude: string[] = []): void {
+function copyDirRecursive(
+  src: string,
+  dest: string,
+  exclude: string[] = [],
+): void {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     if (exclude.includes(entry.name)) continue;
@@ -53,11 +57,14 @@ async function runMatrixEntry(
     });
 
     // Initialize nanoclaw dir
-    execSync('npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index.js\'; initNanoclawDir();"', {
-      cwd: tmpDir,
-      stdio: 'pipe',
-      timeout: 30_000,
-    });
+    execSync(
+      'npx tsx -e "import { initNanoclawDir } from \'./skills-engine/index.js\'; initNanoclawDir();"',
+      {
+        cwd: tmpDir,
+        stdio: 'pipe',
+        timeout: 30_000,
+      },
+    );
 
     // Apply each skill in sequence
     for (const skillName of entry.skills) {
@@ -70,10 +77,11 @@ async function runMatrixEntry(
         };
       }
 
-      const result = execSync(
-        `npx tsx scripts/apply-skill.ts "${skillDir}"`,
-        { cwd: tmpDir, stdio: 'pipe', timeout: 120_000 },
-      );
+      const result = execSync(`npx tsx scripts/apply-skill.ts "${skillDir}"`, {
+        cwd: tmpDir,
+        stdio: 'pipe',
+        timeout: 120_000,
+      });
       const parsed = JSON.parse(result.toString());
       if (!parsed.success) {
         return {
@@ -125,13 +133,17 @@ async function main(): Promise<void> {
     console.log(`Testing: [${entry.skills.join(', ')}]...`);
     const result = await runMatrixEntry(projectRoot, entry);
     results.push(result);
-    console.log(`  ${result.passed ? 'PASS' : 'FAIL'}${result.error ? ` — ${result.error}` : ''}`);
+    console.log(
+      `  ${result.passed ? 'PASS' : 'FAIL'}${result.error ? ` — ${result.error}` : ''}`,
+    );
   }
 
   console.log('\n--- Summary ---');
   const passed = results.filter((r) => r.passed).length;
   const failed = results.filter((r) => !r.passed).length;
-  console.log(`${passed} passed, ${failed} failed out of ${results.length} combination(s)`);
+  console.log(
+    `${passed} passed, ${failed} failed out of ${results.length} combination(s)`,
+  );
 
   if (failed > 0) {
     process.exit(1);

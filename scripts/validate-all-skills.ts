@@ -133,7 +133,11 @@ async function main(): Promise<void> {
     try {
       const applyOutput = execSync(
         `npx tsx scripts/apply-skill.ts "${skill.dir}"`,
-        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 120_000 },
+        {
+          encoding: 'utf-8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+          timeout: 120_000,
+        },
       );
       // parse stdout to verify success
       try {
@@ -162,7 +166,12 @@ async function main(): Promise<void> {
         error = stderr || stdout || err.message;
       }
       console.log(`  FAIL (apply): ${truncate(error)}`);
-      results.push({ name: skill.name, success: false, failedStep: 'apply', error });
+      results.push({
+        name: skill.name,
+        success: false,
+        failedStep: 'apply',
+        error,
+      });
       continue;
     }
     console.log('  apply: OK');
@@ -176,7 +185,12 @@ async function main(): Promise<void> {
     } catch (err: any) {
       const error = err.stdout?.toString() || err.message;
       console.log(`  FAIL (typecheck): ${truncate(error)}`);
-      results.push({ name: skill.name, success: false, failedStep: 'typecheck', error });
+      results.push({
+        name: skill.name,
+        success: false,
+        failedStep: 'typecheck',
+        error,
+      });
       continue;
     }
     console.log('  typecheck: OK');
@@ -192,7 +206,12 @@ async function main(): Promise<void> {
         const error =
           err.stdout?.toString() || err.stderr?.toString() || err.message;
         console.log(`  FAIL (test): ${truncate(error)}`);
-        results.push({ name: skill.name, success: false, failedStep: 'test', error });
+        results.push({
+          name: skill.name,
+          success: false,
+          failedStep: 'test',
+          error,
+        });
         continue;
       }
       console.log('  test: OK');
