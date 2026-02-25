@@ -43,7 +43,6 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
 
 When you learn something important:
-
 - Create files for structured data (e.g., `customers.md`, `preferences.md`)
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
@@ -51,10 +50,9 @@ When you learn something important:
 ## Message Formatting
 
 NEVER use markdown. Only use WhatsApp/Telegram formatting:
-
-- _single asterisks_ for bold (NEVER **double asterisks**)
+- *single asterisks* for bold (NEVER **double asterisks**)
 - _underscores_ for italic
 - • bullet points
-- `triple backticks` for code
+- ```triple backticks``` for code
 
 No ## headings. No [links](url). No **double stars**.
