@@ -168,7 +168,6 @@ container system status
 **Image build fails:**
 
 ```bash
-# Clean rebuild — Apple Container caches aggressively
 container builder stop && container builder rm && container builder start
 ./container/build.sh
 ```
