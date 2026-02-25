@@ -22,6 +22,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { resolveGroupIpcPath } from './group-folder.js';
 import { ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
   getAllChats,
@@ -97,8 +98,14 @@ async function runAgent(prompt: string): Promise<string | null> {
     }));
   writeGroupsSnapshot(groupFolder, true, availableGroups, new Set());
 
-  try {    
-    const output = await runContainerAgent(
+  try {
+    let resultReceived = false;
+    let resolveResult!: (value: string | null) => void;
+    const resultPromise = new Promise<string | null>((resolve) => {
+      resolveResult = resolve;
+    });
+
+    runContainerAgent(
       tuiGroup,
       {
         prompt: `<messages>\n<message sender="User" time="${new Date().toISOString()}">${escapeXml(prompt)}</message>\n</messages>`,
@@ -109,26 +116,40 @@ async function runAgent(prompt: string): Promise<string | null> {
         assistantName: ASSISTANT_NAME,
       },
       // onProcess callback — no-op for TUI (no need to track child process)
-      () => {}
+      () => {},
+      // onOutput callback — handle streaming results
+      async (output) => {
+        let outputData = output;
+        if (typeof output === 'string') {
+          outputData = JSON.parse(output);
+        }
+        if (outputData.newSessionId) {
+          setSession(groupFolder, outputData.newSessionId);
+        }
+
+        if (outputData.status === 'error') {
+          logger.error({ error: outputData.error }, 'Container agent error');
+          if (!resultReceived) {
+            resultReceived = true;
+            resolveResult(`[Error] ${outputData.error}`);
+            setCloseSignal(groupFolder);
+          }
+          return;
+        }
+
+        // Process the result and strip internal tags
+        if (outputData.result && !resultReceived) {
+          const raw = typeof outputData.result === 'string' ? outputData.result : JSON.stringify(outputData.result);
+          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+          const finalResult = text || outputData.result;
+          resultReceived = true;
+          resolveResult(finalResult);
+          setCloseSignal(groupFolder);
+        }
+      }
     );
 
-    if (output.newSessionId) {
-      setSession(groupFolder, output.newSessionId);
-    }
-
-    if (output.status === 'error') {
-      logger.error({ error: output.error }, 'Container agent error');
-      return `[Error] ${output.error}`;
-    }
-
-    // Process the result and strip internal tags
-    if (output.result) {
-      const raw = typeof output.result === 'string' ? output.result : JSON.stringify(output.result);
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      return text || output.result;
-    }
-
-    return output.result;
+    return await resultPromise;
   } catch (err) {
     logger.error({ err }, 'Agent error');
     return `[Error] ${err instanceof Error ? err.message : String(err)}`;
@@ -141,6 +162,20 @@ function escapeXml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function setCloseSignal(groupFolder: string): void {
+  const ipcDir = resolveGroupIpcPath(groupFolder);
+  const inputDir = path.join(ipcDir, 'input');
+  const closeSignalPath = path.join(inputDir, '_close');
+  
+  try {
+    fs.mkdirSync(inputDir, { recursive: true });
+    fs.writeFileSync(closeSignalPath, '');
+    logger.debug({ groupFolder, closeSignalPath }, 'Close signal set');
+  } catch (err) {
+    logger.error({ err, groupFolder, closeSignalPath }, 'Failed to set close signal');
+  }
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
