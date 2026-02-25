@@ -1,4 +1,3 @@
-import { execFileSync, execSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -7,15 +6,8 @@ import path from 'path';
 import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { readManifest } from './manifest.js';
-import {
-  cleanupMergeState,
-  isGitRepo,
-  mergeFile,
-  runRerere,
-  setupRerereAdapter,
-} from './merge.js';
+import { mergeFile } from './merge.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
-import { loadResolutions } from './resolution-cache.js';
 import {
   mergeDockerComposeServices,
   mergeEnvAdditions,
@@ -115,13 +107,6 @@ export async function replaySkills(
     }
   }
 
-  // 3. Load pre-computed resolutions into git's rr-cache before replaying
-  // Pass the last skill's dir — it's the one applied on top, producing conflicts
-  const lastSkillDir = options.skills.length > 0
-    ? options.skillDirs[options.skills[options.skills.length - 1]]
-    : undefined;
-  loadResolutions(options.skills, projectRoot, lastSkillDir);
-
   // Replay each skill in order
   // Collect structured ops for batch application
   const allNpmDeps: Record<string, string> = {};
@@ -190,7 +175,6 @@ export async function replaySkills(
           fs.copyFileSync(currentPath, basePath);
         }
 
-        const oursContent = fs.readFileSync(currentPath, 'utf-8');
         const tmpCurrent = path.join(
           os.tmpdir(),
           `nanoclaw-replay-${crypto.randomUUID()}-${path.basename(relPath)}`,
@@ -205,29 +189,6 @@ export async function replaySkills(
         } else {
           fs.copyFileSync(tmpCurrent, currentPath);
           fs.unlinkSync(tmpCurrent);
-
-          if (isGitRepo()) {
-            const baseContent = fs.readFileSync(basePath, 'utf-8');
-            const theirsContent = fs.readFileSync(skillPath, 'utf-8');
-
-            setupRerereAdapter(
-              resolvedPath,
-              baseContent,
-              oursContent,
-              theirsContent,
-            );
-            const autoResolved = runRerere(currentPath);
-
-            if (autoResolved) {
-              execFileSync('git', ['add', resolvedPath], { stdio: 'pipe' });
-              execSync('git rerere', { stdio: 'pipe' });
-              cleanupMergeState(resolvedPath);
-              continue;
-            }
-
-            cleanupMergeState(resolvedPath);
-          }
-
           skillConflicts.push(resolvedPath);
         }
       }
