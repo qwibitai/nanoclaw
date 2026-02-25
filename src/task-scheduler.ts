@@ -4,7 +4,6 @@ import fs from 'fs';
 
 import {
   ASSISTANT_NAME,
-  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,

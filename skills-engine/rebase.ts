@@ -27,9 +27,7 @@ function walkDir(dir: string, root: string): string[] {
   return results;
 }
 
-function collectTrackedFiles(
-  state: ReturnType<typeof readState>,
-): Set<string> {
+function collectTrackedFiles(state: ReturnType<typeof readState>): Set<string> {
   const tracked = new Set<string>();
 
   for (const skill of state.applied_skills) {
@@ -119,11 +117,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       }
 
       // Save combined patch
-      const patchPath = path.join(
-        projectRoot,
-        NANOCLAW_DIR,
-        'combined.patch',
-      );
+      const patchPath = path.join(projectRoot, NANOCLAW_DIR, 'combined.patch');
       fs.writeFileSync(patchPath, combinedPatch, 'utf-8');
 
       if (newBasePath) {

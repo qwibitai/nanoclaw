@@ -203,16 +203,14 @@ describe('uninstall', () => {
     setupSkillPackage('telegram', {
       adds: { 'src/telegram.ts': 'tg code\n' },
       modifies: {
-        'src/config.ts':
-          'telegram import\nline1\nline2\nline3\nline4\nline5\n',
+        'src/config.ts': 'telegram import\nline1\nline2\nline3\nline4\nline5\n',
       },
     });
 
     setupSkillPackage('discord', {
       adds: { 'src/discord.ts': 'dc code\n' },
       modifies: {
-        'src/config.ts':
-          'line1\nline2\nline3\nline4\nline5\ndiscord import\n',
+        'src/config.ts': 'line1\nline2\nline3\nline4\nline5\ndiscord import\n',
       },
     });
 

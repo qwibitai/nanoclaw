@@ -4,7 +4,11 @@ import path from 'path';
 
 import { parse, stringify } from 'yaml';
 
-import { SKILLS_SCHEMA_VERSION, NANOCLAW_DIR, STATE_FILE } from './constants.js';
+import {
+  SKILLS_SCHEMA_VERSION,
+  NANOCLAW_DIR,
+  STATE_FILE,
+} from './constants.js';
 import { AppliedSkill, CustomModification, SkillState } from './types.js';
 
 function getStatePath(): string {
