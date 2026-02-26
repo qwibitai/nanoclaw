@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, execSync, spawn } from 'child_process';
+import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -17,14 +17,19 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  INSTANCE_ID,
   TIMEZONE,
 } from './config.js';
 import { getBrainPath } from './brain-sync.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_RUNTIME_BIN,
+  detectDockerSocket,
+  isRootlessDocker,
+  readonlyMountArgs,
+  stopContainer,
+} from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -221,39 +226,6 @@ function readSecrets(): Record<string, string> {
   return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
 }
 
-/** Cache rootless detection (doesn't change during process lifetime). */
-let _isRootless: boolean | null = null;
-
-function isRootlessDocker(): boolean {
-  if (_isRootless !== null) return _isRootless;
-  try {
-    const output = execSync(
-      `${CONTAINER_RUNTIME_BIN} info --format '{{json .SecurityOptions}}'`,
-      { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
-    );
-    _isRootless = output.includes('rootless');
-  } catch {
-    _isRootless = false;
-  }
-  return _isRootless;
-}
-
-function detectDockerSocket(): string | null {
-  // Rootless: $XDG_RUNTIME_DIR/docker.sock or /run/user/{uid}/docker.sock
-  const xdgRuntime = process.env.XDG_RUNTIME_DIR;
-  if (xdgRuntime) {
-    const sock = path.join(xdgRuntime, 'docker.sock');
-    try { fs.statSync(sock); return sock; } catch { /* not here */ }
-  }
-  const uid = process.getuid?.();
-  if (uid != null && uid !== 0) {
-    const sock = `/run/user/${uid}/docker.sock`;
-    try { fs.statSync(sock); return sock; } catch { /* not here */ }
-  }
-  // Standard rootful socket
-  try { fs.statSync('/var/run/docker.sock'); return '/var/run/docker.sock'; } catch { return null; }
-}
-
 function buildContainerArgs(mounts: VolumeMount[], containerName: string, isMain: boolean): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
@@ -291,15 +263,16 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string, isMain
   if (isMain) {
     const dockerSock = detectDockerSocket();
     if (dockerSock) {
-      try {
-        const stat = fs.statSync(dockerSock);
-        args.push('-v', `${dockerSock}:/var/run/docker.sock`);
-        // In rootful mode, pass docker GID. In rootless, socket is user-owned.
-        if (stat.gid && !isRootlessDocker()) {
+      args.push('-v', `${dockerSock}:/var/run/docker.sock`);
+      // In rootful mode, pass docker GID so the container user can access the socket.
+      // In rootless mode, the socket is user-owned so --group-add is unnecessary.
+      if (!isRootlessDocker()) {
+        try {
+          const stat = fs.statSync(dockerSock);
           args.push('--group-add', String(stat.gid));
+        } catch {
+          // Socket stat failed — skip group-add, mount still works
         }
-      } catch {
-        // Docker socket not available, skip
       }
     }
   }

@@ -15,6 +15,16 @@ vi.mock('./config.js', () => ({
   CONTAINER_NAME_PREFIX: 'nanoclaw-testuser',
 }));
 
+// Mock fs for detectDockerSocket tests
+const mockStatSync = vi.fn();
+vi.mock('fs', async () => {
+  const actual = await vi.importActual<typeof import('fs')>('fs');
+  return {
+    ...actual,
+    default: { ...actual, statSync: (...args: unknown[]) => mockStatSync(...args) },
+  };
+});
+
 // Mock child_process — store the mock fns so tests can configure them
 const mockExecSync = vi.fn();
 const mockExec = vi.fn();
@@ -36,6 +46,8 @@ import {
   stopContainerAsync,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
+  isRootlessDocker,
+  detectDockerSocket,
 } from './container-runtime.js';
 import { logger } from './logger.js';
 
@@ -203,5 +215,43 @@ describe('cleanupOrphans', () => {
       expect.stringContaining('--filter name=nanoclaw-testuser-'),
       expect.any(Object),
     );
+  });
+});
+
+// --- isRootlessDocker ---
+
+describe('isRootlessDocker', () => {
+  it('detects rootless mode and caches result', () => {
+    mockExecSync.mockReturnValueOnce('["name=seccomp,profile=default","name=rootless"]');
+
+    const result = isRootlessDocker();
+    expect(result).toBe(true);
+
+    // Second call should use cache (no additional execSync calls)
+    const callCount = mockExecSync.mock.calls.length;
+    const result2 = isRootlessDocker();
+    expect(result2).toBe(true);
+    expect(mockExecSync).toHaveBeenCalledTimes(callCount);
+  });
+});
+
+// --- detectDockerSocket ---
+
+describe('detectDockerSocket', () => {
+  it('finds standard rootful socket and caches result', () => {
+    // No XDG_RUNTIME_DIR set, getuid returns 0 (root) — falls through to /var/run/docker.sock
+    mockStatSync.mockImplementation((p: string) => {
+      if (p === '/var/run/docker.sock') return { gid: 999 };
+      throw new Error('ENOENT');
+    });
+
+    const result = detectDockerSocket();
+    expect(result).toBe('/var/run/docker.sock');
+
+    // Second call should use cache
+    const callCount = mockStatSync.mock.calls.length;
+    const result2 = detectDockerSocket();
+    expect(result2).toBe('/var/run/docker.sock');
+    expect(mockStatSync).toHaveBeenCalledTimes(callCount);
   });
 });

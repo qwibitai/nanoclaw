@@ -21,7 +21,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
+import { cleanupOrphans, ensureContainerRuntimeRunning, probeRootlessDocker } from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -572,6 +572,7 @@ function recoverPendingMessages(): void {
 
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
+  probeRootlessDocker();
   cleanupOrphans();
 }
 
