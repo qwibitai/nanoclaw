@@ -15,6 +15,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { runHostSkillAgent } from './host-runner.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -290,6 +291,32 @@ async function runAgent(
     : undefined;
 
   try {
+    // Host execution: skills that need Chrome MCP (e.g., scout with EverBee)
+    if (group.hostSkill) {
+      const output = await runHostSkillAgent(
+        group,
+        {
+          prompt,
+          groupFolder: group.folder,
+          chatJid,
+          assistantName: ASSISTANT_NAME,
+        },
+        (proc) =>
+          queue.registerProcess(chatJid, proc, `host-${group.folder}`, group.folder),
+        wrappedOnOutput,
+      );
+
+      if (output.status === 'error') {
+        logger.error(
+          { group: group.name, error: output.error },
+          'Host skill agent error',
+        );
+        return 'error';
+      }
+      return 'success';
+    }
+
+    // Container execution: default path for all other groups
     const output = await runContainerAgent(
       group,
       {

@@ -39,6 +39,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  hostSkill?: string; // Skill name from .claude/skills/{name}/SKILL.md — runs on host with Chrome MCP (not in container)
 }
 
 export interface NewMessage {
