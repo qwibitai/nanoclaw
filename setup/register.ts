@@ -88,8 +88,10 @@ export async function run(args: string[]): Promise<void> {
 
   logger.info(parsed, 'Registering channel');
 
-  // Ensure data directory exists
+  // Ensure data and store directories exist (store/ may not exist on
+  // fresh installs that skip WhatsApp auth, which normally creates it)
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
+  fs.mkdirSync(STORE_DIR, { recursive: true });
 
   // Write to SQLite using parameterized queries (no SQL injection)
   const dbPath = path.join(STORE_DIR, 'messages.db');

@@ -1,0 +1,16 @@
+skill: whatsapp
+version: 1.0.0
+description: "WhatsApp channel via Baileys (Multi-Device Web API)"
+core_version: 0.1.0
+adds: []
+modifies: []
+structured:
+  npm_dependencies:
+    "@whiskeysockets/baileys": "^7.0.0-rc.9"
+    "qrcode": "^1.5.4"
+    "qrcode-terminal": "^0.12.0"
+  env_additions:
+    - ASSISTANT_HAS_OWN_NUMBER
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/whatsapp.test.ts"

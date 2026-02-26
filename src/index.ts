@@ -520,7 +520,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroups: async (force) => {
+    syncGroups: async (force: boolean) => {
       await Promise.all(
         channels
           .filter((ch) => ch.syncGroups)
