@@ -90,7 +90,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 
 ### Test
 
-Send a voice note in any registered WhatsApp chat. The agent should receive it as `[Voice: <transcript>]`.
+Send a voice note in any registered group. The agent should receive it as `[Voice: <transcript>]`.
 
 ### Check logs
 
