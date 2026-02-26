@@ -1,7 +1,7 @@
 /**
- * Step: groups — Fetch group metadata from channel platforms, write to DB.
- * Currently implements WhatsApp group sync (Baileys). Other channels
- * deliver group names inline with messages and don't need a sync step.
+ * Step: groups — Fetch group metadata from messaging platforms, write to DB.
+ * WhatsApp requires an upfront sync (Baileys groupFetchAllParticipating).
+ * Other channels discover group names at runtime — this step auto-skips for them.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
 import { execSync } from 'child_process';
@@ -65,7 +65,7 @@ async function listGroups(limit: number): Promise<void> {
 }
 
 async function syncGroups(projectRoot: string): Promise<void> {
-  // Check if WhatsApp is an enabled channel — only WhatsApp needs this sync step
+  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime
   const envVars = readEnvFile(['ENABLED_CHANNELS']);
   const enabledChannels = (
     process.env.ENABLED_CHANNELS ||
@@ -77,9 +77,7 @@ async function syncGroups(projectRoot: string): Promise<void> {
     .filter(Boolean);
 
   if (!enabledChannels.includes('whatsapp')) {
-    logger.info(
-      'WhatsApp not in ENABLED_CHANNELS — skipping group sync (other channels deliver names inline)',
-    );
+    logger.info('Group sync not required for enabled channels — skipping');
     emitStatus('SYNC_GROUPS', {
       BUILD: 'skipped',
       SYNC: 'skipped',

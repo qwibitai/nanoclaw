@@ -1,8 +1,8 @@
 /**
  * Step: register — Write channel registration config, create group folders.
- * Replaces 06-register-channel.sh
  *
- * Fixes: SQL injection (parameterized queries), sed -i '' (uses fs directly).
+ * Accepts --channel to specify the messaging platform (whatsapp, telegram, slack, discord).
+ * Uses parameterized SQL queries to prevent injection.
  */
 import fs from 'fs';
 import path from 'path';
@@ -30,7 +30,7 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
-    channel: 'whatsapp',
+    channel: 'whatsapp', // backward-compat: pre-refactor installs omit --channel
     requiresTrigger: true,
     assistantName: 'Andy',
   };
@@ -50,7 +50,7 @@ function parseArgs(args: string[]): RegisterArgs {
         result.folder = args[++i] || '';
         break;
       case '--channel':
-        result.channel = (args[++i] || 'whatsapp').toLowerCase();
+        result.channel = (args[++i] || '').toLowerCase();
         break;
       case '--no-trigger-required':
         result.requiresTrigger = false;

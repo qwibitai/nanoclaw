@@ -105,8 +105,7 @@ describe('Docker detection logic', () => {
 });
 
 describe('channel auth detection', () => {
-  it('detects non-empty auth directory for WhatsApp', () => {
-    // Simulate the check: directory exists and has files
+  it('detects non-empty auth directory', () => {
     const hasAuth = (authDir: string) => {
       try {
         return fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
@@ -130,7 +129,7 @@ describe('ENABLED_CHANNELS parsing', () => {
     expect(channels).toEqual(['whatsapp', 'telegram', 'slack']);
   });
 
-  it('defaults to whatsapp when empty', () => {
+  it('falls back when empty', () => {
     const raw = '';
     const channels = (raw || 'whatsapp')
       .split(',')

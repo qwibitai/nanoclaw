@@ -1,11 +1,12 @@
 /**
- * Step: whatsapp-auth — Full WhatsApp auth flow with polling.
- * Replaces 04-auth-whatsapp.sh
+ * Step: whatsapp-auth — WhatsApp interactive auth (QR code / pairing code).
+ * Auto-skips when WhatsApp is not in ENABLED_CHANNELS.
  */
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import { openBrowser, isHeadless } from './platform.js';
 import { emitStatus } from './status.js';
@@ -125,6 +126,26 @@ function emitAuthStatus(
 
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
+
+  // Auto-skip when WhatsApp is not among the enabled channels
+  const envVars = readEnvFile(['ENABLED_CHANNELS']);
+  const enabledChannels = (
+    process.env.ENABLED_CHANNELS ||
+    envVars.ENABLED_CHANNELS ||
+    'whatsapp'
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (!enabledChannels.includes('whatsapp')) {
+    logger.info('WhatsApp not enabled — skipping auth step');
+    emitAuthStatus('skipped', 'skipped', 'success', {
+      REASON: 'whatsapp_not_enabled',
+    });
+    return;
+  }
+
   const { method, phone } = parseArgs(args);
   const statusFile = path.join(projectRoot, 'store', 'auth-status.txt');
   const qrFile = path.join(projectRoot, 'store', 'qr-data.txt');
@@ -157,7 +178,7 @@ export async function run(args: string[]): Promise<void> {
   }
 
   // Clean stale state
-  logger.info({ method }, 'Starting WhatsApp auth');
+  logger.info({ method }, 'Starting channel authentication');
   try {
     fs.rmSync(path.join(projectRoot, 'store', 'auth'), {
       recursive: true,

@@ -1,13 +1,13 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate messaging channels, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
 
-Run setup steps automatically. Only pause when user action is required (WhatsApp authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
+Run setup steps automatically. Only pause when user action is required (channel authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
 
-**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. scanning a QR code, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
+**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
@@ -27,9 +27,29 @@ Run `bash setup.sh` and parse the status block.
 
 Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
+- Record ENABLED_CHANNELS for later steps (determines which auth/sync steps to run)
+- If HAS_AUTH=true and WhatsApp is enabled → offer to skip step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
+
+## 2b. Select Channels
+
+**If ENABLED_CHANNELS is already set** (from a previous run or .env): show the current selection and `AskUserQuestion: Keep current channels (<list>) or reconfigure?` If "keep", skip to step 3.
+
+**If ENABLED_CHANNELS is not set** (first-time setup):
+
+AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
+- WhatsApp (authenticates via QR code or pairing code)
+- Telegram (authenticates via bot token from @BotFather)
+- Slack (authenticates via Slack app with Socket Mode)
+- Discord (authenticates via Discord bot token)
+
+Run `npx tsx setup/index.ts --step channels -- --channels <comma-separated>` and parse the status block.
+
+**The selected channels determine which later steps run:**
+- Token-based channels (Telegram, Slack, Discord) → collect tokens in step 4b
+- WhatsApp → authenticate in step 5, configure trigger in step 6, sync groups in step 7
+- Channels not selected → their corresponding steps are skipped automatically
 
 ## 3. Container Runtime
 
@@ -38,8 +58,8 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
 - PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (default, cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
-- PLATFORM=macos + APPLE_CONTAINER=not_found → Docker (default)
+- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
+- PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
 
 ### 3a-docker. Install Docker
 
@@ -61,7 +81,7 @@ grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "
 
 **If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
 
-**If the chosen runtime is Docker**, no conversion is needed — Docker is the default. Continue to 3c.
+**If the chosen runtime is Docker**, no conversion is needed. Continue to 3c.
 
 ### 3c. Build and test
 
@@ -83,7 +103,21 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 5. WhatsApp Authentication
+## 4b. Channel Tokens
+
+**Skip this step if no token-based channels are enabled.** WhatsApp uses interactive auth (step 5) rather than tokens.
+
+For each enabled token-based channel, collect the required credentials and write them to `.env`:
+
+- **Telegram:** `AskUserQuestion: Paste your Telegram bot token (from @BotFather)`. Write `TELEGRAM_BOT_TOKEN=<token>` to `.env`.
+- **Slack:** `AskUserQuestion: Paste your Slack Bot Token (xoxb-...)`. Write `SLACK_BOT_TOKEN=<token>` to `.env`. Then `AskUserQuestion: Paste your Slack App Token (xapp-...)`. Write `SLACK_APP_TOKEN=<token>` to `.env`.
+- **Discord:** `AskUserQuestion: Paste your Discord bot token`. Write `DISCORD_BOT_TOKEN=<token>` to `.env`.
+
+If the token already exists in `.env`, show it (masked) and ask: keep or replace?
+
+## 5. WhatsApp Authentication (conditional)
+
+**Only runs when WhatsApp is in ENABLED_CHANNELS.** Otherwise the step auto-skips (emits REASON=whatsapp_not_enabled).
 
 If HAS_AUTH=true, confirm: keep or re-authenticate?
 
@@ -98,16 +132,20 @@ Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser
 
 **If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
 
-## 6. Configure Trigger and Channel Type
+## 6. Configure Trigger and Channel Type (conditional)
 
-Get bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
+**Only runs when WhatsApp is in ENABLED_CHANNELS.** Other channels configure their trigger word and channel type during registration (step 8).
+
+Get the bot's phone number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
 AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? → AskUserQuestion: Main channel type?
 
 **Shared number:** Self-chat (recommended) or Solo group
 **Dedicated number:** DM with bot (recommended) or Solo group with bot
 
-## 7. Sync and Select Group (If Group Channel)
+## 7. Sync and Select Group (conditional)
+
+**Only runs when WhatsApp is in ENABLED_CHANNELS.** The groups step auto-skips otherwise (emits REASON=whatsapp_not_enabled). Telegram, Slack, and Discord discover groups at runtime — no upfront sync needed.
 
 **Personal chat:** JID = `NUMBER@s.whatsapp.net`
 **DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
@@ -120,7 +158,22 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 
 ## 8. Register Channel
 
-Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "main" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
+Register the main channel with its identifier, trigger word, and channel type.
+
+AskUserQuestion for trigger word and assistant name (if not already determined in step 6).
+
+**Per-channel identifiers:**
+- **WhatsApp:** Use the JID from step 7 (e.g. `NUMBER@s.whatsapp.net` or `ID@g.us`). Add `--channel whatsapp`. Add `--no-trigger-required` for personal/DM/solo chats.
+- **Telegram:** `--jid "pending@telegram" --channel telegram`. The actual chat ID is resolved at runtime.
+- **Slack:** `--jid "pending@slack" --channel slack`. The actual channel ID is resolved at runtime.
+- **Discord:** `--jid "pending@discord" --channel discord`. The actual channel ID is resolved at runtime.
+
+```
+npx tsx setup/index.ts --step register -- \
+  --jid "IDENTIFIER" --name "main" --trigger "@TriggerWord" \
+  --folder "main" --channel CHANNEL_NAME \
+  [--no-trigger-required] [--assistant-name "Name"]
+```
 
 ## 9. Mount Allowlist
 
@@ -167,7 +220,7 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 10
 - CREDENTIALS=missing → re-run step 4
-- WHATSAPP_AUTH=not_found → re-run step 5
+- CHANNEL_AUTH shows `not_found` for any channel → re-run its auth step (step 5 for WhatsApp, step 4b for token-based channels)
 - REGISTERED_GROUPS=0 → re-run steps 7-8
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
@@ -175,12 +228,12 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing auth (step 5).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing channel credentials (steps 4b/5).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
-**WhatsApp disconnected:** `npm run auth` then rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux).
+**Channel not connecting:** Verify the channel's credentials are set in `.env` and that `ENABLED_CHANNELS` includes the channel name. For WhatsApp: re-run `npm run auth`. For token-based channels: check token values. Restart the service after any `.env` change.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
