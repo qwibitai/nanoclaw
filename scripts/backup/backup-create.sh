@@ -17,10 +17,10 @@ GROUPS_DIR="${PROJECT_ROOT}/groups"
 CONFIG_DIR="${PROJECT_ROOT}/data"
 
 # GPG passphrase (should be in env var)
-GPG_PASSPHRASE="${NANOCLAW_BACKUP_PASSPHRASE:-changeme}"
+GPG_PASSPHRASE="${BACKUP_PASSPHRASE:-changeme}"
 
 # Google Drive folder ID (will be configured)
-DRIVE_FOLDER_ID="${NANOCLAW_BACKUP_DRIVE_FOLDER:-}"
+DRIVE_FOLDER_ID="${BACKUP_GDRIVE_FOLDER:-}"
 
 # Retention: keep last N backups
 RETENTION_COUNT=21  # 7 days * 3 backups/day

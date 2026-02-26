@@ -39,10 +39,10 @@ Añadir a `/Users/danielmunoz/.nanoclaw/.env`:
 
 ```bash
 # Passphrase para encriptar backups
-NANOCLAW_BACKUP_PASSPHRASE="tu-passphrase-seguro-aqui"
+BACKUP_PASSPHRASE="tu-passphrase-seguro-aqui"
 
 # ID de carpeta en Google Drive donde guardar backups
-NANOCLAW_BACKUP_DRIVE_FOLDER="id-de-carpeta-drive"
+BACKUP_GDRIVE_FOLDER="id-de-carpeta-drive"
 ```
 
 ## Setup Inicial
@@ -58,8 +58,8 @@ NANOCLAW_BACKUP_DRIVE_FOLDER="id-de-carpeta-drive"
 
 2. **Configurar variables de entorno** (en host Mac):
    ```bash
-   echo 'NANOCLAW_BACKUP_PASSPHRASE="mi-passphrase-super-seguro"' >> ~/.nanoclaw/.env
-   echo 'NANOCLAW_BACKUP_DRIVE_FOLDER="id-carpeta-drive"' >> ~/.nanoclaw/.env
+   echo 'BACKUP_PASSPHRASE="mi-passphrase-super-seguro"' >> ~/.nanoclaw/.env
+   echo 'BACKUP_GDRIVE_FOLDER="id-carpeta-drive"' >> ~/.nanoclaw/.env
    ```
 
 3. **Reiniciar NanoClaw** para cargar las variables.

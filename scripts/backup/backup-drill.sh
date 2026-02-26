@@ -4,8 +4,8 @@ set -euo pipefail
 # NanoClaw Backup Integrity Drill
 # Validates latest backup without modifying filesystem
 
-GPG_PASSPHRASE="${NANOCLAW_BACKUP_PASSPHRASE:-changeme}"
-DRIVE_FOLDER_ID="${NANOCLAW_BACKUP_DRIVE_FOLDER:-}"
+GPG_PASSPHRASE="${BACKUP_PASSPHRASE:-changeme}"
+DRIVE_FOLDER_ID="${BACKUP_GDRIVE_FOLDER:-}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"

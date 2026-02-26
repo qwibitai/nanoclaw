@@ -18,7 +18,7 @@ check_backups() {
         echo "Último: Nunca (sin env vars)"
     fi
 
-    if [ -n "${NANOCLAW_BACKUP_DRIVE_FOLDER:-}" ]; then
+    if [ -n "${BACKUP_GDRIVE_FOLDER:-}" ]; then
         echo "Drive: ✅ Configurado"
     else
         echo "Drive: ⚠️ No configurado"
@@ -76,7 +76,7 @@ check_resources() {
 check_alerts() {
     local has_alerts=false
 
-    if [ -z "${NANOCLAW_BACKUP_DRIVE_FOLDER:-}" ] || [ -z "${NANOCLAW_BACKUP_PASSPHRASE:-}" ]; then
+    if [ -z "${BACKUP_GDRIVE_FOLDER:-}" ] || [ -z "${BACKUP_PASSPHRASE:-}" ]; then
         if [ "$has_alerts" = false ]; then
             echo ""
             echo "⚠️ *Alertas*"
