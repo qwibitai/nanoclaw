@@ -223,6 +223,8 @@ async function runTask(
 }
 
 let schedulerRunning = false;
+// Prevents duplicate execution when tasks take longer than SCHEDULER_POLL_INTERVAL
+const enqueuedTaskIds = new Set<string>();
 
 export function startSchedulerLoop(deps: SchedulerDependencies): void {
   if (schedulerRunning) {
@@ -240,15 +242,24 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
       }
 
       for (const task of dueTasks) {
+        if (enqueuedTaskIds.has(task.id)) {
+          continue;
+        }
+
         // Re-check task status in case it was paused/cancelled
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
-        );
+        enqueuedTaskIds.add(currentTask.id);
+        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, async () => {
+          try {
+            await runTask(currentTask, deps);
+          } finally {
+            enqueuedTaskIds.delete(currentTask.id);
+          }
+        });
       }
     } catch (err) {
       logger.error({ err }, 'Error in scheduler loop');
@@ -263,4 +274,5 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 /** @internal - for tests only. */
 export function _resetSchedulerLoopForTests(): void {
   schedulerRunning = false;
+  enqueuedTaskIds.clear();
 }
