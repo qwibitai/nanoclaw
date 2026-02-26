@@ -27,15 +27,30 @@ export async function run(_args: string[]): Promise<void> {
     appleContainer = 'installed';
   }
 
-  // Check Docker
-  let docker: 'running' | 'installed_not_running' | 'not_found' = 'not_found';
+  // Check Docker with detailed diagnostics
+  let docker: 'running' | 'installed_not_running' | 'no_permission' | 'not_found' = 'not_found';
   if (commandExists('docker')) {
     try {
       const { execSync } = await import('child_process');
       execSync('docker info', { stdio: 'ignore' });
       docker = 'running';
-    } catch {
-      docker = 'installed_not_running';
+      logger.info('Docker is accessible');
+    } catch (e1) {
+      // Docker exists but `docker info` failed - diagnose why
+      logger.debug({ err: e1 }, 'docker info failed, diagnosing');
+      try {
+        // Check if docker daemon is running (with sudo)
+        const { execSync: execSync2 } = await import('child_process');
+        execSync2('sudo docker info', { stdio: 'ignore' });
+        // Daemon is running, so it's a permission issue
+        docker = 'no_permission';
+        logger.warn('Docker daemon is running but user lacks permission');
+      } catch (e2) {
+        // Daemon itself is not running
+        docker = 'installed_not_running';
+        logger.debug({ err: e2 }, 'sudo docker info also failed, daemon likely not running');
+        logger.warn('Docker is installed but daemon is not running');
+      }
     }
   }
 
