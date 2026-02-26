@@ -163,7 +163,10 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.writeFileSync(
+        tempPath,
+        JSON.stringify({ type: 'message', text, chatJid: groupJid }),
+      );
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
@@ -173,15 +176,18 @@ export class GroupQueue {
 
   /**
    * Signal the active container to wind down by writing a close sentinel.
+   * Uses a JID-specific sentinel so containers sharing a folder don't
+   * accidentally consume each other's close signals.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    const safeJid = groupJid.replace(/[^a-zA-Z0-9-]/g, '_');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      fs.writeFileSync(path.join(inputDir, `_close.${safeJid}`), '');
     } catch {
       // ignore
     }
