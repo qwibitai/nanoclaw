@@ -449,13 +449,15 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        composio: {
-          command: 'npx',
-          args: ['-y', '@composio/mcp@latest', 'start'],
-          env: {
-            COMPOSIO_API_KEY: process.env.COMPOSIO_API_KEY || '',
+        ...(process.env.COMPOSIO_MCP_URL ? {
+          composio: {
+            type: 'http' as const,
+            url: process.env.COMPOSIO_MCP_URL,
+            headers: {
+              'x-api-key': process.env.COMPOSIO_API_KEY || '',
+            },
           },
-        },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
