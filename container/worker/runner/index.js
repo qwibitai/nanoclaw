@@ -102,44 +102,84 @@ function isModelNotFound(message) {
   return text.includes('model not found') || text.includes('unknown model');
 }
 
-function extractTextFromEvent(event) {
-  if (!event || typeof event !== 'object') return null;
-  if (event.type === 'text' && typeof event.text === 'string') return event.text;
+function findCompletionBlock(text) {
+  if (!text || !text.trim()) return null;
+  const match = text.match(/<completion>[\s\S]*?<\/completion>/i);
+  return match ? match[0].trim() : null;
+}
 
-  if (event.part && typeof event.part === 'object') {
-    if (event.part.type === 'text' && typeof event.part.text === 'string') return event.part.text;
-    if (typeof event.part.text === 'string') return event.part.text;
+function extractTextFromUnknown(value) {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return null;
+
+  if (Array.isArray(value)) {
+    const chunks = value
+      .map((item) => extractTextFromUnknown(item))
+      .filter((item) => typeof item === 'string' && item.trim());
+    return chunks.length > 0 ? chunks.join('\n') : null;
   }
 
-  if (event.properties && typeof event.properties === 'object') {
-    const part = event.properties.part;
-    if (part && typeof part === 'object') {
-      if (part.type === 'text' && typeof part.text === 'string') return part.text;
-      if (typeof part.text === 'string') return part.text;
-    }
+  if (value.type === 'text' && typeof value.text === 'string') return value.text;
+  if (typeof value.text === 'string') return value.text;
+  if (typeof value.result === 'string') return value.result;
+  if (typeof value.output === 'string') return value.output;
+  if (typeof value.message === 'string') return value.message;
+
+  const nestedCandidates = [
+    value.message,
+    value.content,
+    value.part,
+    value.parts,
+    value.properties,
+  ];
+  for (const candidate of nestedCandidates) {
+    const extracted = extractTextFromUnknown(candidate);
+    if (typeof extracted === 'string' && extracted.trim()) return extracted;
   }
 
   return null;
 }
 
+function extractTextFromEvent(event) {
+  return extractTextFromUnknown(event);
+}
+
 function extractResult(stdout, payload, events) {
+  const stdoutTrimmed = (stdout || '').trim();
+  const completionFromStdout = findCompletionBlock(stdoutTrimmed);
+  if (completionFromStdout) return completionFromStdout;
+
   const chunks = [];
   for (const event of events) {
     const text = extractTextFromEvent(event);
     if (typeof text === 'string' && text.trim()) chunks.push(text);
   }
-  if (chunks.length > 0) return chunks.join('\n').trim();
-
-  // Defensive: OpenCode JSON schema is not formally stable.
-  if (payload && typeof payload === 'object') {
-    if (typeof payload.message === 'string') return payload.message;
-    if (typeof payload.content === 'string') return payload.content;
-    if (typeof payload.text === 'string') return payload.text;
-    if (typeof payload.output === 'string') return payload.output;
-    if (typeof payload.result === 'string') return payload.result;
-    return JSON.stringify(payload);
+  if (chunks.length > 0) {
+    const merged = chunks.join('\n').trim();
+    const completionFromChunks = findCompletionBlock(merged);
+    if (completionFromChunks) return completionFromChunks;
+    return merged;
   }
-  return stdout.trim();
+
+  if (payload && typeof payload === 'object') {
+    const payloadCandidates = [
+      payload.message,
+      payload.content,
+      payload.text,
+      payload.output,
+      payload.result,
+    ];
+    for (const candidate of payloadCandidates) {
+      if (typeof candidate !== 'string') continue;
+      const completion = findCompletionBlock(candidate);
+      if (completion) return completion;
+      if (candidate.trim()) return candidate;
+    }
+  }
+
+  if (stdoutTrimmed) return stdoutTrimmed;
+  if (payload && typeof payload === 'object') return JSON.stringify(payload);
+  return '';
 }
 
 function buildModelCandidates(requestedModel) {

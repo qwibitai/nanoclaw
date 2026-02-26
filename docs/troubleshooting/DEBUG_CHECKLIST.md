@@ -80,6 +80,29 @@ Verification:
 4. Confirm only one running group container:
    `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
 
+### 7. [FIXED 2026-02-25] Transient skill staging ENOENT under parallel runs
+
+Symptom:
+
+- Concurrent Andy runs can fail early with errors like:
+  - `ENOENT ... unlink .../.claude/skills/...`
+  - `ENOENT ... chmod .../.claude/skills/...`
+
+Cause:
+
+- Parallel filesystem copy into the same per-group staged skills directory can race inside `fs.cpSync` internals.
+
+Fix:
+
+- `src/container-runner.ts` now retries transient skill sync filesystem errors (`ENOENT`, `EBUSY`, `EPERM`) before failing run setup.
+
+Verification:
+
+1. Run two smoke tests in parallel:
+   `npx tsx scripts/test-worker-e2e.ts` (twice concurrently)
+2. Confirm logs may show `Retrying skill copy after transient filesystem race` warnings.
+3. Confirm runs continue to container spawn and completion instead of aborting on ENOENT.
+
 ## Quick Status Check
 
 ```bash
@@ -98,6 +121,24 @@ grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/nanocla
 
 # 5. Are groups loaded?
 grep 'groupCount' logs/nanoclaw.log | tail -3
+```
+
+## Jarvis Ops Script Shortcuts
+
+Use the script dispatcher for consistent debug/recovery/smoke flow:
+
+```bash
+# Health checks (runtime + auth + DB queue)
+bash scripts/jarvis-ops.sh preflight
+
+# Runtime/builder recovery and service restart
+bash scripts/jarvis-ops.sh recover
+
+# Worker image rebuild + end-to-end smoke gate
+bash scripts/jarvis-ops.sh smoke
+
+# Log summary and categorized live watch
+bash scripts/jarvis-ops.sh watch --lines 120
 ```
 
 ## Duplicate Container Recovery (if runtime state is inconsistent)

@@ -59,23 +59,48 @@ export function isModelNotFound(message: string): boolean {
   return text.includes('model not found') || text.includes('unknown model');
 }
 
-function extractTextFromEvent(event: Record<string, unknown>): string | null {
-  if (event.type === 'text' && typeof event.text === 'string') return event.text;
+function findCompletionBlock(text: string): string | null {
+  if (!text.trim()) return null;
+  const match = text.match(/<completion>[\s\S]*?<\/completion>/i);
+  return match ? match[0].trim() : null;
+}
 
-  const part = event.part as Record<string, unknown> | undefined;
-  if (part) {
-    if (part.type === 'text' && typeof part.text === 'string') return part.text;
-    if (typeof part.text === 'string') return part.text;
+function extractTextFromUnknown(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return null;
+
+  if (Array.isArray(value)) {
+    const chunks = value
+      .map((item) => extractTextFromUnknown(item))
+      .filter((item): item is string => !!item && !!item.trim());
+    return chunks.length > 0 ? chunks.join('\n') : null;
   }
 
-  const props = event.properties as Record<string, unknown> | undefined;
-  const propPart = props?.part as Record<string, unknown> | undefined;
-  if (propPart) {
-    if (propPart.type === 'text' && typeof propPart.text === 'string') return propPart.text;
-    if (typeof propPart.text === 'string') return propPart.text;
+  const obj = value as Record<string, unknown>;
+
+  if (obj.type === 'text' && typeof obj.text === 'string') return obj.text;
+  if (typeof obj.text === 'string') return obj.text;
+  if (typeof obj.result === 'string') return obj.result;
+  if (typeof obj.output === 'string') return obj.output;
+  if (typeof obj.message === 'string') return obj.message;
+
+  const nestedCandidates = [
+    obj.message,
+    obj.content,
+    obj.part,
+    obj.parts,
+    obj.properties,
+  ];
+  for (const candidate of nestedCandidates) {
+    const extracted = extractTextFromUnknown(candidate);
+    if (extracted && extracted.trim()) return extracted;
   }
 
   return null;
+}
+
+function extractTextFromEvent(event: Record<string, unknown>): string | null {
+  return extractTextFromUnknown(event);
 }
 
 export function extractResult(
@@ -83,22 +108,42 @@ export function extractResult(
   payload: Record<string, unknown> | null,
   events: Record<string, unknown>[],
 ): string {
+  const stdoutTrimmed = stdout.trim();
+  const completionFromStdout = findCompletionBlock(stdoutTrimmed);
+  if (completionFromStdout) return completionFromStdout;
+
   const chunks: string[] = [];
   for (const event of events) {
     const text = extractTextFromEvent(event);
     if (text && text.trim()) chunks.push(text);
   }
-  if (chunks.length > 0) return chunks.join('\n').trim();
+  if (chunks.length > 0) {
+    const merged = chunks.join('\n').trim();
+    const completionFromChunks = findCompletionBlock(merged);
+    if (completionFromChunks) return completionFromChunks;
+    return merged;
+  }
 
   if (payload) {
-    if (typeof payload.message === 'string') return payload.message;
-    if (typeof payload.content === 'string') return payload.content;
-    if (typeof payload.text === 'string') return payload.text;
-    if (typeof payload.output === 'string') return payload.output;
-    if (typeof payload.result === 'string') return payload.result;
-    return JSON.stringify(payload);
+    const payloadCandidates = [
+      payload.message,
+      payload.content,
+      payload.text,
+      payload.output,
+      payload.result,
+    ];
+
+    for (const candidate of payloadCandidates) {
+      if (typeof candidate !== 'string') continue;
+      const completion = findCompletionBlock(candidate);
+      if (completion) return completion;
+      if (candidate.trim()) return candidate;
+    }
   }
-  return stdout.trim();
+
+  if (stdoutTrimmed) return stdoutTrimmed;
+  if (payload) return JSON.stringify(payload);
+  return '';
 }
 
 export function buildModelCandidates(

@@ -42,6 +42,49 @@ describe('worker runner lib', () => {
     expect(result).toBe('line one\nline two');
   });
 
+  it('extracts text from result-style events', () => {
+    const events = [
+      { type: 'step_finish' },
+      { type: 'result', result: '<completion>{"run_id":"r1"}</completion>' },
+    ];
+    const result = extractResult('', null, events);
+    expect(result).toContain('<completion>');
+    expect(result).toContain('"run_id":"r1"');
+  });
+
+  it('extracts nested message.content text parts', () => {
+    const events = [
+      {
+        type: 'message',
+        message: {
+          content: [
+            { type: 'text', text: 'first line' },
+            { type: 'text', text: 'second line' },
+          ],
+        },
+      },
+    ];
+    const result = extractResult('', null, events);
+    expect(result).toBe('first line\nsecond line');
+  });
+
+  it('prefers completion block found in stdout', () => {
+    const stdout = [
+      '{"type":"system/init"}',
+      '<completion>{"run_id":"r2","branch":"jarvis-x","commit_sha":"deadbeef","files_changed":["a.ts"],"test_result":"pass","risk":"low","pr_skipped_reason":"n/a"}</completion>',
+      '{"type":"step_finish"}',
+    ].join('\n');
+    const result = extractResult(stdout, { type: 'step_finish' }, []);
+    expect(result).toContain('<completion>');
+    expect(result).toContain('"run_id":"r2"');
+  });
+
+  it('falls back to raw stdout when payload has no extractable text', () => {
+    const stdout = '{"type":"step_finish","sessionID":"ses_123"}';
+    const result = extractResult(stdout, { type: 'step_finish' }, []);
+    expect(result).toBe(stdout);
+  });
+
   it('falls back to payload text when there are no text events', () => {
     const result = extractResult('', { message: 'payload result' }, []);
     expect(result).toBe('payload result');

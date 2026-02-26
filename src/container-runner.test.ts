@@ -329,6 +329,60 @@ describe('container-runner timeout behavior', () => {
     );
   });
 
+  it('retries transient ENOENT skill copy races', async () => {
+    const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+    const visibleSkillSrc = path.join(skillsSrc, 'agent-browser');
+    const skillsDst = '/tmp/nanoclaw-test-data/sessions/test-group/.claude/skills';
+    const visibleSkillDst = path.join(skillsDst, 'agent-browser');
+
+    fsMock.existsSync.mockImplementation((target: string) => {
+      if (target === skillsSrc) return true;
+      return false;
+    });
+    fsMock.readdirSync.mockImplementation((target: string) => {
+      if (target === skillsSrc) {
+        return [{ name: 'agent-browser' }];
+      }
+      return [];
+    });
+    fsMock.statSync.mockImplementation((target: string) => ({
+      isDirectory: () => target === visibleSkillSrc,
+    }));
+
+    const transient = new Error('transient race') as NodeJS.ErrnoException;
+    transient.code = 'ENOENT';
+    fsMock.cpSync
+      .mockImplementationOnce(() => {
+        throw transient;
+      })
+      .mockImplementation(() => {});
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      async () => {},
+    );
+
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await resultPromise;
+
+    expect(fsMock.cpSync).toHaveBeenCalledTimes(2);
+    expect(fsMock.cpSync).toHaveBeenNthCalledWith(
+      1,
+      visibleSkillSrc,
+      visibleSkillDst,
+      expect.objectContaining({ recursive: true, dereference: true, force: true }),
+    );
+    expect(fsMock.cpSync).toHaveBeenNthCalledWith(
+      2,
+      visibleSkillSrc,
+      visibleSkillDst,
+      expect.objectContaining({ recursive: true, dereference: true, force: true }),
+    );
+  });
+
   it('does not pass --user for Apple Container runtime', async () => {
     const resultPromise = runContainerAgent(
       testGroup,

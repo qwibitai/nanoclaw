@@ -656,6 +656,45 @@ export interface WorkerRunRecord {
   risk_summary: string | null;
 }
 
+const TERMINAL_WORKER_RUN_STATUSES: Set<WorkerRunStatus> = new Set([
+  'review_requested',
+  'done',
+  'failed',
+  'failed_contract',
+]);
+
+function isTerminalWorkerRunStatus(status: WorkerRunStatus): boolean {
+  return TERMINAL_WORKER_RUN_STATUSES.has(status);
+}
+
+function canTransitionWorkerRunStatus(
+  current: WorkerRunStatus,
+  next: WorkerRunStatus,
+): boolean {
+  if (current === next) return true;
+  switch (current) {
+    case 'queued':
+      return next === 'running'
+        || next === 'review_requested'
+        || next === 'done'
+        || next === 'failed'
+        || next === 'failed_contract';
+    case 'running':
+      return next === 'review_requested'
+        || next === 'done'
+        || next === 'failed'
+        || next === 'failed_contract';
+    case 'review_requested':
+      return next === 'done';
+    case 'done':
+    case 'failed':
+    case 'failed_contract':
+      return false;
+    default:
+      return false;
+  }
+}
+
 /**
  * Insert a worker run record.
  * - 'new': run_id not seen before, inserted with status 'queued'
@@ -670,7 +709,20 @@ export function insertWorkerRun(
   if (existing) {
     if (existing.status === 'failed' || existing.status === 'failed_contract') {
       db.prepare(
-        `UPDATE worker_runs SET status = 'queued', retry_count = retry_count + 1, started_at = ? WHERE run_id = ?`,
+        `UPDATE worker_runs
+         SET status = 'queued',
+             started_at = ?,
+             completed_at = NULL,
+             result_summary = NULL,
+             error_details = NULL,
+             branch_name = NULL,
+             pr_url = NULL,
+             commit_sha = NULL,
+             files_changed = NULL,
+             test_summary = NULL,
+             risk_summary = NULL,
+             retry_count = retry_count + 1
+         WHERE run_id = ?`,
       ).run(new Date().toISOString(), runId);
       return 'retry';
     }
@@ -684,17 +736,31 @@ export function insertWorkerRun(
 }
 
 export function updateWorkerRunStatus(runId: string, status: WorkerRunStatus): void {
-  const terminal =
-    status === 'done'
-    || status === 'failed'
-    || status === 'failed_contract'
-    || status === 'review_requested';
-  if (terminal) {
+  const current = getWorkerRun(runId);
+  if (!current) {
+    logger.warn({ runId, status }, 'Ignored worker status update for unknown run');
+    return;
+  }
+
+  const fromStatus = current.status as WorkerRunStatus;
+  if (!canTransitionWorkerRunStatus(fromStatus, status)) {
+    logger.warn(
+      { runId, from: fromStatus, to: status },
+      'Ignored invalid worker status transition',
+    );
+    return;
+  }
+
+  if (isTerminalWorkerRunStatus(status)) {
     db.prepare(
-      `UPDATE worker_runs SET status = ?, completed_at = ? WHERE run_id = ?`,
+      `UPDATE worker_runs
+       SET status = ?, completed_at = COALESCE(completed_at, ?)
+       WHERE run_id = ?`,
     ).run(status, new Date().toISOString(), runId);
   } else {
-    db.prepare(`UPDATE worker_runs SET status = ? WHERE run_id = ?`).run(status, runId);
+    db.prepare(
+      `UPDATE worker_runs SET status = ?, completed_at = NULL WHERE run_id = ?`,
+    ).run(status, runId);
   }
 }
 
@@ -728,6 +794,29 @@ export function completeWorkerRun(
   resultSummary?: string,
   errorDetails?: string,
 ): void {
+  const current = getWorkerRun(runId);
+  if (!current) {
+    logger.warn({ runId, status }, 'Ignored completeWorkerRun for unknown run');
+    return;
+  }
+
+  if (!isTerminalWorkerRunStatus(status)) {
+    logger.warn(
+      { runId, status },
+      'Ignored completeWorkerRun with non-terminal status',
+    );
+    return;
+  }
+
+  const fromStatus = current.status as WorkerRunStatus;
+  if (!canTransitionWorkerRunStatus(fromStatus, status)) {
+    logger.warn(
+      { runId, from: fromStatus, to: status },
+      'Ignored invalid worker completion transition',
+    );
+    return;
+  }
+
   db.prepare(
     `UPDATE worker_runs SET status = ?, completed_at = ?, result_summary = ?, error_details = ? WHERE run_id = ?`,
   ).run(

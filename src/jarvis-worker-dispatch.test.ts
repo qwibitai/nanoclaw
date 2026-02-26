@@ -149,6 +149,57 @@ describe('completeWorkerRun (legacy helper)', () => {
   });
 });
 
+describe('worker run status transition guards', () => {
+  beforeEach(() => {
+    _initTestDatabase();
+  });
+
+  it('does not allow reopening a terminal run via updateWorkerRunStatus', () => {
+    insertWorkerRun('run-guard-1', 'jarvis-worker-1');
+    updateWorkerRunStatus('run-guard-1', 'failed');
+    updateWorkerRunStatus('run-guard-1', 'running');
+    const row = getWorkerRun('run-guard-1');
+    expect(row?.status).toBe('failed');
+  });
+
+  it('does not allow completeWorkerRun to overwrite done with failed', () => {
+    insertWorkerRun('run-guard-2', 'jarvis-worker-1');
+    completeWorkerRun('run-guard-2', 'done', 'done once');
+    completeWorkerRun('run-guard-2', 'failed', 'should be ignored');
+    const row = getWorkerRun('run-guard-2');
+    expect(row?.status).toBe('done');
+    expect(row?.result_summary).toBe('done once');
+  });
+
+  it('retry clears stale completion artifacts and re-queues cleanly', () => {
+    insertWorkerRun('run-guard-3', 'jarvis-worker-1');
+    updateWorkerRunCompletion('run-guard-3', {
+      branch_name: 'jarvis-guard',
+      pr_url: 'https://example.com/pr/1',
+      commit_sha: 'abc1234',
+      files_changed: ['x.ts'],
+      test_summary: 'pass',
+      risk_summary: 'low',
+    });
+    completeWorkerRun('run-guard-3', 'failed_contract', 'bad contract', '{"reason":"x"}');
+
+    const retryState = insertWorkerRun('run-guard-3', 'jarvis-worker-1');
+    const row = getWorkerRun('run-guard-3');
+
+    expect(retryState).toBe('retry');
+    expect(row?.status).toBe('queued');
+    expect(row?.completed_at).toBeNull();
+    expect(row?.result_summary).toBeNull();
+    expect(row?.error_details).toBeNull();
+    expect(row?.branch_name).toBeNull();
+    expect(row?.pr_url).toBeNull();
+    expect(row?.commit_sha).toBeNull();
+    expect(row?.files_changed).toBeNull();
+    expect(row?.test_summary).toBeNull();
+    expect(row?.risk_summary).toBeNull();
+  });
+});
+
 describe('getWorkerRun', () => {
   beforeEach(() => _initTestDatabase());
 
@@ -265,7 +316,7 @@ describe('dispatch payload validation', () => {
     expect(errors.some((e) => e.includes('output_contract.required_fields missing commit_sha'))).toBe(true);
   });
 
-  it('requires browser_evidence field for explicit UI-impacting dispatch', () => {
+  it('does not require browser_evidence field for explicit UI-impacting dispatch', () => {
     const { valid, errors } = validateDispatchPayload({
       ...validPayload,
       ui_impacting: true,
@@ -273,10 +324,8 @@ describe('dispatch payload validation', () => {
         required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
       },
     });
-    expect(valid).toBe(false);
-    expect(
-      errors.includes('output_contract.required_fields must include browser_evidence for UI-impacting tasks'),
-    ).toBe(true);
+    expect(valid).toBe(true);
+    expect(errors).toHaveLength(0);
   });
 
   it('accepts UI-impacting dispatch when browser_evidence is required in contract', () => {
@@ -291,7 +340,7 @@ describe('dispatch payload validation', () => {
     expect(errors).toHaveLength(0);
   });
 
-  it('detects browser evidence requirement from UI hints when flag is omitted', () => {
+  it('does not infer browser evidence requirement from UI hints when flag is omitted', () => {
     const payload = {
       ...validPayload,
       input: 'Fix dashboard sidebar UI spacing',
@@ -300,7 +349,7 @@ describe('dispatch payload validation', () => {
         required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
       },
     };
-    expect(requiresBrowserEvidence(payload)).toBe(true);
+    expect(requiresBrowserEvidence(payload)).toBe(false);
   });
 
   it('rejects dispatch input that requests screenshot capture/analysis', () => {
@@ -365,6 +414,21 @@ Done!
     expect(contract?.pr_skipped_reason).toBe('no changes');
     expect(contract?.pr_url).toBeUndefined();
   });
+
+  it('parses escaped completion body with literal \\n and escaped quotes', () => {
+    const output = '<completion>\\n{\\n  \\"run_id\\": \\"task-1\\",\\n  \\"branch\\": \\"jarvis-b\\",\\n  \\"commit_sha\\": \\"deadbeef\\",\\n  \\"files_changed\\": [\\"README.md\\"],\\n  \\"test_result\\": \\"ok\\",\\n  \\"risk\\": \\"low\\",\\n  \\"pr_skipped_reason\\": \\"no pr\\"\\n}\\n</completion>';
+    const contract = parseCompletionContract(output);
+    expect(contract?.run_id).toBe('task-1');
+    expect(contract?.branch).toBe('jarvis-b');
+    expect(contract?.commit_sha).toBe('deadbeef');
+  });
+
+  it('parses quoted completion block string', () => {
+    const output = '"<completion>{\\"run_id\\":\\"task-2\\",\\"branch\\":\\"jarvis-c\\",\\"commit_sha\\":\\"abc1234\\",\\"files_changed\\":[\\"a.ts\\"],\\"test_result\\":\\"pass\\",\\"risk\\":\\"low\\",\\"pr_skipped_reason\\":\\"n/a\\"}</completion>"';
+    const contract = parseCompletionContract(output);
+    expect(contract?.run_id).toBe('task-2');
+    expect(contract?.branch).toBe('jarvis-c');
+  });
 });
 
 describe('completion contract validation', () => {
@@ -393,6 +457,20 @@ describe('completion contract validation', () => {
       risk: 'low',
     });
     expect(valid).toBe(true);
+  });
+
+  it('accepts 6-character short commit_sha', () => {
+    const { valid, missing } = validateCompletionContract({
+      run_id: 'task-1',
+      branch: 'jarvis-feat',
+      commit_sha: 'abc123',
+      files_changed: ['README.md'],
+      pr_skipped_reason: 'no PR for test run',
+      test_result: 'pass',
+      risk: 'low',
+    });
+    expect(valid).toBe(true);
+    expect(missing).toHaveLength(0);
   });
 
   it('fails when branch is missing', () => {

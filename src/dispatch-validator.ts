@@ -46,7 +46,8 @@ export interface CompletionContract {
 const RUN_ID_MAX_LENGTH = 64;
 const REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const BRANCH_PATTERN = /^jarvis-[A-Za-z0-9._/-]+$/;
-const COMMIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
+// Accept short SHA forms commonly used in logs/contracts (6-40 chars).
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{6,40}$/i;
 const ALLOWED_TASK_TYPES: Set<DispatchTaskType> = new Set([
   'analyze',
   'implement',
@@ -57,7 +58,6 @@ const ALLOWED_TASK_TYPES: Set<DispatchTaskType> = new Set([
   'research',
   'code',
 ]);
-const UI_HINT_PATTERN = /\b(ui|frontend|dashboard|page|component|layout|css|style|browser|webmcp|chrome-devtools|visual|route|navigation)\b/i;
 const LOCAL_BASE_URL_PATTERN = /^https?:\/\/127\.0\.0\.1(?::\d+)?(?:\/|$)/i;
 const SCREENSHOT_PATTERN = /\b(screenshot|screen[\s-]?shot|take_screenshot|browser_take_screenshot|comet_screenshot|image analysis|analyze screenshot)\b/i;
 const COMPLETION_REQUIRED_FIELDS = [
@@ -175,9 +175,6 @@ export function validateDispatchPayload(payload: DispatchPayload): { valid: bool
         errors.push('output_contract.required_fields must include pr_url or pr_skipped_reason');
       }
 
-      if (requiresBrowserEvidence(payload) && !fields.includes('browser_evidence')) {
-        errors.push('output_contract.required_fields must include browser_evidence for UI-impacting tasks');
-      }
     }
   }
 
@@ -185,15 +182,7 @@ export function validateDispatchPayload(payload: DispatchPayload): { valid: bool
 }
 
 export function requiresBrowserEvidence(payload: DispatchPayload): boolean {
-  if (payload.output_contract?.browser_evidence_required === true) return true;
-  if (payload.output_contract?.browser_evidence_required === false) return false;
-  if (payload.ui_impacting !== undefined) return payload.ui_impacting;
-
-  const acceptance = Array.isArray(payload.acceptance_tests)
-    ? payload.acceptance_tests.join('\n')
-    : '';
-  const haystack = `${payload.input ?? ''}\n${acceptance}`;
-  return UI_HINT_PATTERN.test(haystack);
+  return payload.output_contract?.browser_evidence_required === true;
 }
 
 /**
@@ -213,22 +202,75 @@ export function parseCompletionContract(output: string): CompletionContract | nu
     return null;
   };
 
-  const match = output.match(/<completion>([\s\S]*?)<\/completion>/);
+  const decodeEscapedText = (raw: string): string | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    // If the block is itself a JSON string, decode once.
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed === 'string' && parsed.trim()) {
+        return parsed;
+      }
+    } catch {
+      // continue
+    }
+
+    // Heuristic decode for payloads like:
+    // \n{\n  \"run_id\":\"x\"\n}\n
+    if (!/\\[nrt"\\]/.test(trimmed)) return null;
+    const decoded = trimmed
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+
+    if (decoded.trim() && decoded !== trimmed) {
+      return decoded;
+    }
+    return null;
+  };
+
+  const parseObjectFlexible = (raw: string): CompletionContract | null => {
+    const direct = parseObject(raw);
+    if (direct) return direct;
+
+    const decoded = decodeEscapedText(raw);
+    if (decoded) {
+      const decodedObj = parseObject(decoded);
+      if (decodedObj) return decodedObj;
+    }
+
+    return null;
+  };
+
+  const match = output.match(/<completion>([\s\S]*?)<\/completion>/i);
   if (match) {
-    const parsed = parseObject(match[1]);
+    const parsed = parseObjectFlexible(match[1]);
     if (parsed) return parsed;
   }
 
   const trimmed = output.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
   const directCandidate = fenced ? fenced[1].trim() : trimmed;
-  const direct = parseObject(directCandidate);
+  const direct = parseObjectFlexible(directCandidate);
   if (direct) return direct;
+
+  const decodedDirect = decodeEscapedText(directCandidate);
+  if (decodedDirect) {
+    const completionInDecoded = decodedDirect.match(/<completion>([\s\S]*?)<\/completion>/i);
+    if (completionInDecoded) {
+      const parsed = parseObjectFlexible(completionInDecoded[1]);
+      if (parsed) return parsed;
+    }
+  }
 
   const firstBrace = directCandidate.indexOf('{');
   const lastBrace = directCandidate.lastIndexOf('}');
   if (firstBrace !== -1 && lastBrace > firstBrace) {
-    const wrapped = parseObject(directCandidate.slice(firstBrace, lastBrace + 1));
+    const wrapped = parseObjectFlexible(directCandidate.slice(firstBrace, lastBrace + 1));
     if (wrapped) return wrapped;
   }
 
@@ -271,8 +313,10 @@ export function validateCompletionContract(
     const isNoCodeCommitPlaceholder = allowNoCodeChanges
       && !!commitSha
       && /^(n\/a|na|none)$/i.test(commitSha);
-    if (!commitSha || (!COMMIT_SHA_PATTERN.test(commitSha) && !isNoCodeCommitPlaceholder)) {
+    if (!commitSha) {
       missing.push('commit_sha');
+    } else if (!COMMIT_SHA_PATTERN.test(commitSha) && !isNoCodeCommitPlaceholder) {
+      missing.push('commit_sha format');
     }
   }
 

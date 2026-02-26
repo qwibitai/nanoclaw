@@ -21,6 +21,7 @@ docs/
 - Runtime behavior: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
 - GitHub control-plane: `docs/workflow/nanoclaw-github-control-plane.md`
 - User review readiness gate: `docs/workflow/nanoclaw-github-control-plane.md` (QA handoff section) + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
+- Ops scripts quick entrypoint: `scripts/jarvis-ops.sh` (`preflight`, `recover`, `smoke`, `watch`)
 - Operational ownership: `docs/operations/roles-classification.md`
 - Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`
 - Skills-vs-docs decision boundary: `docs/operations/skills-vs-docs-map.md`

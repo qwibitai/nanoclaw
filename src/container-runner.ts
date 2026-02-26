@@ -51,6 +51,36 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function isRetryableSkillSyncError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ENOENT' || code === 'EBUSY' || code === 'EPERM';
+}
+
+function copySkillDirWithRetry(srcPath: string, dstPath: string): void {
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      fs.cpSync(srcPath, dstPath, { recursive: true, dereference: true, force: true });
+      return;
+    } catch (err) {
+      const retryable = isRetryableSkillSyncError(err);
+      if (!retryable || attempt === maxAttempts) {
+        throw err;
+      }
+      logger.warn(
+        {
+          err,
+          srcPath,
+          dstPath,
+          attempt,
+          maxAttempts,
+        },
+        'Retrying skill copy after transient filesystem race',
+      );
+    }
+  }
+}
+
 function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
   if (!fs.existsSync(skillsSrc)) return;
 
@@ -97,7 +127,12 @@ function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
       continue;
     }
 
-    fs.cpSync(srcPath, dstPath, { recursive: true, dereference: true, force: true });
+    try {
+      copySkillDirWithRetry(srcPath, dstPath);
+    } catch (err) {
+      logger.warn({ err, srcPath, dstPath }, 'Failed to copy skill directory');
+      throw err;
+    }
   }
 }
 
