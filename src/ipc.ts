@@ -4,7 +4,6 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import {
-  ASSISTANT_NAME,
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
@@ -12,6 +11,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -79,10 +79,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(
-                    data.chatJid,
-                    `${ASSISTANT_NAME}: ${data.text}`,
-                  );
+                  await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -361,6 +358,13 @@ export async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        if (!isValidGroupFolder(data.folder)) {
+          logger.warn(
+            { sourceGroup, folder: data.folder },
+            'Invalid register_group request - unsafe folder name',
+          );
+          break;
+        }
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,

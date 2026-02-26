@@ -5,598 +5,182 @@ description: Run initial NanoClaw setup. Use when user wants to install dependen
 
 # NanoClaw Setup
 
-Run all commands automatically. Only pause when user action is required (WhatsApp authentication, configuration choices).
+Run setup steps automatically. Only pause when user action is required (WhatsApp authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
 
-**UX Note:** When asking the user questions, prefer using the `AskUserQuestion` tool instead of just outputting text. This integrates with Claude's built-in question/answer system for a better experience.
+**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. scanning a QR code, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
-## 1. Install Dependencies
+**UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
-```bash
-npm install
-```
+## 1. Bootstrap (Node.js + Dependencies)
 
-## 2. Install Container Runtime
+Run `bash setup.sh` and parse the status block.
 
-First, detect the platform and check what's available:
+- If NODE_OK=false → Node.js is missing or too old. Use `AskUserQuestion: Would you like me to install Node.js 22?` If confirmed:
+  - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
+  - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
+  - After installing Node, re-run `bash setup.sh`
+- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules` and `package-lock.json`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
+- If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
+- Record PLATFORM and IS_WSL for later steps.
 
-```bash
-echo "Platform: $(uname -s)"
-which container && echo "Apple Container: installed" || echo "Apple Container: not installed"
-which docker && docker info >/dev/null 2>&1 && echo "Docker: installed and running" || echo "Docker: not installed or not running"
-```
+## 2. Check Environment
 
-### If NOT on macOS (Linux, etc.)
+Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-Apple Container is macOS-only. Use Docker instead.
+- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
+- If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
+- Record APPLE_CONTAINER and DOCKER values for step 3
 
-Tell the user:
-> You're on Linux, so we'll use Docker for container isolation. Let me set that up now.
+## 3. Container Runtime
 
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
+### 3a. Choose runtime
 
-### If on macOS
+Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
-**If Apple Container is already installed:** Continue to Section 3.
+- PLATFORM=linux → Docker (only option)
+- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (default, cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
+- PLATFORM=macos + APPLE_CONTAINER=not_found → Docker (default)
 
-**If Apple Container is NOT installed:** Ask the user:
-> NanoClaw needs a container runtime for isolated agent execution. You have two options:
->
-> 1. **Apple Container** (default) - macOS-native, lightweight, designed for Apple silicon
-> 2. **Docker** - Cross-platform, widely used, works on macOS and Linux
->
-> Which would you prefer?
+### 3a-docker. Install Docker
 
-#### Option A: Apple Container
+- DOCKER=running → continue to 3b
+- DOCKER=installed_not_running → start Docker: `open -a Docker` (macOS) or `sudo systemctl start docker` (Linux). Wait 15s, re-check with `docker info`.
+- DOCKER=not_found → Use `AskUserQuestion: Docker is required for running agents. Would you like me to install it?` If confirmed:
+  - macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download at https://docker.com/products/docker-desktop
+  - Linux: install with `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`. Note: user may need to log out/in for group membership.
 
-Tell the user:
-> Apple Container is required for running agents in isolated environments.
->
-> 1. Download the latest `.pkg` from https://github.com/apple/container/releases
-> 2. Double-click to install
-> 3. Run `container system start` to start the service
->
-> Let me know when you've completed these steps.
+### 3b. Apple Container conversion gate (if needed)
 
-Wait for user confirmation, then verify:
+**If the chosen runtime is Apple Container**, you MUST check whether the source code has already been converted from Docker to Apple Container. Do NOT skip this step. Run:
 
 ```bash
-container system start
-container --version
+grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "ALREADY_CONVERTED" || echo "NEEDS_CONVERSION"
 ```
 
-**Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
+**If NEEDS_CONVERSION**, the source code still uses Docker as the runtime. You MUST run the `/convert-to-apple-container` skill NOW, before proceeding to the build step.
 
-#### Option B: Docker
+**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
 
-Tell the user:
-> You've chosen Docker. Let me set that up now.
+**If the chosen runtime is Docker**, no conversion is needed — Docker is the default. Continue to 3c.
 
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
+### 3c. Build and test
 
-## 3. Configure Claude Authentication
+Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse the status block.
 
-Ask the user:
-> Do you want to use your **Claude subscription** (Pro/Max) or an **Anthropic API key**?
+**If BUILD_OK=false:** Read `logs/setup.log` tail for the build error.
+- Cache issue (stale layers): `docker builder prune -f` (Docker) or `container builder stop && container builder rm && container builder start` (Apple Container). Retry.
+- Dockerfile syntax or missing files: diagnose from the log and fix, then retry.
 
-### Option 1: Claude Subscription (Recommended)
+**If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-Tell the user:
-> Open another terminal window and run:
-> ```
-> claude setup-token
-> ```
-> A browser window will open for you to log in. Once authenticated, the token will be displayed in your terminal. Either:
-> 1. Paste it here and I'll add it to `.env` for you, or
-> 2. Add it to `.env` yourself as `CLAUDE_CODE_OAUTH_TOKEN=<your-token>`
+## 4. Claude Authentication (No Script)
 
-If they give you the token, add it to `.env`. **Never echo the full token in commands or output** — use the Write tool to write the `.env` file directly, or tell the user to add it themselves:
+If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
 
-```bash
-echo "CLAUDE_CODE_OAUTH_TOKEN=<token>" > .env
-```
+AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
-### Option 2: API Key
+**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
 
-Ask if they have an existing key to copy or need to create one.
-
-**Copy existing:**
-```bash
-grep "^ANTHROPIC_API_KEY=" /path/to/source/.env > .env
-```
-
-**Create new:**
-```bash
-echo 'ANTHROPIC_API_KEY=' > .env
-```
-
-Tell the user to add their key from https://console.anthropic.com/
-
-**Verify:**
-```bash
-KEY=$(grep "^ANTHROPIC_API_KEY=" .env | cut -d= -f2)
-[ -n "$KEY" ] && echo "API key configured: ${KEY:0:7}..." || echo "Missing"
-```
-
-## 4. Build Container Image
-
-Build the NanoClaw agent container:
-
-```bash
-./container/build.sh
-```
-
-This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
-
-Verify the build succeeded by running a simple test (this auto-detects which runtime you're using):
-
-```bash
-if which docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-else
-  echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-fi
-```
+**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
 ## 5. WhatsApp Authentication
 
-**USER ACTION REQUIRED**
+If HAS_AUTH=true, confirm: keep or re-authenticate?
 
-The auth script supports two methods: QR code scanning and pairing code (phone number). Ask the user which they prefer.
+**Choose auth method based on environment (from step 2):**
 
-The auth script writes status to `store/auth-status.txt`:
-- `already_authenticated` — credentials already exist
-- `pairing_code:<CODE>` — pairing code generated, waiting for user to enter it
-- `authenticated` — successfully authenticated
-- `failed:<reason>` — authentication failed
+If IS_HEADLESS=true AND IS_WSL=false → AskUserQuestion: Pairing code (recommended) vs QR code in terminal?
+Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
 
-The script automatically handles error 515 (stream error after pairing) by reconnecting — this is normal and expected during pairing code auth.
+- **QR browser:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser` (Bash timeout: 150000ms)
+- **Pairing code:** Ask for phone number first. `npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone NUMBER` (Bash timeout: 150000ms). Display PAIRING_CODE.
+- **QR terminal:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal`. Tell user to run `npm run auth` in another terminal.
 
-### Ask the user which method to use
+**If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
 
-> How would you like to authenticate WhatsApp?
->
-> 1. **QR code in browser** (Recommended) — Opens a page with the QR code to scan
-> 2. **Pairing code** — Enter a numeric code on your phone, no camera needed
-> 3. **QR code in terminal** — Run the auth command yourself in another terminal
+## 6. Configure Trigger and Channel Type
 
-### Option A: QR Code in Browser (Recommended)
+Get bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
-Clean any stale auth state and start auth in background:
+AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? → AskUserQuestion: Main channel type?
 
+**Shared number:** Self-chat (recommended) or Solo group
+**Dedicated number:** DM with bot (recommended) or Solo group with bot
+
+## 7. Sync and Select Group (If Group Channel)
+
+**Personal chat:** JID = `NUMBER@s.whatsapp.net`
+**DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
+
+**Group:**
+1. `npx tsx setup/index.ts --step groups` (Bash timeout: 60000ms)
+2. BUILD=failed → fix TypeScript, re-run. GROUPS_IN_DB=0 → check logs.
+3. `npx tsx setup/index.ts --step groups -- --list` for pipe-separated JID|name lines.
+4. Present candidates as AskUserQuestion (names only, not JIDs).
+
+## 8. Register Channel
+
+Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "main" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
+
+## 9. Mount Allowlist
+
+AskUserQuestion: Agent access to external directories?
+
+**No:** `npx tsx setup/index.ts --step mounts -- --empty`
+**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
+
+## 10. Start Service
+
+If service already running: unload first.
+- macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
+- Linux: `systemctl --user stop nanoclaw` (or `systemctl stop nanoclaw` if root)
+
+Run `npx tsx setup/index.ts --step service` and parse the status block.
+
+**If FALLBACK=wsl_no_systemd:** WSL without systemd detected. Tell user they can either enable systemd in WSL (`echo -e "[boot]\nsystemd=true" | sudo tee /etc/wsl.conf` then restart WSL) or use the generated `start-nanoclaw.sh` wrapper.
+
+**If DOCKER_GROUP_STALE=true:** The user was added to the docker group after their session started — the systemd service can't reach the Docker socket. Ask user to run these two commands:
+
+1. Immediate fix: `sudo setfacl -m u:$(whoami):rw /var/run/docker.sock`
+2. Persistent fix (re-applies after every Docker restart):
 ```bash
-rm -rf store/auth store/qr-data.txt store/auth-status.txt
-npm run auth
-```
-
-Run this with `run_in_background: true`.
-
-Poll for QR data (up to 15 seconds):
-
-```bash
-for i in $(seq 1 15); do if [ -f store/qr-data.txt ]; then echo "qr_ready"; exit 0; fi; STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; fi; sleep 1; done; echo "timeout"
-```
-
-If `already_authenticated`, skip to the next step.
-
-If QR data is ready, generate the QR as SVG and inject it into the HTML template:
-
-```bash
-node -e "
-const QR = require('qrcode');
-const fs = require('fs');
-const qrData = fs.readFileSync('store/qr-data.txt', 'utf8');
-QR.toString(qrData, { type: 'svg' }, (err, svg) => {
-  if (err) process.exit(1);
-  const template = fs.readFileSync('.claude/skills/setup/qr-auth.html', 'utf8');
-  fs.writeFileSync('store/qr-auth.html', template.replace('{{QR_SVG}}', svg));
-  console.log('done');
-});
-"
-```
-
-Then open it:
-
-```bash
-open store/qr-auth.html
-```
-
-Tell the user:
-> A browser window should have opened with the QR code. It expires in about 60 seconds.
->
-> Scan it with WhatsApp: **Settings → Linked Devices → Link a Device**
-
-Then poll for completion (up to 120 seconds):
-
-```bash
-for i in $(seq 1 60); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 2; done; echo "timeout"
-```
-
-- If `authenticated`, success — clean up with `rm -f store/qr-auth.html` and continue.
-- If `failed:qr_timeout`, offer to retry (re-run the auth and regenerate the HTML page).
-- If `failed:logged_out`, delete `store/auth/` and retry.
-
-### Option B: Pairing Code
-
-Ask the user for their phone number (with country code, no + or spaces, e.g. `14155551234`).
-
-Clean any stale auth state and start:
-
-```bash
-rm -rf store/auth store/qr-data.txt store/auth-status.txt
-npx tsx src/whatsapp-auth.ts --pairing-code --phone PHONE_NUMBER
-```
-
-Run this with `run_in_background: true`.
-
-Poll for the pairing code (up to 15 seconds):
-
-```bash
-for i in $(seq 1 15); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if echo "$STATUS" | grep -q "^pairing_code:"; then echo "$STATUS"; exit 0; elif [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 1; done; echo "timeout"
-```
-
-Extract the code from the status (e.g. `pairing_code:ABC12DEF` → `ABC12DEF`) and tell the user:
-
-> Your pairing code: **CODE_HERE**
->
-> 1. Open WhatsApp on your phone
-> 2. Tap **Settings → Linked Devices → Link a Device**
-> 3. Tap **"Link with phone number instead"**
-> 4. Enter the code: **CODE_HERE**
-
-Then poll for completion (up to 120 seconds):
-
-```bash
-for i in $(seq 1 60); do STATUS=$(cat store/auth-status.txt 2>/dev/null || echo "waiting"); if [ "$STATUS" = "authenticated" ] || [ "$STATUS" = "already_authenticated" ]; then echo "$STATUS"; exit 0; elif echo "$STATUS" | grep -q "^failed:"; then echo "$STATUS"; exit 0; fi; sleep 2; done; echo "timeout"
-```
-
-- If `authenticated` or `already_authenticated`, success — continue to next step.
-- If `failed:logged_out`, delete `store/auth/` and retry.
-- If `failed:515` or timeout, the 515 reconnect should handle this automatically. If it persists, the user may need to temporarily stop other WhatsApp-connected apps on the same device.
-
-### Option C: QR Code in Terminal
-
-Tell the user to run the auth command in another terminal window:
-
-> Open another terminal and run:
-> ```
-> cd PROJECT_PATH && npm run auth
-> ```
-> Scan the QR code that appears, then let me know when it says "Successfully authenticated".
-
-Replace `PROJECT_PATH` with the actual project path (use `pwd`).
-
-Wait for the user to confirm authentication succeeded, then continue to the next step.
-
-## 6. Configure Assistant Name and Main Channel
-
-This step configures three things at once: the trigger word, the main channel type, and the main channel selection.
-
-### 6a. Ask for trigger word
-
-Ask the user:
-> What trigger word do you want to use? (default: `Andy`)
->
-> In group chats, messages starting with `@TriggerWord` will be sent to Claude.
-> In your main channel (and optionally solo chats), no prefix is needed — all messages are processed.
-
-Store their choice for use in the steps below.
-
-### 6b. Explain security model and ask about main channel type
-
-**Use the AskUserQuestion tool** to present this:
-
-> **Important: Your "main" channel is your admin control portal.**
->
-> The main channel has elevated privileges:
-> - Can see messages from ALL other registered groups
-> - Can manage and delete tasks across all groups
-> - Can write to global memory that all groups can read
-> - Has read-write access to the entire NanoClaw project
->
-> **Recommendation:** Use your personal "Message Yourself" chat or a solo WhatsApp group as your main channel. This ensures only you have admin control.
->
-> **Question:** Which setup will you use for your main channel?
->
-> Options:
-> 1. Personal chat (Message Yourself) - Recommended
-> 2. DM with a specific phone number (e.g. your other phone)
-> 3. Solo WhatsApp group (just me)
-> 4. Group with other people (I understand the security implications)
-
-If they choose option 4, ask a follow-up:
-
-> You've chosen a group with other people. This means everyone in that group will have admin privileges over NanoClaw.
->
-> Are you sure you want to proceed? The other members will be able to:
-> - Read messages from your other registered chats
-> - Schedule and manage tasks
-> - Access any directories you've mounted
->
-> Options:
-> 1. Yes, I understand and want to proceed
-> 2. No, let me use a personal chat or solo group instead
-
-### 6c. Register the main channel
-
-First build, then start the app briefly to connect to WhatsApp and sync group metadata. Use the Bash tool's timeout parameter (15000ms) — do NOT use the `timeout` shell command (it's not available on macOS). The app will be killed when the timeout fires, which is expected.
-
-```bash
-npm run build
-```
-
-Then run briefly (set Bash tool timeout to 15000ms):
-```bash
-npm run dev
-```
-
-**For personal chat** (they chose option 1):
-
-Personal chats are NOT synced to the database on startup — only groups are. The JID for "Message Yourself" is the bot's own number. Use the number from the WhatsApp auth step and construct the JID as `{number}@s.whatsapp.net`.
-
-**For DM with a specific number** (they chose option 2):
-
-Ask the user for the phone number (with country code, no + or spaces, e.g. `14155551234`), then construct the JID as `{number}@s.whatsapp.net`.
-
-**For group** (they chose option 3 or 4):
-
-Groups are synced on startup via `groupFetchAllParticipating`. Query the database for recent groups:
-```bash
-sqlite3 store/messages.db "SELECT jid, name FROM chats WHERE jid LIKE '%@g.us' AND jid != '__group_sync__' ORDER BY last_message_time DESC LIMIT 40"
-```
-
-Show only the **10 most recent** group names to the user and ask them to pick one. If they say their group isn't in the list, show the next batch from the results you already have. If they tell you the group name directly, look it up:
-```bash
-sqlite3 store/messages.db "SELECT jid, name FROM chats WHERE name LIKE '%GROUP_NAME%' AND jid LIKE '%@g.us'"
-```
-
-### 6d. Write the configuration
-
-Once you have the JID, configure it. Use the assistant name from step 6a.
-
-For personal chats (solo, no prefix needed), set `requiresTrigger` to `false`:
-
-```json
-{
-  "JID_HERE": {
-    "name": "main",
-    "folder": "main",
-    "trigger": "@ASSISTANT_NAME",
-    "added_at": "CURRENT_ISO_TIMESTAMP",
-    "requiresTrigger": false
-  }
-}
-```
-
-For groups, keep `requiresTrigger` as `true` (default).
-
-Write to the database directly by creating a temporary registration script, or write `data/registered_groups.json` which will be auto-migrated on first run:
-
-```bash
-mkdir -p data
-```
-
-Then write `data/registered_groups.json` with the correct JID, trigger, and timestamp.
-
-If the user chose a name other than `Andy`, also update:
-1. `groups/global/CLAUDE.md` - Change "# Andy" and "You are Andy" to the new name
-2. `groups/main/CLAUDE.md` - Same changes at the top
-
-Ensure the groups folder exists:
-```bash
-mkdir -p groups/main/logs
-```
-
-## 7. Configure External Directory Access (Mount Allowlist)
-
-Ask the user:
-> Do you want the agent to be able to access any directories **outside** the NanoClaw project?
->
-> Examples: Git repositories, project folders, documents you want Claude to work on.
->
-> **Note:** This is optional. Without configuration, agents can only access their own group folders.
-
-If **no**, create an empty allowlist to make this explicit:
-
-```bash
-mkdir -p ~/.config/nanoclaw
-cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
-{
-  "allowedRoots": [],
-  "blockedPatterns": [],
-  "nonMainReadOnly": true
-}
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/socket-acl.conf << 'EOF'
+[Service]
+ExecStartPost=/usr/bin/setfacl -m u:USERNAME:rw /var/run/docker.sock
 EOF
-echo "Mount allowlist created - no external directories allowed"
+sudo systemctl daemon-reload
 ```
+Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` commands separately — the `tee` heredoc first, then `daemon-reload`. After user confirms setfacl ran, re-run the service step.
 
-Skip to the next step.
+**If SERVICE_LOADED=false:**
+- Read `logs/setup.log` for the error.
+- macOS: check `launchctl list | grep nanoclaw`. If PID=`-` and status non-zero, read `logs/nanoclaw.error.log`.
+- Linux: check `systemctl --user status nanoclaw`.
+- Re-run the service step after fixing.
 
-If **yes**, ask follow-up questions:
+## 11. Verify
 
-### 7a. Collect Directory Paths
+Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
-Ask the user:
-> Which directories do you want to allow access to?
->
-> You can specify:
-> - A parent folder like `~/projects` (allows access to anything inside)
-> - Specific paths like `~/repos/my-app`
->
-> List them one per line, or give me a comma-separated list.
+**If STATUS=failed, fix each:**
+- SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
+- SERVICE=not_found → re-run step 10
+- CREDENTIALS=missing → re-run step 4
+- WHATSAPP_AUTH=not_found → re-run step 5
+- REGISTERED_GROUPS=0 → re-run steps 7-8
+- MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
-For each directory they provide, ask:
-> Should `[directory]` be **read-write** (agents can modify files) or **read-only**?
->
-> Read-write is needed for: code changes, creating files, git commits
-> Read-only is safer for: reference docs, config examples, templates
-
-### 7b. Configure Non-Main Group Access
-
-Ask the user:
-> Should **non-main groups** (other WhatsApp chats you add later) be restricted to **read-only** access even if read-write is allowed for the directory?
->
-> Recommended: **Yes** - this prevents other groups from modifying files even if you grant them access to a directory.
-
-### 7c. Create the Allowlist
-
-Create the allowlist file based on their answers:
-
-```bash
-mkdir -p ~/.config/nanoclaw
-```
-
-Then write the JSON file. Example for a user who wants `~/projects` (read-write) and `~/docs` (read-only) with non-main read-only:
-
-```bash
-cat > ~/.config/nanoclaw/mount-allowlist.json << 'EOF'
-{
-  "allowedRoots": [
-    {
-      "path": "~/projects",
-      "allowReadWrite": true,
-      "description": "Development projects"
-    },
-    {
-      "path": "~/docs",
-      "allowReadWrite": false,
-      "description": "Reference documents"
-    }
-  ],
-  "blockedPatterns": [],
-  "nonMainReadOnly": true
-}
-EOF
-```
-
-Verify the file:
-
-```bash
-cat ~/.config/nanoclaw/mount-allowlist.json
-```
-
-Tell the user:
-> Mount allowlist configured. The following directories are now accessible:
-> - `~/projects` (read-write)
-> - `~/docs` (read-only)
->
-> **Security notes:**
-> - Sensitive paths (`.ssh`, `.gnupg`, `.aws`, credentials) are always blocked
-> - This config file is stored outside the project, so agents cannot modify it
-> - Changes require restarting the NanoClaw service
->
-> To grant a group access to a directory, add it to their config in `data/registered_groups.json`:
-> ```json
-> "containerConfig": {
->   "additionalMounts": [
->     { "hostPath": "~/projects/my-app" }
->   ]
-> }
-> ```
-> The folder appears inside the container at `/workspace/extra/<folder-name>` (derived from the last segment of the path). Add `"readonly": false` for write access, or `"containerPath": "custom-name"` to override the default name.
-
-## 8. Configure launchd Service
-
-Generate the plist file with correct paths automatically:
-
-```bash
-NODE_PATH=$(which node)
-PROJECT_PATH=$(pwd)
-HOME_PATH=$HOME
-
-cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.nanoclaw</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${NODE_PATH}</string>
-        <string>${PROJECT_PATH}/dist/index.js</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${PROJECT_PATH}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${HOME_PATH}/.local/bin</string>
-        <key>HOME</key>
-        <string>${HOME_PATH}</string>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.log</string>
-    <key>StandardErrorPath</key>
-    <string>${PROJECT_PATH}/logs/nanoclaw.error.log</string>
-</dict>
-</plist>
-EOF
-
-echo "Created launchd plist with:"
-echo "  Node: ${NODE_PATH}"
-echo "  Project: ${PROJECT_PATH}"
-```
-
-Build and start the service:
-
-```bash
-npm run build
-mkdir -p logs
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-```
-
-Verify it's running:
-```bash
-launchctl list | grep nanoclaw
-```
-
-## 9. Test
-
-Tell the user (using the assistant name they configured):
-> Send `@ASSISTANT_NAME hello` in your registered chat.
->
-> **Tip:** In your main channel, you don't need the `@` prefix — just send `hello` and the agent will respond.
-
-Check the logs:
-```bash
-tail -f logs/nanoclaw.log
-```
-
-The user should receive a response in WhatsApp.
+Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting**: Check `logs/nanoclaw.error.log`
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing auth (step 5).
 
-**Container agent fails with "Claude Code process exited with code 1"**:
-- Ensure the container runtime is running:
-  - Apple Container: `container system start`
-  - Docker: `docker info` (start Docker Desktop on macOS, or `sudo systemctl start docker` on Linux)
-- Check container logs: `cat groups/main/logs/container-*.log | tail -50`
+**Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
-**No response to messages**:
-- Verify the trigger pattern matches (e.g., `@AssistantName` at start of message)
-- Main channel doesn't require a prefix — all messages are processed
-- Personal/solo chats with `requiresTrigger: false` also don't need a prefix
-- Check that the chat JID is in the database: `sqlite3 store/messages.db "SELECT * FROM registered_groups"`
-- Check `logs/nanoclaw.log` for errors
+**No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
-**Messages sent but not received by NanoClaw (DMs)**:
-- WhatsApp may use LID (Linked Identity) JIDs for DMs instead of phone numbers
-- Check logs for `Translated LID to phone JID` — if missing, the LID isn't being resolved
-- The `translateJid` method in `src/channels/whatsapp.ts` uses `sock.signalRepository.lidMapping.getPNForLID()` to resolve LIDs
-- Verify the registered JID doesn't have a device suffix (should be `number@s.whatsapp.net`, not `number:0@s.whatsapp.net`)
+**WhatsApp disconnected:** `npm run auth` then rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux).
 
-**WhatsApp disconnected**:
-- The service will show a macOS notification
-- Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-
-**Unload service**:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-```
+**Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`

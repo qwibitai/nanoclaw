@@ -15,6 +15,7 @@ import readline from 'readline';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -32,7 +33,10 @@ const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
 
 function askQuestion(prompt: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   return new Promise((resolve) => {
     rl.question(prompt, (answer) => {
       rl.close();
@@ -41,10 +45,13 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function connectSocket(phoneNumber?: string): Promise<void> {
+async function connectSocket(
+  phoneNumber?: string,
+  isReconnect = false,
+): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
 
-  if (state.creds.registered) {
+  if (state.creds.registered && !isReconnect) {
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
     console.log('✓ Already authenticated with WhatsApp');
     console.log(
@@ -53,7 +60,15 @@ async function connectSocket(phoneNumber?: string): Promise<void> {
     process.exit(0);
   }
 
+  const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+    logger.warn(
+      { err },
+      'Failed to fetch latest WA Web version, using default',
+    );
+    return { version: undefined };
+  });
   const sock = makeWASocket({
+    version,
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -110,7 +125,7 @@ async function connectSocket(phoneNumber?: string): Promise<void> {
         // 515 = stream error, often happens after pairing succeeds but before
         // registration completes. Reconnect to finish the handshake.
         console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
-        connectSocket(phoneNumber);
+        connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
         console.log('\n✗ Connection failed. Please try again.');
@@ -121,7 +136,9 @@ async function connectSocket(phoneNumber?: string): Promise<void> {
     if (connection === 'open') {
       fs.writeFileSync(STATUS_FILE, 'authenticated');
       // Clean up QR file now that we're connected
-      try { fs.unlinkSync(QR_FILE); } catch {}
+      try {
+        fs.unlinkSync(QR_FILE);
+      } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
       console.log('  You can now start the NanoClaw service.\n');
@@ -138,12 +155,18 @@ async function authenticate(): Promise<void> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
   // Clean up any stale QR/status files from previous runs
-  try { fs.unlinkSync(QR_FILE); } catch {}
-  try { fs.unlinkSync(STATUS_FILE); } catch {}
+  try {
+    fs.unlinkSync(QR_FILE);
+  } catch {}
+  try {
+    fs.unlinkSync(STATUS_FILE);
+  } catch {}
 
   let phoneNumber = phoneArg;
   if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion('Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ');
+    phoneNumber = await askQuestion(
+      'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
+    );
   }
 
   console.log('Starting WhatsApp authentication...\n');

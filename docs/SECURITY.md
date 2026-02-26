@@ -13,7 +13,7 @@
 
 ### 1. Container Isolation (Primary Boundary)
 
-Agents execute in Apple Container (lightweight Linux VMs), providing:
+Agents execute in containers (lightweight Linux VMs), providing:
 - **Process isolation** - Container processes cannot affect the host
 - **Filesystem isolation** - Only explicitly mounted directories are visible
 - **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
@@ -39,6 +39,10 @@ private_key, .secret
 - Symlink resolution before validation (prevents traversal attacks)
 - Container path validation (rejects `..` and absolute paths)
 - `nonMainReadOnly` option forces read-only for non-main groups
+
+**Read-Only Project Root:**
+
+The main group's project root is mounted read-only. Writable paths the agent needs (group folder, IPC, `.claude/`) are mounted separately. This prevents the agent from modifying host application code (`src/`, `dist/`, `package.json`, etc.) which would bypass the sandbox entirely on next restart.
 
 ### 3. Session Isolation
 
@@ -82,7 +86,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (rw) | None |
+| Project root access | `/workspace/project` (ro) | None |
 | Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
 | Global memory | Implicit via project | `/workspace/global` (ro) |
 | Additional mounts | Configurable | Read-only unless allowed |
