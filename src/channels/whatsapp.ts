@@ -56,6 +56,22 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
+    // Destroy the previous socket before creating a new one.
+    // Without this, each reconnection leaves a ghost socket in memory: its
+    // event listeners, signal-key LRU cache, and internal Baileys buffers all
+    // remain alive via closure references. Over many reconnections (network
+    // blips, phone sleep, WA server drops) this compounds into an OOM crash.
+    if (this.sock) {
+      try {
+        this.sock.ev.removeAllListeners('connection.update');
+        this.sock.ev.removeAllListeners('creds.update');
+        this.sock.ev.removeAllListeners('messages.upsert');
+        this.sock.end(undefined);
+      } catch {
+        // socket may already be closed — ignore
+      }
+    }
+
     const authDir = path.join(STORE_DIR, 'auth');
     fs.mkdirSync(authDir, { recursive: true });
 
