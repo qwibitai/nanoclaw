@@ -440,7 +440,6 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__gdrive__*',
         'mcp__composio__*',
       ],
       env: sdkEnv,
@@ -455,14 +454,6 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-        gdrive: {
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-gdrive'],
-          env: {
-            GDRIVE_OAUTH_PATH: '/home/node/.gdrive-mcp/gcp-oauth.keys.json',
-            GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-mcp/credentials.json',
           },
         },
         composio: {
