@@ -9,7 +9,7 @@ This guide covers debugging the containerized agent execution system.
 
 ## Architecture Overview
 
-A host macOS process (`container-runner.ts`) spawns a Linux container running the Claude Agent SDK with MCP servers. They're connected via these volume mounts:
+The host process (`container-runner.ts`) spawns a Linux container running the Claude Agent SDK with MCP servers. They're connected via these volume mounts:
 
 - `data/env/env` → `/workspace/env-dir/env`
 - `groups/{folder}` → `/workspace/group`
