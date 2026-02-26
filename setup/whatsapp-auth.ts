@@ -71,7 +71,7 @@ function parseArgs(args: string[]): { method: string; phone: string } {
       i++;
     }
     if (args[i] === '--phone' && args[i + 1]) {
-      phone = args[i + 1];
+      phone = args[i + 1].replace(/^\+/, '');
       i++;
     }
   }
