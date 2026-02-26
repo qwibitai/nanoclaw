@@ -210,6 +210,8 @@ cmd_restart() {
   echo ""
   cmd_stop
   sleep 2
+  compile || { log_error "Cannot proceed without compiled code"; return 1; }
+  echo ""
   cmd_start
 }
 

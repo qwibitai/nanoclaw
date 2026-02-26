@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { execSync } from 'child_process';
 
 import { Bot, Api } from 'grammy';
 
@@ -75,33 +76,56 @@ export class TelegramChannel implements Channel {
 
     // Command to check system status
     this.bot.command('status', async (ctx) => {
-      const uptime = process.uptime();
-      const hours = Math.floor(uptime / 3600);
-      const minutes = Math.floor((uptime % 3600) / 60);
-      const memory = process.memoryUsage();
-      const memMB = Math.round(memory.heapUsed / 1024 / 1024);
-
-      // Read Claude Code usage (if available)
-      let claudeUsage = '';
       try {
-        const usageFile = '/tmp/nanoclaw_claude_usage.txt';
-        if (fs.existsSync(usageFile)) {
-          claudeUsage = fs.readFileSync(usageFile, 'utf-8').trim();
-        }
-      } catch (e) {
-        // Ignore errors
+        logger.info('Executing status command');
+
+        // Get system status from script
+        const scriptPath = `${process.cwd()}/scripts/status-report.sh`;
+        const systemStatus = execSync(`bash ${scriptPath}`, {
+          encoding: 'utf-8',
+          timeout: 10000,
+        });
+
+        // Get process metrics
+        const uptime = process.uptime();
+        const hours = Math.floor(uptime / 3600);
+        const minutes = Math.floor((uptime % 3600) / 60);
+        const memory = process.memoryUsage();
+        const memMB = Math.round(memory.heapUsed / 1024 / 1024);
+        const nodeVersion = process.version;
+
+        // Extract title from system status and rebuild output
+        const lines = systemStatus.trim().split('\n');
+        const title = lines[0]; // "📊 *Estado de NanoClaw* (26 Feb 11:42)"
+        const systemStatusBody = lines.slice(2).join('\n'); // Skip title and empty line
+
+        // Combine with title first, then process metrics, then rest
+        const statusOutput = `${title}
+
+⚙️ *Proceso NanoClaw*
+Uptime: ${hours}h ${minutes}m
+Memory: ${memMB} MB
+Node: ${nodeVersion}
+
+${systemStatusBody}`;
+
+        logger.info({ outputLength: statusOutput.length }, 'Status report generated successfully');
+        await ctx.reply(statusOutput, { parse_mode: 'Markdown' });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        const errorOutput = err instanceof Error && 'output' in err ? (err as any).output : null;
+        logger.error(
+          {
+            err,
+            errorMessage,
+            errorOutput,
+            stderr: (err as any)?.stderr?.toString?.() || 'N/A',
+            stdout: (err as any)?.stdout?.toString?.() || 'N/A',
+          },
+          'Failed to generate status report',
+        );
+        await ctx.reply('❌ Error generando reporte de estado');
       }
-
-      let statusMsg = `<b>${ASSISTANT_NAME} Status</b>\n\n` +
-        `Uptime: ${hours}h ${minutes}m\n` +
-        `Memory: ${memMB} MB\n` +
-        `Node: ${process.version}`;
-
-      if (claudeUsage) {
-        statusMsg += `\nClaude: ${claudeUsage}`;
-      }
-
-      await ctx.reply(statusMsg, { parse_mode: 'HTML' });
     });
 
     this.bot.on('message:text', async (ctx) => {
