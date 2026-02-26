@@ -55,8 +55,6 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 
@@ -68,8 +66,6 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
-  TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 ```
@@ -93,8 +89,6 @@ Inside `processGroupMessages()`, add compact detection after the trigger check b
       missedMessages[missedMessages.length - 1].timestamp;
     saveState();
 
-    const channel = findChannel(channels, chatJid);
-
     logger.info(
       { group: group.name, requestedBy: compactMessage.sender },
       'Compact requested',
@@ -102,26 +96,25 @@ Inside `processGroupMessages()`, add compact detection after the trigger check b
 
     // If container is already running, pipe the compact request
     if (queue.sendMessage(chatJid, compactPrompt)) {
-      if (channel) await channel.sendMessage(chatJid, '🗜️ Compacting context...');
+      await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: 🗜️ Compacting context...`);
       return true;
     }
 
     // No active container — run a new agent with the compact prompt
-    if (channel) await channel.sendMessage(chatJid, '🗜️ Compacting context...');
+    await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: 🗜️ Compacting context...`);
 
     const output = await runAgent(group, compactPrompt, chatJid, async (result) => {
-      if (result.result && channel) {
+      if (result.result) {
         const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
         const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         if (text) {
-          const formatted = formatOutbound(channel, text);
-          if (formatted) await channel.sendMessage(chatJid, formatted);
+          await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ${text}`);
         }
       }
     });
 
     if (output === 'error') {
-      if (channel) await channel.sendMessage(chatJid, '⚠️ Compaction failed. Try again later.');
+      await whatsapp.sendMessage(chatJid, `${ASSISTANT_NAME}: ⚠️ Compaction failed. Try again later.`);
     }
 
     return output !== 'error';
@@ -277,9 +270,38 @@ In `buildContainerArgs()`, add the environment variable. Find where args are bei
   args.push('-e', `COMPACT_THRESHOLD=${COMPACT_THRESHOLD}`);
 ```
 
-## 5. Verify and Test
+## 5. Update Existing Tests
 
-### 5a. Build
+Edit `src/container-runner.test.ts`.
+
+The config mock (around line 10) needs `COMPACT_THRESHOLD`. Add it to the existing mock:
+
+```typescript
+// Before:
+vi.mock('./config.js', () => ({
+  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
+  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
+  CONTAINER_TIMEOUT: 1800000, // 30min
+  DATA_DIR: '/tmp/nanoclaw-test-data',
+  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  IDLE_TIMEOUT: 1800000, // 30min
+}));
+
+// After:
+vi.mock('./config.js', () => ({
+  COMPACT_THRESHOLD: 150000,
+  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
+  CONTAINER_MAX_OUTPUT_SIZE: 10485760,
+  CONTAINER_TIMEOUT: 1800000, // 30min
+  DATA_DIR: '/tmp/nanoclaw-test-data',
+  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  IDLE_TIMEOUT: 1800000, // 30min
+}));
+```
+
+## 6. Verify and Test
+
+### 6a. Build
 
 ```bash
 npm run build
@@ -287,7 +309,7 @@ npm run build
 
 Ensure no TypeScript errors.
 
-### 5b. Run existing tests
+### 6b. Run existing tests
 
 ```bash
 npm test
@@ -295,7 +317,7 @@ npm test
 
 All existing tests should pass without modification.
 
-### 5c. Manual test
+### 6c. Manual test
 
 1. Start NanoClaw: `npm run dev`
 2. In a registered WhatsApp group, send `/compact`
@@ -303,7 +325,7 @@ All existing tests should pass without modification.
 4. Send `/compact Keep only the last task discussion` to test custom instructions
 5. Verify `groups/{name}/conversations/` has a new archived transcript
 
-### 5d. Auto-compaction test
+### 6d. Auto-compaction test
 
 Auto-compaction triggers when token count exceeds `COMPACT_THRESHOLD`. To test with a lower threshold:
 
@@ -321,6 +343,7 @@ Then have a long conversation and observe the PreCompact hook archiving the tran
 | `src/index.ts` | Detect `/compact` command, route to agent |
 | `src/container-runner.ts` | Pass `COMPACT_THRESHOLD` env to container |
 | `container/agent-runner/src/index.ts` | Add `context_management` to SDK query |
+| `src/container-runner.test.ts` | Add `COMPACT_THRESHOLD` to config mock |
 
 ## Environment Variables
 
