@@ -122,12 +122,42 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 
 Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "main" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
 
-## 9. Mount Allowlist
+## 9. Mount Allowlist and Per-Group Mounts
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
-**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
+**Yes:** Collect paths and read/write permissions. Then do BOTH steps:
+
+### 9a. Write allowlist (security gate — what's *permitted*)
+
+Each allowed root must use `allowReadWrite: boolean` (NOT `mode`):
+
+`npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[{"path":"/absolute/path","allowReadWrite":true}],"blockedPatterns":[],"nonMainReadOnly":true}'`
+
+### 9b. Add additionalMounts to the group's container_config in SQLite
+
+The allowlist only defines what's permitted. You must ALSO store which mounts to actually use in the group's `container_config` column. Use `node -e` with `better-sqlite3`:
+
+```bash
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database('store/messages.db');
+const config = JSON.stringify({
+  additionalMounts: [
+    { hostPath: '/absolute/path', containerPath: 'dirname', readonly: false }
+  ]
+});
+db.prepare(\"UPDATE registered_groups SET container_config = ? WHERE folder = 'main'\").run(config);
+db.close();
+"
+```
+
+- `hostPath`: absolute path on host
+- `containerPath`: name of directory inside `/workspace/extra/` (defaults to basename of hostPath)
+- `readonly`: `false` for read-write, `true` for read-only
+
+Without step 9b, the agent container won't mount anything even if the allowlist permits it.
 
 ## 10. Start Service
 
