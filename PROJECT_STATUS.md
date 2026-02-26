@@ -1,5 +1,5 @@
 # PROJECT STATUS
-> Última atualização: 2026-02-25
+> Última atualização: 2026-02-25 (rev 2)
 
 ---
 
@@ -141,7 +141,7 @@ docker run -d \
 | 1 | **N8N nunca foi iniciado** — imagem baixada mas sem workflows nem container rodando | Média |
 | 2 | **Unibot não integrado ao NanoClaw** — roda de forma isolada, sem comunicação com o Neo | Média |
 | 3 | **TTS (resposta em áudio) não implementado** — Neo só responde em texto. Opções avaliadas: ElevenLabs, Groq PlayAI | Baixa |
-| 4 | **`git config --global` não configurado** — commits mostram "configured automatically". Corrigir com `git config --global user.name` e `user.email` | Baixa |
+| 4 | ~~**`git config --global` não configurado**~~ — ✅ Resolvido: `Eu Gestor <eugestor.net@gmail.com>` | ~~Baixa~~ |
 | 5 | **AnythingLLM não conectado ao Neo** — workspaces criados mas sem integração com o agente WhatsApp | Média |
 | 6 | **N8N sem integração com NanoClaw** — potencial para criar workflows que o Neo possa acionar | Média |
 
