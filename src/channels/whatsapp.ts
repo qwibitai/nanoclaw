@@ -26,6 +26,8 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const RECONNECT_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_RECONNECTS_BEFORE_RESTART = 3;
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -42,6 +44,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectTimestamps: number[] = [];
 
   private opts: WhatsAppChannelOpts;
 
@@ -108,7 +111,25 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
+          const now = Date.now();
+          this.reconnectTimestamps.push(now);
+          this.reconnectTimestamps = this.reconnectTimestamps.filter(
+            (t) => now - t < RECONNECT_WINDOW_MS,
+          );
+          logger.info(
+            { reconnectsInWindow: this.reconnectTimestamps.length },
+            'Reconnecting...',
+          );
+          if (this.reconnectTimestamps.length >= MAX_RECONNECTS_BEFORE_RESTART) {
+            logger.error(
+              {
+                count: this.reconnectTimestamps.length,
+                windowMs: RECONNECT_WINDOW_MS,
+              },
+              'Too many reconnections in window, restarting process',
+            );
+            process.exit(1);
+          }
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
@@ -123,6 +144,7 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectTimestamps = [];
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
