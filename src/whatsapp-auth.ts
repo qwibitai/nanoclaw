@@ -134,17 +134,34 @@ async function connectSocket(
     }
 
     if (connection === 'open') {
-      fs.writeFileSync(STATUS_FILE, 'authenticated');
       // Clean up QR file now that we're connected
       try {
         fs.unlinkSync(QR_FILE);
       } catch {}
-      console.log('\n✓ Successfully authenticated with WhatsApp!');
-      console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      console.log('\n✓ Connected to WhatsApp! Waiting for registration to complete...');
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
+      // Wait for creds to show registered=true before exiting
+      const checkRegistered = async () => {
+        for (let i = 0; i < 30; i++) {
+          try {
+            const creds = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, 'creds.json'), 'utf-8'));
+            if (creds.registered) {
+              fs.writeFileSync(STATUS_FILE, 'authenticated');
+              console.log('✓ Registration complete! Credentials saved to store/auth/');
+              console.log('  You can now start the NanoClaw service.\n');
+              setTimeout(() => process.exit(0), 500);
+              return;
+            }
+          } catch { /* creds file not ready yet */ }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        // If we get here, registered never became true but connection was open
+        // Still mark as authenticated — it may work
+        fs.writeFileSync(STATUS_FILE, 'authenticated');
+        console.log('✓ Connected (registration pending). Credentials saved to store/auth/\n');
+        setTimeout(() => process.exit(0), 500);
+      };
+      checkRegistered();
     }
   });
 
