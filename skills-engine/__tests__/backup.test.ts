@@ -26,10 +26,14 @@ describe('backup', () => {
     createBackup(['src/app.ts']);
 
     fs.writeFileSync(path.join(tmpDir, 'src', 'app.ts'), 'modified content');
-    expect(fs.readFileSync(path.join(tmpDir, 'src', 'app.ts'), 'utf-8')).toBe('modified content');
+    expect(fs.readFileSync(path.join(tmpDir, 'src', 'app.ts'), 'utf-8')).toBe(
+      'modified content',
+    );
 
     restoreBackup();
-    expect(fs.readFileSync(path.join(tmpDir, 'src', 'app.ts'), 'utf-8')).toBe('original content');
+    expect(fs.readFileSync(path.join(tmpDir, 'src', 'app.ts'), 'utf-8')).toBe(
+      'original content',
+    );
   });
 
   it('createBackup skips missing files without error', () => {
@@ -51,7 +55,13 @@ describe('backup', () => {
   it('createBackup writes tombstone for non-existent files', () => {
     createBackup(['src/newfile.ts']);
 
-    const tombstone = path.join(tmpDir, '.nanoclaw', 'backup', 'src', 'newfile.ts.tombstone');
+    const tombstone = path.join(
+      tmpDir,
+      '.nanoclaw',
+      'backup',
+      'src',
+      'newfile.ts.tombstone',
+    );
     expect(fs.existsSync(tombstone)).toBe(true);
   });
 

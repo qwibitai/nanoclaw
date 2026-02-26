@@ -2,7 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { loadPathRemap, recordPathRemap, resolvePathRemap } from '../path-remap.js';
+import {
+  loadPathRemap,
+  recordPathRemap,
+  resolvePathRemap,
+} from '../path-remap.js';
 import { readState, writeState } from '../state.js';
 import {
   cleanup,
