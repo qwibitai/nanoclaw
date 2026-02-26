@@ -36,10 +36,6 @@ export const MAIN_GROUP_FOLDER = 'main';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
-export const CONTAINER_TIMEOUT = parseInt(
-  process.env.CONTAINER_TIMEOUT || '1800000',
-  10,
-);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
@@ -48,7 +44,19 @@ export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(
   process.env.IDLE_TIMEOUT || '1800000',
   10,
-); // 30min default — how long to keep container alive after last result
+); // 30min default — no output for this long = stuck container
+export const GRACE_TIMEOUT = parseInt(
+  process.env.GRACE_TIMEOUT || '30000',
+  10,
+); // 30s — time for container to exit after soft stop before hard kill
+export const EVICTION_TIMEOUT = parseInt(
+  process.env.EVICTION_TIMEOUT || '14400000',
+  10,
+); // 4h — how long an evictable container can sit before auto-stop
+export const IDLE_BEFORE_EVICT = parseInt(
+  process.env.IDLE_BEFORE_EVICT || '600000',
+  10,
+); // 10min — protection period after idle before becoming evictable
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

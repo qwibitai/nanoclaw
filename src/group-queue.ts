@@ -1,8 +1,9 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { DATA_DIR, EVICTION_TIMEOUT, GRACE_TIMEOUT, IDLE_BEFORE_EVICT, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { stopContainer } from './container-runtime.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -24,6 +25,14 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  // New state for 4-state timeout system
+  evictable: boolean;
+  evictableAt: number | null;
+  stopping: boolean;
+  evictionTimer: ReturnType<typeof setTimeout> | null; // covers IDLE_BEFORE_EVICT and EVICTION_TIMEOUT phases
+  graceTimer: ReturnType<typeof setTimeout> | null;
+  clearIdleTimeout: (() => void) | null;
+  resetIdleTimeout: (() => void) | null;
 }
 
 export class GroupQueue {
@@ -47,6 +56,13 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        evictable: false,
+        evictableAt: null,
+        stopping: false,
+        evictionTimer: null,
+        graceTimer: null,
+        clearIdleTimeout: null,
+        resetIdleTimeout: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -77,6 +93,7 @@ export class GroupQueue {
         { groupJid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
+      this.evictOldest();
       return;
     }
 
@@ -98,8 +115,9 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
-      if (state.idleWaiting) {
-        this.closeStdin(groupJid);
+      // If container is idle or evictable, soft-stop it so the task can run next
+      if (state.idleWaiting || state.evictable) {
+        this.softStop(groupJid);
       }
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
@@ -114,6 +132,7 @@ export class GroupQueue {
         { groupJid, taskId, activeCount: this.activeCount },
         'At concurrency limit, task queued',
       );
+      this.evictOldest();
       return;
     }
 
@@ -123,22 +142,62 @@ export class GroupQueue {
     );
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+    controls?: { clearIdleTimeout: () => void; resetIdleTimeout: () => void },
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (controls) {
+      state.clearIdleTimeout = controls.clearIdleTimeout;
+      state.resetIdleTimeout = controls.resetIdleTimeout;
+    }
   }
 
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
-   * If tasks are pending, preempt the idle container immediately.
+   * Starts the IDLE_BEFORE_EVICT → EVICTABLE → EVICTION_TIMEOUT chain.
+   * If tasks are pending for this group, soft-stop immediately.
    */
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
+    if (state.stopping) return;
+
     state.idleWaiting = true;
+
+    // Clear the idle timeout in container-runner (no longer needed — we manage lifecycle)
+    state.clearIdleTimeout?.();
+
+    // If tasks pending for this group, preempt immediately
     if (state.pendingTasks.length > 0) {
-      this.closeStdin(groupJid);
+      this.softStop(groupJid);
+      return;
+    }
+
+    // Start IDLE_BEFORE_EVICT timer
+    state.evictableAt = Date.now();
+    this.clearEvictionTimer(state);
+    state.evictionTimer = setTimeout(() => {
+      // Transition: IDLE → EVICTABLE
+      state.evictable = true;
+      logger.debug({ groupJid }, 'Container now evictable');
+
+      // Start EVICTION_TIMEOUT
+      state.evictionTimer = setTimeout(() => {
+        // EVICTION_TIMEOUT expired — stop container
+        logger.info({ groupJid }, 'Eviction timeout expired, stopping container');
+        this.softStop(groupJid);
+      }, EVICTION_TIMEOUT);
+    }, IDLE_BEFORE_EVICT);
+
+    // If there are waiting groups, try to evict a different (older) container
+    if (this.waitingGroups.length > 0) {
+      this.evictOldest();
     }
   }
 
@@ -149,7 +208,12 @@ export class GroupQueue {
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
-    state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    if (state.stopping) return false;
+
+    // If idle or evictable, reactivate before sending
+    if (state.idleWaiting || state.evictable) {
+      this.reactivate(groupJid);
+    }
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -166,11 +230,108 @@ export class GroupQueue {
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Soft-stop: write _close sentinel and start grace timer.
+   * Transition to STOPPING state.
    */
-  closeStdin(groupJid: string): void {
+  softStop(groupJid: string): void {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return;
+    if (state.stopping || !state.active) return;
+
+    state.stopping = true;
+    this.clearEvictionTimer(state);
+    state.evictable = false;
+    state.evictableAt = null;
+    state.idleWaiting = false;
+
+    // Clear the idle timeout so it doesn't fire during grace period
+    state.clearIdleTimeout?.();
+
+    logger.debug({ groupJid }, 'Soft-stopping container');
+    this.writeCloseSentinel(state);
+
+    // Start grace timer → hard stop if container doesn't exit
+    state.graceTimer = setTimeout(() => {
+      logger.warn({ groupJid }, 'Grace timeout expired, hard-stopping container');
+      this.hardStop(groupJid);
+    }, GRACE_TIMEOUT);
+  }
+
+  /**
+   * Hard-stop: docker stop the container, fallback to SIGKILL.
+   */
+  hardStop(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    if (!state.containerName && !state.process) return;
+
+    state.stopping = true;
+
+    if (state.containerName) {
+      logger.info({ groupJid, containerName: state.containerName }, 'Hard-stopping container');
+      exec(stopContainer(state.containerName), { timeout: 15000 }, (err) => {
+        if (err) {
+          logger.warn({ groupJid, err }, 'docker stop failed, sending SIGKILL');
+          state.process?.kill('SIGKILL');
+        }
+      });
+    } else {
+      state.process?.kill('SIGKILL');
+    }
+  }
+
+  /**
+   * Reactivate an IDLE or EVICTABLE container back to ACTIVE.
+   */
+  private reactivate(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    this.clearEvictionTimer(state);
+    state.evictable = false;
+    state.evictableAt = null;
+    state.idleWaiting = false;
+
+    // Restart the idle timeout in container-runner
+    state.resetIdleTimeout?.();
+
+    logger.debug({ groupJid }, 'Container reactivated');
+  }
+
+  /**
+   * Evict the oldest EVICTABLE container to free a slot for waiting groups.
+   * Throttled: no-op when stoppingCount >= waitingGroups.length.
+   */
+  private evictOldest(): boolean {
+    const stoppingCount = this.getStoppingCount();
+    if (stoppingCount >= this.waitingGroups.length) return false;
+
+    let oldestJid: string | null = null;
+    let oldestAt = Infinity;
+
+    for (const [jid, state] of this.groups) {
+      if (state.evictable && state.evictableAt != null && state.evictableAt < oldestAt) {
+        oldestAt = state.evictableAt;
+        oldestJid = jid;
+      }
+    }
+
+    if (!oldestJid) return false;
+
+    logger.info({ groupJid: oldestJid }, 'Evicting oldest idle container for queue pressure');
+    this.softStop(oldestJid);
+    return true;
+  }
+
+  private getStoppingCount(): number {
+    let count = 0;
+    for (const state of this.groups.values()) {
+      if (state.stopping) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Write _close sentinel to signal the container to wind down.
+   */
+  private writeCloseSentinel(state: GroupState): void {
+    if (!state.groupFolder) return;
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -179,6 +340,33 @@ export class GroupQueue {
     } catch {
       // ignore
     }
+  }
+
+  private clearEvictionTimer(state: GroupState): void {
+    if (state.evictionTimer) {
+      clearTimeout(state.evictionTimer);
+      state.evictionTimer = null;
+    }
+  }
+
+  private clearGraceTimer(state: GroupState): void {
+    if (state.graceTimer) {
+      clearTimeout(state.graceTimer);
+      state.graceTimer = null;
+    }
+  }
+
+  /**
+   * Reset all timer state for a group (called in runForGroup/runTask finally blocks).
+   */
+  private resetGroupTimers(state: GroupState): void {
+    this.clearEvictionTimer(state);
+    this.clearGraceTimer(state);
+    state.evictable = false;
+    state.evictableAt = null;
+    state.stopping = false;
+    state.clearIdleTimeout = null;
+    state.resetIdleTimeout = null;
   }
 
   private async runForGroup(
@@ -214,6 +402,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      this.resetGroupTimers(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -241,6 +430,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      this.resetGroupTimers(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }
