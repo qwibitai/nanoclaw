@@ -246,12 +246,21 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
-  // Pass Composio API key if configured (~/.composio/api.key)
+  // Pass Composio credentials if configured
+  // API key: ~/.composio/api.key (x-api-key header for the MCP server)
+  // MCP URL: ~/.composio/mcp.url (dedicated MCP server endpoint)
   const composioKeyFile = path.join(os.homedir(), '.composio', 'api.key');
   if (fs.existsSync(composioKeyFile)) {
     try {
       const key = fs.readFileSync(composioKeyFile, 'utf-8').trim();
       if (key) args.push('-e', `COMPOSIO_API_KEY=${key}`);
+    } catch { /* not configured, skip */ }
+  }
+  const composioUrlFile = path.join(os.homedir(), '.composio', 'mcp.url');
+  if (fs.existsSync(composioUrlFile)) {
+    try {
+      const url = fs.readFileSync(composioUrlFile, 'utf-8').trim();
+      if (url) args.push('-e', `COMPOSIO_MCP_URL=${url}`);
     } catch { /* not configured, skip */ }
   }
 
