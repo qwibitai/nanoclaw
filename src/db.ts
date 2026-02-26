@@ -140,15 +140,18 @@ function createSchema(database: Database.Database): void {
 export function inferChannelFromJid(jid: string): string {
   if (jid.startsWith('tg:')) return 'telegram';
   if (jid.startsWith('dc:')) return 'discord';
-  if (jid.includes('@g.us') || jid.includes('@s.whatsapp.net')) return 'whatsapp';
+  if (jid.includes('@g.us') || jid.includes('@s.whatsapp.net'))
+    return 'whatsapp';
   return 'unknown';
 }
 
 function migrateRegisteredGroupsSchema(database: Database.Database): void {
   // Check the actual CREATE TABLE statement to see if folder still has UNIQUE
-  const tableInfo = database.prepare(
-    "SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'",
-  ).get() as { sql: string } | undefined;
+  const tableInfo = database
+    .prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'",
+    )
+    .get() as { sql: string } | undefined;
 
   if (!tableInfo) return; // Table doesn't exist yet (will be created fresh)
 
@@ -187,9 +190,15 @@ function migrateRegisteredGroupsSchema(database: Database.Database): void {
 
   // Backfill channel from JID patterns where NULL
   if (needsChannelColumn || needsUniqueRemoval) {
-    database.exec(`UPDATE registered_groups SET channel = 'whatsapp' WHERE channel IS NULL AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')`);
-    database.exec(`UPDATE registered_groups SET channel = 'telegram' WHERE channel IS NULL AND jid LIKE 'tg:%'`);
-    database.exec(`UPDATE registered_groups SET channel = 'discord' WHERE channel IS NULL AND jid LIKE 'dc:%'`);
+    database.exec(
+      `UPDATE registered_groups SET channel = 'whatsapp' WHERE channel IS NULL AND (jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net')`,
+    );
+    database.exec(
+      `UPDATE registered_groups SET channel = 'telegram' WHERE channel IS NULL AND jid LIKE 'tg:%'`,
+    );
+    database.exec(
+      `UPDATE registered_groups SET channel = 'discord' WHERE channel IS NULL AND jid LIKE 'dc:%'`,
+    );
   }
 }
 

@@ -18,7 +18,9 @@ export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const ENABLED_CHANNELS: string[] = (
-  process.env.ENABLED_CHANNELS || envConfig.ENABLED_CHANNELS || 'whatsapp'
+  process.env.ENABLED_CHANNELS ||
+  envConfig.ENABLED_CHANNELS ||
+  'whatsapp'
 )
   .split(',')
   .map((s) => s.trim())
