@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -42,6 +43,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cost_usd?: number;
+  };
 }
 
 interface VolumeMount {
@@ -56,6 +64,7 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
+  const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -138,6 +147,17 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Google Drive credentials directory (for GDrive MCP inside the container)
+  // Mounted read-write so the MCP server can refresh OAuth tokens automatically.
+  const gdriveDir = path.join(homeDir, '.gdrive-mcp');
+  if (fs.existsSync(gdriveDir)) {
+    mounts.push({
+      hostPath: gdriveDir,
+      containerPath: '/home/node/.gdrive-mcp',
+      readonly: false,
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

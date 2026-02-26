@@ -77,6 +77,17 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL,
+      duration_ms INTEGER
+    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -598,6 +609,68 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Token usage accessors ---
+
+export interface TokenUsageRecord {
+  group_folder: string;
+  timestamp: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  cost_usd: number | null;
+  duration_ms: number | null;
+}
+
+export interface TokenUsageSummary {
+  call_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  total_cost_usd: number | null;
+  avg_duration_ms: number;
+}
+
+export function insertTokenUsage(record: TokenUsageRecord): void {
+  db.prepare(
+    `INSERT INTO token_usage (group_folder, timestamp, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, duration_ms)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    record.group_folder,
+    record.timestamp,
+    record.input_tokens,
+    record.output_tokens,
+    record.cache_read_tokens,
+    record.cache_creation_tokens,
+    record.cost_usd,
+    record.duration_ms,
+  );
+}
+
+export function getTokenUsageSince(isoTimestamp: string): TokenUsageSummary {
+  const row = db.prepare(
+    `SELECT
+       COUNT(*) as call_count,
+       COALESCE(SUM(input_tokens), 0) as input_tokens,
+       COALESCE(SUM(output_tokens), 0) as output_tokens,
+       COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+       COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens,
+       SUM(cost_usd) as total_cost_usd,
+       COALESCE(AVG(duration_ms), 0) as avg_duration_ms
+     FROM token_usage
+     WHERE timestamp >= ?`,
+  ).get(isoTimestamp) as TokenUsageSummary;
+  return row;
+}
+
+export function getGroupJidByFolder(folder: string): string | undefined {
+  const row = db
+    .prepare('SELECT jid FROM registered_groups WHERE folder = ?')
+    .get(folder) as { jid: string } | undefined;
+  return row?.jid;
 }
 
 // --- JSON migration ---

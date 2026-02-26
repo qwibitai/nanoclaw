@@ -35,6 +35,13 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cost_usd?: number;
+  };
 }
 
 interface SessionEntry {
@@ -432,7 +439,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__gdrive__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -446,6 +454,14 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        gdrive: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-gdrive'],
+          env: {
+            GDRIVE_OAUTH_PATH: '/home/node/.gdrive-mcp/gcp-oauth.keys.json',
+            GDRIVE_CREDENTIALS_PATH: '/home/node/.gdrive-mcp/credentials.json',
           },
         },
       },
@@ -476,11 +492,20 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const usageData = (message as { usage?: { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number } }).usage;
+      const costUsd = (message as { total_cost_usd?: number }).total_cost_usd;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        usage: usageData ? {
+          input_tokens: usageData.input_tokens ?? 0,
+          output_tokens: usageData.output_tokens ?? 0,
+          cache_creation_input_tokens: usageData.cache_creation_input_tokens,
+          cache_read_input_tokens: usageData.cache_read_input_tokens,
+          cost_usd: costUsd,
+        } : undefined,
       });
     }
   }

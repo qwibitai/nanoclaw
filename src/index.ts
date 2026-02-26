@@ -21,6 +21,7 @@ import {
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
+  getGroupJidByFolder,
   getMessagesSince,
   getNewMessages,
   getRouterState,
@@ -38,6 +39,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { recordUsage, startUsageReporter } from './usage-tracker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -260,6 +262,9 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Accumulate token usage across all streaming results
+  let accumulatedUsage: ContainerOutput['usage'] | undefined;
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -267,10 +272,28 @@ async function runAgent(
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
+        if (output.usage) {
+          if (!accumulatedUsage) {
+            accumulatedUsage = { input_tokens: 0, output_tokens: 0 };
+          }
+          accumulatedUsage.input_tokens += output.usage.input_tokens;
+          accumulatedUsage.output_tokens += output.usage.output_tokens;
+          accumulatedUsage.cache_creation_input_tokens =
+            (accumulatedUsage.cache_creation_input_tokens ?? 0) +
+            (output.usage.cache_creation_input_tokens ?? 0);
+          accumulatedUsage.cache_read_input_tokens =
+            (accumulatedUsage.cache_read_input_tokens ?? 0) +
+            (output.usage.cache_read_input_tokens ?? 0);
+          if (output.usage.cost_usd != null) {
+            accumulatedUsage.cost_usd =
+              (accumulatedUsage.cost_usd ?? 0) + output.usage.cost_usd;
+          }
+        }
         await onOutput(output);
       }
     : undefined;
 
+  const startMs = Date.now();
   try {
     const output = await runContainerAgent(
       group,
@@ -285,10 +308,17 @@ async function runAgent(
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
     );
+    const durationMs = Date.now() - startMs;
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+
+    // Record token usage (streaming: from accumulated callbacks; legacy: from final output)
+    const usageToRecord = accumulatedUsage ?? output.usage;
+    if (usageToRecord) {
+      recordUsage(group.folder, usageToRecord, durationMs);
     }
 
     if (output.status === 'error') {
@@ -465,6 +495,16 @@ async function main(): Promise<void> {
       if (text) await channel.sendMessage(jid, text);
     },
   });
+  const sendToJid = async (jid: string, rawText: string) => {
+    const channel = findChannel(channels, jid);
+    if (!channel) {
+      logger.warn({ jid }, 'No channel found for JID');
+      return;
+    }
+    const text = formatOutbound(rawText);
+    if (text) await channel.sendMessage(jid, text);
+  };
+
   startIpcWatcher({
     sendMessage: (jid, text) => {
       const channel = findChannel(channels, jid);
@@ -477,6 +517,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startUsageReporter(sendToJid, () => getGroupJidByFolder('main') ?? null);
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
