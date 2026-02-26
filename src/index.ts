@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import { GitHubChannel } from './channels/github.js';
 import { SlackChannel } from './channels/slack.js';
+import { WebChannel } from './channels/web.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -660,6 +661,7 @@ async function main(): Promise<void> {
   const envTokens = readEnvFile([
     'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN',
     'GITHUB_TOKEN', 'GITHUB_USERNAME',
+    'WEB_AUTH_TOKEN', 'WEB_API_PORT',
   ]);
 
   // WhatsApp: conditional on auth creds existing
@@ -697,6 +699,25 @@ async function main(): Promise<void> {
     await github.connect();
   } else {
     logger.info('GitHub: no token/username in .env, skipping');
+  }
+
+  // Web: conditional on auth token in .env
+  if (envTokens.WEB_AUTH_TOKEN) {
+    const web = new WebChannel({
+      ...channelOpts,
+      authToken: envTokens.WEB_AUTH_TOKEN,
+      port: envTokens.WEB_API_PORT ? parseInt(envTokens.WEB_API_PORT, 10) : undefined,
+      registerGroup,
+      onDirectEnqueue: (jid) => queue.enqueueMessageCheck(jid),
+    });
+    channels.push(web);
+    try {
+      await web.connect();
+    } catch (err) {
+      logger.warn({ err }, 'Web channel failed to start, continuing without it');
+    }
+  } else {
+    logger.info('Web: no WEB_AUTH_TOKEN in .env, skipping');
   }
 
   if (channels.length === 0) {

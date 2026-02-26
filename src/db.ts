@@ -60,6 +60,17 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
+    CREATE TABLE IF NOT EXISTS web_sessions (
+      session_id TEXT PRIMARY KEY,
+      jid TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_activity TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_jid_ts ON messages(chat_jid, timestamp);
+
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -159,10 +170,21 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+
+  // Enable WAL mode for better concurrent read/write performance
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('busy_timeout = 5000');
+
   createSchema(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
+}
+
+/** Expose database instance for transactional operations (e.g. web channel). */
+export function getDatabase(): Database.Database {
+  return db;
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -651,6 +673,93 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Web session accessors ---
+
+export interface WebSession {
+  session_id: string;
+  jid: string;
+  name: string;
+  group_folder: string;
+  created_at: string;
+  last_activity: string;
+}
+
+export function insertWebSession(
+  sessionId: string,
+  jid: string,
+  name: string,
+  groupFolder: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO web_sessions (session_id, jid, name, group_folder, created_at, last_activity)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(sessionId, jid, name, groupFolder, now, now);
+}
+
+export function getWebSession(sessionId: string): WebSession | undefined {
+  return db
+    .prepare('SELECT * FROM web_sessions WHERE session_id = ?')
+    .get(sessionId) as WebSession | undefined;
+}
+
+export function getAllWebSessions(): WebSession[] {
+  return db
+    .prepare('SELECT * FROM web_sessions ORDER BY last_activity DESC')
+    .all() as WebSession[];
+}
+
+export function updateWebSessionActivity(sessionId: string): void {
+  db.prepare(
+    'UPDATE web_sessions SET last_activity = ? WHERE session_id = ?',
+  ).run(new Date().toISOString(), sessionId);
+}
+
+export function getMessageHistory(
+  chatJid: string,
+  limit: number = 50,
+  before?: string,
+): Array<{
+  id: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_bot_message: number;
+}> {
+  if (before) {
+    return db
+      .prepare(
+        `SELECT id, sender_name, content, timestamp, is_bot_message
+         FROM messages
+         WHERE chat_jid = ? AND timestamp < ?
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+      )
+      .all(chatJid, before, limit) as Array<{
+      id: string;
+      sender_name: string;
+      content: string;
+      timestamp: string;
+      is_bot_message: number;
+    }>;
+  }
+  return db
+    .prepare(
+      `SELECT id, sender_name, content, timestamp, is_bot_message
+       FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as Array<{
+    id: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_bot_message: number;
+  }>;
 }
 
 // --- JSON migration ---
