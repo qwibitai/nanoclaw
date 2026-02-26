@@ -1,17 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 
-import { CronExpressionParser } from 'cron-parser';
-
 import {
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
-  TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
+import { computeNextRun } from './schedule-utils.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -211,30 +209,7 @@ export async function processTaskIpc(
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
         let nextRun: string | null = null;
-        if (scheduleType === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: TIMEZONE,
-            });
-            nextRun = interval.next().toISOString();
-          } catch {
-            logger.warn(
-              { scheduleValue: data.schedule_value },
-              'Invalid cron expression',
-            );
-            break;
-          }
-        } else if (scheduleType === 'interval') {
-          const ms = parseInt(data.schedule_value, 10);
-          if (isNaN(ms) || ms <= 0) {
-            logger.warn(
-              { scheduleValue: data.schedule_value },
-              'Invalid interval',
-            );
-            break;
-          }
-          nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (scheduleType === 'once') {
+        if (scheduleType === 'once') {
           const scheduled = new Date(data.schedule_value);
           if (isNaN(scheduled.getTime())) {
             logger.warn(
@@ -244,6 +219,16 @@ export async function processTaskIpc(
             break;
           }
           nextRun = scheduled.toISOString();
+        } else {
+          try {
+            nextRun = computeNextRun(scheduleType, data.schedule_value);
+          } catch {
+            logger.warn(
+              { scheduleType, scheduleValue: data.schedule_value },
+              'Invalid schedule value',
+            );
+            break;
+          }
         }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
