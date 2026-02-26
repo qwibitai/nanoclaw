@@ -144,7 +144,6 @@ export class WhatsAppChannel implements Channel {
         }
       } else if (connection === 'open') {
         this.connected = true;
-        this.reconnectTimestamps = [];
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
