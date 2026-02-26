@@ -2,8 +2,12 @@ skill: whatsapp
 version: 1.0.0
 description: "WhatsApp channel via Baileys (Multi-Device Web API)"
 core_version: 0.1.0
-adds: []
-modifies: []
+adds:
+  - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
+  - src/whatsapp-auth.ts
+modifies:
+  - src/channels/index.ts
 structured:
   npm_dependencies:
     "@whiskeysockets/baileys": "^7.0.0-rc.9"

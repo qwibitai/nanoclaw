@@ -5,7 +5,7 @@ description: Add WhatsApp as a channel. Can replace other channels entirely or r
 
 # Add WhatsApp Channel
 
-This skill adds WhatsApp support to NanoClaw. WhatsApp is included in the core codebase (no skill-apply needed) — this skill walks through authentication, registration, and configuration.
+This skill adds WhatsApp support to NanoClaw. It installs the WhatsApp channel code, dependencies, and guides through authentication, registration, and configuration.
 
 ## Phase 1: Pre-flight
 
@@ -36,13 +36,17 @@ AskUserQuestion: What is your phone number? (Include country code, e.g., +123456
 
 ## Phase 2: Verify Code
 
-WhatsApp is part of the NanoClaw core — no skill-apply step is needed. Verify the code is present:
+Apply the skill to install the WhatsApp channel code and dependencies:
 
 ```bash
-test -f src/channels/whatsapp.ts && echo "WhatsApp channel code present" || echo "ERROR: WhatsApp channel code missing"
+npx tsx skills-engine/apply.ts .claude/skills/add-whatsapp
 ```
 
-If the code is missing (e.g., it was removed during a previous customization), the user needs to restore it from upstream. Use the `/update` skill.
+Verify the code was placed correctly:
+
+```bash
+test -f src/channels/whatsapp.ts && echo "WhatsApp channel code present" || echo "ERROR: WhatsApp channel code missing — re-run skill apply"
+```
 
 ### Verify dependencies
 
