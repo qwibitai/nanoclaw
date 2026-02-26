@@ -1,5 +1,5 @@
 # PROJECT STATUS
-> Última atualização: 2026-02-25 (rev 2)
+> Última atualização: 2026-02-25 (rev 3)
 
 ---
 
@@ -13,7 +13,7 @@
 | **Docker Desktop** | ✅ Rodando | Daemon ativo |
 | **Ollama** | ✅ Rodando | launchd `com.ollama.ollama` |
 | **AnythingLLM Desktop** | ✅ Instalado | 3 workspaces criados |
-| **N8N** | ⚠️ Instalado, não ativo | Imagem Docker baixada, container nunca iniciado |
+| **N8N** | ✅ Rodando | Container `neo-engine`, porta 5678 → http://localhost:5678 |
 | **Unibot** | ⚠️ Instalado, não ativo | Repositório local, dependências Python instaladas |
 | **GitHub CLI (gh)** | ✅ Autenticado | conta `eugestornet` |
 
@@ -96,14 +96,12 @@
 
 > **Status atual:** Nenhum workflow criado. O N8N tem sua imagem Docker baixada (`n8nio/n8n:latest`) mas o container nunca foi iniciado e o banco de dados está vazio.
 
-Para iniciar o N8N:
+Container: `neo-engine` (porta 5678) — http://localhost:5678
+
+Para iniciar/parar:
 ```bash
-docker run -d \
-  --name n8n \
-  -p 5678:5678 \
-  -v ~/.n8n:/home/node/.n8n \
-  n8nio/n8n:latest
-# Acessar em http://localhost:5678
+docker start neo-engine
+docker stop neo-engine
 ```
 
 ---
@@ -138,7 +136,7 @@ docker run -d \
 
 | # | Descrição | Prioridade |
 |---|---|---|
-| 1 | **N8N nunca foi iniciado** — imagem baixada mas sem workflows nem container rodando | Média |
+| 1 | ~~**N8N nunca foi iniciado**~~ — ✅ Rodando no container `neo-engine` (porta 5678). Sem workflows criados ainda. | ~~Média~~ |
 | 2 | **Unibot não integrado ao NanoClaw** — roda de forma isolada, sem comunicação com o Neo | Média |
 | 3 | **TTS (resposta em áudio) não implementado** — Neo só responde em texto. Opções avaliadas: ElevenLabs, Groq PlayAI | Baixa |
 | 4 | ~~**`git config --global` não configurado**~~ — ✅ Resolvido: `Eu Gestor <eugestor.net@gmail.com>` | ~~Baixa~~ |
