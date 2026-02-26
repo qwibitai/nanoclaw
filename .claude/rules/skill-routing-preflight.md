@@ -40,6 +40,17 @@ For tool routing, prefer intent-matched MCPs before ad-hoc shell/web:
 2. `comet-bridge` for real-browser/deep browsing flows
 3. `context7` for library/framework docs
 4. `deepwiki` for GitHub repo architecture/Q&A
+5. `token-efficient` for large log/CSV/data processing and sandboxed code execution
+
+## MCP Reliability Loop (Mandatory)
+
+When an intent-matched MCP exists, do not sidestep immediately on first failure.
+
+1. Capture the exact tool error and failing call.
+2. Attempt to fix the MCP server/config at source first (project-agnostic servers under `/Users/gurusharan/Documents/remote-claude/mcp-servers`).
+3. Rebuild/restart the affected MCP server and re-run a minimal verification call.
+4. Only use shell/ad-hoc fallback after at least one fix attempt or a clear external blocker.
+5. Report blocker + evidence explicitly if fallback is required.
 
 ## If Skipping a Matching Skill
 

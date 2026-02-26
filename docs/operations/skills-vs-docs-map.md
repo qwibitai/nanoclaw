@@ -45,6 +45,7 @@ Use MCP tools first when intent matches. Do not default to ad-hoc shell/web flow
 
 | Intent | Preferred MCP | Typical Use |
 |--------|----------------|-------------|
+| Large log/CSV/data processing and token-heavy analysis | `token-efficient` | `process_logs`, `process_csv`, `batch_process_csv`, `execute_code` |
 | Browser inspection, debugging, and automation (DOM, console, network, performance, interaction) | `chrome-devtools` | default browser MCP for local app/browser tasks |
 | Real-browser research or login-wall/dynamic browsing flows | `comet-bridge` | agentic browser exploration and deep browsing tasks |
 | Library/framework docs lookup and API examples | `context7` | resolve library ID + query authoritative docs |
@@ -52,7 +53,11 @@ Use MCP tools first when intent matches. Do not default to ad-hoc shell/web flow
 
 Fallback policy:
 - If no MCP matches the intent, use normal tools (shell, tests, docs, web).
-- If an MCP fails or is unavailable, record the blocker and use the nearest fallback.
+- If an MCP fails or is unavailable, run fix-first loop before fallback:
+  - capture exact failure
+  - fix MCP server/config at source when feasible (project-agnostic servers under `/Users/gurusharan/Documents/remote-claude/mcp-servers`)
+  - rebuild/restart and verify with a minimal tool call
+  - use nearest fallback only if still blocked, with explicit blocker evidence
 
 ## Skill Catalog (Repo-Local)
 
