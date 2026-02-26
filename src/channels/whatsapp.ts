@@ -6,12 +6,14 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
 import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { transcribeAudioBuffer } from '../transcription.js';
 import {
   getLastGroupSync,
   setLastGroupSync,
@@ -172,12 +174,23 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          let content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
+
+          // Transcribe voice notes (ptt = push-to-talk = voice message)
+          if (!content && msg.message?.audioMessage?.ptt) {
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+              content = await transcribeAudioBuffer(buffer);
+            } catch (err) {
+              logger.error({ err }, 'Failed to download audio message');
+              content = '[Voice Message - transcription failed]';
+            }
+          }
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           if (!content) continue;
