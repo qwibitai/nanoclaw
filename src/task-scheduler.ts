@@ -195,7 +195,7 @@ async function runTask(
   let nextRun: string | null = null;
   if (task.schedule_type === 'cron') {
     const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
+      tz: task.timezone || TIMEZONE,
     });
     nextRun = interval.next().toISOString();
   } else if (task.schedule_type === 'interval') {
