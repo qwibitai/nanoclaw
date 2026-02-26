@@ -478,80 +478,26 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('downloads image and includes path with caption', async () => {
+    it.each([
+      { desc: 'with caption', id: 'msg-6', caption: 'Check this photo', mime: 'image/jpeg',
+        expected: 'Check this photo\n[Image: /workspace/group/images/msg-6.jpeg]' },
+      { desc: 'without caption', id: 'msg-img-nocap', caption: undefined, mime: 'image/png',
+        expected: '[Image: /workspace/group/images/msg-img-nocap.png]' },
+    ])('downloads image $desc', async ({ id, caption, mime, expected }) => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
-
       await connectChannel(channel);
 
-      await triggerMessages([
-        {
-          key: {
-            id: 'msg-6',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: {
-            imageMessage: {
-              caption: 'Check this photo',
-              mimetype: 'image/jpeg',
-            },
-          },
-          pushName: 'Diana',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
-      ]);
-
-      const { downloadMediaMessage } = await import(
-        '@whiskeysockets/baileys'
-      );
-      expect(downloadMediaMessage).toHaveBeenCalled();
+      await triggerMessages([{
+        key: { id, remoteJid: 'registered@g.us', participant: '5551234@s.whatsapp.net', fromMe: false },
+        message: { imageMessage: { caption, mimetype: mime } },
+        pushName: 'Diana',
+        messageTimestamp: Math.floor(Date.now() / 1000),
+      }]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({
-          content: expect.stringContaining('Check this photo'),
-        }),
-      );
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: expect.stringContaining('[Image: /workspace/group/images/msg-6.jpeg]'),
-        }),
-      );
-    });
-
-    it('downloads image without caption', async () => {
-      const opts = createTestOpts();
-      const channel = new WhatsAppChannel(opts);
-
-      await connectChannel(channel);
-
-      await triggerMessages([
-        {
-          key: {
-            id: 'msg-img-nocap',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: {
-            imageMessage: {
-              mimetype: 'image/png',
-            },
-          },
-          pushName: 'Diana',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
-      ]);
-
-      // Image without caption should still be delivered (not skipped as empty)
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({
-          content: expect.stringContaining('[Image: /workspace/group/images/msg-img-nocap.png]'),
-        }),
+        expect.objectContaining({ content: expected }),
       );
     });
 

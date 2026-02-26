@@ -199,34 +199,18 @@ export class WhatsAppChannel implements Channel {
         if (groups[chatJid]) {
           // Download image if present and save to group's images directory
           let imagePath = '';
-          if (msg.message?.imageMessage) {
+          const imgMsg = msg.message?.imageMessage;
+          if (imgMsg) {
             try {
-              const buffer = await downloadMediaMessage(
-                msg,
-                'buffer',
-                {},
-                {
-                  logger,
-                  reuploadRequest: this.sock.updateMediaMessage,
-                },
-              );
-              const ext =
-                (msg.message.imageMessage.mimetype || 'image/jpeg')
-                  .split('/')[1] || 'jpg';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+                logger, reuploadRequest: this.sock.updateMediaMessage,
+              });
+              const ext = (imgMsg.mimetype || 'image/jpeg').split('/')[1] || 'jpg';
               const filename = `${msg.key.id || Date.now()}.${ext}`;
-              const group = groups[chatJid];
-              const imagesDir = path.join(
-                GROUPS_DIR,
-                group.folder,
-                'images',
-              );
+              const imagesDir = path.join(GROUPS_DIR, groups[chatJid].folder, 'images');
               fs.mkdirSync(imagesDir, { recursive: true });
               fs.writeFileSync(path.join(imagesDir, filename), buffer);
               imagePath = `/workspace/group/images/${filename}`;
-              logger.info(
-                { chatJid, filename },
-                'Downloaded image from WhatsApp message',
-              );
             } catch (err) {
               logger.error({ err, chatJid }, 'Failed to download image');
             }
@@ -235,11 +219,10 @@ export class WhatsAppChannel implements Channel {
           const textContent =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
+            imgMsg?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
 
-          // Build final content: text + image path (if present)
           const content = imagePath
             ? `${textContent}\n[Image: ${imagePath}]`.trim()
             : textContent;
