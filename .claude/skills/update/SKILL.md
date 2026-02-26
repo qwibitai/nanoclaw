@@ -169,3 +169,30 @@ Report final status:
 ```bash
 npx tsx -e "import { restoreBackup, clearBackup } from './skills-engine/backup.js'; restoreBackup(); clearBackup();"
 ```
+
+## Protected Fork Changes (Multi-Tenant)
+
+Our fork adds multi-tenant isolation to 3 core files. When upstream changes
+conflict with these during Step 6, preserve our changes using these rules:
+
+### src/config.ts
+**Preserve**: `INSTANCE_ID`, `CONTAINER_NAME_PREFIX`, `safeInstanceId()`,
+`getOsUsername()`, `CONTAINER_CPUS`, `CONTAINER_MEMORY`, `CONTAINER_PIDS_LIMIT`.
+These are appended after `MAX_CONCURRENT_CONTAINERS`. Upstream additions to
+config are fine — just keep our block intact.
+
+### src/container-runtime.ts
+**Preserve**: The `import { CONTAINER_NAME_PREFIX } from './config.js'` and
+the `cleanupOrphans()` filter using `${CONTAINER_NAME_PREFIX}-` instead of
+hardcoded `nanoclaw-`. Never revert to the global `nanoclaw-` filter.
+
+### src/container-runner.ts
+**Preserve**:
+1. Container name: `${CONTAINER_NAME_PREFIX}-${safeName}-${Date.now()}`
+2. Resource limit args (`--cpus`, `--memory`, `--pids-limit`) in `buildContainerArgs()`
+3. `isRootlessDocker()` and `detectDockerSocket()` helper functions
+4. The conditional docker socket mount using `detectDockerSocket()` instead of
+   hardcoded `/var/run/docker.sock`
+
+If upstream modifies `buildContainerArgs()`, merge their changes but keep our
+three additions: resource limits, rootless detection, instance-prefixed naming.

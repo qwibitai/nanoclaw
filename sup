@@ -39,7 +39,7 @@ SNAP_CMD="
   echo '=== Recent Logs ==='
   $SVC_LOGS 2>/dev/null || echo '(no logs)'
   echo
-  echo '=== Active Containers ==='
+  echo '=== Active Containers (all NanoClaw instances) ==='
   docker ps --filter name=nanoclaw- --format 'table {{.Names}}\t{{.Status}}\t{{.Command}}' 2>/dev/null || echo '(docker not available)'
   echo
   echo '=== Scheduled Tasks ==='

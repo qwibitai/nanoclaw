@@ -54,6 +54,31 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
 
+// Multi-tenant instance isolation — prefixes all container names
+function getOsUsername(): string {
+  try {
+    return os.userInfo().username;
+  } catch {
+    // os.userInfo() throws on musl-based containers and some CI environments
+    return process.env.USER || process.env.LOGNAME || 'default';
+  }
+}
+
+function safeInstanceId(): string {
+  const raw = process.env.INSTANCE_ID || getOsUsername();
+  // Strip non-alphanumeric chars, limit to 32 chars (Docker name limit is 128)
+  const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
+  return sanitized || 'default';
+}
+
+export const INSTANCE_ID = safeInstanceId();
+export const CONTAINER_NAME_PREFIX = `nanoclaw-${INSTANCE_ID}`;
+
+// Container resource limits (empty/0 = no limit, preserves current behavior)
+export const CONTAINER_CPUS = process.env.CONTAINER_CPUS || '';
+export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || '';
+export const CONTAINER_PIDS_LIMIT = process.env.CONTAINER_PIDS_LIMIT || '';
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

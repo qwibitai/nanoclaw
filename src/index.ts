@@ -4,7 +4,9 @@ import path from 'path';
 import { syncBrain } from './brain-sync.js';
 import {
   ASSISTANT_NAME,
+  CONTAINER_NAME_PREFIX,
   IDLE_TIMEOUT,
+  INSTANCE_ID,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   STORE_DIR,
@@ -575,6 +577,7 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  logger.info({ instanceId: INSTANCE_ID, containerPrefix: CONTAINER_NAME_PREFIX }, 'Instance identity');
   initDatabase();
   logger.info('Database initialized');
   loadState();
