@@ -15,6 +15,62 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
+/**
+ * Convert a bare local-time string (e.g. "2026-02-26T17:00:00") into a UTC
+ * Date by interpreting it in the given IANA timezone.  Uses only the built-in
+ * Intl API — no third-party date libraries required.
+ */
+export function localTimeToUtc(localIso: string, tz: string): Date {
+  // Parse the components from the local-time string
+  const m = localIso.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/,
+  );
+  if (!m) throw new Error(`Cannot parse local time: ${localIso}`);
+
+  const [, year, month, day, hour, minute, second = '0'] = m;
+
+  // Build a Date in UTC with the given wall-clock values …
+  const utcGuess = new Date(
+    Date.UTC(+year, +month - 1, +day, +hour, +minute, +second),
+  );
+
+  // … then find out what UTC offset the target timezone has at that instant.
+  // Intl gives us the local parts; the difference tells us the offset.
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+    .formatToParts(utcGuess)
+    .reduce(
+      (acc, p) => {
+        if (p.type !== 'literal') acc[p.type] = p.value;
+        return acc;
+      },
+      {} as Record<string, string>,
+    );
+
+  const localAtGuess = Date.UTC(
+    +parts.year,
+    +parts.month - 1,
+    +parts.day,
+    +(parts.hour === '24' ? '0' : parts.hour),
+    +parts.minute,
+    +parts.second,
+  );
+
+  // offset = localAtGuess − utcGuess  (in ms)
+  const offsetMs = localAtGuess - utcGuess.getTime();
+
+  // The actual UTC time is: wall-clock minus offset
+  return new Date(utcGuess.getTime() - offsetMs);
+}
+
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -160,6 +216,7 @@ export async function processTaskIpc(
     schedule_type?: string;
     schedule_value?: string;
     context_mode?: string;
+    timezone?: string;
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
@@ -209,12 +266,15 @@ export async function processTaskIpc(
         }
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
+        // Use the user-supplied timezone if provided, otherwise fall back to
+        // the server/system timezone so existing behaviour is preserved.
+        const taskTimezone = data.timezone || TIMEZONE;
 
         let nextRun: string | null = null;
         if (scheduleType === 'cron') {
           try {
             const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: TIMEZONE,
+              tz: taskTimezone,
             });
             nextRun = interval.next().toISOString();
           } catch {
@@ -235,7 +295,16 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
+          // Interpret the bare local-time string in the user's timezone.
+          // We build an Intl-based offset so the UTC instant is correct.
+          const localStr = data.schedule_value;
+          let scheduled: Date;
+          try {
+            scheduled = localTimeToUtc(localStr, taskTimezone);
+          } catch {
+            // Fallback: let Date parse it (old behaviour)
+            scheduled = new Date(localStr);
+          }
           if (isNaN(scheduled.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
@@ -259,6 +328,7 @@ export async function processTaskIpc(
           schedule_type: scheduleType,
           schedule_value: data.schedule_value,
           context_mode: contextMode,
+          timezone: data.timezone || null,
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),
