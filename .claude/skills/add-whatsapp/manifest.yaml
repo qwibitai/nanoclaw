@@ -6,8 +6,10 @@ adds:
   - src/channels/whatsapp.ts
   - src/channels/whatsapp.test.ts
   - src/whatsapp-auth.ts
+  - setup/whatsapp-auth.ts
 modifies:
   - src/channels/index.ts
+  - setup/index.ts
 structured:
   npm_dependencies:
     "@whiskeysockets/baileys": "^7.0.0-rc.9"
