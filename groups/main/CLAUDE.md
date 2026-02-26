@@ -43,6 +43,31 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Fastmail Email (Read-Only)
+
+You have access to the user's Fastmail email via MCP tools (prefixed `mcp__fastmail-email__`). You can read and search emails but cannot send, delete, or modify them.
+
+When the user asks about emails, use these tools to find and summarize relevant messages.
+
+## Fastmail Calendar
+
+You have access to the user's Fastmail calendars via MCP tools (prefixed `mcp__fastmail-calendar__`). Available tools:
+
+- `caldav_list_calendars` — list all calendars
+- `caldav_get_events` — get events in a date range
+- `caldav_get_today_events` — get today's events
+- `caldav_get_week_events` — get this week's events
+- `caldav_create_event` — create an event (supports location, description, attendees, reminders, recurrence)
+- `caldav_get_event_by_uid` — get a specific event by UID
+- `caldav_delete_event` — delete an event
+- `caldav_search_events` — search events by text
+
+To update an event, delete the old one and create a new one with the changes.
+
+The user's preferred default calendar is named **dgoeke@gmail.com** (hosted on Fastmail). Use this when creating events or checking the schedule unless the user specifies a different calendar.
+
+When the user asks about their schedule, upcoming events, or wants to create/modify events, use these tools.
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:

@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -41,11 +43,21 @@ COPY agent-runner/package*.json ./
 # Install dependencies
 RUN npm install
 
+# Patch @jahfer/jmap-mcp-server: getEmailContent uses textBody/htmlBody directly
+# as strings, but JMAP returns them as arrays of body part objects. Fix: request
+# bodyValues with fetchTextBodyValues and look up content by partId.
+COPY patches/fix-jmap-body.js /tmp/fix-jmap-body.js
+RUN node /tmp/fix-jmap-body.js node_modules/@jahfer/jmap-mcp-server/index.js
+
 # Copy source code
 COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install uv and pre-install CalDAV MCP server from git
+RUN pip install --break-system-packages uv
+ENV PATH="/home/node/.local/bin:$PATH"
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
@@ -60,6 +72,9 @@ RUN chown -R node:node /workspace && chmod 777 /home/node
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
+
+# Install CalDAV MCP server (must run as node user so uv tool dir is correct)
+RUN uv tool install git+https://github.com/madbonez/caldav-mcp.git
 
 # Set working directory to group workspace
 WORKDIR /workspace/group

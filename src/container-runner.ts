@@ -152,13 +152,13 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Google Calendar credentials (for Calendar MCP inside the container)
-  const calendarDir = path.join(os.homedir(), '.calendar-mcp');
-  if (fs.existsSync(calendarDir)) {
+  // Fastmail credentials (for Email + Calendar MCPs inside the container)
+  const fastmailDir = path.join(os.homedir(), '.fastmail-mcp');
+  if (fs.existsSync(fastmailDir)) {
     mounts.push({
-      hostPath: calendarDir,
-      containerPath: '/home/node/.calendar-mcp',
-      readonly: false, // MCP needs to refresh OAuth tokens
+      hostPath: fastmailDir,
+      containerPath: '/home/node/.fastmail-mcp',
+      readonly: true, // credentials are static, no token refresh needed
     });
   }
 

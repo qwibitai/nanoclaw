@@ -10,9 +10,13 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.34",
+    "@jahfer/jmap-mcp-server": "^1.0.6",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "cron-parser": "^5.0.0",
     "zod": "^4.0.0"
+  },
+  "overrides": {
+    "jmap-jam": "^0.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

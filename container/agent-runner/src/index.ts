@@ -391,6 +391,12 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Load Fastmail credentials for email/calendar MCP servers
+  const fastmailConfigPath = '/home/node/.fastmail-mcp/config.json';
+  const fastmailConfig = fs.existsSync(fastmailConfigPath)
+    ? JSON.parse(fs.readFileSync(fastmailConfigPath, 'utf8'))
+    : null;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -433,7 +439,8 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__google-calendar__*'
+        'mcp__fastmail-email__*',
+        'mcp__fastmail-calendar__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -449,13 +456,24 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        ...(fs.existsSync('/home/node/.calendar-mcp/gcp-oauth.keys.json') ? {
-          'google-calendar': {
-            command: 'npx',
-            args: ['-y', '@cocal/google-calendar-mcp'],
+        ...(fastmailConfig?.jmapToken ? {
+          'fastmail-email': {
+            command: 'node',
+            args: ['/app/node_modules/@jahfer/jmap-mcp-server/index.js'],
             env: {
-              GOOGLE_OAUTH_CREDENTIALS: '/home/node/.calendar-mcp/gcp-oauth.keys.json',
-              GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.calendar-mcp/tokens.json',
+              JMAP_SESSION_URL: 'https://api.fastmail.com/jmap/session',
+              JMAP_TOKEN: fastmailConfig.jmapToken,
+            },
+          },
+        } : {}),
+        ...(fastmailConfig?.caldavPassword ? {
+          'fastmail-calendar': {
+            command: 'mcp-caldav',
+            args: [],
+            env: {
+              CALDAV_URL: `https://caldav.fastmail.com/dav/calendars/user/${fastmailConfig.caldavUsername}/`,
+              CALDAV_USERNAME: fastmailConfig.caldavUsername,
+              CALDAV_PASSWORD: fastmailConfig.caldavPassword,
             },
           },
         } : {}),
