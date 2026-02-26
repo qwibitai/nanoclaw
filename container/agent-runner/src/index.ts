@@ -169,7 +169,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const conversationsDir = '/workspace/group/conversations';
       fs.mkdirSync(conversationsDir, { recursive: true });
 
-      const date = new Date().toISOString().split('T')[0];
+      const date = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local tz
       const filename = `${date}-${name}.md`;
       const filePath = path.join(conversationsDir, filename);
 

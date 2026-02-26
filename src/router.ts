@@ -1,5 +1,19 @@
 import { Channel, NewMessage } from './types.js';
 
+/** Format a Date (or epoch-ms) as a local US/Pacific timestamp, e.g. "2026-02-25 10:30pm PT" */
+export function formatLocalTimestamp(dateOrMs: Date | number): string {
+  const d = typeof dateOrMs === 'number' ? new Date(dateOrMs) : dateOrMs;
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }) + ' PT';
+}
+
 export function escapeXml(s: string): string {
   if (!s) return '';
   return s
@@ -10,9 +24,10 @@ export function escapeXml(s: string): string {
 }
 
 export function formatMessages(messages: NewMessage[]): string {
-  const lines = messages.map((m) =>
-    `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
-  );
+  const lines = messages.map((m) => {
+    const time = formatLocalTimestamp(new Date(m.timestamp));
+    return `<message sender="${escapeXml(m.sender_name)}" time="${time}">${escapeXml(m.content)}</message>`;
+  });
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
