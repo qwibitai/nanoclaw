@@ -44,6 +44,22 @@ describe('stopContainer', () => {
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`,
     );
   });
+
+  it('throws on names with shell metacharacters', () => {
+    expect(() => stopContainer('nanoclaw-test; rm -rf /')).toThrow(
+      'unsafe container name rejected',
+    );
+  });
+
+  it('throws on names with spaces', () => {
+    expect(() => stopContainer('nanoclaw test')).toThrow(
+      'unsafe container name rejected',
+    );
+  });
+
+  it('throws on empty string', () => {
+    expect(() => stopContainer('')).toThrow('unsafe container name rejected');
+  });
 });
 
 // --- ensureContainerRuntimeRunning ---

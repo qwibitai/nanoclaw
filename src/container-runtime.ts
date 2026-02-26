@@ -14,8 +14,16 @@ export function readonlyMountArgs(hostPath: string, containerPath: string): stri
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
+/** Container names must only contain safe characters to prevent shell injection. */
+const SAFE_CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.\-]*$/;
+
 /** Returns the shell command to stop a container by name. */
 export function stopContainer(name: string): string {
+  if (!SAFE_CONTAINER_NAME_RE.test(name)) {
+    throw new Error(
+      `stopContainer: unsafe container name rejected: ${JSON.stringify(name)}`,
+    );
+  }
   return `${CONTAINER_RUNTIME_BIN} stop ${name}`;
 }
 
