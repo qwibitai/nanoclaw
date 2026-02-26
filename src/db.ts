@@ -314,7 +314,8 @@ export function getNewMessages(
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
-    if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
+    if (!newTimestamp || new Date(row.timestamp) > new Date(newTimestamp))
+      newTimestamp = row.timestamp;
   }
 
   return { messages: rows, newTimestamp };
