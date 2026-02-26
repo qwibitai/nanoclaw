@@ -18,12 +18,15 @@
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@xenova/transformers": "^2.17.2",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "ffmpeg-static": "^5.3.0",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "wavefile": "^11.0.0",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },

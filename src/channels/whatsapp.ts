@@ -18,6 +18,7 @@ import {
   updateChatName,
 } from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -180,7 +181,8 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          // but allow voice messages through for transcription
+          if (!content && !isVoiceMessage(msg)) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -194,12 +196,29 @@ export class WhatsAppChannel implements Channel {
             ? fromMe
             : content.startsWith(`${ASSISTANT_NAME}:`);
 
+          // Transcribe voice messages before storing
+          let finalContent = content;
+          if (isVoiceMessage(msg)) {
+            try {
+              const transcript = await transcribeAudioMessage(msg, this.sock);
+              if (transcript) {
+                finalContent = `[Voice: ${transcript}]`;
+                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+              } else {
+                finalContent = '[Voice Message - transcription unavailable]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription error');
+              finalContent = '[Voice Message - transcription failed]';
+            }
+          }
+
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content,
+            content: finalContent,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
