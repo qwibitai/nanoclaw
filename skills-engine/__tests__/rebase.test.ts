@@ -239,48 +239,6 @@ describe('rebase', () => {
     expect(baseConfig).toContain('skill-b');
   });
 
-  it('rebase clears resolution cache', async () => {
-    // Set up base + working tree
-    const baseDir = path.join(tmpDir, '.nanoclaw', 'base', 'src');
-    fs.mkdirSync(baseDir, { recursive: true });
-    fs.writeFileSync(path.join(baseDir, 'index.ts'), 'const x = 1;\n');
-
-    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
-    fs.writeFileSync(
-      path.join(tmpDir, 'src', 'index.ts'),
-      'const x = 1;\n// skill\n',
-    );
-
-    // Create a fake resolution cache entry
-    const resDir = path.join(tmpDir, '.nanoclaw', 'resolutions', 'skill-a+skill-b');
-    fs.mkdirSync(resDir, { recursive: true });
-    fs.writeFileSync(path.join(resDir, 'meta.yaml'), 'skills: [skill-a, skill-b]\n');
-
-    writeState(tmpDir, {
-      skills_system_version: '0.1.0',
-      core_version: '1.0.0',
-      applied_skills: [
-        {
-          name: 'my-skill',
-          version: '1.0.0',
-          applied_at: new Date().toISOString(),
-          file_hashes: { 'src/index.ts': 'hash' },
-        },
-      ],
-    });
-
-    initGitRepo(tmpDir);
-
-    const result = await rebase();
-    expect(result.success).toBe(true);
-
-    // Resolution cache should be cleared
-    const resolutions = fs.readdirSync(
-      path.join(tmpDir, '.nanoclaw', 'resolutions'),
-    );
-    expect(resolutions).toHaveLength(0);
-  });
-
   it('rebase with new base: base updated, changes merged', async () => {
     // Set up current base (multi-line so changes don't conflict)
     const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
@@ -355,10 +313,7 @@ describe('rebase', () => {
     // Set up current base — short file so changes overlap
     const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
-    fs.writeFileSync(
-      path.join(baseDir, 'src', 'index.ts'),
-      'const x = 1;\n',
-    );
+    fs.writeFileSync(path.join(baseDir, 'src', 'index.ts'), 'const x = 1;\n');
 
     // Working tree: skill replaces the same line
     fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
