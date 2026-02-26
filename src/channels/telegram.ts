@@ -12,6 +12,101 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+// --- Telegram HTML formatting ---
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Convert standard Markdown to Telegram-compatible HTML.
+ * Handles code blocks, inline code, bold, italic, strikethrough, links, and headers.
+ * Content inside code/pre blocks is HTML-escaped but not otherwise transformed.
+ */
+function markdownToTelegramHtml(md: string): string {
+  const placeholders: string[] = [];
+
+  function ph(html: string): string {
+    const idx = placeholders.length;
+    placeholders.push(html);
+    return `\x00${idx}\x00`;
+  }
+
+  let result = md;
+
+  // 1. Extract fenced code blocks
+  result = result.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+    const escaped = escapeHtml(code.replace(/\n$/, ''));
+    return ph(
+      lang
+        ? `<pre><code class="language-${lang}">${escaped}</code></pre>`
+        : `<pre>${escaped}</pre>`,
+    );
+  });
+
+  // 2. Extract inline code
+  result = result.replace(/`([^`\n]+)`/g, (_, code) =>
+    ph(`<code>${escapeHtml(code)}</code>`),
+  );
+
+  // 3. Escape HTML in remaining text (preserve placeholders)
+  result = result
+    .split(/(\x00\d+\x00)/)
+    .map((part) => (/^\x00\d+\x00$/.test(part) ? part : escapeHtml(part)))
+    .join('');
+
+  // 4. Convert markdown formatting to HTML
+  // Agent uses WhatsApp-style: *bold*, _italic_, ~strikethrough~
+  result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  result = result.replace(
+    /(?<!\*)\*(?!\s|\*)(.+?)(?<!\s)\*(?!\*)/g,
+    '<b>$1</b>',
+  );
+  result = result.replace(
+    /(?<![\w\\])_(?!\s)(.+?)(?<!\s)_(?!\w)/g,
+    '<i>$1</i>',
+  );
+  result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
+  result = result.replace(/(?<!~)~(?!~)(.+?)(?<!~)~(?!~)/g, '<s>$1</s>');
+  result = result.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2">$1</a>',
+  );
+  result = result.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
+  // Blockquotes: collapse consecutive > lines into a single <blockquote>
+  result = result.replace(
+    /(?:^&gt; (.+)$\n?)+/gm,
+    (match) => {
+      const inner = match.replace(/^&gt; /gm, '').replace(/\n$/, '');
+      return `<blockquote>${inner}</blockquote>\n`;
+    },
+  );
+
+  // 5. Restore placeholders
+  result = result.replace(/\x00(\d+)\x00/g, (_, idx) =>
+    placeholders[parseInt(idx)],
+  );
+
+  return result;
+}
+
+/**
+ * Send a message with HTML formatting, falling back to plain text on parse errors.
+ */
+async function sendTelegramHtml(
+  api: Api,
+  chatId: string,
+  text: string,
+): Promise<void> {
+  const html = markdownToTelegramHtml(text);
+  try {
+    await api.sendMessage(chatId, html, { parse_mode: 'HTML' });
+  } catch {
+    // Fallback to plain text if HTML parsing fails
+    await api.sendMessage(chatId, text);
+  }
+}
+
 // Bot pool for agent teams: send-only Api instances (no polling)
 const poolApis: Api[] = [];
 // Maps "{groupFolder}:{senderName}" → pool Api index for stable assignment
@@ -78,10 +173,10 @@ export async function sendPoolMessage(
     const numericId = chatId.replace(/^tg:/, '');
     const MAX_LENGTH = 4096;
     if (text.length <= MAX_LENGTH) {
-      await api.sendMessage(numericId, text);
+      await sendTelegramHtml(api, numericId, text);
     } else {
       for (let i = 0; i < text.length; i += MAX_LENGTH) {
-        await api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
+        await sendTelegramHtml(api, numericId, text.slice(i, i + MAX_LENGTH));
       }
     }
     logger.info({ chatId, sender, poolIndex: idx, length: text.length }, 'Pool message sent');
@@ -324,10 +419,11 @@ export class TelegramChannel implements Channel {
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await sendTelegramHtml(this.bot.api, numericId, text);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(
+          await sendTelegramHtml(
+            this.bot.api,
             numericId,
             text.slice(i, i + MAX_LENGTH),
           );
