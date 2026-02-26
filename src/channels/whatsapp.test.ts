@@ -532,7 +532,7 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
+    it('transcribes voice note and delivers as [Voice: ...] content', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -554,8 +554,13 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Skipped — no text content to process
-      expect(opts.onMessage).not.toHaveBeenCalled();
+      // Voice message is transcribed (falls back to unavailable without OpenAI key in tests)
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: expect.stringContaining('[Voice'),
+        }),
+      );
     });
 
     it('uses sender JID when pushName is absent', async () => {

@@ -18,6 +18,7 @@ import {
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
+import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
   Channel,
   OnInboundMessage,
@@ -202,8 +203,25 @@ export class WhatsAppChannel implements Channel {
             msg.message?.videoMessage?.caption ||
             '';
 
+          // Voice message transcription
+          let finalContent = content;
+          if (isVoiceMessage(msg)) {
+            try {
+              const transcript = await transcribeAudioMessage(msg, this.sock!);
+              if (transcript) {
+                finalContent = `[Voice: ${transcript}]`;
+                logger.info({ chars: transcript.length }, 'Transcribed voice message');
+              } else {
+                finalContent = '[Voice Message - transcription unavailable]';
+              }
+            } catch (err) {
+              logger.error({ err }, 'Voice transcription failed');
+              finalContent = '[Voice Message - transcription failed]';
+            }
+          }
+
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          if (!content) continue;
+          if (!finalContent) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -215,14 +233,14 @@ export class WhatsAppChannel implements Channel {
           // (even in DMs/self-chat) so we check for that.
           const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
             ? fromMe
-            : content.startsWith(`${ASSISTANT_NAME}:`);
+            : finalContent.startsWith(`${ASSISTANT_NAME}:`);
 
           this.opts.onMessage(chatJid, {
             id: msg.key.id || '',
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
-            content,
+            content: finalContent,
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
