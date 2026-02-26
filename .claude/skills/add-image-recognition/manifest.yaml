@@ -1,0 +1,17 @@
+skill: image-recognition
+version: 1.0.0
+description: "WhatsApp image recognition via Claude's native vision"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/types.ts
+  - src/db.ts
+  - src/router.ts
+  - src/channels/whatsapp.ts
+  - src/index.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npm run build"
