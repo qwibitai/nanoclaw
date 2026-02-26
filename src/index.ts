@@ -646,6 +646,9 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
     resolveAgentImage,
     getAgentDefinition,
+    recordTelemetry: interceptor
+      ? (telemetry, channel) => interceptor!.recordTelemetry(telemetry, channel)
+      : undefined,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

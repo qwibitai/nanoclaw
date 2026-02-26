@@ -746,6 +746,40 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // Cumulative telemetry across all queries in this container session
+  const cumulativeTelemetry: ContainerTelemetry = {
+    totalCostUsd: 0,
+    durationMs: 0,
+    durationApiMs: 0,
+    numTurns: 0,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    modelUsage: {},
+    toolInvocations: [],
+  };
+  let queryCount = 0;
+
+  function accumulateTelemetry(t: ContainerTelemetry): void {
+    cumulativeTelemetry.totalCostUsd += t.totalCostUsd;
+    cumulativeTelemetry.durationMs += t.durationMs;
+    cumulativeTelemetry.durationApiMs += t.durationApiMs;
+    cumulativeTelemetry.numTurns += t.numTurns;
+    cumulativeTelemetry.usage.inputTokens += t.usage.inputTokens;
+    cumulativeTelemetry.usage.outputTokens += t.usage.outputTokens;
+    cumulativeTelemetry.toolInvocations.push(...t.toolInvocations);
+    // Merge per-model usage
+    for (const [model, usage] of Object.entries(t.modelUsage)) {
+      const existing = cumulativeTelemetry.modelUsage[model];
+      if (existing) {
+        existing.inputTokens += usage.inputTokens;
+        existing.outputTokens += usage.outputTokens;
+        existing.costUSD += usage.costUSD;
+      } else {
+        cumulativeTelemetry.modelUsage[model] = { ...usage };
+      }
+    }
+    queryCount++;
+  }
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
@@ -760,8 +794,9 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
-      // Emit telemetry for the completed query (separate from user-visible results)
+      // Emit per-query telemetry and accumulate for session total
       if (queryResult.telemetry) {
+        accumulateTelemetry(queryResult.telemetry);
         writeOutput({ status: 'success', result: null, newSessionId: sessionId, telemetry: queryResult.telemetry });
       }
 
@@ -810,13 +845,21 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    // Emit accumulated telemetry even on error so partial work isn't lost
     writeOutput({
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
+      telemetry: queryCount > 0 ? cumulativeTelemetry : undefined,
     });
     process.exit(1);
+  }
+
+  // Emit cumulative session telemetry when multiple queries ran
+  if (queryCount > 1) {
+    log(`Session cumulative: queries=${queryCount}, cost=$${cumulativeTelemetry.totalCostUsd.toFixed(4)}, turns=${cumulativeTelemetry.numTurns}, tools=${cumulativeTelemetry.toolInvocations.length}`);
+    writeOutput({ status: 'success', result: null, newSessionId: sessionId, telemetry: cumulativeTelemetry });
   }
 }
 

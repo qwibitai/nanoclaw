@@ -10,7 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AgentOptions } from './agents.js';
-import { AvailableGroup, runWorkerAgent } from './container-runner.js';
+import { AvailableGroup, ContainerTelemetry, runWorkerAgent } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -30,6 +30,7 @@ export interface IpcDeps {
   ) => void;
   resolveAgentImage: (agentId: string) => AgentOptions;
   getAgentDefinition: (id: string) => WorkerDefinition | undefined;
+  recordTelemetry?: (telemetry: ContainerTelemetry, channel?: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -444,6 +445,10 @@ export async function processTaskIpc(
       // Run worker asynchronously — result written to IPC when done
       runWorkerAgent(sourceGroup, delegationId, fullPrompt, agentOpts)
         .then((output) => {
+          // Record worker telemetry before writing delegation result
+          if (output.telemetry && deps.recordTelemetry) {
+            deps.recordTelemetry(output.telemetry, `worker:${workerId}`);
+          }
           writeDelegationResult(sourceGroup, delegationId, {
             status: output.status,
             result: output.result,
