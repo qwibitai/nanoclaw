@@ -162,11 +162,13 @@ async function authenticate(): Promise<void> {
     fs.unlinkSync(STATUS_FILE);
   } catch {}
 
-  let phoneNumber = phoneArg;
+  let phoneNumber = phoneArg?.replace(/^\+/, '');
   if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion(
-      'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
-    );
+    phoneNumber = (
+      await askQuestion(
+        'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
+      )
+    ).replace(/^\+/, '');
   }
 
   console.log('Starting WhatsApp authentication...\n');
