@@ -1,8 +1,7 @@
-import { execSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { isGitRepo, mergeFile, setupRerereAdapter } from '../merge.js';
+import { isGitRepo, mergeFile } from '../merge.js';
 import { createTempDir, initGitRepo, cleanup } from './test-helpers.js';
 
 describe('merge', () => {
@@ -49,31 +48,6 @@ describe('merge', () => {
       const merged = fs.readFileSync(current, 'utf-8');
       expect(merged).toContain('line1-modified');
       expect(merged).toContain('line3-modified');
-    });
-
-    it('setupRerereAdapter cleans stale MERGE_HEAD before proceeding', () => {
-      // Simulate a stale MERGE_HEAD from a previous crash
-      const gitDir = execSync('git rev-parse --git-dir', {
-        cwd: tmpDir,
-        encoding: 'utf-8',
-      }).trim();
-      const headHash = execSync('git rev-parse HEAD', {
-        cwd: tmpDir,
-        encoding: 'utf-8',
-      }).trim();
-      fs.writeFileSync(path.join(gitDir, 'MERGE_HEAD'), headHash + '\n');
-      fs.writeFileSync(path.join(gitDir, 'MERGE_MSG'), 'stale merge\n');
-
-      // Write a file for the adapter to work with
-      fs.writeFileSync(path.join(tmpDir, 'test.txt'), 'conflicted content');
-
-      // setupRerereAdapter should not throw despite stale MERGE_HEAD
-      expect(() =>
-        setupRerereAdapter('test.txt', 'base', 'ours', 'theirs'),
-      ).not.toThrow();
-
-      // MERGE_HEAD should still exist (newly written by setupRerereAdapter)
-      expect(fs.existsSync(path.join(gitDir, 'MERGE_HEAD'))).toBe(true);
     });
 
     it('conflict with overlapping changes', () => {

@@ -43,9 +43,7 @@ export async function run(_args: string[]): Promise<void> {
   const hasEnv = fs.existsSync(path.join(projectRoot, '.env'));
 
   const authDir = path.join(projectRoot, 'store', 'auth');
-  const hasAuth =
-    fs.existsSync(authDir) &&
-    fs.readdirSync(authDir).length > 0;
+  const hasAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
   let hasRegisteredGroups = false;
   // Check JSON file first (pre-migration)
@@ -57,9 +55,9 @@ export async function run(_args: string[]): Promise<void> {
     if (fs.existsSync(dbPath)) {
       try {
         const db = new Database(dbPath, { readonly: true });
-        const row = db.prepare(
-          'SELECT COUNT(*) as count FROM registered_groups',
-        ).get() as { count: number };
+        const row = db
+          .prepare('SELECT COUNT(*) as count FROM registered_groups')
+          .get() as { count: number };
         if (row.count > 0) hasRegisteredGroups = true;
         db.close();
       } catch {
@@ -68,8 +66,18 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  logger.info({ platform, wsl, appleContainer, docker, hasEnv, hasAuth, hasRegisteredGroups },
-    'Environment check complete');
+  logger.info(
+    {
+      platform,
+      wsl,
+      appleContainer,
+      docker,
+      hasEnv,
+      hasAuth,
+      hasRegisteredGroups,
+    },
+    'Environment check complete',
+  );
 
   emitStatus('CHECK_ENVIRONMENT', {
     PLATFORM: platform,

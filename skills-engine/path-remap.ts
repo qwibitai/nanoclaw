@@ -34,10 +34,7 @@ function toSafeProjectRelativePath(
   const root = path.resolve(projectRoot);
   const realRoot = fs.realpathSync(root);
   const resolved = path.resolve(root, candidatePath);
-  if (
-    !resolved.startsWith(root + path.sep) &&
-    resolved !== root
-  ) {
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
     throw new Error(`Path remap escapes project root: "${candidatePath}"`);
   }
   if (resolved === root) {
@@ -99,9 +96,7 @@ export function resolvePathRemap(
 ): string {
   const projectRoot = process.cwd();
   const safeRelPath = toSafeProjectRelativePath(relPath, projectRoot);
-  const remapped =
-    remap[safeRelPath] ??
-    remap[relPath];
+  const remapped = remap[safeRelPath] ?? remap[relPath];
 
   if (remapped === undefined) {
     return safeRelPath;

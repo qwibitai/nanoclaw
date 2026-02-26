@@ -4,7 +4,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 
-import { cleanup, createTempDir, initGitRepo, setupNanoclawDir } from './test-helpers.js';
+import {
+  cleanup,
+  createTempDir,
+  initGitRepo,
+  setupNanoclawDir,
+} from './test-helpers.js';
 
 describe('update-core.ts CLI flags', () => {
   let tmpDir: string;
@@ -101,11 +106,12 @@ describe('update-core.ts CLI flags', () => {
       'package.json': JSON.stringify({ version: '2.0.0' }),
     });
 
-    const stdout = execFileSync(
-      tsxBin,
-      [scriptPath, '--json', newCoreDir],
-      { cwd: tmpDir, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 },
-    );
+    const stdout = execFileSync(tsxBin, [scriptPath, '--json', newCoreDir], {
+      cwd: tmpDir,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 30_000,
+    });
 
     const result = JSON.parse(stdout);
 

@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-
+.npm-cache/
 # Build output
 dist/
 
