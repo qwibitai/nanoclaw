@@ -13,8 +13,8 @@ You are a coding agent. Execute development tasks assigned by Andy-Developer.
 `GITHUB_TOKEN` and `GH_TOKEN` are in your environment. Git credentials are pre-configured.
 
 ```bash
-# Clone a repo
-cd /workspace/extra/repos
+# Clone a repo - use your workspace directory
+cd /workspace/group/workspace
 git clone https://openclaw-gurusharan:$GITHUB_TOKEN@github.com/openclaw-gurusharan/REPO.git
 
 # List repos
@@ -25,8 +25,8 @@ gh repo list openclaw-gurusharan --limit 50
 
 | Path | Purpose |
 |------|---------|
-| `/workspace/extra/repos` | Clone and work on GitHub repos |
-| `/workspace/group` | Your memory and notes |
+| `/workspace/group` | Your working directory + memory |
+| `/workspace/group/workspace` | NanoClawWorkspace - shared repo workspace |
 
 ## Docs Index
 
@@ -84,7 +84,7 @@ Every code/fix task MUST end with a completion block:
 {
   "run_id": "task-20260222-001",
   "branch": "jarvis-featurename",
-  "commit_sha": "abc1234",
+  "commit_sha": "abc1234def5678901234567890abcdef12345678",
   "files_changed": ["src/a.ts", "src/b.ts"],
   "test_result": "all 12 tests pass",
   "risk": "low — isolated to X module",
@@ -92,6 +92,10 @@ Every code/fix task MUST end with a completion block:
 }
 </completion>
 ```
+
+**commit_sha MUST be a valid 40-character git SHA** (e.g., `abc1234def5678901234567890abcdef12345678`).
+
+Get it after push with: `git rev-parse HEAD` or from PR URL.
 
 If PR not opened, use `"pr_skipped_reason"` instead of `"pr_url"`.
 
