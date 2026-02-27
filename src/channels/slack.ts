@@ -4,7 +4,7 @@
  */
 import { App, LogLevel } from '@slack/bolt';
 
-import { ASSISTANT_NAME } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { storeMessageDirect } from '../db.js';
 import { logger } from '../logger.js';
 import {
@@ -32,6 +32,7 @@ export interface SlackChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  registerGroup: (jid: string, group: RegisteredGroup) => void;
 }
 
 export class SlackChannel implements Channel {
@@ -44,6 +45,9 @@ export class SlackChannel implements Channel {
 
   // User display name cache
   private userCache = new Map<string, { name: string; ts: number }>();
+
+  // Channel name cache (same TTL as user cache)
+  private channelCache = new Map<string, { name: string; ts: number }>();
 
   // Event dedup
   private seenEvents = new Map<string, number>();
@@ -119,22 +123,47 @@ export class SlackChannel implements Channel {
       const normalizedText = await this.normalizeMentions(text);
 
       const groups = this.opts.registeredGroups();
-      if (groups[chatJid]) {
-        const msg = {
-          id: eventId,
-          chat_jid: chatJid,
-          sender: userId || 'unknown',
-          sender_name: senderName,
-          content: normalizedText,
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-          thread_ts: threadTs,
-        };
+      let group = groups[chatJid];
 
-        storeMessageDirect(msg);
-        this.opts.onMessage(chatJid, msg);
+      if (!group) {
+        // Not registered — only auto-register if trigger is present
+        if (!TRIGGER_PATTERN.test(normalizedText)) return;
+
+        const channelName = await this.resolveChannelName(channelId);
+        const sanitized = channelName.replace(/[^A-Za-z0-9_-]/g, '_');
+        const folder = `slack__${sanitized}_${channelId}`;
+
+        this.opts.registerGroup(chatJid, {
+          name: `#${channelName}`,
+          folder,
+          trigger: `@${ASSISTANT_NAME}`,
+          added_at: new Date().toISOString(),
+          requiresTrigger: true,
+        });
+        group = this.opts.registeredGroups()[chatJid];
+      } else {
+        // Refresh display name if channel was renamed (cheap, cached)
+        const channelName = await this.resolveChannelName(channelId);
+        const displayName = `#${channelName}`;
+        if (group.name !== displayName) {
+          group.name = displayName;
+        }
       }
+
+      const msg = {
+        id: eventId,
+        chat_jid: chatJid,
+        sender: userId || 'unknown',
+        sender_name: senderName,
+        content: normalizedText,
+        timestamp,
+        is_from_me: false,
+        is_bot_message: false,
+        thread_ts: threadTs,
+      };
+
+      storeMessageDirect(msg);
+      this.opts.onMessage(chatJid, msg);
     });
 
     await this.app.start();
@@ -247,6 +276,28 @@ export class SlackChannel implements Channel {
       logger.debug({ userId, err }, 'Failed to resolve Slack user name');
       return userId;
     }
+  }
+
+  private async resolveChannelName(channelId: string): Promise<string> {
+    const cached = this.channelCache.get(channelId);
+    if (cached && Date.now() - cached.ts < USER_CACHE_TTL_MS) {
+      return cached.name;
+    }
+
+    try {
+      const result = await this.app.client.conversations.info({
+        channel: channelId,
+      });
+      const name = (result.channel as Record<string, unknown>)?.name as string;
+      if (name) {
+        this.channelCache.set(channelId, { name, ts: Date.now() });
+        return name;
+      }
+    } catch (err) {
+      logger.debug({ channelId, err }, 'Failed to resolve Slack channel name');
+    }
+
+    return channelId;
   }
 
   private async normalizeMentions(text: string): Promise<string> {

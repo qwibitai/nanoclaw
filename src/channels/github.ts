@@ -3,7 +3,7 @@
  * Polls GitHub notifications API, auto-registers issues/PRs as groups,
  * and posts comments back via the API.
  */
-import { ASSISTANT_NAME, MAIN_GROUP_FOLDER } from '../config.js';
+import { ASSISTANT_NAME } from '../config.js';
 import { getRouterState, setRouterState, storeMessageDirect } from '../db.js';
 import { logger } from '../logger.js';
 import {
@@ -185,9 +185,12 @@ export class GitHubChannel implements Channel {
 
     // Auto-register if not already registered
     if (!groups[chatJid]) {
+      const sanitizedRepo = repoFullName.replace(/[^A-Za-z0-9_-]/g, '_');
+      const folder = `github__${sanitizedRepo}_${number}`;
+
       this.opts.registerGroup(chatJid, {
         name: `${repoFullName}#${number}: ${notif.subject.title}`,
-        folder: MAIN_GROUP_FOLDER, // GitHub issues share the main folder
+        folder,
         trigger: `@${ASSISTANT_NAME}`,
         added_at: new Date().toISOString(),
         requiresTrigger: true,

@@ -775,6 +775,7 @@ async function main(): Promise<void> {
       ...channelOpts,
       botToken: envTokens.SLACK_BOT_TOKEN,
       appToken: envTokens.SLACK_APP_TOKEN,
+      registerGroup,
     });
     channels.push(slack);
     await slack.connect();
