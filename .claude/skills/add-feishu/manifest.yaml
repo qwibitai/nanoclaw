@@ -1,0 +1,23 @@
+skill: add-feishu
+version: 1.0.0
+description: "Add Feishu (Lark) as a channel for NanoClaw. Supports both group chats and private messages via WebSocket long connection."
+core_version: 0.1.0
+adds:
+  - src/channels/feishu.ts
+  - src/channels/feishu.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies:
+    "@larksuiteoapi/node-sdk": "^1.29.0"
+  env_additions:
+    - FEISHU_APP_ID
+    - FEISHU_APP_SECRET
+    - FEISHU_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/feishu.test.ts"
