@@ -78,10 +78,12 @@ If the user doesn't have a bot token, tell them:
 > 5. Under **Privileged Gateway Intents**, enable:
 >    - **Message Content Intent** (required to read message text)
 >    - **Server Members Intent** (optional, for member display names)
-> 6. Go to **OAuth2** > **URL Generator**:
->    - Scopes: select `bot`
->    - Bot Permissions: select `Send Messages`, `Read Message History`, `View Channels`
->    - Copy the generated URL and open it in your browser to invite the bot to your server
+> 6. Scroll down to **"Requires OAuth2 Code Grant"** and make sure it is **OFF** — if enabled, the bot invite will fail
+> 7. Invite the bot to your server using this URL (replace `YOUR_CLIENT_ID` with the value from the **General Information** tab):
+>    ```
+>    https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=68608
+>    ```
+>    (The OAuth2 URL Generator requires a redirect URI and is not suitable for bot invites)
 
 Wait for the user to provide the token.
 
@@ -177,6 +179,10 @@ tail -f logs/nanoclaw.log
 ```
 
 ## Troubleshooting
+
+### "This integration requires a code grant" when inviting
+
+Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **Bot** tab → scroll down → toggle **"Requires OAuth2 Code Grant"** OFF → Save Changes. Then try the invite URL again.
 
 ### Bot not responding
 
