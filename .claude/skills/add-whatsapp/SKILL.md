@@ -22,17 +22,14 @@ grep ENABLED_CHANNELS .env 2>/dev/null || echo "ENABLED_CHANNELS not set (defaul
 
 Use `AskUserQuestion` to collect configuration:
 
-AskUserQuestion: Should WhatsApp replace your current channels or run alongside them?
-- **Replace all** - WhatsApp will be the only channel
-- **Alongside** - WhatsApp runs alongside existing channels
-
 AskUserQuestion: How do you want to authenticate WhatsApp?
-- **QR code in terminal** (Recommended) - Scan a QR code displayed in the terminal
-- **Pairing code** - Enter a numeric code on your phone (requires your phone number)
+- **QR code in browser** (Recommended) - Opens a browser window with a large, scannable QR code
+- **QR code in terminal** - Displays QR code in the terminal (can be too small on some displays)
+- **Pairing code** - Enter a numeric code on your phone (no camera needed, requires phone number)
 
 If they chose pairing code:
 
-AskUserQuestion: What is your phone number? (Include country code, e.g., +1234567890)
+AskUserQuestion: What is your phone number? (Include country code without +, e.g., 1234567890)
 
 ## Phase 2: Verify Code
 
@@ -78,6 +75,20 @@ rm -rf store/auth/
 
 ### Run WhatsApp authentication
 
+For QR code in browser (recommended):
+
+```bash
+npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+```
+
+Tell the user:
+
+> A browser window will open with a QR code.
+>
+> 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
+> 2. Scan the QR code in the browser
+> 3. The page will show "Authenticated!" when done
+
 For QR code in terminal:
 
 ```bash
@@ -86,11 +97,8 @@ npx tsx src/whatsapp-auth.ts
 
 Tell the user:
 
-> Open WhatsApp on your phone:
->
-> 1. Go to **Settings** > **Linked Devices** > **Link a Device**
+> 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
 > 2. Scan the QR code displayed in the terminal
-> 3. Wait for the "authenticated" confirmation
 
 For pairing code:
 
@@ -100,11 +108,13 @@ npx tsx src/whatsapp-auth.ts --pairing-code --phone <their-phone-number>
 
 Tell the user:
 
-> A pairing code will appear in the terminal. Enter it on your phone:
+> A pairing code will appear. **Enter it within 60 seconds** — codes expire quickly.
 >
-> 1. Go to **Settings** > **Linked Devices** > **Link a Device**
-> 2. Choose **Link with phone number instead**
-> 3. Enter the pairing code shown in the terminal
+> 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
+> 2. Tap **Link with phone number instead**
+> 3. Enter the code immediately
+>
+> If the code expires, re-run the command — a new code will be generated.
 
 ### Verify authentication succeeded
 
@@ -114,11 +124,7 @@ test -f store/auth/creds.json && echo "Authentication successful" || echo "Authe
 
 ### Configure environment
 
-Ensure `whatsapp` is in `ENABLED_CHANNELS` in `.env`:
-
-If they chose to replace other channels, set `ENABLED_CHANNELS=whatsapp` (removing other channels).
-
-If alongside, append `whatsapp` to the existing value (e.g., `ENABLED_CHANNELS=telegram,whatsapp`).
+Ensure `whatsapp` is in `ENABLED_CHANNELS` in `.env`. Append it to any existing channels (e.g., `ENABLED_CHANNELS=telegram,whatsapp`). If not set, the default is `whatsapp`.
 
 Sync to container environment:
 
@@ -243,10 +249,22 @@ rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
 
 ### Pairing code not working
 
-Ensure:
+Codes expire in ~60 seconds. To retry:
+
+```bash
+rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
+```
+
+Enter the code **immediately** when it appears. Also ensure:
 1. Phone number includes country code without `+` (e.g., `1234567890`)
 2. Phone has internet access
 3. WhatsApp is updated to the latest version
+
+If pairing code keeps failing, switch to QR-browser auth instead:
+
+```bash
+rm -rf store/auth/ && npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+```
 
 ### "conflict" disconnection
 
