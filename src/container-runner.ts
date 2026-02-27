@@ -241,12 +241,19 @@ function buildVolumeMounts(
  */
 function readSecrets(): Record<string, string> {
   return readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN',
-    'STIX_WORKER_URL', 'STIX_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'GITHUB_TOKEN',
+    'STIX_WORKER_URL',
+    'STIX_API_KEY',
   ]);
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string, isMain: boolean): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+  isMain: boolean,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's

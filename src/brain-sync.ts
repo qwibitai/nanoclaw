@@ -20,17 +20,24 @@ export function syncBrain(): void {
 
   try {
     // If directory exists but isn't a git repo, re-clone
-    if (fs.existsSync(BRAIN_DIR) && !fs.existsSync(path.join(BRAIN_DIR, '.git'))) {
+    if (
+      fs.existsSync(BRAIN_DIR) &&
+      !fs.existsSync(path.join(BRAIN_DIR, '.git'))
+    ) {
       logger.warn('Brain directory exists but is not a git repo, re-cloning');
       fs.rmSync(BRAIN_DIR, { recursive: true, force: true });
     }
 
     if (!fs.existsSync(BRAIN_DIR)) {
       logger.info({ repo: BRAIN_REPO_URL }, 'Cloning brain repo');
-      execFileSync('git', ['clone', '--depth', '1', BRAIN_REPO_URL, BRAIN_DIR], {
-        stdio: 'pipe',
-        timeout: 30_000,
-      });
+      execFileSync(
+        'git',
+        ['clone', '--depth', '1', BRAIN_REPO_URL, BRAIN_DIR],
+        {
+          stdio: 'pipe',
+          timeout: 30_000,
+        },
+      );
     } else {
       logger.debug('Pulling latest brain');
       execFileSync('git', ['pull', '--ff-only'], {

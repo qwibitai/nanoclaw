@@ -29,9 +29,14 @@ export function stopContainer(name: string): string {
 }
 
 /** Async container stop. Swallows "already stopped" errors. */
-export async function stopContainerAsync(name: string, timeoutSeconds = 10): Promise<void> {
+export async function stopContainerAsync(
+  name: string,
+  timeoutSeconds = 10,
+): Promise<void> {
   try {
-    await execAsync(`${CONTAINER_RUNTIME_BIN} stop -t ${timeoutSeconds} ${name}`);
+    await execAsync(
+      `${CONTAINER_RUNTIME_BIN} stop -t ${timeoutSeconds} ${name}`,
+    );
     logger.info({ name }, 'Container stopped');
   } catch (err) {
     // Swallow errors from containers that are already stopped
@@ -121,7 +126,9 @@ export function detectDockerSocket(): string | null {
       fs.statSync(sock);
       _cachedDockerSocket = sock;
       return sock;
-    } catch { /* not here */ }
+    } catch {
+      /* not here */
+    }
   }
 
   const uid = process.getuid?.();
@@ -131,7 +138,9 @@ export function detectDockerSocket(): string | null {
       fs.statSync(sock);
       _cachedDockerSocket = sock;
       return sock;
-    } catch { /* not here */ }
+    } catch {
+      /* not here */
+    }
   }
 
   // Standard rootful socket

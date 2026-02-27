@@ -22,7 +22,12 @@ import {
 } from '../db.js';
 import { resolveGroupFolderPath } from '../group-folder.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 import type { Server } from 'http';
 
@@ -92,7 +97,15 @@ export class WebChannel implements Channel {
     app.post('/api/sessions', zValidator('json', createSessionSchema), (c) => {
       // Rate limit
       if (this.isRateLimited('sessions')) {
-        return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many sessions created' } }, 429);
+        return c.json(
+          {
+            error: {
+              code: 'RATE_LIMITED',
+              message: 'Too many sessions created',
+            },
+          },
+          429,
+        );
       }
 
       const { name } = c.req.valid('json');
@@ -117,7 +130,9 @@ export class WebChannel implements Channel {
       try {
         const groupDir = resolveGroupFolderPath(MAIN_GROUP_FOLDER);
         const fs = require('fs');
-        fs.mkdirSync(require('path').join(groupDir, 'logs'), { recursive: true });
+        fs.mkdirSync(require('path').join(groupDir, 'logs'), {
+          recursive: true,
+        });
       } catch {
         // ignore — folder likely already exists
       }
@@ -145,11 +160,22 @@ export class WebChannel implements Channel {
       const { id } = c.req.param();
       const session = getWebSession(id);
       if (!session) {
-        return c.json({ error: { code: 'SESSION_NOT_FOUND', message: `Session ${id} does not exist` } }, 404);
+        return c.json(
+          {
+            error: {
+              code: 'SESSION_NOT_FOUND',
+              message: `Session ${id} does not exist`,
+            },
+          },
+          404,
+        );
       }
 
       const before = c.req.query('before');
-      const limit = Math.min(parseInt(c.req.query('limit') || '50', 10) || 50, 200);
+      const limit = Math.min(
+        parseInt(c.req.query('limit') || '50', 10) || 50,
+        200,
+      );
 
       const rows = getMessageHistory(session.jid, limit, before || undefined);
 
@@ -172,99 +198,125 @@ export class WebChannel implements Channel {
       senderName: z.string().default('User'),
     });
 
-    app.post('/api/sessions/:id/chat', zValidator('json', chatSchema), async (c) => {
-      const { id } = c.req.param();
-      const { content, senderName } = c.req.valid('json');
+    app.post(
+      '/api/sessions/:id/chat',
+      zValidator('json', chatSchema),
+      async (c) => {
+        const { id } = c.req.param();
+        const { content, senderName } = c.req.valid('json');
 
-      // Rate limit
-      if (this.isRateLimited('messages')) {
-        return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many messages' } }, 429);
-      }
+        // Rate limit
+        if (this.isRateLimited('messages')) {
+          return c.json(
+            { error: { code: 'RATE_LIMITED', message: 'Too many messages' } },
+            429,
+          );
+        }
 
-      const session = getWebSession(id);
-      if (!session) {
-        return c.json({ error: { code: 'SESSION_NOT_FOUND', message: `Session ${id} does not exist` } }, 404);
-      }
+        const session = getWebSession(id);
+        if (!session) {
+          return c.json(
+            {
+              error: {
+                code: 'SESSION_NOT_FOUND',
+                message: `Session ${id} does not exist`,
+              },
+            },
+            404,
+          );
+        }
 
-      // Validate senderName
-      const safeName = SENDER_NAME_PATTERN.test(senderName) && senderName.toLowerCase() !== ASSISTANT_NAME.toLowerCase()
-        ? senderName
-        : 'User';
+        // Validate senderName
+        const safeName =
+          SENDER_NAME_PATTERN.test(senderName) &&
+          senderName.toLowerCase() !== ASSISTANT_NAME.toLowerCase()
+            ? senderName
+            : 'User';
 
-      const jid = session.jid;
+        const jid = session.jid;
 
-      // Reject if already processing (prevents multi-tab conflicts)
-      if (this.pendingResponses.has(jid)) {
-        return c.json({ error: { code: 'SESSION_BUSY', message: 'Session is already processing a message' } }, 409);
-      }
+        // Reject if already processing (prevents multi-tab conflicts)
+        if (this.pendingResponses.has(jid)) {
+          return c.json(
+            {
+              error: {
+                code: 'SESSION_BUSY',
+                message: 'Session is already processing a message',
+              },
+            },
+            409,
+          );
+        }
 
-      const msgId = `web-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const timestamp = new Date().toISOString();
+        const msgId = `web-${id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const timestamp = new Date().toISOString();
 
-      // Store inbound message
-      const msg = {
-        id: msgId,
-        chat_jid: jid,
-        sender: jid,
-        sender_name: safeName,
-        content,
-        timestamp,
-        is_from_me: false,
-        is_bot_message: false,
-      };
-      storeMessageDirect(msg);
-      this.opts.onMessage(jid, {
-        ...msg,
-        is_from_me: false,
-        is_bot_message: false,
-      });
+        // Store inbound message
+        const msg = {
+          id: msgId,
+          chat_jid: jid,
+          sender: jid,
+          sender_name: safeName,
+          content,
+          timestamp,
+          is_from_me: false,
+          is_bot_message: false,
+        };
+        storeMessageDirect(msg);
+        this.opts.onMessage(jid, {
+          ...msg,
+          is_from_me: false,
+          is_bot_message: false,
+        });
 
-      // Update last activity (debounced)
-      this.debouncedUpdateActivity(id);
+        // Update last activity (debounced)
+        this.debouncedUpdateActivity(id);
 
-      // Set up streaming response
-      const { readable, writable } = new TransformStream();
-      const writer = writable.getWriter();
+        // Set up streaming response
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
 
-      const pending: PendingResponse = {
-        write: (text: string) => writer.write(encoder.encode(text)).catch(() => {}),
-        close: () => {
+        const pending: PendingResponse = {
+          write: (text: string) =>
+            writer.write(encoder.encode(text)).catch(() => {}),
+          close: () => {
+            this.pendingResponses.delete(jid);
+            writer.close().catch(() => {});
+          },
+          canceled: false,
+          writeQueue: Promise.resolve(),
+          createdAt: Date.now(),
+        };
+        this.pendingResponses.set(jid, pending);
+
+        // Heartbeat to prevent proxy idle timeouts
+        const heartbeat = setInterval(() => {
+          if (!pending.canceled) {
+            writer.write(encoder.encode('')).catch(() => {});
+          }
+        }, 30_000);
+
+        // Clean up on client disconnect
+        c.req.raw.signal.addEventListener('abort', () => {
+          pending.canceled = true;
+          clearInterval(heartbeat);
           this.pendingResponses.delete(jid);
           writer.close().catch(() => {});
-        },
-        canceled: false,
-        writeQueue: Promise.resolve(),
-        createdAt: Date.now(),
-      };
-      this.pendingResponses.set(jid, pending);
+        });
 
-      // Heartbeat to prevent proxy idle timeouts
-      const heartbeat = setInterval(() => {
-        if (!pending.canceled) {
-          writer.write(encoder.encode('')).catch(() => {});
-        }
-      }, 30_000);
+        // Trigger processing (bypass polling loop)
+        this.opts.onDirectEnqueue(jid);
 
-      // Clean up on client disconnect
-      c.req.raw.signal.addEventListener('abort', () => {
-        pending.canceled = true;
-        clearInterval(heartbeat);
-        this.pendingResponses.delete(jid);
-        writer.close().catch(() => {});
-      });
-
-      // Trigger processing (bypass polling loop)
-      this.opts.onDirectEnqueue(jid);
-
-      return new Response(readable, {
-        headers: {
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Transfer-Encoding': 'chunked',
-          'X-Content-Type-Options': 'nosniff',
-          'Cache-Control': 'no-cache',
-        },
-      });
-    });
+        return new Response(readable, {
+          headers: {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Transfer-Encoding': 'chunked',
+            'X-Content-Type-Options': 'nosniff',
+            'Cache-Control': 'no-cache',
+          },
+        });
+      },
+    );
 
     // Start server
     try {
@@ -371,7 +423,9 @@ export class WebChannel implements Channel {
     if (pending && !pending.canceled) {
       pending.writeQueue = pending.writeQueue.then(() => {
         if (!pending.canceled) {
-          pending.write('\n\n[Error: Agent encountered an issue. Your message has been saved — try again.]');
+          pending.write(
+            '\n\n[Error: Agent encountered an issue. Your message has been saved — try again.]',
+          );
         }
       });
     }
@@ -425,7 +479,10 @@ export class WebChannel implements Channel {
 
   private isRateLimited(type: 'sessions' | 'messages'): boolean {
     const map = type === 'sessions' ? rateLimits.sessions : rateLimits.messages;
-    const limit = type === 'sessions' ? RATE_LIMIT_SESSIONS_PER_MIN : RATE_LIMIT_MESSAGES_PER_MIN;
+    const limit =
+      type === 'sessions'
+        ? RATE_LIMIT_SESSIONS_PER_MIN
+        : RATE_LIMIT_MESSAGES_PER_MIN;
     const key = 'global'; // Single-token system — rate limit globally
     const now = Date.now();
     const windowMs = 60_000;

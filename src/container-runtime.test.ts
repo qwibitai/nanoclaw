@@ -21,7 +21,10 @@ vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
-    default: { ...actual, statSync: (...args: unknown[]) => mockStatSync(...args) },
+    default: {
+      ...actual,
+      statSync: (...args: unknown[]) => mockStatSync(...args),
+    },
   };
 });
 
@@ -100,7 +103,9 @@ describe('stopContainerAsync', () => {
   });
 
   it('swallows "already stopped" errors', async () => {
-    mockExecAsync.mockRejectedValueOnce(new Error('No such container: nanoclaw-test-789'));
+    mockExecAsync.mockRejectedValueOnce(
+      new Error('No such container: nanoclaw-test-789'),
+    );
 
     await stopContainerAsync('nanoclaw-test-789'); // should not throw
 
@@ -146,7 +151,9 @@ describe('ensureContainerRuntimeRunning', () => {
 describe('cleanupOrphans', () => {
   it('stops orphaned nanoclaw containers', () => {
     // docker ps returns container names, one per line
-    mockExecSync.mockReturnValueOnce('nanoclaw-testuser-group1-111\nnanoclaw-testuser-group2-222\n');
+    mockExecSync.mockReturnValueOnce(
+      'nanoclaw-testuser-group1-111\nnanoclaw-testuser-group2-222\n',
+    );
     // stop calls succeed
     mockExecSync.mockReturnValue('');
 
@@ -165,7 +172,10 @@ describe('cleanupOrphans', () => {
       { stdio: 'pipe' },
     );
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ['nanoclaw-testuser-group1-111', 'nanoclaw-testuser-group2-222'] },
+      {
+        count: 2,
+        names: ['nanoclaw-testuser-group1-111', 'nanoclaw-testuser-group2-222'],
+      },
       'Stopped orphaned containers',
     );
   });
@@ -193,7 +203,9 @@ describe('cleanupOrphans', () => {
   });
 
   it('continues stopping remaining containers when one stop fails', () => {
-    mockExecSync.mockReturnValueOnce('nanoclaw-testuser-a-1\nnanoclaw-testuser-b-2\n');
+    mockExecSync.mockReturnValueOnce(
+      'nanoclaw-testuser-a-1\nnanoclaw-testuser-b-2\n',
+    );
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
       throw new Error('already stopped');
@@ -224,7 +236,9 @@ describe('cleanupOrphans', () => {
 
 describe('isRootlessDocker', () => {
   it('detects rootless mode and caches result', () => {
-    mockExecSync.mockReturnValueOnce('["name=seccomp,profile=default","name=rootless"]');
+    mockExecSync.mockReturnValueOnce(
+      '["name=seccomp,profile=default","name=rootless"]',
+    );
 
     const result = isRootlessDocker();
     expect(result).toBe(true);

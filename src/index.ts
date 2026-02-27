@@ -22,7 +22,11 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
-import { cleanupOrphans, ensureContainerRuntimeRunning, probeRootlessDocker } from './container-runtime.js';
+import {
+  cleanupOrphans,
+  ensureContainerRuntimeRunning,
+  probeRootlessDocker,
+} from './container-runtime.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -155,7 +159,10 @@ function cursorKey(chatJid: string, threadTs?: string): string {
  * Process all pending messages for a group (thread-aware).
  * Called by the GroupQueue when it's this group's turn.
  */
-async function processGroupMessages(chatJid: string, threadTs?: string): Promise<boolean> {
+async function processGroupMessages(
+  chatJid: string,
+  threadTs?: string,
+): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
 
@@ -180,7 +187,11 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
       );
     }
 
-    effectiveGroup = { ...group, folder: threadFolder, name: `${group.name} (thread)` };
+    effectiveGroup = {
+      ...group,
+      folder: threadFolder,
+      name: `${group.name} (thread)`,
+    };
   }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
@@ -195,7 +206,10 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
     try {
       wipContent = fs.readFileSync(wipPath, 'utf-8');
       fs.unlinkSync(wipPath);
-      logger.info({ group: group.name }, 'Recovered WIP context from previous run');
+      logger.info(
+        { group: group.name },
+        'Recovered WIP context from previous run',
+      );
     } catch {
       // ignore
     }
@@ -204,7 +218,12 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   const sinceTimestamp = lastAgentTimestamp[cKey] || '';
   // Pass null (not undefined) when no threadTs to filter to top-level messages only.
   // undefined means "no filter" which would include thread messages in top-level processing.
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME, threadTs ?? null);
+  const missedMessages = getMessagesSince(
+    chatJid,
+    sinceTimestamp,
+    ASSISTANT_NAME,
+    threadTs ?? null,
+  );
 
   if (missedMessages.length === 0 && !wipContent) return true;
 
@@ -221,14 +240,19 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   let messagesToProcess = missedMessages;
   let hasRemainder = false;
 
-  if (!isMainGroup && group.requiresTrigger !== false && !isBotThread && missedMessages.length > 1) {
+  if (
+    !isMainGroup &&
+    group.requiresTrigger !== false &&
+    !isBotThread &&
+    missedMessages.length > 1
+  ) {
     const firstTriggerIdx = missedMessages.findIndex((m) =>
       TRIGGER_PATTERN.test(m.content.trim()),
     );
     if (firstTriggerIdx >= 0) {
       // Find the next trigger after the first one
-      const nextTriggerIdx = missedMessages.findIndex((m, i) =>
-        i > firstTriggerIdx && TRIGGER_PATTERN.test(m.content.trim()),
+      const nextTriggerIdx = missedMessages.findIndex(
+        (m, i) => i > firstTriggerIdx && TRIGGER_PATTERN.test(m.content.trim()),
       );
       if (nextTriggerIdx >= 0) {
         // Process up to (but not including) the next trigger
@@ -273,7 +297,10 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   const resetIdleTimer = () => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug({ group: group.name }, 'Idle timeout, closing container stdin');
+      logger.debug(
+        { group: group.name },
+        'Idle timeout, closing container stdin',
+      );
       queue.closeStdin(chatJid, threadTs);
     }, IDLE_TIMEOUT);
   };
@@ -281,35 +308,48 @@ async function processGroupMessages(chatJid: string, threadTs?: string): Promise
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
 
-  const output = await runAgent(effectiveGroup, prompt, chatJid, threadTs, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        const sentTs = await channel.sendMessage(chatJid, text, replyThreadTs ? { thread_ts: replyThreadTs } : undefined);
-        if (replyThreadTs) botRepliedThreads.add(replyThreadTs);
-        if (typeof sentTs === 'string') botRepliedThreads.add(sentTs);
-        const rs = activeRunState.get(runKey);
-        if (rs) rs.outputSentToUser = true;
+  const output = await runAgent(
+    effectiveGroup,
+    prompt,
+    chatJid,
+    threadTs,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          const sentTs = await channel.sendMessage(
+            chatJid,
+            text,
+            replyThreadTs ? { thread_ts: replyThreadTs } : undefined,
+          );
+          if (replyThreadTs) botRepliedThreads.add(replyThreadTs);
+          if (typeof sentTs === 'string') botRepliedThreads.add(sentTs);
+          const rs = activeRunState.get(runKey);
+          if (rs) rs.outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid, threadTs);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid, threadTs);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -401,7 +441,14 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder, threadTs),
+      (proc, containerName) =>
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          threadTs,
+        ),
       wrappedOnOutput,
     );
 
@@ -475,8 +522,10 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
-          const isBotThread = threadTs != null && botRepliedThreads.has(threadTs);
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false && !isBotThread;
+          const isBotThread =
+            threadTs != null && botRepliedThreads.has(threadTs);
+          const needsTrigger =
+            !isMainGroup && group.requiresTrigger !== false && !isBotThread;
 
           // For non-main groups, only act on trigger messages.
           if (needsTrigger) {
@@ -536,7 +585,10 @@ function recoverPendingMessages(): void {
       const groupDir = resolveGroupFolderPath(group.folder);
       const wipPath = path.join(groupDir, 'wip.md');
       if (fs.existsSync(wipPath)) {
-        logger.info({ group: group.name }, 'Recovery: found WIP file from interrupted run');
+        logger.info(
+          { group: group.name },
+          'Recovery: found WIP file from interrupted run',
+        );
         queue.enqueueMessageCheck(chatJid);
       }
     } catch {
@@ -556,7 +608,10 @@ function recoverPendingMessages(): void {
             // Extract threadTs from folder name: {folder}-t-{sanitizedTs}
             const sanitizedTs = entry.name.slice(threadPrefix.length);
             const threadTs = sanitizedTs.replace(/-/g, '.');
-            logger.info({ group: group.name, threadTs }, 'Recovery: found thread WIP file');
+            logger.info(
+              { group: group.name, threadTs },
+              'Recovery: found thread WIP file',
+            );
             queue.enqueueMessageCheck(chatJid, threadTs);
           }
         }
@@ -576,7 +631,13 @@ function recoverPendingMessages(): void {
 
       for (const threadTs of threadKeys) {
         logger.info(
-          { group: group.name, threadTs, pendingCount: pending.filter((m) => (m.thread_ts ?? undefined) === threadTs).length },
+          {
+            group: group.name,
+            threadTs,
+            pendingCount: pending.filter(
+              (m) => (m.thread_ts ?? undefined) === threadTs,
+            ).length,
+          },
           'Recovery: found unprocessed messages',
         );
         queue.enqueueMessageCheck(chatJid, threadTs);
@@ -593,7 +654,10 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
-  logger.info({ instanceId: INSTANCE_ID, containerPrefix: CONTAINER_NAME_PREFIX }, 'Instance identity');
+  logger.info(
+    { instanceId: INSTANCE_ID, containerPrefix: CONTAINER_NAME_PREFIX },
+    'Instance identity',
+  );
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -616,7 +680,10 @@ async function main(): Promise<void> {
           if (group) {
             const groupDir = resolveGroupFolderPath(group.folder);
             const wipPath = path.join(groupDir, 'wip.md');
-            fs.writeFileSync(wipPath, `Interrupted run at ${new Date().toISOString()}. Agent was responding to messages.`);
+            fs.writeFileSync(
+              wipPath,
+              `Interrupted run at ${new Date().toISOString()}. Agent was responding to messages.`,
+            );
           }
         } catch {
           // ignore
@@ -658,24 +725,38 @@ async function main(): Promise<void> {
       try {
         storeMessage(msg);
       } catch (err) {
-        logger.warn({ err, chatJid: msg.chat_jid }, 'storeMessage failed, retrying once');
+        logger.warn(
+          { err, chatJid: msg.chat_jid },
+          'storeMessage failed, retrying once',
+        );
         try {
           storeMessage(msg);
         } catch (retryErr) {
-          logger.error({ err: retryErr, chatJid: msg.chat_jid }, 'storeMessage retry failed, message lost');
+          logger.error(
+            { err: retryErr, chatJid: msg.chat_jid },
+            'storeMessage retry failed, message lost',
+          );
         }
       }
     },
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onChatMetadata: (
+      chatJid: string,
+      timestamp: string,
+      name?: string,
+      channel?: string,
+      isGroup?: boolean,
+    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
 
   // Read env for optional channels
   const envTokens = readEnvFile([
-    'SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN',
-    'GITHUB_TOKEN', 'GITHUB_USERNAME',
-    'WEB_AUTH_TOKEN', 'WEB_API_PORT',
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'GITHUB_TOKEN',
+    'GITHUB_USERNAME',
+    'WEB_AUTH_TOKEN',
+    'WEB_API_PORT',
   ]);
 
   // WhatsApp: conditional on auth creds existing
@@ -720,7 +801,9 @@ async function main(): Promise<void> {
     const web = new WebChannel({
       ...channelOpts,
       authToken: envTokens.WEB_AUTH_TOKEN,
-      port: envTokens.WEB_API_PORT ? parseInt(envTokens.WEB_API_PORT, 10) : undefined,
+      port: envTokens.WEB_API_PORT
+        ? parseInt(envTokens.WEB_API_PORT, 10)
+        : undefined,
       registerGroup,
       onDirectEnqueue: (jid) => queue.enqueueMessageCheck(jid),
     });
@@ -728,14 +811,19 @@ async function main(): Promise<void> {
     try {
       await web.connect();
     } catch (err) {
-      logger.warn({ err }, 'Web channel failed to start, continuing without it');
+      logger.warn(
+        { err },
+        'Web channel failed to start, continuing without it',
+      );
     }
   } else {
     logger.info('Web: no WEB_AUTH_TOKEN in .env, skipping');
   }
 
   if (channels.length === 0) {
-    logger.error('No channels configured. Run /setup to configure at least one channel.');
+    logger.error(
+      'No channels configured. Run /setup to configure at least one channel.',
+    );
     process.exit(1);
   }
 
@@ -747,9 +835,14 @@ async function main(): Promise<void> {
       for (const jid of notifiedJids) {
         const channel = findChannel(channels, jid);
         if (channel) {
-          channel.sendMessage(jid, 'Back online.').catch((err) =>
-            logger.warn({ jid, err }, 'Failed to send back-online notification'),
-          );
+          channel
+            .sendMessage(jid, 'Back online.')
+            .catch((err) =>
+              logger.warn(
+                { jid, err },
+                'Failed to send back-online notification',
+              ),
+            );
         }
       }
       setRouterState('restart_notified_jids', '[]');
@@ -797,13 +890,23 @@ async function main(): Promise<void> {
   setInterval(() => {
     for (const [chatJid, group] of Object.entries(registeredGroups)) {
       const cKey = cursorKey(chatJid);
-      const pending = getMessagesSince(chatJid, lastAgentTimestamp[cKey] || '', ASSISTANT_NAME, null);
+      const pending = getMessagesSince(
+        chatJid,
+        lastAgentTimestamp[cKey] || '',
+        ASSISTANT_NAME,
+        null,
+      );
       if (pending.length > 0) {
         const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
         const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-        const hasTrigger = !needsTrigger || pending.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
+        const hasTrigger =
+          !needsTrigger ||
+          pending.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
         if (hasTrigger) {
-          logger.info({ group: group.name, count: pending.length }, 'Sweep: found unprocessed messages');
+          logger.info(
+            { group: group.name, count: pending.length },
+            'Sweep: found unprocessed messages',
+          );
           queue.enqueueMessageCheck(chatJid);
         }
       }

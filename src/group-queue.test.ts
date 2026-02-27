@@ -476,7 +476,12 @@ describe('GroupQueue', () => {
 
     // Register process with a mock that looks alive
     const mockProc = { killed: false } as any;
-    queue.registerProcess('group1@g.us', mockProc, 'nanoclaw-test-container', 'test-group');
+    queue.registerProcess(
+      'group1@g.us',
+      mockProc,
+      'nanoclaw-test-container',
+      'test-group',
+    );
 
     // Shutdown should stop the container
     const shutdownPromise = queue.shutdown(10000);
@@ -484,14 +489,18 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await shutdownPromise;
 
-    expect(mockStopContainerAsync).toHaveBeenCalledWith('nanoclaw-test-container');
+    expect(mockStopContainerAsync).toHaveBeenCalledWith(
+      'nanoclaw-test-container',
+    );
   });
 
   // --- Static helper methods ---
 
   it('queueKey builds composite keys', () => {
     expect(GroupQueue.queueKey('chat@g.us')).toBe('chat@g.us');
-    expect(GroupQueue.queueKey('chat@g.us', '1234.5678')).toBe('chat@g.us#1234.5678');
+    expect(GroupQueue.queueKey('chat@g.us', '1234.5678')).toBe(
+      'chat@g.us#1234.5678',
+    );
   });
 
   it('chatJidFromKey extracts chatJid', () => {

@@ -78,7 +78,8 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup) ||
-                  (targetGroup && sourceGroup.startsWith(targetGroup.folder + '-t-'))
+                  (targetGroup &&
+                    sourceGroup.startsWith(targetGroup.folder + '-t-'))
                 ) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
@@ -202,7 +203,11 @@ export async function processTaskIpc(
 
         // Authorization: non-main groups can only schedule for themselves
         // Thread folders (sourceGroup containing '-t-') are authorized for their parent group
-        if (!isMain && targetFolder !== sourceGroup && !sourceGroup.startsWith(targetFolder + '-t-')) {
+        if (
+          !isMain &&
+          targetFolder !== sourceGroup &&
+          !sourceGroup.startsWith(targetFolder + '-t-')
+        ) {
           logger.warn(
             { sourceGroup, targetFolder },
             'Unauthorized schedule_task attempt blocked',
@@ -275,7 +280,12 @@ export async function processTaskIpc(
     case 'pause_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup || sourceGroup.startsWith(task.group_folder + '-t-'))) {
+        if (
+          task &&
+          (isMain ||
+            task.group_folder === sourceGroup ||
+            sourceGroup.startsWith(task.group_folder + '-t-'))
+        ) {
           updateTask(data.taskId, { status: 'paused' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -293,7 +303,12 @@ export async function processTaskIpc(
     case 'resume_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup || sourceGroup.startsWith(task.group_folder + '-t-'))) {
+        if (
+          task &&
+          (isMain ||
+            task.group_folder === sourceGroup ||
+            sourceGroup.startsWith(task.group_folder + '-t-'))
+        ) {
           updateTask(data.taskId, { status: 'active' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -311,7 +326,12 @@ export async function processTaskIpc(
     case 'cancel_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup || sourceGroup.startsWith(task.group_folder + '-t-'))) {
+        if (
+          task &&
+          (isMain ||
+            task.group_folder === sourceGroup ||
+            sourceGroup.startsWith(task.group_folder + '-t-'))
+        ) {
           deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },

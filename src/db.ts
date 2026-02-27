@@ -120,9 +120,11 @@ function createSchema(database: Database.Database): void {
   // Remove UNIQUE constraint on registered_groups.folder (migration for existing DBs)
   // Multiple JIDs can share a folder (e.g. GitHub issues all use "main")
   try {
-    const hasUnique = database.prepare(
-      `SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`,
-    ).get() as { sql: string } | undefined;
+    const hasUnique = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`,
+      )
+      .get() as { sql: string } | undefined;
     if (hasUnique?.sql?.includes('UNIQUE')) {
       database.exec(`
         CREATE TABLE registered_groups_new (
@@ -145,9 +147,7 @@ function createSchema(database: Database.Database): void {
 
   // Add thread_ts column to messages if it doesn't exist (migration for existing DBs)
   try {
-    database.exec(
-      `ALTER TABLE messages ADD COLUMN thread_ts TEXT`,
-    );
+    database.exec(`ALTER TABLE messages ADD COLUMN thread_ts TEXT`);
   } catch {
     /* column already exists */
   }
@@ -410,9 +410,7 @@ export function getMessagesSince(
       AND content != '' AND content IS NOT NULL${threadFilter}
     ORDER BY timestamp
   `;
-  return db
-    .prepare(sql)
-    .all(...params) as NewMessage[];
+  return db.prepare(sql).all(...params) as NewMessage[];
 }
 
 export function createTask(

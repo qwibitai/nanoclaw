@@ -6,7 +6,12 @@
 import { ASSISTANT_NAME, MAIN_GROUP_FOLDER } from '../config.js';
 import { getRouterState, setRouterState, storeMessageDirect } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 const JID_SUFFIX = '@github';
@@ -83,7 +88,11 @@ export class GitHubChannel implements Channel {
     logger.info('GitHub channel connected (polling)');
   }
 
-  async sendMessage(jid: string, text: string, _options?: { thread_ts?: string }): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    _options?: { thread_ts?: string },
+  ): Promise<void> {
     // Parse JID to get the issue/PR comment URL
     // JID format: owner/repo#123@github
     const match = jid.replace(JID_SUFFIX, '').match(/^(.+?)#(\d+)$/);
@@ -108,7 +117,10 @@ export class GitHubChannel implements Channel {
 
       if (!response.ok) {
         const body = await response.text();
-        logger.error({ jid, status: response.status, body }, 'Failed to post GitHub comment');
+        logger.error(
+          { jid, status: response.status, body },
+          'Failed to post GitHub comment',
+        );
       }
     } catch (err) {
       logger.error({ jid, err }, 'Error posting GitHub comment');
@@ -138,14 +150,20 @@ export class GitHubChannel implements Channel {
       );
 
       if (!response.ok) {
-        logger.warn({ status: response.status }, 'GitHub notifications API error');
+        logger.warn(
+          { status: response.status },
+          'GitHub notifications API error',
+        );
         return;
       }
 
-      const notifications = await response.json() as GitHubNotification[];
+      const notifications = (await response.json()) as GitHubNotification[];
 
       for (const notif of notifications) {
-        if (notif.subject.type !== 'Issue' && notif.subject.type !== 'PullRequest') {
+        if (
+          notif.subject.type !== 'Issue' &&
+          notif.subject.type !== 'PullRequest'
+        ) {
           continue;
         }
 
@@ -177,10 +195,21 @@ export class GitHubChannel implements Channel {
     }
 
     // Notify metadata
-    this.opts.onChatMetadata(chatJid, notif.updated_at, notif.subject.title, 'github', false);
+    this.opts.onChatMetadata(
+      chatJid,
+      notif.updated_at,
+      notif.subject.title,
+      'github',
+      false,
+    );
 
     // Fetch new comments
-    await this.fetchNewComments(chatJid, repoFullName, number, notif.subject.type);
+    await this.fetchNewComments(
+      chatJid,
+      repoFullName,
+      number,
+      notif.subject.type,
+    );
 
     // Mark notification as read
     try {
@@ -252,19 +281,27 @@ export class GitHubChannel implements Channel {
 
   private async fetchComments(url: string): Promise<GitHubComment[]> {
     try {
-      const response = await this.githubFetch(`${url}?per_page=100&sort=created&direction=desc`);
+      const response = await this.githubFetch(
+        `${url}?per_page=100&sort=created&direction=desc`,
+      );
       if (!response.ok) return [];
-      return await response.json() as GitHubComment[];
+      return (await response.json()) as GitHubComment[];
     } catch {
       return [];
     }
   }
 
   private saveCursors(): void {
-    setRouterState('github_comment_cursors', JSON.stringify(this.commentCursors));
+    setRouterState(
+      'github_comment_cursors',
+      JSON.stringify(this.commentCursors),
+    );
   }
 
-  private async githubFetch(url: string, init?: RequestInit): Promise<Response> {
+  private async githubFetch(
+    url: string,
+    init?: RequestInit,
+  ): Promise<Response> {
     return fetch(url, {
       ...init,
       headers: {

@@ -67,7 +67,8 @@ function getOsUsername(): string {
 }
 
 function safeInstanceId(): string {
-  const raw = process.env.INSTANCE_ID || envConfig.INSTANCE_ID || getOsUsername();
+  const raw =
+    process.env.INSTANCE_ID || envConfig.INSTANCE_ID || getOsUsername();
   // Strip non-alphanumeric chars, limit to 32 chars (Docker name limit is 128)
   const sanitized = raw.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32);
   return sanitized || 'default';
@@ -77,20 +78,29 @@ export const INSTANCE_ID = safeInstanceId();
 export const CONTAINER_NAME_PREFIX = `nanoclaw-${INSTANCE_ID}`;
 
 // Container resource limits (empty/0 = no limit, preserves current behavior)
-export const CONTAINER_CPUS = process.env.CONTAINER_CPUS || envConfig.CONTAINER_CPUS || '';
-export const CONTAINER_MEMORY = process.env.CONTAINER_MEMORY || envConfig.CONTAINER_MEMORY || '';
-export const CONTAINER_PIDS_LIMIT = process.env.CONTAINER_PIDS_LIMIT || envConfig.CONTAINER_PIDS_LIMIT || '';
+export const CONTAINER_CPUS =
+  process.env.CONTAINER_CPUS || envConfig.CONTAINER_CPUS || '';
+export const CONTAINER_MEMORY =
+  process.env.CONTAINER_MEMORY || envConfig.CONTAINER_MEMORY || '';
+export const CONTAINER_PIDS_LIMIT =
+  process.env.CONTAINER_PIDS_LIMIT || envConfig.CONTAINER_PIDS_LIMIT || '';
 
 // Validate resource limits early so operators get clear errors instead of
 // cryptic Docker failures at container spawn time.
 if (CONTAINER_CPUS && !/^\d+(\.\d+)?$/.test(CONTAINER_CPUS)) {
-  console.warn(`WARNING: CONTAINER_CPUS="${CONTAINER_CPUS}" is not a valid number (e.g. "0.5", "2")`);
+  console.warn(
+    `WARNING: CONTAINER_CPUS="${CONTAINER_CPUS}" is not a valid number (e.g. "0.5", "2")`,
+  );
 }
 if (CONTAINER_MEMORY && !/^\d+[bkmg]?$/i.test(CONTAINER_MEMORY)) {
-  console.warn(`WARNING: CONTAINER_MEMORY="${CONTAINER_MEMORY}" is not a valid Docker memory value (e.g. "512m", "1g")`);
+  console.warn(
+    `WARNING: CONTAINER_MEMORY="${CONTAINER_MEMORY}" is not a valid Docker memory value (e.g. "512m", "1g")`,
+  );
 }
 if (CONTAINER_PIDS_LIMIT && !/^\d+$/.test(CONTAINER_PIDS_LIMIT)) {
-  console.warn(`WARNING: CONTAINER_PIDS_LIMIT="${CONTAINER_PIDS_LIMIT}" is not a valid integer`);
+  console.warn(
+    `WARNING: CONTAINER_PIDS_LIMIT="${CONTAINER_PIDS_LIMIT}" is not a valid integer`,
+  );
 }
 
 function escapeRegex(str: string): string {
@@ -103,10 +113,7 @@ export const TRIGGER_PATTERN = new RegExp(
 );
 
 // Web channel API port
-export const WEB_API_PORT = parseInt(
-  process.env.WEB_API_PORT || '3100',
-  10,
-);
+export const WEB_API_PORT = parseInt(process.env.WEB_API_PORT || '3100', 10);
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default

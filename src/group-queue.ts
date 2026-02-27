@@ -32,8 +32,9 @@ export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
   private waitingGroups: string[] = [];
-  private processMessagesFn: ((chatJid: string, threadTs?: string) => Promise<boolean>) | null =
-    null;
+  private processMessagesFn:
+    | ((chatJid: string, threadTs?: string) => Promise<boolean>)
+    | null = null;
   private shuttingDown = false;
 
   /** Build a composite key for per-thread queuing. */
@@ -72,7 +73,9 @@ export class GroupQueue {
     return state;
   }
 
-  setProcessMessagesFn(fn: (chatJid: string, threadTs?: string) => Promise<boolean>): void {
+  setProcessMessagesFn(
+    fn: (chatJid: string, threadTs?: string) => Promise<boolean>,
+  ): void {
     this.processMessagesFn = fn;
   }
 
@@ -96,7 +99,10 @@ export class GroupQueue {
         if (s.idleWaiting) {
           this.closeStdinForKey(k);
         }
-        logger.debug({ groupJid, threadTs }, 'Sibling thread active, message queued');
+        logger.debug(
+          { groupJid, threadTs },
+          'Sibling thread active, message queued',
+        );
         return;
       }
     }
@@ -114,7 +120,10 @@ export class GroupQueue {
     }
 
     this.runForGroup(key, groupJid, threadTs, 'messages').catch((err) =>
-      logger.error({ groupJid, threadTs, err }, 'Unhandled error in runForGroup'),
+      logger.error(
+        { groupJid, threadTs, err },
+        'Unhandled error in runForGroup',
+      ),
     );
   }
 
@@ -168,7 +177,13 @@ export class GroupQueue {
     );
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string, threadTs?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+    threadTs?: string,
+  ): void {
     const key = GroupQueue.queueKey(groupJid, threadTs);
     const state = this.getGroup(key);
     state.process = proc;
@@ -196,7 +211,11 @@ export class GroupQueue {
 
     // Check if sibling threads have pending messages
     for (const [k, s] of this.groups) {
-      if (k !== key && GroupQueue.chatJidFromKey(k) === groupJid && s.pendingMessages) {
+      if (
+        k !== key &&
+        GroupQueue.chatJidFromKey(k) === groupJid &&
+        s.pendingMessages
+      ) {
         this.closeStdinForKey(key);
         return;
       }
@@ -210,7 +229,8 @@ export class GroupQueue {
   sendMessage(groupJid: string, text: string, threadTs?: string): boolean {
     const key = GroupQueue.queueKey(groupJid, threadTs);
     const state = this.getGroup(key);
-    if (!state.active || !state.groupFolder || state.isTaskContainer) return false;
+    if (!state.active || !state.groupFolder || state.isTaskContainer)
+      return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
@@ -288,7 +308,10 @@ export class GroupQueue {
         }
       }
     } catch (err) {
-      logger.error({ chatJid, threadTs, err }, 'Error processing messages for group');
+      logger.error(
+        { chatJid, threadTs, err },
+        'Error processing messages for group',
+      );
       this.scheduleRetry(key, chatJid, threadTs, state);
     } finally {
       state.active = false;
@@ -328,7 +351,12 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(key: string, chatJid: string, threadTs: string | undefined, state: GroupState): void {
+  private scheduleRetry(
+    key: string,
+    chatJid: string,
+    threadTs: string | undefined,
+    state: GroupState,
+  ): void {
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
       logger.error(
@@ -356,11 +384,19 @@ export class GroupQueue {
 
     // Check sibling threads for pending messages first
     for (const [k, s] of this.groups) {
-      if (k !== key && GroupQueue.chatJidFromKey(k) === chatJid && s.pendingMessages && !s.active) {
+      if (
+        k !== key &&
+        GroupQueue.chatJidFromKey(k) === chatJid &&
+        s.pendingMessages &&
+        !s.active
+      ) {
         const siblingJid = GroupQueue.chatJidFromKey(k);
         const siblingThread = GroupQueue.threadTsFromKey(k);
         this.runForGroup(k, siblingJid, siblingThread, 'drain').catch((err) =>
-          logger.error({ chatJid: siblingJid, threadTs: siblingThread, err }, 'Unhandled error in runForGroup (sibling drain)'),
+          logger.error(
+            { chatJid: siblingJid, threadTs: siblingThread, err },
+            'Unhandled error in runForGroup (sibling drain)',
+          ),
         );
         return;
       }
@@ -374,7 +410,10 @@ export class GroupQueue {
     if (baseState.pendingTasks.length > 0) {
       const task = baseState.pendingTasks.shift()!;
       this.runTask(chatJid, task).catch((err) =>
-        logger.error({ chatJid, taskId: task.id, err }, 'Unhandled error in runTask (drain)'),
+        logger.error(
+          { chatJid, taskId: task.id, err },
+          'Unhandled error in runTask (drain)',
+        ),
       );
       return;
     }
@@ -383,7 +422,10 @@ export class GroupQueue {
     if (state.pendingMessages) {
       const threadTs = GroupQueue.threadTsFromKey(key);
       this.runForGroup(key, chatJid, threadTs, 'drain').catch((err) =>
-        logger.error({ chatJid, threadTs, err }, 'Unhandled error in runForGroup (drain)'),
+        logger.error(
+          { chatJid, threadTs, err },
+          'Unhandled error in runForGroup (drain)',
+        ),
       );
       return;
     }
@@ -416,7 +458,10 @@ export class GroupQueue {
       } else if (state.pendingMessages) {
         const threadTs = GroupQueue.threadTsFromKey(nextKey);
         this.runForGroup(nextKey, nextJid, threadTs, 'drain').catch((err) =>
-          logger.error({ groupJid: nextJid, err }, 'Unhandled error in runForGroup (waiting)'),
+          logger.error(
+            { groupJid: nextJid, err },
+            'Unhandled error in runForGroup (waiting)',
+          ),
         );
       }
       // If neither pending, skip this group

@@ -7,7 +7,12 @@ import { App, LogLevel } from '@slack/bolt';
 import { ASSISTANT_NAME } from '../config.js';
 import { storeMessageDirect } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
+import {
+  Channel,
+  OnInboundMessage,
+  OnChatMetadata,
+  RegisteredGroup,
+} from '../types.js';
 
 const USER_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 const DEDUP_TTL_MS = 2 * 60 * 1000; // 2 minutes
@@ -15,7 +20,11 @@ const DEDUP_MAX_SIZE = 2000;
 const MAX_CHUNK_SIZE = 3900; // Slack's limit is ~4000 for chat.postMessage
 
 // Subtypes we allow through (most subtypes are noise: channel_join, etc.)
-const ALLOWED_SUBTYPES = new Set(['thread_broadcast', 'file_share', 'me_message']);
+const ALLOWED_SUBTYPES = new Set([
+  'thread_broadcast',
+  'file_share',
+  'me_message',
+]);
 
 export interface SlackChannelOpts {
   botToken: string;
@@ -54,10 +63,15 @@ export class SlackChannel implements Channel {
   async connect(): Promise<void> {
     // Identify ourselves
     try {
-      const authResult = await this.app.client.auth.test({ token: this.opts.botToken });
+      const authResult = await this.app.client.auth.test({
+        token: this.opts.botToken,
+      });
       this.botUserId = authResult.user_id as string;
-      this.botBotId = authResult.bot_id as string | undefined ?? null;
-      logger.info({ botUserId: this.botUserId, botBotId: this.botBotId }, 'Slack bot identity resolved');
+      this.botBotId = (authResult.bot_id as string | undefined) ?? null;
+      logger.info(
+        { botUserId: this.botUserId, botBotId: this.botBotId },
+        'Slack bot identity resolved',
+      );
     } catch (err) {
       logger.error({ err }, 'Failed to resolve Slack bot identity');
     }
@@ -89,10 +103,14 @@ export class SlackChannel implements Channel {
 
       const chatJid = `${channelId}@slack`;
       const threadTs = (ev.thread_ts as string) || undefined;
-      const timestamp = new Date(parseFloat(ev.ts as string) * 1000).toISOString();
+      const timestamp = new Date(
+        parseFloat(ev.ts as string) * 1000,
+      ).toISOString();
 
       // Resolve sender name
-      const senderName = userId ? await this.resolveUserName(userId) : 'unknown';
+      const senderName = userId
+        ? await this.resolveUserName(userId)
+        : 'unknown';
 
       // Notify about chat metadata
       this.opts.onChatMetadata(chatJid, timestamp, undefined, 'slack', true);
@@ -127,7 +145,11 @@ export class SlackChannel implements Channel {
     setInterval(() => this.cleanupDedup(), 60_000);
   }
 
-  async sendMessage(jid: string, text: string, options?: { thread_ts?: string }): Promise<string | void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    options?: { thread_ts?: string },
+  ): Promise<string | void> {
     const channelId = jid.replace(/@slack$/, '');
     const threadTs = options?.thread_ts;
 
@@ -196,7 +218,9 @@ export class SlackChannel implements Channel {
     }
     // Cap size
     if (this.seenEvents.size > DEDUP_MAX_SIZE) {
-      const entries = Array.from(this.seenEvents.entries()).sort((a, b) => a[1] - b[1]);
+      const entries = Array.from(this.seenEvents.entries()).sort(
+        (a, b) => a[1] - b[1],
+      );
       const toRemove = entries.slice(0, entries.length - DEDUP_MAX_SIZE);
       for (const [id] of toRemove) {
         this.seenEvents.delete(id);
@@ -212,10 +236,11 @@ export class SlackChannel implements Channel {
 
     try {
       const result = await this.app.client.users.info({ user: userId });
-      const name = result.user?.profile?.display_name
-        || result.user?.profile?.real_name
-        || result.user?.name
-        || userId;
+      const name =
+        result.user?.profile?.display_name ||
+        result.user?.profile?.real_name ||
+        result.user?.name ||
+        userId;
       this.userCache.set(userId, { name, ts: Date.now() });
       return name;
     } catch (err) {
