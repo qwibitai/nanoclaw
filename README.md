@@ -19,7 +19,7 @@ cd solclaw
 claude
 ```
 
-and after claude code has been started -> ```bash /setup ```
+and after claude code has been started run ```/setup ``` in the claude code itself
 
 ## Example Commands
 
