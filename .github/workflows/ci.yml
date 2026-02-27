@@ -21,5 +21,13 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Install agent-runner deps
+        run: npm ci
+        working-directory: container/agent-runner
+
+      - name: Typecheck agent-runner
+        run: npx tsc --noEmit
+        working-directory: container/agent-runner
+
       - name: Tests
         run: npx vitest run

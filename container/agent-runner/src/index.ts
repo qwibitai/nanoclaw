@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -355,8 +355,8 @@ function buildMcpServers(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
-): Record<string, unknown> {
-  const servers: Record<string, unknown> = {
+): Record<string, McpServerConfig> {
+  const servers: Record<string, McpServerConfig> = {
     nanoclaw: {
       command: 'node',
       args: [mcpServerPath],
