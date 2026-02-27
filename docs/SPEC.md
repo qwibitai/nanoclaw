@@ -409,11 +409,13 @@ NanoClaw has a built-in scheduler that runs tasks as full agents in their group'
 
 ### Schedule Types
 
+All schedule times are interpreted as **Pacific Time (America/Los_Angeles)**.
+
 | Type | Value Format | Example |
 |------|--------------|---------|
 | `cron` | Cron expression | `0 9 * * 1` (Mondays at 9am) |
 | `interval` | Milliseconds | `3600000` (every hour) |
-| `once` | ISO timestamp | `2024-12-25T09:00:00Z` |
+| `once` | ISO timestamp (no Z) | `2024-12-25T09:00:00` |
 
 ### Creating a Task
 
@@ -439,7 +441,7 @@ Claude: [calls mcp__nanoclaw__schedule_task]
         {
           "prompt": "Search for today's emails, summarize the important ones, and send the summary to the group.",
           "schedule_type": "once",
-          "schedule_value": "2024-01-31T17:00:00Z"
+          "schedule_value": "2024-01-31T17:00:00"
         }
 ```
 
