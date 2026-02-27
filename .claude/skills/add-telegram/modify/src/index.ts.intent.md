@@ -19,6 +19,7 @@ Refactored from single WhatsApp channel to multi-channel architecture using the 
 - Added: `findChannel(channels, chatJid)` lookup at the start
 - Changed: `whatsapp.setTyping()` → `channel.setTyping?.()` (optional chaining)
 - Changed: `whatsapp.sendMessage()` → `channel.sendMessage()` in output callback
+- Added: typing indicator interval pattern — Telegram's `sendChatAction` expires after ~5s, so a `setInterval` fires every 4s to keep the indicator alive during long agent responses. `stopTyping()` is called **before** `channel.sendMessage()` so the indicator clears immediately when output arrives, not only after `runAgent` fully completes.
 
 ### getAvailableGroups()
 - Unchanged: uses `c.is_group` filter from base (Telegram channels pass `isGroup=true` via `onChatMetadata`)

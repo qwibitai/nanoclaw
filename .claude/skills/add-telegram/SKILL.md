@@ -46,9 +46,9 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
 ```
 
 This deterministically:
-- Adds `src/channels/telegram.ts` (TelegramChannel class implementing Channel interface)
+- Adds `src/channels/telegram.ts` (TelegramChannel class implementing Channel interface, with Markdown→HTML rendering and file download support)
 - Adds `src/channels/telegram.test.ts` (46 unit tests)
-- Three-way merges Telegram support into `src/index.ts` (multi-channel support, findChannel routing)
+- Three-way merges Telegram support into `src/index.ts` (multi-channel support, findChannel routing, typing indicator interval pattern)
 - Three-way merges Telegram config into `src/config.ts` (TELEGRAM_BOT_TOKEN, TELEGRAM_ONLY exports)
 - Three-way merges updated routing tests into `src/routing.test.ts`
 - Installs the `grammy` npm dependency
@@ -98,6 +98,8 @@ If they chose to replace WhatsApp:
 TELEGRAM_ONLY=true
 ```
 
+**Critical on Linux with systemd**: The service does NOT inherit the shell environment. All credentials must be in `.env`.
+
 Sync to container environment:
 
 ```bash
@@ -122,8 +124,16 @@ Tell the user:
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+```
+
+On macOS (launchd):
+```bash
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+On Linux (systemd):
+```bash
+systemctl --user restart nanoclaw
 ```
 
 ## Phase 4: Registration
@@ -140,31 +150,31 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+Use the IPC register flow or register directly. The simplest approach on an already-running system is a one-time CJS script (avoids ESM module resolution issues, and uses the correct DB column name `trigger_pattern`):
 
-For a main chat (responds to all messages, uses the `main` folder):
+```javascript
+// register-chat.cjs — run with: node register-chat.cjs
+const Database = require('better-sqlite3');
+const path = require('path');
+const fs = require('fs');
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-});
+const JID = 'tg:YOUR_CHAT_ID_HERE';
+const GROUP_NAME = 'Personal';
+const FOLDER = 'main';
+const TRIGGER = '@Andy';
+const REQUIRES_TRIGGER = false; // false = respond to all messages
+
+const db = new Database(path.join(__dirname, 'store/messages.db'));
+fs.mkdirSync(path.join(__dirname, 'groups', FOLDER, 'logs'), { recursive: true });
+db.prepare(`
+  INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, requires_trigger, added_at)
+  VALUES (?, ?, ?, ?, ?, ?)
+`).run(JID, GROUP_NAME, FOLDER, TRIGGER, REQUIRES_TRIGGER ? 1 : 0, new Date().toISOString());
+console.log('Registered:', JID, '->', GROUP_NAME);
+db.close();
 ```
 
-For additional chats (trigger-only):
-
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "<folder-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
-```
+Alternatively, use the `registerGroup()` function in `src/index.ts` at runtime, or the IPC `register_group` task type if the agent is already running.
 
 ## Phase 5: Verify
 
@@ -184,15 +194,52 @@ Tell the user:
 tail -f logs/nanoclaw.log
 ```
 
+## Linux / Docker Considerations
+
+When running on Linux with Docker (rather than macOS with Apple Container), additional care is needed.
+
+### IPC directory permissions
+
+The host process runs as root, but Docker containers run as the `node` user (uid 1000). IPC directories and files must be world-writable. Ensure `src/container-runner.ts` creates IPC dirs with `mode: 0o777` and `src/group-queue.ts` writes files with `mode: 0o666`. If you see `EACCES` errors in container logs:
+
+```bash
+chmod -R 777 data/ipc/
+chmod -R 777 data/sessions/
+```
+
+### Session directory permissions
+
+The per-group `.claude` sessions directory is created by the host as root. If the container can't create subdirectories (e.g., `.claude/debug/`), fix with:
+
+```bash
+chmod -R 777 data/sessions/
+```
+
 ## Troubleshooting
 
 ### Bot not responding
 
 Check:
-1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
-2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
-3. For non-main chats: message includes trigger pattern
-4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+1. Check `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+2. **Linux/systemd**: Shell env vars are not inherited by the service — credentials must be in `.env`
+3. Check chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`
+4. For non-main chats: message must include trigger pattern
+5. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+
+### "Not logged in · Please run /login"
+
+The agent can't authenticate with Anthropic. Causes:
+
+1. **Credentials not in `.env`** — add `ANTHROPIC_API_KEY` to `.env`
+2. **Session dir permissions** — run `chmod -R 777 data/sessions/`
+
+### Typing indicator never stops
+
+The skill already applies the interval + `stopTyping()` pattern via `modify/src/index.ts`. If you see this issue after applying the skill, ensure the build is up to date: `npm run build`.
+
+### Container can't process IPC messages (permission errors)
+
+See "Linux / Docker Considerations" above. Quick fix: `chmod -R 777 data/ipc/`
 
 ### Bot only responds to @mentions in groups
 
