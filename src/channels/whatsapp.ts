@@ -50,8 +50,10 @@ export class WhatsAppChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      this.connectInternal(resolve).catch(reject);
+    // Don't block on connection - start connecting and return immediately
+    // The channel will emit events when connection state changes
+    this.connectInternal().catch((err) => {
+      logger.error({ err }, 'WhatsApp initial connection failed, will retry');
     });
   }
 

@@ -7,8 +7,11 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
+  FEISHU_APP_ID,
+  FEISHU_APP_SECRET,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { FeishuChannel } from './channels/feishu.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -474,10 +477,37 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
+  // Create and connect channels in parallel
+  // Each channel connects independently so one failing doesn't block others
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
-  await whatsapp.connect();
+
+  const channelConnections: Promise<void>[] = [
+    whatsapp.connect().catch((err) => {
+      logger.warn(
+        { err },
+        'WhatsApp connection failed, will retry in background',
+      );
+    }),
+  ];
+
+  if (FEISHU_APP_ID && FEISHU_APP_SECRET) {
+    const feishu = new FeishuChannel(FEISHU_APP_ID, FEISHU_APP_SECRET, {
+      onMessage: (chatJid, msg) => storeMessage(msg),
+      onChatMetadata: (chatJid, timestamp, name, channel, isGroup) =>
+        storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+      registeredGroups: () => registeredGroups,
+    });
+    channels.push(feishu);
+    channelConnections.push(
+      feishu.connect().catch((err) => {
+        logger.error({ err }, 'Feishu connection failed');
+      }),
+    );
+  }
+
+  // Wait for all channels to attempt connection (don't block on failures)
+  await Promise.allSettled(channelConnections);
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
