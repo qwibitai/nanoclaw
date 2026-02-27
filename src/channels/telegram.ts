@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { execSync } from 'child_process';
+import { createRequire } from 'module';
 
 import { Bot, Api } from 'grammy';
 
@@ -18,6 +19,8 @@ export interface TelegramChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
+
+const NC_VERSION: string = createRequire(import.meta.url)('../../package.json').version;
 
 // Bot pool state for Agent Swarm
 let poolApis: Api[] = [];
@@ -121,10 +124,16 @@ export class TelegramChannel implements Channel {
       ctx.reply(
         `/help — Show this list\n` +
         `/ping — Check if the bot is online\n` +
+        `/version — Show NanoClaw version\n` +
         `/status — System status report\n` +
         `/restart — Restart NanoClaw\n` +
         `/chatid — Get this chat's registration ID`,
       );
+    });
+
+    // Command to show NanoClaw version
+    this.bot.command('version', (ctx) => {
+      ctx.reply(`NanoClaw v${NC_VERSION}`);
     });
 
     // Command to get chat ID (useful for registration)
@@ -157,6 +166,7 @@ export class TelegramChannel implements Channel {
         const systemStatus = execSync(`bash ${scriptPath}`, {
           encoding: 'utf-8',
           timeout: 10000,
+          env: process.env,
         });
 
         // Get process metrics
@@ -166,6 +176,7 @@ export class TelegramChannel implements Channel {
         const memory = process.memoryUsage();
         const memMB = Math.round(memory.heapUsed / 1024 / 1024);
         const nodeVersion = process.version;
+        const ncVersion = NC_VERSION;
 
         // Extract title from system status and rebuild output
         const lines = systemStatus.trim().split('\n');
@@ -176,6 +187,7 @@ export class TelegramChannel implements Channel {
         const statusOutput = `${title}
 
 ⚙️ *Proceso NanoClaw*
+Versión: ${ncVersion}
 Uptime: ${hours}h ${minutes}m
 Memory: ${memMB} MB
 Node: ${nodeVersion}
