@@ -133,6 +133,101 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Trading tables
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS trading_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        entry_price REAL NOT NULL,
+        size REAL NOT NULL,
+        entry_date TEXT NOT NULL,
+        exit_date TEXT,
+        exit_price REAL,
+        status TEXT NOT NULL DEFAULT 'open',
+        pnl REAL,
+        strategy TEXT NOT NULL,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS trading_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        position_id INTEGER,
+        platform TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        order_type TEXT NOT NULL,
+        size REAL NOT NULL,
+        limit_price REAL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        timestamp TEXT NOT NULL,
+        filled_at TEXT,
+        error_message TEXT,
+        FOREIGN KEY (position_id) REFERENCES trading_positions(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS market_data (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        price REAL NOT NULL,
+        volume REAL,
+        open_interest REAL,
+        metadata TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS strategy_state (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        strategy_id TEXT NOT NULL,
+        current_bias TEXT,
+        rsi_2day REAL,
+        rsi_14day REAL,
+        volatility REAL,
+        confidence REAL,
+        notes TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS performance_metrics (
+        date TEXT PRIMARY KEY,
+        total_pnl REAL NOT NULL,
+        win_rate REAL NOT NULL,
+        total_trades INTEGER NOT NULL,
+        winning_trades INTEGER NOT NULL,
+        max_drawdown REAL NOT NULL,
+        sharpe_ratio REAL,
+        avg_win REAL,
+        avg_loss REAL,
+        largest_win REAL,
+        largest_loss REAL,
+        consecutive_losses INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS backtest_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        total_trades INTEGER NOT NULL,
+        win_rate REAL NOT NULL,
+        total_pnl REAL NOT NULL,
+        max_drawdown REAL NOT NULL,
+        sharpe_ratio REAL,
+        notes TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_trading_positions_status ON trading_positions(status);
+      CREATE INDEX IF NOT EXISTS idx_trading_positions_symbol ON trading_positions(symbol);
+      CREATE INDEX IF NOT EXISTS idx_trading_orders_status ON trading_orders(status);
+      CREATE INDEX IF NOT EXISTS idx_market_data_symbol ON market_data(platform, symbol, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_strategy_state_timestamp ON strategy_state(timestamp);
+    `);
+  } catch {
+    /* tables already exist */
+  }
 }
 
 export function initDatabase(): void {

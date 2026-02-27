@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NanoClaw Monitor - Enhanced</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  a { color: #58a6ff; text-decoration: none; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+  }
+  .header h1 { font-size: 16px; font-weight: 600; color: #f0f6fc; }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+    background: #f85149;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .status-dot.connected { background: #3fb950; }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 20px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+  }
+  .tab {
+    padding: 10px 16px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: #8b949e;
+    font-weight: 500;
+  }
+  .tab:hover { color: #c9d1d9; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+
+  .stats-bar {
+    display: flex;
+    gap: 24px;
+    padding: 10px 20px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+    flex-wrap: wrap;
+  }
+  .stat { display: flex; gap: 6px; align-items: center; }
+  .stat-label { color: #8b949e; }
+  .stat-value { color: #f0f6fc; font-weight: 600; }
+  .stat-value.ok { color: #3fb950; }
+  .stat-value.warn { color: #d29922; }
+  .stat-value.error { color: #f85149; }
+
+  .tab-content {
+    display: none;
+    padding: 20px;
+    height: calc(100vh - 150px);
+    overflow-y: auto;
+  }
+  .tab-content.active { display: block; }
+
+  .panel {
+    border: 1px solid #21262d;
+    background: #161b22;
+    border-radius: 6px;
+    margin-bottom: 16px;
+  }
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #21262d;
+    font-weight: 600;
+    color: #f0f6fc;
+  }
+  .panel-body {
+    padding: 16px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    color: #8b949e;
+    font-weight: 500;
+    font-size: 11px;
+    border-bottom: 1px solid #21262d;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #21262d;
+    font-size: 12px;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .badge-green { background: #1b4332; color: #3fb950; }
+  .badge-red { background: #4c1f1f; color: #f85149; }
+  .badge-yellow { background: #3b2e00; color: #d29922; }
+  .badge-gray { background: #1c1d21; color: #8b949e; }
+
+  .metric-card {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .metric-label {
+    color: #8b949e;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .metric-value {
+    font-size: 24px;
+    font-weight: 600;
+    color: #f0f6fc;
+  }
+  .metric-value.positive { color: #3fb950; }
+  .metric-value.negative { color: #f85149; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  .refresh-btn {
+    background: #21262d;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .refresh-btn:hover { background: #30363d; }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #8b949e;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>NanoClaw Monitor<span class="status-dot" id="statusDot"></span></h1>
+  <div style="display: flex; gap: 8px; align-items: center;">
+    <div id="headerStats"></div>
+    <button class="refresh-btn" onclick="restartNanoClaw()" title="Restart NanoClaw">↻ Restart</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('overview')">Overview</div>
+  <div class="tab" onclick="switchTab('trading')">Trading</div>
+  <div class="tab" onclick="switchTab('messages')">Messages</div>
+  <div class="tab" onclick="switchTab('tasks')">Tasks</div>
+</div>
+
+<div class="stats-bar" id="statsBar"></div>
+
+<!-- OVERVIEW TAB -->
+<div id="tab-overview" class="tab-content active">
+  <div class="grid-4">
+    <div class="metric-card">
+      <div class="metric-label">Uptime</div>
+      <div class="metric-value" id="stat-uptime">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Messages Today</div>
+      <div class="metric-value" id="stat-messages">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Active Groups</div>
+      <div class="metric-value" id="stat-groups">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Scheduled Tasks</div>
+      <div class="metric-value" id="stat-tasks">--</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">System Status</div>
+    <div class="panel-body">
+      <table>
+        <tr><td>Platform</td><td id="info-platform">--</td></tr>
+        <tr><td>Node Version</td><td id="info-node">--</td></tr>
+        <tr><td>Memory Usage</td><td id="info-memory">--</td></tr>
+        <tr><td>CPU Usage</td><td id="info-cpu">--</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- TRADING TAB -->
+<div id="tab-trading" class="tab-content">
+  <div class="grid-3">
+    <div class="metric-card">
+      <div class="metric-label">Total P&L</div>
+      <div class="metric-value" id="trade-pnl">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Win Rate</div>
+      <div class="metric-value" id="trade-winrate">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Open Positions</div>
+      <div class="metric-value" id="trade-positions">--</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      Open Positions
+      <button class="refresh-btn" onclick="loadTradingData()">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <table id="positions-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Platform</th>
+            <th>Entry</th>
+            <th>Size</th>
+            <th>Entry Date</th>
+            <th>Strategy</th>
+            <th>P&L</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="positions-body">
+          <tr><td colspan="8" class="empty-state">Loading positions...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Recent Signals</div>
+    <div class="panel-body">
+      <table id="signals-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Strategy</th>
+            <th>Bias</th>
+            <th>Confidence</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="signals-body">
+          <tr><td colspan="5" class="empty-state">Loading signals...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Performance Metrics (Last 30 Days)</div>
+    <div class="panel-body" id="performance-metrics">
+      <div class="empty-state">Loading performance data...</div>
+    </div>
+  </div>
+</div>
+
+<!-- MESSAGES TAB -->
+<div id="tab-messages" class="tab-content">
+  <div class="panel">
+    <div class="panel-header">Recent Messages</div>
+    <div class="panel-body" id="messages-feed">
+      <div class="empty-state">No messages yet</div>
+    </div>
+  </div>
+</div>
+
+<!-- TASKS TAB -->
+<div id="tab-tasks" class="tab-content">
+  <div class="panel">
+    <div class="panel-header">Scheduled Tasks</div>
+    <div class="panel-body" id="tasks-list">
+      <div class="empty-state">No scheduled tasks</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// State
+let currentTab = 'overview';
+
+// Tab switching
+function switchTab(tabName) {
+  currentTab = tabName;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-' + tabName).classList.add('active');
+
+  if (tabName === 'trading') loadTradingData();
+}
+
+// Load trading data
+async function loadTradingData() {
+  try {
+    // Load positions
+    const posResp = await fetch('/api/trading/positions');
+    const positions = await posResp.json();
+
+    // Load performance
+    const perfResp = await fetch('/api/trading/performance');
+    const perf = await perfResp.json();
+
+    // Load signals
+    const sigResp = await fetch('/api/trading/signals');
+    const signals = await sigResp.json();
+
+    // Update summary metrics
+    const openPositions = positions.filter(p => p.status === 'open');
+    document.getElementById('trade-positions').textContent = openPositions.length;
+
+    if (perf.total_pnl !== undefined) {
+      const pnlEl = document.getElementById('trade-pnl');
+      pnlEl.textContent = '$' + perf.total_pnl.toFixed(2);
+      pnlEl.className = 'metric-value ' + (perf.total_pnl >= 0 ? 'positive' : 'negative');
+    }
+
+    if (perf.win_rate !== undefined) {
+      document.getElementById('trade-winrate').textContent = (perf.win_rate * 100).toFixed(1) + '%';
+    }
+
+    // Render positions table
+    const posBody = document.getElementById('positions-body');
+    if (openPositions.length === 0) {
+      posBody.innerHTML = '<tr><td colspan="8" class="empty-state">No open positions</td></tr>';
+    } else {
+      posBody.innerHTML = openPositions.map(p => `
+        <tr>
+          <td>${escapeHtml(p.symbol)}</td>
+          <td>${escapeHtml(p.platform)}</td>
+          <td>$${p.entry_price.toFixed(4)}</td>
+          <td>${p.size}</td>
+          <td>${new Date(p.entry_date).toLocaleDateString()}</td>
+          <td>${escapeHtml(p.strategy)}</td>
+          <td class="${p.pnl >= 0 ? 'stat-value ok' : 'stat-value error'}">
+            ${p.pnl ? '$' + p.pnl.toFixed(2) : '--'}
+          </td>
+          <td><span class="badge badge-green">${p.status}</span></td>
+        </tr>
+      `).join('');
+    }
+
+    // Render signals table
+    const sigBody = document.getElementById('signals-body');
+    if (signals.length === 0) {
+      sigBody.innerHTML = '<tr><td colspan="5" class="empty-state">No signals detected</td></tr>';
+    } else {
+      sigBody.innerHTML = signals.slice(0, 10).map(s => `
+        <tr>
+          <td>${new Date(s.timestamp).toLocaleTimeString()}</td>
+          <td>${escapeHtml(s.strategy_id)}</td>
+          <td><span class="badge ${s.current_bias === 'bullish' ? 'badge-green' : s.current_bias === 'bearish' ? 'badge-red' : 'badge-gray'}">${s.current_bias || 'neutral'}</span></td>
+          <td>${s.confidence ? (s.confidence * 100).toFixed(0) + '%' : '--'}</td>
+          <td>${s.notes ? JSON.parse(s.notes).reasoning || '--' : '--'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // Render performance metrics
+    const perfDiv = document.getElementById('performance-metrics');
+    if (perf.total_trades === 0) {
+      perfDiv.innerHTML = '<div class="empty-state">No trades yet</div>';
+    } else {
+      perfDiv.innerHTML = `
+        <div class="grid-3">
+          <div><strong>Total Trades:</strong> ${perf.total_trades}</div>
+          <div><strong>Winning Trades:</strong> ${perf.winning_trades}</div>
+          <div><strong>Win Rate:</strong> ${(perf.win_rate * 100).toFixed(1)}%</div>
+          <div><strong>Avg Win:</strong> $${perf.avg_win ? perf.avg_win.toFixed(2) : '0.00'}</div>
+          <div><strong>Avg Loss:</strong> $${perf.avg_loss ? perf.avg_loss.toFixed(2) : '0.00'}</div>
+          <div><strong>Max Drawdown:</strong> <span class="stat-value error">${perf.max_drawdown ? (perf.max_drawdown * 100).toFixed(1) + '%' : '0%'}</span></div>
+          <div><strong>Sharpe Ratio:</strong> ${perf.sharpe_ratio ? perf.sharpe_ratio.toFixed(2) : '--'}</div>
+          <div><strong>Largest Win:</strong> <span class="stat-value ok">$${perf.largest_win || '0.00'}</span></div>
+          <div><strong>Largest Loss:</strong> <span class="stat-value error">$${perf.largest_loss || '0.00'}</span></div>
+        </div>
+      `;
+    }
+
+  } catch (err) {
+    console.error('Failed to load trading data:', err);
+    document.getElementById('positions-body').innerHTML = '<tr><td colspan="8" class="empty-state">Error loading data</td></tr>';
+  }
+}
+
+// Helper functions
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function formatUptime(ms) {
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return d + 'd ' + (h % 24) + 'h';
+  if (h > 0) return h + 'h ' + (m % 60) + 'm';
+  return m + 'm ' + (s % 60) + 's';
+}
+
+// Initialize
+async function init() {
+  // Connect to SSE for live updates
+  const eventSource = new EventSource('/events');
+
+  eventSource.onopen = () => {
+    document.getElementById('statusDot').classList.add('connected');
+  };
+
+  eventSource.onerror = () => {
+    document.getElementById('statusDot').classList.remove('connected');
+  };
+
+  eventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.type === 'status') {
+        updateOverview(data);
+      }
+    } catch (err) {
+      console.error('SSE parse error:', err);
+    }
+  };
+
+  // Load initial data
+  loadTradingData();
+  setInterval(() => {
+    if (currentTab === 'trading') loadTradingData();
+  }, 30000); // Refresh every 30s when on trading tab
+}
+
+function updateOverview(data) {
+  if (data.uptime) {
+    document.getElementById('stat-uptime').textContent = formatUptime(data.uptime);
+  }
+  if (data.messages_today !== undefined) {
+    document.getElementById('stat-messages').textContent = data.messages_today;
+  }
+  if (data.active_groups !== undefined) {
+    document.getElementById('stat-groups').textContent = data.active_groups;
+  }
+  if (data.scheduled_tasks !== undefined) {
+    document.getElementById('stat-tasks').textContent = data.scheduled_tasks;
+  }
+  if (data.memory_usage) {
+    document.getElementById('info-memory').textContent = (data.memory_usage / 1024 / 1024).toFixed(0) + ' MB';
+  }
+  if (data.platform) {
+    document.getElementById('info-platform').textContent = data.platform;
+  }
+  if (data.node_version) {
+    document.getElementById('info-node').textContent = data.node_version;
+  }
+}
+
+// Restart NanoClaw
+async function restartNanoClaw() {
+  if (!confirm('Restart NanoClaw? This will disconnect briefly while the system restarts.')) {
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/restart', { method: 'POST' });
+    if (response.ok) {
+      alert('✅ Restart initiated. The dashboard will reconnect automatically in ~10 seconds.');
+      // Reload page after delay to reconnect
+      setTimeout(() => window.location.reload(), 10000);
+    } else {
+      alert('❌ Restart failed: ' + response.statusText);
+    }
+  } catch (err) {
+    alert('❌ Restart error: ' + err.message);
+  }
+}
+
+init();
+</script>
+
+</body>
+</html>
