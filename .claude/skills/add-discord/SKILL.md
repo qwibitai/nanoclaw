@@ -70,10 +70,12 @@ If the user doesn't have a bot token, tell them:
 > 5. Under **Privileged Gateway Intents**, enable:
 >    - **Message Content Intent** (required to read message text)
 >    - **Server Members Intent** (optional, for member display names)
-> 6. Go to **OAuth2** > **URL Generator**:
->    - Scopes: select `bot`
->    - Bot Permissions: select `Send Messages`, `Read Message History`, `View Channels`
->    - Copy the generated URL and open it in your browser to invite the bot to your server
+> 6. Scroll down and make sure **"Requires OAuth2 Code Grant"** is **OFF** — if it's on, the bot invite will fail with a confusing error
+> 7. Invite the bot to your server by opening this URL (replace `YOUR_CLIENT_ID` with the Client ID from the **General Information** tab):
+>    ```
+>    https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=68608
+>    ```
+>    Select your server and click **Authorize**
 
 Wait for the user to provide the token.
 
@@ -166,13 +168,27 @@ tail -f logs/nanoclaw.log
 
 ## Troubleshooting
 
+### "This integration requires a code grant" when inviting
+
+Go to the [Discord Developer Portal](https://discord.com/developers/applications) → **Bot** tab → scroll down → toggle **"Requires OAuth2 Code Grant"** OFF → Save Changes. Then try the invite URL again.
+
+### Bot invite URL — skip the OAuth2 URL Generator
+
+The OAuth2 URL Generator in the Developer Portal requires a redirect URI when non-bot scopes are selected, and the `bot` scope can be hard to find. It's simpler to build the invite URL directly:
+
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=68608
+```
+
+`YOUR_CLIENT_ID` is on the **General Information** tab. Permissions: View Channels (1024) + Send Messages (2048) + Read Message History (65536) = 68608.
+
 ### Bot not responding
 
 1. Check `DISCORD_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'dc:%'"`
 3. For non-main channels: message must include trigger pattern (@mention the bot)
 4. Service is running: `launchctl list | grep nanoclaw`
-5. Verify the bot has been invited to the server (check OAuth2 URL was used)
+5. Verify the bot has been invited to the server using the invite URL above
 
 ### Bot only responds to @mentions
 
