@@ -24,11 +24,8 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { createStreamParser, parseLastOutput } from './output-parser.js';
 import { RegisteredGroup } from './types.js';
-
-// Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 export interface ContainerInput {
   prompt: string;
@@ -301,9 +298,8 @@ export async function runContainerAgent(
     delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
-    let parseBuffer = '';
-    let newSessionId: string | undefined;
-    let outputChain = Promise.resolve();
+    // streamParser is created lazily (only when onOutput is provided)
+    let streamParser: ReturnType<typeof createStreamParser> | undefined;
 
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
@@ -325,35 +321,13 @@ export async function runContainerAgent(
 
       // Stream-parse for output markers
       if (onOutput) {
-        parseBuffer += chunk;
-        let startIdx: number;
-        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
-          const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-          if (endIdx === -1) break; // Incomplete pair, wait for more data
-
-          const jsonStr = parseBuffer
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
-
-          try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
-            }
+        if (!streamParser) {
+          streamParser = createStreamParser(group.name, onOutput, () => {
             hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
             resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
-          } catch (err) {
-            logger.warn(
-              { group: group.name, error: err },
-              'Failed to parse streamed output chunk',
-            );
-          }
+          });
         }
+        streamParser.push(chunk);
       }
     });
 
@@ -439,11 +413,11 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
+          streamParser!.waitForChain().then(() => {
             resolve({
               status: 'success',
               result: null,
-              newSessionId,
+              newSessionId: streamParser!.getNewSessionId(),
             });
           });
           return;
@@ -542,8 +516,9 @@ export async function runContainerAgent(
       }
 
       // Streaming mode: wait for output chain to settle, return completion marker
-      if (onOutput) {
-        outputChain.then(() => {
+      if (onOutput && streamParser) {
+        streamParser.waitForChain().then(() => {
+          const newSessionId = streamParser!.getNewSessionId();
           logger.info(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
@@ -559,22 +534,7 @@ export async function runContainerAgent(
 
       // Legacy mode: parse the last output marker pair from accumulated stdout
       try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
-
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
-        }
-
-        const output: ContainerOutput = JSON.parse(jsonLine);
+        const output: ContainerOutput = parseLastOutput(stdout);
 
         logger.info(
           {
