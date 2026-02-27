@@ -233,13 +233,33 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  // Detect stale docker group before writing the unit (user systemd only)
+  const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
+  if (dockerGroupStale) {
+    logger.warn(
+      'Docker group not active in systemd session — wrapping ExecStart with sg docker',
+    );
+    console.log(
+      '\n⚠️  Docker group was added mid-session and is not yet active in your systemd context.\n' +
+      '   The service unit will use "sg docker" to inherit the group.\n' +
+      '   For a permanent fix, log out and back in (or reboot).\n',
+    );
+  }
+
+  // When the docker group is stale in the user systemd session, wrap the
+  // ExecStart command with `sg docker -c "..."` so the service process
+  // inherits the docker group without requiring a full re-login.
+  const execStart = dockerGroupStale
+    ? `sg docker -c "${nodePath} ${projectRoot}/dist/index.js"`
+    : `${nodePath} ${projectRoot}/dist/index.js`;
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=${nodePath} ${projectRoot}/dist/index.js
+ExecStart=${execStart}
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
@@ -253,14 +273,6 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   fs.writeFileSync(unitPath, unit);
   logger.info({ unitPath }, 'Wrote systemd unit');
-
-  // Detect stale docker group before starting (user systemd only)
-  const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
-  if (dockerGroupStale) {
-    logger.warn(
-      'Docker group not active in systemd session — user was likely added to docker group mid-session',
-    );
-  }
 
   // Kill orphaned nanoclaw processes to avoid WhatsApp conflict errors
   killOrphanedProcesses(projectRoot);
