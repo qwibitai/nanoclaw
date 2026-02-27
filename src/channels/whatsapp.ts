@@ -363,9 +363,11 @@ export class WhatsAppChannel implements Channel {
         'Flushing outgoing message queue',
       );
       while (this.outgoingQueue.length > 0) {
-        const item = this.outgoingQueue.shift()!;
+        const item = this.outgoingQueue[0];
         // Send directly — queued items are already prefixed by sendMessage
         await this.sock.sendMessage(item.jid, { text: item.text });
+        // Only dequeue after a successful send to avoid losing messages on error
+        this.outgoingQueue.shift();
         logger.info(
           { jid: item.jid, length: item.text.length },
           'Queued message sent',
