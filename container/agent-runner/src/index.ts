@@ -56,8 +56,12 @@ interface SDKUserMessage {
 }
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+// JID-specific close sentinel path — set after reading stdin.
+// Falls back to legacy '_close' for backward compat with older orchestrators.
+let myCloseSentinel: string = '';
+let myJid: string = '';
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -284,19 +288,29 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Check for _close sentinel.
+ * Check for close sentinel. Prefers JID-specific sentinel (_close.{safeJid})
+ * to avoid collisions when multiple containers share a folder.
+ * Falls back to legacy _close for backward compat with older orchestrators.
  */
 function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  // JID-specific sentinel (new protocol)
+  if (myCloseSentinel && fs.existsSync(myCloseSentinel)) {
+    try { fs.unlinkSync(myCloseSentinel); } catch { /* ignore */ }
+    return true;
+  }
+  // Legacy sentinel (backward compat)
+  const legacySentinel = path.join(IPC_INPUT_DIR, '_close');
+  if (fs.existsSync(legacySentinel)) {
+    try { fs.unlinkSync(legacySentinel); } catch { /* ignore */ }
     return true;
   }
   return false;
 }
 
 /**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
+ * Drain all pending IPC input messages addressed to this container.
+ * Messages tagged with a different chatJid are left for the correct container.
+ * Untagged messages (from older orchestrators) are consumed by any container.
  */
 function drainIpcInput(): string[] {
   try {
@@ -310,6 +324,10 @@ function drainIpcInput(): string[] {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        // Skip messages addressed to a different container
+        if (data.chatJid && myJid && data.chatJid !== myJid) {
+          continue;
+        }
         fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
@@ -521,8 +539,14 @@ async function main(): Promise<void> {
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  // Set JID-specific IPC identity for message filtering and close sentinels
+  myJid = containerInput.chatJid;
+  const safeJid = myJid.replace(/[^a-zA-Z0-9-]/g, '_');
+  myCloseSentinel = path.join(IPC_INPUT_DIR, `_close.${safeJid}`);
+
+  // Clean up stale sentinels from previous container runs
+  try { fs.unlinkSync(myCloseSentinel); } catch { /* ignore */ }
+  try { fs.unlinkSync(path.join(IPC_INPUT_DIR, '_close')); } catch { /* ignore */ }
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;

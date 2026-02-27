@@ -277,7 +277,7 @@ describe('GroupQueue', () => {
     // _close should NOT have been written (container is working, not idle)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     const closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+      (call) => typeof call[0] === 'string' && call[0].includes('_close'),
     );
     expect(closeWrites).toHaveLength(0);
 
@@ -320,7 +320,7 @@ describe('GroupQueue', () => {
 
     // _close SHOULD have been written (container is idle)
     const closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+      (call) => typeof call[0] === 'string' && call[0].includes('_close'),
     );
     expect(closeWrites).toHaveLength(1);
 
@@ -363,7 +363,7 @@ describe('GroupQueue', () => {
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
     const closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+      (call) => typeof call[0] === 'string' && call[0].includes('_close'),
     );
     expect(closeWrites).toHaveLength(0);
 
@@ -430,7 +430,7 @@ describe('GroupQueue', () => {
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
     let closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+      (call) => typeof call[0] === 'string' && call[0].includes('_close'),
     );
     expect(closeWrites).toHaveLength(0);
 
@@ -439,7 +439,7 @@ describe('GroupQueue', () => {
     queue.notifyIdle('group1@g.us');
 
     closeWrites = writeFileSync.mock.calls.filter(
-      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+      (call) => typeof call[0] === 'string' && call[0].includes('_close'),
     );
     expect(closeWrites).toHaveLength(1);
 
