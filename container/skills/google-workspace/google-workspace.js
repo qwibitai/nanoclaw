@@ -345,6 +345,64 @@ async function driveRead(token, args) {
   out({ name: meta.name, mimeType: meta.mimeType, content });
 }
 
+async function driveUpload(token, args) {
+  const fs = await import('fs');
+  if (!args.file) die('--file required (path to file)');
+  if (!fs.existsSync(args.file)) die(`File not found: ${args.file}`);
+  const fileName = args.name || args.file.split('/').pop();
+  const fileContent = fs.readFileSync(args.file);
+  const mimeType = args.mimetype || 'application/octet-stream';
+  const boundary = '-------314159265358979323846';
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelimiter = `\r\n--${boundary}--`;
+  const metadata = { name: fileName, mimeType: mimeType };
+  if (args.folder) metadata.parents = [args.folder];
+  const multipartBody = Buffer.concat([
+    Buffer.from(delimiter),
+    Buffer.from('Content-Type: application/json; charset=UTF-8\r\n\r\n'),
+    Buffer.from(JSON.stringify(metadata)),
+    Buffer.from(delimiter),
+    Buffer.from(`Content-Type: ${mimeType}\r\n\r\n`),
+    fileContent,
+    Buffer.from(closeDelimiter),
+  ]);
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,size,webViewLink', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
+    body: multipartBody,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    die(`Drive upload failed: ${res.status} ${text}`);
+  }
+  const result = await res.json();
+  out({ uploaded: true, id: result.id, name: result.name, size: result.size, link: result.webViewLink });
+}
+
+async function driveDownload(token, args) {
+  if (!args.id) die('--id required');
+  if (!args.output) die('--output required (path to save file)');
+  const fs = await import('fs');
+  const meta = await gapi(token, 'GET', `https://www.googleapis.com/drive/v3/files/${args.id}?fields=name,mimeType`);
+  const url = `https://www.googleapis.com/drive/v3/files/${args.id}?alt=media`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) die(`Drive download failed: ${res.status}`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(args.output, buffer);
+  out({ downloaded: true, name: meta.name, size: buffer.length, path: args.output });
+}
+
+async function driveDelete(token, args) {
+  if (!args.id) die('--id required');
+  const url = `https://www.googleapis.com/drive/v3/files/${args.id}`;
+  const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const text = await res.text();
+    die(`Drive delete failed: ${res.status} ${text}`);
+  }
+  out({ deleted: true, id: args.id });
+}
+
 // --- Sheets ---
 
 async function sheetsRead(token, args) {
@@ -466,7 +524,7 @@ async function main() {
   const handlers = {
     gmail: { list: gmailList, read: gmailRead, send: gmailSend, search: gmailSearch, reply: gmailReply },
     calendar: { list: calendarList, calendars: calendarListCalendars, create: calendarCreate, delete: calendarDelete },
-    drive: { list: driveList, search: driveSearch, read: driveRead },
+    drive: { list: driveList, search: driveSearch, read: driveRead, upload: driveUpload, download: driveDownload, delete: driveDelete },
     sheets: { read: sheetsRead, write: sheetsWrite, append: sheetsAppend },
     docs: { read: docsRead, create: docsCreate },
   };
