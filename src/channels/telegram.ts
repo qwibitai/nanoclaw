@@ -116,6 +116,17 @@ export class TelegramChannel implements Channel {
       await next();
     });
 
+    // Command to list available commands
+    this.bot.command('help', (ctx) => {
+      ctx.reply(
+        `/help — Show this list\n` +
+        `/ping — Check if the bot is online\n` +
+        `/status — System status report\n` +
+        `/restart — Restart NanoClaw\n` +
+        `/chatid — Get this chat's registration ID`,
+      );
+    });
+
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
