@@ -5,6 +5,7 @@ FROM node:22-slim
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
+    # Browser automation
     chromium \
     fonts-liberation \
     fonts-noto-color-emoji \
@@ -21,16 +22,41 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    # Core tools
     curl \
+    wget \
     git \
+    jq \
+    # Python (for scripts Adam might write)
+    python3 \
+    python3-pip \
+    # Networking & APIs
+    dnsutils \
+    iputils-ping \
+    openssl \
+    ca-certificates \
+    # File processing
+    zip \
+    unzip \
+    imagemagick \
+    ffmpeg \
+    # Text processing
+
+    gawk \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Make pre-installed packages available from any working directory
+ENV NODE_PATH=/app/node_modules
+
 # Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+RUN npm install -g agent-browser @anthropic-ai/claude-code \
+    typescript \
+    tsx \
+    nodemon
 
 # Create app directory
 WORKDIR /app
@@ -40,6 +66,25 @@ COPY agent-runner/package*.json ./
 
 # Install dependencies
 RUN npm install
+
+# Pre-install useful packages for agent scripts
+# These are available via: import('axios') or require() in Adam's scripts
+RUN npm install \
+    axios \
+    cheerio \
+    nodemailer \
+    csv-parse \
+    csv-stringify \
+    marked \
+    turndown \
+    sharp \
+    pdf-parse \
+    rss-parser \
+    date-fns \
+    lodash \
+    stripe \
+    openai \
+    dotenv
 
 # Copy source code
 COPY agent-runner/ ./

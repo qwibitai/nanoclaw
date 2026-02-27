@@ -64,6 +64,7 @@ export interface ScheduledTask {
   last_run: string | null;
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
+  model?: string;
   created_at: string;
 }
 

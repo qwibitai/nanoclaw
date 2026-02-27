@@ -93,6 +93,25 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+
+  // Add consecutive_errors column for auto-disable after repeated failures
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN consecutive_errors INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add model column if it does not exist (per-task model override)
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN model TEXT DEFAULT NULL`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -340,13 +359,41 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
+
+export function getRecentMessages(
+  chatJid: string,
+  limit: number = 50,
+): { sender_name: string; content: string; timestamp: string; is_from_me: boolean }[] {
+  const sql = `
+    SELECT sender_name, content, timestamp,
+           CASE WHEN is_bot_message = 1 OR sender = 'me' THEN 1 ELSE 0 END as is_from_me
+    FROM messages
+    WHERE chat_jid = ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `;
+  const rows = db.prepare(sql).all(chatJid, limit) as {
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: number;
+  }[];
+  return rows.reverse().map(r => ({
+    sender_name: r.sender_name,
+    content: r.content,
+    timestamp: r.timestamp,
+    is_from_me: r.is_from_me === 1,
+  }));
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, model, next_run, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -356,6 +403,7 @@ export function createTask(
     task.schedule_type,
     task.schedule_value,
     task.context_mode || 'isolated',
+    task.model || null,
     task.next_run,
     task.status,
     task.created_at,
@@ -446,15 +494,37 @@ export function updateTaskAfterRun(
   id: string,
   nextRun: string | null,
   lastResult: string,
+  wasError: boolean = false,
 ): void {
   const now = new Date().toISOString();
-  db.prepare(
-    `
-    UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
-    WHERE id = ?
-  `,
-  ).run(nextRun, now, lastResult, nextRun, id);
+  const MAX_CONSECUTIVE_ERRORS = 5;
+
+  if (wasError) {
+    // Increment consecutive errors; auto-pause after MAX_CONSECUTIVE_ERRORS
+    db.prepare(
+      `
+      UPDATE scheduled_tasks
+      SET next_run = ?, last_run = ?, last_result = ?,
+          consecutive_errors = COALESCE(consecutive_errors, 0) + 1,
+          status = CASE
+            WHEN COALESCE(consecutive_errors, 0) + 1 >= ? THEN 'paused'
+            WHEN ? IS NULL THEN 'completed'
+            ELSE status
+          END
+      WHERE id = ?
+    `,
+    ).run(nextRun, now, lastResult, MAX_CONSECUTIVE_ERRORS, nextRun, id);
+  } else {
+    // Success - reset consecutive errors
+    db.prepare(
+      `
+      UPDATE scheduled_tasks
+      SET next_run = ?, last_run = ?, last_result = ?, consecutive_errors = 0,
+          status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+      WHERE id = ?
+    `,
+    ).run(nextRun, now, lastResult, nextRun, id);
+  }
 }
 
 export function logTaskRun(log: TaskRunLog): void {

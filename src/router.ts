@@ -21,7 +21,22 @@ export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
 }
 
+
+/**
+ * Scrub credentials from outbound messages before sending to users.
+ */
+function scrubOutboundCredentials(text: string): string {
+  return text
+    .replace(/\b(sk|pk|xai|gsk|eyJ)[a-zA-Z0-9_-]{20,}/g, '[REDACTED]')
+    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1[REDACTED]')
+    .replace(/\b(or-|ant-|sk-ant-)[a-zA-Z0-9_-]{20,}/g, '[REDACTED]')
+    .replace(/[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g, '[REDACTED]')
+    .replace(/\b0x[a-fA-F0-9]{64}\b/g, '[REDACTED]')
+    .replace(/(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi, '$1=[REDACTED]');
+}
+
 export function formatOutbound(rawText: string): string {
+  rawText = scrubOutboundCredentials(rawText);
   const text = stripInternalTags(rawText);
   if (!text) return '';
   return text;

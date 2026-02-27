@@ -25,6 +25,31 @@ import {
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { getRecentMessages } from './db.js';
+
+
+/**
+ * Credential scrubbing — redact API keys, tokens, and passwords from text.
+ * Inspired by IronClaw's leak detection. Prevents secrets from leaking
+ * into logs, Discord messages, or agent context.
+ */
+function scrubCredentials(text: string): string {
+  return text
+    // API keys (sk-..., pk-..., xai-..., etc.)
+    .replace(/\b(sk|pk|xai|gsk|eyJ)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
+    // Bearer tokens
+    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***REDACTED***')
+    // OpenRouter / Anthropic keys
+    .replace(/\b(or-|ant-|sk-ant-)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
+    // Discord bot tokens (base64.base64.base64)
+    .replace(/[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g, '***DISCORD_TOKEN_REDACTED***')
+    // Private keys (hex, 64 chars)
+    .replace(/\b0x[a-fA-F0-9]{64}\b/g, '0x***PRIVATE_KEY_REDACTED***')
+    // Generic long hex secrets (32+ chars)
+    .replace(/\b[a-fA-F0-9]{40,}\b/g, '***HEX_REDACTED***')
+    // Password patterns
+    .replace(/(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi, '$1=***REDACTED***');
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -38,6 +63,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   secrets?: Record<string, string>;
 }
 
@@ -156,6 +182,8 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'delegate-requests'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'delegate-responses'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -204,7 +232,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'SIGNALWIRE_PROJECT_ID', 'SIGNALWIRE_API_TOKEN', 'SIGNALWIRE_SPACE_URL', 'SIGNALWIRE_PHONE_NUMBER', 'BASE_WALLET_PRIVATE_KEY']);
 }
 
 function buildContainerArgs(
@@ -249,6 +277,27 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+
+  // Dump recent conversation history to workspace for agent recall
+  try {
+    const messages = getRecentMessages(input.chatJid, 100);
+    if (messages.length > 0) {
+      const conversationsDir = path.join(groupDir, 'conversations');
+      fs.mkdirSync(conversationsDir, { recursive: true });
+      const historyLines = messages.map(m => {
+        const time = new Date(m.timestamp).toISOString().replace('T', ' ').slice(0, 19);
+        const who = m.is_from_me ? 'Adam' : (m.sender_name || 'User');
+        return `[${time}] ${who}: ${m.content}`;
+      });
+      fs.writeFileSync(
+        path.join(conversationsDir, 'recent-history.md'),
+        `# Recent Conversation History\n\nLast ${messages.length} messages (auto-generated before each turn):\n\n${historyLines.join('\n')}\n`
+      );
+    }
+  } catch (err) {
+    logger.debug({ err }, 'Failed to dump conversation history (non-fatal)');
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -361,7 +410,7 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (line) logger.debug({ container: group.folder }, scrubCredentials(line));
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

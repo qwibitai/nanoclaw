@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   secrets?: Record<string, string>;
 }
 
@@ -414,6 +415,7 @@ async function runQuery(
     log(`Additional directories: ${extraDirs.join(', ')}`);
   }
 
+  let lastAssistantText: string | null = null;
   for await (const message of query({
     prompt: stream,
     options: {
@@ -446,6 +448,11 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            // SignalWire credentials (from host .env via secrets)
+            SIGNALWIRE_PROJECT_ID: sdkEnv.SIGNALWIRE_PROJECT_ID || '',
+            SIGNALWIRE_API_TOKEN: sdkEnv.SIGNALWIRE_API_TOKEN || '',
+            SIGNALWIRE_SPACE_URL: sdkEnv.SIGNALWIRE_SPACE_URL || '',
+            SIGNALWIRE_PHONE_NUMBER: sdkEnv.SIGNALWIRE_PHONE_NUMBER || '',
           },
         },
       },
@@ -461,6 +468,15 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Capture text from assistant messages for delegation result output
+      const assistantMsg = message as { uuid: string; message?: { content?: Array<{type?: string; text?: string}> } };
+      if (assistantMsg.message?.content) {
+        const textParts = assistantMsg.message.content
+          .filter((b: {type?: string; text?: string}) => b.type === 'text' && b.text)
+          .map((b: {type?: string; text?: string}) => b.text)
+          .join('\n');
+        if (textParts) lastAssistantText = textParts;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -479,9 +495,15 @@ async function runQuery(
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: textResult || lastAssistantText || null,
         newSessionId
       });
+      // For scheduled tasks/workers: exit the message loop after first result
+      // The SDK stream doesn't close after result, so we must break manually
+      if (containerInput.isScheduledTask) {
+        log('Scheduled task got result, breaking message loop');
+        break;
+      }
     }
   }
 
@@ -513,6 +535,12 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+  }
+
+  // Per-task model override: set ANTHROPIC_MODEL so Claude Code uses the specified model
+  if (containerInput.model) {
+    sdkEnv.ANTHROPIC_MODEL = containerInput.model;
+    log(`Model override: ${containerInput.model}`);
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -557,6 +585,12 @@ async function main(): Promise<void> {
         break;
       }
 
+      // Scheduled tasks and workers: exit after first query (no IPC loop needed)
+      if (containerInput.isScheduledTask) {
+        log('Scheduled task complete, exiting');
+        break;
+      }
+
       // Emit session update so host can track it
       writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
@@ -585,4 +619,4 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().then(() => process.exit(0)).catch(() => process.exit(1));
