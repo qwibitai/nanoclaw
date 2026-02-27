@@ -24,6 +24,68 @@ let poolApis: Api[] = [];
 const senderBotMap: Map<string, { botIndex: number; botName: string }> = new Map();
 let nextPoolIndex = 0;
 
+/**
+ * Split HTML into chunks that respect paragraph boundaries and don't break HTML tags.
+ * Each chunk will be under maxLength characters.
+ */
+function splitHtmlIntelligently(html: string, maxLength: number): string[] {
+  // Split by double newlines (paragraph breaks) first
+  const paragraphs = html.split('\n\n');
+  const chunks: string[] = [];
+  let currentChunk = '';
+
+  for (const para of paragraphs) {
+    // If adding this paragraph would exceed limit, save current chunk and start new one
+    if (currentChunk.length + para.length + 2 > maxLength) {
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+      }
+
+      // If a single paragraph is too long, split it by sentences
+      if (para.length > maxLength) {
+        const sentences = para.split(/(?<=[.!?])\s+/);
+        let sentenceChunk = '';
+
+        for (const sentence of sentences) {
+          if (sentenceChunk.length + sentence.length + 1 > maxLength) {
+            if (sentenceChunk) {
+              chunks.push(sentenceChunk.trim());
+            }
+
+            // If even a single sentence is too long, hard split it
+            if (sentence.length > maxLength) {
+              for (let i = 0; i < sentence.length; i += maxLength) {
+                chunks.push(sentence.slice(i, i + maxLength));
+              }
+              sentenceChunk = '';
+            } else {
+              sentenceChunk = sentence;
+            }
+          } else {
+            sentenceChunk += (sentenceChunk ? ' ' : '') + sentence;
+          }
+        }
+
+        if (sentenceChunk) {
+          currentChunk = sentenceChunk;
+        } else {
+          currentChunk = '';
+        }
+      } else {
+        currentChunk = para;
+      }
+    } else {
+      currentChunk += (currentChunk ? '\n\n' : '') + para;
+    }
+  }
+
+  if (currentChunk) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [html];
+}
+
 export class TelegramChannel implements Channel {
   name = 'telegram';
 
@@ -281,12 +343,12 @@ ${systemStatusBody}`;
       if (html.length <= MAX_LENGTH) {
         await this.bot.api.sendMessage(numericId, html, { parse_mode: 'HTML' });
       } else {
-        for (let i = 0; i < html.length; i += MAX_LENGTH) {
-          await this.bot.api.sendMessage(
-            numericId,
-            html.slice(i, i + MAX_LENGTH),
-            { parse_mode: 'HTML' },
-          );
+        // Split intelligently by paragraphs to avoid breaking HTML tags
+        const chunks = splitHtmlIntelligently(html, MAX_LENGTH);
+        logger.info({ jid, totalLength: html.length, chunks: chunks.length }, 'Splitting long message');
+
+        for (const chunk of chunks) {
+          await this.bot.api.sendMessage(numericId, chunk, { parse_mode: 'HTML' });
         }
       }
       logger.info({ jid, length: text.length }, 'Telegram message sent');
@@ -380,8 +442,12 @@ export async function sendPoolMessage(
     if (html.length <= MAX_LENGTH) {
       await poolApi.sendMessage(numericId, html, { parse_mode: 'HTML' });
     } else {
-      for (let i = 0; i < html.length; i += MAX_LENGTH) {
-        await poolApi.sendMessage(numericId, html.slice(i, i + MAX_LENGTH), { parse_mode: 'HTML' });
+      // Split intelligently by paragraphs to avoid breaking HTML tags
+      const chunks = splitHtmlIntelligently(html, MAX_LENGTH);
+      logger.info({ jid: chatId, sender, totalLength: html.length, chunks: chunks.length }, 'Splitting long pool message');
+
+      for (const chunk of chunks) {
+        await poolApi.sendMessage(numericId, chunk, { parse_mode: 'HTML' });
       }
     }
     logger.info({ jid: chatId, sender, poolIndex: botInfo.botIndex }, 'Pool message sent');
