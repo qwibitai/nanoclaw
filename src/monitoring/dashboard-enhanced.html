@@ -383,7 +383,7 @@ async function loadTradingData() {
           <td>${escapeHtml(s.strategy_id)}</td>
           <td><span class="badge ${s.current_bias === 'bullish' ? 'badge-green' : s.current_bias === 'bearish' ? 'badge-red' : 'badge-gray'}">${s.current_bias || 'neutral'}</span></td>
           <td>${s.confidence ? (s.confidence * 100).toFixed(0) + '%' : '--'}</td>
-          <td>${s.notes ? JSON.parse(s.notes).reasoning || '--' : '--'}</td>
+          <td>${s.notes ? (() => { try { return JSON.parse(s.notes).reasoning || '--'; } catch { return escapeHtml(s.notes.slice(0, 80)); } })() : '--'}</td>
         </tr>
       `).join('');
     }
@@ -434,7 +434,7 @@ function formatUptime(ms) {
 // Initialize
 async function init() {
   // Connect to SSE for live updates
-  const eventSource = new EventSource('/events');
+  const eventSource = new EventSource('/api/events');
 
   eventSource.onopen = () => {
     document.getElementById('statusDot').classList.add('connected');

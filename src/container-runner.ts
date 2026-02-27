@@ -347,7 +347,17 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            // Wrap in try/catch so a single failed send doesn't break the chain.
+            outputChain = outputChain.then(async () => {
+              try {
+                await onOutput(parsed);
+              } catch (err) {
+                logger.error(
+                  { group: group.name, error: err },
+                  'onOutput callback failed, continuing chain',
+                );
+              }
+            });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -431,13 +441,20 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          outputChain
+            .catch((err) => {
+              logger.error(
+                { group: group.name, error: err },
+                'outputChain error during idle cleanup',
+              );
+            })
+            .then(() => {
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
             });
-          });
           return;
         }
 
@@ -524,6 +541,27 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
+        // If we had streaming output, wait for the chain to settle before
+        // resolving — the agent may have already sent its response and the
+        // non-zero exit is just cleanup (e.g. SIGKILL after idle timeout).
+        if (hadStreamingOutput && onOutput) {
+          outputChain
+            .catch((err) => {
+              logger.error(
+                { group: group.name, error: err },
+                'outputChain error during error exit',
+              );
+            })
+            .then(() => {
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
+            });
+          return;
+        }
+
         resolve({
           status: 'error',
           result: null,
@@ -534,17 +572,24 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        outputChain
+          .catch((err) => {
+            logger.error(
+              { group: group.name, error: err },
+              'outputChain error during normal exit',
+            );
+          })
+          .then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
           });
-        });
         return;
       }
 

@@ -161,7 +161,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
 
       try {
         const Database = (await import('better-sqlite3')).default;
-        const dbPath = path.join(process.env.STORE_DIR || 'store', 'messages.db');
+        const dbPath = process.env.STORE_DIR
+          ? path.join(process.env.STORE_DIR, 'messages.db')
+          : path.join(__dirname, '..', 'store', 'messages.db');
         const db = new Database(dbPath);
 
         let sql = `SELECT * FROM trading_positions`;
@@ -190,7 +192,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
 
       try {
         const Database = (await import('better-sqlite3')).default;
-        const dbPath = path.join(process.env.STORE_DIR || 'store', 'messages.db');
+        const dbPath = process.env.STORE_DIR
+          ? path.join(process.env.STORE_DIR, 'messages.db')
+          : path.join(__dirname, '..', 'store', 'messages.db');
         const db = new Database(dbPath);
 
         const metrics = db
@@ -217,7 +221,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
 
       try {
         const Database = (await import('better-sqlite3')).default;
-        const dbPath = path.join(process.env.STORE_DIR || 'store', 'messages.db');
+        const dbPath = process.env.STORE_DIR
+          ? path.join(process.env.STORE_DIR, 'messages.db')
+          : path.join(__dirname, '..', 'store', 'messages.db');
         const db = new Database(dbPath);
 
         const signals = db
