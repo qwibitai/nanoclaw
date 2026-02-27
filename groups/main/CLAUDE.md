@@ -66,6 +66,14 @@ To update an event, delete the old one and create a new one with the changes.
 
 The user's preferred default calendar is named **dgoeke@gmail.com** (hosted on Fastmail). Use this when creating events or checking the schedule unless the user specifies a different calendar.
 
+### Work Calendar Notes
+
+The **Work** calendar (index 7) shows events as "Busy" due to security restrictions from the subscribed work calendar.
+
+**IMPORTANT**: Ignore the daily 6:00 AM - 8:30 AM PT block on the Work calendar on weekdays. This is a "do not schedule" placeholder to prevent East Coast colleagues from scheduling early meetings, not an actual meeting.
+
+When reporting on work meetings, skip this block and report the first *actual* meeting after 8:30 AM PT.
+
 When the user asks about their schedule, upcoming events, or wants to create/modify events, use these tools.
 
 ## WhatsApp Formatting (and other messaging apps)
