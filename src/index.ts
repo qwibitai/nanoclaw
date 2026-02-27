@@ -7,6 +7,8 @@ import {
   DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MIN_OBSERVER_MESSAGES,
+  OBSERVER_ENABLED,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -186,6 +188,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  const botResponses: string[] = [];
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -197,6 +200,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        botResponses.push(text);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -226,6 +230,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     return false;
+  }
+
+  // Observer: fire-and-forget after response delivered (non-blocking)
+  if (OBSERVER_ENABLED && missedMessages.length >= MIN_OBSERVER_MESSAGES) {
+    import('./observer.js')
+      .then(({ observeConversation }) =>
+        observeConversation(
+          group.folder,
+          missedMessages.map((m) => ({
+            sender_name: m.sender_name,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+          botResponses,
+        ),
+      )
+      .catch((err) => logger.warn({ err, group: group.name }, 'Observer failed (non-blocking)'));
   }
 
   return true;

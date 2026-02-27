@@ -1,0 +1,16 @@
+{
+  "version": "1",
+  "generated": "2026-02-27T20:00:00Z",
+  "riskTierRules": {
+    "high": [
+      "src/observer.ts",
+      "src/index.ts",
+      "src/config.ts"
+    ],
+    "low": ["**"]
+  },
+  "requiredEvidence": {
+    "high": ["test-pass", "build-pass", "security-review"],
+    "low": ["test-pass", "build-pass"]
+  }
+}
