@@ -34,6 +34,10 @@ fi
 
 # Diagnostics commands — no set -e (diagnostic scripts should keep going)
 SNAP_CMD='
+  # Ensure systemctl --user works in non-login shells (SSH, cron, etc.)
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
   PERSONA=$(whoami)
 
   echo "=== Service Status ($PERSONA) ==="
@@ -84,6 +88,10 @@ SNAP_CMD='
 '
 
 TAIL_CMD='
+  # Ensure systemctl --user works in non-login shells (SSH, cron, etc.)
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+
   # Illegal state check before tailing
   SYS_SVCS=$(systemctl list-units --type=service --state=running --no-legend "nanoclaw@*" 2>/dev/null | awk "{print \$1}")
   if [ -n "$SYS_SVCS" ]; then
