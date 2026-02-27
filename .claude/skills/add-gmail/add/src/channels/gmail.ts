@@ -7,6 +7,7 @@ import { OAuth2Client } from 'google-auth-library';
 
 import { MAIN_GROUP_FOLDER } from '../config.js';
 import { logger } from '../logger.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -337,3 +338,14 @@ export class GmailChannel implements Channel {
     return '';
   }
 }
+
+registerChannel('gmail', (opts: ChannelOpts) => {
+  const credDir = path.join(os.homedir(), '.gmail-mcp');
+  if (
+    !fs.existsSync(path.join(credDir, 'gcp-oauth.keys.json')) ||
+    !fs.existsSync(path.join(credDir, 'credentials.json'))
+  ) {
+    return null;
+  }
+  return new GmailChannel(opts);
+});
