@@ -12,6 +12,8 @@ const envConfig = readEnvFile([
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
   'ALLOWED_USERS',
+  'OBSERVER_ENABLED',
+  'MIN_OBSERVER_MESSAGES',
 ]);
 
 export const ASSISTANT_NAME =
@@ -85,4 +87,12 @@ export const ALLOWED_USERS: Set<string> = new Set(
     .split(',')
     .map((id) => id.trim())
     .filter(Boolean),
+);
+
+// Observer — auto-compress conversations into prioritized observations
+export const OBSERVER_ENABLED =
+  (process.env.OBSERVER_ENABLED ?? envConfig.OBSERVER_ENABLED ?? 'true') !== 'false';
+export const MIN_OBSERVER_MESSAGES = Math.max(
+  1,
+  parseInt(process.env.MIN_OBSERVER_MESSAGES || envConfig.MIN_OBSERVER_MESSAGES || '5', 10) || 5,
 );
