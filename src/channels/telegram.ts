@@ -190,6 +190,14 @@ ${systemStatusBody}`;
       }
     });
 
+    // Command to restart the service
+    this.bot.command('restart', async (ctx) => {
+      await ctx.reply('Reiniciando NanoClaw...');
+      logger.info('Service restart initiated via /restart command');
+      // launchctl (KeepAlive: true) will restart the process automatically
+      setTimeout(() => process.kill(process.pid, 'SIGTERM'), 500);
+    });
+
     this.bot.on('message:text', async (ctx) => {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
