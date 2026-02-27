@@ -313,10 +313,7 @@ describe('rebase', () => {
     // Set up current base — short file so changes overlap
     const baseDir = path.join(tmpDir, '.nanoclaw', 'base');
     fs.mkdirSync(path.join(baseDir, 'src'), { recursive: true });
-    fs.writeFileSync(
-      path.join(baseDir, 'src', 'index.ts'),
-      'const x = 1;\n',
-    );
+    fs.writeFileSync(path.join(baseDir, 'src', 'index.ts'), 'const x = 1;\n');
 
     // Working tree: skill replaces the same line
     fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });

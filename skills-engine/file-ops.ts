@@ -22,7 +22,9 @@ function nearestExistingPathOrSymlink(candidateAbsPath: string): string {
   }
 }
 
-function resolveRealPathWithSymlinkAwareAnchor(candidateAbsPath: string): string {
+function resolveRealPathWithSymlinkAwareAnchor(
+  candidateAbsPath: string,
+): string {
   const anchorPath = nearestExistingPathOrSymlink(candidateAbsPath);
   const anchorStat = fs.lstatSync(anchorPath);
   let realAnchor: string;
@@ -56,7 +58,9 @@ function safePath(projectRoot: string, relativePath: string): string | null {
   }
 
   const realRoot = fs.realpathSync(root);
-  const realParent = resolveRealPathWithSymlinkAwareAnchor(path.dirname(resolved));
+  const realParent = resolveRealPathWithSymlinkAwareAnchor(
+    path.dirname(resolved),
+  );
   if (!isWithinRoot(realRoot, realParent)) {
     return null;
   }
@@ -64,7 +68,10 @@ function safePath(projectRoot: string, relativePath: string): string | null {
   return resolved;
 }
 
-export function executeFileOps(ops: FileOperation[], projectRoot: string): FileOpsResult {
+export function executeFileOps(
+  ops: FileOperation[],
+  projectRoot: string,
+): FileOpsResult {
   const result: FileOpsResult = {
     success: true,
     executed: [],
@@ -122,7 +129,9 @@ export function executeFileOps(ops: FileOperation[], projectRoot: string): FileO
           return result;
         }
         if (!fs.existsSync(delPath)) {
-          result.warnings.push(`delete: file does not exist (skipped): ${op.path}`);
+          result.warnings.push(
+            `delete: file does not exist (skipped): ${op.path}`,
+          );
           result.executed.push(op);
           break;
         }
@@ -169,7 +178,9 @@ export function executeFileOps(ops: FileOperation[], projectRoot: string): FileO
       }
 
       default: {
-        result.errors.push(`unknown operation type: ${(op as FileOperation).type}`);
+        result.errors.push(
+          `unknown operation type: ${(op as FileOperation).type}`,
+        );
         result.success = false;
         return result;
       }
