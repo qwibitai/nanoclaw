@@ -55,11 +55,13 @@ describe('ensureContainerRuntimeRunning', () => {
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(
-      `${CONTAINER_RUNTIME_BIN} info`,
-      { stdio: 'pipe', timeout: 10000 },
+    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} info`, {
+      stdio: 'pipe',
+      timeout: 10000,
+    });
+    expect(logger.debug).toHaveBeenCalledWith(
+      'Container runtime already running',
     );
-    expect(logger.debug).toHaveBeenCalledWith('Container runtime already running');
   });
 
   it('throws when docker info fails', () => {
@@ -79,7 +81,9 @@ describe('ensureContainerRuntimeRunning', () => {
 describe('cleanupOrphans', () => {
   it('stops orphaned nanoclaw containers', () => {
     // docker ps returns container names, one per line
-    mockExecSync.mockReturnValueOnce('nanoclaw-group1-111\nnanoclaw-group2-222\n');
+    mockExecSync.mockReturnValueOnce(
+      'nanoclaw-group1-111\nnanoclaw-group2-222\n',
+    );
     // stop calls succeed
     mockExecSync.mockReturnValue('');
 

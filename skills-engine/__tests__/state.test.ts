@@ -66,7 +66,9 @@ describe('state', () => {
     expect(state.applied_skills).toHaveLength(1);
     expect(state.applied_skills[0].name).toBe('my-skill');
     expect(state.applied_skills[0].version).toBe('1.0.0');
-    expect(state.applied_skills[0].file_hashes).toEqual({ 'src/foo.ts': 'abc123' });
+    expect(state.applied_skills[0].file_hashes).toEqual({
+      'src/foo.ts': 'abc123',
+    });
   });
 
   it('re-applying same skill replaces it', () => {

@@ -40,9 +40,7 @@ export function acquireLock(): () => void {
   } catch {
     // Lock file exists — check if it's stale or from a dead process
     try {
-      const existing: LockInfo = JSON.parse(
-        fs.readFileSync(lockPath, 'utf-8'),
-      );
+      const existing: LockInfo = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
       if (!isStale(existing) && isProcessAlive(existing.pid)) {
         throw new Error(
           `Operation in progress (pid ${existing.pid}, started ${new Date(existing.timestamp).toISOString()}). If this is stale, delete ${LOCK_FILE}`,
@@ -59,11 +57,17 @@ export function acquireLock(): () => void {
       // Corrupt or unreadable — overwrite
     }
 
-    try { fs.unlinkSync(lockPath); } catch { /* already gone */ }
+    try {
+      fs.unlinkSync(lockPath);
+    } catch {
+      /* already gone */
+    }
     try {
       fs.writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: 'wx' });
     } catch {
-      throw new Error('Lock contention: another process acquired the lock. Retry.');
+      throw new Error(
+        'Lock contention: another process acquired the lock. Retry.',
+      );
     }
     return () => releaseLock();
   }

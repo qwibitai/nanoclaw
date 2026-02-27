@@ -9,7 +9,9 @@ export function createTempDir(): string {
 }
 
 export function setupNanoclawDir(tmpDir: string): void {
-  fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'base', 'src'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'base', 'src'), {
+    recursive: true,
+  });
   fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'backup'), { recursive: true });
 }
 
@@ -26,23 +28,26 @@ export function createMinimalState(tmpDir: string): void {
   });
 }
 
-export function createSkillPackage(tmpDir: string, opts: {
-  skill?: string;
-  version?: string;
-  core_version?: string;
-  adds?: string[];
-  modifies?: string[];
-  addFiles?: Record<string, string>;
-  modifyFiles?: Record<string, string>;
-  conflicts?: string[];
-  depends?: string[];
-  test?: string;
-  structured?: any;
-  file_ops?: any[];
-  post_apply?: string[];
-  min_skills_system_version?: string;
-  dirName?: string;
-}): string {
+export function createSkillPackage(
+  tmpDir: string,
+  opts: {
+    skill?: string;
+    version?: string;
+    core_version?: string;
+    adds?: string[];
+    modifies?: string[];
+    addFiles?: Record<string, string>;
+    modifyFiles?: Record<string, string>;
+    conflicts?: string[];
+    depends?: string[];
+    test?: string;
+    structured?: any;
+    file_ops?: any[];
+    post_apply?: string[];
+    min_skills_system_version?: string;
+    dirName?: string;
+  },
+): string {
   const skillDir = path.join(tmpDir, opts.dirName ?? 'skill-pkg');
   fs.mkdirSync(skillDir, { recursive: true });
 
@@ -60,7 +65,8 @@ export function createSkillPackage(tmpDir: string, opts: {
     file_ops: opts.file_ops,
   };
   if (opts.post_apply) manifest.post_apply = opts.post_apply;
-  if (opts.min_skills_system_version) manifest.min_skills_system_version = opts.min_skills_system_version;
+  if (opts.min_skills_system_version)
+    manifest.min_skills_system_version = opts.min_skills_system_version;
 
   fs.writeFileSync(path.join(skillDir, 'manifest.yaml'), stringify(manifest));
 
@@ -87,7 +93,10 @@ export function createSkillPackage(tmpDir: string, opts: {
 
 export function initGitRepo(dir: string): void {
   execSync('git init', { cwd: dir, stdio: 'pipe' });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: 'pipe' });
+  execSync('git config user.email "test@test.com"', {
+    cwd: dir,
+    stdio: 'pipe',
+  });
   execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' });
   execSync('git config rerere.enabled true', { cwd: dir, stdio: 'pipe' });
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n');
