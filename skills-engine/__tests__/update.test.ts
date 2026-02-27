@@ -3,7 +3,12 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { stringify } from 'yaml';
 
-import { cleanup, createTempDir, initGitRepo, setupNanoclawDir } from './test-helpers.js';
+import {
+  cleanup,
+  createTempDir,
+  initGitRepo,
+  setupNanoclawDir,
+} from './test-helpers.js';
 
 let tmpDir: string;
 const originalCwd = process.cwd();
