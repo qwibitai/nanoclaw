@@ -6,9 +6,17 @@ import { GroupQueue } from './group-queue.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  IDLE_BEFORE_EVICT: 600000,
+  EVICTION_TIMEOUT: 14400000,
+  GRACE_TIMEOUT: 30000,
 }));
 
-// Mock fs operations used by sendMessage/closeStdin
+// Mock container-runtime used by hardStop
+vi.mock('./container-runtime.js', () => ({
+  stopContainer: (name: string) => `docker stop ${name}`,
+}));
+
+// Mock fs operations used by sendMessage/writeCloseSentinel
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -395,6 +403,292 @@ describe('GroupQueue', () => {
     expect(result).toBe(false);
 
     resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- 4-state timeout system ---
+
+  it('sendMessage returns false for stopping containers', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'test-group');
+    queue.notifyIdle('group1@g.us');
+
+    // Soft-stop the container
+    queue.softStop('group1@g.us');
+
+    // sendMessage should return false — container is stopping
+    const result = queue.sendMessage('group1@g.us', 'hello');
+    expect(result).toBe(false);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('IDLE container transitions to EVICTABLE after IDLE_BEFORE_EVICT', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'test-group');
+    queue.notifyIdle('group1@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Before IDLE_BEFORE_EVICT (600000ms), container should NOT be soft-stopped
+    await vi.advanceTimersByTimeAsync(599999);
+    let closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // After IDLE_BEFORE_EVICT, container transitions to EVICTABLE (not stopped yet)
+    await vi.advanceTimersByTimeAsync(1);
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // After EVICTION_TIMEOUT (14400000ms), container should be soft-stopped
+    await vi.advanceTimersByTimeAsync(14400000);
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('IDLE container is NOT evicted by queue pressure (protected)', async () => {
+    const fs = await import('fs');
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Mark group1 as idle (protected — still within IDLE_BEFORE_EVICT)
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'folder-1');
+    queue.notifyIdle('group1@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Queue a third group (creates queue pressure)
+    queue.enqueueMessageCheck('group3@g.us');
+
+    // group1 should NOT be evicted (it's IDLE, not EVICTABLE)
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    completionCallbacks.forEach((cb) => cb());
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('EVICTABLE container IS evicted by queue pressure', async () => {
+    const fs = await import('fs');
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Mark group1 as idle
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'folder-1');
+    queue.notifyIdle('group1@g.us');
+
+    // Advance past IDLE_BEFORE_EVICT so group1 becomes EVICTABLE
+    await vi.advanceTimersByTimeAsync(600000);
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Queue a third group (creates queue pressure)
+    queue.enqueueMessageCheck('group3@g.us');
+
+    // group1 SHOULD be evicted (it's EVICTABLE and there's queue pressure)
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    completionCallbacks.forEach((cb) => cb());
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('eviction guard: does not evict when stoppingCount >= waitingGroups', async () => {
+    const fs = await import('fs');
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots
+    queue.enqueueMessageCheck('group1@g.us');
+    queue.enqueueMessageCheck('group2@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Mark both as idle and advance past protection
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'folder-1');
+    queue.registerProcess('group2@g.us', {} as any, 'container-2', 'folder-2');
+    queue.notifyIdle('group1@g.us');
+    queue.notifyIdle('group2@g.us');
+    await vi.advanceTimersByTimeAsync(600000);
+
+    // Soft-stop group1 (now stoppingCount = 1)
+    queue.softStop('group1@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Queue one group (waitingGroups = 1, stoppingCount = 1) — guard should prevent eviction
+    queue.enqueueMessageCheck('group3@g.us');
+
+    // group2 should NOT be evicted (stoppingCount >= waitingGroups)
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    completionCallbacks.forEach((cb) => cb());
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('reactivate clears eviction timers when message arrives', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'test-group');
+    queue.notifyIdle('group1@g.us');
+
+    // Advance partially into IDLE_BEFORE_EVICT
+    await vi.advanceTimersByTimeAsync(300000);
+
+    // Send a message — should reactivate (clear timers)
+    queue.sendMessage('group1@g.us', 'hello');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Advance past what would have been IDLE_BEFORE_EVICT + EVICTION_TIMEOUT
+    await vi.advanceTimersByTimeAsync(600000 + 14400000);
+
+    // Should NOT have been soft-stopped (timers were cleared by reactivate)
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('idle → reactivate → idle again starts fresh eviction cycle', async () => {
+    const fs = await import('fs');
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess('group1@g.us', {} as any, 'container-1', 'test-group');
+
+    // First idle cycle
+    queue.notifyIdle('group1@g.us');
+
+    // Advance partially into IDLE_BEFORE_EVICT
+    await vi.advanceTimersByTimeAsync(300000);
+
+    // Reactivate via message
+    queue.sendMessage('group1@g.us', 'hello');
+
+    // Go idle again — should start a fresh timer cycle
+    queue.notifyIdle('group1@g.us');
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Advance by IDLE_BEFORE_EVICT - 1ms: should NOT be evictable/stopped yet
+    await vi.advanceTimersByTimeAsync(599999);
+    let closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Advance 1ms more → now EVICTABLE (but not stopped yet — needs EVICTION_TIMEOUT)
+    await vi.advanceTimersByTimeAsync(1);
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Advance EVICTION_TIMEOUT → should be soft-stopped
+    await vi.advanceTimersByTimeAsync(14400000);
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(1);
+
+    resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
 
