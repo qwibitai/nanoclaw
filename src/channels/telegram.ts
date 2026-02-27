@@ -3,7 +3,7 @@ import path from 'path';
 
 import { Api, Bot } from 'grammy';
 
-import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, GROUPS_DIR, RESET_COMMAND_PATTERN, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -227,8 +227,8 @@ export class TelegramChannel implements Channel {
     });
 
     this.bot.on('message:text', async (ctx) => {
-      // Skip commands
-      if (ctx.message.text.startsWith('/')) return;
+      // Skip bot commands (but allow /reset and /clear through)
+      if (ctx.message.text.startsWith('/') && !RESET_COMMAND_PATTERN.test(ctx.message.text)) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;

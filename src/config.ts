@@ -71,6 +71,8 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+export const RESET_COMMAND_PATTERN = /\/(?:reset|clear)\b/i;
+
 // Timezone for display formatting and container local time (TZ env var).
 // Cron/once schedules are interpreted in UTC, not this timezone.
 export const TIMEZONE =

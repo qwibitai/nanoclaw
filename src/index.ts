@@ -6,6 +6,7 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  RESET_COMMAND_PATTERN,
   SLACK_ALLOWED_USER_ID,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
@@ -25,6 +26,7 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -369,6 +371,20 @@ async function startMessageLoop(): Promise<void> {
               TRIGGER_PATTERN.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
+          }
+
+          // Check for /reset or /clear command
+          const hasResetCommand = groupMessages.some((m) =>
+            RESET_COMMAND_PATTERN.test(m.content.trim()),
+          );
+          if (hasResetCommand) {
+            delete sessions[group.folder];
+            deleteSession(group.folder);
+            lastAgentTimestamp[chatJid] = new Date().toISOString();
+            saveState();
+            logger.info({ group: group.name, chatJid }, 'Session reset by user command');
+            await channel.sendMessage(chatJid, 'Session cleared. Next message starts a fresh conversation.');
+            continue;
           }
 
           // Pull all messages since lastAgentTimestamp so non-trigger
