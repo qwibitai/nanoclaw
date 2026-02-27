@@ -98,6 +98,14 @@ The action replaces everything between the markers with the token count.
 | `percentage` | Percentage of context window (e.g., `17`) |
 | `badge` | The formatted text that was inserted (e.g., `34.9k tokens · 17% of context window`) |
 
+## Examples
+
+Repos using repo-tokens:
+
+| Repo | Badge |
+|------|-------|
+| [NanoClaw](https://github.com/qwibitai/NanoClaw) | ![tokens](https://raw.githubusercontent.com/qwibitai/NanoClaw/main/repo-tokens/badge.svg) |
+
 ## How it works
 
 Composite GitHub Action. Installs tiktoken, runs ~60 lines of inline Python. Takes about 10 seconds.
