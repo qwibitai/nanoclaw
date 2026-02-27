@@ -7,7 +7,6 @@ import {
   DATA_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
-  TIMEZONE,
 } from './config.js';
 import { sendPoolMessage } from './channels/telegram.js';
 import { AvailableGroup } from './container-runner.js';
@@ -224,7 +223,7 @@ export async function processTaskIpc(
         if (scheduleType === 'cron') {
           try {
             const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: TIMEZONE,
+              tz: 'UTC',
             });
             nextRun = interval.next().toISOString();
           } catch {
@@ -245,7 +244,17 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
+          const raw = data.schedule_value;
+          const hasExplicitTZ =
+            /[Zz]$/.test(raw) || /[+-]\d{2}:\d{2}$/.test(raw);
+          if (!hasExplicitTZ) {
+            logger.warn(
+              { scheduleValue: raw },
+              'once timestamp missing UTC indicator, assuming UTC',
+            );
+          }
+          const normalized = hasExplicitTZ ? raw : `${raw}Z`;
+          const scheduled = new Date(normalized);
           if (isNaN(scheduled.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },

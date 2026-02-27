@@ -71,8 +71,8 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
-// Timezone for scheduled tasks (cron expressions, etc.)
-// Uses system timezone by default
+// Timezone for display formatting and container local time (TZ env var).
+// Cron/once schedules are interpreted in UTC, not this timezone.
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 

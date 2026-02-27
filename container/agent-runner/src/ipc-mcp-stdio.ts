@@ -20,6 +20,24 @@ const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
+function formatNextRunPT(iso: string | null | undefined): string {
+  if (!iso) return 'N/A';
+  try {
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return iso;
+    return date.toLocaleString('en-US', {
+      timeZone: 'America/Los_Angeles',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
 
@@ -81,28 +99,33 @@ MESSAGING BEHAVIOR - The task agent's output is sent to the user or group. It ca
 \u2022 Only send a message when there's something to report (e.g., "notify me if...")
 \u2022 Never send a message (background maintenance tasks)
 
-SCHEDULE VALUE FORMAT (all times are Pacific Time / America/Los_Angeles):
-\u2022 cron: Standard cron expression in Pacific Time (e.g., "0 6 * * *" for daily at 6am PT, "0 9 * * 1" for Mondays at 9am PT)
+SCHEDULE VALUE FORMAT (all times in UTC):
+\u2022 cron: Standard cron expression in UTC (e.g., "0 14 * * *" for 2pm UTC = 6am PT, "0 17 * * 1" for Mondays 5pm UTC = 9am PT)
 \u2022 interval: Milliseconds between runs (e.g., "300000" for 5 minutes, "3600000" for 1 hour)
-\u2022 once: Pacific Time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00" for 3:30pm PT). Do NOT use UTC or Z suffix \u2014 times are interpreted as Pacific Time.`,
+\u2022 once: UTC timestamp with "Z" suffix (e.g., "2026-02-01T23:30:00Z"). Explicit offsets like "-07:00" are also accepted and converted.
+
+NOTE: The user is in Pacific Time (America/Los_Angeles). Convert accordingly when discussing times with the user.`,
   {
     prompt: z.string().describe('What the agent should do when the task runs. For isolated mode, include all necessary context here.'),
     schedule_type: z.enum(['cron', 'interval', 'once']).describe('cron=recurring at specific times, interval=recurring every N ms, once=run once at specific time'),
-    schedule_value: z.string().describe('cron: "0 6 * * *" (6am PT) | interval: milliseconds like "300000" | once: Pacific Time timestamp like "2026-02-01T15:30:00" (no Z suffix!)'),
+    schedule_value: z.string().describe('cron: "0 14 * * *" (2pm UTC = 6am PT) | interval: milliseconds like "300000" | once: UTC timestamp with Z suffix like "2026-02-01T23:30:00Z" (offsets like "-07:00" also accepted)'),
     context_mode: z.enum(['group', 'isolated']).default('group').describe('group=runs with chat history and memory, isolated=fresh session (include context in prompt)'),
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
   },
   async (args) => {
-    // Validate schedule_value before writing IPC
+    // Validate schedule_value and compute PT confirmation in one pass
+    let confirmationTime = '';
     if (args.schedule_type === 'cron') {
+      let cron;
       try {
-        CronExpressionParser.parse(args.schedule_value);
+        cron = CronExpressionParser.parse(args.schedule_value, { tz: 'UTC' });
       } catch {
         return {
           content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
           isError: true,
         };
       }
+      confirmationTime = ` → next run: ${formatNextRunPT(cron.next().toISOString())}`;
     } else if (args.schedule_type === 'interval') {
       const ms = parseInt(args.schedule_value, 10);
       if (isNaN(ms) || ms <= 0) {
@@ -111,20 +134,24 @@ SCHEDULE VALUE FORMAT (all times are Pacific Time / America/Los_Angeles):
           isError: true,
         };
       }
+      confirmationTime = ` → next run: ${formatNextRunPT(new Date(Date.now() + ms).toISOString())}`;
     } else if (args.schedule_type === 'once') {
-      if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+      const v = args.schedule_value;
+      // Accept Z suffix or any explicit offset (±HH:MM) — reject naive timestamps
+      if (!/[Zz]$/.test(v) && !/[+-]\d{2}:\d{2}$/.test(v)) {
         return {
-          content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Ambiguous timestamp "${v}" — include a UTC indicator. Use "Z" suffix (e.g., "2026-02-01T23:30:00Z") or an explicit offset (e.g., "+00:00", "-07:00").` }],
           isError: true,
         };
       }
-      const date = new Date(args.schedule_value);
+      const date = new Date(v);
       if (isNaN(date.getTime())) {
         return {
-          content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+          content: [{ type: 'text' as const, text: `Invalid timestamp: "${v}". Use format like "2026-02-01T23:30:00Z".` }],
           isError: true,
         };
       }
+      confirmationTime = ` → ${formatNextRunPT(date.toISOString())}`;
     }
 
     // Non-main groups can only schedule for themselves
@@ -141,10 +168,10 @@ SCHEDULE VALUE FORMAT (all times are Pacific Time / America/Los_Angeles):
       timestamp: new Date().toISOString(),
     };
 
-    const filename = writeIpcFile(TASKS_DIR, data);
+    writeIpcFile(TASKS_DIR, data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task scheduled: ${args.schedule_type} - ${args.schedule_value}${confirmationTime}` }],
     };
   },
 );
@@ -174,7 +201,7 @@ server.tool(
       const formatted = tasks
         .map(
           (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
-            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
+            `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${formatNextRunPT(t.next_run)}`,
         )
         .join('\n');
 

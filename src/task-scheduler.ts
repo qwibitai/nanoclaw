@@ -7,7 +7,6 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
-  TIMEZONE,
 } from './config.js';
 import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
 import {
@@ -187,7 +186,7 @@ async function runTask(
   let nextRun: string | null = null;
   if (task.schedule_type === 'cron') {
     const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
+      tz: 'UTC',
     });
     nextRun = interval.next().toISOString();
   } else if (task.schedule_type === 'interval') {

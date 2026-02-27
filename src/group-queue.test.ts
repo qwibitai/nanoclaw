@@ -378,6 +378,34 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('rejects duplicate task enqueue while task is already running', async () => {
+    let resolveTask: () => void;
+    let taskRunCount = 0;
+
+    const taskFn = async () => {
+      taskRunCount++;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    };
+
+    // Start the task (runs immediately since nothing is active)
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskRunCount).toBe(1);
+
+    // Try to enqueue the same task ID while it's running — should be skipped
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Complete the running task
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Task should have only run once
+    expect(taskRunCount).toBe(1);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
