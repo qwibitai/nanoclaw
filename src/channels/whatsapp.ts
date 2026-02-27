@@ -38,6 +38,7 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private shuttingDown = false;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -61,13 +62,14 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-    const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-      logger.warn(
-        { err },
-        'Failed to fetch latest WA Web version, using default',
-      );
-      return { version: undefined };
-    });
+    // TODO: re-enable fetchLatestWaWebVersion once upstream version issue is resolved
+    // const { version: fetchedVersion } = await fetchLatestWaWebVersion({}).catch((err) => {
+    //   logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+    //   return { version: undefined };
+    // });
+    // const version: [number, number, number] = fetchedVersion ?? [2, 3000, 1034003740];
+    const version: [number, number, number] = [2, 3000, 1033893291];
+    logger.info({ version }, 'Using WA Web version');
     this.sock = makeWASocket({
       version,
       auth: {
@@ -107,11 +109,12 @@ export class WhatsAppChannel implements Channel {
           'Connection closed',
         );
 
-        if (shouldReconnect) {
+        if (shouldReconnect && !this.shuttingDown) {
           logger.info('Reconnecting...');
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
+              if (this.shuttingDown) return;
               this.connectInternal().catch((err2) => {
                 logger.error({ err: err2 }, 'Reconnection retry failed');
               });
@@ -232,7 +235,11 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    _options?: { thread_ts?: string },
+  ): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
@@ -271,8 +278,11 @@ export class WhatsAppChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    this.shuttingDown = true;
     this.connected = false;
     this.sock?.end(undefined);
+    // Give WhatsApp server time to clean up the session
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

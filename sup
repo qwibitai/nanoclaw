@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+# sup — NanoClaw diagnostics (no sudo, per-tenant)
+# Usage: sup [--snap]             Auto-detects local/gcp/oci
+#        sup --snap               Quick status snapshot
+#        sup gcp|oci [--snap]     Force remote target
+
+set -euo pipefail
+
+# Parse arguments
+TARGET=""
+MODE="tail"
+
+for arg in "$@"; do
+  case "$arg" in
+    gcp|oci) TARGET="$arg" ;;
+    --snap)  MODE="snap" ;;
+    *)       echo "Usage: sup [gcp|oci] [--snap]"; exit 1 ;;
+  esac
+done
+
+# Auto-detect target if not specified
+if [ -z "$TARGET" ]; then
+  if [ -d "$HOME/nanoclaw" ]; then
+    TARGET="local"
+  elif [ -n "${NANOCLAW_GCP_ZONE:-}" ] && [ -n "${NANOCLAW_GCP_VM:-}" ]; then
+    TARGET="gcp"
+  elif [ -n "${NANOCLAW_HOST:-}" ]; then
+    TARGET="oci"
+  else
+    echo "Cannot detect target. Either run from a nanoclaw host or set NANOCLAW_GCP_ZONE+NANOCLAW_GCP_VM or NANOCLAW_HOST."
+    exit 1
+  fi
+fi
+
+# Diagnostics commands — no set -e (diagnostic scripts should keep going)
+SNAP_CMD='
+  PERSONA=$(whoami)
+
+  echo "=== Service Status ($PERSONA) ==="
+
+  # Illegal state: system-level nanoclaw services
+  SYS_SVCS=$(systemctl list-units --type=service --state=running,failed --no-legend "nanoclaw@*" 2>/dev/null | awk "{print \$1}")
+  if [ -n "$SYS_SVCS" ]; then
+    echo "!! ILLEGAL: system-level services detected (multi-tenant requires user-level only):"
+    echo "$SYS_SVCS"
+    echo
+  fi
+
+  if systemctl --user is-active nanoclaw >/dev/null 2>&1; then
+    systemctl --user status nanoclaw --no-pager 2>/dev/null || true
+  elif systemctl --user is-failed nanoclaw >/dev/null 2>&1; then
+    echo "!! nanoclaw service FAILED"
+    systemctl --user status nanoclaw --no-pager 2>/dev/null || true
+  else
+    echo "(nanoclaw service not running)"
+  fi
+
+  echo
+  echo "=== Recent Logs ==="
+  journalctl --user -u nanoclaw --no-pager -n 30 2>/dev/null || tail -30 ~/nanoclaw/logs/nanoclaw.log 2>/dev/null || echo "(no logs)"
+
+  echo
+  echo "=== Active Containers ==="
+  docker ps --filter name=nanoclaw- --format "table {{.Names}}\t{{.Status}}\t{{.Command}}" 2>/dev/null || echo "(docker not available)"
+
+  # Cross-tenant container leak check
+  ENV_DATA=$(cat ~/nanoclaw/.env 2>/dev/null || true)
+  INSTANCE_ID=$(echo "$ENV_DATA" | grep -m1 "^INSTANCE_ID=" | cut -d= -f2- || true)
+  EXPECTED_PREFIX="nanoclaw-${INSTANCE_ID:-$PERSONA}"
+  FOREIGN=$(docker ps --filter "name=nanoclaw-" --format "{{.Names}}" 2>/dev/null | grep -v "^${EXPECTED_PREFIX}-" || true)
+  if [ -n "$FOREIGN" ]; then
+    echo
+    echo "!! ILLEGAL: containers with foreign prefix (possible cross-tenant leak):"
+    echo "$FOREIGN"
+  fi
+
+  echo
+  echo "=== Scheduled Tasks ==="
+  if command -v sqlite3 &>/dev/null && [ -f ~/nanoclaw/store/messages.db ]; then
+    sqlite3 ~/nanoclaw/store/messages.db "SELECT id, status, next_run FROM scheduled_tasks WHERE status='"'"'active'"'"' ORDER BY next_run LIMIT 10;" 2>/dev/null || echo "(query failed)"
+  else
+    echo "(sqlite3 not available or db not found)"
+  fi
+'
+
+TAIL_CMD='
+  # Illegal state check before tailing
+  SYS_SVCS=$(systemctl list-units --type=service --state=running --no-legend "nanoclaw@*" 2>/dev/null | awk "{print \$1}")
+  if [ -n "$SYS_SVCS" ]; then
+    echo "!! ILLEGAL: system-level services detected: $SYS_SVCS"
+  fi
+
+  if systemctl --user is-active nanoclaw >/dev/null 2>&1; then
+    echo "Tailing nanoclaw (user:$(whoami)) ..."
+    journalctl --user -u nanoclaw -f --no-pager 2>/dev/null || tail -f ~/nanoclaw/logs/nanoclaw.log
+  else
+    echo "(nanoclaw service not running for $(whoami))"
+  fi
+'
+
+if [[ "$TARGET" == "local" ]]; then
+  if [[ "$MODE" == "snap" ]]; then
+    eval "$SNAP_CMD"
+  else
+    eval "$TAIL_CMD"
+  fi
+
+elif [[ "$TARGET" == "gcp" ]]; then
+  GCP_ZONE="${NANOCLAW_GCP_ZONE:?Set NANOCLAW_GCP_ZONE (e.g. us-central1-a)}"
+  GCP_VM="${NANOCLAW_GCP_VM:?Set NANOCLAW_GCP_VM (e.g. nanoclaw-vm)}"
+
+  if [[ "$MODE" == "snap" ]]; then
+    gcloud compute ssh "$GCP_VM" --zone="$GCP_ZONE" --tunnel-through-iap --command="$SNAP_CMD"
+  else
+    echo "Tailing NanoClaw logs on GCP $GCP_VM (Ctrl+C to stop)..."
+    gcloud compute ssh "$GCP_VM" --zone="$GCP_ZONE" --tunnel-through-iap --command="$TAIL_CMD"
+  fi
+
+elif [[ "$TARGET" == "oci" ]]; then
+  HOST="${NANOCLAW_HOST:?Set NANOCLAW_HOST to the server IP/hostname}"
+  USER="${NANOCLAW_USER:-ubuntu}"
+
+  if [[ "$MODE" == "snap" ]]; then
+    ssh "$USER@$HOST" bash -s <<< "$SNAP_CMD"
+  else
+    echo "Tailing NanoClaw logs on OCI $HOST (Ctrl+C to stop)..."
+    ssh "$USER@$HOST" bash -s <<< "$TAIL_CMD"
+  fi
+fi

@@ -8,6 +8,12 @@ vi.mock('./config.js', () => ({
   MAX_CONCURRENT_CONTAINERS: 2,
 }));
 
+// Mock container-runtime for stopContainerAsync
+const mockStopContainerAsync = vi.fn();
+vi.mock('./container-runtime.js', () => ({
+  stopContainerAsync: (...args: unknown[]) => mockStopContainerAsync(...args),
+}));
+
 // Mock fs operations used by sendMessage/closeStdin
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -27,6 +33,7 @@ describe('GroupQueue', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     queue = new GroupQueue();
   });
 
@@ -169,6 +176,7 @@ describe('GroupQueue', () => {
   // --- Shutdown prevents new enqueues ---
 
   it('prevents new enqueues after shutdown', async () => {
+    mockStopContainerAsync.mockResolvedValue(undefined);
     const processMessages = vi.fn(async () => true);
     queue.setProcessMessagesFn(processMessages);
 
@@ -445,5 +453,63 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- Shutdown stops containers ---
+
+  it('stops active containers on shutdown', async () => {
+    mockStopContainerAsync.mockResolvedValue(undefined);
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start processing
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Register process with a mock that looks alive
+    const mockProc = { killed: false } as any;
+    queue.registerProcess(
+      'group1@g.us',
+      mockProc,
+      'nanoclaw-test-container',
+      'test-group',
+    );
+
+    // Shutdown should stop the container
+    const shutdownPromise = queue.shutdown(10000);
+    await vi.advanceTimersByTimeAsync(10);
+    resolveProcess!();
+    await shutdownPromise;
+
+    expect(mockStopContainerAsync).toHaveBeenCalledWith(
+      'nanoclaw-test-container',
+    );
+  });
+
+  // --- Static helper methods ---
+
+  it('queueKey builds composite keys', () => {
+    expect(GroupQueue.queueKey('chat@g.us')).toBe('chat@g.us');
+    expect(GroupQueue.queueKey('chat@g.us', '1234.5678')).toBe(
+      'chat@g.us#1234.5678',
+    );
+  });
+
+  it('chatJidFromKey extracts chatJid', () => {
+    expect(GroupQueue.chatJidFromKey('chat@g.us')).toBe('chat@g.us');
+    expect(GroupQueue.chatJidFromKey('chat@g.us#1234.5678')).toBe('chat@g.us');
+  });
+
+  it('threadTsFromKey extracts threadTs', () => {
+    expect(GroupQueue.threadTsFromKey('chat@g.us')).toBeUndefined();
+    expect(GroupQueue.threadTsFromKey('chat@g.us#1234.5678')).toBe('1234.5678');
   });
 });

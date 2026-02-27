@@ -65,6 +65,17 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
+    CREATE TABLE IF NOT EXISTS web_sessions (
+      session_id TEXT PRIMARY KEY,
+      jid TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      group_folder TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      last_activity TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_jid_ts ON messages(chat_jid, timestamp);
+
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -76,7 +87,7 @@ function createSchema(database: Database.Database): void {
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
-      folder TEXT NOT NULL UNIQUE,
+      folder TEXT NOT NULL,
       trigger_pattern TEXT NOT NULL,
       added_at TEXT NOT NULL,
       container_config TEXT,
@@ -102,6 +113,41 @@ function createSchema(database: Database.Database): void {
     database
       .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Remove UNIQUE constraint on registered_groups.folder (migration for existing DBs)
+  // Multiple JIDs can share a folder (e.g. GitHub issues all use "main")
+  try {
+    const hasUnique = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='registered_groups'`,
+      )
+      .get() as { sql: string } | undefined;
+    if (hasUnique?.sql?.includes('UNIQUE')) {
+      database.exec(`
+        CREATE TABLE registered_groups_new (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1
+        );
+        INSERT INTO registered_groups_new SELECT * FROM registered_groups;
+        DROP TABLE registered_groups;
+        ALTER TABLE registered_groups_new RENAME TO registered_groups;
+      `);
+    }
+  } catch {
+    /* table doesn't exist yet or migration already applied */
+  }
+
+  // Add thread_ts column to messages if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN thread_ts TEXT`);
   } catch {
     /* column already exists */
   }
@@ -133,10 +179,21 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+
+  // Enable WAL mode for better concurrent read/write performance
+  db.pragma('journal_mode = WAL');
+  db.pragma('synchronous = NORMAL');
+  db.pragma('busy_timeout = 5000');
+
   createSchema(db);
 
   // Migrate from JSON files if they exist
   migrateJsonState();
+}
+
+/** Expose database instance for transactional operations (e.g. web channel). */
+export function getDatabase(): Database.Database {
+  return db;
 }
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
@@ -249,7 +306,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -259,6 +316,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.thread_ts ?? null,
   );
 }
 
@@ -274,9 +332,10 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
+  thread_ts?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -286,6 +345,7 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.thread_ts ?? null,
   );
 }
 
@@ -300,7 +360,7 @@ export function getNewMessages(
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders})
       AND is_bot_message = 0 AND content NOT LIKE ?
@@ -324,20 +384,33 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  threadTs?: string | null,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // threadTs filtering:
+  //   undefined → all messages (no thread filter)
+  //   null      → top-level messages only (thread_ts IS NULL)
+  //   string    → messages in that specific thread
+  let threadFilter = '';
+  const params: unknown[] = [chatJid, sinceTimestamp, `${botPrefix}:%`];
+
+  if (threadTs === null) {
+    threadFilter = ' AND thread_ts IS NULL';
+  } else if (threadTs !== undefined) {
+    threadFilter = ' AND thread_ts = ?';
+    params.push(threadTs);
+  }
+
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, thread_ts
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
+      AND content != '' AND content IS NOT NULL${threadFilter}
     ORDER BY timestamp
   `;
-  return db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+  return db.prepare(sql).all(...params) as NewMessage[];
 }
 
 export function createTask(
@@ -604,6 +677,93 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Web session accessors ---
+
+export interface WebSession {
+  session_id: string;
+  jid: string;
+  name: string;
+  group_folder: string;
+  created_at: string;
+  last_activity: string;
+}
+
+export function insertWebSession(
+  sessionId: string,
+  jid: string,
+  name: string,
+  groupFolder: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO web_sessions (session_id, jid, name, group_folder, created_at, last_activity)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(sessionId, jid, name, groupFolder, now, now);
+}
+
+export function getWebSession(sessionId: string): WebSession | undefined {
+  return db
+    .prepare('SELECT * FROM web_sessions WHERE session_id = ?')
+    .get(sessionId) as WebSession | undefined;
+}
+
+export function getAllWebSessions(): WebSession[] {
+  return db
+    .prepare('SELECT * FROM web_sessions ORDER BY last_activity DESC')
+    .all() as WebSession[];
+}
+
+export function updateWebSessionActivity(sessionId: string): void {
+  db.prepare(
+    'UPDATE web_sessions SET last_activity = ? WHERE session_id = ?',
+  ).run(new Date().toISOString(), sessionId);
+}
+
+export function getMessageHistory(
+  chatJid: string,
+  limit: number = 50,
+  before?: string,
+): Array<{
+  id: string;
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_bot_message: number;
+}> {
+  if (before) {
+    return db
+      .prepare(
+        `SELECT id, sender_name, content, timestamp, is_bot_message
+         FROM messages
+         WHERE chat_jid = ? AND timestamp < ?
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+      )
+      .all(chatJid, before, limit) as Array<{
+      id: string;
+      sender_name: string;
+      content: string;
+      timestamp: string;
+      is_bot_message: number;
+    }>;
+  }
+  return db
+    .prepare(
+      `SELECT id, sender_name, content, timestamp, is_bot_message
+       FROM messages
+       WHERE chat_jid = ?
+       ORDER BY timestamp DESC
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as Array<{
+    id: string;
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_bot_message: number;
+  }>;
 }
 
 // --- JSON migration ---

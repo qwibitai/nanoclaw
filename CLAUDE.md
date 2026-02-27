@@ -12,14 +12,20 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/slack.ts` | Slack channel (Socket Mode via @slack/bolt) |
+| `src/channels/github.ts` | GitHub channel (notification polling, comment API) |
+| `src/group-queue.ts` | Thread-aware per-group queuing with graceful shutdown |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
 | `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/container-runtime.ts` | Container runtime abstraction (docker start/stop) |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `.github/workflows/deploy.yml` | SSH-based deploy (workflow_dispatch only) |
+| `sup` | Remote diagnostics script (status, logs, containers) |
 
 ## Skills
 

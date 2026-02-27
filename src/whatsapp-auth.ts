@@ -60,13 +60,13 @@ async function connectSocket(
     process.exit(0);
   }
 
-  const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-    logger.warn(
-      { err },
-      'Failed to fetch latest WA Web version, using default',
-    );
-    return { version: undefined };
-  });
+  // TODO: re-enable fetchLatestWaWebVersion once upstream version issue is resolved
+  // const { version: fetchedVersion } = await fetchLatestWaWebVersion({}).catch((err) => {
+  //   logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+  //   return { version: undefined };
+  // });
+  // const version: [number, number, number] = fetchedVersion ?? [2, 3000, 1034003740];
+  const version: [number, number, number] = [2, 3000, 1033893291];
   const sock = makeWASocket({
     version,
     auth: {

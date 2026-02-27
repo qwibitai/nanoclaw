@@ -1,0 +1,17 @@
+name: Trigger Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  trigger-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch deploy to anton
+        run: |
+          curl -fsS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.ANTON_DEPLOY_TOKEN }}" \
+            https://api.github.com/repos/dalab-tech/anton/dispatches \
+            -d '{"event_type":"nanoclaw-updated"}'
