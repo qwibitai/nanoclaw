@@ -1,0 +1,20 @@
+skill: signal
+version: 1.0.0
+description: "Signal channel via signal-cli daemon (TCP JSON-RPC)"
+core_version: 0.1.0
+adds:
+  - src/channels/signal.ts
+  - src/channels/signal.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - SIGNAL_PHONE_NUMBER
+    - SIGNAL_CLI_URL
+    - SIGNAL_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/signal.test.ts"
