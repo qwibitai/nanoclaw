@@ -1,11 +1,13 @@
 ---
 name: add-telegram
-description: Add Telegram as a channel. Can replace WhatsApp entirely or run alongside it. Also configurable as a control-only channel (triggers actions) or passive channel (receives notifications only).
+description: Add Telegram as a channel with Topics/Forum thread support. Can replace WhatsApp entirely or run alongside it. Also configurable as a control-only channel (triggers actions) or passive channel (receives notifications only).
 ---
 
 # Add Telegram Channel
 
 This skill adds Telegram support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+
+**Includes support for Telegram Topics (forum threads)** — each topic can be registered as its own isolated group with independent memory and context.
 
 ## Phase 1: Pre-flight
 
@@ -46,7 +48,11 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
 ```
 
 This deterministically:
-- Adds `src/channels/telegram.ts` (TelegramChannel class implementing Channel interface)
+- Adds `src/channels/telegram.ts` (TelegramChannel class with Topics support)
+  - Topic-aware JID format: `tg:chatid:topicid`
+  - `/chatid` command reports topic ID when used inside a thread
+  - Inbound and outbound messages routed to/from correct thread
+  - Topic registration is opt-in
 - Adds `src/channels/telegram.test.ts` (46 unit tests)
 - Three-way merges Telegram support into `src/index.ts` (multi-channel support, findChannel routing)
 - Three-way merges Telegram config into `src/config.ts` (TELEGRAM_BOT_TOKEN, TELEGRAM_ONLY exports)
@@ -135,8 +141,13 @@ Tell the user:
 > 1. Open your bot in Telegram (search for its username)
 > 2. Send `/chatid` — it will reply with the chat ID
 > 3. For groups: add the bot to the group first, then send `/chatid` in the group
+> 4. **For topics**: Go to the specific topic thread and send `/chatid` there
 
-Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234567890`).
+Wait for the user to provide the chat ID.
+
+**Chat ID formats:**
+- Regular chat: `tg:123456789` or `tg:-1001234567890`
+- Topic thread: `tg:-1001234567890:20` (includes topic ID after the second colon)
 
 ### Register the chat
 
@@ -166,6 +177,34 @@ registerGroup("tg:<chat-id>", {
 });
 ```
 
+**For topic threads** — each topic gets its own agent instance with separate memory and context:
+
+```typescript
+registerGroup("tg:<chat-id>:<topic-id>", {
+  name: "<topic-name>",
+  folder: "<topic-folder-name>",
+  trigger: `@${ASSISTANT_NAME}`,
+  added_at: new Date().toISOString(),
+  requiresTrigger: false,
+  containerConfig: {
+    additionalMounts: [{
+      hostPath: "~/projects/your-project",
+      containerPath: "your-project",
+      readonly: false
+    }]
+  }
+});
+```
+
+**Topic registration behavior:**
+
+When a message arrives in a topic:
+1. Check topic-specific registration (`tg:chatid:topicid`) → if registered, deliver to that agent
+2. Check base chat registration (`tg:chatid`) → if registered, skip (prevents duplicate processing)
+3. Neither registered → ignore message
+
+Topics are opt-in: a registered base chat will not automatically process its topic messages.
+
 ## Phase 5: Verify
 
 ### Test the connection
@@ -175,6 +214,7 @@ Tell the user:
 > Send a message to your registered Telegram chat:
 > - For main chat: Any message works
 > - For non-main: `@Andy hello` or @mention the bot
+> - For topics: Send a message in the registered topic thread
 >
 > The bot should respond within a few seconds.
 
@@ -199,6 +239,12 @@ Check:
 Group Privacy is enabled (default). Fix:
 1. `@BotFather` > `/mybots` > select bot > **Bot Settings** > **Group Privacy** > **Turn off**
 2. Remove and re-add the bot to the group (required for the change to take effect)
+
+### Topic messages not being processed
+
+1. Verify the topic is registered with the full JID (`tg:chatid:topicid`)
+2. Ensure the base chat (`tg:chatid`) is NOT also registered
+3. Check logs for: `Topic message in registered chat - topic not separately registered`
 
 ### Getting chat ID
 
