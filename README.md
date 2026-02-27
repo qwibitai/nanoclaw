@@ -14,7 +14,7 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/solclaw.git
+git clone https://github.com/anagrambuild/solclaw.git
 cd solclaw
 claude
 ```
