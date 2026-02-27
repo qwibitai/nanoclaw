@@ -58,7 +58,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Semantic memory (RAG)** - Three-layer memory with vector search: core facts, conversation RAG, and session archives. Agents recall relevant context automatically and store new knowledge via MCP tools. Powered by local embeddings (no API costs).
 - **Isolated group context** - Each group has its own memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Scheduled tasks** - Recurring jobs that run Claude with full memory context and can message you back
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
