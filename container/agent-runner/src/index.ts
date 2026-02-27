@@ -482,6 +482,14 @@ async function runQuery(
         result: textResult || null,
         newSessionId
       });
+
+      // Break out of the for-await loop after receiving a result.
+      // This allows control to return to the outer while(true) loop where
+      // waitForIpcMessage() can properly handle follow-up messages.
+      // Without this break, the for-await loop hangs waiting for more stream
+      // input that the SDK will never process after yielding a result.
+      // See: https://github.com/qwibitai/nanoclaw/issues/233
+      break;
     }
   }
 
