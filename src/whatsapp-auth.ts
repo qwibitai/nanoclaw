@@ -32,6 +32,11 @@ const logger = pino({
 const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
 
+// Track whether a pairing code was successfully issued in this session.
+// After pairing succeeds, WhatsApp sends a 405 close before the registered
+// connection opens — we reconnect once to complete the handshake.
+let pairingCodeIssued = false;
+
 function askQuestion(prompt: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -90,6 +95,7 @@ async function connectSocket(
         console.log('  3. Tap "Link with phone number instead"');
         console.log(`  4. Enter this code: ${code}\n`);
         fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
+        pairingCodeIssued = true;
       } catch (err: any) {
         console.error('Failed to request pairing code:', err.message);
         process.exit(1);
@@ -125,6 +131,14 @@ async function connectSocket(
         // 515 = stream error, often happens after pairing succeeds but before
         // registration completes. Reconnect to finish the handshake.
         console.log('\n⟳ Stream error (515) after pairing — reconnecting...');
+        connectSocket(phoneNumber, true);
+      } else if (reason === 405 && pairingCodeIssued) {
+        // 405 is normal after pairing code is accepted — WhatsApp drops the
+        // unauthenticated stream once it links the device. Reconnect to open
+        // the authenticated session.
+        console.log(
+          '\n⟳ Pairing accepted (405) — reconnecting to complete handshake...',
+        );
         connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
