@@ -20,7 +20,7 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const ENABLED_CHANNELS: string[] = (
   process.env.ENABLED_CHANNELS ||
   envConfig.ENABLED_CHANNELS ||
-  'whatsapp'
+  ''
 )
   .split(',')
   .map((s) => s.trim())

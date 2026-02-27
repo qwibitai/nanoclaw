@@ -263,7 +263,7 @@ export function storeMessage(msg: NewMessage): void {
 }
 
 /**
- * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
+ * Store a message directly.
  */
 export function storeMessageDirect(msg: {
   id: string;
