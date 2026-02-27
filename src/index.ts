@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -445,7 +446,37 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function acquirePidLock(): void {
+  const pidFile = path.join(DATA_DIR, 'nanoclaw.pid');
+  try {
+    const existing = fs.readFileSync(pidFile, 'utf-8').trim();
+    const existingPid = parseInt(existing, 10);
+    if (!isNaN(existingPid) && existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0);
+        logger.error(
+          { existingPid },
+          'Another nanoclaw instance is already running. Exiting.',
+        );
+        process.exit(1);
+      } catch {
+        logger.warn({ existingPid }, 'Removing stale PID lock file');
+      }
+    }
+  } catch {
+    // No PID file — first instance
+  }
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(pidFile, String(process.pid));
+  process.on('exit', () => {
+    try {
+      fs.unlinkSync(pidFile);
+    } catch {}
+  });
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
