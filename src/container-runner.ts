@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -200,18 +200,43 @@ function buildVolumeMounts(
   return mounts;
 }
 
+function readKeychainToken(): string | undefined {
+  try {
+    const json = execSync(
+      'security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null',
+      { encoding: 'utf8', timeout: 5000 },
+    ).trim();
+    if (!json) return undefined;
+    const creds = JSON.parse(json);
+    return creds?.claudeAiOauth?.accessToken || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
+  const secrets = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'GITHUB_TOKEN',
     'BACKUP_PASSPHRASE',
     'BACKUP_GDRIVE_FOLDER',
   ]);
+
+  // If not in .env, read from macOS keychain (stays in sync with ccswitch)
+  if (!secrets['CLAUDE_CODE_OAUTH_TOKEN']) {
+    const keychainToken = readKeychainToken();
+    if (keychainToken) {
+      logger.debug('Using CLAUDE_CODE_OAUTH_TOKEN from macOS keychain');
+      secrets['CLAUDE_CODE_OAUTH_TOKEN'] = keychainToken;
+    }
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
