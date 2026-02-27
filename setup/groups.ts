@@ -90,7 +90,7 @@ async function syncGroups(projectRoot: string): Promise<void> {
   let syncOk = false;
   try {
     const syncScript = `
-import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers, fetchLatestWaWebVersion, DisconnectReason } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
@@ -115,7 +115,10 @@ const upsert = db.prepare(
 
 const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+const { version } = await fetchLatestWaWebVersion({}).catch(() => ({ version: undefined }));
+
 const sock = makeWASocket({
+  version,
   auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
   printQRInTerminal: false,
   logger,
@@ -127,6 +130,7 @@ const timeout = setTimeout(() => {
   process.exit(1);
 }, 30000);
 
+let done = false;
 sock.ev.on('creds.update', saveCreds);
 
 sock.ev.on('connection.update', async (update) => {
@@ -145,28 +149,37 @@ sock.ev.on('connection.update', async (update) => {
     } catch (err) {
       console.error('FETCH_ERROR:' + err.message);
     } finally {
+      done = true;
       clearTimeout(timeout);
       sock.end(undefined);
       db.close();
       process.exit(0);
     }
-  } else if (update.connection === 'close') {
+  } else if (update.connection === 'close' && !done) {
     clearTimeout(timeout);
-    console.error('CONNECTION_CLOSED');
+    const statusCode = update.lastDisconnect?.error?.output?.statusCode;
+    console.error('CONNECTION_CLOSED:' + (statusCode || 'unknown'));
+    if (statusCode === DisconnectReason.loggedOut) {
+      console.error('LOGGED_OUT');
+    }
     process.exit(1);
   }
 });
 `;
 
-    const output = execSync(
-      `node --input-type=module -e ${JSON.stringify(syncScript)}`,
-      {
+    const tmpScript = path.join(projectRoot, '.sync-groups.mjs');
+    fs.writeFileSync(tmpScript, syncScript, 'utf-8');
+    let output: string;
+    try {
+      output = execSync(`node ${tmpScript}`, {
         cwd: projectRoot,
         encoding: 'utf-8',
         timeout: 45000,
         stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
+      });
+    } finally {
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore */ }
+    }
     syncOk = output.includes('SYNCED:');
     logger.info({ output: output.trim() }, 'Sync output');
   } catch (err) {
