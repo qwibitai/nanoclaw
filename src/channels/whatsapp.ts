@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -14,6 +15,7 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
@@ -195,14 +197,37 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          // Download image if present and save to group's images directory
+          let imagePath = '';
+          const imgMsg = msg.message?.imageMessage;
+          if (imgMsg) {
+            try {
+              const buffer = await downloadMediaMessage(msg, 'buffer', {}, {
+                logger, reuploadRequest: this.sock.updateMediaMessage,
+              });
+              const ext = (imgMsg.mimetype || 'image/jpeg').split('/')[1] || 'jpg';
+              const filename = `${msg.key.id || Date.now()}.${ext}`;
+              const imagesDir = path.join(GROUPS_DIR, groups[chatJid].folder, 'images');
+              fs.mkdirSync(imagesDir, { recursive: true });
+              fs.writeFileSync(path.join(imagesDir, filename), buffer);
+              imagePath = `/workspace/group/images/${filename}`;
+            } catch (err) {
+              logger.error({ err, chatJid }, 'Failed to download image');
+            }
+          }
+
+          const textContent =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
+            imgMsg?.caption ||
             msg.message?.videoMessage?.caption ||
             '';
 
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+          const content = imagePath
+            ? `${textContent}\n[Image: ${imagePath}]`.trim()
+            : textContent;
+
+          // Skip protocol messages with no usable content
           if (!content) continue;
 
           const sender = msg.key.participant || msg.key.remoteJid || '';

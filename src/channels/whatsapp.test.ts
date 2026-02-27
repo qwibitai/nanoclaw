@@ -6,6 +6,7 @@ import { EventEmitter } from 'events';
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
+  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
 }));
@@ -36,6 +37,7 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
     },
   };
 });
@@ -84,6 +86,9 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
+    downloadMediaMessage: vi
+      .fn()
+      .mockResolvedValue(Buffer.from('fake-image-data')),
     fetchLatestWaWebVersion: vi
       .fn()
       .mockResolvedValue({ version: [2, 3000, 0] }),
@@ -473,34 +478,26 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('extracts caption from imageMessage', async () => {
+    it.each([
+      { desc: 'with caption', id: 'msg-6', caption: 'Check this photo', mime: 'image/jpeg',
+        expected: 'Check this photo\n[Image: /workspace/group/images/msg-6.jpeg]' },
+      { desc: 'without caption', id: 'msg-img-nocap', caption: undefined, mime: 'image/png',
+        expected: '[Image: /workspace/group/images/msg-img-nocap.png]' },
+    ])('downloads image $desc', async ({ id, caption, mime, expected }) => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
-
       await connectChannel(channel);
 
-      await triggerMessages([
-        {
-          key: {
-            id: 'msg-6',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
-            fromMe: false,
-          },
-          message: {
-            imageMessage: {
-              caption: 'Check this photo',
-              mimetype: 'image/jpeg',
-            },
-          },
-          pushName: 'Diana',
-          messageTimestamp: Math.floor(Date.now() / 1000),
-        },
-      ]);
+      await triggerMessages([{
+        key: { id, remoteJid: 'registered@g.us', participant: '5551234@s.whatsapp.net', fromMe: false },
+        message: { imageMessage: { caption, mimetype: mime } },
+        pushName: 'Diana',
+        messageTimestamp: Math.floor(Date.now() / 1000),
+      }]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: 'Check this photo' }),
+        expect.objectContaining({ content: expected }),
       );
     });
 
