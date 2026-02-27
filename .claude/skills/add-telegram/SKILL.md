@@ -151,50 +151,78 @@ Wait for the user to provide the chat ID.
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+Registration is done via IPC — write a JSON task file and the host process picks it up immediately (no restart needed). Then create the group folder.
 
-For a main chat (responds to all messages, uses the `main` folder):
+**Main chat** (responds to all messages, no trigger needed):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-});
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>",
+  "name": "<chat-name>",
+  "folder": "main",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/main
 ```
 
-For additional chats (trigger-only):
+**Additional chat** (trigger-only):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "<folder-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>",
+  "name": "<chat-name>",
+  "folder": "<folder-name>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": true
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<folder-name>
 ```
 
-**For topic threads** — each topic gets its own agent instance with separate memory and context:
+**Topic thread** — each topic gets its own agent with independent memory and context:
 
-```typescript
-registerGroup("tg:<chat-id>:<topic-id>", {
-  name: "<topic-name>",
-  folder: "<topic-folder-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  containerConfig: {
-    additionalMounts: [{
-      hostPath: "~/projects/your-project",
-      containerPath: "your-project",
-      readonly: false
-    }]
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>:<topic-id>",
+  "name": "<topic-name>",
+  "folder": "<topic-folder>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<topic-folder>
+```
+
+**Topic with a project directory mounted:**
+
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>:<topic-id>",
+  "name": "<topic-name>",
+  "folder": "<topic-folder>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false,
+  "containerConfig": {
+    "additionalMounts": [
+      {
+        "hostPath": "~/projects/your-project",
+        "containerPath": "your-project",
+        "readonly": false
+      }
+    ]
   }
-});
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<topic-folder>
 ```
+
+> **Note on mounts:** The host path must already be in `~/.config/nanoclaw/mount-allowlist.json` on the host machine. This file lives outside the project root and must be edited manually — it cannot be modified from within a container. Ask the user to add the path before registering.
 
 **Topic registration behavior:**
 
