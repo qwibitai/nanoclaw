@@ -391,8 +391,11 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] || '',
             ASSISTANT_NAME,
           );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
+          if (allPending.length === 0) {
+            logger.debug({ chatJid }, 'No pending messages after cursor, skipping pipe');
+            continue;
+          }
+          const messagesToSend = allPending;
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
