@@ -1,0 +1,19 @@
+skill: generic-llm
+version: 1.0.0
+description: "Add a generic OpenAI-compatible LLM provider (DeepSeek/GLM) for text-only responses"
+core_version: 0.1.0
+adds:
+  - container/agent-runner/src/provider-generic-llm.ts
+modifies:
+  - container/agent-runner/src/index.ts
+  - src/container-runner.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - LLM_API_KEY
+    - LLM_API_BASE
+    - LLM_MODEL
+    - LLM_PROVIDER
+conflicts: []
+depends: []
+test: "echo 'No tests for generic LLM provider yet'"
