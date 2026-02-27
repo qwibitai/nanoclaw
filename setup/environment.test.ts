@@ -119,31 +119,3 @@ describe('channel auth detection', () => {
   });
 });
 
-describe('ENABLED_CHANNELS parsing', () => {
-  it('parses comma-separated channels', () => {
-    const raw = 'whatsapp, telegram , slack';
-    const channels = raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    expect(channels).toEqual(['whatsapp', 'telegram', 'slack']);
-  });
-
-  it('falls back when empty', () => {
-    const raw = '';
-    const channels = (raw || 'whatsapp')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    expect(channels).toEqual(['whatsapp']);
-  });
-
-  it('handles single channel', () => {
-    const raw = 'telegram';
-    const channels = raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    expect(channels).toEqual(['telegram']);
-  });
-});

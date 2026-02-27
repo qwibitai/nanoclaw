@@ -27,16 +27,11 @@ Run `bash setup.sh` and parse the status block.
 
 Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-- Record ENABLED_CHANNELS for later steps (determines which auth/sync steps to run)
-- If HAS_AUTH=true and WhatsApp is enabled → offer to skip step 5
+- If HAS_AUTH=true → WhatsApp is already configured, offer to skip step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
 ## 2b. Select Channels
-
-**If ENABLED_CHANNELS is already set** (from a previous run or .env): show the current selection and `AskUserQuestion: Keep current channels (<list>) or reconfigure?` If "keep", skip to step 3.
-
-**If ENABLED_CHANNELS is not set** (first-time setup):
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - WhatsApp (authenticates via QR code or pairing code)
@@ -44,9 +39,13 @@ AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - Slack (authenticates via Slack app with Socket Mode)
 - Discord (authenticates via Discord bot token)
 
-Run `npx tsx setup/index.ts --step channels -- --channels <comma-separated>` and parse the status block.
+For each selected channel, apply its skill to install the channel code:
 
-**The selected channels determine which later steps run:**
+```bash
+npx tsx skills-engine/apply.ts .claude/skills/add-<channel>
+```
+
+Channels auto-enable when their credentials are present — no `ENABLED_CHANNELS` variable needed. The selected channels determine which later steps run:
 - Token-based channels (Telegram, Slack, Discord) → collect tokens in step 4b
 - WhatsApp → authenticate in step 5, configure trigger in step 6, sync groups in step 7
 - Channels not selected → their corresponding steps are skipped automatically
@@ -117,7 +116,7 @@ If the token already exists in `.env`, show it (masked) and ask: keep or replace
 
 ## 5. WhatsApp Authentication (conditional)
 
-**Only runs when WhatsApp is in ENABLED_CHANNELS.** Otherwise the step auto-skips (emits REASON=whatsapp_not_enabled).
+**Only runs when WhatsApp was selected in step 2b.**
 
 If HAS_AUTH=true, confirm: keep or re-authenticate?
 
@@ -134,7 +133,7 @@ Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser
 
 ## 6. Configure Trigger and Channel Type (conditional)
 
-**Only runs when WhatsApp is in ENABLED_CHANNELS.** Other channels configure their trigger word and channel type during registration (step 8).
+**Only runs when WhatsApp was selected in step 2b.** Other channels configure their trigger word and channel type during registration (step 8).
 
 Get the bot's phone number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
@@ -145,7 +144,7 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 
 ## 7. Sync and Select Group (conditional)
 
-**Only runs when WhatsApp is in ENABLED_CHANNELS.** The groups step auto-skips otherwise (emits REASON=whatsapp_not_enabled). Telegram, Slack, and Discord discover groups at runtime — no upfront sync needed.
+**Only runs when WhatsApp was selected in step 2b.** The groups step auto-skips when WhatsApp auth credentials are not present. Telegram, Slack, and Discord discover groups at runtime — no upfront sync needed.
 
 **Personal chat:** JID = `NUMBER@s.whatsapp.net`
 **DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
@@ -234,6 +233,6 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
-**Channel not connecting:** Verify the channel's credentials are set in `.env` and that `ENABLED_CHANNELS` includes the channel name. For WhatsApp: re-run `npm run auth`. For token-based channels: check token values. Restart the service after any `.env` change.
+**Channel not connecting:** Verify the channel's credentials are set in `.env`. Channels auto-enable when their credentials are present. For WhatsApp: check `store/auth/creds.json` exists. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`

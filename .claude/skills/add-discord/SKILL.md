@@ -85,14 +85,7 @@ Add to `.env`:
 DISCORD_BOT_TOKEN=<their-token>
 ```
 
-To control which channels are active, set `ENABLED_CHANNELS` in `.env`:
-
-```bash
-# Both channels:
-ENABLED_CHANNELS=whatsapp,discord
-# Discord only:
-ENABLED_CHANNELS=discord
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 

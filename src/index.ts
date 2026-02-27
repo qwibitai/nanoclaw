@@ -3,14 +3,16 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  ENABLED_CHANNELS,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
-import { getChannelFactory } from './channels/registry.js';
+import {
+  getChannelFactory,
+  getRegisteredChannelNames,
+} from './channels/registry.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -475,13 +477,11 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels from ENABLED_CHANNELS
-  for (const channelName of ENABLED_CHANNELS) {
-    const factory = getChannelFactory(channelName);
-    if (!factory) {
-      logger.warn({ channel: channelName }, 'Unknown channel, skipping');
-      continue;
-    }
+  // Create and connect all registered channels.
+  // Each channel self-registers via the barrel import above.
+  // Factories return null when credentials are missing, so unconfigured channels are skipped.
+  for (const channelName of getRegisteredChannelNames()) {
+    const factory = getChannelFactory(channelName)!;
     const channel = factory(channelOpts);
     if (!channel) {
       logger.info({ channel: channelName }, 'Channel not configured, skipping');

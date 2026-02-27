@@ -11,7 +11,6 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
-import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import { emitStatus } from './status.js';
 
@@ -65,24 +64,19 @@ async function listGroups(limit: number): Promise<void> {
 }
 
 async function syncGroups(projectRoot: string): Promise<void> {
-  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime
-  const envVars = readEnvFile(['ENABLED_CHANNELS']);
-  const enabledChannels = (
-    process.env.ENABLED_CHANNELS ||
-    envVars.ENABLED_CHANNELS ||
-    'whatsapp'
-  )
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime.
+  // Detect WhatsApp by checking for auth credentials on disk.
+  const authDir = path.join(projectRoot, 'store', 'auth');
+  const hasWhatsAppAuth =
+    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
-  if (!enabledChannels.includes('whatsapp')) {
-    logger.info('Group sync not required for enabled channels — skipping');
+  if (!hasWhatsAppAuth) {
+    logger.info('WhatsApp auth not found — skipping group sync');
     emitStatus('SYNC_GROUPS', {
       BUILD: 'skipped',
       SYNC: 'skipped',
       GROUPS_IN_DB: 0,
-      REASON: 'whatsapp_not_enabled',
+      REASON: 'whatsapp_not_configured',
       STATUS: 'success',
       LOG: 'logs/setup.log',
     });

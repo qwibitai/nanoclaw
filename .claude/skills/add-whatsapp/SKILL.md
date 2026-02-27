@@ -11,11 +11,10 @@ This skill adds WhatsApp support to NanoClaw. It installs the WhatsApp channel c
 
 ### Check current state
 
-Read `.env` and check `ENABLED_CHANNELS`. If `whatsapp` is already in the list and `store/auth/` exists with credential files, skip to Phase 4 (Registration) or Phase 5 (Verify).
+Check if WhatsApp is already configured. If `store/auth/` exists with credential files, skip to Phase 4 (Registration) or Phase 5 (Verify).
 
 ```bash
 ls store/auth/creds.json 2>/dev/null && echo "WhatsApp auth exists" || echo "No WhatsApp auth"
-grep ENABLED_CHANNELS .env 2>/dev/null || echo "ENABLED_CHANNELS not set (defaults to whatsapp)"
 ```
 
 ### Ask the user
@@ -124,7 +123,7 @@ test -f store/auth/creds.json && echo "Authentication successful" || echo "Authe
 
 ### Configure environment
 
-Ensure `whatsapp` is in `ENABLED_CHANNELS` in `.env`. Append it to any existing channels (e.g., `ENABLED_CHANNELS=telegram,whatsapp`). If not set, the default is `whatsapp`.
+Channels auto-enable when their credentials are present — WhatsApp activates when `store/auth/creds.json` exists.
 
 Sync to container environment:
 
@@ -278,8 +277,7 @@ pkill -f "node dist/index.js"
 ### Bot not responding
 
 Check:
-1. `ENABLED_CHANNELS` includes `whatsapp` in `.env` AND synced to `data/env/env`
-2. Auth credentials exist: `ls store/auth/creds.json`
+1. Auth credentials exist: `ls store/auth/creds.json`
 3. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE '%whatsapp%' OR jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
 4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
 5. Logs: `tail -50 logs/nanoclaw.log`
@@ -315,8 +313,7 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 To remove WhatsApp integration:
 
-1. Remove `whatsapp` from `ENABLED_CHANNELS` in `.env`
-2. Delete auth credentials: `rm -rf store/auth/`
-3. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-4. Sync env: `mkdir -p data/env && cp .env data/env/env`
-5. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+1. Delete auth credentials: `rm -rf store/auth/`
+2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
+3. Sync env: `mkdir -p data/env && cp .env data/env/env`
+4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

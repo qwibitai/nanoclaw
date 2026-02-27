@@ -80,14 +80,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-token
 ```
 
-To control which channels are active, set `ENABLED_CHANNELS` in `.env`:
-
-```bash
-# Both channels:
-ENABLED_CHANNELS=whatsapp,slack
-# Slack only:
-ENABLED_CHANNELS=slack
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 
@@ -209,7 +202,7 @@ The Slack channel supports:
 - **Public channels** — Bot must be added to the channel
 - **Private channels** — Bot must be invited to the channel
 - **Direct messages** — Users can DM the bot directly
-- **Multi-channel** — Can run alongside WhatsApp or other channels (controlled via `ENABLED_CHANNELS`)
+- **Multi-channel** — Can run alongside WhatsApp or other channels (auto-enabled by credentials)
 
 ## Known Limitations
 
