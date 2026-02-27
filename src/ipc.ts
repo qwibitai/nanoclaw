@@ -379,6 +379,34 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'restart_service':
+      // Only main group can restart the service
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized restart_service attempt blocked',
+        );
+        break;
+      }
+      logger.info({ reason: data.prompt }, 'Service restart requested via IPC');
+
+      // Execute restart script
+      const { spawn } = await import('child_process');
+      const scriptPath = path.join(process.cwd(), 'scripts', 'nc-manager.sh');
+
+      try {
+        // Run restart in background so the IPC processor can finish
+        const child = spawn(scriptPath, ['restart'], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref(); // Allow parent to exit independently
+        logger.info('Service restart initiated');
+      } catch (err) {
+        logger.error({ err }, 'Failed to initiate service restart');
+      }
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
