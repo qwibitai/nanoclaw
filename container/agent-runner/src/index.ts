@@ -361,7 +361,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; promptTooLong: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -390,6 +390,7 @@ async function runQuery(
   let lastAssistantUuid: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  let promptTooLong = false;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -477,6 +478,19 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+
+      // Detect "Prompt is too long" — the SDK returns this as a successful
+      // result when the resumed session context exceeds the model's limit.
+      // Don't forward it to the user; end the stream so we break out of
+      // runQuery and let main() retry with a fresh session.
+      if (textResult && /prompt is too long/i.test(textResult)) {
+        log('Detected "Prompt is too long" result, ending stream for fresh retry');
+        promptTooLong = true;
+        ipcPolling = false;
+        stream.end();
+        break;
+      }
+
       writeOutput({
         status: 'success',
         result: textResult || null,
@@ -486,8 +500,8 @@ async function runQuery(
   }
 
   ipcPolling = false;
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}, promptTooLong: ${promptTooLong}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, promptTooLong };
 }
 
 async function main(): Promise<void> {
@@ -541,7 +555,21 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      let queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+
+      // If the session context was too large, delete the session file and retry from scratch.
+      // Simply clearing sessionId isn't enough — the SDK auto-discovers session files.
+      if (queryResult.promptTooLong) {
+        if (sessionId) {
+          const sessionFile = `/home/node/.claude/projects/-workspace-group/${sessionId}.jsonl`;
+          log(`Prompt too long, deleting stale session file: ${sessionFile}`);
+          try { fs.unlinkSync(sessionFile); } catch { /* ignore */ }
+        }
+        sessionId = undefined;
+        resumeAt = undefined;
+        queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      }
+
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
