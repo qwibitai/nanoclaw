@@ -1,0 +1,16 @@
+skill: use-avian
+version: 1.0.0
+description: "Use Avian (avian.io) as the LLM provider via OpenAI-compatible API"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - src/env.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - AVIAN_API_KEY
+    - AVIAN_MODEL
+conflicts: []
+depends: []
+test: "npm run build"
