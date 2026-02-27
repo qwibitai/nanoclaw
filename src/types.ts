@@ -98,6 +98,82 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
 }
 
+export interface TradingPreset {
+  id: string;
+  name: string;
+  platform: string;          // polymarket, kalshi, all
+  strategy: string;          // rsi_mean_reversion, probability_mispricing
+  mode: string;              // paper, live
+  initial_capital: number;
+  risk_params: string;       // JSON: { max_drawdown, max_position_size, min_confidence, time_stop_days }
+  schedule_type: string | null;
+  schedule_value: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TradingRun {
+  id: string;
+  preset_id: string | null;
+  task_id: string | null;
+  type: string;              // backtest, paper, live
+  status: string;            // pending, running, completed, failed, stopped
+  platform: string;
+  strategy: string;
+  mode: string;              // paper, live
+  initial_capital: number;
+  risk_params: string;       // JSON snapshot
+  start_date: string | null;
+  end_date: string | null;
+  results: string | null;    // JSON: { total_pnl, win_rate, max_drawdown, sharpe_ratio, equity_curve, trades }
+  created_at: string;
+  completed_at: string | null;
+  error: string | null;
+}
+
+export interface MarketWatcher {
+  id: string;
+  name: string;
+  token_ids: string;       // JSON array of token IDs
+  market_slugs: string | null; // JSON array of display names
+  interval_ms: number;     // 300000=5m, 900000=15m
+  duration_ms: number;
+  started_at: string;
+  expires_at: string;
+  status: string;          // active, completed, stopped
+  data_points: number;
+}
+
+export interface OptimizationResult {
+  id: string;
+  watcher_id: string;
+  strategy: string;
+  param_ranges: string;    // JSON
+  results: string;         // JSON: top combos
+  optimize_for: string;
+  created_at: string;
+}
+
+export interface PaperTrade {
+  id: string;
+  ticker: string;
+  market_title: string | null;
+  side: string;
+  action: string;
+  qty: number;
+  entry_price: number;
+  exit_price: number | null;
+  status: string;
+  strategy: string;
+  market_type: string | null;
+  event_ticker: string | null;
+  close_time: string | null;
+  notes: string | null;
+  created_at: string;
+  settled_at: string | null;
+}
+
 // Callback type that channels use to deliver inbound messages
 export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 

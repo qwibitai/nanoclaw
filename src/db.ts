@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
-import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog, User } from './types.js';
+import { MarketWatcher, NewMessage, OptimizationResult, PaperTrade, RegisteredGroup, ScheduledTask, TaskRunLog, TradingPreset, TradingRun, User } from './types.js';
 
 let db: Database.Database;
 
@@ -227,6 +227,127 @@ function createSchema(database: Database.Database): void {
     `);
   } catch {
     /* tables already exist */
+  }
+
+  // Trading management tables
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS trading_presets (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        platform TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'paper',
+        initial_capital REAL DEFAULT 10000,
+        risk_params TEXT NOT NULL,
+        schedule_type TEXT,
+        schedule_value TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS trading_runs (
+        id TEXT PRIMARY KEY,
+        preset_id TEXT,
+        task_id TEXT,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        platform TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'paper',
+        initial_capital REAL DEFAULT 10000,
+        risk_params TEXT NOT NULL,
+        start_date TEXT,
+        end_date TEXT,
+        results TEXT,
+        created_at TEXT NOT NULL,
+        completed_at TEXT,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_trading_runs_type ON trading_runs(type);
+      CREATE INDEX IF NOT EXISTS idx_trading_runs_status ON trading_runs(status);
+
+      CREATE TABLE IF NOT EXISTS account_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+  } catch {
+    /* tables already exist */
+  }
+
+  // Market watchers + optimization tables
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS market_watchers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        token_ids TEXT NOT NULL,
+        market_slugs TEXT,
+        interval_ms INTEGER NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        data_points INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_market_watchers_status ON market_watchers(status);
+
+      CREATE TABLE IF NOT EXISTS optimization_results (
+        id TEXT PRIMARY KEY,
+        watcher_id TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        param_ranges TEXT NOT NULL,
+        results TEXT NOT NULL,
+        optimize_for TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_optimization_results_watcher ON optimization_results(watcher_id);
+    `);
+  } catch {
+    /* tables already exist */
+  }
+
+  // Paper trades table
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS paper_trades (
+        id TEXT PRIMARY KEY,
+        ticker TEXT NOT NULL,
+        market_title TEXT,
+        side TEXT NOT NULL,
+        action TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        entry_price INTEGER NOT NULL,
+        exit_price INTEGER,
+        status TEXT NOT NULL DEFAULT 'open',
+        strategy TEXT NOT NULL DEFAULT 'uncategorized',
+        market_type TEXT,
+        event_ticker TEXT,
+        close_time TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        settled_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
+    `);
+  } catch {
+    /* table already exists */
+  }
+
+  // Add strategy column to paper_trades if it doesn't exist (migration)
+  try {
+    database.exec(`ALTER TABLE paper_trades ADD COLUMN strategy TEXT NOT NULL DEFAULT 'uncategorized'`);
+    // Backfill seeded trades with their strategies
+    database.exec(`UPDATE paper_trades SET strategy = 'center_bracket' WHERE id = 'pt-seed-trade1'`);
+    database.exec(`UPDATE paper_trades SET strategy = 'spread' WHERE id IN ('pt-seed-trade2a','pt-seed-trade2b','pt-seed-trade2c')`);
+    database.exec(`UPDATE paper_trades SET strategy = 'directional' WHERE id = 'pt-seed-trade5'`);
+    database.exec(`UPDATE paper_trades SET strategy = 'lottery' WHERE id = 'pt-seed-trade6'`);
+    database.exec(`UPDATE paper_trades SET strategy = 'momentum_15m' WHERE id = 'pt-seed-trade7'`);
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -777,6 +898,252 @@ export function getAllUsers(): User[] {
 
 export function deleteUser(id: string): void {
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
+}
+
+// --- Trading Preset accessors ---
+
+export function createPreset(preset: TradingPreset): void {
+  db.prepare(
+    `INSERT INTO trading_presets (id, name, platform, strategy, mode, initial_capital, risk_params, schedule_type, schedule_value, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    preset.id, preset.name, preset.platform, preset.strategy, preset.mode,
+    preset.initial_capital, preset.risk_params, preset.schedule_type,
+    preset.schedule_value, preset.notes, preset.created_at, preset.updated_at,
+  );
+}
+
+export function getAllPresets(): TradingPreset[] {
+  return db.prepare('SELECT * FROM trading_presets ORDER BY updated_at DESC').all() as TradingPreset[];
+}
+
+export function getPresetById(id: string): TradingPreset | undefined {
+  return db.prepare('SELECT * FROM trading_presets WHERE id = ?').get(id) as TradingPreset | undefined;
+}
+
+export function updatePreset(id: string, updates: Partial<Omit<TradingPreset, 'id' | 'created_at'>>): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  for (const [key, val] of Object.entries(updates)) {
+    if (val !== undefined) {
+      fields.push(`${key} = ?`);
+      values.push(val);
+    }
+  }
+  if (fields.length === 0) return;
+
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+
+  db.prepare(`UPDATE trading_presets SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function deletePreset(id: string): void {
+  db.prepare('DELETE FROM trading_presets WHERE id = ?').run(id);
+}
+
+// --- Trading Run accessors ---
+
+export function createRun(run: TradingRun): void {
+  db.prepare(
+    `INSERT INTO trading_runs (id, preset_id, task_id, type, status, platform, strategy, mode, initial_capital, risk_params, start_date, end_date, results, created_at, completed_at, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    run.id, run.preset_id, run.task_id, run.type, run.status, run.platform,
+    run.strategy, run.mode, run.initial_capital, run.risk_params,
+    run.start_date, run.end_date, run.results, run.created_at,
+    run.completed_at, run.error,
+  );
+}
+
+export function getAllRuns(type?: string, status?: string): TradingRun[] {
+  let sql = 'SELECT * FROM trading_runs WHERE 1=1';
+  const params: unknown[] = [];
+  if (type) { sql += ' AND type = ?'; params.push(type); }
+  if (status) { sql += ' AND status = ?'; params.push(status); }
+  sql += ' ORDER BY created_at DESC';
+  return db.prepare(sql).all(...params) as TradingRun[];
+}
+
+export function getRunById(id: string): TradingRun | undefined {
+  return db.prepare('SELECT * FROM trading_runs WHERE id = ?').get(id) as TradingRun | undefined;
+}
+
+export function updateRun(id: string, updates: Partial<Pick<TradingRun, 'status' | 'task_id' | 'results' | 'completed_at' | 'error'>>): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+  if (updates.task_id !== undefined) { fields.push('task_id = ?'); values.push(updates.task_id); }
+  if (updates.results !== undefined) { fields.push('results = ?'); values.push(updates.results); }
+  if (updates.completed_at !== undefined) { fields.push('completed_at = ?'); values.push(updates.completed_at); }
+  if (updates.error !== undefined) { fields.push('error = ?'); values.push(updates.error); }
+
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE trading_runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+// --- Account Config accessors ---
+
+export function getAccountConfig(key: string): string | undefined {
+  const row = db.prepare('SELECT value FROM account_config WHERE key = ?').get(key) as { value: string } | undefined;
+  return row?.value;
+}
+
+export function setAccountConfig(key: string, value: string): void {
+  db.prepare(
+    'INSERT OR REPLACE INTO account_config (key, value, updated_at) VALUES (?, ?, ?)',
+  ).run(key, value, new Date().toISOString());
+}
+
+export function getAllAccountConfig(): Record<string, string> {
+  const rows = db.prepare('SELECT key, value FROM account_config').all() as Array<{ key: string; value: string }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) result[row.key] = row.value;
+  return result;
+}
+
+// --- Market Watcher accessors ---
+
+export function createWatcher(watcher: MarketWatcher): void {
+  db.prepare(
+    `INSERT INTO market_watchers (id, name, token_ids, market_slugs, interval_ms, duration_ms, started_at, expires_at, status, data_points)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    watcher.id, watcher.name, watcher.token_ids, watcher.market_slugs,
+    watcher.interval_ms, watcher.duration_ms, watcher.started_at,
+    watcher.expires_at, watcher.status, watcher.data_points,
+  );
+}
+
+export function getWatcher(id: string): MarketWatcher | undefined {
+  return db.prepare('SELECT * FROM market_watchers WHERE id = ?').get(id) as MarketWatcher | undefined;
+}
+
+export function getAllWatchers(status?: string): MarketWatcher[] {
+  if (status) {
+    return db.prepare('SELECT * FROM market_watchers WHERE status = ? ORDER BY started_at DESC').all(status) as MarketWatcher[];
+  }
+  return db.prepare('SELECT * FROM market_watchers ORDER BY started_at DESC').all() as MarketWatcher[];
+}
+
+export function updateWatcher(id: string, updates: Partial<Pick<MarketWatcher, 'status' | 'data_points'>>): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+  if (updates.data_points !== undefined) { fields.push('data_points = ?'); values.push(updates.data_points); }
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE market_watchers SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function storeMarketDataPoint(point: {
+  platform: string;
+  symbol: string;
+  timestamp: string;
+  price: number;
+  volume?: number;
+  open_interest?: number;
+  metadata?: string;
+}): void {
+  db.prepare(
+    `INSERT INTO market_data (platform, symbol, timestamp, price, volume, open_interest, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(point.platform, point.symbol, point.timestamp, point.price, point.volume ?? null, point.open_interest ?? null, point.metadata ?? null);
+}
+
+export function getRecordedData(watcherId: string, tokenId?: string, limit?: number, offset?: number, order?: 'ASC' | 'DESC'): Array<{
+  id: number;
+  platform: string;
+  symbol: string;
+  timestamp: string;
+  price: number;
+  volume: number | null;
+  open_interest: number | null;
+  metadata: string | null;
+}> {
+  let sql = `SELECT * FROM market_data WHERE metadata LIKE ?`;
+  const params: unknown[] = [`%"watcher_id":"${watcherId}"%`];
+  if (tokenId) {
+    sql += ` AND symbol = ?`;
+    params.push(tokenId);
+  }
+  sql += ` ORDER BY timestamp ${order === 'DESC' ? 'DESC' : 'ASC'}`;
+  if (limit) {
+    sql += ` LIMIT ?`;
+    params.push(limit);
+  }
+  if (offset) {
+    sql += ` OFFSET ?`;
+    params.push(offset);
+  }
+  return db.prepare(sql).all(...params) as any[];
+}
+
+// --- Optimization Result accessors ---
+
+export function createOptimizationResult(result: OptimizationResult): void {
+  db.prepare(
+    `INSERT INTO optimization_results (id, watcher_id, strategy, param_ranges, results, optimize_for, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(result.id, result.watcher_id, result.strategy, result.param_ranges, result.results, result.optimize_for, result.created_at);
+}
+
+export function getOptimizationResult(id: string): OptimizationResult | undefined {
+  return db.prepare('SELECT * FROM optimization_results WHERE id = ?').get(id) as OptimizationResult | undefined;
+}
+
+export function getOptimizationResults(watcherId?: string): OptimizationResult[] {
+  if (watcherId) {
+    return db.prepare('SELECT * FROM optimization_results WHERE watcher_id = ? ORDER BY created_at DESC').all(watcherId) as OptimizationResult[];
+  }
+  return db.prepare('SELECT * FROM optimization_results ORDER BY created_at DESC').all() as OptimizationResult[];
+}
+
+// --- Paper Trade accessors ---
+
+export function createPaperTrade(trade: PaperTrade): void {
+  db.prepare(
+    `INSERT INTO paper_trades (id, ticker, market_title, side, action, qty, entry_price, exit_price, status, strategy, market_type, event_ticker, close_time, notes, created_at, settled_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    trade.id, trade.ticker, trade.market_title, trade.side, trade.action,
+    trade.qty, trade.entry_price, trade.exit_price, trade.status,
+    trade.strategy || 'uncategorized',
+    trade.market_type, trade.event_ticker, trade.close_time, trade.notes,
+    trade.created_at, trade.settled_at,
+  );
+}
+
+export function getAllPaperTrades(status?: string): PaperTrade[] {
+  if (status) {
+    return db.prepare('SELECT * FROM paper_trades WHERE status = ? ORDER BY created_at DESC').all(status) as PaperTrade[];
+  }
+  return db.prepare('SELECT * FROM paper_trades ORDER BY created_at DESC').all() as PaperTrade[];
+}
+
+export function getPaperTradeById(id: string): PaperTrade | undefined {
+  return db.prepare('SELECT * FROM paper_trades WHERE id = ?').get(id) as PaperTrade | undefined;
+}
+
+export function updatePaperTrade(id: string, updates: Partial<Pick<PaperTrade, 'exit_price' | 'status' | 'settled_at' | 'notes' | 'strategy'>>): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.exit_price !== undefined) { fields.push('exit_price = ?'); values.push(updates.exit_price); }
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+  if (updates.settled_at !== undefined) { fields.push('settled_at = ?'); values.push(updates.settled_at); }
+  if (updates.notes !== undefined) { fields.push('notes = ?'); values.push(updates.notes); }
+  if (updates.strategy !== undefined) { fields.push('strategy = ?'); values.push(updates.strategy); }
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE paper_trades SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function deletePaperTrade(id: string): void {
+  db.prepare('DELETE FROM paper_trades WHERE id = ?').run(id);
 }
 
 // --- JSON migration ---

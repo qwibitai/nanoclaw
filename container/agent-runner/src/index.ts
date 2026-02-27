@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput, SubagentStartHookInput, SubagentStopHookInput, TaskCompletedHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -206,6 +206,133 @@ function createSanitizeBashHook(): HookCallback {
         },
       },
     };
+  };
+}
+
+function createSubagentStartHook(): HookCallback {
+  return async (input) => {
+    const hook = input as SubagentStartHookInput;
+    log(`[subagent:start] ${JSON.stringify({
+      _event: 'subagent:start',
+      agent_id: hook.agent_id,
+      agent_type: hook.agent_type,
+      timestamp: new Date().toISOString(),
+    })}`);
+    return {};
+  };
+}
+
+interface TranscriptStep {
+  type: 'thinking' | 'text' | 'tool_call' | 'tool_result';
+  name?: string;
+  content: string;
+}
+
+function parseSubagentTranscript(transcriptPath: string): { tools: string[]; outputPreview: string; steps: TranscriptStep[] } {
+  const toolSet = new Set<string>();
+  const steps: TranscriptStep[] = [];
+  let lastAssistantText = '';
+  const MAX_STEPS = 80;
+  const MAX_CONTENT = 400;
+  const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+  // Check if file exists and is readable
+  if (!fs.existsSync(transcriptPath)) {
+    return { tools: [], outputPreview: '', steps: [] };
+  }
+
+  // Check file size before reading
+  const stats = fs.statSync(transcriptPath);
+  if (stats.size > MAX_FILE_SIZE) {
+    if (process.env.DEBUG) {
+      log(`Transcript file too large (${stats.size} bytes), truncating results`);
+    }
+    return { tools: [], outputPreview: '', steps: [] };
+  }
+
+  const content = fs.readFileSync(transcriptPath, 'utf-8');
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type === 'assistant' && Array.isArray(entry.message?.content)) {
+        for (const block of entry.message.content) {
+          if (block.type === 'thinking' && block.thinking && steps.length < MAX_STEPS) {
+            steps.push({ type: 'thinking', content: block.thinking.slice(0, MAX_CONTENT) });
+          } else if (block.type === 'text' && block.text) {
+            lastAssistantText = block.text;
+            if (steps.length < MAX_STEPS) {
+              steps.push({ type: 'text', content: block.text.slice(0, MAX_CONTENT) });
+            }
+          } else if (block.type === 'tool_use' && block.name) {
+            toolSet.add(block.name);
+            if (steps.length < MAX_STEPS) {
+              const inputStr = block.input ? JSON.stringify(block.input) : '';
+              steps.push({ type: 'tool_call', name: block.name, content: inputStr.slice(0, MAX_CONTENT) });
+            }
+          } else if (block.type === 'tool_result') {
+            if (steps.length < MAX_STEPS) {
+              const resultText = typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
+              steps.push({ type: 'tool_result', content: resultText.slice(0, MAX_CONTENT) });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (process.env.DEBUG) {
+        log(`Failed to parse transcript line: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  return {
+    tools: Array.from(toolSet),
+    outputPreview: lastAssistantText.slice(0, 500),
+    steps,
+  };
+}
+
+function createSubagentStopHook(): HookCallback {
+  return async (input) => {
+    const hook = input as SubagentStopHookInput;
+    let tools: string[] = [];
+    let outputPreview = '';
+    let steps: TranscriptStep[] = [];
+    try {
+      if (hook.agent_transcript_path && fs.existsSync(hook.agent_transcript_path)) {
+        const parsed = parseSubagentTranscript(hook.agent_transcript_path);
+        tools = parsed.tools;
+        outputPreview = parsed.outputPreview;
+        steps = parsed.steps;
+      }
+    } catch (err) {
+      log(`Failed to read sub-agent transcript: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    log(`[subagent:stop] ${JSON.stringify({
+      _event: 'subagent:stop',
+      agent_id: hook.agent_id,
+      agent_type: hook.agent_type,
+      tools,
+      output_preview: outputPreview,
+      steps,
+      timestamp: new Date().toISOString(),
+    })}`);
+    return {};
+  };
+}
+
+function createTaskCompletedHook(): HookCallback {
+  return async (input) => {
+    const hook = input as TaskCompletedHookInput;
+    log(`[task:completed] ${JSON.stringify({
+      _event: 'task:completed',
+      task_id: hook.task_id,
+      task_subject: hook.task_subject,
+      teammate_name: hook.teammate_name,
+      team_name: hook.team_name,
+      timestamp: new Date().toISOString(),
+    })}`);
+    return {};
   };
 }
 
@@ -457,6 +584,9 @@ async function runQuery(
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook()] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        SubagentStart: [{ hooks: [createSubagentStartHook()] }],
+        SubagentStop: [{ hooks: [createSubagentStopHook()] }],
+        TaskCompleted: [{ hooks: [createTaskCompletedHook()] }],
       },
     }
   })) {
@@ -464,8 +594,26 @@ async function runQuery(
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
     log(`[msg #${messageCount}] type=${msgType}`);
 
-    if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+    if (message.type === 'assistant') {
+      if ('uuid' in message) {
+        lastAssistantUuid = (message as { uuid: string }).uuid;
+      }
+      // Log assistant content blocks for live monitoring
+      const content = (message as { message?: { content?: unknown[] } }).message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          const b = block as Record<string, unknown>;
+          if (b.type === 'text' && typeof b.text === 'string') {
+            log(`[assistant] ${b.text.slice(0, 500)}`);
+          } else if (b.type === 'tool_use') {
+            const inputPreview = b.input ? JSON.stringify(b.input).slice(0, 300) : '';
+            log(`[tool_call] ${b.name}(${inputPreview})`);
+          } else if (b.type === 'tool_result') {
+            const resultText = typeof b.content === 'string' ? b.content : JSON.stringify(b.content || '');
+            log(`[tool_result] ${resultText.slice(0, 300)}`);
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

@@ -26,6 +26,7 @@ import {
 } from './container-runner.js';
 import { cleanupOrphans, ensureContainerRuntimeRunning } from './container-runtime.js';
 import {
+  createTask,
   createUser,
   getAllChats,
   getAllRegisteredGroups,
@@ -41,6 +42,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateTask,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
@@ -287,6 +289,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
+      monitorBus.emit(MONITOR_EVENTS.CONTAINER_OUTPUT, {
+        groupName: group.name,
+        chatJid,
+        status: result.status,
+        preview: result.result ? result.result.slice(0, 500) : null,
+        timestamp: new Date().toISOString(),
+      });
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
@@ -303,10 +312,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+      if (!result.result) {
+        monitorBus.emit(MONITOR_EVENTS.CONTAINER_OUTPUT, {
+          groupName: group.name,
+          chatJid,
+          status: result.status,
+          preview: null,
+          timestamp: new Date().toISOString(),
+        });
+      }
     }
 
     if (result.status === 'error') {
       hadError = true;
+      monitorBus.emit(MONITOR_EVENTS.CONTAINER_OUTPUT, {
+        groupName: group.name,
+        chatJid,
+        status: 'error',
+        preview: result.error || null,
+        timestamp: new Date().toISOString(),
+      });
     }
   });
 
@@ -615,6 +640,54 @@ async function main(): Promise<void> {
       },
       getQueueState: () => queue.getState(),
       getChannelStatus: () => channels.map((ch) => ({ name: ch.name, connected: ch.isConnected() })),
+      sendMessage: async (jid: string, text: string) => {
+        const channel = findChannel(channels, jid);
+        if (!channel) throw new Error(`No channel for JID: ${jid}`);
+        await channel.sendMessage(jid, text);
+      },
+      injectMessage: (jid: string, text: string) => {
+        const admin = getAllUsers().find((u) => u.role === 'admin');
+        const sender = admin?.phone ? `+${admin.phone}` : 'dashboard';
+        const senderName = admin?.name || 'Admin';
+        const msg: NewMessage = {
+          id: `dash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          chat_jid: jid,
+          sender,
+          sender_name: senderName,
+          content: text,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+          is_bot_message: false,
+        };
+        storeMessage(msg);
+        monitorBus.emit(MONITOR_EVENTS.MESSAGE_RECEIVED, {
+          chatJid: jid,
+          groupName: registeredGroups[jid]?.name || jid,
+          senderName,
+          contentPreview: text.slice(0, 200),
+          timestamp: msg.timestamp,
+        });
+        queue.enqueueMessageCheck(jid);
+      },
+      getRegisteredGroups: () => {
+        const result: Record<string, { name: string; folder: string }> = {};
+        for (const [jid, g] of Object.entries(registeredGroups)) {
+          result[jid] = { name: g.name, folder: g.folder };
+        }
+        return result;
+      },
+      createScheduledTask: (task) => createTask(task),
+      updateTaskStatus: (taskId, status) => updateTask(taskId, { status }),
+      execPolymarketCli: async (args: string) => {
+        const execAsync = promisify(exec);
+        return execAsync(`/opt/homebrew/bin/polymarket ${args}`, { timeout: 30000 });
+      },
+      getMainGroupJid: () => {
+        const entry = Object.entries(registeredGroups).find(
+          ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+        );
+        return entry ? entry[0] : null;
+      },
     });
   }
 

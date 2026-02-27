@@ -17,6 +17,7 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { monitorBus, MONITOR_EVENTS } from './monitor-events.js';
 import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -372,7 +373,15 @@ export async function runContainerAgent(
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (line) {
+          logger.debug({ container: group.folder }, line);
+          monitorBus.emit(MONITOR_EVENTS.CONTAINER_LOG, {
+            groupName: group.folder,
+            containerName,
+            line,
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).

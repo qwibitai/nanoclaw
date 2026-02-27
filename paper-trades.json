@@ -1,0 +1,85 @@
+{
+  "session": "2026-02-27",
+  "btc_at_entry": 65348,
+  "entry_time": "2026-02-27T19:33:00Z",
+  "trades": [
+    {
+      "id": 1,
+      "name": "Stay put (3pm)",
+      "ticker": "KXBTC-26FEB2715-B65375",
+      "bracket": "$65,250 to $65,499.99",
+      "event_close": "2026-02-27T20:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 10,
+      "price_cents": 49,
+      "cost_dollars": 4.90,
+      "win_payout_dollars": 10.00
+    },
+    {
+      "id": 2,
+      "name": "Cover range (3pm) — leg A",
+      "ticker": "KXBTC-26FEB2715-B65375",
+      "bracket": "$65,250 to $65,499.99",
+      "event_close": "2026-02-27T20:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 5,
+      "price_cents": 49,
+      "cost_dollars": 2.45,
+      "win_payout_dollars": 5.00
+    },
+    {
+      "id": 3,
+      "name": "Cover range (3pm) — leg B",
+      "ticker": "KXBTC-26FEB2715-B65125",
+      "bracket": "$65,000 to $65,249.99",
+      "event_close": "2026-02-27T20:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 5,
+      "price_cents": 24,
+      "cost_dollars": 1.20,
+      "win_payout_dollars": 5.00
+    },
+    {
+      "id": 4,
+      "name": "Cover range (3pm) — leg C",
+      "ticker": "KXBTC-26FEB2715-B65625",
+      "bracket": "$65,500 to $65,749.99",
+      "event_close": "2026-02-27T20:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 5,
+      "price_cents": 19,
+      "cost_dollars": 0.95,
+      "win_payout_dollars": 5.00
+    },
+    {
+      "id": 5,
+      "name": "Lean bearish (5pm)",
+      "ticker": "KXBTC-26FEB2717-B64750",
+      "bracket": "$64,500 to $64,999.99",
+      "event_close": "2026-02-27T22:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 10,
+      "price_cents": 21,
+      "cost_dollars": 2.10,
+      "win_payout_dollars": 10.00
+    },
+    {
+      "id": 6,
+      "name": "Lottery ticket (5pm)",
+      "ticker": "KXBTC-26FEB2717-B67750",
+      "bracket": "$67,500 to $67,999.99",
+      "event_close": "2026-02-27T22:00:00Z",
+      "side": "yes",
+      "action": "buy",
+      "qty": 20,
+      "price_cents": 3,
+      "cost_dollars": 0.60,
+      "win_payout_dollars": 20.00
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+name: read-article
+version: 1.0.0
+description: Read and extract learnings from articles, applying knowledge to the system
+invocation: manual
+command: /read-article
+tags:
+  - learning
+  - knowledge-management
+  - research

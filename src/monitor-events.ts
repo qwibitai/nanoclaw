@@ -13,4 +13,6 @@ export const MONITOR_EVENTS = {
   TASK_STARTED: 'task:started',
   TASK_COMPLETED: 'task:completed',
   CHANNEL_STATUS: 'channel:status',
+  CONTAINER_LOG: 'container:log',
+  CONTAINER_OUTPUT: 'container:output',
 } as const;

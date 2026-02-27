@@ -1,0 +1,9 @@
+=== 3PM WINDOW CHECK — Fri Feb 27 15:03:42 EST 2026 ===
+BTC at 3pm close: $65431
+
+  KXBTC-26FEB2715-B65375                   $65,250 to 65,499.99           status=finalized result=yes last=99c
+  KXBTC-26FEB2715-B65125                   $65,000 to 65,249.99           status=finalized result=no last=50c
+  KXBTC-26FEB2715-B65625                   $65,500 to 65,749.99           status=finalized result=no last=1c
+
+--- Trade 1 (Stay put): 10x B65375 @ 49c = $4.90 cost ---
+--- Trade 2 (Cover): 5x B65375@49c + 5x B65125@24c + 5x B65625@19c = $4.60 cost ---

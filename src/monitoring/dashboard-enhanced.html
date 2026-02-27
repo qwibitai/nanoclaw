@@ -161,6 +161,368 @@
     padding: 40px;
     color: #8b949e;
   }
+
+  /* Agents tab styles */
+  #tab-agents {
+    display: none;
+    padding: 16px 20px;
+    height: calc(100vh - 150px);
+    overflow: hidden;
+  }
+  #tab-agents.active { display: block; }
+
+  .agent-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 11px;
+    transition: opacity 0.5s ease;
+  }
+  .agent-card .pulse-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #3fb950;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(63,185,80,0.4); }
+    50% { box-shadow: 0 0 0 4px rgba(63,185,80,0); }
+  }
+  .agent-card .agent-name { color: #f0f6fc; font-weight: 600; }
+  .agent-card .agent-time { color: #8b949e; }
+  .agent-card.ending { opacity: 0; }
+
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-line .log-ts { color: #484f58; }
+  .log-line .log-group { color: #58a6ff; }
+  .log-line.log-stderr { color: #8b949e; }
+  .log-line.log-assistant { color: #f0f6fc; }
+  .log-line.log-tool-call { color: #d2a8ff; }
+  .log-line.log-tool-result { color: #a5d6ff; }
+  .log-line.log-output-success { color: #3fb950; }
+  .log-line.log-output-error { color: #f85149; }
+  .log-line.log-output-heartbeat { color: #484f58; }
+  .log-line.log-lifecycle { color: #58a6ff; }
+  .log-line.log-subagent-start { color: #3fb950; font-weight: 600; }
+  .log-line.log-subagent-stop { color: #d29922; }
+  .log-line.log-task-completed { color: #a5d6ff; font-weight: 600; }
+
+  .subagent-card {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #0d1117; border: 1px solid #30363d;
+    border-radius: 4px; padding: 4px 10px;
+    font-size: 10px; margin-left: 16px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .subagent-card:hover { border-color: #d2a8ff; }
+  .subagent-card .pulse-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #d2a8ff;
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+  .subagent-card.completed .pulse-dot { background: #8b949e; animation: none; }
+  .subagent-card .subagent-type { color: #d2a8ff; font-weight: 600; }
+  .subagent-card .subagent-id { color: #8b949e; }
+  .subagent-card .subagent-time { color: #484f58; }
+
+  .subagent-modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+    animation: modal-fade-in 0.15s ease;
+  }
+  @keyframes modal-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .subagent-modal {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; width: 700px; max-width: 90vw;
+    max-height: 80vh; display: flex; flex-direction: column;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+    animation: modal-slide-in 0.15s ease;
+  }
+  @keyframes modal-slide-in { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .subagent-modal-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid #21262d;
+    flex-shrink: 0;
+  }
+  .subagent-modal-header .modal-dot {
+    width: 10px; height: 10px; border-radius: 50%; background: #d2a8ff; flex-shrink: 0;
+  }
+  .subagent-modal-header .modal-dot.done { background: #8b949e; }
+  .subagent-modal-header .modal-name { color: #f0f6fc; font-weight: 600; font-size: 14px; }
+  .subagent-modal-header .modal-id { color: #8b949e; font-size: 11px; }
+  .subagent-modal-header .modal-duration { color: #8b949e; font-size: 12px; margin-left: auto; }
+  .subagent-modal-header .modal-close {
+    color: #8b949e; cursor: pointer; font-size: 20px; line-height: 1;
+    background: none; border: none; padding: 0 4px; margin-left: 12px;
+  }
+  .subagent-modal-header .modal-close:hover { color: #f0f6fc; }
+  .subagent-modal-tools {
+    display: flex; flex-wrap: wrap; gap: 4px;
+    padding: 10px 20px; border-bottom: 1px solid #21262d;
+    flex-shrink: 0;
+  }
+  .subagent-modal-tools .tool-badge {
+    background: #1c1d21; color: #d2a8ff; padding: 3px 8px;
+    border-radius: 3px; font-size: 10px; font-weight: 600;
+  }
+  .subagent-modal-body {
+    flex: 1; overflow-y: auto; padding: 12px 20px;
+  }
+  .subagent-timeline .step {
+    display: flex; gap: 8px; padding: 6px 0;
+    font-size: 12px; line-height: 1.5;
+    border-bottom: 1px solid #21262d;
+  }
+  .subagent-timeline .step:last-child { border-bottom: none; }
+  .subagent-timeline .step-icon {
+    flex-shrink: 0; width: 20px; text-align: center; font-size: 12px; padding-top: 1px;
+  }
+  .subagent-timeline .step-label {
+    flex-shrink: 0; color: #d2a8ff; font-weight: 600; min-width: 80px;
+  }
+  .subagent-timeline .step-body {
+    color: #8b949e; white-space: pre-wrap; word-break: break-word;
+    flex: 1; overflow: hidden;
+  }
+  .subagent-timeline .step-thinking .step-body { color: #484f58; font-style: italic; }
+  .subagent-timeline .step-text .step-body { color: #f0f6fc; }
+  .subagent-timeline .step-tool_call .step-body { color: #c9d1d9; }
+  .subagent-timeline .step-tool_result .step-body { color: #a5d6ff; }
+  .subagent-modal .output-preview {
+    color: #c9d1d9; white-space: pre-wrap; word-break: break-word;
+    padding: 12px 0; font-size: 12px; line-height: 1.5;
+  }
+
+  /* Messages tab styles */
+  #tab-messages {
+    display: none;
+    padding: 0;
+    height: calc(100vh - 150px);
+    overflow: hidden;
+  }
+  #tab-messages.active { display: flex; flex-direction: column; }
+  .msg-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .msg-header-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #21262d;
+    background: #161b22;
+    flex-shrink: 0;
+  }
+  .msg-header-bar select {
+    font-family: inherit;
+    font-size: 13px;
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 6px 10px;
+    min-width: 220px;
+  }
+  .msg-header-bar .msg-status {
+    color: #8b949e;
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .msg-feed {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+  .msg-date-sep {
+    text-align: center;
+    color: #8b949e;
+    font-size: 10px;
+    padding: 8px 0 4px;
+  }
+  .msg-bubble {
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 75%;
+    font-size: 12px;
+    line-height: 1.4;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .msg-bubble.incoming {
+    background: #21262d;
+    align-self: flex-start;
+  }
+  .msg-bubble.outgoing {
+    background: #1b3a2a;
+    align-self: flex-end;
+  }
+  .msg-sender {
+    font-weight: 600;
+    color: #58a6ff;
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+  .msg-time {
+    color: #8b949e;
+    font-size: 10px;
+    margin-top: 4px;
+  }
+  .msg-compose {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    padding: 10px 16px;
+    border-top: 1px solid #21262d;
+    background: #161b22;
+    flex-shrink: 0;
+  }
+  .msg-compose textarea {
+    flex: 1;
+    font-family: inherit;
+    font-size: 13px;
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-height: 38px;
+    max-height: 120px;
+    resize: none;
+  }
+  .msg-compose textarea:focus { border-color: #58a6ff; outline: none; }
+  .send-btn {
+    background: #238636;
+    color: #fff;
+    border: 1px solid #2ea043;
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+  .send-btn:hover { background: #2ea043; }
+  .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Trading management styles */
+  .form-group {
+    margin-bottom: 12px;
+  }
+  .form-group label {
+    display: block;
+    color: #8b949e;
+    font-size: 11px;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .form-group input, .form-group select, .form-group textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 13px;
+    background: #0d1117;
+    color: #c9d1d9;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .form-group textarea { resize: vertical; min-height: 60px; }
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .form-row-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+  .btn {
+    font-family: inherit;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid #30363d;
+  }
+  .btn-primary { background: #238636; color: #fff; border-color: #2ea043; }
+  .btn-primary:hover { background: #2ea043; }
+  .btn-danger { background: #4c1f1f; color: #f85149; border-color: #f85149; }
+  .btn-danger:hover { background: #6b2a2a; }
+  .btn-secondary { background: #21262d; color: #c9d1d9; }
+  .btn-secondary:hover { background: #30363d; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  .checklist-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid #21262d;
+  }
+  .checklist-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .checklist-icon.done { background: #1b4332; color: #3fb950; }
+  .checklist-icon.pending { background: #1c1d21; color: #8b949e; }
+
+  .badge-pulsing {
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .sub-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+  .sub-tab {
+    padding: 6px 12px;
+    cursor: pointer;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    color: #8b949e;
+    font-size: 12px;
+    background: transparent;
+  }
+  .sub-tab.active { background: #21262d; color: #f0f6fc; border-color: #58a6ff; }
+
+  .equity-canvas {
+    width: 100%;
+    height: 300px;
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 6px;
+  }
+
+  .compare-check {
+    margin-right: 8px;
+    accent-color: #58a6ff;
+  }
 </style>
 </head>
 <body>
@@ -175,9 +537,16 @@
 
 <div class="tabs">
   <div class="tab active" onclick="switchTab('overview')">Overview</div>
-  <div class="tab" onclick="switchTab('trading')">Trading</div>
+  <div class="tab" onclick="switchTab('predictions')">Prediction Markets</div>
+  <div class="tab" onclick="switchTab('stocks')">Stocks</div>
   <div class="tab" onclick="switchTab('messages')">Messages</div>
   <div class="tab" onclick="switchTab('tasks')">Tasks</div>
+  <div class="tab" onclick="switchTab('account')">Account</div>
+  <div class="tab" onclick="switchTab('presets')">Presets</div>
+  <div class="tab" onclick="switchTab('runs')">Runs</div>
+  <div class="tab" onclick="switchTab('backtests')">Backtests</div>
+  <div class="tab" onclick="switchTab('watchers')">Watchers</div>
+  <div class="tab" onclick="switchTab('agents')">Agents</div>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -216,30 +585,30 @@
   </div>
 </div>
 
-<!-- TRADING TAB -->
-<div id="tab-trading" class="tab-content">
+<!-- PREDICTION MARKETS TAB -->
+<div id="tab-predictions" class="tab-content">
   <div class="grid-3">
     <div class="metric-card">
       <div class="metric-label">Total P&L</div>
-      <div class="metric-value" id="trade-pnl">--</div>
+      <div class="metric-value" id="pred-pnl">--</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Win Rate</div>
-      <div class="metric-value" id="trade-winrate">--</div>
+      <div class="metric-value" id="pred-winrate">--</div>
     </div>
     <div class="metric-card">
       <div class="metric-label">Open Positions</div>
-      <div class="metric-value" id="trade-positions">--</div>
+      <div class="metric-value" id="pred-positions">--</div>
     </div>
   </div>
 
   <div class="panel">
     <div class="panel-header">
       Open Positions
-      <button class="refresh-btn" onclick="loadTradingData()">Refresh</button>
+      <button class="refresh-btn" onclick="loadTradingData('predictions')">Refresh</button>
     </div>
     <div class="panel-body">
-      <table id="positions-table">
+      <table>
         <thead>
           <tr>
             <th>Symbol</th>
@@ -252,8 +621,8 @@
             <th>Status</th>
           </tr>
         </thead>
-        <tbody id="positions-body">
-          <tr><td colspan="8" class="empty-state">Loading positions...</td></tr>
+        <tbody id="pred-positions-body">
+          <tr><td colspan="8" class="empty-state">No prediction market positions</td></tr>
         </tbody>
       </table>
     </div>
@@ -262,7 +631,7 @@
   <div class="panel">
     <div class="panel-header">Recent Signals</div>
     <div class="panel-body">
-      <table id="signals-table">
+      <table>
         <thead>
           <tr>
             <th>Time</th>
@@ -272,8 +641,8 @@
             <th>Notes</th>
           </tr>
         </thead>
-        <tbody id="signals-body">
-          <tr><td colspan="5" class="empty-state">Loading signals...</td></tr>
+        <tbody id="pred-signals-body">
+          <tr><td colspan="5" class="empty-state">No signals</td></tr>
         </tbody>
       </table>
     </div>
@@ -281,18 +650,98 @@
 
   <div class="panel">
     <div class="panel-header">Performance Metrics (Last 30 Days)</div>
-    <div class="panel-body" id="performance-metrics">
-      <div class="empty-state">Loading performance data...</div>
+    <div class="panel-body" id="pred-performance">
+      <div class="empty-state">No performance data</div>
+    </div>
+  </div>
+</div>
+
+<!-- STOCKS TAB -->
+<div id="tab-stocks" class="tab-content">
+  <div class="grid-3">
+    <div class="metric-card">
+      <div class="metric-label">Total P&L</div>
+      <div class="metric-value" id="stocks-pnl">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Win Rate</div>
+      <div class="metric-value" id="stocks-winrate">--</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Open Positions</div>
+      <div class="metric-value" id="stocks-positions">--</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      Open Positions
+      <button class="refresh-btn" onclick="loadTradingData('stocks')">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Platform</th>
+            <th>Entry</th>
+            <th>Size</th>
+            <th>Entry Date</th>
+            <th>Strategy</th>
+            <th>P&L</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="stocks-positions-body">
+          <tr><td colspan="8" class="empty-state">No stock positions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Recent Signals</div>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Strategy</th>
+            <th>Bias</th>
+            <th>Confidence</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="stocks-signals-body">
+          <tr><td colspan="5" class="empty-state">No signals</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Performance Metrics (Last 30 Days)</div>
+    <div class="panel-body" id="stocks-performance">
+      <div class="empty-state">No performance data</div>
     </div>
   </div>
 </div>
 
 <!-- MESSAGES TAB -->
 <div id="tab-messages" class="tab-content">
-  <div class="panel">
-    <div class="panel-header">Recent Messages</div>
-    <div class="panel-body" id="messages-feed">
-      <div class="empty-state">No messages yet</div>
+  <div class="msg-layout">
+    <div class="msg-header-bar">
+      <select id="msg-group-select">
+        <option value="">Select a group...</option>
+      </select>
+      <span class="msg-status" id="msg-live-status"></span>
+    </div>
+    <div class="msg-feed" id="messages-feed">
+      <div class="empty-state">Select a group to view messages</div>
+    </div>
+    <div class="msg-compose">
+      <textarea id="msg-input" placeholder="Type a message..." rows="1"></textarea>
+      <button class="send-btn" id="msg-send-btn" onclick="sendMessage()" disabled>Send</button>
     </div>
   </div>
 </div>
@@ -307,9 +756,656 @@
   </div>
 </div>
 
+<!-- ACCOUNT TAB -->
+<div id="tab-account" class="tab-content">
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="switchAccountSub('wallet')">Wallet</div>
+    <div class="sub-tab" onclick="switchAccountSub('paper')">Paper Trading</div>
+    <div class="sub-tab" onclick="switchAccountSub('kalshi')">Kalshi</div>
+    <div class="sub-tab" onclick="switchAccountSub('markets')">Markets</div>
+  </div>
+
+  <div id="acct-sub-wallet">
+  <div class="grid-2">
+    <div>
+      <div class="panel">
+        <div class="panel-header">Wallet Status <button class="refresh-btn" onclick="loadAccountStatus()">Refresh</button></div>
+        <div class="panel-body">
+          <table>
+            <tr><td>Wallet Address</td><td id="acct-address"><span class="badge badge-gray">Not created</span></td></tr>
+            <tr><td>Approval Status</td><td id="acct-approval"><span class="badge badge-gray">Unknown</span></td></tr>
+            <tr><td>Balance</td><td id="acct-balance">--</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">Actions</div>
+        <div class="panel-body" style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <button class="btn btn-primary" onclick="acctCreateWallet()">Create Wallet</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('import-wallet-form').style.display = document.getElementById('import-wallet-form').style.display === 'none' ? 'block' : 'none'">Import Wallet</button>
+          <button class="btn btn-secondary" onclick="acctApprove()">Approve Contracts</button>
+          <button class="btn btn-secondary" onclick="acctCheckApproval()">Check Approval</button>
+          <button class="btn btn-secondary" onclick="acctRefreshBalance()">Refresh Balance</button>
+        </div>
+        <div id="import-wallet-form" style="display: none; padding: 12px 16px; border-top: 1px solid #21262d;">
+          <div class="form-group">
+            <label>Private Key</label>
+            <input type="password" id="acct-private-key" placeholder="Enter private key...">
+          </div>
+          <button class="btn btn-primary" onclick="acctImportWallet()">Import</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Setup Guide</div>
+      <div class="panel-body" id="acct-checklist">
+        <div class="checklist-item"><div class="checklist-icon pending" id="check-wallet">1</div><div>Create or import a wallet</div></div>
+        <div class="checklist-item"><div class="checklist-icon pending" id="check-fund">2</div><div>Fund wallet with USDC</div></div>
+        <div class="checklist-item"><div class="checklist-icon pending" id="check-approve">3</div><div>Approve exchange contracts</div></div>
+        <div class="checklist-item"><div class="checklist-icon pending" id="check-verify">4</div><div>Verify balance and approval</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" style="margin-top: 16px;">
+    <div class="panel-header">CLI Output</div>
+    <div class="panel-body"><pre id="acct-output" style="color: #8b949e; white-space: pre-wrap; max-height: 200px; overflow-y: auto;">Ready.</pre></div>
+  </div>
+  </div>
+
+  <div id="acct-sub-markets" style="display:none">
+    <span id="btc-price-badge" style="font-size: 14px; font-weight: 700; color: #58a6ff;">--</span>
+    <div id="btc-updown-container" style="margin: 12px 0;">
+      <div class="empty-state" style="padding: 12px;">Loading up/down windows...</div>
+    </div>
+    <div id="btc-windows-container" style="margin-bottom: 16px;">
+      <div class="empty-state" style="padding: 20px;">Loading range windows...</div>
+    </div>
+  </div>
+
+  <div id="acct-sub-paper" style="display:none">
+  <!-- Portfolio Summary Bar -->
+  <div id="paper-summary" style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+    <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 120px;">
+      <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Realized P&L</div>
+      <div id="paper-total-pnl" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+    </div>
+    <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 120px;">
+      <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Unrealized P&L</div>
+      <div id="paper-unrealized-pnl" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+    </div>
+    <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 100px;">
+      <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Win Rate</div>
+      <div id="paper-win-rate" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+    </div>
+    <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 100px;">
+      <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Open Exposure</div>
+      <div id="paper-exposure" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+    </div>
+    <div style="background: #161b22; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 80px;">
+      <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Trades</div>
+      <div id="paper-trade-count" style="font-size: 18px; font-weight: 700; color: #c9d1d9;">--</div>
+    </div>
+  </div>
+
+  <!-- Strategy Breakdown -->
+  <div id="strategy-breakdown-panel" class="panel" style="margin-bottom: 12px; display: none;">
+    <div class="panel-header">Strategy Breakdown</div>
+    <div class="panel-body" style="padding: 0; overflow-x: auto;">
+      <table style="width: 100%; font-size: 12px;">
+        <thead>
+          <tr style="background: #161b22;">
+            <th style="padding: 5px 8px; text-align: left; color: #8b949e; font-weight: 600;">Strategy</th>
+            <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Trades</th>
+            <th style="padding: 5px 8px; text-align: center; color: #8b949e; font-weight: 600;">W/L</th>
+            <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Win%</th>
+            <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">P&L</th>
+            <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Avg Return</th>
+          </tr>
+        </thead>
+        <tbody id="strategy-breakdown-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Quick Trade Form -->
+  <div class="panel" style="margin-bottom: 12px;">
+    <div class="panel-header">Add Paper Trade</div>
+    <div class="panel-body" style="padding: 10px;">
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: end;">
+        <div style="flex: 2; min-width: 140px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Ticker</label>
+          <input id="paper-ticker" type="text" placeholder="KXBTC-..." style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px; font-family: monospace;">
+        </div>
+        <div style="min-width: 70px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Side</label>
+          <select id="paper-side" style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+        <div style="min-width: 110px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Strategy</label>
+          <select id="paper-strategy" style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+            <option value="center_bracket">Center Bracket</option>
+            <option value="spread">Spread</option>
+            <option value="directional">Directional</option>
+            <option value="momentum_15m">15m Momentum</option>
+            <option value="lottery">Lottery</option>
+            <option value="arbitrage">Arbitrage</option>
+            <option value="uncategorized">Other</option>
+          </select>
+        </div>
+        <div style="min-width: 60px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Qty</label>
+          <input id="paper-qty" type="number" value="10" min="1" style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+        </div>
+        <div style="min-width: 70px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Price (&cent;)</label>
+          <input id="paper-price" type="number" min="1" max="99" style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+        </div>
+        <div style="flex: 1; min-width: 100px;">
+          <label style="font-size: 11px; color: #8b949e; display: block; margin-bottom: 2px;">Notes</label>
+          <input id="paper-notes" type="text" placeholder="optional" style="width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 8px; border-radius: 4px; font-size: 12px;">
+        </div>
+        <button onclick="addPaperTrade()" style="background: #238636; color: #fff; border: none; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap;">Add Trade</button>
+      </div>
+      <div id="paper-ticker-info" style="font-size: 11px; color: #8b949e; margin-top: 4px;"></div>
+    </div>
+  </div>
+
+  <!-- Paper Trades Table -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <div class="panel-header">
+      Trades
+      <span style="float: right; font-size: 11px;">
+        <label style="color: #8b949e; cursor: pointer;"><input type="checkbox" id="paper-show-closed" onchange="loadPaperPortfolio()" style="margin-right: 4px;">Show settled</label>
+      </span>
+    </div>
+    <div class="panel-body" style="padding: 0; overflow-x: auto;">
+      <table style="width: 100%; font-size: 12px;">
+        <thead>
+          <tr style="background: #161b22;">
+            <th style="padding: 6px 8px; text-align: left; color: #8b949e; font-weight: 600;">Ticker</th>
+            <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Strat</th>
+            <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Side</th>
+            <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Qty</th>
+            <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Entry</th>
+            <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Current/Exit</th>
+            <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">P&L</th>
+            <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Status</th>
+            <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Closes</th>
+            <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="paper-trades-body">
+          <tr><td colspan="10" class="empty-state" style="padding: 16px;">No paper trades yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </div>
+
+  <div id="acct-sub-kalshi" style="display:none">
+  <div class="grid-2">
+    <div>
+      <div class="panel">
+        <div class="panel-header">Kalshi Balance <button class="refresh-btn" onclick="loadKalshiBalance()">Refresh</button></div>
+        <div class="panel-body">
+          <table>
+            <tr><td>Available Balance</td><td id="kalshi-balance"><span class="badge badge-gray">--</span></td></tr>
+            <tr><td>Portfolio Value</td><td id="kalshi-portfolio"><span class="badge badge-gray">--</span></td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">Open Positions <button class="refresh-btn" onclick="loadKalshiPositions()">Refresh</button></div>
+        <div class="panel-body" style="max-height: 300px; overflow-y: auto;">
+          <table>
+            <thead><tr><th>Ticker</th><th>Side</th><th>Qty</th><th>Avg Price</th><th>Value</th></tr></thead>
+            <tbody id="kalshi-positions-body"><tr><td colspan="5" class="empty-state">--</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <div class="panel-header">Place Order</div>
+        <div class="panel-body">
+          <div class="form-group"><label>Ticker</label><input id="kalshi-order-ticker" placeholder="e.g. KXBTC-26FEB2717-B85000"></div>
+          <div style="display: flex; gap: 8px;">
+            <div class="form-group" style="flex:1"><label>Side</label>
+              <select id="kalshi-order-side"><option value="yes">Yes</option><option value="no">No</option></select>
+            </div>
+            <div class="form-group" style="flex:1"><label>Action</label>
+              <select id="kalshi-order-action"><option value="buy">Buy</option><option value="sell">Sell</option></select>
+            </div>
+            <div class="form-group" style="flex:1"><label>Type</label>
+              <select id="kalshi-order-type"><option value="limit">Limit</option><option value="market">Market</option></select>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <div class="form-group" style="flex:1"><label>Quantity</label><input id="kalshi-order-qty" type="number" min="1" value="1"></div>
+            <div class="form-group" style="flex:1"><label>Price (cents 1-99)</label><input id="kalshi-order-price" type="number" min="1" max="99" value="50"></div>
+          </div>
+          <button class="btn btn-primary" onclick="placeKalshiOrder()" style="margin-top: 8px; width: 100%;">Place Order</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">Open Orders <button class="refresh-btn" onclick="loadKalshiOrders()">Refresh</button></div>
+        <div class="panel-body" style="max-height: 250px; overflow-y: auto;">
+          <table>
+            <thead><tr><th>Ticker</th><th>Side</th><th>Action</th><th>Qty</th><th>Price</th><th>Status</th><th></th></tr></thead>
+            <tbody id="kalshi-orders-body"><tr><td colspan="7" class="empty-state">--</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">Recent Fills <button class="refresh-btn" onclick="loadKalshiFills()">Refresh</button></div>
+        <div class="panel-body" style="max-height: 200px; overflow-y: auto;">
+          <table>
+            <thead><tr><th>Ticker</th><th>Side</th><th>Action</th><th>Qty</th><th>Price</th><th>Time</th></tr></thead>
+            <tbody id="kalshi-fills-body"><tr><td colspan="6" class="empty-state">--</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  </div>
+</div>
+
+<!-- PRESETS TAB -->
+<div id="tab-presets" class="tab-content">
+  <div class="panel">
+    <div class="panel-header">
+      Strategy Presets
+      <button class="btn btn-primary btn-sm" onclick="togglePresetForm()" style="float: right;">+ New Preset</button>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>Name</th><th>Strategy</th><th>Platform</th><th>Mode</th><th>Capital</th><th>Actions</th></tr></thead>
+        <tbody id="presets-body"><tr><td colspan="6" class="empty-state">No presets</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel" id="preset-form-panel" style="display: none;">
+    <div class="panel-header">Preset Configuration</div>
+    <div class="panel-body">
+      <input type="hidden" id="preset-id">
+      <div class="form-row">
+        <div class="form-group"><label>Name</label><input id="preset-name" placeholder="My Strategy"></div>
+        <div class="form-group"><label>Strategy</label>
+          <select id="preset-strategy">
+            <option value="rsi_mean_reversion">RSI Mean Reversion</option>
+            <option value="probability_mispricing">Probability Mispricing</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group"><label>Platform</label>
+          <select id="preset-platform"><option value="polymarket">Polymarket</option><option value="kalshi">Kalshi</option><option value="all">All</option></select>
+        </div>
+        <div class="form-group"><label>Mode</label>
+          <select id="preset-mode"><option value="paper">Paper</option><option value="live">Live</option></select>
+        </div>
+        <div class="form-group"><label>Initial Capital ($)</label><input id="preset-capital" type="number" value="10000"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Max Drawdown (%)</label><input id="preset-drawdown" type="number" value="10"></div>
+        <div class="form-group"><label>Max Position Size (%)</label><input id="preset-position" type="number" value="5"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Min Confidence (%)</label><input id="preset-confidence" type="number" value="60"></div>
+        <div class="form-group"><label>Time Stop (days)</label><input id="preset-timestop" type="number" value="30"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Schedule Type</label>
+          <select id="preset-schedule-type"><option value="">None</option><option value="cron">Cron</option><option value="interval">Interval</option></select>
+        </div>
+        <div class="form-group"><label>Schedule Value</label><input id="preset-schedule-value" placeholder="e.g. 0 9 * * * or 4h"></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea id="preset-notes" rows="2"></textarea></div>
+      <div style="display: flex; gap: 8px; margin-top: 8px;">
+        <button class="btn btn-primary" onclick="savePreset()">Save Preset</button>
+        <button class="btn btn-secondary" onclick="togglePresetForm()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RUNS TAB -->
+<div id="tab-runs" class="tab-content">
+  <div class="panel">
+    <div class="panel-header">Active Runs</div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>ID</th><th>Type</th><th>Strategy</th><th>Platform</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead>
+        <tbody id="runs-active-body"><tr><td colspan="7" class="empty-state">No active runs</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Completed Runs</div>
+    <div class="panel-body">
+      <table>
+        <thead><tr><th>ID</th><th>Type</th><th>Strategy</th><th>Platform</th><th>P&L</th><th>Win Rate</th><th>Completed</th></tr></thead>
+        <tbody id="runs-completed-body"><tr><td colspan="7" class="empty-state">No completed runs</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">Launch New Run</div>
+    <div class="panel-body">
+      <div class="form-row-3">
+        <div class="form-group"><label>From Preset</label>
+          <select id="run-preset"><option value="">Manual config...</option></select>
+        </div>
+        <div class="form-group"><label>Type</label>
+          <select id="run-type" onchange="toggleRunDateRange()"><option value="backtest">Backtest</option><option value="paper">Paper Trading</option><option value="live">Live Trading</option></select>
+        </div>
+        <div class="form-group"><label>Platform</label>
+          <select id="run-platform"><option value="polymarket">Polymarket</option><option value="kalshi">Kalshi</option><option value="all">All</option></select>
+        </div>
+      </div>
+      <div class="form-row-3">
+        <div class="form-group"><label>Strategy</label>
+          <select id="run-strategy"><option value="rsi_mean_reversion">RSI Mean Reversion</option><option value="probability_mispricing">Probability Mispricing</option></select>
+        </div>
+        <div class="form-group"><label>Mode</label>
+          <select id="run-mode"><option value="paper">Paper</option><option value="live">Live</option></select>
+        </div>
+        <div class="form-group"><label>Capital ($)</label><input id="run-capital" type="number" value="10000"></div>
+      </div>
+      <div class="form-row" id="run-date-range">
+        <div class="form-group"><label>Start Date</label><input id="run-start-date" type="date"></div>
+        <div class="form-group"><label>End Date</label><input id="run-end-date" type="date"></div>
+      </div>
+      <button class="btn btn-primary" onclick="launchRun()">Launch Run</button>
+    </div>
+  </div>
+</div>
+
+<!-- BACKTESTS TAB -->
+<div id="tab-backtests" class="tab-content">
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="switchBacktestSub('results')">Results</div>
+    <div class="sub-tab" onclick="switchBacktestSub('compare')">Compare</div>
+  </div>
+
+  <div id="bt-sub-results">
+    <div class="panel">
+      <div class="panel-header">Backtest Results <button class="refresh-btn" onclick="loadBacktests()">Refresh</button></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>ID</th><th>Strategy</th><th>Platform</th><th>Date Range</th><th>P&L</th><th>Win Rate</th><th>Max DD</th><th>Sharpe</th><th>Actions</th></tr></thead>
+          <tbody id="backtests-body"><tr><td colspan="10" class="empty-state">No backtests</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" id="bt-detail-panel" style="display: none;">
+      <div class="panel-header">Backtest Detail: <span id="bt-detail-title"></span></div>
+      <div class="panel-body">
+        <div class="grid-4" id="bt-detail-metrics"></div>
+        <canvas id="bt-equity-canvas" class="equity-canvas" style="margin: 16px 0;"></canvas>
+        <div class="panel-header" style="margin-top: 16px; padding-left: 0;">Trades</div>
+        <table>
+          <thead><tr><th>Date</th><th>Symbol</th><th>Side</th><th>Price</th><th>P&L</th></tr></thead>
+          <tbody id="bt-detail-trades"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="bt-sub-compare" style="display: none;">
+    <div class="panel">
+      <div class="panel-header">Select Runs to Compare <button class="btn btn-primary btn-sm" onclick="compareSelected()" style="float: right;">Compare</button></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th></th><th>ID</th><th>Strategy</th><th>Platform</th><th>Date Range</th><th>P&L</th></tr></thead>
+          <tbody id="compare-select-body"><tr><td colspan="6" class="empty-state">No backtests to compare</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel" id="compare-results-panel" style="display: none;">
+      <div class="panel-header">Comparison</div>
+      <div class="panel-body">
+        <table id="compare-metrics-table"></table>
+        <canvas id="compare-equity-canvas" class="equity-canvas" style="margin-top: 16px;"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- WATCHERS TAB -->
+<div id="tab-watchers" class="tab-content">
+  <div class="sub-tabs">
+    <div class="sub-tab active" onclick="switchWatcherSub('active')">Active & Completed</div>
+    <div class="sub-tab" onclick="switchWatcherSub('search')">Find Markets</div>
+    <div class="sub-tab" onclick="switchWatcherSub('compare')">Compare</div>
+    <div class="sub-tab" onclick="switchWatcherSub('optimize')">Optimizer</div>
+    <div class="sub-tab" id="data-sub-tab" onclick="switchWatcherSub('data')" style="display:none;">Data Viewer</div>
+  </div>
+
+  <div id="watcher-sub-active">
+    <div class="panel">
+      <div class="panel-header">Market Watchers <button class="refresh-btn" onclick="loadWatchers()">Refresh</button></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>Name</th><th>Tokens</th><th>Interval</th><th>Points</th><th>Progress</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="watchers-body"><tr><td colspan="7" class="empty-state">No watchers</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="watcher-sub-search" style="display:none;">
+    <div class="panel">
+      <div class="panel-header">Search Markets (Polymarket + Kalshi)</div>
+      <div class="panel-body">
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <input id="market-search-input" type="text" value="bitcoin" placeholder="Search markets..." style="flex:1; font-family:inherit; font-size:13px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:8px 10px;">
+          <select id="market-search-platform" style="font-family:inherit; font-size:13px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:8px 10px;">
+            <option value="both">Both Platforms</option>
+            <option value="polymarket">Polymarket Only</option>
+            <option value="kalshi">Kalshi Only</option>
+          </select>
+          <button class="btn btn-primary" onclick="searchMarkets()">Search</button>
+        </div>
+
+        <h4 style="color:#58a6ff; margin:12px 0 8px 0; font-size:13px;">Polymarket Results</h4>
+        <table>
+          <thead><tr><th></th><th>Question</th><th>Volume</th><th>Tokens</th><th>End Date</th></tr></thead>
+          <tbody id="market-search-body"><tr><td colspan="5" class="empty-state">Search for markets above</td></tr></tbody>
+        </table>
+
+        <h4 style="color:#f0883e; margin:16px 0 8px 0; font-size:13px;">Kalshi Results</h4>
+        <table>
+          <thead><tr><th>Ticker</th><th>Question</th><th>Yes Bid/Ask</th><th>Volume</th><th>Close Time</th></tr></thead>
+          <tbody id="kalshi-search-body"><tr><td colspan="5" class="empty-state">Search for markets above</td></tr></tbody>
+        </table>
+        <div style="margin-top: 16px;">
+          <div class="form-row-3">
+            <div class="form-group"><label>Watcher Name</label><input id="watcher-name" type="text" placeholder="BTC 5m watch"></div>
+            <div class="form-group"><label>Interval</label>
+              <select id="watcher-interval">
+                <option value="300000">5 minutes</option>
+                <option value="900000">15 minutes</option>
+                <option value="3600000">1 hour</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Duration</label>
+              <select id="watcher-duration">
+                <option value="1800000">30 minutes</option>
+                <option value="3600000">1 hour</option>
+                <option value="21600000">6 hours</option>
+                <option value="86400000">24 hours</option>
+                <option value="172800000">48 hours</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="startWatcher()">Start Watching Selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="watcher-sub-compare" style="display:none;">
+    <div class="panel">
+      <div class="panel-header">Cross-Platform Edge Finder <button class="refresh-btn" onclick="runComparison()">Refresh</button></div>
+      <div class="panel-body">
+        <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+          <input id="compare-query" type="text" value="bitcoin" placeholder="Search term (bitcoin, trump, etc.)..." style="flex:1; font-family:inherit; font-size:13px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:4px; padding:8px 10px;">
+          <button class="btn btn-primary" onclick="runComparison()">Find Edges</button>
+        </div>
+        <div id="compare-summary" style="font-size:13px; color:#8b949e; margin-bottom:12px;"></div>
+
+        <div id="compare-matches-section">
+          <h4 style="color:#3fb950; margin:12px 0 8px 0; font-size:13px;">Matched Markets (Potential Edges)</h4>
+          <table>
+            <thead><tr>
+              <th>Polymarket</th><th>Poly Price</th>
+              <th>Kalshi</th><th>Kalshi Price</th>
+              <th>Delta</th><th>Edge</th>
+            </tr></thead>
+            <tbody id="compare-body"><tr><td colspan="6" class="empty-state">Click "Find Edges" to compare prices across platforms</td></tr></tbody>
+          </table>
+        </div>
+
+        <div style="display:flex; gap:16px; margin-top:16px;">
+          <div style="flex:1;">
+            <h4 style="color:#58a6ff; margin:0 0 8px 0; font-size:13px;">Polymarket Markets</h4>
+            <table>
+              <thead><tr><th>Question</th><th>Price</th><th>Volume</th></tr></thead>
+              <tbody id="compare-poly-body"><tr><td colspan="3" class="empty-state">--</td></tr></tbody>
+            </table>
+          </div>
+          <div style="flex:1;">
+            <h4 style="color:#f0883e; margin:0 0 8px 0; font-size:13px;">Kalshi Markets (Active)</h4>
+            <table>
+              <thead><tr><th>Ticker</th><th>Question</th><th>Price</th><th>Volume</th></tr></thead>
+              <tbody id="compare-kalshi-body"><tr><td colspan="4" class="empty-state">--</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="watcher-sub-optimize" style="display:none;">
+    <div class="panel">
+      <div class="panel-header">Strategy Optimizer</div>
+      <div class="panel-body">
+        <div class="form-row-3">
+          <div class="form-group"><label>Watcher (data source)</label>
+            <select id="opt-watcher"><option value="">Select a completed watcher...</option></select>
+          </div>
+          <div class="form-group"><label>Strategy</label>
+            <select id="opt-strategy"><option value="rsi_mean_reversion">RSI Mean Reversion</option></select>
+          </div>
+          <div class="form-group"><label>Optimize For</label>
+            <select id="opt-target"><option value="sharpe_ratio">Sharpe Ratio</option><option value="pnl">Total P&L</option><option value="win_rate">Win Rate</option></select>
+          </div>
+        </div>
+        <div class="form-group"><label>Initial Capital ($)</label><input id="opt-capital" type="number" value="1000"></div>
+        <details style="margin-bottom:12px;">
+          <summary style="color:#8b949e; cursor:pointer; font-size:12px;">Parameter Ranges (advanced)</summary>
+          <div class="form-row" style="margin-top:8px;">
+            <div class="form-group"><label>RSI Oversold</label><input id="opt-rsi-os" value="15,20,25,30" style="font-size:12px;"></div>
+            <div class="form-group"><label>RSI Overbought</label><input id="opt-rsi-ob" value="70,75,80,85" style="font-size:12px;"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Max Position Size (%)</label><input id="opt-pos-size" value="5,10,15" style="font-size:12px;"></div>
+            <div class="form-group"><label>Time Stop (intervals)</label><input id="opt-time-stop" value="6,12,24,48" style="font-size:12px;"></div>
+          </div>
+        </details>
+        <button class="btn btn-primary" onclick="runOptimizer()">Run Optimization</button>
+        <div id="opt-status" style="margin-top:8px; font-size:12px; color:#8b949e;"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="opt-results-panel" style="display:none;">
+      <div class="panel-header">Optimization Results <span id="opt-results-count" style="color:#8b949e; font-weight:normal;"></span></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>#</th><th>RSI OS</th><th>RSI OB</th><th>Pos Size</th><th>Time Stop</th><th>P&L</th><th>Win Rate</th><th>Max DD</th><th>Sharpe</th><th>Actions</th></tr></thead>
+          <tbody id="opt-results-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">Past Optimizations <button class="refresh-btn" onclick="loadPastOptimizations()">Refresh</button></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>ID</th><th>Watcher</th><th>Strategy</th><th>Target</th><th>Date</th></tr></thead>
+          <tbody id="past-opt-body"><tr><td colspan="5" class="empty-state">No past optimizations</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="watcher-sub-data" style="display:none;">
+    <div style="margin-bottom:12px;">
+      <button class="btn btn-secondary btn-sm" onclick="switchWatcherSub('active')" style="font-size:12px;">&larr; Back to Watchers</button>
+      <span id="data-viewer-title" style="margin-left:12px; color:#f0f6fc; font-weight:600;"></span>
+    </div>
+    <div class="grid-4" id="data-summary-stats" style="margin-bottom:16px;"></div>
+    <div class="panel">
+      <div class="panel-header">Price Chart (Up vs Down)</div>
+      <div class="panel-body">
+        <canvas id="price-chart-canvas" class="equity-canvas"></canvas>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Recorded Data <span id="data-table-count" style="color:#8b949e; font-weight:normal;"></span></div>
+      <div class="panel-body">
+        <table>
+          <thead><tr><th>Time</th><th>Market</th><th>Outcome</th><th>Price</th></tr></thead>
+          <tbody id="data-table-body"><tr><td colspan="4" class="empty-state">Loading...</td></tr></tbody>
+        </table>
+        <div style="text-align:center; margin-top:12px;">
+          <button class="btn btn-secondary" id="data-load-more-btn" style="display:none;" onclick="loadMoreWatcherData()">Load More</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AGENTS TAB -->
+<div id="tab-agents" class="tab-content">
+  <div style="display:flex; flex-direction:column; height:100%;">
+    <!-- Active containers bar -->
+    <div id="agents-containers-bar" style="display:flex; gap:8px; flex-wrap:wrap; padding:8px 0; min-height:36px;">
+      <span style="color:#8b949e; font-size:11px; align-self:center;" id="agents-empty-msg">No active containers</span>
+    </div>
+    <!-- Log controls -->
+    <div style="display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #21262d;">
+      <span style="color:#8b949e; font-size:11px;">LIVE LOG FEED</span>
+      <span id="agents-log-count" style="color:#484f58; font-size:10px; margin-left:auto;">0 lines</span>
+      <button class="refresh-btn" onclick="clearAgentLogs()" style="font-size:11px; padding:3px 8px;">Clear</button>
+      <label style="color:#8b949e; font-size:11px; display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="agents-autoscroll" checked style="accent-color:#58a6ff;"> Auto-scroll
+      </label>
+    </div>
+    <!-- Log feed -->
+    <div id="agents-log-feed" style="flex:1; overflow-y:auto; background:#010409; border:1px solid #21262d; border-radius:4px; padding:8px; margin-top:8px; font-family:'SF Mono','Menlo','Monaco','Consolas',monospace; font-size:11px; line-height:1.6; min-height:300px;"></div>
+  </div>
+</div>
+
 <script>
 // State
 let currentTab = 'overview';
+const PREDICTION_PLATFORMS = ['polymarket', 'kalshi'];
 
 // Tab switching
 function switchTab(tabName) {
@@ -319,40 +1415,63 @@ function switchTab(tabName) {
   event.target.classList.add('active');
   document.getElementById('tab-' + tabName).classList.add('active');
 
-  if (tabName === 'trading') loadTradingData();
+  if (tabName === 'predictions' || tabName === 'stocks') loadTradingData(tabName);
+  if (tabName === 'messages') {
+    loadGroupsDropdown();
+  }
+  if (tabName === 'account') { loadAccountStatus(); startBtcWindowsRefresh(); } else { stopBtcWindowsRefresh(); }
+  if (tabName === 'presets') loadPresets();
+  if (tabName === 'runs') { loadRuns(); loadPresetsDropdown(); }
+  if (tabName === 'backtests') loadBacktests();
+  if (tabName === 'watchers') { loadWatchers(); loadWatcherDropdowns(); }
 }
 
-// Load trading data
-async function loadTradingData() {
+// --- Trading ---
+
+function isPredictionPlatform(platform) {
+  return PREDICTION_PLATFORMS.includes((platform || '').toLowerCase());
+}
+
+async function loadTradingData(tab) {
+  if (!tab) tab = currentTab;
+  const isPred = tab === 'predictions';
+  const prefix = isPred ? 'pred' : 'stocks';
+
   try {
-    // Load positions
-    const posResp = await fetch('/api/trading/positions');
-    const positions = await posResp.json();
-
-    // Load performance
-    const perfResp = await fetch('/api/trading/performance');
+    const [posResp, perfResp, sigResp] = await Promise.all([
+      fetch('/api/trading/positions'),
+      fetch('/api/trading/performance'),
+      fetch('/api/trading/signals'),
+    ]);
+    const allPositions = await posResp.json();
     const perf = await perfResp.json();
+    const allSignals = await sigResp.json();
 
-    // Load signals
-    const sigResp = await fetch('/api/trading/signals');
-    const signals = await sigResp.json();
+    // Filter by platform
+    const positions = Array.isArray(allPositions)
+      ? allPositions.filter(p => isPred === isPredictionPlatform(p.platform))
+      : [];
+    const signals = Array.isArray(allSignals)
+      ? allSignals
+      : [];
 
-    // Update summary metrics
     const openPositions = positions.filter(p => p.status === 'open');
-    document.getElementById('trade-positions').textContent = openPositions.length;
+    const closedPositions = positions.filter(p => p.status === 'closed');
+    document.getElementById(prefix + '-positions').textContent = openPositions.length;
 
-    if (perf.total_pnl !== undefined) {
-      const pnlEl = document.getElementById('trade-pnl');
-      pnlEl.textContent = '$' + perf.total_pnl.toFixed(2);
-      pnlEl.className = 'metric-value ' + (perf.total_pnl >= 0 ? 'positive' : 'negative');
-    }
+    // Compute P&L from filtered positions
+    const totalPnl = closedPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+    const pnlEl = document.getElementById(prefix + '-pnl');
+    pnlEl.textContent = '$' + totalPnl.toFixed(2);
+    pnlEl.className = 'metric-value ' + (totalPnl >= 0 ? 'positive' : 'negative');
 
-    if (perf.win_rate !== undefined) {
-      document.getElementById('trade-winrate').textContent = (perf.win_rate * 100).toFixed(1) + '%';
-    }
+    const wins = closedPositions.filter(p => (p.pnl || 0) > 0).length;
+    const winRate = closedPositions.length > 0 ? wins / closedPositions.length : 0;
+    document.getElementById(prefix + '-winrate').textContent =
+      closedPositions.length > 0 ? (winRate * 100).toFixed(1) + '%' : '--';
 
-    // Render positions table
-    const posBody = document.getElementById('positions-body');
+    // Positions table
+    const posBody = document.getElementById(prefix + '-positions-body');
     if (openPositions.length === 0) {
       posBody.innerHTML = '<tr><td colspan="8" class="empty-state">No open positions</td></tr>';
     } else {
@@ -364,18 +1483,18 @@ async function loadTradingData() {
           <td>${p.size}</td>
           <td>${new Date(p.entry_date).toLocaleDateString()}</td>
           <td>${escapeHtml(p.strategy)}</td>
-          <td class="${p.pnl >= 0 ? 'stat-value ok' : 'stat-value error'}">
-            ${p.pnl ? '$' + p.pnl.toFixed(2) : '--'}
+          <td class="${(p.pnl || 0) >= 0 ? 'stat-value ok' : 'stat-value error'}">
+            ${p.pnl != null ? '$' + p.pnl.toFixed(2) : '--'}
           </td>
           <td><span class="badge badge-green">${p.status}</span></td>
         </tr>
       `).join('');
     }
 
-    // Render signals table
-    const sigBody = document.getElementById('signals-body');
+    // Signals table
+    const sigBody = document.getElementById(prefix + '-signals-body');
     if (signals.length === 0) {
-      sigBody.innerHTML = '<tr><td colspan="5" class="empty-state">No signals detected</td></tr>';
+      sigBody.innerHTML = '<tr><td colspan="5" class="empty-state">No signals</td></tr>';
     } else {
       sigBody.innerHTML = signals.slice(0, 10).map(s => `
         <tr>
@@ -388,33 +1507,212 @@ async function loadTradingData() {
       `).join('');
     }
 
-    // Render performance metrics
-    const perfDiv = document.getElementById('performance-metrics');
-    if (perf.total_trades === 0) {
-      perfDiv.innerHTML = '<div class="empty-state">No trades yet</div>';
+    // Performance metrics
+    const perfDiv = document.getElementById(prefix + '-performance');
+    if (closedPositions.length === 0) {
+      perfDiv.innerHTML = '<div class="empty-state">No completed trades yet</div>';
     } else {
+      const avgWin = wins > 0 ? closedPositions.filter(p => (p.pnl || 0) > 0).reduce((s, p) => s + p.pnl, 0) / wins : 0;
+      const losses = closedPositions.filter(p => (p.pnl || 0) <= 0);
+      const avgLoss = losses.length > 0 ? losses.reduce((s, p) => s + p.pnl, 0) / losses.length : 0;
       perfDiv.innerHTML = `
         <div class="grid-3">
-          <div><strong>Total Trades:</strong> ${perf.total_trades}</div>
-          <div><strong>Winning Trades:</strong> ${perf.winning_trades}</div>
-          <div><strong>Win Rate:</strong> ${(perf.win_rate * 100).toFixed(1)}%</div>
-          <div><strong>Avg Win:</strong> $${perf.avg_win ? perf.avg_win.toFixed(2) : '0.00'}</div>
-          <div><strong>Avg Loss:</strong> $${perf.avg_loss ? perf.avg_loss.toFixed(2) : '0.00'}</div>
-          <div><strong>Max Drawdown:</strong> <span class="stat-value error">${perf.max_drawdown ? (perf.max_drawdown * 100).toFixed(1) + '%' : '0%'}</span></div>
-          <div><strong>Sharpe Ratio:</strong> ${perf.sharpe_ratio ? perf.sharpe_ratio.toFixed(2) : '--'}</div>
-          <div><strong>Largest Win:</strong> <span class="stat-value ok">$${perf.largest_win || '0.00'}</span></div>
-          <div><strong>Largest Loss:</strong> <span class="stat-value error">$${perf.largest_loss || '0.00'}</span></div>
+          <div><strong>Total Trades:</strong> ${closedPositions.length}</div>
+          <div><strong>Winning Trades:</strong> ${wins}</div>
+          <div><strong>Win Rate:</strong> ${(winRate * 100).toFixed(1)}%</div>
+          <div><strong>Avg Win:</strong> <span class="stat-value ok">$${avgWin.toFixed(2)}</span></div>
+          <div><strong>Avg Loss:</strong> <span class="stat-value error">$${avgLoss.toFixed(2)}</span></div>
+          <div><strong>Total P&L:</strong> <span class="stat-value ${totalPnl >= 0 ? 'ok' : 'error'}">$${totalPnl.toFixed(2)}</span></div>
         </div>
       `;
     }
-
   } catch (err) {
     console.error('Failed to load trading data:', err);
-    document.getElementById('positions-body').innerHTML = '<tr><td colspan="8" class="empty-state">Error loading data</td></tr>';
   }
 }
 
-// Helper functions
+// --- Messages ---
+
+let msgGroupsLoaded = false;
+let msgSelectedJid = '';
+let msgGroupNames = {}; // jid -> name lookup
+
+async function loadGroupsDropdown() {
+  if (msgGroupsLoaded) return;
+  try {
+    const resp = await fetch('/api/chats');
+    const chats = await resp.json();
+    const select = document.getElementById('msg-group-select');
+    chats.forEach(c => {
+      msgGroupNames[c.jid] = c.name || c.jid;
+      const opt = document.createElement('option');
+      opt.value = c.jid;
+      opt.textContent = c.name || c.jid;
+      select.appendChild(opt);
+    });
+    msgGroupsLoaded = true;
+
+    select.addEventListener('change', () => {
+      msgSelectedJid = select.value;
+      document.getElementById('msg-send-btn').disabled = !select.value;
+      if (select.value) loadMessages();
+    });
+
+    // Auto-select first chat
+    if (chats.length > 0 && !select.value) {
+      select.value = chats[0].jid;
+      msgSelectedJid = chats[0].jid;
+      document.getElementById('msg-send-btn').disabled = false;
+      loadMessages();
+    }
+  } catch (err) {
+    console.error('Failed to load chats:', err);
+  }
+}
+
+function renderMessageBubble(m) {
+  const isNano = m.is_bot_message || m.is_from_me;
+  const displayName = isNano ? 'Nano' : (m.sender_name || 'You');
+  const ts = new Date(m.timestamp);
+  const time = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const date = ts.toLocaleDateString();
+  return `
+    <div class="msg-bubble ${isNano ? 'incoming' : 'outgoing'}" data-ts="${ts.getTime()}">
+      <div class="msg-sender">${escapeHtml(displayName)}</div>
+      <div>${escapeHtml(m.content || '')}</div>
+      <div class="msg-time">${date} ${time}</div>
+    </div>
+  `;
+}
+
+async function loadMessages() {
+  const jid = document.getElementById('msg-group-select').value;
+  const feed = document.getElementById('messages-feed');
+  if (!jid) {
+    feed.innerHTML = '<div class="empty-state">Select a group to view messages</div>';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/messages?jid=' + encodeURIComponent(jid) + '&limit=200');
+    const messages = await resp.json();
+
+    if (messages.length === 0) {
+      feed.innerHTML = '<div class="empty-state">No messages yet</div>';
+      return;
+    }
+
+    // Messages come newest-first from API, reverse for chronological display
+    const sorted = [...messages].reverse();
+
+    // Insert date separators
+    let lastDate = '';
+    let html = '';
+    for (const m of sorted) {
+      const d = new Date(m.timestamp).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      if (d !== lastDate) {
+        html += `<div class="msg-date-sep">${escapeHtml(d)}</div>`;
+        lastDate = d;
+      }
+      html += renderMessageBubble(m);
+    }
+    feed.innerHTML = html;
+
+    // Scroll to bottom
+    feed.scrollTop = feed.scrollHeight;
+  } catch (err) {
+    console.error('Failed to load messages:', err);
+    feed.innerHTML = '<div class="empty-state">Error loading messages</div>';
+  }
+}
+
+function appendLiveMessage(data, isOutgoing) {
+  const jid = data.chatJid;
+  // Only append if this message belongs to the currently selected group
+  if (jid !== msgSelectedJid) return;
+
+  const feed = document.getElementById('messages-feed');
+  // Clear empty state if present
+  const empty = feed.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  const wasAtBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+
+  // Date separator if needed
+  const ts = new Date(data.timestamp);
+  const dateStr = ts.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const lastSep = feed.querySelectorAll('.msg-date-sep');
+  const lastDateText = lastSep.length > 0 ? lastSep[lastSep.length - 1].textContent : '';
+  if (dateStr !== lastDateText) {
+    const sep = document.createElement('div');
+    sep.className = 'msg-date-sep';
+    sep.textContent = dateStr;
+    feed.appendChild(sep);
+  }
+
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = renderMessageBubble({
+    sender_name: data.senderName || data.groupName || 'NanoClaw',
+    content: data.contentPreview || data.content || '',
+    timestamp: data.timestamp,
+    is_from_me: isOutgoing,
+    is_bot_message: isOutgoing,
+  });
+  feed.appendChild(wrapper.firstElementChild);
+
+  // Auto-scroll if user was near the bottom
+  if (wasAtBottom) {
+    feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+async function sendMessage() {
+  const jid = document.getElementById('msg-group-select').value;
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!jid || !text) return;
+
+  const btn = document.getElementById('msg-send-btn');
+  btn.disabled = true;
+  input.value = '';
+
+  try {
+    const resp = await fetch('/api/send-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatJid: jid, text }),
+    });
+    const result = await resp.json();
+    if (!result.success) {
+      alert('Failed to send: ' + (result.error || 'Unknown error'));
+      input.value = text; // restore on failure
+    }
+  } catch (err) {
+    alert('Send error: ' + err.message);
+    input.value = text;
+  } finally {
+    btn.disabled = !jid;
+  }
+}
+
+// Auto-grow textarea
+document.addEventListener('input', function(e) {
+  if (e.target.id === 'msg-input') {
+    e.target.style.height = 'auto';
+    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+  }
+});
+
+// Allow Enter to send (Shift+Enter for newline)
+document.addEventListener('keydown', function(e) {
+  if (e.target.id === 'msg-input' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+
+// --- Helpers ---
+
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
@@ -431,17 +1729,23 @@ function formatUptime(ms) {
   return m + 'm ' + (s % 60) + 's';
 }
 
-// Initialize
-async function init() {
-  // Connect to SSE for live updates
+// --- Initialize ---
+
+function connectSSE() {
   const eventSource = new EventSource('/api/events');
 
   eventSource.onopen = () => {
     document.getElementById('statusDot').classList.add('connected');
+    const s = document.getElementById('msg-live-status');
+    if (s) s.textContent = 'Live';
   };
 
   eventSource.onerror = () => {
     document.getElementById('statusDot').classList.remove('connected');
+    const s = document.getElementById('msg-live-status');
+    if (s) s.textContent = 'Reconnecting...';
+    eventSource.close();
+    setTimeout(connectSSE, 3000);
   };
 
   eventSource.onmessage = (event) => {
@@ -455,11 +1759,422 @@ async function init() {
     }
   };
 
-  // Load initial data
-  loadTradingData();
+  // Live message events
+  eventSource.addEventListener('message:received', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      appendLiveMessage(data, false);
+    } catch (err) {
+      console.error('SSE message:received error:', err);
+    }
+  });
+
+  eventSource.addEventListener('message:sent', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      appendLiveMessage(data, true);
+    } catch (err) {
+      console.error('SSE message:sent error:', err);
+    }
+  });
+
+  // Agent monitoring events
+  eventSource.addEventListener('container:start', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      addActiveContainer(data);
+      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container started: ' + (data.containerName || ''));
+    } catch (err) { console.error('SSE container:start error:', err); }
+  });
+
+  eventSource.addEventListener('container:end', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      removeActiveContainer(data);
+      const dur = data.duration ? ' (' + (data.duration / 1000).toFixed(1) + 's)' : '';
+      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container ended' + dur);
+    } catch (err) { console.error('SSE container:end error:', err); }
+  });
+
+  eventSource.addEventListener('container:log', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      const line = data.line || '';
+      const groupName = data.groupName || '?';
+      // Check for sub-agent lifecycle events first
+      const subagentEvent = parseSubagentEvent(line);
+      if (subagentEvent) {
+        handleSubagentEvent(subagentEvent, groupName);
+        return;
+      }
+      // Classify agent-runner log lines by prefix
+      let type = 'stderr';
+      if (line.includes('[assistant]')) type = 'assistant';
+      else if (line.includes('[tool_call]')) type = 'tool-call';
+      else if (line.includes('[tool_result]')) type = 'tool-result';
+      appendAgentLog(type, groupName, line);
+    } catch (err) { console.error('SSE container:log error:', err); }
+  });
+
+  eventSource.addEventListener('container:output', (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      const status = data.status || 'success';
+      const type = status === 'error' ? 'output-error' : status === 'heartbeat' ? 'output-heartbeat' : 'output-success';
+      const msg = data.preview ? data.preview.slice(0, 200) : '[' + status + ']';
+      appendAgentLog(type, data.groupName || '?', msg);
+    } catch (err) { console.error('SSE container:output error:', err); }
+  });
+}
+
+// --- Agent monitoring ---
+const activeContainers = new Map(); // key: containerName or groupName, value: { groupName, containerName, startTime }
+const activeSubagents = new Map(); // key: agent_id → { type, parentGroup, startTime }
+const completedSubagents = new Map(); // key: agent_id → { type, parentGroup, startTime, endTime, tools, outputPreview }
+const MAX_COMPLETED_SUBAGENTS = 20;
+const AGENT_LOG_MAX = 500;
+let agentLogCount = 0;
+let agentElapsedInterval = null;
+
+function addActiveContainer(data) {
+  const key = data.containerName || data.folder || data.groupName || Date.now().toString();
+  const groupName = data.groupName || data.folder || '?';
+  // Remove any stale entry for the same group (e.g. missed container:end during SSE disconnect)
+  for (const [k, v] of activeContainers) {
+    if (k !== key && v.groupName === groupName) {
+      activeContainers.delete(k);
+    }
+  }
+  activeContainers.set(key, {
+    groupName,
+    containerName: data.containerName || key,
+    startTime: Date.now(),
+  });
+  renderActiveContainers();
+  if (!agentElapsedInterval) {
+    agentElapsedInterval = setInterval(updateElapsedTimes, 1000);
+  }
+}
+
+function removeActiveContainer(data) {
+  const key = data.containerName || data.folder || data.groupName;
+  const removedGroup = data.groupName || data.folder;
+  // Try exact key first, fallback to matching by groupName
+  if (activeContainers.has(key)) {
+    const card = document.getElementById('agent-card-' + CSS.escape(key));
+    if (card) {
+      card.classList.add('ending');
+      setTimeout(() => { activeContainers.delete(key); renderActiveContainers(); }, 500);
+    } else {
+      activeContainers.delete(key);
+      renderActiveContainers();
+    }
+  } else {
+    // Match by groupName
+    for (const [k, v] of activeContainers) {
+      if (v.groupName === removedGroup) {
+        const card = document.getElementById('agent-card-' + CSS.escape(k));
+        if (card) {
+          card.classList.add('ending');
+          setTimeout(() => { activeContainers.delete(k); renderActiveContainers(); }, 500);
+        } else {
+          activeContainers.delete(k);
+          renderActiveContainers();
+        }
+        break;
+      }
+    }
+  }
+  // Clean up active sub-agents belonging to the removed container's group
+  if (removedGroup) {
+    for (const [saId, sa] of activeSubagents) {
+      if (sa.parentGroup === removedGroup) {
+        activeSubagents.delete(saId);
+      }
+    }
+    // Auto-expire completed sub-agents after 5 minutes
+    for (const [saId, sa] of completedSubagents) {
+      if (sa.parentGroup === removedGroup) {
+        setTimeout(() => { completedSubagents.delete(saId); renderActiveContainers(); }, 5 * 60 * 1000);
+      }
+    }
+  }
+  if (activeContainers.size === 0 && agentElapsedInterval) {
+    clearInterval(agentElapsedInterval);
+    agentElapsedInterval = null;
+  }
+}
+
+function renderActiveContainers() {
+  const bar = document.getElementById('agents-containers-bar');
+  if (!bar) return;
+  if (activeContainers.size === 0 && activeSubagents.size === 0 && completedSubagents.size === 0) {
+    bar.innerHTML = '<span style="color:#8b949e; font-size:11px; align-self:center;" id="agents-empty-msg">No active containers</span>';
+    return;
+  }
+  let html = '';
+  const renderedSubagents = new Set();
+  for (const [key, c] of activeContainers) {
+    const elapsed = formatElapsed(Date.now() - c.startTime);
+    html += '<div class="agent-card" id="agent-card-' + key.replace(/[^a-zA-Z0-9-]/g, '_') + '">'
+      + '<div class="pulse-dot"></div>'
+      + '<span class="agent-name">' + escapeHtml(c.groupName) + '</span>'
+      + '<span class="agent-time" data-start="' + c.startTime + '">' + elapsed + '</span>'
+      + '</div>';
+    // Active sub-agents (purple pulsing)
+    for (const [saId, sa] of activeSubagents) {
+      if (sa.parentGroup === c.groupName) {
+        renderedSubagents.add(saId);
+        const saElapsed = formatElapsed(Date.now() - sa.startTime);
+        html += '<div class="subagent-card" id="subagent-card-' + saId.replace(/[^a-zA-Z0-9-]/g, '_') + '" onclick="toggleSubagentDetail(\'' + saId + '\')">'
+          + '<div class="pulse-dot"></div>'
+          + '<span class="subagent-type">' + escapeHtml(sa.type) + '</span>'
+          + '<span class="subagent-id">' + saId.slice(0, 8) + '</span>'
+          + '<span class="subagent-time" data-start="' + sa.startTime + '">' + saElapsed + '</span>'
+          + '</div>';
+      }
+    }
+    // Completed sub-agents (gray dot, clickable for details)
+    for (const [saId, sa] of completedSubagents) {
+      if (sa.parentGroup === c.groupName) {
+        renderedSubagents.add(saId);
+        const dur = formatElapsed(sa.endTime - sa.startTime);
+        html += '<div class="subagent-card completed" id="subagent-card-' + saId.replace(/[^a-zA-Z0-9-]/g, '_') + '" onclick="toggleSubagentDetail(\'' + saId + '\')">'
+          + '<div class="pulse-dot"></div>'
+          + '<span class="subagent-type">' + escapeHtml(sa.type) + '</span>'
+          + '<span class="subagent-id">' + saId.slice(0, 8) + '</span>'
+          + '<span class="subagent-time">' + dur + '</span>'
+          + '</div>';
+      }
+    }
+  }
+  // Orphaned completed sub-agents (container already ended, still within expiry window)
+  const orphaned = [];
+  for (const [saId, sa] of completedSubagents) {
+    if (!renderedSubagents.has(saId)) orphaned.push([saId, sa]);
+  }
+  if (orphaned.length > 0) {
+    // Group by parentGroup
+    const byGroup = {};
+    for (const [saId, sa] of orphaned) {
+      if (!byGroup[sa.parentGroup]) byGroup[sa.parentGroup] = [];
+      byGroup[sa.parentGroup].push([saId, sa]);
+    }
+    for (const [group, agents] of Object.entries(byGroup)) {
+      html += '<div class="agent-card completed" style="opacity:0.6">'
+        + '<div class="pulse-dot" style="background:#8b949e;animation:none"></div>'
+        + '<span class="agent-name">' + escapeHtml(group) + '</span>'
+        + '<span class="agent-time" style="color:#484f58">ended</span>'
+        + '</div>';
+      for (const [saId, sa] of agents) {
+        const dur = formatElapsed(sa.endTime - sa.startTime);
+        html += '<div class="subagent-card completed" id="subagent-card-' + saId.replace(/[^a-zA-Z0-9-]/g, '_') + '" onclick="toggleSubagentDetail(\'' + saId + '\')">'
+          + '<div class="pulse-dot"></div>'
+          + '<span class="subagent-type">' + escapeHtml(sa.type) + '</span>'
+          + '<span class="subagent-id">' + saId.slice(0, 8) + '</span>'
+          + '<span class="subagent-time">' + dur + '</span>'
+          + '</div>';
+      }
+    }
+  }
+  bar.innerHTML = html;
+}
+
+function updateElapsedTimes() {
+  const timeEls = document.querySelectorAll('#agents-containers-bar .agent-time[data-start], #agents-containers-bar .subagent-time[data-start]');
+  const now = Date.now();
+  timeEls.forEach(el => {
+    const start = parseInt(el.dataset.start, 10);
+    if (start) el.textContent = formatElapsed(now - start);
+  });
+}
+
+function formatElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  if (m < 60) return m + 'm ' + rem + 's';
+  return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+function appendAgentLog(type, groupName, message) {
+  const feed = document.getElementById('agents-log-feed');
+  if (!feed) return;
+
+  // Prune oldest if over limit
+  while (feed.children.length >= AGENT_LOG_MAX) {
+    feed.removeChild(feed.firstChild);
+  }
+
+  const now = new Date();
+  const ts = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
+
+  const line = document.createElement('div');
+  line.className = 'log-line log-' + type;
+  line.innerHTML = '<span class="log-ts">[' + ts + ']</span> <span class="log-group">[' + escapeHtml(groupName) + ']</span> ' + escapeHtml(message);
+
+  feed.appendChild(line);
+  agentLogCount++;
+  const countEl = document.getElementById('agents-log-count');
+  if (countEl) countEl.textContent = Math.min(agentLogCount, AGENT_LOG_MAX) + ' lines';
+
+  // Auto-scroll if checkbox is checked and user is near bottom
+  const autoScroll = document.getElementById('agents-autoscroll');
+  if (autoScroll && autoScroll.checked) {
+    const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+    if (isNearBottom || feed.children.length <= 5) {
+      feed.scrollTop = feed.scrollHeight;
+    }
+  }
+}
+
+function parseSubagentEvent(line) {
+  const match = line.match(/\[(subagent:start|subagent:stop|task:completed)\]\s*(\{.+\})/);
+  if (!match) return null;
+  try {
+    const data = JSON.parse(match[2]);
+    return data;
+  } catch { return null; }
+}
+
+function handleSubagentEvent(evt, groupName) {
+  if (evt._event === 'subagent:start') {
+    activeSubagents.set(evt.agent_id, {
+      type: evt.agent_type,
+      parentGroup: groupName,
+      startTime: Date.now(),
+    });
+    appendAgentLog('subagent-start', groupName, 'Sub-agent started: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ')');
+    renderActiveContainers();
+  } else if (evt._event === 'subagent:stop') {
+    const sa = activeSubagents.get(evt.agent_id);
+    const startTime = sa ? sa.startTime : Date.now();
+    const elapsed = sa ? formatElapsed(Date.now() - sa.startTime) : '?';
+    activeSubagents.delete(evt.agent_id);
+    // Store completed sub-agent with summary + full timeline
+    completedSubagents.set(evt.agent_id, {
+      type: evt.agent_type,
+      parentGroup: sa ? sa.parentGroup : groupName,
+      startTime: startTime,
+      endTime: Date.now(),
+      tools: evt.tools || [],
+      outputPreview: evt.output_preview || '',
+      steps: evt.steps || [],
+    });
+    // Prune oldest completed sub-agents
+    while (completedSubagents.size > MAX_COMPLETED_SUBAGENTS) {
+      const oldest = completedSubagents.keys().next().value;
+      completedSubagents.delete(oldest);
+    }
+    const toolsSuffix = evt.tools && evt.tools.length > 0 ? ' | tools: ' + evt.tools.join(', ') : '';
+    appendAgentLog('subagent-stop', groupName, 'Sub-agent completed: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ') after ' + elapsed + toolsSuffix);
+    renderActiveContainers();
+  } else if (evt._event === 'task:completed') {
+    const who = evt.teammate_name ? ' by ' + evt.teammate_name : '';
+    appendAgentLog('task-completed', groupName, 'Task completed' + who + ': ' + (evt.task_subject || evt.task_id));
+  }
+}
+
+function toggleSubagentDetail(agentId) {
+  // Close existing modal if any
+  const existing = document.getElementById('subagent-modal-overlay');
+  if (existing) { existing.remove(); }
+
+  const sa = completedSubagents.get(agentId) || activeSubagents.get(agentId);
+  if (!sa) return;
+
+  const isRunning = !sa.endTime;
+  const duration = sa.endTime
+    ? formatElapsed(sa.endTime - sa.startTime)
+    : formatElapsed(Date.now() - sa.startTime) + ' (running)';
+
+  let toolsHtml = '';
+  if (sa.tools && sa.tools.length > 0) {
+    toolsHtml = '<div class="subagent-modal-tools">' + sa.tools.map(t => '<span class="tool-badge">' + escapeHtml(t) + '</span>').join('') + '</div>';
+  }
+
+  // Build timeline from steps
+  let bodyHtml = '';
+  if (sa.steps && sa.steps.length > 0) {
+    bodyHtml = '<div class="subagent-timeline">';
+    for (const step of sa.steps) {
+      const cls = 'step step-' + step.type;
+      if (step.type === 'thinking') {
+        bodyHtml += '<div class="' + cls + '"><span class="step-icon">💭</span><span class="step-body">' + escapeHtml(step.content) + '</span></div>';
+      } else if (step.type === 'text') {
+        bodyHtml += '<div class="' + cls + '"><span class="step-icon">💬</span><span class="step-body">' + escapeHtml(step.content) + '</span></div>';
+      } else if (step.type === 'tool_call') {
+        bodyHtml += '<div class="' + cls + '"><span class="step-icon">⚡</span><span class="step-label">' + escapeHtml(step.name || '?') + '</span><span class="step-body">' + escapeHtml(step.content) + '</span></div>';
+      } else if (step.type === 'tool_result') {
+        bodyHtml += '<div class="' + cls + '"><span class="step-icon">↩</span><span class="step-body">' + escapeHtml(step.content) + '</span></div>';
+      }
+    }
+    bodyHtml += '</div>';
+  } else if (sa.outputPreview) {
+    bodyHtml = '<div class="output-preview">' + escapeHtml(sa.outputPreview) + '</div>';
+  } else {
+    bodyHtml = '<div style="color:#8b949e;padding:20px;text-align:center">No detail available yet — data appears when the agent completes.</div>';
+  }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'subagent-modal-overlay';
+  overlay.id = 'subagent-modal-overlay';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+  overlay.innerHTML = '<div class="subagent-modal">'
+    + '<div class="subagent-modal-header">'
+    + '<div class="modal-dot' + (isRunning ? '' : ' done') + '"></div>'
+    + '<span class="modal-name">' + escapeHtml(sa.type) + '</span>'
+    + '<span class="modal-id">' + agentId.slice(0, 8) + '</span>'
+    + '<span class="modal-duration">' + duration + '</span>'
+    + '<button class="modal-close" onclick="document.getElementById(\'subagent-modal-overlay\').remove()">&times;</button>'
+    + '</div>'
+    + toolsHtml
+    + '<div class="subagent-modal-body">' + bodyHtml + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+}
+
+function clearAgentLogs() {
+  const feed = document.getElementById('agents-log-feed');
+  if (feed) feed.innerHTML = '';
+  agentLogCount = 0;
+  const countEl = document.getElementById('agents-log-count');
+  if (countEl) countEl.textContent = '0 lines';
+}
+
+async function init() {
+  connectSSE();
+  hydrateActiveContainers();
+
+  // Periodic refresh for trading tabs
   setInterval(() => {
-    if (currentTab === 'trading') loadTradingData();
-  }, 30000); // Refresh every 30s when on trading tab
+    if (currentTab === 'predictions' || currentTab === 'stocks') loadTradingData(currentTab);
+  }, 30000);
+}
+
+async function hydrateActiveContainers() {
+  try {
+    const res = await fetch('/api/groups');
+    const groups = await res.json();
+    for (const g of groups) {
+      if (g.active && g.containerName) {
+        activeContainers.set(g.containerName, {
+          groupName: g.folder || g.name || '?',
+          containerName: g.containerName,
+          startTime: Date.now(), // approximate — we don't know the real start time
+        });
+      }
+    }
+    if (activeContainers.size > 0) {
+      renderActiveContainers();
+      if (!agentElapsedInterval) {
+        agentElapsedInterval = setInterval(updateElapsedTimes, 1000);
+      }
+    }
+  } catch (err) { console.error('Failed to hydrate active containers:', err); }
 }
 
 function updateOverview(data) {
@@ -486,24 +2201,1928 @@ function updateOverview(data) {
   }
 }
 
-// Restart NanoClaw
 async function restartNanoClaw() {
   if (!confirm('Restart NanoClaw? This will disconnect briefly while the system restarts.')) {
     return;
   }
-
   try {
     const response = await fetch('/api/restart', { method: 'POST' });
     if (response.ok) {
-      alert('✅ Restart initiated. The dashboard will reconnect automatically in ~10 seconds.');
-      // Reload page after delay to reconnect
+      alert('Restart initiated. The dashboard will reconnect automatically in ~10 seconds.');
       setTimeout(() => window.location.reload(), 10000);
     } else {
-      alert('❌ Restart failed: ' + response.statusText);
+      alert('Restart failed: ' + response.statusText);
     }
   } catch (err) {
-    alert('❌ Restart error: ' + err.message);
+    alert('Restart error: ' + err.message);
   }
+}
+
+// --- Account ---
+
+function switchAccountSub(sub) {
+  document.querySelectorAll('#tab-account .sub-tab').forEach(t => t.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+  ['wallet', 'paper', 'kalshi', 'markets'].forEach(s => {
+    const el = document.getElementById('acct-sub-' + s);
+    if (el) el.style.display = s === sub ? 'block' : 'none';
+  });
+  if (sub === 'paper') loadPaperPortfolio();
+  if (sub === 'kalshi') { loadKalshiBalance(); loadKalshiPositions(); loadKalshiOrders(); }
+  if (sub === 'markets') loadBTCWindows();
+}
+
+function acctLog(msg) {
+  const el = document.getElementById('acct-output');
+  el.textContent = msg;
+}
+
+async function loadAccountStatus() {
+  try {
+    const resp = await fetch('/api/account/status');
+    const data = await resp.json();
+
+    const addr = data.config?.wallet_address || (data.wallet?.address);
+    document.getElementById('acct-address').innerHTML = addr
+      ? `<code>${escapeHtml(addr)}</code>`
+      : '<span class="badge badge-gray">Not created</span>';
+
+    if (addr) {
+      document.getElementById('check-wallet').className = 'checklist-icon done';
+      document.getElementById('check-wallet').textContent = '\u2713';
+    }
+
+    // Try to load balance
+    try {
+      const balResp = await fetch('/api/account/balance');
+      const balData = await balResp.json();
+      if (balData.error) {
+        document.getElementById('acct-balance').textContent = '--';
+      } else {
+        const bal = balData.balance ?? balData.usdc ?? JSON.stringify(balData);
+        document.getElementById('acct-balance').textContent = typeof bal === 'number' ? '$' + bal.toFixed(2) : String(bal);
+        if (parseFloat(bal) > 0) {
+          document.getElementById('check-fund').className = 'checklist-icon done';
+          document.getElementById('check-fund').textContent = '\u2713';
+        }
+      }
+    } catch { /* balance fetch failed */ }
+
+    // Try to check approval
+    try {
+      const appResp = await fetch('/api/account/approve/check');
+      const appData = await appResp.json();
+      if (appData.error) {
+        document.getElementById('acct-approval').innerHTML = '<span class="badge badge-gray">Unknown</span>';
+      } else {
+        const approved = appData.approved || appData.status === 'approved';
+        document.getElementById('acct-approval').innerHTML = approved
+          ? '<span class="badge badge-green">Approved</span>'
+          : '<span class="badge badge-yellow">Not Approved</span>';
+        if (approved) {
+          document.getElementById('check-approve').className = 'checklist-icon done';
+          document.getElementById('check-approve').textContent = '\u2713';
+          document.getElementById('check-verify').className = 'checklist-icon done';
+          document.getElementById('check-verify').textContent = '\u2713';
+        }
+      }
+    } catch { /* approval check failed */ }
+
+    // Load Kalshi trading data
+    loadKalshiBalance();
+    loadKalshiPositions();
+    loadKalshiOrders();
+    loadKalshiFills();
+    loadPaperPortfolio();
+
+  } catch (err) {
+    acctLog('Error: ' + err.message);
+  }
+}
+
+async function acctCreateWallet() {
+  acctLog('Creating wallet...');
+  try {
+    const resp = await fetch('/api/account/wallet/create', { method: 'POST' });
+    const data = await resp.json();
+    acctLog(JSON.stringify(data, null, 2));
+    loadAccountStatus();
+  } catch (err) { acctLog('Error: ' + err.message); }
+}
+
+async function acctImportWallet() {
+  const pk = document.getElementById('acct-private-key').value.trim();
+  if (!pk) return;
+  acctLog('Importing wallet...');
+  try {
+    const resp = await fetch('/api/account/wallet/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ privateKey: pk }),
+    });
+    const data = await resp.json();
+    acctLog(JSON.stringify(data, null, 2));
+    document.getElementById('acct-private-key').value = '';
+    document.getElementById('import-wallet-form').style.display = 'none';
+    loadAccountStatus();
+  } catch (err) { acctLog('Error: ' + err.message); }
+}
+
+async function acctApprove() {
+  acctLog('Approving contracts...');
+  try {
+    const resp = await fetch('/api/account/approve', { method: 'POST' });
+    const data = await resp.json();
+    acctLog(JSON.stringify(data, null, 2));
+    loadAccountStatus();
+  } catch (err) { acctLog('Error: ' + err.message); }
+}
+
+async function acctCheckApproval() {
+  acctLog('Checking approval...');
+  try {
+    const resp = await fetch('/api/account/approve/check');
+    const data = await resp.json();
+    acctLog(JSON.stringify(data, null, 2));
+    loadAccountStatus();
+  } catch (err) { acctLog('Error: ' + err.message); }
+}
+
+async function acctRefreshBalance() {
+  acctLog('Fetching balance...');
+  try {
+    const resp = await fetch('/api/account/balance');
+    const data = await resp.json();
+    acctLog(JSON.stringify(data, null, 2));
+    loadAccountStatus();
+  } catch (err) { acctLog('Error: ' + err.message); }
+}
+
+// --- BTC Windows ---
+
+let btcWindowsInterval = null;
+
+async function loadBtcWindows() {
+  try {
+    const resp = await fetch('/api/trading/kalshi/btc-windows');
+    const data = await resp.json();
+    if (data.error) {
+      document.getElementById('btc-windows-container').innerHTML = '<div class="empty-state">' + escapeHtml(data.error) + '</div>';
+      return;
+    }
+
+    const btcPrice = data.btc_price;
+    document.getElementById('btc-price-badge').textContent = btcPrice ? '$' + btcPrice.toLocaleString() : '--';
+
+    // Render up/down 15m windows
+    const udContainer = document.getElementById('btc-updown-container');
+    const updowns = data.updowns || [];
+    if (!updowns.length) {
+      udContainer.innerHTML = '<div class="empty-state" style="padding:8px;">No active 15m up/down windows</div>';
+    } else {
+      let udHtml = '';
+      for (const ud of updowns) {
+        const m = ud.markets[0];
+        if (!m) continue;
+        const diff = new Date(m.close_time).getTime() - Date.now();
+        const isClosed = diff <= 0 || m.status === 'closed';
+        let countdown = '';
+        if (isClosed) {
+          countdown = m.result ? '<span class="badge badge-gray">Settled</span>' : '<span class="badge badge-red">CLOSED</span>';
+        } else {
+          const mins = Math.floor(diff / 60000);
+          const secs = Math.floor((diff % 60000) / 1000);
+          countdown = '<span class="badge badge-' + (mins < 5 ? 'red' : 'yellow') + '">' + mins + 'm ' + secs + 's</span>';
+        }
+
+        const strike = m.floor_strike ? '$' + Number(m.floor_strike).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '?';
+        const above = btcPrice >= m.floor_strike;
+        const delta = btcPrice - m.floor_strike;
+        const deltaStr = (delta >= 0 ? '+' : '') + '$' + delta.toFixed(2);
+        const deltaColor = delta >= 0 ? '#3fb950' : '#f85149';
+
+        const resultBadge = m.result === 'yes' ? '<span class="badge badge-green">YES - Up</span>'
+          : m.result === 'no' ? '<span class="badge badge-red">NO - Down</span>'
+          : '';
+
+        udHtml += '<div class="panel" style="margin-bottom: 8px;">';
+        udHtml += '<div class="panel-header" style="font-size: 12px;">15m Up/Down ' + countdown + '</div>';
+        udHtml += '<div class="panel-body">';
+        udHtml += '<div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;">';
+        udHtml += '<div><span style="color:#8b949e;font-size:11px;">Strike</span><br><strong>' + strike + '</strong></div>';
+        udHtml += '<div><span style="color:#8b949e;font-size:11px;">BTC Now</span><br><strong>$' + btcPrice.toLocaleString() + '</strong></div>';
+        udHtml += '<div><span style="color:#8b949e;font-size:11px;">Delta</span><br><strong style="color:' + deltaColor + '">' + deltaStr + '</strong></div>';
+        udHtml += '<div style="border-left:1px solid #21262d;padding-left:16px;"><span style="color:#8b949e;font-size:11px;">YES (Up)</span><br><span style="color:#3fb950;font-weight:600;">' + m.yes_bid + '/' + m.yes_ask + 'c</span></div>';
+        udHtml += '<div><span style="color:#8b949e;font-size:11px;">NO (Down)</span><br><span style="color:#f85149;font-weight:600;">' + m.no_bid + '/' + m.no_ask + 'c</span></div>';
+        udHtml += '<div><span style="color:#8b949e;font-size:11px;">Volume</span><br>' + (m.volume || 0).toLocaleString() + '</div>';
+        if (resultBadge) udHtml += '<div>' + resultBadge + '</div>';
+        udHtml += '</div>';
+        udHtml += '</div></div>';
+      }
+      udContainer.innerHTML = udHtml;
+    }
+
+    // Render range windows
+    const container = document.getElementById('btc-windows-container');
+    if (!data.windows || !data.windows.length) {
+      container.innerHTML = '<div class="empty-state">No active BTC range windows</div>';
+      return;
+    }
+
+    let html = '';
+    for (const win of data.windows) {
+      const closeTime = win.close_time;
+      let countdown = '';
+      let isClosed = closeTime === 'closed';
+      if (!isClosed && closeTime) {
+        const diff = new Date(closeTime).getTime() - Date.now();
+        if (diff <= 0) {
+          countdown = '<span class="badge badge-red">CLOSED</span>';
+          isClosed = true;
+        } else {
+          const mins = Math.floor(diff / 60000);
+          const hrs = Math.floor(mins / 60);
+          const m = mins % 60;
+          countdown = hrs > 0
+            ? '<span class="badge badge-yellow">' + hrs + 'h ' + m + 'm</span>'
+            : '<span class="badge badge-' + (mins < 10 ? 'red' : 'yellow') + '">' + m + 'm</span>';
+        }
+      } else if (isClosed) {
+        countdown = '<span class="badge badge-gray">Settled</span>';
+      }
+
+      html += '<div class="panel" style="margin-bottom: 8px;">';
+      html += '<div class="panel-header" style="font-size: 12px;">' + escapeHtml(win.title || win.event_ticker) + ' ' + countdown + '</div>';
+      html += '<div class="panel-body" style="padding: 0;">';
+      html += '<table style="margin:0;"><thead><tr><th>Bracket</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Vol 24h</th>';
+      if (isClosed) html += '<th>Result</th>';
+      html += '</tr></thead><tbody>';
+
+      for (const m of win.markets) {
+        const isActive = m.inBracket;
+        const rowStyle = isActive ? 'background: #1a3a1a; border-left: 3px solid #3fb950;' : '';
+        const tickerLabel = isActive ? ' <span style="color:#3fb950;font-weight:700;">&#9668; BTC HERE</span>' : '';
+        const resultBadge = m.result === 'yes' ? '<span class="badge badge-green">YES</span>'
+          : m.result === 'no' ? '<span class="badge badge-red">NO</span>'
+          : '<span class="badge badge-gray">--</span>';
+
+        html += '<tr style="' + rowStyle + 'cursor:pointer;" onclick="fillPaperTicker(\'' + escapeHtml(m.ticker) + '\',\'' + escapeHtml(m.title || '') + '\',\'' + escapeHtml(win.event_ticker || '') + '\',\'' + escapeHtml(win.close_time || '') + '\',' + m.mid + ',\'range\')" title="Click to fill paper trade form">';
+        html += '<td style="font-size:11px;white-space:nowrap;">' + escapeHtml(m.title || m.ticker) + tickerLabel + '</td>';
+        html += '<td>' + m.yes_bid + 'c</td>';
+        html += '<td>' + m.yes_ask + 'c</td>';
+        html += '<td style="font-weight:600;">' + m.mid + 'c</td>';
+        html += '<td>' + (m.volume_24h || 0).toLocaleString() + '</td>';
+        if (isClosed) html += '<td>' + resultBadge + '</td>';
+        html += '</tr>';
+      }
+
+      html += '</tbody></table></div></div>';
+    }
+
+    container.innerHTML = html;
+
+    // Auto-settle open paper trades based on market results
+    autoSettlePaperTrades(data);
+  } catch (err) {
+    document.getElementById('btc-windows-container').innerHTML = '<div class="empty-state">Error: ' + err.message + '</div>';
+  }
+}
+
+function startBtcWindowsRefresh() {
+  if (btcWindowsInterval) clearInterval(btcWindowsInterval);
+  loadBtcWindows();
+  btcWindowsInterval = setInterval(loadBtcWindows, 15000);
+}
+
+function stopBtcWindowsRefresh() {
+  if (btcWindowsInterval) { clearInterval(btcWindowsInterval); btcWindowsInterval = null; }
+}
+
+// --- Kalshi Trading ---
+
+async function loadKalshiBalance() {
+  try {
+    const resp = await fetch('/api/trading/kalshi/balance');
+    const data = await resp.json();
+    if (data.error) {
+      document.getElementById('kalshi-balance').innerHTML = '<span class="badge badge-red">Error</span>';
+      document.getElementById('kalshi-portfolio').innerHTML = '<span class="badge badge-red">' + escapeHtml(data.error.slice(0, 60)) + '</span>';
+      return;
+    }
+    document.getElementById('kalshi-balance').innerHTML = '<strong>$' + (data.balance || 0).toFixed(2) + '</strong>';
+    document.getElementById('kalshi-portfolio').innerHTML = '<strong>$' + (data.portfolio_value || 0).toFixed(2) + '</strong>';
+  } catch (err) {
+    document.getElementById('kalshi-balance').textContent = 'Error: ' + err.message;
+  }
+}
+
+async function loadKalshiPositions() {
+  const body = document.getElementById('kalshi-positions-body');
+  body.innerHTML = '<tr><td colspan="5" class="empty-state">Loading...</td></tr>';
+  try {
+    const resp = await fetch('/api/trading/kalshi/positions');
+    const data = await resp.json();
+    if (data.error) { body.innerHTML = '<tr><td colspan="5" class="empty-state">' + escapeHtml(data.error) + '</td></tr>'; return; }
+    const positions = data.positions || [];
+    if (!positions.length) { body.innerHTML = '<tr><td colspan="5" class="empty-state">No open positions</td></tr>'; return; }
+    body.innerHTML = positions.map(p => {
+      const side = (p.market_exposure > 0) ? 'Yes' : (p.market_exposure < 0) ? 'No' : '--';
+      const qty = Math.abs(p.total_traded || p.position || 0);
+      const avgPrice = p.realized_pnl !== undefined ? '--' : '--';
+      const value = p.market_exposure !== undefined ? '$' + (Math.abs(p.market_exposure) / 100).toFixed(2) : '--';
+      return '<tr><td style="font-family:monospace;font-size:11px;">' + escapeHtml(p.ticker || '') + '</td>' +
+        '<td>' + side + '</td><td>' + qty + '</td><td>' + avgPrice + '</td><td>' + value + '</td></tr>';
+    }).join('');
+  } catch (err) { body.innerHTML = '<tr><td colspan="5" class="empty-state">Error: ' + err.message + '</td></tr>'; }
+}
+
+async function loadKalshiOrders() {
+  const body = document.getElementById('kalshi-orders-body');
+  body.innerHTML = '<tr><td colspan="7" class="empty-state">Loading...</td></tr>';
+  try {
+    const resp = await fetch('/api/trading/kalshi/orders?status=resting');
+    const data = await resp.json();
+    if (data.error) { body.innerHTML = '<tr><td colspan="7" class="empty-state">' + escapeHtml(data.error) + '</td></tr>'; return; }
+    const orders = data.orders || [];
+    if (!orders.length) { body.innerHTML = '<tr><td colspan="7" class="empty-state">No open orders</td></tr>'; return; }
+    body.innerHTML = orders.map(o => {
+      const price = o.yes_price || o.no_price || '--';
+      return '<tr><td style="font-family:monospace;font-size:11px;">' + escapeHtml(o.ticker || '') + '</td>' +
+        '<td>' + escapeHtml(o.side || '') + '</td>' +
+        '<td>' + escapeHtml(o.action || '') + '</td>' +
+        '<td>' + (o.remaining_count || o.count || 0) + '</td>' +
+        '<td>' + price + 'c</td>' +
+        '<td><span class="badge badge-yellow">' + escapeHtml(o.status || '') + '</span></td>' +
+        '<td><button class="btn btn-sm" style="color:#f85149;border-color:#f85149;padding:2px 6px;font-size:11px;" onclick="cancelKalshiOrder(\'' + escapeHtml(o.order_id) + '\')">Cancel</button></td></tr>';
+    }).join('');
+  } catch (err) { body.innerHTML = '<tr><td colspan="7" class="empty-state">Error: ' + err.message + '</td></tr>'; }
+}
+
+async function loadKalshiFills() {
+  const body = document.getElementById('kalshi-fills-body');
+  body.innerHTML = '<tr><td colspan="6" class="empty-state">Loading...</td></tr>';
+  try {
+    const resp = await fetch('/api/trading/kalshi/fills');
+    const data = await resp.json();
+    if (data.error) { body.innerHTML = '<tr><td colspan="6" class="empty-state">' + escapeHtml(data.error) + '</td></tr>'; return; }
+    const fills = data.fills || [];
+    if (!fills.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state">No recent fills</td></tr>'; return; }
+    body.innerHTML = fills.slice(0, 50).map(f => {
+      const time = f.created_time ? new Date(f.created_time).toLocaleString() : '--';
+      const price = f.yes_price || f.no_price || '--';
+      return '<tr><td style="font-family:monospace;font-size:11px;">' + escapeHtml(f.ticker || '') + '</td>' +
+        '<td>' + escapeHtml(f.side || '') + '</td>' +
+        '<td>' + escapeHtml(f.action || '') + '</td>' +
+        '<td>' + (f.count || 0) + '</td>' +
+        '<td>' + price + 'c</td>' +
+        '<td style="font-size:11px;">' + escapeHtml(time) + '</td></tr>';
+    }).join('');
+  } catch (err) { body.innerHTML = '<tr><td colspan="6" class="empty-state">Error: ' + err.message + '</td></tr>'; }
+}
+
+async function placeKalshiOrder() {
+  const ticker = document.getElementById('kalshi-order-ticker').value.trim();
+  const side = document.getElementById('kalshi-order-side').value;
+  const action = document.getElementById('kalshi-order-action').value;
+  const type = document.getElementById('kalshi-order-type').value;
+  const count = parseInt(document.getElementById('kalshi-order-qty').value) || 0;
+  const price = parseInt(document.getElementById('kalshi-order-price').value) || 0;
+
+  if (!ticker) { alert('Enter a ticker'); return; }
+  if (count < 1) { alert('Quantity must be at least 1'); return; }
+  if (type === 'limit' && (price < 1 || price > 99)) { alert('Price must be 1-99 cents'); return; }
+
+  const msg = `Place ${action.toUpperCase()} order:\n\nTicker: ${ticker}\nSide: ${side}\nAction: ${action}\nType: ${type}\nQuantity: ${count}` +
+    (type === 'limit' ? `\nPrice: ${price}c` : '') + '\n\nConfirm?';
+  if (!confirm(msg)) return;
+
+  try {
+    const payload = { ticker, side, action, type, count };
+    if (type === 'limit') payload.price = price;
+    if (type === 'limit' && side === 'yes') payload.yes_price = price;
+    if (type === 'limit' && side === 'no') payload.no_price = price;
+
+    const resp = await fetch('/api/trading/kalshi/orders/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Order failed: ' + data.error);
+    } else {
+      alert('Order placed! ID: ' + (data.order?.order_id || JSON.stringify(data)));
+      loadKalshiOrders();
+      loadKalshiBalance();
+    }
+  } catch (err) {
+    alert('Order error: ' + err.message);
+  }
+}
+
+async function cancelKalshiOrder(orderId) {
+  if (!confirm('Cancel order ' + orderId + '?')) return;
+  try {
+    const resp = await fetch('/api/trading/kalshi/orders/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId }),
+    });
+    const data = await resp.json();
+    if (data.error) {
+      alert('Cancel failed: ' + data.error);
+    } else {
+      loadKalshiOrders();
+      loadKalshiBalance();
+    }
+  } catch (err) {
+    alert('Cancel error: ' + err.message);
+  }
+}
+
+// --- Paper Portfolio ---
+
+let _paperPortfolioData = null;
+
+async function loadPaperPortfolio() {
+  try {
+    const resp = await fetch('/api/trading/paper/portfolio');
+    const data = await resp.json();
+    if (data.error) return;
+    _paperPortfolioData = data;
+
+    // Update summary bar
+    const pnlEl = document.getElementById('paper-total-pnl');
+    const pnlCents = data.total_pnl_cents || 0;
+    pnlEl.textContent = (pnlCents >= 0 ? '+' : '') + '$' + (pnlCents / 100).toFixed(2);
+    pnlEl.style.color = pnlCents > 0 ? '#3fb950' : pnlCents < 0 ? '#f85149' : '#8b949e';
+
+    const uPnlEl = document.getElementById('paper-unrealized-pnl');
+    const uPnlCents = data.unrealized_pnl_cents || 0;
+    uPnlEl.textContent = (uPnlCents >= 0 ? '+' : '') + '$' + (uPnlCents / 100).toFixed(2);
+    uPnlEl.style.color = uPnlCents > 0 ? '#3fb950' : uPnlCents < 0 ? '#f85149' : '#8b949e';
+
+    const wrEl = document.getElementById('paper-win-rate');
+    wrEl.textContent = data.closed_trades > 0 ? data.win_rate + '%' : '--';
+    wrEl.style.color = data.win_rate >= 50 ? '#3fb950' : data.win_rate > 0 ? '#f85149' : '#8b949e';
+
+    document.getElementById('paper-exposure').textContent = '$' + (data.open_exposure / 100).toFixed(2);
+    document.getElementById('paper-trade-count').textContent = data.total_trades + ' (' + data.open_trades + ' open)';
+
+    // Build strategy breakdown table
+    const stratPanel = document.getElementById('strategy-breakdown-panel');
+    const stratBody = document.getElementById('strategy-breakdown-body');
+    const byStrategy = data.by_strategy || {};
+    const stratKeys = Object.keys(byStrategy);
+    const hasClosedStrats = stratKeys.some(k => byStrategy[k].wins + byStrategy[k].losses > 0);
+    if (stratKeys.length > 0 && hasClosedStrats) {
+      stratPanel.style.display = '';
+      const stratLabels = { center_bracket: 'Center Bracket', spread: 'Spread', directional: 'Directional', momentum_15m: '15m Momentum', lottery: 'Lottery', arbitrage: 'Arbitrage', uncategorized: 'Other' };
+      const stratColors = { center_bracket: '#58a6ff', spread: '#d2a8ff', directional: '#f0883e', momentum_15m: '#3fb950', lottery: '#f85149', arbitrage: '#e3b341', uncategorized: '#8b949e' };
+      let shtml = '';
+      // Sort: strategies with closed trades first, then by P&L desc
+      stratKeys.sort((a, b) => {
+        const aClosed = byStrategy[a].wins + byStrategy[a].losses;
+        const bClosed = byStrategy[b].wins + byStrategy[b].losses;
+        if (aClosed > 0 && bClosed === 0) return -1;
+        if (aClosed === 0 && bClosed > 0) return 1;
+        return byStrategy[b].pnl_cents - byStrategy[a].pnl_cents;
+      });
+      for (const k of stratKeys) {
+        const s = byStrategy[k];
+        const closed = s.wins + s.losses;
+        const label = stratLabels[k] || k;
+        const color = stratColors[k] || '#8b949e';
+        const wrText = closed > 0 ? s.win_rate + '%' : '--';
+        const pnlColor = s.pnl_cents > 0 ? '#3fb950' : s.pnl_cents < 0 ? '#f85149' : '#8b949e';
+        const pnlText = closed > 0 ? ((s.pnl_cents >= 0 ? '+' : '') + '$' + s.pnl.toFixed(2)) : '$0.00';
+        const retText = closed > 0 ? ((s.avg_return_pct >= 0 ? '+' : '') + s.avg_return_pct + '%') : (s.open > 0 ? '(open)' : '--');
+        shtml += '<tr>';
+        shtml += '<td style="padding:4px 8px;"><span style="color:' + color + ';font-weight:600;">' + escapeHtml(label) + '</span></td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + s.trades + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:center;">' + s.wins + '/' + s.losses + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + wrText + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;color:' + pnlColor + ';">' + pnlText + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + retText + '</td>';
+        shtml += '</tr>';
+      }
+      stratBody.innerHTML = shtml;
+    } else {
+      stratPanel.style.display = 'none';
+    }
+
+    // Build trades table
+    const showClosed = document.getElementById('paper-show-closed')?.checked;
+    const trades = [];
+    // Open positions first (with current prices)
+    for (const t of (data.open_positions || [])) {
+      trades.push({ ...t, _type: 'open' });
+    }
+    // Settled trades
+    if (showClosed) {
+      for (const t of (data.closed_positions || [])) {
+        trades.push({ ...t, _type: 'closed' });
+      }
+    }
+
+    const tbody = document.getElementById('paper-trades-body');
+    if (!trades.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-state" style="padding: 16px;">No paper trades' + (showClosed ? '' : ' (check "Show settled" for history)') + '</td></tr>';
+      return;
+    }
+
+    let html = '';
+    for (const t of trades) {
+      const isOpen = t._type === 'open';
+      const sideBadge = t.side === 'yes'
+        ? '<span class="badge badge-green">YES</span>'
+        : '<span class="badge badge-red">NO</span>';
+
+      let currentExitCell = '';
+      let pnlCell = '';
+
+      if (isOpen) {
+        const cp = t.current_price;
+        currentExitCell = cp !== null ? cp + 'c' : '<span style="color:#8b949e;">--</span>';
+        const uPnl = t.unrealized_pnl || 0;
+        const pnlColor = uPnl > 0 ? '#3fb950' : uPnl < 0 ? '#f85149' : '#8b949e';
+        pnlCell = '<span style="color:' + pnlColor + ';">' + (uPnl >= 0 ? '+' : '') + '$' + (uPnl / 100).toFixed(2) + '</span>';
+      } else {
+        currentExitCell = (t.exit_price !== null ? t.exit_price + 'c' : '--');
+        let pnl = 0;
+        if (t.exit_price !== null) {
+          pnl = t.side === 'yes' ? (t.exit_price - t.entry_price) * t.qty : (t.entry_price - t.exit_price) * t.qty;
+        }
+        const pnlColor = pnl > 0 ? '#3fb950' : pnl < 0 ? '#f85149' : '#8b949e';
+        pnlCell = '<span style="color:' + pnlColor + ';">' + (pnl >= 0 ? '+' : '') + '$' + (pnl / 100).toFixed(2) + '</span>';
+      }
+
+      let statusBadge = '';
+      if (t.status === 'open') statusBadge = '<span class="badge badge-blue">OPEN</span>';
+      else if (t.status === 'won') statusBadge = '<span class="badge badge-green">WIN</span>';
+      else if (t.status === 'lost') statusBadge = '<span class="badge badge-red">LOSS</span>';
+      else if (t.status === 'cancelled') statusBadge = '<span class="badge badge-gray">CANCEL</span>';
+
+      let actions = '';
+      if (isOpen) {
+        actions += '<button onclick="settlePaperTrade(\'' + t.id + '\',\'won\')" style="background:#238636;color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;margin:1px;" title="Settle as won (exit at 100c)">W</button>';
+        actions += '<button onclick="settlePaperTrade(\'' + t.id + '\',\'lost\')" style="background:#da3633;color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;margin:1px;" title="Settle as lost (exit at 0c)">L</button>';
+        actions += '<button onclick="settlePaperTrade(\'' + t.id + '\',\'cancelled\')" style="background:#30363d;color:#8b949e;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;margin:1px;" title="Cancel trade">X</button>';
+      } else {
+        actions += '<button onclick="deletePaperTrade(\'' + t.id + '\')" style="background:#21262d;color:#8b949e;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;" title="Delete record">Del</button>';
+      }
+
+      // Truncate ticker for display
+      const tickerDisplay = t.ticker.length > 25 ? t.ticker.slice(0, 25) + '...' : t.ticker;
+
+      // Strategy badge
+      const stratColorMap = { center_bracket: '#58a6ff', spread: '#d2a8ff', directional: '#f0883e', momentum_15m: '#3fb950', lottery: '#f85149', arbitrage: '#e3b341', uncategorized: '#8b949e' };
+      const stratLabelMap = { center_bracket: 'CB', spread: 'SPR', directional: 'DIR', momentum_15m: '15M', lottery: 'LOT', arbitrage: 'ARB', uncategorized: '?' };
+      const stratFullMap = { center_bracket: 'Center Bracket', spread: 'Spread', directional: 'Directional', momentum_15m: '15m Momentum', lottery: 'Lottery', arbitrage: 'Arbitrage', uncategorized: 'Other' };
+      const strat = t.strategy || 'uncategorized';
+      const stratColor = stratColorMap[strat] || '#8b949e';
+      const stratLabel = stratLabelMap[strat] || strat.slice(0, 3).toUpperCase();
+      const stratFull = stratFullMap[strat] || strat;
+      const stratBadge = '<span style="background:' + stratColor + '22;color:' + stratColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;" title="' + escapeHtml(stratFull) + '">' + stratLabel + '</span>';
+
+      html += '<tr>';
+      html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap;" title="' + escapeHtml(t.ticker) + '">' + escapeHtml(tickerDisplay) + '</td>';
+      html += '<td style="text-align:center;">' + stratBadge + '</td>';
+      html += '<td style="text-align:center;">' + sideBadge + '</td>';
+      html += '<td style="text-align:right;">' + t.qty + '</td>';
+      html += '<td style="text-align:right;">' + t.entry_price + 'c</td>';
+      html += '<td style="text-align:right;">' + currentExitCell + '</td>';
+      html += '<td style="text-align:right;">' + pnlCell + '</td>';
+      html += '<td style="text-align:center;">' + statusBadge + '</td>';
+      // Close time column — show date + time
+      let closeCell = '<span style="color:#8b949e;">--</span>';
+      if (t.close_time) {
+        const cd = new Date(t.close_time);
+        const timeStr = cd.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        const diffMs = cd - new Date();
+        const color = (t.status === 'open' && diffMs < 0) ? '#f85149' : (t.status === 'open' && diffMs < 3600000) ? '#f0883e' : '#8b949e';
+        closeCell = '<span style="color:' + color + ';">' + timeStr + '</span>';
+      }
+      html += '<td style="text-align:right;font-size:11px;white-space:nowrap;" title="' + escapeHtml(t.close_time || '') + '">' + closeCell + '</td>';
+      html += '<td style="text-align:center;white-space:nowrap;">' + actions + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html;
+  } catch (err) {
+    console.error('Paper portfolio load error:', err);
+  }
+}
+
+async function addPaperTrade() {
+  const ticker = document.getElementById('paper-ticker').value.trim();
+  const side = document.getElementById('paper-side').value;
+  const strategy = document.getElementById('paper-strategy').value;
+  const qty = parseInt(document.getElementById('paper-qty').value) || 0;
+  const price = parseInt(document.getElementById('paper-price').value) || 0;
+  const notes = document.getElementById('paper-notes').value.trim();
+
+  if (!ticker) { alert('Ticker is required'); return; }
+  if (qty < 1) { alert('Qty must be at least 1'); return; }
+  if (price < 1 || price > 99) { alert('Price must be 1-99 cents'); return; }
+
+  try {
+    const payload = {
+      ticker,
+      side,
+      action: 'buy',
+      qty,
+      entry_price: price,
+      strategy,
+      notes: notes || null,
+      market_title: document.getElementById('paper-ticker').dataset.title || null,
+      event_ticker: document.getElementById('paper-ticker').dataset.eventTicker || null,
+      close_time: document.getElementById('paper-ticker').dataset.closeTime || null,
+      market_type: document.getElementById('paper-ticker').dataset.marketType || null,
+    };
+    const resp = await fetch('/api/trading/paper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+
+    // Clear form
+    document.getElementById('paper-ticker').value = '';
+    document.getElementById('paper-price').value = '';
+    document.getElementById('paper-notes').value = '';
+    document.getElementById('paper-ticker-info').textContent = '';
+    delete document.getElementById('paper-ticker').dataset.title;
+    delete document.getElementById('paper-ticker').dataset.eventTicker;
+    delete document.getElementById('paper-ticker').dataset.closeTime;
+    delete document.getElementById('paper-ticker').dataset.marketType;
+
+    loadPaperPortfolio();
+  } catch (err) {
+    alert('Error adding trade: ' + err.message);
+  }
+}
+
+async function settlePaperTrade(id, status) {
+  try {
+    const resp = await fetch('/api/trading/paper/settle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    loadPaperPortfolio();
+  } catch (err) {
+    alert('Error settling trade: ' + err.message);
+  }
+}
+
+async function deletePaperTrade(id) {
+  if (!confirm('Delete this paper trade record?')) return;
+  try {
+    const resp = await fetch('/api/trading/paper/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    loadPaperPortfolio();
+  } catch (err) {
+    alert('Error deleting trade: ' + err.message);
+  }
+}
+
+function fillPaperTicker(ticker, title, eventTicker, closeTime, mid, marketType) {
+  const input = document.getElementById('paper-ticker');
+  input.value = ticker;
+  input.dataset.title = title;
+  input.dataset.eventTicker = eventTicker;
+  input.dataset.closeTime = closeTime;
+  input.dataset.marketType = marketType;
+  document.getElementById('paper-price').value = mid || '';
+  document.getElementById('paper-ticker-info').textContent = title ? 'Selected: ' + title : '';
+  // Auto-select strategy based on market type
+  const stratSelect = document.getElementById('paper-strategy');
+  if (marketType === 'range') stratSelect.value = 'center_bracket';
+  else if (marketType === 'up_down_15m') stratSelect.value = 'momentum_15m';
+  // Scroll the form into view
+  input.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function autoSettlePaperTrades(btcData) {
+  // Check all markets in the btc-windows data for settled results
+  // and auto-settle matching open paper trades
+  try {
+    const openResp = await fetch('/api/trading/paper?status=open');
+    const openTrades = await openResp.json();
+    if (!openTrades.length) return;
+
+    // Build a map of ticker -> result from all windows data
+    const resultMap = {};
+    for (const win of (btcData.windows || [])) {
+      for (const m of (win.markets || [])) {
+        if (m.result === 'yes' || m.result === 'no') {
+          resultMap[m.ticker] = m.result;
+        }
+      }
+    }
+    for (const ud of (btcData.updowns || [])) {
+      for (const m of (ud.markets || [])) {
+        if (m.result === 'yes' || m.result === 'no') {
+          resultMap[m.ticker] = m.result;
+        }
+      }
+    }
+
+    let settled = false;
+    for (const trade of openTrades) {
+      const result = resultMap[trade.ticker];
+      if (!result) continue;
+
+      // Determine if trade won or lost
+      const won = (trade.side === result);
+      await fetch('/api/trading/paper/settle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: trade.id,
+          status: won ? 'won' : 'lost',
+          exit_price: won ? 100 : 0,
+        }),
+      });
+      settled = true;
+    }
+
+    if (settled) loadPaperPortfolio();
+  } catch (err) {
+    console.error('Auto-settle error:', err);
+  }
+}
+
+// --- Presets ---
+
+async function loadPresets() {
+  try {
+    const resp = await fetch('/api/trading/presets');
+    const presets = await resp.json();
+    const body = document.getElementById('presets-body');
+    if (!presets.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state">No presets</td></tr>';
+      return;
+    }
+    body.innerHTML = presets.map(p => `
+      <tr>
+        <td>${escapeHtml(p.name)}</td>
+        <td>${escapeHtml(p.strategy)}</td>
+        <td>${escapeHtml(p.platform)}</td>
+        <td><span class="badge ${p.mode === 'live' ? 'badge-red' : 'badge-green'}">${p.mode}</span></td>
+        <td>$${(p.initial_capital || 0).toLocaleString()}</td>
+        <td>
+          <button class="btn btn-primary btn-sm" onclick="launchFromPreset('${p.id}')">Launch</button>
+          <button class="btn btn-secondary btn-sm" onclick="editPreset('${p.id}')">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deletePresetConfirm('${p.id}')">Delete</button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (err) {
+    console.error('Failed to load presets:', err);
+  }
+}
+
+function togglePresetForm() {
+  const panel = document.getElementById('preset-form-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'none') clearPresetForm();
+}
+
+function clearPresetForm() {
+  document.getElementById('preset-id').value = '';
+  document.getElementById('preset-name').value = '';
+  document.getElementById('preset-strategy').value = 'rsi_mean_reversion';
+  document.getElementById('preset-platform').value = 'polymarket';
+  document.getElementById('preset-mode').value = 'paper';
+  document.getElementById('preset-capital').value = '10000';
+  document.getElementById('preset-drawdown').value = '10';
+  document.getElementById('preset-position').value = '5';
+  document.getElementById('preset-confidence').value = '60';
+  document.getElementById('preset-timestop').value = '30';
+  document.getElementById('preset-schedule-type').value = '';
+  document.getElementById('preset-schedule-value').value = '';
+  document.getElementById('preset-notes').value = '';
+}
+
+async function editPreset(id) {
+  try {
+    const resp = await fetch('/api/trading/presets');
+    const presets = await resp.json();
+    const p = presets.find(x => x.id === id);
+    if (!p) return;
+
+    let risk = {};
+    try { risk = JSON.parse(p.risk_params); } catch {}
+
+    document.getElementById('preset-id').value = p.id;
+    document.getElementById('preset-name').value = p.name;
+    document.getElementById('preset-strategy').value = p.strategy;
+    document.getElementById('preset-platform').value = p.platform;
+    document.getElementById('preset-mode').value = p.mode;
+    document.getElementById('preset-capital').value = p.initial_capital;
+    document.getElementById('preset-drawdown').value = risk.max_drawdown ?? 10;
+    document.getElementById('preset-position').value = risk.max_position_size ?? 5;
+    document.getElementById('preset-confidence').value = risk.min_confidence ?? 60;
+    document.getElementById('preset-timestop').value = risk.time_stop_days ?? 30;
+    document.getElementById('preset-schedule-type').value = p.schedule_type || '';
+    document.getElementById('preset-schedule-value').value = p.schedule_value || '';
+    document.getElementById('preset-notes').value = p.notes || '';
+    document.getElementById('preset-form-panel').style.display = 'block';
+  } catch (err) {
+    console.error('Failed to load preset:', err);
+  }
+}
+
+async function savePreset() {
+  const body = {
+    id: document.getElementById('preset-id').value || undefined,
+    name: document.getElementById('preset-name').value,
+    strategy: document.getElementById('preset-strategy').value,
+    platform: document.getElementById('preset-platform').value,
+    mode: document.getElementById('preset-mode').value,
+    initial_capital: parseFloat(document.getElementById('preset-capital').value) || 10000,
+    risk_params: {
+      max_drawdown: parseFloat(document.getElementById('preset-drawdown').value) || 10,
+      max_position_size: parseFloat(document.getElementById('preset-position').value) || 5,
+      min_confidence: parseFloat(document.getElementById('preset-confidence').value) || 60,
+      time_stop_days: parseFloat(document.getElementById('preset-timestop').value) || 30,
+    },
+    schedule_type: document.getElementById('preset-schedule-type').value || null,
+    schedule_value: document.getElementById('preset-schedule-value').value || null,
+    notes: document.getElementById('preset-notes').value || null,
+  };
+
+  if (!body.name) { alert('Name is required'); return; }
+
+  try {
+    const resp = await fetch('/api/trading/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result.error) { alert(result.error); return; }
+    togglePresetForm();
+    loadPresets();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function deletePresetConfirm(id) {
+  if (!confirm('Delete this preset?')) return;
+  try {
+    await fetch('/api/trading/presets/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    loadPresets();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function launchFromPreset(presetId) {
+  const type = prompt('Run type (backtest / paper / live):', 'backtest');
+  if (!type) return;
+  try {
+    const resp = await fetch('/api/trading/runs/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset_id: presetId, type }),
+    });
+    const result = await resp.json();
+    if (result.error) { alert(result.error); return; }
+    alert('Run started: ' + result.id);
+    switchTab('runs');
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+// --- Runs ---
+
+async function loadRuns() {
+  try {
+    const resp = await fetch('/api/trading/runs');
+    const runs = await resp.json();
+
+    const active = runs.filter(r => ['pending', 'running'].includes(r.status));
+    const completed = runs.filter(r => !['pending', 'running'].includes(r.status));
+
+    const activeBody = document.getElementById('runs-active-body');
+    if (!active.length) {
+      activeBody.innerHTML = '<tr><td colspan="7" class="empty-state">No active runs</td></tr>';
+    } else {
+      activeBody.innerHTML = active.map(r => `
+        <tr>
+          <td><code>${r.id.slice(0, 16)}</code></td>
+          <td>${escapeHtml(r.type)}</td>
+          <td>${escapeHtml(r.strategy)}</td>
+          <td>${escapeHtml(r.platform)}</td>
+          <td><span class="badge badge-green badge-pulsing">${r.status}</span></td>
+          <td>${new Date(r.created_at).toLocaleString()}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="stopRun('${r.id}')">Stop</button></td>
+        </tr>
+      `).join('');
+    }
+
+    const completedBody = document.getElementById('runs-completed-body');
+    if (!completed.length) {
+      completedBody.innerHTML = '<tr><td colspan="7" class="empty-state">No completed runs</td></tr>';
+    } else {
+      completedBody.innerHTML = completed.map(r => {
+        let pnl = '--', winRate = '--';
+        try {
+          const res = JSON.parse(r.results);
+          if (res) {
+            pnl = '$' + (res.total_pnl || 0).toFixed(2);
+            winRate = ((res.win_rate || 0) * 100).toFixed(1) + '%';
+          }
+        } catch {}
+        return `
+          <tr>
+            <td><code>${r.id.slice(0, 16)}</code></td>
+            <td>${escapeHtml(r.type)}</td>
+            <td>${escapeHtml(r.strategy)}</td>
+            <td>${escapeHtml(r.platform)}</td>
+            <td>${pnl}</td>
+            <td>${winRate}</td>
+            <td>${r.completed_at ? new Date(r.completed_at).toLocaleString() : '--'}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+  } catch (err) {
+    console.error('Failed to load runs:', err);
+  }
+}
+
+async function loadPresetsDropdown() {
+  try {
+    const resp = await fetch('/api/trading/presets');
+    const presets = await resp.json();
+    const select = document.getElementById('run-preset');
+    // Keep first option, clear the rest
+    while (select.options.length > 1) select.remove(1);
+    presets.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      select.appendChild(opt);
+    });
+  } catch {}
+}
+
+function toggleRunDateRange() {
+  const isBacktest = document.getElementById('run-type').value === 'backtest';
+  document.getElementById('run-date-range').style.display = isBacktest ? 'grid' : 'none';
+}
+
+async function launchRun() {
+  const presetId = document.getElementById('run-preset').value;
+  const body = {
+    preset_id: presetId || undefined,
+    type: document.getElementById('run-type').value,
+    platform: document.getElementById('run-platform').value,
+    strategy: document.getElementById('run-strategy').value,
+    mode: document.getElementById('run-mode').value,
+    initial_capital: parseFloat(document.getElementById('run-capital').value) || 10000,
+    start_date: document.getElementById('run-start-date').value || undefined,
+    end_date: document.getElementById('run-end-date').value || undefined,
+  };
+
+  try {
+    const resp = await fetch('/api/trading/runs/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const result = await resp.json();
+    if (result.error) { alert(result.error); return; }
+    loadRuns();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function stopRun(id) {
+  if (!confirm('Stop this run?')) return;
+  try {
+    await fetch('/api/trading/runs/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    loadRuns();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+// --- Backtests ---
+
+let backtestRuns = [];
+
+async function loadBacktests() {
+  try {
+    const resp = await fetch('/api/trading/runs?type=backtest');
+    backtestRuns = await resp.json();
+    renderBacktestTable();
+    renderCompareSelect();
+  } catch (err) {
+    console.error('Failed to load backtests:', err);
+  }
+}
+
+function renderBacktestTable() {
+  const completed = backtestRuns.filter(r => r.status === 'completed' || r.status === 'stopped');
+  const body = document.getElementById('backtests-body');
+  if (!completed.length) {
+    body.innerHTML = '<tr><td colspan="10" class="empty-state">No backtests</td></tr>';
+    return;
+  }
+  body.innerHTML = completed.map(r => {
+    let pnl = '--', winRate = '--', maxDD = '--', sharpe = '--';
+    try {
+      const res = JSON.parse(r.results);
+      if (res) {
+        pnl = '$' + (res.total_pnl || 0).toFixed(2);
+        winRate = ((res.win_rate || 0) * 100).toFixed(1) + '%';
+        maxDD = ((res.max_drawdown || 0) * 100).toFixed(1) + '%';
+        sharpe = (res.sharpe_ratio || 0).toFixed(2);
+      }
+    } catch {}
+    return `
+      <tr>
+        <td><code>${r.id.slice(0, 16)}</code></td>
+        <td>${escapeHtml(r.strategy)}</td>
+        <td>${escapeHtml(r.platform)}</td>
+        <td>${r.start_date || '?'} - ${r.end_date || '?'}</td>
+        <td>${pnl}</td>
+        <td>${winRate}</td>
+        <td>${maxDD}</td>
+        <td>${sharpe}</td>
+        <td><button class="btn btn-secondary btn-sm" onclick="viewBacktest('${r.id}')">View</button></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function viewBacktest(id) {
+  const run = backtestRuns.find(r => r.id === id);
+  if (!run) return;
+
+  document.getElementById('bt-detail-panel').style.display = 'block';
+  document.getElementById('bt-detail-title').textContent = `${run.strategy} (${run.platform})`;
+
+  let results = {};
+  try { results = JSON.parse(run.results) || {}; } catch {}
+
+  const metricsDiv = document.getElementById('bt-detail-metrics');
+  metricsDiv.innerHTML = [
+    { label: 'Total P&L', value: '$' + (results.total_pnl || 0).toFixed(2), cls: (results.total_pnl || 0) >= 0 ? 'positive' : 'negative' },
+    { label: 'Win Rate', value: ((results.win_rate || 0) * 100).toFixed(1) + '%' },
+    { label: 'Max Drawdown', value: ((results.max_drawdown || 0) * 100).toFixed(1) + '%', cls: 'negative' },
+    { label: 'Sharpe Ratio', value: (results.sharpe_ratio || 0).toFixed(2) },
+  ].map(m => `
+    <div class="metric-card">
+      <div class="metric-label">${m.label}</div>
+      <div class="metric-value ${m.cls || ''}">${m.value}</div>
+    </div>
+  `).join('');
+
+  // Equity curve
+  if (results.equity_curve && results.equity_curve.length) {
+    drawEquityCurve('bt-equity-canvas', [{ label: run.strategy, data: results.equity_curve, color: '#58a6ff' }]);
+  }
+
+  // Trades table
+  const tradesBody = document.getElementById('bt-detail-trades');
+  const trades = results.trades || [];
+  if (!trades.length) {
+    tradesBody.innerHTML = '<tr><td colspan="5" class="empty-state">No trade data</td></tr>';
+  } else {
+    tradesBody.innerHTML = trades.map(t => `
+      <tr>
+        <td>${t.date || '--'}</td>
+        <td>${escapeHtml(t.symbol || '--')}</td>
+        <td>${escapeHtml(t.side || '--')}</td>
+        <td>${t.price != null ? '$' + t.price.toFixed(4) : '--'}</td>
+        <td class="${(t.pnl || 0) >= 0 ? 'stat-value ok' : 'stat-value error'}">${t.pnl != null ? '$' + t.pnl.toFixed(2) : '--'}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function switchBacktestSub(sub) {
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('bt-sub-results').style.display = sub === 'results' ? 'block' : 'none';
+  document.getElementById('bt-sub-compare').style.display = sub === 'compare' ? 'block' : 'none';
+}
+
+function renderCompareSelect() {
+  const completed = backtestRuns.filter(r => r.status === 'completed' || r.status === 'stopped');
+  const body = document.getElementById('compare-select-body');
+  if (!completed.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty-state">No backtests to compare</td></tr>';
+    return;
+  }
+  body.innerHTML = completed.map(r => {
+    let pnl = '--';
+    try { const res = JSON.parse(r.results); pnl = '$' + (res?.total_pnl || 0).toFixed(2); } catch {}
+    return `
+      <tr>
+        <td><input type="checkbox" class="compare-check" value="${r.id}"></td>
+        <td><code>${r.id.slice(0, 16)}</code></td>
+        <td>${escapeHtml(r.strategy)}</td>
+        <td>${escapeHtml(r.platform)}</td>
+        <td>${r.start_date || '?'} - ${r.end_date || '?'}</td>
+        <td>${pnl}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function compareSelected() {
+  const checked = [...document.querySelectorAll('.compare-check:checked')].map(c => c.value);
+  if (checked.length < 2) { alert('Select at least 2 runs to compare'); return; }
+
+  try {
+    const resp = await fetch('/api/trading/evaluations?ids=' + checked.join(','));
+    const runs = await resp.json();
+
+    document.getElementById('compare-results-panel').style.display = 'block';
+
+    // Build metrics table
+    const metrics = ['total_pnl', 'win_rate', 'max_drawdown', 'sharpe_ratio'];
+    const metricLabels = { total_pnl: 'Total P&L', win_rate: 'Win Rate', max_drawdown: 'Max Drawdown', sharpe_ratio: 'Sharpe Ratio' };
+
+    let tableHtml = '<thead><tr><th>Metric</th>';
+    runs.forEach(r => { tableHtml += `<th>${escapeHtml(r.strategy)} (${r.id.slice(0, 8)})</th>`; });
+    tableHtml += '</tr></thead><tbody>';
+
+    metrics.forEach(m => {
+      tableHtml += `<tr><td>${metricLabels[m]}</td>`;
+      runs.forEach(r => {
+        let val = '--';
+        try {
+          const res = JSON.parse(r.results);
+          if (res && res[m] != null) {
+            if (m === 'win_rate' || m === 'max_drawdown') val = (res[m] * 100).toFixed(1) + '%';
+            else if (m === 'total_pnl') val = '$' + res[m].toFixed(2);
+            else val = res[m].toFixed(2);
+          }
+        } catch {}
+        tableHtml += `<td>${val}</td>`;
+      });
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</tbody>';
+    document.getElementById('compare-metrics-table').innerHTML = tableHtml;
+
+    // Overlaid equity curves
+    const COLORS = ['#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff'];
+    const curves = runs.map((r, i) => {
+      let ec = [];
+      try { ec = JSON.parse(r.results)?.equity_curve || []; } catch {}
+      return { label: r.strategy + ' (' + r.id.slice(0, 8) + ')', data: ec, color: COLORS[i % COLORS.length] };
+    }).filter(c => c.data.length > 0);
+
+    if (curves.length) drawEquityCurve('compare-equity-canvas', curves);
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+// --- Equity Curve Drawing (Canvas 2D) ---
+
+function drawEquityCurve(canvasId, curves) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+
+  const w = canvas.offsetWidth;
+  const h = canvas.offsetHeight;
+  const pad = { top: 20, right: 20, bottom: 40, left: 60 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  // Clear
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  // Find data bounds
+  let allEquities = [];
+  let maxLen = 0;
+  curves.forEach(c => {
+    c.data.forEach(d => allEquities.push(d.equity));
+    if (c.data.length > maxLen) maxLen = c.data.length;
+  });
+
+  if (allEquities.length === 0) return;
+
+  const minEq = Math.min(...allEquities) * 0.98;
+  const maxEq = Math.max(...allEquities) * 1.02;
+  const eqRange = maxEq - minEq || 1;
+
+  // Grid lines
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH * i / 4);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const val = maxEq - (eqRange * i / 4);
+    ctx.fillText('$' + val.toFixed(0), pad.left - 6, y + 4);
+  }
+
+  // Draw curves
+  curves.forEach(curve => {
+    ctx.strokeStyle = curve.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    curve.data.forEach((d, i) => {
+      const x = pad.left + (i / (maxLen - 1 || 1)) * plotW;
+      const y = pad.top + plotH - ((d.equity - minEq) / eqRange) * plotH;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // X-axis labels (first and last dates)
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  const firstCurve = curves[0].data;
+  if (firstCurve.length > 0) {
+    ctx.fillText(firstCurve[0].date || '', pad.left, h - 8);
+    ctx.fillText(firstCurve[firstCurve.length - 1].date || '', w - pad.right, h - 8);
+  }
+
+  // Legend
+  const legendY = pad.top + 12;
+  let legendX = pad.left + 8;
+  curves.forEach(curve => {
+    ctx.fillStyle = curve.color;
+    ctx.fillRect(legendX, legendY - 8, 12, 3);
+    ctx.fillStyle = '#c9d1d9';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(curve.label, legendX + 16, legendY - 3);
+    legendX += ctx.measureText(curve.label).width + 32;
+  });
+}
+
+// --- Watcher functions ---
+
+function switchWatcherSub(sub) {
+  document.querySelectorAll('#tab-watchers .sub-tab').forEach(t => t.classList.remove('active'));
+  if (event && event.target) event.target.classList.add('active');
+  else {
+    // Programmatic call — highlight the right tab
+    document.querySelectorAll('#tab-watchers .sub-tab').forEach(t => {
+      if (t.textContent.toLowerCase().includes(sub === 'active' ? 'active' : sub)) t.classList.add('active');
+    });
+  }
+  ['active', 'search', 'compare', 'optimize', 'data'].forEach(s => {
+    const el = document.getElementById('watcher-sub-' + s);
+    if (el) el.style.display = s === sub ? 'block' : 'none';
+  });
+  if (sub === 'optimize') { loadWatcherDropdowns(); loadPastOptimizations(); }
+  // Show/hide the data sub-tab
+  const dataTab = document.getElementById('data-sub-tab');
+  if (dataTab) dataTab.style.display = sub === 'data' ? 'inline-block' : 'none';
+}
+
+let selectedMarketTokens = [];
+let selectedGroupMode = null;
+
+async function loadWatchers() {
+  try {
+    const resp = await fetch('/api/trading/watch/status');
+    const watchers = await resp.json();
+    const body = document.getElementById('watchers-body');
+    if (!Array.isArray(watchers) || watchers.length === 0) {
+      body.innerHTML = '<tr><td colspan="7" class="empty-state">No watchers</td></tr>';
+      return;
+    }
+    body.innerHTML = watchers.map(w => {
+      const tokens = Array.isArray(w.token_ids) ? w.token_ids : [];
+      const slugs = Array.isArray(w.market_slugs) ? w.market_slugs : [];
+      const isGroup = slugs.some(s => s === 'btc-updown-5m' || s === 'btc-updown-15m');
+      const intervalLabel = w.interval_ms === 300000 ? '5m' : w.interval_ms === 900000 ? '15m' : w.interval_ms === 3600000 ? '1h' : (w.interval_ms / 60000) + 'm';
+      const statusBadge = w.status === 'active' ? 'badge-green badge-pulsing' : w.status === 'completed' ? 'badge-gray' : 'badge-red';
+      const typeLabel = isGroup ? '<span style="color:#58a6ff; font-size:10px;">GROUP</span> ' : '';
+      return `<tr>
+        <td>${typeLabel}${escapeHtml(w.name)}</td>
+        <td title="${isGroup ? 'Auto-rotating: ' + slugs.join(', ') : tokens.join(', ')}">${isGroup ? slugs[0] + ' (auto)' : slugs.length > 0 ? escapeHtml(slugs.slice(0, 3).join(', ')) : tokens.length + ' tokens'}</td>
+        <td>${intervalLabel}</td>
+        <td>${w.data_points || 0}</td>
+        <td>${w.progress || 0}%</td>
+        <td><span class="badge ${statusBadge}">${w.status}</span></td>
+        <td>
+          ${w.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="stopWatcher('${w.id}')">Stop</button>` : ''}
+          ${w.data_points > 0 ? `<button class="btn btn-secondary btn-sm" onclick="viewWatcherData('${w.id}')">Data</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load watchers', err);
+  }
+}
+
+async function searchMarkets() {
+  const query = document.getElementById('market-search-input').value;
+  const platform = document.getElementById('market-search-platform').value;
+  const polyBody = document.getElementById('market-search-body');
+  const kalshiBody = document.getElementById('kalshi-search-body');
+  polyBody.innerHTML = '<tr><td colspan="5" class="empty-state">Searching...</td></tr>';
+  kalshiBody.innerHTML = '<tr><td colspan="5" class="empty-state">Searching...</td></tr>';
+  try {
+    const resp = await fetch('/api/trading/watch/find-markets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, platform }),
+    });
+    const data = await resp.json();
+    if (data.error) { polyBody.innerHTML = '<tr><td colspan="5" class="empty-state">Error: ' + escapeHtml(data.error) + '</td></tr>'; return; }
+
+    // Polymarket results
+    const polyMarkets = data.polymarket || [];
+    selectedMarketTokens = [];
+    selectedGroupMode = null;
+    if (polyMarkets.length === 0) {
+      polyBody.innerHTML = '<tr><td colspan="5" class="empty-state">No Polymarket results</td></tr>';
+    } else {
+      polyBody.innerHTML = polyMarkets.map((m, i) => {
+        if (m.type === 'group') {
+          return `<tr style="background:#1a2332;">
+            <td><input type="checkbox" class="market-check" data-idx="${i}" data-group-mode="${m.groupMode}" data-question="${escapeHtml(m.question)}" onchange="toggleMarketSelect(this)"></td>
+            <td><span style="color:#58a6ff; font-weight:600;">&#9656; ${escapeHtml(m.question)}</span></td>
+            <td style="color:#8b949e;">auto</td>
+            <td style="color:#8b949e;">auto-rotating</td>
+            <td style="color:#8b949e;">continuous</td>
+          </tr>`;
+        }
+        const yesToken = (m.tokens || []).find(t => t.outcome === 'Yes' || t.outcome === 'Up');
+        return `<tr>
+          <td><input type="checkbox" class="market-check" data-idx="${i}" data-token="${yesToken ? yesToken.token_id : ''}" data-question="${escapeHtml(m.question)}" onchange="toggleMarketSelect(this)"></td>
+          <td>${escapeHtml(m.question)}</td>
+          <td>${m.volume ? '$' + Number(m.volume).toLocaleString() : '--'}</td>
+          <td>${(m.tokens || []).length} tokens</td>
+          <td>${m.endDate ? new Date(m.endDate).toLocaleDateString() : '--'}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Kalshi results
+    const kalshiMarkets = data.kalshi || [];
+    if (kalshiMarkets.length === 0) {
+      kalshiBody.innerHTML = '<tr><td colspan="5" class="empty-state">No Kalshi results</td></tr>';
+    } else {
+      kalshiBody.innerHTML = kalshiMarkets.map(m => `<tr>
+        <td style="font-family:monospace; font-size:11px;">${escapeHtml(m.id)}</td>
+        <td>${escapeHtml(m.question || m.eventTitle)}</td>
+        <td>${m.yes_bid || 0}c / ${m.yes_ask || 0}c</td>
+        <td>${m.volume ? Number(m.volume).toLocaleString() : '--'}</td>
+        <td>${m.close_time ? new Date(m.close_time).toLocaleString() : '--'}</td>
+      </tr>`).join('');
+    }
+  } catch (err) {
+    polyBody.innerHTML = '<tr><td colspan="5" class="empty-state">Error: ' + escapeHtml(err.message) + '</td></tr>';
+  }
+}
+
+function toggleMarketSelect(el) {
+  const groupMode = el.dataset.groupMode;
+  const tokenId = el.dataset.token;
+  const question = el.dataset.question;
+
+  if (groupMode) {
+    // Group entry — selecting a group deselects individual markets and vice versa
+    if (el.checked) {
+      selectedGroupMode = groupMode;
+      selectedMarketTokens = [];
+      // Uncheck any individual market checkboxes
+      document.querySelectorAll('.market-check').forEach(cb => {
+        if (cb !== el && !cb.dataset.groupMode) cb.checked = false;
+      });
+    } else {
+      selectedGroupMode = null;
+    }
+    return;
+  }
+
+  // Individual market — deselect any group
+  if (el.checked) {
+    if (selectedGroupMode) {
+      selectedGroupMode = null;
+      document.querySelectorAll('.market-check').forEach(cb => {
+        if (cb.dataset.groupMode) cb.checked = false;
+      });
+    }
+    if (tokenId) selectedMarketTokens.push({ token_id: tokenId, question });
+  } else {
+    selectedMarketTokens = selectedMarketTokens.filter(t => t.token_id !== tokenId);
+  }
+}
+
+async function startWatcher() {
+  if (!selectedGroupMode && selectedMarketTokens.length === 0) { alert('Select at least one market or group'); return; }
+  const name = document.getElementById('watcher-name').value || (selectedGroupMode
+    ? 'BTC Up/Down ' + (selectedGroupMode.includes('5m') ? '5m' : '15m') + ' Watch'
+    : 'Watcher ' + new Date().toLocaleString());
+  const intervalMs = parseInt(document.getElementById('watcher-interval').value);
+  const durationMs = parseInt(document.getElementById('watcher-duration').value);
+
+  const payload = { name, interval_ms: intervalMs, duration_ms: durationMs };
+  if (selectedGroupMode) {
+    payload.group_mode = selectedGroupMode;
+  } else {
+    payload.token_ids = selectedMarketTokens.map(t => t.token_id);
+    payload.market_slugs = selectedMarketTokens.map(t => t.question);
+  }
+
+  try {
+    const resp = await fetch('/api/trading/watch/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await resp.json();
+    if (result.error) { alert('Error: ' + result.error); return; }
+    alert('Watcher started! ID: ' + result.id + (result.group_mode ? ' (Group: ' + result.group_mode + ')' : ''));
+    switchWatcherSub('active');
+    loadWatchers();
+  } catch (err) {
+    alert('Failed: ' + err.message);
+  }
+}
+
+async function stopWatcher(id) {
+  try {
+    await fetch('/api/trading/watch/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    loadWatchers();
+  } catch (err) {
+    alert('Failed to stop watcher');
+  }
+}
+
+let currentDataWatcherId = null;
+let currentDataOffset = 0;
+const DATA_PAGE_SIZE = 100;
+
+async function viewWatcherData(watcherId) {
+  currentDataWatcherId = watcherId;
+  currentDataOffset = 0;
+
+  // Show the data sub-tab
+  const dataTab = document.getElementById('data-sub-tab');
+  if (dataTab) dataTab.style.display = 'inline-block';
+  switchWatcherSub('data');
+  dataTab.classList.add('active');
+
+  const summaryEl = document.getElementById('data-summary-stats');
+  const tableBody = document.getElementById('data-table-body');
+  const tableCount = document.getElementById('data-table-count');
+  const loadMoreBtn = document.getElementById('data-load-more-btn');
+  const titleEl = document.getElementById('data-viewer-title');
+
+  summaryEl.innerHTML = '<div class="metric-card"><div class="metric-label">Loading...</div></div>';
+  tableBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
+  loadMoreBtn.style.display = 'none';
+
+  try {
+    // Fetch summary, chart data (ASC), and table data (DESC) in parallel
+    const [summaryResp, chartResp, tableResp] = await Promise.all([
+      fetch('/api/trading/watch/data/summary?watcher_id=' + watcherId),
+      fetch('/api/trading/watch/data?watcher_id=' + watcherId + '&order=ASC'),
+      fetch('/api/trading/watch/data?watcher_id=' + watcherId + '&order=DESC&limit=' + DATA_PAGE_SIZE),
+    ]);
+    const summary = await summaryResp.json();
+    const chartData = await chartResp.json();
+    const tableData = await tableResp.json();
+
+    if (summary.error) { summaryEl.innerHTML = '<div class="metric-card"><div class="metric-value">' + escapeHtml(summary.error) + '</div></div>'; return; }
+
+    // Title
+    titleEl.textContent = 'Watcher: ' + watcherId.slice(0, 16) + '...';
+
+    // Summary stats
+    const timeRange = summary.first_timestamp && summary.last_timestamp
+      ? new Date(summary.first_timestamp).toLocaleString() + ' — ' + new Date(summary.last_timestamp).toLocaleString()
+      : '--';
+    const outcomeKeys = Object.keys(summary.outcomes || {});
+    const upStats = summary.outcomes?.Up || summary.outcomes?.Yes || null;
+    const downStats = summary.outcomes?.Down || summary.outcomes?.No || null;
+
+    summaryEl.innerHTML = `
+      <div class="metric-card">
+        <div class="metric-label">Total Points</div>
+        <div class="metric-value">${summary.total_points}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Time Range</div>
+        <div class="metric-value" style="font-size:13px;">${timeRange}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Unique Markets</div>
+        <div class="metric-value">${summary.unique_markets}</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Avg Prices</div>
+        <div class="metric-value" style="font-size:14px;">
+          ${upStats ? '<span style="color:#3fb950;">Up ' + (upStats.avg * 100).toFixed(1) + 'c</span>' : ''}
+          ${upStats && downStats ? ' / ' : ''}
+          ${downStats ? '<span style="color:#f85149;">Down ' + (downStats.avg * 100).toFixed(1) + 'c</span>' : ''}
+          ${!upStats && !downStats && outcomeKeys.length > 0 ? outcomeKeys.map(k => k + ': ' + (summary.outcomes[k].avg * 100).toFixed(1) + 'c').join(', ') : ''}
+        </div>
+      </div>
+    `;
+
+    // Draw price chart
+    if (Array.isArray(chartData) && chartData.length > 0) {
+      drawPriceChart('price-chart-canvas', chartData);
+    }
+
+    // Populate table
+    currentDataOffset = tableData.length;
+    renderDataTable(tableBody, tableData, false);
+    tableCount.textContent = '(showing ' + tableData.length + ' of ' + summary.total_points + ')';
+    if (tableData.length >= DATA_PAGE_SIZE && tableData.length < summary.total_points) {
+      loadMoreBtn.style.display = 'inline-block';
+    }
+  } catch (err) {
+    summaryEl.innerHTML = '<div class="metric-card"><div class="metric-value" style="color:#f85149;">Error: ' + escapeHtml(err.message) + '</div></div>';
+  }
+}
+
+async function loadMoreWatcherData() {
+  if (!currentDataWatcherId) return;
+  const loadMoreBtn = document.getElementById('data-load-more-btn');
+  loadMoreBtn.textContent = 'Loading...';
+  try {
+    const resp = await fetch('/api/trading/watch/data?watcher_id=' + currentDataWatcherId + '&order=DESC&limit=' + DATA_PAGE_SIZE + '&offset=' + currentDataOffset);
+    const data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      loadMoreBtn.style.display = 'none';
+      return;
+    }
+    currentDataOffset += data.length;
+    const tableBody = document.getElementById('data-table-body');
+    renderDataTable(tableBody, data, true);
+    loadMoreBtn.textContent = 'Load More';
+    if (data.length < DATA_PAGE_SIZE) loadMoreBtn.style.display = 'none';
+    // Update count
+    const tableCount = document.getElementById('data-table-count');
+    tableCount.textContent = '(showing ' + currentDataOffset + ' rows)';
+  } catch (err) {
+    loadMoreBtn.textContent = 'Load More';
+  }
+}
+
+function renderDataTable(tbody, data, append) {
+  const rows = data.map(d => {
+    let meta = {};
+    try { meta = JSON.parse(d.metadata || '{}'); } catch {}
+    const outcome = meta.outcome || '--';
+    const marketSlug = meta.market_slug || '--';
+    const priceColor = outcome === 'Up' || outcome === 'Yes' ? '#3fb950' : outcome === 'Down' || outcome === 'No' ? '#f85149' : '#c9d1d9';
+    return `<tr>
+      <td>${new Date(d.timestamp).toLocaleString()}</td>
+      <td style="font-size:11px; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(marketSlug)}</td>
+      <td><span style="color:${priceColor}; font-weight:600;">${escapeHtml(outcome)}</span></td>
+      <td style="color:${priceColor};">${(d.price * 100).toFixed(2)}c</td>
+    </tr>`;
+  }).join('');
+  if (append) {
+    tbody.insertAdjacentHTML('beforeend', rows);
+  } else {
+    tbody.innerHTML = rows || '<tr><td colspan="4" class="empty-state">No data points recorded</td></tr>';
+  }
+}
+
+function drawPriceChart(canvasId, data) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  canvas.width = canvas.offsetWidth * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  ctx.scale(dpr, dpr);
+
+  const w = canvas.offsetWidth;
+  const h = canvas.offsetHeight;
+  const pad = { top: 24, right: 20, bottom: 40, left: 60 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  // Clear
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, 0, w, h);
+
+  // Group data by outcome, keyed by timestamp
+  const byOutcome = {};
+  for (const d of data) {
+    let meta = {};
+    try { meta = JSON.parse(d.metadata || '{}'); } catch {}
+    const outcome = meta.outcome || 'Unknown';
+    if (!byOutcome[outcome]) byOutcome[outcome] = [];
+    byOutcome[outcome].push({ ts: new Date(d.timestamp).getTime(), price: d.price });
+  }
+
+  const outcomeColors = { Up: '#3fb950', Down: '#f85149', Yes: '#3fb950', No: '#f85149' };
+  const defaultColors = ['#58a6ff', '#d29922', '#bc8cff', '#f0883e'];
+  const outcomes = Object.keys(byOutcome);
+
+  // Find time and price bounds
+  let minTs = Infinity, maxTs = -Infinity;
+  let minPrice = Infinity, maxPrice = -Infinity;
+  for (const pts of Object.values(byOutcome)) {
+    for (const p of pts) {
+      if (p.ts < minTs) minTs = p.ts;
+      if (p.ts > maxTs) maxTs = p.ts;
+      if (p.price < minPrice) minPrice = p.price;
+      if (p.price > maxPrice) maxPrice = p.price;
+    }
+  }
+
+  // Clamp Y to 0-1 for probability prices
+  if (minPrice >= 0 && maxPrice <= 1) {
+    minPrice = 0;
+    maxPrice = 1;
+  } else {
+    const margin = (maxPrice - minPrice) * 0.05 || 0.01;
+    minPrice -= margin;
+    maxPrice += margin;
+  }
+
+  const tsRange = maxTs - minTs || 1;
+  const priceRange = maxPrice - minPrice || 1;
+
+  // Grid lines
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + (plotH * i / 4);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(w - pad.right, y);
+    ctx.stroke();
+
+    ctx.fillStyle = '#8b949e';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const val = maxPrice - (priceRange * i / 4);
+    ctx.fillText((val * 100).toFixed(0) + 'c', pad.left - 6, y + 4);
+  }
+
+  // Draw lines per outcome
+  outcomes.forEach((outcome, oi) => {
+    const pts = byOutcome[outcome];
+    if (pts.length < 2) return;
+    // Sort by time
+    pts.sort((a, b) => a.ts - b.ts);
+
+    const color = outcomeColors[outcome] || defaultColors[oi % defaultColors.length];
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = pad.left + ((p.ts - minTs) / tsRange) * plotW;
+      const y = pad.top + plotH - ((p.price - minPrice) / priceRange) * plotH;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+
+  // X-axis labels
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '10px monospace';
+  ctx.textAlign = 'center';
+  const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const numLabels = Math.min(6, Math.floor(plotW / 80));
+  for (let i = 0; i <= numLabels; i++) {
+    const t = minTs + (tsRange * i / numLabels);
+    const x = pad.left + (plotW * i / numLabels);
+    ctx.fillText(fmtTime(t), x, h - 8);
+  }
+
+  // Legend
+  let legendX = pad.left + 8;
+  const legendY = pad.top + 12;
+  outcomes.forEach((outcome, oi) => {
+    const color = outcomeColors[outcome] || defaultColors[oi % defaultColors.length];
+    ctx.fillStyle = color;
+    ctx.fillRect(legendX, legendY - 8, 12, 3);
+    ctx.fillStyle = '#c9d1d9';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(outcome, legendX + 16, legendY - 3);
+    legendX += ctx.measureText(outcome).width + 32;
+  });
+}
+
+async function loadWatcherDropdowns() {
+  try {
+    const resp = await fetch('/api/trading/watch/status');
+    const watchers = await resp.json();
+    const select = document.getElementById('opt-watcher');
+    if (!select) return;
+    select.innerHTML = '<option value="">Select a watcher...</option>';
+    (watchers || []).filter(w => w.status === 'completed' || w.status === 'stopped' || w.status === 'active')
+      .forEach(w => {
+        select.innerHTML += `<option value="${w.id}">${escapeHtml(w.name)} (${w.data_points || 0} pts, ${w.status})</option>`;
+      });
+  } catch { /* ignore */ }
+}
+
+async function runOptimizer() {
+  const watcherId = document.getElementById('opt-watcher').value;
+  if (!watcherId) { alert('Select a watcher first'); return; }
+  const statusEl = document.getElementById('opt-status');
+  statusEl.textContent = 'Running optimization...';
+
+  const parseNums = (val) => val.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+
+  try {
+    const resp = await fetch('/api/trading/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        watcher_id: watcherId,
+        strategy: document.getElementById('opt-strategy').value,
+        optimize_for: document.getElementById('opt-target').value,
+        initial_capital: parseFloat(document.getElementById('opt-capital').value) || 1000,
+        param_ranges: {
+          rsi_oversold: parseNums(document.getElementById('opt-rsi-os').value),
+          rsi_overbought: parseNums(document.getElementById('opt-rsi-ob').value),
+          max_position_size: parseNums(document.getElementById('opt-pos-size').value),
+          min_confidence: [60],
+          time_stop_intervals: parseNums(document.getElementById('opt-time-stop').value),
+        },
+      }),
+    });
+    const result = await resp.json();
+    if (result.error) { statusEl.textContent = 'Error: ' + result.error; return; }
+
+    statusEl.textContent = `Done! Tested ${result.total_combinations} combinations on ${result.data_points} data points.`;
+    document.getElementById('opt-results-panel').style.display = 'block';
+    document.getElementById('opt-results-count').textContent = `(${result.total_combinations} combos tested)`;
+
+    const body = document.getElementById('opt-results-body');
+    body.innerHTML = (result.top10 || []).map(r => `<tr>
+      <td>${r.rank}</td>
+      <td>${r.params.rsi_oversold}</td>
+      <td>${r.params.rsi_overbought}</td>
+      <td>${r.params.max_position_size}%</td>
+      <td>${r.params.time_stop_intervals}</td>
+      <td class="${r.pnl >= 0 ? 'stat-value ok' : 'stat-value error'}">$${r.pnl.toFixed(2)} (${r.pnl_pct.toFixed(1)}%)</td>
+      <td>${r.win_rate.toFixed(1)}%</td>
+      <td>${r.max_drawdown.toFixed(1)}%</td>
+      <td>${r.sharpe_ratio.toFixed(2)}</td>
+      <td><button class="btn btn-secondary btn-sm" onclick="saveAsPreset(${JSON.stringify(r.params).replace(/"/g, '&quot;')})">Save as Preset</button></td>
+    </tr>`).join('');
+
+    loadPastOptimizations();
+  } catch (err) {
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function saveAsPreset(params) {
+  const name = prompt('Preset name:', 'Optimized RSI ' + params.rsi_oversold + '/' + params.rsi_overbought);
+  if (!name) return;
+  try {
+    await fetch('/api/trading/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        platform: 'polymarket',
+        strategy: 'rsi_mean_reversion',
+        mode: 'paper',
+        initial_capital: parseFloat(document.getElementById('opt-capital').value) || 1000,
+        risk_params: {
+          MAX_DRAWDOWN: 0.25,
+          MAX_POSITION_SIZE: params.max_position_size / 100,
+          MIN_CONFIDENCE: (params.min_confidence || 60) / 100,
+          TIME_STOP_DAYS: Math.ceil(params.time_stop_intervals / 24),
+          rsi_oversold: params.rsi_oversold,
+          rsi_overbought: params.rsi_overbought,
+        },
+      }),
+    });
+    alert('Preset "' + name + '" saved!');
+  } catch (err) {
+    alert('Failed to save preset');
+  }
+}
+
+async function runComparison() {
+  const query = document.getElementById('compare-query').value;
+  const matchBody = document.getElementById('compare-body');
+  const polyBody = document.getElementById('compare-poly-body');
+  const kalshiBody = document.getElementById('compare-kalshi-body');
+  const summary = document.getElementById('compare-summary');
+  matchBody.innerHTML = '<tr><td colspan="6" class="empty-state">Comparing prices across platforms...</td></tr>';
+  polyBody.innerHTML = '<tr><td colspan="3" class="empty-state">Loading...</td></tr>';
+  kalshiBody.innerHTML = '<tr><td colspan="4" class="empty-state">Loading...</td></tr>';
+  summary.textContent = 'Loading...';
+  try {
+    const resp = await fetch('/api/trading/compare', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+    const data = await resp.json();
+    if (data.error) { summary.textContent = 'Error: ' + data.error; return; }
+
+    summary.textContent = data.summary;
+
+    // Matched comparisons
+    const comparisons = data.comparisons || [];
+    if (comparisons.length === 0) {
+      matchBody.innerHTML = '<tr><td colspan="6" class="empty-state">No cross-platform matches found for this topic.</td></tr>';
+    } else {
+      matchBody.innerHTML = comparisons.map(c => {
+        const edgeColor = c.edgeDirection === 'neutral' ? '#8b949e' : Math.abs(c.priceDeltaPct) > 5 ? '#f85149' : '#3fb950';
+        const edgeLabel = c.edgeDirection === 'buy_kalshi' ? 'Buy Kalshi' :
+                          c.edgeDirection === 'buy_poly' ? 'Buy Poly' : 'Neutral';
+        return `<tr>
+          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(c.polymarket.question)}</td>
+          <td>${(c.polymarket.midPrice * 100).toFixed(1)}c</td>
+          <td style="font-family:monospace; font-size:11px;">${escapeHtml(c.kalshi.ticker)}</td>
+          <td>${(c.kalshi.midpoint * 100).toFixed(1)}c</td>
+          <td style="color:${edgeColor}; font-weight:bold;">${c.priceDeltaPct > 0 ? '+' : ''}${c.priceDeltaPct.toFixed(1)}%</td>
+          <td style="color:${edgeColor};">${edgeLabel}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Polymarket side
+    const polyMarkets = data.polymarket || [];
+    if (polyMarkets.length === 0) {
+      polyBody.innerHTML = '<tr><td colspan="3" class="empty-state">No Polymarket markets</td></tr>';
+    } else {
+      polyBody.innerHTML = polyMarkets.map(m => `<tr>
+        <td style="max-width:250px; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(m.question)}</td>
+        <td>${m.midPrice != null ? (m.midPrice * 100).toFixed(1) + 'c' : '--'}</td>
+        <td>${m.volume ? '$' + Number(m.volume).toLocaleString() : '--'}</td>
+      </tr>`).join('');
+    }
+
+    // Kalshi side
+    const kalshiMkts = data.kalshi || [];
+    if (kalshiMkts.length === 0) {
+      kalshiBody.innerHTML = '<tr><td colspan="4" class="empty-state">No active Kalshi markets</td></tr>';
+    } else {
+      kalshiBody.innerHTML = kalshiMkts.map(m => `<tr>
+        <td style="font-family:monospace; font-size:11px;">${escapeHtml(m.ticker)}</td>
+        <td>${escapeHtml(m.question)}</td>
+        <td>${(m.midpoint * 100).toFixed(1)}c</td>
+        <td>${m.volume ? Number(m.volume).toLocaleString() : '--'}</td>
+      </tr>`).join('');
+    }
+  } catch (err) {
+    summary.textContent = 'Error: ' + err.message;
+  }
+}
+
+async function loadPastOptimizations() {
+  try {
+    const resp = await fetch('/api/trading/optimize/results');
+    const results = await resp.json();
+    const body = document.getElementById('past-opt-body');
+    if (!Array.isArray(results) || results.length === 0) {
+      body.innerHTML = '<tr><td colspan="5" class="empty-state">No past optimizations</td></tr>';
+      return;
+    }
+    body.innerHTML = results.map(r => `<tr>
+      <td>${escapeHtml(r.id)}</td>
+      <td>${escapeHtml(r.watcher_id)}</td>
+      <td>${escapeHtml(r.strategy)}</td>
+      <td>${escapeHtml(r.optimize_for)}</td>
+      <td>${new Date(r.created_at).toLocaleString()}</td>
+    </tr>`).join('');
+  } catch { /* ignore */ }
 }
 
 init();

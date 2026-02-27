@@ -1,47 +1,47 @@
 /**
  * Kalshi API wrapper
+ *
+ * Kalshi requires API key auth for all endpoints (unlike Polymarket's public CLOB).
+ * Without credentials, all methods return empty results to avoid polluting
+ * backtests with fake random-walk data.
  */
 
 import { MarketAPI, MarketData, Order } from './common.js';
 
+const KALSHI_BASE = 'https://trading-api.kalshi.com/trade-api/v2';
+
 export class KalshiAPI implements MarketAPI {
   platform: 'kalshi' = 'kalshi';
   private apiKey?: string;
-  private baseUrl = 'https://trading-api.kalshi.com/v2';
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey;
   }
 
+  private get hasAuth(): boolean {
+    return !!this.apiKey;
+  }
+
   async getMarketData(symbol: string): Promise<MarketData> {
-    // For now, return mock data until we have real API keys
-    // In production, this would call: GET /markets/{symbol}
-    return {
-      symbol,
-      platform: 'kalshi',
-      price: 0.3 + Math.random() * 0.4, // Mock price between 0.3-0.7
-      volume: Math.random() * 500000,
-      openInterest: Math.random() * 2000000,
-      timestamp: new Date().toISOString(),
-      metadata: {
-        mock: true,
-        description: `Kalshi: ${symbol}`,
-      },
-    };
+    if (!this.hasAuth) {
+      return {
+        symbol,
+        platform: 'kalshi',
+        price: 0,
+        timestamp: new Date().toISOString(),
+        metadata: { error: 'No Kalshi API key configured' },
+      };
+    }
+
+    // TODO: implement authenticated GET /markets/{ticker}
+    throw new Error('Kalshi authenticated API not yet implemented');
   }
 
   async getAllMarkets(): Promise<MarketData[]> {
-    // In production: GET /markets?status=open
-    // For now, return a few mock markets
-    const mockSymbols = [
-      'FED-RATE-MARCH24',
-      'UNEMPLOYMENT-FEB24',
-      'GDP-Q1-2024',
-      'CPI-MARCH24',
-      'NONFARM-FEB24',
-    ];
+    if (!this.hasAuth) return [];
 
-    return Promise.all(mockSymbols.map(symbol => this.getMarketData(symbol)));
+    // TODO: implement authenticated GET /markets?status=open
+    throw new Error('Kalshi authenticated API not yet implemented');
   }
 
   async placeOrder(
@@ -54,10 +54,11 @@ export class KalshiAPI implements MarketAPI {
     error?: string;
   }> {
     if (mode === 'paper') {
-      // Paper trading: simulate immediate fill at limit price or current market price
       const marketData = await this.getMarketData(order.symbol);
+      if (marketData.price === 0) {
+        return { orderId: '', status: 'failed', error: 'No Kalshi API key configured' };
+      }
       const filledPrice = order.limitPrice || marketData.price;
-
       return {
         orderId: `PAPER_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         status: 'filled',
@@ -65,43 +66,18 @@ export class KalshiAPI implements MarketAPI {
       };
     }
 
-    // Live trading: would call Kalshi API
-    // POST /orders with { ticker, action, count, type, limit_price }
     throw new Error('Live trading not yet implemented - use paper mode for testing');
   }
 
   async getHistoricalData(
-    symbol: string,
-    startDate: string,
-    endDate: string,
+    _symbol: string,
+    _startDate: string,
+    _endDate: string,
+    _interval?: string,
   ): Promise<MarketData[]> {
-    // In production: GET /markets/{symbol}/history?min_ts={startDate}&max_ts={endDate}
-    // For now, generate mock historical data
-    const data: MarketData[] = [];
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    if (!this.hasAuth) return [];
 
-    let currentDate = new Date(start);
-    let basePrice = 0.3 + Math.random() * 0.4;
-
-    while (currentDate <= end) {
-      // Simulate price movement with random walk
-      basePrice += (Math.random() - 0.5) * 0.06;
-      basePrice = Math.max(0.01, Math.min(0.99, basePrice));
-
-      data.push({
-        symbol,
-        platform: 'kalshi',
-        price: basePrice,
-        volume: Math.random() * 300000,
-        openInterest: Math.random() * 1000000,
-        timestamp: currentDate.toISOString(),
-        metadata: { mock: true },
-      });
-
-      currentDate = new Date(currentDate.getTime() + 24 * 60 * 60 * 1000); // +1 day
-    }
-
-    return data;
+    // TODO: implement authenticated GET /markets/{ticker}/history
+    throw new Error('Kalshi authenticated API not yet implemented');
   }
 }

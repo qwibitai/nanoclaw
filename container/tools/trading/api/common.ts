@@ -92,5 +92,21 @@ export interface MarketAPI {
   /**
    * Get historical prices for backtesting
    */
-  getHistoricalData(symbol: string, startDate: string, endDate: string): Promise<MarketData[]>;
+  getHistoricalData(symbol: string, startDate: string, endDate: string, interval?: string): Promise<MarketData[]>;
+
+  /**
+   * Search for markets by query string
+   */
+  searchMarkets?(query: string): Promise<MarketSearchResult[]>;
+}
+
+export interface MarketSearchResult {
+  id: string;
+  question: string;
+  slug: string;
+  active: boolean;
+  closed: boolean;
+  tokens: Array<{ token_id: string; outcome: string }>;
+  volume: number;
+  endDate?: string;
 }
