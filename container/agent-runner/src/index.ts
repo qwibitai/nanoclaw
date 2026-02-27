@@ -368,12 +368,12 @@ function buildMcpServers(
     },
   };
 
-  const stixUrl = sdkEnv.STIX_WORKER_URL;
+  const stixUrl = sdkEnv.STIX_MCP_URL;
   const stixApiKey = sdkEnv.STIX_API_KEY;
   if (stixUrl && stixApiKey) {
     servers.stix = {
       type: 'http',
-      url: `${stixUrl}/mcp`,
+      url: stixUrl,
       headers: {
         'X-MCP-API-Key': stixApiKey,
       },

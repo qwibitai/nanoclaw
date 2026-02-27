@@ -244,7 +244,7 @@ function readSecrets(): Record<string, string> {
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'GITHUB_TOKEN',
-    'STIX_WORKER_URL',
+    'STIX_MCP_URL',
     'STIX_API_KEY',
   ]);
 }
