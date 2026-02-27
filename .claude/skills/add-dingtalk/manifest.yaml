@@ -1,0 +1,25 @@
+skill: dingtalk
+version: 1.0.0
+description: "DingTalk Stream Mode integration via dingtalk-stream"
+core_version: 0.1.0
+adds:
+  - src/channels/dingtalk.ts
+  - src/channels/dingtalk.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies:
+    dingtalk-stream: "^2.1.4"
+    axios: "^1.7.9"
+  env_additions:
+    - DINGTALK_CLIENT_ID
+    - DINGTALK_CLIENT_SECRET
+    - DINGTALK_ROBOT_CODE
+    - DINGTALK_ALLOWED_USERS
+    - DINGTALK_ALLOWED_GROUPS
+    - DINGTALK_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/dingtalk.test.ts"
