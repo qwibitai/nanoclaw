@@ -128,3 +128,13 @@ export const ROUTER_ENABLED =
 // ACP (Agent Client Protocol) — makes agents driveable from external tools
 export const ACP_ENABLED =
   (process.env.ACP_ENABLED || '') === 'true';
+
+// Sentry Agent — automated incident triage
+export const SENTRY_AGENT_PORT = parseInt(
+  process.env.SENTRY_AGENT_PORT || '0',
+  10,
+); // 0 = disabled
+export const SENTRY_AGENT_CHANNEL =
+  process.env.SENTRY_AGENT_CHANNEL || ''; // JID to post alerts to
+export const SENTRY_WEBHOOK_SECRET =
+  process.env.SENTRY_WEBHOOK_SECRET || '';
