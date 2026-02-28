@@ -1,0 +1,13 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js b/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
+index 42fb902..38a2e0c 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
+@@ -13,7 +13,7 @@ const getUserAgent = (config) => {
+             secondary: config.version[1],
+             tertiary: config.version[2]
+         },
+-        platform: proto.ClientPayload.UserAgent.Platform.WEB,
++        platform: proto.ClientPayload.UserAgent.Platform.MACOS,
+         releaseChannel: proto.ClientPayload.UserAgent.ReleaseChannel.RELEASE,
+         osVersion: '0.1',
+         device: 'Desktop',
