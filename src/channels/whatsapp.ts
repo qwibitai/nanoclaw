@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -20,6 +21,22 @@ import { logger } from '../logger.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+let cachedVersion: [number, number, number] | null = null;
+
+async function resolveWhatsAppVersion(): Promise<
+  [number, number, number] | undefined
+> {
+  if (cachedVersion) return cachedVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    cachedVersion = version as [number, number, number];
+    logger.info({ version: version.join('.') }, 'Using WhatsApp web version');
+    return cachedVersion;
+  } catch (err) {
+    logger.warn({ err }, 'Failed to fetch latest WhatsApp version, using Baileys default');
+    return undefined;
+  }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -54,8 +71,10 @@ export class WhatsAppChannel implements Channel {
     fs.mkdirSync(authDir, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const version = await resolveWhatsAppVersion();
 
     this.sock = makeWASocket({
+      ...(version ? { version } : {}),
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),

@@ -15,6 +15,7 @@ import readline from 'readline';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -26,6 +27,24 @@ const STATUS_FILE = './store/auth-status.txt';
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
 });
+
+let cachedVersion: [number, number, number] | null = null;
+
+async function resolveWhatsAppVersion(): Promise<
+  [number, number, number] | undefined
+> {
+  if (cachedVersion) return cachedVersion;
+  try {
+    const { version } = await fetchLatestBaileysVersion();
+    cachedVersion = version as [number, number, number];
+    return cachedVersion;
+  } catch (err: any) {
+    console.warn(
+      `Warning: failed to fetch latest WhatsApp version (${err?.message || 'unknown error'}). Using Baileys default.`,
+    );
+    return undefined;
+  }
+}
 
 // Check for --pairing-code flag and phone number
 const usePairingCode = process.argv.includes('--pairing-code');
@@ -43,6 +62,7 @@ function askQuestion(prompt: string): Promise<string> {
 
 async function connectSocket(phoneNumber?: string, isReconnect = false): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const version = await resolveWhatsAppVersion();
 
   if (state.creds.registered && !isReconnect) {
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
@@ -54,6 +74,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
   }
 
   const sock = makeWASocket({
+    ...(version ? { version } : {}),
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, logger),
@@ -76,6 +97,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
         console.log(`  4. Enter this code: ${code}\n`);
         fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
       } catch (err: any) {
+        fs.writeFileSync(STATUS_FILE, 'failed:pairing_code_request_failed');
         console.error('Failed to request pairing code:', err.message);
         process.exit(1);
       }
@@ -113,7 +135,7 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
         connectSocket(phoneNumber, true);
       } else {
         fs.writeFileSync(STATUS_FILE, `failed:${reason || 'unknown'}`);
-        console.log('\n✗ Connection failed. Please try again.');
+        console.log(`\n✗ Connection failed (reason: ${reason || 'unknown'}). Please try again.`);
         process.exit(1);
       }
     }
