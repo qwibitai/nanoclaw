@@ -547,7 +547,6 @@
   <div class="tab" onclick="switchTab('backtests')">Backtests</div>
   <div class="tab" onclick="switchTab('watchers')">Watchers</div>
   <div class="tab" onclick="switchTab('agents')">Agents</div>
-  <div class="tab" onclick="switchTab('trading')">Paper Trading</div>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -921,6 +920,7 @@
     <div class="panel-header">
       Trades
       <span style="float: right; font-size: 11px;">
+        <span id="paper-refresh-countdown" style="color: #484f58; margin-right: 12px;"></span>
         <label style="color: #8b949e; cursor: pointer;"><input type="checkbox" id="paper-show-closed" onchange="loadPaperPortfolio()" style="margin-right: 4px;">Show settled</label>
         <span style="display: inline-flex; align-items: center; gap: 4px; margin-left: 12px;">
           <label style="color: #8b949e;">Run:</label>
@@ -1446,48 +1446,6 @@
 </div>
 
 <!-- PAPER TRADING TAB -->
-<div id="tab-trading" class="tab-content">
-  <div class="grid-3" style="margin-bottom: 16px;">
-    <div class="metric-card">
-      <div class="metric-label">Capital</div>
-      <div class="metric-value" id="trading-capital">$0.00</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Total P&L</div>
-      <div class="metric-value" id="trading-pnl">$0.00</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Return</div>
-      <div class="metric-value" id="trading-return">0.00%</div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-header">
-      Open Positions
-      <button class="refresh-btn" onclick="loadTradingPositions()">Refresh</button>
-    </div>
-    <div class="panel-body">
-      <table>
-        <thead>
-          <tr>
-            <th>Ticker/Market</th>
-            <th>Side</th>
-            <th>Contracts</th>
-            <th>Entry Price</th>
-            <th>Current Price</th>
-            <th>P&L</th>
-            <th>P&L %</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody id="trading-positions-body">
-          <tr><td colspan="8" class="empty-state">No open positions</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
 <script>
 // State
@@ -1506,12 +1464,11 @@ function switchTab(tabName) {
   if (tabName === 'messages') {
     loadGroupsDropdown();
   }
-  if (tabName === 'account') { loadAccountStatus(); startBtcWindowsRefresh(); } else { stopBtcWindowsRefresh(); }
+  if (tabName === 'account') { loadAccountStatus(); startBtcWindowsRefresh(); } else { stopBtcWindowsRefresh(); stopPaperRefresh(); }
   if (tabName === 'presets') loadPresets();
   if (tabName === 'runs') { loadRuns(); loadPresetsDropdown(); }
   if (tabName === 'backtests') loadBacktests();
   if (tabName === 'watchers') { loadWatchers(); loadWatcherDropdowns(); }
-  if (tabName === 'trading') { loadTradingPositions(); startTradingRefresh(); } else { stopTradingRefresh(); }
 }
 
 // --- Trading ---
@@ -1925,6 +1882,17 @@ function connectSSE() {
       appendAgentLog(type, data.groupName || '?', msg, data._ts);
     } catch (err) { console.error('SSE container:output error:', err); }
   });
+
+  eventSource.addEventListener('paper-trade:update', () => {
+    // Refresh paper portfolio if the paper tab is visible
+    const paperTab = document.getElementById('acct-sub-paper');
+    if (paperTab && paperTab.style.display !== 'none') {
+      loadPaperPortfolio();
+      // Reset countdown since we just refreshed
+      paperRefreshSecondsLeft = PAPER_REFRESH_SECONDS;
+      renderPaperCountdown();
+    }
+  });
 }
 
 // --- Agent monitoring ---
@@ -2333,7 +2301,7 @@ function switchAccountSub(sub) {
     const el = document.getElementById('acct-sub-' + s);
     if (el) el.style.display = s === sub ? 'block' : 'none';
   });
-  if (sub === 'paper') { populatePaperRunFilter(); loadPaperPortfolio(); }
+  if (sub === 'paper') { populatePaperRunFilter(); loadPaperPortfolio(); startPaperRefresh(); } else { stopPaperRefresh(); }
   if (sub === 'kalshi') { loadKalshiBalance(); loadKalshiPositions(); loadKalshiOrders(); loadKalshiPresets(); loadStrategyEngineStatus(); }
   if (sub === 'markets') loadBTCWindows();
 }
@@ -4445,80 +4413,81 @@ async function loadPastOptimizations() {
   } catch { /* ignore */ }
 }
 
-// --- Paper Trading Positions ---
+// --- Paper Trading Refresh with Countdown ---
 
-let tradingRefreshInterval = null;
+let paperCountdownInterval = null;
+let paperRefreshSecondsLeft = 30;
+const PAPER_REFRESH_SECONDS = 30;
 
-async function loadTradingPositions() {
-  try {
-    const res = await fetch('/api/trading/positions?status=open');
-    const positions = await res.json();
+function renderPaperCountdown() {
+  const el = document.getElementById('paper-refresh-countdown');
+  if (!el) return;
+  const s = paperRefreshSecondsLeft;
+  const pct = s / PAPER_REFRESH_SECONDS;
+  const r = 6, circ = 2 * Math.PI * r;
+  const dashOffset = circ * (1 - pct);
+  const color = s <= 5 ? '#3fb950' : '#484f58';
 
-    const body = document.getElementById('trading-positions-body');
-    if (!positions || positions.length === 0) {
-      body.innerHTML = '<tr><td colspan="8" class="empty-state">No open positions</td></tr>';
-      updateTradingSummary([], 10000); // Default capital
-      return;
+  // Build ring SVG via DOM (no innerHTML with untrusted content — all values are numeric constants)
+  el.textContent = '';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '16');
+  svg.setAttribute('height', '16');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.style.verticalAlign = 'middle';
+  svg.style.marginRight = '3px';
+
+  const bgCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  bgCircle.setAttribute('cx', '8');
+  bgCircle.setAttribute('cy', '8');
+  bgCircle.setAttribute('r', String(r));
+  bgCircle.setAttribute('fill', 'none');
+  bgCircle.setAttribute('stroke', '#21262d');
+  bgCircle.setAttribute('stroke-width', '2');
+  svg.appendChild(bgCircle);
+
+  const fgCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  fgCircle.setAttribute('cx', '8');
+  fgCircle.setAttribute('cy', '8');
+  fgCircle.setAttribute('r', String(r));
+  fgCircle.setAttribute('fill', 'none');
+  fgCircle.setAttribute('stroke', color);
+  fgCircle.setAttribute('stroke-width', '2');
+  fgCircle.setAttribute('stroke-dasharray', circ.toFixed(1));
+  fgCircle.setAttribute('stroke-dashoffset', dashOffset.toFixed(1));
+  fgCircle.setAttribute('transform', 'rotate(-90 8 8)');
+  fgCircle.style.transition = 'stroke-dashoffset 1s linear, stroke 0.3s';
+  svg.appendChild(fgCircle);
+
+  const label = document.createElement('span');
+  label.style.color = color;
+  label.textContent = s + 's';
+
+  el.appendChild(svg);
+  el.appendChild(label);
+}
+
+function startPaperRefresh() {
+  stopPaperRefresh();
+  paperRefreshSecondsLeft = PAPER_REFRESH_SECONDS;
+  renderPaperCountdown();
+  paperCountdownInterval = setInterval(function() {
+    paperRefreshSecondsLeft--;
+    if (paperRefreshSecondsLeft <= 0) {
+      paperRefreshSecondsLeft = PAPER_REFRESH_SECONDS;
+      loadPaperPortfolio();
     }
+    renderPaperCountdown();
+  }, 1000);
+}
 
-    // Calculate portfolio metrics
-    let totalPnl = 0;
-    const capital = 10000; // TODO: Make this configurable
-
-    body.innerHTML = positions.map(p => {
-      // For paper trading, we'll need to fetch current prices
-      // For now, show entry data and status
-      const currentPrice = p.current_price || p.entry_price;
-      const pnl = (currentPrice - p.entry_price) * p.size;
-      const pnlPct = ((currentPrice - p.entry_price) / p.entry_price) * 100;
-      totalPnl += pnl;
-
-      const statusClass = pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : '';
-      const badgeClass = pnl > 0 ? 'badge-green' : pnl < 0 ? 'badge-red' : 'badge-gray';
-
-      return `<tr>
-        <td>${escapeHtml(p.symbol)}</td>
-        <td><span class="badge ${p.strategy === 'YES' || p.strategy === 'LONG' ? 'badge-green' : 'badge-red'}">${escapeHtml(p.strategy)}</span></td>
-        <td>${p.size.toFixed(0)}</td>
-        <td>$${p.entry_price.toFixed(2)}</td>
-        <td>$${currentPrice.toFixed(2)}</td>
-        <td class="${statusClass}">$${pnl.toFixed(2)}</td>
-        <td class="${statusClass}">${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td>
-        <td><span class="badge ${badgeClass}">${escapeHtml(p.status)}</span></td>
-      </tr>`;
-    }).join('');
-
-    updateTradingSummary(positions, capital);
-  } catch (err) {
-    console.error('Failed to load trading positions:', err);
+function stopPaperRefresh() {
+  if (paperCountdownInterval) {
+    clearInterval(paperCountdownInterval);
+    paperCountdownInterval = null;
   }
-}
-
-function updateTradingSummary(positions, capital) {
-  const totalPnl = positions.reduce((sum, p) => {
-    const currentPrice = p.current_price || p.entry_price;
-    return sum + ((currentPrice - p.entry_price) * p.size);
-  }, 0);
-
-  const returnPct = (totalPnl / capital) * 100;
-
-  document.getElementById('trading-capital').textContent = `$${capital.toFixed(2)}`;
-  document.getElementById('trading-pnl').textContent = `$${totalPnl.toFixed(2)}`;
-  document.getElementById('trading-pnl').className = totalPnl > 0 ? 'metric-value positive' : totalPnl < 0 ? 'metric-value negative' : 'metric-value';
-  document.getElementById('trading-return').textContent = `${returnPct > 0 ? '+' : ''}${returnPct.toFixed(2)}%`;
-  document.getElementById('trading-return').className = returnPct > 0 ? 'metric-value positive' : returnPct < 0 ? 'metric-value negative' : 'metric-value';
-}
-
-function startTradingRefresh() {
-  stopTradingRefresh();
-  tradingRefreshInterval = setInterval(loadTradingPositions, 30000); // Refresh every 30 seconds
-}
-
-function stopTradingRefresh() {
-  if (tradingRefreshInterval) {
-    clearInterval(tradingRefreshInterval);
-    tradingRefreshInterval = null;
-  }
+  const el = document.getElementById('paper-refresh-countdown');
+  if (el) el.textContent = '';
 }
 
 init();

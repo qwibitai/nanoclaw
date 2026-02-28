@@ -58,13 +58,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Resolve dashboard HTML — works from both src/ (dev) and dist/ (compiled)
 // Try enhanced dashboard first, fallback to basic dashboard
-const DASHBOARD_PATH = fs.existsSync(path.join(__dirname, 'monitoring', 'dashboard-enhanced.html'))
+const DASHBOARD_PATH = fs.existsSync(
+  path.join(__dirname, 'monitoring', 'dashboard-enhanced.html'),
+)
   ? path.join(__dirname, 'monitoring', 'dashboard-enhanced.html')
-  : fs.existsSync(path.join(__dirname, '..', 'src', 'monitoring', 'dashboard-enhanced.html'))
-  ? path.join(__dirname, '..', 'src', 'monitoring', 'dashboard-enhanced.html')
-  : fs.existsSync(path.join(__dirname, 'monitoring', 'dashboard.html'))
-  ? path.join(__dirname, 'monitoring', 'dashboard.html')
-  : path.join(__dirname, '..', 'src', 'monitoring', 'dashboard.html');
+  : fs.existsSync(
+        path.join(
+          __dirname,
+          '..',
+          'src',
+          'monitoring',
+          'dashboard-enhanced.html',
+        ),
+      )
+    ? path.join(__dirname, '..', 'src', 'monitoring', 'dashboard-enhanced.html')
+    : fs.existsSync(path.join(__dirname, 'monitoring', 'dashboard.html'))
+      ? path.join(__dirname, 'monitoring', 'dashboard.html')
+      : path.join(__dirname, '..', 'src', 'monitoring', 'dashboard.html');
 
 const startTime = Date.now();
 
@@ -141,7 +151,12 @@ interface StrategyEngineRun {
     trades: number;
     skipped: number;
     pnl: number;
-    lastSignal: { type: string; ticker: string; confidence: number; time: string } | null;
+    lastSignal: {
+      type: string;
+      ticker: string;
+      confidence: number;
+      time: string;
+    } | null;
     dataPoints: number;
     errors: number;
   };
@@ -164,7 +179,10 @@ let snapshotInterval: ReturnType<typeof setInterval> | null = null;
 
 export function snapshotActiveStrategies(): void {
   for (const [runId, run] of activeStrategies) {
-    const statsForJson = { ...run.stats, tradedTickers: run.tradedTickers.size };
+    const statsForJson = {
+      ...run.stats,
+      tradedTickers: run.tradedTickers.size,
+    };
     updateRun(runId, {
       results: JSON.stringify(statsForJson),
       last_snapshot_at: new Date().toISOString(),
@@ -195,22 +213,35 @@ function resumeActiveStrategies(): void {
     // Skip if this strategy type is already active (duplicate guard)
     let alreadyRunning = false;
     for (const [, active] of activeStrategies) {
-      if (active.strategy === dbRun.strategy) { alreadyRunning = true; break; }
+      if (active.strategy === dbRun.strategy) {
+        alreadyRunning = true;
+        break;
+      }
     }
     if (alreadyRunning) continue;
 
     // Look up the preset — skip if deleted
     const preset = dbRun.preset_id ? getPresetById(dbRun.preset_id) : null;
     if (!preset) {
-      updateRun(dbRun.id, { status: 'failed', error: 'Preset deleted during downtime', completed_at: new Date().toISOString() });
-      logger.warn({ runId: dbRun.id }, 'Strategy preset missing, marking run as failed');
+      updateRun(dbRun.id, {
+        status: 'failed',
+        error: 'Preset deleted during downtime',
+        completed_at: new Date().toISOString(),
+      });
+      logger.warn(
+        { runId: dbRun.id },
+        'Strategy preset missing, marking run as failed',
+      );
       continue;
     }
 
     // Parse risk params from DB
     let riskParams: StrategyEngineRun['riskParams'];
     try {
-      const rp = typeof dbRun.risk_params === 'string' ? JSON.parse(dbRun.risk_params) : dbRun.risk_params;
+      const rp =
+        typeof dbRun.risk_params === 'string'
+          ? JSON.parse(dbRun.risk_params)
+          : dbRun.risk_params;
       riskParams = {
         max_position_size: rp.max_position_size ?? 10,
         min_confidence: rp.min_confidence ?? 60,
@@ -223,14 +254,27 @@ function resumeActiveStrategies(): void {
       };
     } catch {
       riskParams = {
-        max_position_size: 10, min_confidence: 60, max_drawdown: 25,
-        poly_momentum_threshold: 0.03, arb_edge_threshold: 5, max_contracts_per_trade: 20,
-        daily_loss_limit: 5000, spread_width: 1,
+        max_position_size: 10,
+        min_confidence: 60,
+        max_drawdown: 25,
+        poly_momentum_threshold: 0.03,
+        arb_edge_threshold: 5,
+        max_contracts_per_trade: 20,
+        daily_loss_limit: 5000,
+        spread_width: 1,
       };
     }
 
     // Restore stats from last snapshot
-    let stats: StrategyEngineRun['stats'] = { signals: 0, trades: 0, skipped: 0, pnl: 0, lastSignal: null, dataPoints: 0, errors: 0 };
+    let stats: StrategyEngineRun['stats'] = {
+      signals: 0,
+      trades: 0,
+      skipped: 0,
+      pnl: 0,
+      lastSignal: null,
+      dataPoints: 0,
+      errors: 0,
+    };
     if (dbRun.results) {
       try {
         const saved = JSON.parse(dbRun.results);
@@ -243,7 +287,9 @@ function resumeActiveStrategies(): void {
           dataPoints: saved.dataPoints ?? 0,
           errors: saved.errors ?? 0,
         };
-      } catch { /* use defaults */ }
+      } catch {
+        /* use defaults */
+      }
     }
 
     // Reconstruct tradedTickers from open paper trades
@@ -306,24 +352,36 @@ async function fetchJsonHost<T>(url: string, timeoutMs = 15000): Promise<T> {
 
 // --- Kalshi API helpers ---
 
-function kalshiSign(method: string, path: string, timestamp: string, privateKeyPem: string): string {
+function kalshiSign(
+  method: string,
+  path: string,
+  timestamp: string,
+  privateKeyPem: string,
+): string {
   const message = timestamp + method.toUpperCase() + path;
   const sign = crypto.createSign('SHA256');
   sign.update(message);
   sign.end();
-  return sign.sign({
-    key: privateKeyPem,
-    padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
-    saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
-  }, 'base64');
+  return sign.sign(
+    {
+      key: privateKeyPem,
+      padding: crypto.constants.RSA_PKCS1_PSS_PADDING,
+      saltLength: crypto.constants.RSA_PSS_SALTLEN_DIGEST,
+    },
+    'base64',
+  );
 }
 
-async function kalshiFetch<T>(path: string, method = 'GET', body?: Record<string, unknown>): Promise<T> {
+async function kalshiFetch<T>(
+  path: string,
+  method = 'GET',
+  body?: Record<string, unknown>,
+): Promise<T> {
   const keyId = getAccountConfig('kalshi_key_id');
   const privateKey = getAccountConfig('kalshi_private_key');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Accept': 'application/json',
+    Accept: 'application/json',
   };
 
   if (keyId && privateKey) {
@@ -389,7 +447,10 @@ let _btcPriceCache: { price: number; ts: number } = { price: 0, ts: 0 };
 const BTC_PRICE_CACHE_TTL = 120_000; // 2 min cache to stay within CoinGecko free tier
 
 async function fetchBtcPrice(): Promise<number> {
-  if (_btcPriceCache.price > 0 && Date.now() - _btcPriceCache.ts < BTC_PRICE_CACHE_TTL) {
+  if (
+    _btcPriceCache.price > 0 &&
+    Date.now() - _btcPriceCache.ts < BTC_PRICE_CACHE_TTL
+  ) {
     return _btcPriceCache.price;
   }
   try {
@@ -432,14 +493,17 @@ async function fetchKxbtcBrackets(btcPrice: number): Promise<KxbtcBracket[]> {
   );
 
   const brackets: KxbtcBracket[] = [];
-  for (const event of (data.events || [])) {
-    for (const m of (event.markets || [])) {
+  for (const event of data.events || []) {
+    for (const m of event.markets || []) {
       if (m.status !== 'active') continue;
 
       const title = m.yes_sub_title || '';
-      let low = 0, high = 0;
+      let low = 0,
+        high = 0;
       let isEdge = false;
-      const rangeMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+to\s+([\d,]+(?:\.\d+)?)/);
+      const rangeMatch = title.match(
+        /\$?([\d,]+(?:\.\d+)?)\s+to\s+([\d,]+(?:\.\d+)?)/,
+      );
       const belowMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+or\s+below/i);
       const aboveMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+or\s+above/i);
       if (rangeMatch) {
@@ -459,14 +523,17 @@ async function fetchKxbtcBrackets(btcPrice: number): Promise<KxbtcBracket[]> {
 
       const inBracket = btcPrice >= low && btcPrice <= high;
       const spread = (m.yes_ask || 0) - (m.yes_bid || 0);
-      const mid = m.yes_bid > 0 && m.yes_ask > 0 ? (m.yes_bid + m.yes_ask) / 2 : m.last_price;
+      const mid =
+        m.yes_bid > 0 && m.yes_ask > 0
+          ? (m.yes_bid + m.yes_ask) / 2
+          : m.last_price;
 
       // Centeredness: how centered BTC is within this bracket (0 = at edge, 1 = dead center)
       let centeredness = 0;
       if (high !== Infinity && low !== 0 && high > low) {
         const range = high - low;
         const distFromCenter = Math.abs(btcPrice - (low + range / 2));
-        centeredness = Math.max(0, 1 - (distFromCenter / (range / 2)));
+        centeredness = Math.max(0, 1 - distFromCenter / (range / 2));
       }
 
       brackets.push({
@@ -479,7 +546,13 @@ async function fetchKxbtcBrackets(btcPrice: number): Promise<KxbtcBracket[]> {
         no_ask: m.no_ask,
         last_price: m.last_price,
         close_time: m.close_time,
-        low, high, inBracket, isEdge, spread, mid, centeredness,
+        low,
+        high,
+        inBracket,
+        isEdge,
+        spread,
+        mid,
+        centeredness,
       });
     }
   }
@@ -489,12 +562,15 @@ async function fetchKxbtcBrackets(btcPrice: number): Promise<KxbtcBracket[]> {
   return brackets;
 }
 
-function computeVolatilityFromPolyHistory(polyHistory: Array<{ time: number; upMid: number; downMid: number }>): number {
+function computeVolatilityFromPolyHistory(
+  polyHistory: Array<{ time: number; upMid: number; downMid: number }>,
+): number {
   if (polyHistory.length < 5) return 0.5; // default mid-range if insufficient data
 
-  const prices = polyHistory.map(p => p.upMid);
+  const prices = polyHistory.map((p) => p.upMid);
   const mean = prices.reduce((s, v) => s + v, 0) / prices.length;
-  const variance = prices.reduce((s, v) => s + (v - mean) ** 2, 0) / prices.length;
+  const variance =
+    prices.reduce((s, v) => s + (v - mean) ** 2, 0) / prices.length;
   const stddev = Math.sqrt(variance);
 
   // Directionality: how much has the trend moved start→end
@@ -502,7 +578,7 @@ function computeVolatilityFromPolyHistory(polyHistory: Array<{ time: number; upM
 
   // Combine: high stddev + high directionality = high volatility (bad for brackets)
   // Normalize to 0-1 range. stddev > 0.05 or directionality > 0.10 is quite volatile
-  const volRaw = (stddev / 0.05) * 0.6 + (directionality / 0.10) * 0.4;
+  const volRaw = (stddev / 0.05) * 0.6 + (directionality / 0.1) * 0.4;
   return Math.min(1, Math.max(0, volRaw));
 }
 
@@ -510,24 +586,36 @@ async function updatePolyHistory(run: StrategyEngineRun): Promise<void> {
   const polyMarket = await discoverBtcUpDownMarket(300);
   if (!polyMarket || polyMarket.tokens.length < 2) return;
 
-  const upToken = polyMarket.tokens.find(t => t.outcome.toLowerCase().includes('up'));
-  const downToken = polyMarket.tokens.find(t => t.outcome.toLowerCase().includes('down'));
+  const upToken = polyMarket.tokens.find((t) =>
+    t.outcome.toLowerCase().includes('up'),
+  );
+  const downToken = polyMarket.tokens.find((t) =>
+    t.outcome.toLowerCase().includes('down'),
+  );
   if (!upToken || !downToken) return;
 
-  let upMid = 0, downMid = 0;
+  let upMid = 0,
+    downMid = 0;
   try {
     const [upData, downData] = await Promise.all([
-      fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${upToken.token_id}`),
-      fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${downToken.token_id}`),
+      fetchJsonHost<{ mid: string }>(
+        `${CLOB_BASE}/midpoint?token_id=${upToken.token_id}`,
+      ),
+      fetchJsonHost<{ mid: string }>(
+        `${CLOB_BASE}/midpoint?token_id=${downToken.token_id}`,
+      ),
     ]);
     upMid = parseFloat(upData.mid);
     downMid = parseFloat(downData.mid);
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   if (isNaN(upMid) || isNaN(downMid)) return;
 
   run.polyHistory.push({ time: Date.now(), upMid, downMid });
-  if (run.polyHistory.length > 30) run.polyHistory.splice(0, run.polyHistory.length - 30);
+  if (run.polyHistory.length > 30)
+    run.polyHistory.splice(0, run.polyHistory.length - 30);
   run.stats.dataPoints = run.polyHistory.length;
 }
 
@@ -546,26 +634,41 @@ async function discoverBtcUpDownMarket(intervalSec: number): Promise<{
   // Check current and next window
   for (const ts of [rounded, rounded + intervalSec]) {
     try {
-      const events = await fetchJsonHost<any[]>(`${GAMMA_BASE}/events?slug=${prefix}-${ts}`);
+      const events = await fetchJsonHost<any[]>(
+        `${GAMMA_BASE}/events?slug=${prefix}-${ts}`,
+      );
       if (!events || events.length === 0) continue;
       const event = events[0];
-      for (const m of (event.markets || [])) {
+      for (const m of event.markets || []) {
         if (m.closed) continue;
         let tokenIds: string[] = [];
         let outcomes: string[] = [];
         try {
-          tokenIds = typeof m.clobTokenIds === 'string' ? JSON.parse(m.clobTokenIds) : m.clobTokenIds || [];
-          outcomes = typeof m.outcomes === 'string' ? JSON.parse(m.outcomes) : m.outcomes || [];
-        } catch { /* skip */ }
+          tokenIds =
+            typeof m.clobTokenIds === 'string'
+              ? JSON.parse(m.clobTokenIds)
+              : m.clobTokenIds || [];
+          outcomes =
+            typeof m.outcomes === 'string'
+              ? JSON.parse(m.outcomes)
+              : m.outcomes || [];
+        } catch {
+          /* skip */
+        }
         if (tokenIds.length > 0) {
           return {
             slug: `${prefix}-${ts}`,
             title: event.title || m.question || '',
-            tokens: tokenIds.map((id: string, i: number) => ({ token_id: id, outcome: outcomes[i] || `Outcome ${i}` })),
+            tokens: tokenIds.map((id: string, i: number) => ({
+              token_id: id,
+              outcome: outcomes[i] || `Outcome ${i}`,
+            })),
           };
         }
       }
-    } catch { /* skip */ }
+    } catch {
+      /* skip */
+    }
   }
   return null;
 }
@@ -574,7 +677,12 @@ async function discoverBtcUpDownMarket(intervalSec: number): Promise<{
 
 function generateMomentumSignal(
   run: StrategyEngineRun,
-  kalshiMarket: { ticker: string; yes_bid: number; yes_ask: number; close_time: string },
+  kalshiMarket: {
+    ticker: string;
+    yes_bid: number;
+    yes_ask: number;
+    close_time: string;
+  },
 ): { side: 'yes' | 'no'; confidence: number; reason: string } | null {
   const hist = run.polyHistory;
   if (hist.length < 20) return null; // Need 20+ data points (10 min) for reliable signal
@@ -602,7 +710,8 @@ function generateMomentumSignal(
   // Sustained momentum: both recent vs mid AND mid vs early must agree
   const recentDelta = avgRecent - avgMid;
   const midDelta = avgMid - avgEarly;
-  const sustained = (recentDelta > 0 && midDelta > 0) || (recentDelta < 0 && midDelta < 0);
+  const sustained =
+    (recentDelta > 0 && midDelta > 0) || (recentDelta < 0 && midDelta < 0);
 
   const momentum = recentDelta; // Primary signal
   const momentumPct = momentum * 100;
@@ -622,7 +731,10 @@ function generateMomentumSignal(
   // Liquidity bonus: tighter spread = better fill
   const liquidityScore = Math.max(0, 10 - kalshiSpread);
 
-  const confidence = Math.min(85, 40 + momentumScore + consistencyScore + timeScore + liquidityScore);
+  const confidence = Math.min(
+    85,
+    40 + momentumScore + consistencyScore + timeScore + liquidityScore,
+  );
 
   if (confidence < min_confidence) return null;
 
@@ -636,20 +748,33 @@ function generateMomentumSignal(
 async function executeStrategyTrade(
   run: StrategyEngineRun,
   signal: { side: 'yes' | 'no'; confidence: number; reason: string },
-  kalshiMarket: { ticker: string; yes_bid: number; yes_ask: number; no_bid: number; no_ask: number; close_time: string; title?: string; event_ticker?: string },
+  kalshiMarket: {
+    ticker: string;
+    yes_bid: number;
+    yes_ask: number;
+    no_bid: number;
+    no_ask: number;
+    close_time: string;
+    title?: string;
+    event_ticker?: string;
+  },
 ): Promise<void> {
   // --- Guard 1: Max 1 trade per ticker (check both in-memory and DB) ---
   if (run.tradedTickers.has(kalshiMarket.ticker)) {
     run.stats.skipped++;
     return;
   }
-  const existingPositions = run.mode === 'live'
-    ? getOpenLiveTradesForTicker(kalshiMarket.ticker)
-    : getOpenPaperTradesForTicker(kalshiMarket.ticker);
+  const existingPositions =
+    run.mode === 'live'
+      ? getOpenLiveTradesForTicker(kalshiMarket.ticker)
+      : getOpenPaperTradesForTicker(kalshiMarket.ticker);
   if (existingPositions.length > 0) {
     run.tradedTickers.add(kalshiMarket.ticker);
     run.stats.skipped++;
-    logger.debug({ runId: run.runId, ticker: kalshiMarket.ticker }, 'Skipped: already have position');
+    logger.debug(
+      { runId: run.runId, ticker: kalshiMarket.ticker },
+      'Skipped: already have position',
+    );
     return;
   }
 
@@ -658,7 +783,10 @@ async function executeStrategyTrade(
   const dailyPnl = getDailySettledPnl(todayStr);
   if (dailyPnl.total_pnl_cents < -run.riskParams.daily_loss_limit) {
     run.stats.skipped++;
-    logger.warn({ runId: run.runId, dailyPnl: dailyPnl.total_pnl_cents }, 'Skipped: daily loss limit hit');
+    logger.warn(
+      { runId: run.runId, dailyPnl: dailyPnl.total_pnl_cents },
+      'Skipped: daily loss limit hit',
+    );
     return;
   }
 
@@ -666,18 +794,25 @@ async function executeStrategyTrade(
   const confidenceNorm = (signal.confidence - 40) / 45; // 0 at conf=40, 1 at conf=85
   const sizePct = 0.25 + confidenceNorm * 0.75; // 25% to 100% of max
   const maxContracts = run.riskParams.max_contracts_per_trade;
-  const qty = Math.max(1, Math.min(maxContracts, Math.round(sizePct * maxContracts)));
+  const qty = Math.max(
+    1,
+    Math.min(maxContracts, Math.round(sizePct * maxContracts)),
+  );
 
-  const entryPrice = signal.side === 'yes'
-    ? kalshiMarket.yes_ask || kalshiMarket.yes_bid
-    : kalshiMarket.no_ask || kalshiMarket.no_bid;
+  const entryPrice =
+    signal.side === 'yes'
+      ? kalshiMarket.yes_ask || kalshiMarket.yes_bid
+      : kalshiMarket.no_ask || kalshiMarket.no_bid;
 
   if (entryPrice <= 0 || entryPrice >= 100) return;
 
   // --- Guard 3: Don't buy contracts priced below 10c or above 90c ---
   if (entryPrice < 10 || entryPrice > 90) {
     run.stats.skipped++;
-    logger.debug({ runId: run.runId, ticker: kalshiMarket.ticker, price: entryPrice }, 'Skipped: price too extreme');
+    logger.debug(
+      { runId: run.runId, ticker: kalshiMarket.ticker, price: entryPrice },
+      'Skipped: price too extreme',
+    );
     return;
   }
 
@@ -707,7 +842,22 @@ async function executeStrategyTrade(
       settled_at: null,
     });
     run.stats.trades++;
-    logger.info({ runId: run.runId, trade: id, side: signal.side, qty, price: entryPrice, confidence: signal.confidence }, 'Strategy paper trade placed');
+    monitorBus.emit('paper-trade:update', {
+      action: 'created',
+      id,
+      ticker: kalshiMarket.ticker,
+    });
+    logger.info(
+      {
+        runId: run.runId,
+        trade: id,
+        side: signal.side,
+        qty,
+        price: entryPrice,
+        confidence: signal.confidence,
+      },
+      'Strategy paper trade placed',
+    );
   } else {
     // Live mode: place real Kalshi order with DB tracking
     const now = new Date().toISOString();
@@ -752,7 +902,11 @@ async function executeStrategyTrade(
       } else {
         orderPayload.no_price = entryPrice;
       }
-      const orderResult = await kalshiFetch<{ order: { order_id: string } }>('/portfolio/orders', 'POST', orderPayload);
+      const orderResult = await kalshiFetch<{ order: { order_id: string } }>(
+        '/portfolio/orders',
+        'POST',
+        orderPayload,
+      );
       const kalshiOrderId = orderResult?.order?.order_id || clientOrderId;
 
       updateLiveTrade(tradeId, {
@@ -763,14 +917,27 @@ async function executeStrategyTrade(
       });
 
       run.stats.trades++;
-      logger.info({ runId: run.runId, trade: tradeId, kalshiOrderId, side: signal.side, qty, price: entryPrice }, 'Strategy live order placed');
+      logger.info(
+        {
+          runId: run.runId,
+          trade: tradeId,
+          kalshiOrderId,
+          side: signal.side,
+          qty,
+          price: entryPrice,
+        },
+        'Strategy live order placed',
+      );
     } catch (err: any) {
       updateLiveTrade(tradeId, {
         status: 'failed',
         notes: `Auto: ${signal.reason} (conf: ${signal.confidence.toFixed(0)}%) | ERROR: ${err.message}`,
       });
       run.stats.errors++;
-      logger.error({ runId: run.runId, trade: tradeId, error: err.message }, 'Strategy live order failed');
+      logger.error(
+        { runId: run.runId, trade: tradeId, error: err.message },
+        'Strategy live order failed',
+      );
     }
   }
 }
@@ -782,25 +949,37 @@ async function momentumStrategyTick(run: StrategyEngineRun): Promise<void> {
     if (!polyMarket || polyMarket.tokens.length < 2) return;
 
     // 2. Fetch midpoints for up/down tokens
-    const upToken = polyMarket.tokens.find(t => t.outcome.toLowerCase().includes('up'));
-    const downToken = polyMarket.tokens.find(t => t.outcome.toLowerCase().includes('down'));
+    const upToken = polyMarket.tokens.find((t) =>
+      t.outcome.toLowerCase().includes('up'),
+    );
+    const downToken = polyMarket.tokens.find((t) =>
+      t.outcome.toLowerCase().includes('down'),
+    );
     if (!upToken || !downToken) return;
 
-    let upMid = 0, downMid = 0;
+    let upMid = 0,
+      downMid = 0;
     try {
       const [upData, downData] = await Promise.all([
-        fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${upToken.token_id}`),
-        fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${downToken.token_id}`),
+        fetchJsonHost<{ mid: string }>(
+          `${CLOB_BASE}/midpoint?token_id=${upToken.token_id}`,
+        ),
+        fetchJsonHost<{ mid: string }>(
+          `${CLOB_BASE}/midpoint?token_id=${downToken.token_id}`,
+        ),
       ]);
       upMid = parseFloat(upData.mid);
       downMid = parseFloat(downData.mid);
-    } catch { return; }
+    } catch {
+      return;
+    }
 
     if (isNaN(upMid) || isNaN(downMid)) return;
 
     // 3. Push to rolling history (keep last 30 = 15 min at 30s intervals)
     run.polyHistory.push({ time: Date.now(), upMid, downMid });
-    if (run.polyHistory.length > 30) run.polyHistory.splice(0, run.polyHistory.length - 30);
+    if (run.polyHistory.length > 30)
+      run.polyHistory.splice(0, run.polyHistory.length - 30);
     run.stats.dataPoints = run.polyHistory.length;
 
     // 4. Fetch Kalshi KXBTC15M active markets
@@ -809,22 +988,29 @@ async function momentumStrategyTick(run: StrategyEngineRun): Promise<void> {
       const data = await kalshiFetch<{ events: KalshiEvent[] }>(
         '/events?status=open&with_nested_markets=true&limit=10&series_ticker=KXBTC15M',
       );
-      for (const event of (data.events || [])) {
-        for (const m of (event.markets || [])) {
+      for (const event of data.events || []) {
+        for (const m of event.markets || []) {
           if (m.status === 'active') {
             kalshiMarkets.push({ ...m, event_ticker: event.event_ticker });
           }
         }
       }
-    } catch { return; }
+    } catch {
+      return;
+    }
 
     if (kalshiMarkets.length === 0) return;
 
     // 5. Find soonest-closing market with >2 min remaining
     const now = Date.now();
     const eligible = kalshiMarkets
-      .filter((m: any) => new Date(m.close_time).getTime() - now > 2 * 60 * 1000)
-      .sort((a: any, b: any) => new Date(a.close_time).getTime() - new Date(b.close_time).getTime());
+      .filter(
+        (m: any) => new Date(m.close_time).getTime() - now > 2 * 60 * 1000,
+      )
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.close_time).getTime() - new Date(b.close_time).getTime(),
+      );
 
     if (eligible.length === 0) return;
     const target = eligible[0];
@@ -845,7 +1031,10 @@ async function momentumStrategyTick(run: StrategyEngineRun): Promise<void> {
     }
   } catch (err: any) {
     run.stats.errors++;
-    logger.error({ runId: run.runId, error: err.message }, 'Strategy tick error');
+    logger.error(
+      { runId: run.runId, error: err.message },
+      'Strategy tick error',
+    );
   }
 }
 
@@ -965,7 +1154,9 @@ function generateSpreadSignal(
 
 // --- Center Bracket strategy tick ---
 
-async function centerBracketStrategyTick(run: StrategyEngineRun): Promise<void> {
+async function centerBracketStrategyTick(
+  run: StrategyEngineRun,
+): Promise<void> {
   try {
     // 1. Fetch data
     const [btcPrice] = await Promise.all([
@@ -978,7 +1169,7 @@ async function centerBracketStrategyTick(run: StrategyEngineRun): Promise<void> 
     if (brackets.length === 0) return;
 
     // 2. Find the bracket BTC currently sits in (non-edge)
-    const centerBracket = brackets.find(b => b.inBracket && !b.isEdge);
+    const centerBracket = brackets.find((b) => b.inBracket && !b.isEdge);
     if (!centerBracket) return;
 
     // 3. Generate signal and trade
@@ -995,7 +1186,10 @@ async function centerBracketStrategyTick(run: StrategyEngineRun): Promise<void> 
     }
   } catch (err: any) {
     run.stats.errors++;
-    logger.error({ runId: run.runId, error: err.message }, 'Center bracket tick error');
+    logger.error(
+      { runId: run.runId, error: err.message },
+      'Center bracket tick error',
+    );
   }
 }
 
@@ -1014,7 +1208,7 @@ async function spreadStrategyTick(run: StrategyEngineRun): Promise<void> {
     if (brackets.length === 0) return;
 
     // 2. Find center bracket index
-    const centerIdx = brackets.findIndex(b => b.inBracket && !b.isEdge);
+    const centerIdx = brackets.findIndex((b) => b.inBracket && !b.isEdge);
     if (centerIdx === -1) return;
     const centerBracket = brackets[centerIdx];
 
@@ -1044,7 +1238,13 @@ async function spreadStrategyTick(run: StrategyEngineRun): Promise<void> {
 
     // 4. Generate signals and trade each
     for (const { bracket, weight } of targets) {
-      const signal = generateSpreadSignal(run, bracket, centerBracket, btcPrice, weight);
+      const signal = generateSpreadSignal(
+        run,
+        bracket,
+        centerBracket,
+        btcPrice,
+        weight,
+      );
       if (signal) {
         run.stats.signals++;
         run.stats.lastSignal = {
@@ -1064,12 +1264,17 @@ async function spreadStrategyTick(run: StrategyEngineRun): Promise<void> {
 
 // --- Strategy tick dispatcher ---
 
-function getStrategyTickFn(strategy: string): (run: StrategyEngineRun) => Promise<void> {
+function getStrategyTickFn(
+  strategy: string,
+): (run: StrategyEngineRun) => Promise<void> {
   switch (strategy) {
-    case 'center_bracket': return centerBracketStrategyTick;
-    case 'spread': return spreadStrategyTick;
+    case 'center_bracket':
+      return centerBracketStrategyTick;
+    case 'spread':
+      return spreadStrategyTick;
     case 'momentum_15m':
-    default: return momentumStrategyTick;
+    default:
+      return momentumStrategyTick;
   }
 }
 
@@ -1079,9 +1284,17 @@ function startWatcherInterval(watcherId: string): void {
 
   const tokenIds: string[] = JSON.parse(watcher.token_ids);
   // Detect group watcher mode from market_slugs metadata
-  const slugs: string[] = watcher.market_slugs ? JSON.parse(watcher.market_slugs) : [];
-  const isGroupMode = slugs.some(s => s === 'btc-updown-5m' || s === 'btc-updown-15m');
-  const groupInterval = slugs.includes('btc-updown-5m') ? 300 : slugs.includes('btc-updown-15m') ? 900 : 0;
+  const slugs: string[] = watcher.market_slugs
+    ? JSON.parse(watcher.market_slugs)
+    : [];
+  const isGroupMode = slugs.some(
+    (s) => s === 'btc-updown-5m' || s === 'btc-updown-15m',
+  );
+  const groupInterval = slugs.includes('btc-updown-5m')
+    ? 300
+    : slugs.includes('btc-updown-15m')
+      ? 900
+      : 0;
 
   const tick = async () => {
     const w = getWatcher(watcherId);
@@ -1103,7 +1316,10 @@ function startWatcherInterval(watcherId: string): void {
       try {
         const market = await discoverBtcUpDownMarket(groupInterval);
         if (!market) {
-          logger.warn({ watcherId }, 'No active btc-updown market found this tick');
+          logger.warn(
+            { watcherId },
+            'No active btc-updown market found this tick',
+          );
           return;
         }
 
@@ -1111,7 +1327,9 @@ function startWatcherInterval(watcherId: string): void {
         let pointsAdded = 0;
         for (const token of market.tokens) {
           try {
-            const data = await fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${token.token_id}`);
+            const data = await fetchJsonHost<{ mid: string }>(
+              `${CLOB_BASE}/midpoint?token_id=${token.token_id}`,
+            );
             const price = parseFloat(data.mid);
             if (isNaN(price)) continue;
 
@@ -1131,11 +1349,16 @@ function startWatcherInterval(watcherId: string): void {
             });
             pointsAdded++;
           } catch (err) {
-            logger.warn({ watcherId, tokenId: token.token_id, err }, 'Group watcher tick failed for token');
+            logger.warn(
+              { watcherId, tokenId: token.token_id, err },
+              'Group watcher tick failed for token',
+            );
           }
         }
         if (pointsAdded > 0) {
-          updateWatcher(watcherId, { data_points: (w.data_points || 0) + pointsAdded });
+          updateWatcher(watcherId, {
+            data_points: (w.data_points || 0) + pointsAdded,
+          });
         }
       } catch (err) {
         logger.warn({ watcherId, err }, 'Group watcher tick failed');
@@ -1144,7 +1367,9 @@ function startWatcherInterval(watcherId: string): void {
       // Standard mode: watch specific token IDs
       for (const tokenId of tokenIds) {
         try {
-          const data = await fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${tokenId}`);
+          const data = await fetchJsonHost<{ mid: string }>(
+            `${CLOB_BASE}/midpoint?token_id=${tokenId}`,
+          );
           const price = parseFloat(data.mid);
           if (isNaN(price)) continue;
 
@@ -1153,13 +1378,21 @@ function startWatcherInterval(watcherId: string): void {
             symbol: tokenId,
             timestamp: new Date().toISOString(),
             price,
-            metadata: JSON.stringify({ watcher_id: watcherId, interval_ms: w.interval_ms }),
+            metadata: JSON.stringify({
+              watcher_id: watcherId,
+              interval_ms: w.interval_ms,
+            }),
           });
         } catch (err) {
-          logger.warn({ watcherId, tokenId, err }, 'Watcher tick failed for token');
+          logger.warn(
+            { watcherId, tokenId, err },
+            'Watcher tick failed for token',
+          );
         }
       }
-      updateWatcher(watcherId, { data_points: (w.data_points || 0) + tokenIds.length });
+      updateWatcher(watcherId, {
+        data_points: (w.data_points || 0) + tokenIds.length,
+      });
     }
   };
 
@@ -1168,7 +1401,15 @@ function startWatcherInterval(watcherId: string): void {
 
   const interval = setInterval(tick, watcher.interval_ms);
   activeWatchers.set(watcherId, interval);
-  logger.info({ watcherId, intervalMs: watcher.interval_ms, isGroupMode, tokenCount: tokenIds.length }, 'Watcher started');
+  logger.info(
+    {
+      watcherId,
+      intervalMs: watcher.interval_ms,
+      isGroupMode,
+      tokenCount: tokenIds.length,
+    },
+    'Watcher started',
+  );
 }
 
 function clearWatcherInterval(watcherId: string): void {
@@ -1208,7 +1449,9 @@ function resumeActiveWatchers(): void {
  *   Kalshi close 22:45Z → Poly window opens 22:30Z → slug btc-updown-15m-{openUnix}
  * Then find the "Up" outcome data point closest to close time.
  */
-async function selfSettleBtcUpDown(closeTime: string): Promise<'yes' | 'no' | null> {
+async function selfSettleBtcUpDown(
+  closeTime: string,
+): Promise<'yes' | 'no' | null> {
   const closeMs = new Date(closeTime).getTime();
   const openMs = closeMs - 15 * 60 * 1000;
   const openUnix = Math.floor(openMs / 1000);
@@ -1242,9 +1485,15 @@ async function selfSettleBtcUpDown(closeTime: string): Promise<'yes' | 'no' | nu
       return result;
     }
 
-    logger.debug({ closeTime, slug: expectedSlug }, 'No Polymarket data found for self-settlement');
+    logger.debug(
+      { closeTime, slug: expectedSlug },
+      'No Polymarket data found for self-settlement',
+    );
   } catch (err: any) {
-    logger.debug({ closeTime, error: err.message }, 'Self-settlement lookup failed');
+    logger.debug(
+      { closeTime, error: err.message },
+      'Self-settlement lookup failed',
+    );
   }
 
   return null;
@@ -1252,13 +1501,21 @@ async function selfSettleBtcUpDown(closeTime: string): Promise<'yes' | 'no' | nu
 
 let settlementInterval: NodeJS.Timeout | null = null;
 
-async function settlePaperTrades(): Promise<{ settled: number; won: number; lost: number; pnl_cents: number; errors: number }> {
+async function settlePaperTrades(): Promise<{
+  settled: number;
+  won: number;
+  lost: number;
+  pnl_cents: number;
+  errors: number;
+}> {
   const result = { settled: 0, won: 0, lost: 0, pnl_cents: 0, errors: 0 };
   const openTrades = getAllPaperTrades('open');
   if (openTrades.length === 0) return result;
 
   const now = Date.now();
-  const expired = openTrades.filter(t => t.close_time && new Date(t.close_time).getTime() <= now);
+  const expired = openTrades.filter(
+    (t) => t.close_time && new Date(t.close_time).getTime() <= now,
+  );
   if (expired.length === 0) return result;
 
   // Group by ticker to avoid duplicate API calls
@@ -1275,7 +1532,9 @@ async function settlePaperTrades(): Promise<{ settled: number; won: number; lost
 
       // Try Kalshi API first
       try {
-        const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${ticker}`);
+        const data = await kalshiFetch<{ market: KalshiMarket }>(
+          `/markets/${ticker}`,
+        );
         const market = data.market;
         if (market.result === 'yes' || market.result === 'no') {
           marketResult = market.result;
@@ -1313,17 +1572,34 @@ async function settlePaperTrades(): Promise<{ settled: number; won: number; lost
 
         const pnl = (exitPrice - t.entry_price) * t.qty;
         result.settled++;
-        if (won) result.won++; else result.lost++;
+        if (won) result.won++;
+        else result.lost++;
         result.pnl_cents += pnl;
 
         logger.info(
-          { tradeId: t.id, ticker, marketResult, side: t.side, won, pnl, exitPrice },
+          {
+            tradeId: t.id,
+            ticker,
+            marketResult,
+            side: t.side,
+            won,
+            pnl,
+            exitPrice,
+          },
           'Paper trade auto-settled',
         );
+        monitorBus.emit('paper-trade:update', {
+          action: 'settled',
+          id: t.id,
+          status: won ? 'won' : 'lost',
+        });
       }
     } catch (err: any) {
       result.errors++;
-      logger.debug({ ticker, error: err.message }, 'Could not fetch market for auto-settlement');
+      logger.debug(
+        { ticker, error: err.message },
+        'Could not fetch market for auto-settlement',
+      );
     }
   }
 
@@ -1334,13 +1610,21 @@ async function settlePaperTrades(): Promise<{ settled: number; won: number; lost
   return result;
 }
 
-async function settleLiveTrades(): Promise<{ settled: number; won: number; lost: number; pnl_cents: number; errors: number }> {
+async function settleLiveTrades(): Promise<{
+  settled: number;
+  won: number;
+  lost: number;
+  pnl_cents: number;
+  errors: number;
+}> {
   const result = { settled: 0, won: 0, lost: 0, pnl_cents: 0, errors: 0 };
-  const openTrades = getOpenLiveTrades().filter(t => t.status === 'filled');
+  const openTrades = getOpenLiveTrades().filter((t) => t.status === 'filled');
   if (openTrades.length === 0) return result;
 
   const now = Date.now();
-  const expired = openTrades.filter(t => t.close_time && new Date(t.close_time).getTime() <= now);
+  const expired = openTrades.filter(
+    (t) => t.close_time && new Date(t.close_time).getTime() <= now,
+  );
   if (expired.length === 0) return result;
 
   // Group by ticker to avoid duplicate API calls
@@ -1356,7 +1640,9 @@ async function settleLiveTrades(): Promise<{ settled: number; won: number; lost:
       let marketResult: 'yes' | 'no' | null = null;
 
       try {
-        const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${ticker}`);
+        const data = await kalshiFetch<{ market: KalshiMarket }>(
+          `/markets/${ticker}`,
+        );
         const market = data.market;
         if (market.result === 'yes' || market.result === 'no') {
           marketResult = market.result;
@@ -1392,17 +1678,29 @@ async function settleLiveTrades(): Promise<{ settled: number; won: number; lost:
 
         const pnl = (exitPrice - t.entry_price) * t.qty;
         result.settled++;
-        if (won) result.won++; else result.lost++;
+        if (won) result.won++;
+        else result.lost++;
         result.pnl_cents += pnl;
 
         logger.info(
-          { tradeId: t.id, ticker, marketResult, side: t.side, won, pnl, exitPrice },
+          {
+            tradeId: t.id,
+            ticker,
+            marketResult,
+            side: t.side,
+            won,
+            pnl,
+            exitPrice,
+          },
           'Live trade auto-settled',
         );
       }
     } catch (err: any) {
       result.errors++;
-      logger.debug({ ticker, error: err.message }, 'Could not fetch market for live trade settlement');
+      logger.debug(
+        { ticker, error: err.message },
+        'Could not fetch market for live trade settlement',
+      );
     }
   }
 
@@ -1418,7 +1716,10 @@ function startPaperTradeSettlement(): void {
   // Run immediately, then every 60 seconds
   settlePaperTrades();
   settleLiveTrades();
-  settlementInterval = setInterval(() => { settlePaperTrades(); settleLiveTrades(); }, 60_000);
+  settlementInterval = setInterval(() => {
+    settlePaperTrades();
+    settleLiveTrades();
+  }, 60_000);
   logger.info('Trade auto-settlement started (60s interval, paper + live)');
 }
 
@@ -1435,9 +1736,10 @@ function stopPaperTradeSettlement(): void {
 function calculateRSI(prices: number[], period: number): number {
   if (prices.length < period + 1) return 50; // neutral
   const changes: number[] = [];
-  for (let i = 1; i < prices.length; i++) changes.push(prices[i] - prices[i - 1]);
-  const gains = changes.map(c => (c > 0 ? c : 0));
-  const losses = changes.map(c => (c < 0 ? -c : 0));
+  for (let i = 1; i < prices.length; i++)
+    changes.push(prices[i] - prices[i - 1]);
+  const gains = changes.map((c) => (c > 0 ? c : 0));
+  const losses = changes.map((c) => (c < 0 ? -c : 0));
   const avgGain = gains.slice(0, period).reduce((a, b) => a + b, 0) / period;
   const avgLoss = losses.slice(0, period).reduce((a, b) => a + b, 0) / period;
   if (avgLoss === 0) return 100;
@@ -1456,7 +1758,13 @@ function runSingleBacktest(
   dataPoints: Array<{ price: number; timestamp: string }>,
   params: OptimizerParams,
   initialCapital: number,
-): { pnl: number; trades: number; wins: number; maxDrawdown: number; sharpeRatio: number } {
+): {
+  pnl: number;
+  trades: number;
+  wins: number;
+  maxDrawdown: number;
+  sharpeRatio: number;
+} {
   let capital = initialCapital;
   let peak = initialCapital;
   let maxDrawdown = 0;
@@ -1464,17 +1772,23 @@ function runSingleBacktest(
   let trades = 0;
   let wins = 0;
 
-  let position: { entryPrice: number; entryIdx: number; size: number } | null = null;
+  let position: { entryPrice: number; entryIdx: number; size: number } | null =
+    null;
 
   for (let i = 15; i < dataPoints.length; i++) {
-    const prices = dataPoints.slice(Math.max(0, i - 15), i + 1).map(p => p.price);
+    const prices = dataPoints
+      .slice(Math.max(0, i - 15), i + 1)
+      .map((p) => p.price);
     const rsi = calculateRSI(prices, 2);
     const currentPrice = dataPoints[i].price;
 
     if (!position) {
       // Entry: RSI below oversold
       if (rsi < params.rsi_oversold) {
-        const posSize = Math.min(params.max_position_size / 100 * capital, capital * 0.5);
+        const posSize = Math.min(
+          (params.max_position_size / 100) * capital,
+          capital * 0.5,
+        );
         const contracts = posSize / currentPrice;
         position = { entryPrice: currentPrice, entryIdx: i, size: contracts };
       }
@@ -1510,10 +1824,15 @@ function runSingleBacktest(
     if (pnl > 0) wins++;
   }
 
-  const avgReturn = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
-  const variance = returns.length > 0
-    ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / returns.length
-    : 0;
+  const avgReturn =
+    returns.length > 0
+      ? returns.reduce((a, b) => a + b, 0) / returns.length
+      : 0;
+  const variance =
+    returns.length > 0
+      ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) /
+        returns.length
+      : 0;
   const stdDev = Math.sqrt(variance);
   const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0;
 
@@ -1563,8 +1882,13 @@ export interface MonitorDeps {
     status: 'active' | 'paused' | 'completed';
     created_at: string;
   }) => void;
-  updateTaskStatus: (taskId: string, status: 'active' | 'paused' | 'completed') => void;
-  execPolymarketCli: (args: string) => Promise<{ stdout: string; stderr: string }>;
+  updateTaskStatus: (
+    taskId: string,
+    status: 'active' | 'paused' | 'completed',
+  ) => void;
+  execPolymarketCli: (
+    args: string,
+  ) => Promise<{ stdout: string; stderr: string }>;
   getMainGroupJid: () => string | null;
 }
 
@@ -1599,7 +1923,9 @@ function parseQuery(url: string): Record<string, string> {
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+    req.on('data', (chunk: Buffer) => {
+      data += chunk.toString();
+    });
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });
@@ -1774,7 +2100,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
         const db = new Database(dbPath);
 
         const metrics = db
-          .prepare(`SELECT * FROM performance_metrics ORDER BY date DESC LIMIT ?`)
+          .prepare(
+            `SELECT * FROM performance_metrics ORDER BY date DESC LIMIT ?`,
+          )
           .all(days);
 
         const recentPositions = db
@@ -1803,7 +2131,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
         const db = new Database(dbPath);
 
         const signals = db
-          .prepare(`SELECT * FROM strategy_state ORDER BY timestamp DESC LIMIT ?`)
+          .prepare(
+            `SELECT * FROM strategy_state ORDER BY timestamp DESC LIMIT ?`,
+          )
           .all(Math.min(Math.max(1, limit), 100));
 
         db.close();
@@ -1832,9 +2162,14 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
       // Replay buffered events
       const buffered = eventBuffer.getAll();
       for (const entry of buffered) {
-        const replayData = typeof entry.data === 'object' && entry.data !== null
-          ? { ...(entry.data as Record<string, unknown>), _replay: true, _ts: entry.timestamp }
-          : entry.data;
+        const replayData =
+          typeof entry.data === 'object' && entry.data !== null
+            ? {
+                ...(entry.data as Record<string, unknown>),
+                _replay: true,
+                _ts: entry.timestamp,
+              }
+            : entry.data;
         send(entry.event, replayData, entry.id);
       }
       send('replay:done', { count: buffered.length });
@@ -1863,6 +2198,7 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
           CHANNEL_STATUS: 'channel:status',
           CONTAINER_LOG: 'container:log',
           CONTAINER_OUTPUT: 'container:output',
+          PAPER_TRADE_UPDATE: 'paper-trade:update',
         },
       )) {
         const fn = listener(eventName);
@@ -1886,9 +2222,13 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
         const config = getAllAccountConfig();
         let wallet: unknown = null;
         try {
-          const { stdout } = await deps.execPolymarketCli('wallet show -o json');
+          const { stdout } = await deps.execPolymarketCli(
+            'wallet show -o json',
+          );
           wallet = JSON.parse(stdout);
-        } catch { /* CLI not available or no wallet */ }
+        } catch {
+          /* CLI not available or no wallet */
+        }
         json(res, { config, wallet });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -1898,7 +2238,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
 
     if (pathname === '/api/account/wallet/create' && req.method === 'POST') {
       try {
-        const { stdout } = await deps.execPolymarketCli('wallet create -o json');
+        const { stdout } = await deps.execPolymarketCli(
+          'wallet create -o json',
+        );
         const result = JSON.parse(stdout);
         if (result.address) setAccountConfig('wallet_address', result.address);
         json(res, result);
@@ -1911,10 +2253,19 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
     if (pathname === '/api/account/wallet/import' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.privateKey) { json(res, { error: 'privateKey required' }, 400); return; }
-        const { stdout } = await deps.execPolymarketCli(`wallet import --private-key ${body.privateKey}`);
+        if (!body.privateKey) {
+          json(res, { error: 'privateKey required' }, 400);
+          return;
+        }
+        const { stdout } = await deps.execPolymarketCli(
+          `wallet import --private-key ${body.privateKey}`,
+        );
         let result: unknown;
-        try { result = JSON.parse(stdout); } catch { result = { output: stdout.trim() }; }
+        try {
+          result = JSON.parse(stdout);
+        } catch {
+          result = { output: stdout.trim() };
+        }
         json(res, result);
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -1934,7 +2285,9 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
 
     if (pathname === '/api/account/approve/check') {
       try {
-        const { stdout } = await deps.execPolymarketCli('approve check -o json');
+        const { stdout } = await deps.execPolymarketCli(
+          'approve check -o json',
+        );
         json(res, JSON.parse(stdout));
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -1970,14 +2323,19 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
             strategy: body.strategy,
             mode: body.mode,
             initial_capital: body.initial_capital,
-            risk_params: typeof body.risk_params === 'string' ? body.risk_params : JSON.stringify(body.risk_params),
+            risk_params:
+              typeof body.risk_params === 'string'
+                ? body.risk_params
+                : JSON.stringify(body.risk_params),
             schedule_type: body.schedule_type || null,
             schedule_value: body.schedule_value || null,
             notes: body.notes || null,
           });
           json(res, { id: body.id, updated: true });
         } else {
-          const id = body.id || `preset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const id =
+            body.id ||
+            `preset-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
           createPreset({
             id,
             name: body.name,
@@ -1985,7 +2343,10 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
             strategy: body.strategy,
             mode: body.mode || 'paper',
             initial_capital: body.initial_capital ?? 10000,
-            risk_params: typeof body.risk_params === 'string' ? body.risk_params : JSON.stringify(body.risk_params || {}),
+            risk_params:
+              typeof body.risk_params === 'string'
+                ? body.risk_params
+                : JSON.stringify(body.risk_params || {}),
             schedule_type: body.schedule_type || null,
             schedule_value: body.schedule_value || null,
             notes: body.notes || null,
@@ -2003,7 +2364,10 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
     if (pathname === '/api/trading/presets/delete' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.id) { json(res, { error: 'id required' }, 400); return; }
+        if (!body.id) {
+          json(res, { error: 'id required' }, 400);
+          return;
+        }
         deletePreset(body.id);
         json(res, { deleted: true });
       } catch (err: any) {
@@ -2031,12 +2395,18 @@ export function startMonitorServer(deps: MonitorDeps): http.Server {
         let strategy = body.strategy;
         let mode = body.mode || 'paper';
         let initialCapital = body.initial_capital ?? 10000;
-        let riskParams = typeof body.risk_params === 'string' ? body.risk_params : JSON.stringify(body.risk_params || {});
+        let riskParams =
+          typeof body.risk_params === 'string'
+            ? body.risk_params
+            : JSON.stringify(body.risk_params || {});
         let presetId: string | null = null;
 
         if (body.preset_id) {
           const preset = getPresetById(body.preset_id);
-          if (!preset) { json(res, { error: 'Preset not found' }, 404); return; }
+          if (!preset) {
+            json(res, { error: 'Preset not found' }, 404);
+            return;
+          }
           platform = preset.platform;
           strategy = preset.strategy;
           mode = preset.mode;
@@ -2098,7 +2468,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         // Create a scheduled task to execute it
         const mainJid = deps.getMainGroupJid();
         if (!mainJid) {
-          updateRun(runId, { status: 'failed', error: 'No main group configured', completed_at: now });
+          updateRun(runId, {
+            status: 'failed',
+            error: 'No main group configured',
+            completed_at: now,
+          });
           json(res, { error: 'No main group configured' }, 500);
           return;
         }
@@ -2128,13 +2502,22 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/runs/stop' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.id) { json(res, { error: 'id required' }, 400); return; }
+        if (!body.id) {
+          json(res, { error: 'id required' }, 400);
+          return;
+        }
         const run = getRunById(body.id);
-        if (!run) { json(res, { error: 'Run not found' }, 404); return; }
+        if (!run) {
+          json(res, { error: 'Run not found' }, 404);
+          return;
+        }
         if (run.task_id) {
           deps.updateTaskStatus(run.task_id, 'completed');
         }
-        updateRun(body.id, { status: 'stopped', completed_at: new Date().toISOString() });
+        updateRun(body.id, {
+          status: 'stopped',
+          completed_at: new Date().toISOString(),
+        });
         json(res, { stopped: true });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -2147,15 +2530,21 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/evaluations') {
       const query = parseQuery(url);
       const ids = (query.ids || '').split(',').filter(Boolean);
-      if (ids.length === 0) { json(res, []); return; }
-      const runs = ids.map(id => getRunById(id)).filter(Boolean);
+      if (ids.length === 0) {
+        json(res, []);
+        return;
+      }
+      const runs = ids.map((id) => getRunById(id)).filter(Boolean);
       json(res, runs);
       return;
     }
 
     // --- Market Watcher endpoints ---
 
-    if (pathname === '/api/trading/watch/find-markets' && req.method === 'POST') {
+    if (
+      pathname === '/api/trading/watch/find-markets' &&
+      req.method === 'POST'
+    ) {
       try {
         const body = JSON.parse(await readBody(req));
         const query = (body.query || 'bitcoin').toLowerCase();
@@ -2170,24 +2559,41 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
             const events = await fetchJsonHost<any[]>(
               `${GAMMA_BASE}/events?limit=100&active=true&closed=false`,
             );
-            for (const event of (events || [])) {
-              for (const m of (event.markets || [])) {
-                const searchText = ((m.question || '') + ' ' + (m.groupItemTitle || '') + ' ' + (event.title || '')).toLowerCase();
+            for (const event of events || []) {
+              for (const m of event.markets || []) {
+                const searchText = (
+                  (m.question || '') +
+                  ' ' +
+                  (m.groupItemTitle || '') +
+                  ' ' +
+                  (event.title || '')
+                ).toLowerCase();
                 if (!searchText.includes(query)) continue;
 
                 let tokenIds: string[] = [];
                 let outcomes: string[] = [];
                 try {
-                  tokenIds = typeof m.clobTokenIds === 'string' ? JSON.parse(m.clobTokenIds) : m.clobTokenIds || [];
-                  outcomes = typeof m.outcomes === 'string' ? JSON.parse(m.outcomes) : m.outcomes || [];
-                } catch { /* skip */ }
+                  tokenIds =
+                    typeof m.clobTokenIds === 'string'
+                      ? JSON.parse(m.clobTokenIds)
+                      : m.clobTokenIds || [];
+                  outcomes =
+                    typeof m.outcomes === 'string'
+                      ? JSON.parse(m.outcomes)
+                      : m.outcomes || [];
+                } catch {
+                  /* skip */
+                }
 
                 polyResults.push({
                   platform: 'polymarket',
                   id: m.id || m.conditionId,
                   question: m.question || m.title || '',
                   slug: m.slug || '',
-                  tokens: tokenIds.map((id: string, i: number) => ({ token_id: id, outcome: outcomes[i] || `Outcome ${i}` })),
+                  tokens: tokenIds.map((id: string, i: number) => ({
+                    token_id: id,
+                    outcome: outcomes[i] || `Outcome ${i}`,
+                  })),
                   volume: parseFloat(m.volume || '0'),
                   endDate: m.endDate || m.end_date_iso || null,
                   eventTitle: event.title || '',
@@ -2239,25 +2645,31 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           try {
             // Map common search terms to known Kalshi series tickers
             const seriesMap: Record<string, string> = {
-              bitcoin: 'KXBTC', btc: 'KXBTC',
-              ethereum: 'KXETH', eth: 'KXETH',
-              nasdaq: 'KXNASDAQ', spy: 'KXSPY', sp500: 'KXSPY',
+              bitcoin: 'KXBTC',
+              btc: 'KXBTC',
+              ethereum: 'KXETH',
+              eth: 'KXETH',
+              nasdaq: 'KXNASDAQ',
+              spy: 'KXSPY',
+              sp500: 'KXSPY',
             };
             const seriesTicker = seriesMap[query] || '';
 
             let eventsPath = `/events?status=open&with_nested_markets=true&limit=200`;
             if (seriesTicker) eventsPath += `&series_ticker=${seriesTicker}`;
 
-            const data = await kalshiFetch<{ events: KalshiEvent[] }>(eventsPath);
+            const data = await kalshiFetch<{ events: KalshiEvent[] }>(
+              eventsPath,
+            );
 
-            for (const event of (data.events || [])) {
+            for (const event of data.events || []) {
               // If no series filter, filter by text match
               if (!seriesTicker) {
                 const searchText = (event.title || '').toLowerCase();
                 if (!searchText.includes(query)) continue;
               }
 
-              for (const m of (event.markets || [])) {
+              for (const m of event.markets || []) {
                 if (m.status !== 'active') continue;
                 kalshiResults.push({
                   platform: 'kalshi',
@@ -2298,7 +2710,12 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         // Detect group mode: token_ids can be empty if group_mode is set
         const groupMode = body.group_mode; // 'btc-updown-5m' or 'btc-updown-15m'
-        if (!groupMode && (!body.token_ids || !Array.isArray(body.token_ids) || body.token_ids.length === 0)) {
+        if (
+          !groupMode &&
+          (!body.token_ids ||
+            !Array.isArray(body.token_ids) ||
+            body.token_ids.length === 0)
+        ) {
           json(res, { error: 'token_ids array or group_mode required' }, 400);
           return;
         }
@@ -2308,17 +2725,23 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         const durationMs = body.duration_ms || 3600000;
 
         // For group mode, force interval to match the market rotation
-        if (groupMode === 'btc-updown-5m') intervalMs = 60000;   // poll every 1min for 5m markets
-        if (groupMode === 'btc-updown-15m') intervalMs = 60000;  // poll every 1min for 15m markets
+        if (groupMode === 'btc-updown-5m') intervalMs = 60000; // poll every 1min for 5m markets
+        if (groupMode === 'btc-updown-15m') intervalMs = 60000; // poll every 1min for 15m markets
 
         const id = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const watcher = {
           id,
-          name: body.name || (groupMode ? `BTC Up/Down ${groupMode.includes('5m') ? '5m' : '15m'} Watch` : `Watcher ${new Date().toLocaleString()}`),
+          name:
+            body.name ||
+            (groupMode
+              ? `BTC Up/Down ${groupMode.includes('5m') ? '5m' : '15m'} Watch`
+              : `Watcher ${new Date().toLocaleString()}`),
           token_ids: JSON.stringify(body.token_ids || []),
           market_slugs: groupMode
             ? JSON.stringify([groupMode])
-            : (body.market_slugs ? JSON.stringify(body.market_slugs) : null),
+            : body.market_slugs
+              ? JSON.stringify(body.market_slugs)
+              : null,
           interval_ms: intervalMs,
           duration_ms: durationMs,
           started_at: now.toISOString(),
@@ -2328,7 +2751,12 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         };
         createWatcher(watcher);
         startWatcherInterval(id);
-        json(res, { id, started: true, expires_at: watcher.expires_at, group_mode: groupMode || null });
+        json(res, {
+          id,
+          started: true,
+          expires_at: watcher.expires_at,
+          group_mode: groupMode || null,
+        });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
       }
@@ -2338,7 +2766,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/watch/stop' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.id) { json(res, { error: 'id required' }, 400); return; }
+        if (!body.id) {
+          json(res, { error: 'id required' }, 400);
+          return;
+        }
         clearWatcherInterval(body.id);
         updateWatcher(body.id, { status: 'stopped' });
         json(res, { stopped: true });
@@ -2351,14 +2782,24 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/watch/status') {
       const query = parseQuery(url);
       const watchers = getAllWatchers(query.status || undefined);
-      const result = watchers.map(w => ({
+      const result = watchers.map((w) => ({
         ...w,
         token_ids: JSON.parse(w.token_ids),
         market_slugs: w.market_slugs ? JSON.parse(w.market_slugs) : [],
         is_running: activeWatchers.has(w.id),
-        progress: w.status === 'active'
-          ? Math.min(100, Math.round((Date.now() - new Date(w.started_at).getTime()) / w.duration_ms * 100))
-          : w.status === 'completed' ? 100 : 0,
+        progress:
+          w.status === 'active'
+            ? Math.min(
+                100,
+                Math.round(
+                  ((Date.now() - new Date(w.started_at).getTime()) /
+                    w.duration_ms) *
+                    100,
+                ),
+              )
+            : w.status === 'completed'
+              ? 100
+              : 0,
       }));
       json(res, result);
       return;
@@ -2366,22 +2807,41 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
     if (pathname === '/api/trading/watch/data/summary') {
       const query = parseQuery(url);
-      if (!query.watcher_id) { json(res, { error: 'watcher_id required' }, 400); return; }
+      if (!query.watcher_id) {
+        json(res, { error: 'watcher_id required' }, 400);
+        return;
+      }
       try {
         const allData = getRecordedData(query.watcher_id);
         if (allData.length === 0) {
-          json(res, { total_points: 0, first_timestamp: null, last_timestamp: null, unique_markets: 0, outcomes: {} });
+          json(res, {
+            total_points: 0,
+            first_timestamp: null,
+            last_timestamp: null,
+            unique_markets: 0,
+            outcomes: {},
+          });
           return;
         }
-        const outcomes: Record<string, { count: number; min: number; max: number; sum: number }> = {};
+        const outcomes: Record<
+          string,
+          { count: number; min: number; max: number; sum: number }
+        > = {};
         const marketSlugs = new Set<string>();
         for (const d of allData) {
           let meta: any = {};
-          try { meta = JSON.parse(d.metadata || '{}'); } catch {}
+          try {
+            meta = JSON.parse(d.metadata || '{}');
+          } catch {}
           if (meta.market_slug) marketSlugs.add(meta.market_slug);
           const outcome = meta.outcome || 'Unknown';
           if (!outcomes[outcome]) {
-            outcomes[outcome] = { count: 0, min: d.price, max: d.price, sum: 0 };
+            outcomes[outcome] = {
+              count: 0,
+              min: d.price,
+              max: d.price,
+              sum: 0,
+            };
           }
           const o = outcomes[outcome];
           o.count++;
@@ -2389,9 +2849,17 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           if (d.price < o.min) o.min = d.price;
           if (d.price > o.max) o.max = d.price;
         }
-        const outcomeStats: Record<string, { count: number; min: number; max: number; avg: number }> = {};
+        const outcomeStats: Record<
+          string,
+          { count: number; min: number; max: number; avg: number }
+        > = {};
         for (const [k, v] of Object.entries(outcomes)) {
-          outcomeStats[k] = { count: v.count, min: v.min, max: v.max, avg: v.sum / v.count };
+          outcomeStats[k] = {
+            count: v.count,
+            min: v.min,
+            max: v.max,
+            avg: v.sum / v.count,
+          };
         }
         json(res, {
           total_points: allData.length,
@@ -2408,11 +2876,20 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
     if (pathname === '/api/trading/watch/data') {
       const query = parseQuery(url);
-      if (!query.watcher_id) { json(res, { error: 'watcher_id required' }, 400); return; }
+      if (!query.watcher_id) {
+        json(res, { error: 'watcher_id required' }, 400);
+        return;
+      }
       const limit = query.limit ? parseInt(query.limit, 10) : undefined;
       const offset = query.offset ? parseInt(query.offset, 10) : undefined;
       const order = query.order === 'DESC' ? 'DESC' : 'ASC';
-      const data = getRecordedData(query.watcher_id, query.token_id || undefined, limit, offset, order);
+      const data = getRecordedData(
+        query.watcher_id,
+        query.token_id || undefined,
+        limit,
+        offset,
+        order,
+      );
       json(res, data);
       return;
     }
@@ -2422,20 +2899,36 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/optimize' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.watcher_id) { json(res, { error: 'watcher_id required' }, 400); return; }
-
-        const watcher = getWatcher(body.watcher_id);
-        if (!watcher) { json(res, { error: 'Watcher not found' }, 404); return; }
-
-        // Get recorded data
-        const tokenIds: string[] = body.token_ids || JSON.parse(watcher.token_ids);
-        const allData = getRecordedData(body.watcher_id, tokenIds[0]);
-        if (allData.length < 20) {
-          json(res, { error: `Not enough data points (${allData.length}). Need at least 20.` }, 400);
+        if (!body.watcher_id) {
+          json(res, { error: 'watcher_id required' }, 400);
           return;
         }
 
-        const dataPoints = allData.map(d => ({ price: d.price, timestamp: d.timestamp }));
+        const watcher = getWatcher(body.watcher_id);
+        if (!watcher) {
+          json(res, { error: 'Watcher not found' }, 404);
+          return;
+        }
+
+        // Get recorded data
+        const tokenIds: string[] =
+          body.token_ids || JSON.parse(watcher.token_ids);
+        const allData = getRecordedData(body.watcher_id, tokenIds[0]);
+        if (allData.length < 20) {
+          json(
+            res,
+            {
+              error: `Not enough data points (${allData.length}). Need at least 20.`,
+            },
+            400,
+          );
+          return;
+        }
+
+        const dataPoints = allData.map((d) => ({
+          price: d.price,
+          timestamp: d.timestamp,
+        }));
         const initialCapital = body.initial_capital || 1000;
         const optimizeFor: string = body.optimize_for || 'sharpe_ratio';
 
@@ -2450,11 +2943,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         const results: Array<{ params: OptimizerParams; metrics: any }> = [];
 
-        for (const rsiOS of (ranges.rsi_oversold || [25])) {
-          for (const rsiOB of (ranges.rsi_overbought || [75])) {
-            for (const maxPos of (ranges.max_position_size || [10])) {
-              for (const minConf of (ranges.min_confidence || [60])) {
-                for (const timeStop of (ranges.time_stop_intervals || [12])) {
+        for (const rsiOS of ranges.rsi_oversold || [25]) {
+          for (const rsiOB of ranges.rsi_overbought || [75]) {
+            for (const maxPos of ranges.max_position_size || [10]) {
+              for (const minConf of ranges.min_confidence || [60]) {
+                for (const timeStop of ranges.time_stop_intervals || [12]) {
                   const params: OptimizerParams = {
                     rsi_oversold: rsiOS,
                     rsi_overbought: rsiOB,
@@ -2462,7 +2955,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
                     min_confidence: minConf,
                     time_stop_intervals: timeStop,
                   };
-                  const metrics = runSingleBacktest(dataPoints, params, initialCapital);
+                  const metrics = runSingleBacktest(
+                    dataPoints,
+                    params,
+                    initialCapital,
+                  );
                   results.push({ params, metrics });
                 }
               }
@@ -2473,7 +2970,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         // Sort by target metric
         results.sort((a, b) => {
           if (optimizeFor === 'pnl') return b.metrics.pnl - a.metrics.pnl;
-          if (optimizeFor === 'win_rate') return (b.metrics.wins / (b.metrics.trades || 1)) - (a.metrics.wins / (a.metrics.trades || 1));
+          if (optimizeFor === 'win_rate')
+            return (
+              b.metrics.wins / (b.metrics.trades || 1) -
+              a.metrics.wins / (a.metrics.trades || 1)
+            );
           return b.metrics.sharpeRatio - a.metrics.sharpeRatio; // default: sharpe
         });
 
@@ -2481,11 +2982,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           rank: rank + 1,
           params: r.params,
           pnl: r.metrics.pnl,
-          pnl_pct: (r.metrics.pnl / initialCapital * 100),
+          pnl_pct: (r.metrics.pnl / initialCapital) * 100,
           trades: r.metrics.trades,
           wins: r.metrics.wins,
-          win_rate: r.metrics.trades > 0 ? (r.metrics.wins / r.metrics.trades * 100) : 0,
-          max_drawdown: (r.metrics.maxDrawdown * 100),
+          win_rate:
+            r.metrics.trades > 0
+              ? (r.metrics.wins / r.metrics.trades) * 100
+              : 0,
+          max_drawdown: r.metrics.maxDrawdown * 100,
           sharpe_ratio: r.metrics.sharpeRatio,
         }));
 
@@ -2501,7 +3005,12 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           created_at: new Date().toISOString(),
         });
 
-        json(res, { id: optId, total_combinations: results.length, data_points: dataPoints.length, top10 });
+        json(res, {
+          id: optId,
+          total_combinations: results.length,
+          data_points: dataPoints.length,
+          top10,
+        });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
       }
@@ -2512,8 +3021,15 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
       const query = parseQuery(url);
       if (query.id) {
         const result = getOptimizationResult(query.id);
-        if (!result) { json(res, { error: 'Not found' }, 404); return; }
-        json(res, { ...result, results: JSON.parse(result.results), param_ranges: JSON.parse(result.param_ranges) });
+        if (!result) {
+          json(res, { error: 'Not found' }, 404);
+          return;
+        }
+        json(res, {
+          ...result,
+          results: JSON.parse(result.results),
+          param_ranges: JSON.parse(result.param_ranges),
+        });
       } else {
         const results = getOptimizationResults(query.watcher_id || undefined);
         json(res, results);
@@ -2552,7 +3068,7 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           path += `&min_close_ts=${Math.floor(Date.now() / 1000)}`;
         }
         const data = await kalshiFetch<{ markets: KalshiMarket[] }>(path);
-        const markets = (data.markets || []).map(m => ({
+        const markets = (data.markets || []).map((m) => ({
           ticker: m.ticker,
           event_ticker: m.event_ticker,
           yes_sub_title: m.yes_sub_title,
@@ -2564,7 +3080,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           open_interest: m.open_interest,
           status: m.status,
           close_time: m.close_time,
-          midpoint: m.yes_bid > 0 && m.yes_ask > 0 ? (m.yes_bid + m.yes_ask) / 2 : m.last_price,
+          midpoint:
+            m.yes_bid > 0 && m.yes_ask > 0
+              ? (m.yes_bid + m.yes_ask) / 2
+              : m.last_price,
         }));
         // Sort by volume descending
         markets.sort((a, b) => (b.volume || 0) - (a.volume || 0));
@@ -2578,7 +3097,9 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname?.startsWith('/api/trading/kalshi/market/')) {
       try {
         const ticker = pathname.split('/').pop()!;
-        const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${ticker}`);
+        const data = await kalshiFetch<{ market: KalshiMarket }>(
+          `/markets/${ticker}`,
+        );
         json(res, data.market);
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -2593,11 +3114,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           json(res, { error: 'ticker and series_ticker required' }, 400);
           return;
         }
-        const startTs = query.start_ts || Math.floor((Date.now() - 86400000) / 1000);
+        const startTs =
+          query.start_ts || Math.floor((Date.now() - 86400000) / 1000);
         const endTs = query.end_ts || Math.floor(Date.now() / 1000);
         const period = query.period || '60'; // 1=1min, 60=1hr, 1440=1day
         const path = `/series/${query.series_ticker}/markets/${query.ticker}/candlesticks?start_ts=${startTs}&end_ts=${endTs}&period_interval=${period}`;
-        const data = await kalshiFetch<{ ticker: string; candlesticks: any[] }>(path);
+        const data = await kalshiFetch<{ ticker: string; candlesticks: any[] }>(
+          path,
+        );
         json(res, data);
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -2614,9 +3138,13 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         // Map search terms to Kalshi series tickers
         const seriesMap: Record<string, string> = {
-          bitcoin: 'KXBTC', btc: 'KXBTC',
-          ethereum: 'KXETH', eth: 'KXETH',
-          nasdaq: 'KXNASDAQ', spy: 'KXSPY', sp500: 'KXSPY',
+          bitcoin: 'KXBTC',
+          btc: 'KXBTC',
+          ethereum: 'KXETH',
+          eth: 'KXETH',
+          nasdaq: 'KXNASDAQ',
+          spy: 'KXSPY',
+          sp500: 'KXSPY',
         };
         const seriesTicker = seriesMap[query] || '';
         let kalshiPath = `/events?status=open&with_nested_markets=true&limit=200`;
@@ -2624,8 +3152,12 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         // Fetch both platforms in parallel
         const [polyEvents, kalshiData] = await Promise.all([
-          fetchJsonHost<any[]>(`${GAMMA_BASE}/events?limit=100&active=true&closed=false`).catch(() => []),
-          kalshiFetch<{ events: KalshiEvent[] }>(kalshiPath).catch(() => ({ events: [] })),
+          fetchJsonHost<any[]>(
+            `${GAMMA_BASE}/events?limit=100&active=true&closed=false`,
+          ).catch(() => []),
+          kalshiFetch<{ events: KalshiEvent[] }>(kalshiPath).catch(() => ({
+            events: [],
+          })),
         ]);
 
         // Extract Polymarket markets matching query
@@ -2637,19 +3169,34 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           eventTitle: string;
           midPrice?: number;
         }> = [];
-        for (const event of (polyEvents || [])) {
-          for (const m of (event.markets || [])) {
-            const searchText = ((m.question || '') + ' ' + (event.title || '')).toLowerCase();
+        for (const event of polyEvents || []) {
+          for (const m of event.markets || []) {
+            const searchText = (
+              (m.question || '') +
+              ' ' +
+              (event.title || '')
+            ).toLowerCase();
             if (!searchText.includes(query)) continue;
             let tokenIds: string[] = [];
             let outcomes: string[] = [];
             try {
-              tokenIds = typeof m.clobTokenIds === 'string' ? JSON.parse(m.clobTokenIds) : m.clobTokenIds || [];
-              outcomes = typeof m.outcomes === 'string' ? JSON.parse(m.outcomes) : m.outcomes || [];
-            } catch { /* skip */ }
+              tokenIds =
+                typeof m.clobTokenIds === 'string'
+                  ? JSON.parse(m.clobTokenIds)
+                  : m.clobTokenIds || [];
+              outcomes =
+                typeof m.outcomes === 'string'
+                  ? JSON.parse(m.outcomes)
+                  : m.outcomes || [];
+            } catch {
+              /* skip */
+            }
             polyMarkets.push({
               question: m.question || '',
-              tokens: tokenIds.map((id: string, i: number) => ({ token_id: id, outcome: outcomes[i] || `Outcome ${i}` })),
+              tokens: tokenIds.map((id: string, i: number) => ({
+                token_id: id,
+                outcome: outcomes[i] || `Outcome ${i}`,
+              })),
               volume: parseFloat(m.volume || '0'),
               endDate: m.endDate || null,
               eventTitle: event.title || '',
@@ -2659,12 +3206,16 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         // Get midprices for top Polymarket markets
         for (const pm of polyMarkets.slice(0, 20)) {
-          const yesToken = pm.tokens.find(t => t.outcome === 'Yes');
+          const yesToken = pm.tokens.find((t) => t.outcome === 'Yes');
           if (yesToken) {
             try {
-              const mid = await fetchJsonHost<{ mid: string }>(`${CLOB_BASE}/midpoint?token_id=${yesToken.token_id}`);
+              const mid = await fetchJsonHost<{ mid: string }>(
+                `${CLOB_BASE}/midpoint?token_id=${yesToken.token_id}`,
+              );
               pm.midPrice = parseFloat(mid.mid);
-            } catch { /* skip */ }
+            } catch {
+              /* skip */
+            }
           }
         }
 
@@ -2682,13 +3233,13 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           eventTitle: string;
           midpoint: number;
         }> = [];
-        for (const event of (kalshiData.events || [])) {
+        for (const event of kalshiData.events || []) {
           // If no series filter, filter by text
           if (!seriesTicker) {
             const searchText = (event.title || '').toLowerCase();
             if (!searchText.includes(query)) continue;
           }
-          for (const m of (event.markets || [])) {
+          for (const m of event.markets || []) {
             if (m.status !== 'active') continue;
             kalshiMarkets.push({
               ticker: m.ticker,
@@ -2701,26 +3252,70 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
               volume: m.volume || 0,
               close_time: m.close_time,
               eventTitle: event.title || '',
-              midpoint: m.yes_bid > 0 && m.yes_ask > 0 ? (m.yes_bid + m.yes_ask) / 2 / 100 : (m.last_price || 0) / 100,
+              midpoint:
+                m.yes_bid > 0 && m.yes_ask > 0
+                  ? (m.yes_bid + m.yes_ask) / 2 / 100
+                  : (m.last_price || 0) / 100,
             });
           }
         }
 
         // --- Cross-platform edge finding ---
         // Strategy: normalize questions to keywords, match markets that share enough keywords
-        const stopWords = new Set(['the', 'and', 'will', 'for', 'this', 'that', 'with', 'has', 'have', 'are', 'was',
-          'been', 'any', 'not', 'yes', 'before', 'after', 'more', 'than', 'above', 'below', 'price', 'range',
-          'market', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
-          '2024', '2025', '2026', '2027', '2028', '2029', '2030',
+        const stopWords = new Set([
+          'the',
+          'and',
+          'will',
+          'for',
+          'this',
+          'that',
+          'with',
+          'has',
+          'have',
+          'are',
+          'was',
+          'been',
+          'any',
+          'not',
+          'yes',
+          'before',
+          'after',
+          'more',
+          'than',
+          'above',
+          'below',
+          'price',
+          'range',
+          'market',
+          'feb',
+          'mar',
+          'apr',
+          'may',
+          'jun',
+          'jul',
+          'aug',
+          'sep',
+          'oct',
+          'nov',
+          'dec',
+          '2024',
+          '2025',
+          '2026',
+          '2027',
+          '2028',
+          '2029',
+          '2030',
           // Also exclude the search query itself — it matches everything
-          ...query.split(/\s+/)]);
+          ...query.split(/\s+/),
+        ]);
 
         function extractKeywords(text: string): Set<string> {
           return new Set(
-            text.toLowerCase()
+            text
+              .toLowerCase()
               .replace(/[^a-z0-9\s]/g, ' ')
               .split(/\s+/)
-              .filter(w => w.length > 3 && !stopWords.has(w))
+              .filter((w) => w.length > 3 && !stopWords.has(w)),
           );
         }
 
@@ -2731,18 +3326,29 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         }
 
         const comparisons: Array<{
-          polymarket: { question: string; midPrice: number; volume: number; endDate: string | null };
-          kalshi: { ticker: string; question: string; midpoint: number; volume: number; close_time: string };
+          polymarket: {
+            question: string;
+            midPrice: number;
+            volume: number;
+            endDate: string | null;
+          };
+          kalshi: {
+            ticker: string;
+            question: string;
+            midpoint: number;
+            volume: number;
+            close_time: string;
+          };
           priceDelta: number;
           priceDeltaPct: number;
           edgeDirection: string;
           matchScore: number;
         }> = [];
 
-        for (const pm of polyMarkets.filter(p => p.midPrice !== undefined)) {
+        for (const pm of polyMarkets.filter((p) => p.midPrice !== undefined)) {
           const polyKw = extractKeywords(pm.question + ' ' + pm.eventTitle);
 
-          for (const km of kalshiMarkets.filter(m => m.volume > 0)) {
+          for (const km of kalshiMarkets.filter((m) => m.volume > 0)) {
             const kalshiKw = extractKeywords(km.question + ' ' + km.eventTitle);
             const overlap = keywordOverlap(polyKw, kalshiKw);
             // Require at least 3 meaningful keyword matches (excluding common/stop words)
@@ -2755,22 +3361,42 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
             const deltaPct = avgPrice > 0 ? (delta / avgPrice) * 100 : 0;
 
             comparisons.push({
-              polymarket: { question: pm.question, midPrice: polyPrice, volume: pm.volume, endDate: pm.endDate },
-              kalshi: { ticker: km.ticker, question: km.question, midpoint: kalshiPrice, volume: km.volume, close_time: km.close_time },
+              polymarket: {
+                question: pm.question,
+                midPrice: polyPrice,
+                volume: pm.volume,
+                endDate: pm.endDate,
+              },
+              kalshi: {
+                ticker: km.ticker,
+                question: km.question,
+                midpoint: kalshiPrice,
+                volume: km.volume,
+                close_time: km.close_time,
+              },
               priceDelta: delta,
               priceDeltaPct: deltaPct,
-              edgeDirection: Math.abs(deltaPct) < 3 ? 'neutral' : delta > 0 ? 'buy_kalshi' : 'buy_poly',
+              edgeDirection:
+                Math.abs(deltaPct) < 3
+                  ? 'neutral'
+                  : delta > 0
+                    ? 'buy_kalshi'
+                    : 'buy_poly',
               matchScore: overlap,
             });
           }
         }
 
         // Sort by match score (quality) then by absolute delta
-        comparisons.sort((a, b) => b.matchScore - a.matchScore || Math.abs(b.priceDeltaPct) - Math.abs(a.priceDeltaPct));
+        comparisons.sort(
+          (a, b) =>
+            b.matchScore - a.matchScore ||
+            Math.abs(b.priceDeltaPct) - Math.abs(a.priceDeltaPct),
+        );
 
         // Deduplicate: keep best match per Polymarket question
         const seen = new Set<string>();
-        const deduped = comparisons.filter(c => {
+        const deduped = comparisons.filter((c) => {
           const key = c.polymarket.question + '|' + c.kalshi.ticker;
           if (seen.has(key)) return false;
           seen.add(key);
@@ -2779,25 +3405,29 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
         json(res, {
           comparisons: deduped.slice(0, 30),
-          polymarket: polyMarkets.slice(0, 20).map(pm => ({
+          polymarket: polyMarkets.slice(0, 20).map((pm) => ({
             question: pm.question,
             midPrice: pm.midPrice,
             volume: pm.volume,
             endDate: pm.endDate,
           })),
-          kalshi: kalshiMarkets.filter(m => m.volume > 0).slice(0, 20).map(km => ({
-            ticker: km.ticker,
-            question: km.question,
-            midpoint: km.midpoint,
-            volume: km.volume,
-            close_time: km.close_time,
-          })),
+          kalshi: kalshiMarkets
+            .filter((m) => m.volume > 0)
+            .slice(0, 20)
+            .map((km) => ({
+              ticker: km.ticker,
+              question: km.question,
+              midpoint: km.midpoint,
+              volume: km.volume,
+              close_time: km.close_time,
+            })),
           polymarket_count: polyMarkets.length,
           kalshi_count: kalshiMarkets.length,
           matched: deduped.length,
-          summary: deduped.length > 0
-            ? `Found ${deduped.length} potential matches across platforms.`
-            : `No matching markets found. Polymarket has ${polyMarkets.length} markets, Kalshi has ${kalshiMarkets.filter(m => m.volume > 0).length} active markets for "${query}".`,
+          summary:
+            deduped.length > 0
+              ? `Found ${deduped.length} potential matches across platforms.`
+              : `No matching markets found. Polymarket has ${polyMarkets.length} markets, Kalshi has ${kalshiMarkets.filter((m) => m.volume > 0).length} active markets for "${query}".`,
         });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -2816,12 +3446,24 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/paper' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.ticker || !body.side || !body.action || !body.qty || !body.entry_price) {
-          json(res, { error: 'ticker, side, action, qty, and entry_price required' }, 400);
+        if (
+          !body.ticker ||
+          !body.side ||
+          !body.action ||
+          !body.qty ||
+          !body.entry_price
+        ) {
+          json(
+            res,
+            { error: 'ticker, side, action, qty, and entry_price required' },
+            400,
+          );
           return;
         }
         const now = new Date().toISOString();
-        const id = body.id || `pt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const id =
+          body.id ||
+          `pt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         createPaperTrade({
           id,
           ticker: body.ticker,
@@ -2841,6 +3483,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           created_at: now,
           settled_at: null,
         });
+        monitorBus.emit('paper-trade:update', {
+          action: 'created',
+          id,
+          ticker: body.ticker,
+        });
         json(res, { id, created: true });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -2852,17 +3499,35 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
       try {
         const body = JSON.parse(await readBody(req));
         if (!body.id || !body.status) {
-          json(res, { error: 'id and status (won/lost/cancelled) required' }, 400);
+          json(
+            res,
+            { error: 'id and status (won/lost/cancelled) required' },
+            400,
+          );
           return;
         }
         const trade = getPaperTradeById(body.id);
-        if (!trade) { json(res, { error: 'Trade not found' }, 404); return; }
+        if (!trade) {
+          json(res, { error: 'Trade not found' }, 404);
+          return;
+        }
         const now = new Date().toISOString();
-        const exitPrice = body.exit_price ?? (body.status === 'won' ? 100 : body.status === 'lost' ? 0 : trade.entry_price);
+        const exitPrice =
+          body.exit_price ??
+          (body.status === 'won'
+            ? 100
+            : body.status === 'lost'
+              ? 0
+              : trade.entry_price);
         updatePaperTrade(body.id, {
           status: body.status,
           exit_price: exitPrice,
           settled_at: now,
+        });
+        monitorBus.emit('paper-trade:update', {
+          action: 'settled',
+          id: body.id,
+          status: body.status,
         });
         json(res, { settled: true, exit_price: exitPrice });
       } catch (err: any) {
@@ -2879,7 +3544,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           json(res, { deleted: true, count });
           return;
         }
-        if (!body.id) { json(res, { error: 'id or run_id required' }, 400); return; }
+        if (!body.id) {
+          json(res, { error: 'id or run_id required' }, 400);
+          return;
+        }
         deletePaperTrade(body.id);
         json(res, { deleted: true, count: 1 });
       } catch (err: any) {
@@ -2891,9 +3559,12 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/paper/portfolio') {
       try {
         const params = parseQuery(req.url || '');
-        const allTrades = getAllPaperTrades(undefined, params.run_id || undefined);
-        const openTrades = allTrades.filter(t => t.status === 'open');
-        const closedTrades = allTrades.filter(t => t.status !== 'open');
+        const allTrades = getAllPaperTrades(
+          undefined,
+          params.run_id || undefined,
+        );
+        const openTrades = allTrades.filter((t) => t.status === 'open');
+        const closedTrades = allTrades.filter((t) => t.status !== 'open');
 
         let totalPnl = 0;
         let winCount = 0;
@@ -2909,8 +3580,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           else if (t.status === 'lost') lossCount++;
         }
 
-        const totalInvested = allTrades.reduce((sum, t) => sum + t.entry_price * t.qty, 0);
-        const openExposure = openTrades.reduce((sum, t) => sum + t.entry_price * t.qty, 0);
+        const totalInvested = allTrades.reduce(
+          (sum, t) => sum + t.entry_price * t.qty,
+          0,
+        );
+        const openExposure = openTrades.reduce(
+          (sum, t) => sum + t.entry_price * t.qty,
+          0,
+        );
         const closedCount = winCount + lossCount;
         const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : 0;
 
@@ -2920,37 +3597,75 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         for (const t of openTrades) {
           let currentPrice: number | null = null;
           try {
-            const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${t.ticker}`);
+            const data = await kalshiFetch<{ market: KalshiMarket }>(
+              `/markets/${t.ticker}`,
+            );
             const m = data.market;
             if (t.side === 'yes') {
-              currentPrice = m.yes_bid > 0 && m.yes_ask > 0 ? Math.round((m.yes_bid + m.yes_ask) / 2) : m.last_price;
+              currentPrice =
+                m.yes_bid > 0 && m.yes_ask > 0
+                  ? Math.round((m.yes_bid + m.yes_ask) / 2)
+                  : m.last_price;
             } else {
-              currentPrice = m.no_bid > 0 && m.no_ask > 0 ? Math.round((m.no_bid + m.no_ask) / 2) : (m.last_price != null ? 100 - m.last_price : null);
+              currentPrice =
+                m.no_bid > 0 && m.no_ask > 0
+                  ? Math.round((m.no_bid + m.no_ask) / 2)
+                  : m.last_price != null
+                    ? 100 - m.last_price
+                    : null;
             }
-          } catch { /* market data unavailable */ }
+          } catch {
+            /* market data unavailable */
+          }
 
           let uPnl = 0;
           if (currentPrice !== null) {
             uPnl = (currentPrice - t.entry_price) * t.qty;
             unrealizedPnl += uPnl;
           }
-          openWithPrices.push({ ...t, current_price: currentPrice, unrealized_pnl: uPnl });
+          openWithPrices.push({
+            ...t,
+            current_price: currentPrice,
+            unrealized_pnl: uPnl,
+          });
         }
 
         // Build per-strategy breakdown
-        const byStrategy: Record<string, {
-          trades: number; wins: number; losses: number; win_rate: number;
-          pnl_cents: number; pnl: number; avg_entry: number; avg_return_pct: number;
-          open: number;
-        }> = {};
+        const byStrategy: Record<
+          string,
+          {
+            trades: number;
+            wins: number;
+            losses: number;
+            win_rate: number;
+            pnl_cents: number;
+            pnl: number;
+            avg_entry: number;
+            avg_return_pct: number;
+            open: number;
+          }
+        > = {};
         for (const t of allTrades) {
           const strat = t.strategy || 'uncategorized';
           if (!byStrategy[strat]) {
-            byStrategy[strat] = { trades: 0, wins: 0, losses: 0, win_rate: 0, pnl_cents: 0, pnl: 0, avg_entry: 0, avg_return_pct: 0, open: 0 };
+            byStrategy[strat] = {
+              trades: 0,
+              wins: 0,
+              losses: 0,
+              win_rate: 0,
+              pnl_cents: 0,
+              pnl: 0,
+              avg_entry: 0,
+              avg_return_pct: 0,
+              open: 0,
+            };
           }
           const s = byStrategy[strat];
           s.trades++;
-          if (t.status === 'open') { s.open++; continue; }
+          if (t.status === 'open') {
+            s.open++;
+            continue;
+          }
           if (t.exit_price === null) continue;
           const pnl = (t.exit_price - t.entry_price) * t.qty;
           s.pnl_cents += pnl;
@@ -2960,20 +3675,33 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         for (const [stratKey, s] of Object.entries(byStrategy)) {
           const closedInStrat = s.wins + s.losses;
           s.pnl = s.pnl_cents / 100;
-          s.win_rate = closedInStrat > 0 ? Math.round((s.wins / closedInStrat) * 1000) / 10 : 0;
+          s.win_rate =
+            closedInStrat > 0
+              ? Math.round((s.wins / closedInStrat) * 1000) / 10
+              : 0;
           // Compute avg entry and avg return from all trades in this strategy
-          const stratTrades = allTrades.filter(t => (t.strategy || 'uncategorized') === stratKey);
-          const closedStratTrades = stratTrades.filter(t => t.status !== 'open' && t.exit_price !== null);
-          s.avg_entry = stratTrades.length > 0
-            ? Math.round(stratTrades.reduce((sum, t) => sum + t.entry_price, 0) / stratTrades.length)
-            : 0;
+          const stratTrades = allTrades.filter(
+            (t) => (t.strategy || 'uncategorized') === stratKey,
+          );
+          const closedStratTrades = stratTrades.filter(
+            (t) => t.status !== 'open' && t.exit_price !== null,
+          );
+          s.avg_entry =
+            stratTrades.length > 0
+              ? Math.round(
+                  stratTrades.reduce((sum, t) => sum + t.entry_price, 0) /
+                    stratTrades.length,
+                )
+              : 0;
           if (closedStratTrades.length > 0) {
             const totalReturnPct = closedStratTrades.reduce((sum, t) => {
               const cost = t.entry_price * t.qty;
               const exitVal = (t.exit_price! - t.entry_price) * t.qty;
               return sum + (cost > 0 ? (exitVal / cost) * 100 : 0);
             }, 0);
-            s.avg_return_pct = Math.round(totalReturnPct / closedStratTrades.length);
+            s.avg_return_pct = Math.round(
+              totalReturnPct / closedStratTrades.length,
+            );
           }
         }
 
@@ -3006,8 +3734,15 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/live/portfolio') {
       try {
         const allTrades = getAllLiveTrades();
-        const openTrades = allTrades.filter(t => t.status === 'pending' || t.status === 'filled');
-        const closedTrades = allTrades.filter(t => t.status === 'settled' || t.status === 'cancelled' || t.status === 'failed');
+        const openTrades = allTrades.filter(
+          (t) => t.status === 'pending' || t.status === 'filled',
+        );
+        const closedTrades = allTrades.filter(
+          (t) =>
+            t.status === 'settled' ||
+            t.status === 'cancelled' ||
+            t.status === 'failed',
+        );
 
         let totalPnl = 0;
         let winCount = 0;
@@ -3021,8 +3756,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           else lossCount++;
         }
 
-        const totalInvested = allTrades.reduce((sum, t) => sum + t.entry_price * t.qty, 0);
-        const openExposure = openTrades.reduce((sum, t) => sum + t.entry_price * t.qty, 0);
+        const totalInvested = allTrades.reduce(
+          (sum, t) => sum + t.entry_price * t.qty,
+          0,
+        );
+        const openExposure = openTrades.reduce(
+          (sum, t) => sum + t.entry_price * t.qty,
+          0,
+        );
         const closedCount = winCount + lossCount;
         const winRate = closedCount > 0 ? (winCount / closedCount) * 100 : 0;
 
@@ -3032,37 +3773,75 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         for (const t of openTrades) {
           let currentPrice: number | null = null;
           try {
-            const data = await kalshiFetch<{ market: KalshiMarket }>(`/markets/${t.ticker}`);
+            const data = await kalshiFetch<{ market: KalshiMarket }>(
+              `/markets/${t.ticker}`,
+            );
             const m = data.market;
             if (t.side === 'yes') {
-              currentPrice = m.yes_bid > 0 && m.yes_ask > 0 ? Math.round((m.yes_bid + m.yes_ask) / 2) : m.last_price;
+              currentPrice =
+                m.yes_bid > 0 && m.yes_ask > 0
+                  ? Math.round((m.yes_bid + m.yes_ask) / 2)
+                  : m.last_price;
             } else {
-              currentPrice = m.no_bid > 0 && m.no_ask > 0 ? Math.round((m.no_bid + m.no_ask) / 2) : (m.last_price != null ? 100 - m.last_price : null);
+              currentPrice =
+                m.no_bid > 0 && m.no_ask > 0
+                  ? Math.round((m.no_bid + m.no_ask) / 2)
+                  : m.last_price != null
+                    ? 100 - m.last_price
+                    : null;
             }
-          } catch { /* market data unavailable */ }
+          } catch {
+            /* market data unavailable */
+          }
 
           let uPnl = 0;
           if (currentPrice !== null) {
             uPnl = (currentPrice - t.entry_price) * t.qty;
             unrealizedPnl += uPnl;
           }
-          openWithPrices.push({ ...t, current_price: currentPrice, unrealized_pnl: uPnl });
+          openWithPrices.push({
+            ...t,
+            current_price: currentPrice,
+            unrealized_pnl: uPnl,
+          });
         }
 
         // Build per-strategy breakdown
-        const byStrategy: Record<string, {
-          trades: number; wins: number; losses: number; win_rate: number;
-          pnl_cents: number; pnl: number; avg_entry: number; avg_return_pct: number;
-          open: number;
-        }> = {};
+        const byStrategy: Record<
+          string,
+          {
+            trades: number;
+            wins: number;
+            losses: number;
+            win_rate: number;
+            pnl_cents: number;
+            pnl: number;
+            avg_entry: number;
+            avg_return_pct: number;
+            open: number;
+          }
+        > = {};
         for (const t of allTrades) {
           const strat = t.strategy || 'uncategorized';
           if (!byStrategy[strat]) {
-            byStrategy[strat] = { trades: 0, wins: 0, losses: 0, win_rate: 0, pnl_cents: 0, pnl: 0, avg_entry: 0, avg_return_pct: 0, open: 0 };
+            byStrategy[strat] = {
+              trades: 0,
+              wins: 0,
+              losses: 0,
+              win_rate: 0,
+              pnl_cents: 0,
+              pnl: 0,
+              avg_entry: 0,
+              avg_return_pct: 0,
+              open: 0,
+            };
           }
           const s = byStrategy[strat];
           s.trades++;
-          if (t.status === 'pending' || t.status === 'filled') { s.open++; continue; }
+          if (t.status === 'pending' || t.status === 'filled') {
+            s.open++;
+            continue;
+          }
           if (t.exit_price === null || t.status !== 'settled') continue;
           const pnl = (t.exit_price - t.entry_price) * t.qty;
           s.pnl_cents += pnl;
@@ -3072,19 +3851,32 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         for (const [stratKey, s] of Object.entries(byStrategy)) {
           const closedInStrat = s.wins + s.losses;
           s.pnl = s.pnl_cents / 100;
-          s.win_rate = closedInStrat > 0 ? Math.round((s.wins / closedInStrat) * 1000) / 10 : 0;
-          const stratTrades = allTrades.filter(t => (t.strategy || 'uncategorized') === stratKey);
-          const closedStratTrades = stratTrades.filter(t => t.status === 'settled' && t.exit_price !== null);
-          s.avg_entry = stratTrades.length > 0
-            ? Math.round(stratTrades.reduce((sum, t) => sum + t.entry_price, 0) / stratTrades.length)
-            : 0;
+          s.win_rate =
+            closedInStrat > 0
+              ? Math.round((s.wins / closedInStrat) * 1000) / 10
+              : 0;
+          const stratTrades = allTrades.filter(
+            (t) => (t.strategy || 'uncategorized') === stratKey,
+          );
+          const closedStratTrades = stratTrades.filter(
+            (t) => t.status === 'settled' && t.exit_price !== null,
+          );
+          s.avg_entry =
+            stratTrades.length > 0
+              ? Math.round(
+                  stratTrades.reduce((sum, t) => sum + t.entry_price, 0) /
+                    stratTrades.length,
+                )
+              : 0;
           if (closedStratTrades.length > 0) {
             const totalReturnPct = closedStratTrades.reduce((sum, t) => {
               const cost = t.entry_price * t.qty;
               const exitVal = (t.exit_price! - t.entry_price) * t.qty;
               return sum + (cost > 0 ? (exitVal / cost) * 100 : 0);
             }, 0);
-            s.avg_return_pct = Math.round(totalReturnPct / closedStratTrades.length);
+            s.avg_return_pct = Math.round(
+              totalReturnPct / closedStratTrades.length,
+            );
           }
         }
 
@@ -3119,85 +3911,115 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         // Fetch BTC price, range windows, and up/down windows in parallel
         const [btcPrice, eventsData, updown15Data] = await Promise.all([
           fetchBtcPrice().catch(() => 0),
-          kalshiFetch<{ events: KalshiEvent[] }>('/events?status=open&with_nested_markets=true&limit=50&series_ticker=KXBTC').catch(() => ({ events: [] })),
-          kalshiFetch<{ events: KalshiEvent[] }>('/events?status=open&with_nested_markets=true&limit=10&series_ticker=KXBTC15M').catch(() => ({ events: [] })),
+          kalshiFetch<{ events: KalshiEvent[] }>(
+            '/events?status=open&with_nested_markets=true&limit=50&series_ticker=KXBTC',
+          ).catch(() => ({ events: [] })),
+          kalshiFetch<{ events: KalshiEvent[] }>(
+            '/events?status=open&with_nested_markets=true&limit=10&series_ticker=KXBTC15M',
+          ).catch(() => ({ events: [] })),
         ]);
-        const windows = (eventsData.events || []).map(event => {
-          const markets = (event.markets || [])
-            .filter((m: any) => m.status === 'active' || m.status === 'closed')
-            .map((m: any) => {
-              const mid = m.yes_bid > 0 && m.yes_ask > 0 ? (m.yes_bid + m.yes_ask) / 2 : m.last_price;
-              // Parse bracket range from yes_sub_title (e.g. "$65,250 to 65,499.99" or "$65,999.99 or below")
-              const title = m.yes_sub_title || '';
-              let low = 0, high = 0;
-              const rangeMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+to\s+([\d,]+(?:\.\d+)?)/);
-              const belowMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+or\s+below/i);
-              const aboveMatch = title.match(/\$?([\d,]+(?:\.\d+)?)\s+or\s+above/i);
-              if (rangeMatch) {
-                low = parseFloat(rangeMatch[1].replace(/,/g, ''));
-                high = parseFloat(rangeMatch[2].replace(/,/g, ''));
-              } else if (belowMatch) {
-                high = parseFloat(belowMatch[1].replace(/,/g, ''));
-                low = 0;
-              } else if (aboveMatch) {
-                low = parseFloat(aboveMatch[1].replace(/,/g, ''));
-                high = Infinity;
-              }
-              const inBracket = btcPrice >= low && btcPrice <= high;
-              return {
-                ticker: m.ticker,
-                title: m.yes_sub_title,
-                yes_bid: m.yes_bid,
-                yes_ask: m.yes_ask,
-                last_price: m.last_price,
-                mid,
-                volume_24h: m.volume_24h || 0,
-                open_interest: m.open_interest || 0,
-                status: m.status,
-                result: m.result || '',
-                low, high, inBracket,
-              };
-            })
-            .sort((a: any, b: any) => b.mid - a.mid);
+        const windows = (eventsData.events || [])
+          .map((event) => {
+            const markets = (event.markets || [])
+              .filter(
+                (m: any) => m.status === 'active' || m.status === 'closed',
+              )
+              .map((m: any) => {
+                const mid =
+                  m.yes_bid > 0 && m.yes_ask > 0
+                    ? (m.yes_bid + m.yes_ask) / 2
+                    : m.last_price;
+                // Parse bracket range from yes_sub_title (e.g. "$65,250 to 65,499.99" or "$65,999.99 or below")
+                const title = m.yes_sub_title || '';
+                let low = 0,
+                  high = 0;
+                const rangeMatch = title.match(
+                  /\$?([\d,]+(?:\.\d+)?)\s+to\s+([\d,]+(?:\.\d+)?)/,
+                );
+                const belowMatch = title.match(
+                  /\$?([\d,]+(?:\.\d+)?)\s+or\s+below/i,
+                );
+                const aboveMatch = title.match(
+                  /\$?([\d,]+(?:\.\d+)?)\s+or\s+above/i,
+                );
+                if (rangeMatch) {
+                  low = parseFloat(rangeMatch[1].replace(/,/g, ''));
+                  high = parseFloat(rangeMatch[2].replace(/,/g, ''));
+                } else if (belowMatch) {
+                  high = parseFloat(belowMatch[1].replace(/,/g, ''));
+                  low = 0;
+                } else if (aboveMatch) {
+                  low = parseFloat(aboveMatch[1].replace(/,/g, ''));
+                  high = Infinity;
+                }
+                const inBracket = btcPrice >= low && btcPrice <= high;
+                return {
+                  ticker: m.ticker,
+                  title: m.yes_sub_title,
+                  yes_bid: m.yes_bid,
+                  yes_ask: m.yes_ask,
+                  last_price: m.last_price,
+                  mid,
+                  volume_24h: m.volume_24h || 0,
+                  open_interest: m.open_interest || 0,
+                  status: m.status,
+                  result: m.result || '',
+                  low,
+                  high,
+                  inBracket,
+                };
+              })
+              .sort((a: any, b: any) => b.mid - a.mid);
 
-          return {
-            event_ticker: event.event_ticker,
-            title: event.title,
-            close_time: markets[0]?.status === 'closed' ? 'closed' : ((event.markets || [])[0] as any)?.close_time || '',
-            markets: markets.slice(0, 12), // top 12 brackets
-          };
-        }).sort((a: any, b: any) => a.close_time.localeCompare(b.close_time));
+            return {
+              event_ticker: event.event_ticker,
+              title: event.title,
+              close_time:
+                markets[0]?.status === 'closed'
+                  ? 'closed'
+                  : ((event.markets || [])[0] as any)?.close_time || '',
+              markets: markets.slice(0, 12), // top 12 brackets
+            };
+          })
+          .sort((a: any, b: any) => a.close_time.localeCompare(b.close_time));
 
         // Process 15-min up/down windows
-        const updowns = (updown15Data.events || []).map(event => {
-          const markets = (event.markets || []).map((m: any) => ({
-            ticker: m.ticker,
-            title: m.title || m.yes_sub_title || '',
-            yes_sub_title: m.yes_sub_title || '',
-            yes_bid: m.yes_bid,
-            yes_ask: m.yes_ask,
-            no_bid: m.no_bid,
-            no_ask: m.no_ask,
-            last_price: m.last_price,
-            volume: m.volume || 0,
-            open_interest: m.open_interest || 0,
-            status: m.status,
-            result: m.result || '',
-            floor_strike: m.floor_strike || 0,
-            open_time: m.open_time || '',
-            close_time: m.close_time || '',
-          }));
-          return {
-            event_ticker: event.event_ticker,
-            title: event.title,
-            type: 'up_down_15m',
-            close_time: markets[0]?.close_time || '',
-            open_time: markets[0]?.open_time || '',
-            markets,
-          };
-        }).sort((a: any, b: any) => a.close_time.localeCompare(b.close_time));
+        const updowns = (updown15Data.events || [])
+          .map((event) => {
+            const markets = (event.markets || []).map((m: any) => ({
+              ticker: m.ticker,
+              title: m.title || m.yes_sub_title || '',
+              yes_sub_title: m.yes_sub_title || '',
+              yes_bid: m.yes_bid,
+              yes_ask: m.yes_ask,
+              no_bid: m.no_bid,
+              no_ask: m.no_ask,
+              last_price: m.last_price,
+              volume: m.volume || 0,
+              open_interest: m.open_interest || 0,
+              status: m.status,
+              result: m.result || '',
+              floor_strike: m.floor_strike || 0,
+              open_time: m.open_time || '',
+              close_time: m.close_time || '',
+            }));
+            return {
+              event_ticker: event.event_ticker,
+              title: event.title,
+              type: 'up_down_15m',
+              close_time: markets[0]?.close_time || '',
+              open_time: markets[0]?.open_time || '',
+              markets,
+            };
+          })
+          .sort((a: any, b: any) => a.close_time.localeCompare(b.close_time));
 
-        json(res, { btc_price: btcPrice, windows, updowns, timestamp: new Date().toISOString() });
+        json(res, {
+          btc_price: btcPrice,
+          windows,
+          updowns,
+          timestamp: new Date().toISOString(),
+        });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
       }
@@ -3208,7 +4030,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
     if (pathname === '/api/trading/kalshi/balance') {
       try {
-        const data = await kalshiFetch<{ balance: number; portfolio_value: number }>('/portfolio/balance');
+        const data = await kalshiFetch<{
+          balance: number;
+          portfolio_value: number;
+        }>('/portfolio/balance');
         json(res, {
           balance_cents: data.balance,
           portfolio_value_cents: data.portfolio_value,
@@ -3226,7 +4051,8 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         const query = parseQuery(url);
         let path = '/portfolio/positions?limit=200';
         if (query.ticker) path += `&ticker=${query.ticker}`;
-        if (query.settlement_status) path += `&settlement_status=${query.settlement_status}`;
+        if (query.settlement_status)
+          path += `&settlement_status=${query.settlement_status}`;
         const data = await kalshiFetch<{ market_positions: any[] }>(path);
         json(res, { positions: data.market_positions || [] });
       } catch (err: any) {
@@ -3249,11 +4075,27 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
       return;
     }
 
-    if (pathname === '/api/trading/kalshi/orders/create' && req.method === 'POST') {
+    if (
+      pathname === '/api/trading/kalshi/orders/create' &&
+      req.method === 'POST'
+    ) {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.ticker || !body.side || !body.action || !body.count || !body.type) {
-          json(res, { error: 'Missing required fields: ticker, side, action, count, type' }, 400);
+        if (
+          !body.ticker ||
+          !body.side ||
+          !body.action ||
+          !body.count ||
+          !body.type
+        ) {
+          json(
+            res,
+            {
+              error:
+                'Missing required fields: ticker, side, action, count, type',
+            },
+            400,
+          );
           return;
         }
         const orderPayload: Record<string, unknown> = {
@@ -3271,7 +4113,11 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
             orderPayload.no_price = body.no_price || body.price;
           }
         }
-        const data = await kalshiFetch<{ order: any }>('/portfolio/orders', 'POST', orderPayload);
+        const data = await kalshiFetch<{ order: any }>(
+          '/portfolio/orders',
+          'POST',
+          orderPayload,
+        );
         json(res, data);
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -3279,14 +4125,20 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
       return;
     }
 
-    if (pathname === '/api/trading/kalshi/orders/cancel' && req.method === 'POST') {
+    if (
+      pathname === '/api/trading/kalshi/orders/cancel' &&
+      req.method === 'POST'
+    ) {
       try {
         const body = JSON.parse(await readBody(req));
         if (!body.order_id) {
           json(res, { error: 'order_id required' }, 400);
           return;
         }
-        const data = await kalshiFetch<any>(`/portfolio/orders/${body.order_id}`, 'DELETE');
+        const data = await kalshiFetch<any>(
+          `/portfolio/orders/${body.order_id}`,
+          'DELETE',
+        );
         json(res, data);
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -3328,17 +4180,32 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
     // --- Strategy Engine endpoints ---
 
-    if (pathname === '/api/trading/strategy-engine/start' && req.method === 'POST') {
+    if (
+      pathname === '/api/trading/strategy-engine/start' &&
+      req.method === 'POST'
+    ) {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.preset_id) { json(res, { error: 'preset_id required' }, 400); return; }
+        if (!body.preset_id) {
+          json(res, { error: 'preset_id required' }, 400);
+          return;
+        }
 
         // Block duplicate strategy types (e.g. can't run two momentum_15m at once)
         const preset = getPresetById(body.preset_id);
-        if (!preset) { json(res, { error: 'Preset not found' }, 404); return; }
+        if (!preset) {
+          json(res, { error: 'Preset not found' }, 404);
+          return;
+        }
         for (const [, run] of activeStrategies) {
           if (run.strategy === preset.strategy) {
-            json(res, { error: `Strategy "${preset.strategy}" is already running (${run.runId}). Stop it first.` }, 400);
+            json(
+              res,
+              {
+                error: `Strategy "${preset.strategy}" is already running (${run.runId}). Stop it first.`,
+              },
+              400,
+            );
             return;
           }
         }
@@ -3350,7 +4217,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         // Parse risk params
         let riskParams: StrategyEngineRun['riskParams'];
         try {
-          const rp = typeof preset.risk_params === 'string' ? JSON.parse(preset.risk_params) : preset.risk_params;
+          const rp =
+            typeof preset.risk_params === 'string'
+              ? JSON.parse(preset.risk_params)
+              : preset.risk_params;
           riskParams = {
             max_position_size: rp.max_position_size ?? 10,
             min_confidence: rp.min_confidence ?? 60,
@@ -3363,9 +4233,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           };
         } catch {
           riskParams = {
-            max_position_size: 10, min_confidence: 60, max_drawdown: 25,
-            poly_momentum_threshold: 0.03, arb_edge_threshold: 5, max_contracts_per_trade: 20,
-            daily_loss_limit: 5000, spread_width: 1,
+            max_position_size: 10,
+            min_confidence: 60,
+            max_drawdown: 25,
+            poly_momentum_threshold: 0.03,
+            arb_edge_threshold: 5,
+            max_contracts_per_trade: 20,
+            daily_loss_limit: 5000,
+            spread_width: 1,
           };
         }
 
@@ -3376,7 +4251,15 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           strategy: preset.strategy,
           interval: null,
           startedAt: Date.now(),
-          stats: { signals: 0, trades: 0, skipped: 0, pnl: 0, lastSignal: null, dataPoints: 0, errors: 0 },
+          stats: {
+            signals: 0,
+            trades: 0,
+            skipped: 0,
+            pnl: 0,
+            lastSignal: null,
+            dataPoints: 0,
+            errors: 0,
+          },
           polyHistory: [],
           tradedTickers: new Set(),
           riskParams,
@@ -3415,21 +4298,38 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         startPaperTradeSettlement();
         startSnapshotInterval();
 
-        logger.info({ runId, strategy: preset.strategy, mode }, 'Strategy engine started');
-        json(res, { runId, strategy: preset.strategy, mode, status: 'running' });
+        logger.info(
+          { runId, strategy: preset.strategy, mode },
+          'Strategy engine started',
+        );
+        json(res, {
+          runId,
+          strategy: preset.strategy,
+          mode,
+          status: 'running',
+        });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
       }
       return;
     }
 
-    if (pathname === '/api/trading/strategy-engine/stop' && req.method === 'POST') {
+    if (
+      pathname === '/api/trading/strategy-engine/stop' &&
+      req.method === 'POST'
+    ) {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.run_id) { json(res, { error: 'run_id required' }, 400); return; }
+        if (!body.run_id) {
+          json(res, { error: 'run_id required' }, 400);
+          return;
+        }
 
         const run = activeStrategies.get(body.run_id);
-        if (!run) { json(res, { error: 'Strategy not running' }, 404); return; }
+        if (!run) {
+          json(res, { error: 'Strategy not running' }, 404);
+          return;
+        }
 
         if (run.interval) clearInterval(run.interval);
         activeStrategies.delete(body.run_id);
@@ -3441,7 +4341,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         }
 
         // Serialize stats (convert Set to count for JSON)
-        const statsForJson = { ...run.stats, tradedTickers: run.tradedTickers.size };
+        const statsForJson = {
+          ...run.stats,
+          tradedTickers: run.tradedTickers.size,
+        };
 
         // Update DB record
         updateRun(body.run_id, {
@@ -3450,7 +4353,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           results: JSON.stringify(statsForJson),
         });
 
-        logger.info({ runId: body.run_id, stats: statsForJson }, 'Strategy engine stopped');
+        logger.info(
+          { runId: body.run_id, stats: statsForJson },
+          'Strategy engine stopped',
+        );
         json(res, { stopped: true, stats: statsForJson });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -3462,7 +4368,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
       const query = parseQuery(url);
       if (query.run_id) {
         const run = activeStrategies.get(query.run_id);
-        if (!run) { json(res, { error: 'Not found' }, 404); return; }
+        if (!run) {
+          json(res, { error: 'Not found' }, 404);
+          return;
+        }
         json(res, {
           runId: run.runId,
           strategy: run.strategy,
@@ -3471,7 +4380,7 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           stats: run.stats,
         });
       } else {
-        const all = Array.from(activeStrategies.values()).map(r => ({
+        const all = Array.from(activeStrategies.values()).map((r) => ({
           runId: r.runId,
           strategy: r.strategy,
           mode: r.mode,
@@ -3486,7 +4395,10 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     // --- Settlement endpoint ---
     if (pathname === '/api/trading/settle' && req.method === 'POST') {
       try {
-        const [paperResult, liveResult] = await Promise.all([settlePaperTrades(), settleLiveTrades()]);
+        const [paperResult, liveResult] = await Promise.all([
+          settlePaperTrades(),
+          settleLiveTrades(),
+        ]);
         json(res, { paper: paperResult, live: liveResult });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
@@ -3499,13 +4411,19 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
   });
 
   server.listen(MONITOR_PORT, '0.0.0.0', () => {
-    const hostname = process.env.MONITOR_HOSTNAME || os.hostname().toLowerCase();
-    logger.info(`Monitor dashboard listening on http://${hostname}:${MONITOR_PORT}`);
+    const hostname =
+      process.env.MONITOR_HOSTNAME || os.hostname().toLowerCase();
+    logger.info(
+      `Monitor dashboard listening on http://${hostname}:${MONITOR_PORT}`,
+    );
 
     // Mark orphaned strategy runs as stopped (survived a service restart)
     const orphaned = markOrphanedRunsStopped();
     if (orphaned > 0) {
-      logger.info({ count: orphaned }, 'Marked orphaned strategy runs as stopped');
+      logger.info(
+        { count: orphaned },
+        'Marked orphaned strategy runs as stopped',
+      );
     }
 
     // Resume any active market watchers and strategy engines on startup
