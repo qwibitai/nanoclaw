@@ -1747,11 +1747,20 @@ function calculateRSI(prices: number[], period: number): number {
 }
 
 interface OptimizerParams {
+  [key: string]: number;
   rsi_oversold: number;
   rsi_overbought: number;
   max_position_size: number;
   min_confidence: number;
   time_stop_intervals: number;
+}
+
+interface PMBacktestParams {
+  [key: string]: number;
+  min_edge: number;
+  kelly_fraction: number;
+  min_confidence: number;
+  max_position_size: number;
 }
 
 function runSingleBacktest(
@@ -1818,6 +1827,150 @@ function runSingleBacktest(
   if (position && dataPoints.length > 0) {
     const lastPrice = dataPoints[dataPoints.length - 1].price;
     const pnl = (lastPrice - position.entryPrice) * position.size;
+    capital += pnl;
+    returns.push(pnl / initialCapital);
+    trades++;
+    if (pnl > 0) wins++;
+  }
+
+  const avgReturn =
+    returns.length > 0
+      ? returns.reduce((a, b) => a + b, 0) / returns.length
+      : 0;
+  const variance =
+    returns.length > 0
+      ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) /
+        returns.length
+      : 0;
+  const stdDev = Math.sqrt(variance);
+  const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0;
+
+  return {
+    pnl: capital - initialCapital,
+    trades,
+    wins,
+    maxDrawdown,
+    sharpeRatio,
+  };
+}
+
+function calculateSMA(
+  prices: number[],
+  period: number,
+): number {
+  if (prices.length < period) return prices[prices.length - 1];
+  const window = prices.slice(prices.length - period);
+  return window.reduce((a, b) => a + b, 0) / window.length;
+}
+
+function runPMBacktest(
+  dataPoints: ReadonlyArray<{ price: number; timestamp: string }>,
+  params: PMBacktestParams,
+  initialCapital: number,
+): { pnl: number; trades: number; wins: number; maxDrawdown: number; sharpeRatio: number } {
+  const minEdgeFrac = params.min_edge / 100; // Convert percentage points to fraction
+  const minConfFrac = params.min_confidence / 100;
+
+  let capital = initialCapital;
+  let peak = initialCapital;
+  let maxDrawdown = 0;
+  const returns: number[] = [];
+  let trades = 0;
+  let wins = 0;
+
+  let position: {
+    entryPrice: number;
+    entryIdx: number;
+    size: number;
+    direction: 'buy' | 'sell';
+  } | null = null;
+
+  const smaPeriod = 10;
+
+  for (let i = smaPeriod; i < dataPoints.length; i++) {
+    const recentPrices = dataPoints
+      .slice(Math.max(0, i - smaPeriod), i + 1)
+      .map((p) => p.price);
+    const smoothedProb = calculateSMA(recentPrices, smaPeriod);
+    const currentPrice = dataPoints[i].price;
+    const edge = smoothedProb - currentPrice;
+    const absEdge = Math.abs(edge);
+
+    if (!position) {
+      // Confidence = fraction of recent lookback intervals where edge pointed the same direction
+      const lookback = Math.min(i, smaPeriod);
+      let sameDirectionCount = 0;
+      for (let j = i - lookback; j < i; j++) {
+        const pastPrices = dataPoints
+          .slice(Math.max(0, j - smaPeriod), j + 1)
+          .map((p) => p.price);
+        const pastSma = calculateSMA(pastPrices, smaPeriod);
+        const pastEdge = pastSma - dataPoints[j].price;
+        if ((edge > 0 && pastEdge > 0) || (edge < 0 && pastEdge < 0)) {
+          sameDirectionCount++;
+        }
+      }
+      const confidence = lookback > 0 ? sameDirectionCount / lookback : 0;
+
+      if (absEdge >= minEdgeFrac && confidence >= minConfFrac) {
+        const direction: 'buy' | 'sell' = edge > 0 ? 'buy' : 'sell';
+
+        // Kelly sizing (mirroring prediction-market-core.ts)
+        const p = direction === 'buy' ? smoothedProb : 1 - smoothedProb;
+        const marketP = direction === 'buy' ? currentPrice : 1 - currentPrice;
+        const b = marketP > 0 ? (1 - marketP) / marketP : 0;
+        const q = 1 - p;
+        const kellyRaw = b > 0 ? (p * b - q) / b : 0;
+        const kellyAdjusted = Math.max(0, kellyRaw * confidence * params.kelly_fraction);
+        const maxPosFrac = params.max_position_size / 100;
+        const positionFrac = Math.min(kellyAdjusted, maxPosFrac);
+        const posSize = Math.min(positionFrac * capital, maxPosFrac * initialCapital);
+
+        if (posSize > 0) {
+          const contracts = posSize / currentPrice;
+          position = { entryPrice: currentPrice, entryIdx: i, size: contracts, direction };
+        }
+      }
+    } else {
+      // Exit conditions (mirroring prediction-market-core.ts shouldExit)
+      const intervalsSinceEntry = i - position.entryIdx;
+      const priceMoveFromEntry = currentPrice - position.entryPrice;
+      const movedCorrectDirection = position.direction === 'buy'
+        ? priceMoveFromEntry > 0
+        : priceMoveFromEntry < 0;
+
+      // Exit 1: Edge captured — market repriced 10+ points in our favor
+      const edgeCaptured = movedCorrectDirection && Math.abs(priceMoveFromEntry) > 0.10;
+
+      // Exit 2: Edge reversed — market moved against us significantly
+      const edgeReversed = !movedCorrectDirection && Math.abs(priceMoveFromEntry) > 0.10;
+
+      // Exit 3: Safety backstop — position held too long
+      const tooLong = intervalsSinceEntry >= 50;
+
+      if (edgeCaptured || edgeReversed || tooLong) {
+        const pnl = position.direction === 'buy'
+          ? (currentPrice - position.entryPrice) * position.size
+          : (position.entryPrice - currentPrice) * position.size;
+        capital += pnl;
+        returns.push(pnl / initialCapital);
+        trades++;
+        if (pnl > 0) wins++;
+        position = null;
+
+        if (capital > peak) peak = capital;
+        const dd = (capital - peak) / peak;
+        maxDrawdown = Math.min(maxDrawdown, dd);
+      }
+    }
+  }
+
+  // Close any remaining position
+  if (position && dataPoints.length > 0) {
+    const lastPrice = dataPoints[dataPoints.length - 1].price;
+    const pnl = position.direction === 'buy'
+      ? (lastPrice - position.entryPrice) * position.size
+      : (position.entryPrice - lastPrice) * position.size;
     capital += pnl;
     returns.push(pnl / initialCapital);
     trades++;
@@ -2931,36 +3084,73 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         }));
         const initialCapital = body.initial_capital || 1000;
         const optimizeFor: string = body.optimize_for || 'sharpe_ratio';
+        const strategy: string = body.strategy || 'probability_mispricing';
+        const ranges = body.param_ranges || {};
 
-        // Build param grid
-        const ranges = body.param_ranges || {
-          rsi_oversold: [15, 20, 25, 30],
-          rsi_overbought: [70, 75, 80, 85],
-          max_position_size: [5, 10, 15],
-          min_confidence: [50, 60, 70],
-          time_stop_intervals: [6, 12, 24, 48],
-        };
+        const isPMStrategy = strategy !== 'rsi_mean_reversion';
 
-        const results: Array<{ params: OptimizerParams; metrics: any }> = [];
+        let results: Array<{ params: Record<string, number>; metrics: { pnl: number; trades: number; wins: number; maxDrawdown: number; sharpeRatio: number } }>;
 
-        for (const rsiOS of ranges.rsi_oversold || [25]) {
-          for (const rsiOB of ranges.rsi_overbought || [75]) {
-            for (const maxPos of ranges.max_position_size || [10]) {
-              for (const minConf of ranges.min_confidence || [60]) {
-                for (const timeStop of ranges.time_stop_intervals || [12]) {
-                  const params: OptimizerParams = {
-                    rsi_oversold: rsiOS,
-                    rsi_overbought: rsiOB,
-                    max_position_size: maxPos,
+        if (isPMStrategy) {
+          // PM strategy grid search
+          const pmRanges = {
+            min_edge: ranges.min_edge || [5, 10, 15, 20],
+            kelly_fraction: ranges.kelly_fraction || [0.25, 0.5, 0.75],
+            min_confidence: ranges.min_confidence || [60, 70, 80],
+            max_position_size: ranges.max_position_size || [5, 10, 15],
+          };
+
+          results = [];
+          for (const minEdge of pmRanges.min_edge) {
+            for (const kellyF of pmRanges.kelly_fraction) {
+              for (const minConf of pmRanges.min_confidence) {
+                for (const maxPos of pmRanges.max_position_size) {
+                  const params: PMBacktestParams = {
+                    min_edge: minEdge,
+                    kelly_fraction: kellyF,
                     min_confidence: minConf,
-                    time_stop_intervals: timeStop,
+                    max_position_size: maxPos,
                   };
-                  const metrics = runSingleBacktest(
+                  const metrics = runPMBacktest(
                     dataPoints,
                     params,
                     initialCapital,
                   );
                   results.push({ params, metrics });
+                }
+              }
+            }
+          }
+        } else {
+          // Legacy RSI strategy (backward compat for stored results)
+          const rsiRanges = {
+            rsi_oversold: ranges.rsi_oversold || [15, 20, 25, 30],
+            rsi_overbought: ranges.rsi_overbought || [70, 75, 80, 85],
+            max_position_size: ranges.max_position_size || [5, 10, 15],
+            min_confidence: ranges.min_confidence || [50, 60, 70],
+            time_stop_intervals: ranges.time_stop_intervals || [6, 12, 24, 48],
+          };
+
+          results = [];
+          for (const rsiOS of rsiRanges.rsi_oversold) {
+            for (const rsiOB of rsiRanges.rsi_overbought) {
+              for (const maxPos of rsiRanges.max_position_size) {
+                for (const minConf of rsiRanges.min_confidence) {
+                  for (const timeStop of rsiRanges.time_stop_intervals) {
+                    const params: OptimizerParams = {
+                      rsi_oversold: rsiOS,
+                      rsi_overbought: rsiOB,
+                      max_position_size: maxPos,
+                      min_confidence: minConf,
+                      time_stop_intervals: timeStop,
+                    };
+                    const metrics = runSingleBacktest(
+                      dataPoints,
+                      params,
+                      initialCapital,
+                    );
+                    results.push({ params, metrics });
+                  }
                 }
               }
             }
@@ -2998,8 +3188,8 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
         createOptimizationResult({
           id: optId,
           watcher_id: body.watcher_id,
-          strategy: body.strategy || 'rsi_mean_reversion',
-          param_ranges: JSON.stringify(ranges),
+          strategy,
+          param_ranges: JSON.stringify(isPMStrategy ? ranges : ranges),
           results: JSON.stringify(top10),
           optimize_for: optimizeFor,
           created_at: new Date().toISOString(),

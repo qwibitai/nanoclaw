@@ -1353,7 +1353,11 @@
             <select id="opt-watcher"><option value="">Select a completed watcher...</option></select>
           </div>
           <div class="form-group"><label>Strategy</label>
-            <select id="opt-strategy"><option value="rsi_mean_reversion">RSI Mean Reversion</option></select>
+            <select id="opt-strategy">
+              <option value="probability_mispricing">Probability Mispricing</option>
+              <option value="edge_capture">Edge Capture</option>
+              <option value="time_decay">Time Decay</option>
+            </select>
           </div>
           <div class="form-group"><label>Optimize For</label>
             <select id="opt-target"><option value="sharpe_ratio">Sharpe Ratio</option><option value="pnl">Total P&L</option><option value="win_rate">Win Rate</option></select>
@@ -1363,12 +1367,12 @@
         <details style="margin-bottom:12px;">
           <summary style="color:#8b949e; cursor:pointer; font-size:12px;">Parameter Ranges (advanced)</summary>
           <div class="form-row" style="margin-top:8px;">
-            <div class="form-group"><label>RSI Oversold</label><input id="opt-rsi-os" value="15,20,25,30" style="font-size:12px;"></div>
-            <div class="form-group"><label>RSI Overbought</label><input id="opt-rsi-ob" value="70,75,80,85" style="font-size:12px;"></div>
+            <div class="form-group"><label>Min Edge (pts)</label><input id="opt-min-edge" value="5,10,15,20" style="font-size:12px;"></div>
+            <div class="form-group"><label>Kelly Fraction</label><input id="opt-kelly-fraction" value="0.25,0.5,0.75" style="font-size:12px;"></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Max Position Size (%)</label><input id="opt-pos-size" value="5,10,15" style="font-size:12px;"></div>
-            <div class="form-group"><label>Time Stop (intervals)</label><input id="opt-time-stop" value="6,12,24,48" style="font-size:12px;"></div>
+            <div class="form-group"><label>Min Confidence (%)</label><input id="opt-min-confidence" value="60,70,80" style="font-size:12px;"></div>
+            <div class="form-group"><label>Max Position Size (%)</label><input id="opt-pm-pos-size" value="5,10,15" style="font-size:12px;"></div>
           </div>
         </details>
         <button class="btn btn-primary" onclick="runOptimizer()">Run Optimization</button>
@@ -1379,8 +1383,11 @@
     <div class="panel" id="opt-results-panel" style="display:none;">
       <div class="panel-header">Optimization Results <span id="opt-results-count" style="color:#8b949e; font-weight:normal;"></span></div>
       <div class="panel-body">
+        <div style="background:#1c1c1e; border:1px solid #3d3d40; border-radius:6px; padding:8px 12px; margin-bottom:12px; font-size:11px; color:#8b949e;">
+          Simulated on historical data using SMA as probability proxy. Use for relative parameter comparison, not absolute P&amp;L prediction.
+        </div>
         <table>
-          <thead><tr><th>#</th><th>RSI OS</th><th>RSI OB</th><th>Pos Size</th><th>Time Stop</th><th>P&L</th><th>Win Rate</th><th>Max DD</th><th>Sharpe</th><th>Actions</th></tr></thead>
+          <thead id="opt-results-head"><tr><th>#</th><th>Min Edge</th><th>Kelly F</th><th>Confidence</th><th>Pos Size</th><th>Trades</th><th>Win Rate</th><th>Max DD</th><th>Sharpe</th><th>Actions</th></tr></thead>
           <tbody id="opt-results-body"></tbody>
         </table>
       </div>
@@ -4260,29 +4267,28 @@ async function runOptimizer() {
         optimize_for: document.getElementById('opt-target').value,
         initial_capital: parseFloat(document.getElementById('opt-capital').value) || 1000,
         param_ranges: {
-          rsi_oversold: parseNums(document.getElementById('opt-rsi-os').value),
-          rsi_overbought: parseNums(document.getElementById('opt-rsi-ob').value),
-          max_position_size: parseNums(document.getElementById('opt-pos-size').value),
-          min_confidence: [60],
-          time_stop_intervals: parseNums(document.getElementById('opt-time-stop').value),
+          min_edge: parseNums(document.getElementById('opt-min-edge').value),
+          kelly_fraction: parseNums(document.getElementById('opt-kelly-fraction').value),
+          min_confidence: parseNums(document.getElementById('opt-min-confidence').value),
+          max_position_size: parseNums(document.getElementById('opt-pm-pos-size').value),
         },
       }),
     });
     const result = await resp.json();
     if (result.error) { statusEl.textContent = 'Error: ' + result.error; return; }
 
-    statusEl.textContent = `Done! Tested ${result.total_combinations} combinations on ${result.data_points} data points.`;
+    statusEl.textContent = `Done! Tested ${result.total_combinations} combinations on ${result.data_points} data points. Ranked by relative ${document.getElementById('opt-target').value.replace('_', ' ')}.`;
     document.getElementById('opt-results-panel').style.display = 'block';
     document.getElementById('opt-results-count').textContent = `(${result.total_combinations} combos tested)`;
 
     const body = document.getElementById('opt-results-body');
     body.innerHTML = (result.top10 || []).map(r => `<tr>
       <td>${r.rank}</td>
-      <td>${r.params.rsi_oversold}</td>
-      <td>${r.params.rsi_overbought}</td>
+      <td>${r.params.min_edge}pts</td>
+      <td>${r.params.kelly_fraction}</td>
+      <td>${r.params.min_confidence}%</td>
       <td>${r.params.max_position_size}%</td>
-      <td>${r.params.time_stop_intervals}</td>
-      <td class="${r.pnl >= 0 ? 'stat-value ok' : 'stat-value error'}">$${r.pnl.toFixed(2)} (${r.pnl_pct.toFixed(1)}%)</td>
+      <td>${r.trades}</td>
       <td>${r.win_rate.toFixed(1)}%</td>
       <td>${r.max_drawdown.toFixed(1)}%</td>
       <td>${r.sharpe_ratio.toFixed(2)}</td>
@@ -4296,7 +4302,8 @@ async function runOptimizer() {
 }
 
 async function saveAsPreset(params) {
-  const name = prompt('Preset name:', 'Optimized RSI ' + params.rsi_oversold + '/' + params.rsi_overbought);
+  const strategy = document.getElementById('opt-strategy').value;
+  const name = prompt('Preset name:', 'PM Edge ' + params.min_edge + 'pts / Kelly ' + params.kelly_fraction);
   if (!name) return;
   try {
     await fetch('/api/trading/presets', {
@@ -4305,16 +4312,15 @@ async function saveAsPreset(params) {
       body: JSON.stringify({
         name,
         platform: 'polymarket',
-        strategy: 'rsi_mean_reversion',
+        strategy,
         mode: 'paper',
         initial_capital: parseFloat(document.getElementById('opt-capital').value) || 1000,
         risk_params: {
           MAX_DRAWDOWN: 0.25,
           MAX_POSITION_SIZE: params.max_position_size / 100,
-          MIN_CONFIDENCE: (params.min_confidence || 60) / 100,
-          TIME_STOP_DAYS: Math.ceil(params.time_stop_intervals / 24),
-          rsi_oversold: params.rsi_oversold,
-          rsi_overbought: params.rsi_overbought,
+          MIN_CONFIDENCE: params.min_confidence / 100,
+          MIN_EDGE: params.min_edge / 100,
+          KELLY_FRACTION: params.kelly_fraction,
         },
       }),
     });
