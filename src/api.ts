@@ -283,9 +283,9 @@ export function createApi(options: ApiOptions): express.Application {
               return;
             }
 
-            // Handle complete outputs
+            // Handle complete outputs (only use if no deltas were received)
             const output = message as ContainerOutput;
-            if (output.result) {
+            if (output.result && !fullResponse) {
               const raw =
                 typeof output.result === 'string'
                   ? output.result
@@ -296,7 +296,7 @@ export function createApi(options: ApiOptions): express.Application {
                 .trim();
 
               if (responseText) {
-                fullResponse += responseText;
+                fullResponse = responseText;
               }
             }
 
