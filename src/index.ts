@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  AUTO_LEARNER_ENABLED,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
@@ -265,6 +266,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ),
       )
       .catch((err) => logger.warn({ err, group: group.name }, 'Quality tracker failed (non-blocking)'));
+  }
+
+  // Auto-Learner: fire-and-forget correction detection and learning extraction
+  if (AUTO_LEARNER_ENABLED) {
+    import('./auto-learner.js')
+      .then(({ processLearning }) =>
+        processLearning(
+          group.folder,
+          missedMessages.map((m) => ({
+            sender_name: m.sender_name,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+          botResponses,
+        ),
+      )
+      .catch((err) => logger.warn({ err, group: group.name }, 'Auto-learner failed (non-blocking)'));
   }
 
   return true;
