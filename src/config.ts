@@ -1,4 +1,3 @@
-import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
@@ -9,6 +8,12 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'TELEGRAM_BOT_POOL',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
+  'SLACK_SIGNING_SECRET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -20,7 +25,7 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || os.homedir();
+const HOME_DIR = process.env.HOME || '/Users/user';
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -67,3 +72,21 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || envConfig.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
+
+// Slack configuration
+export const SLACK_BOT_TOKEN =
+  process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN =
+  process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+export const SLACK_SIGNING_SECRET =
+  process.env.SLACK_SIGNING_SECRET || envConfig.SLACK_SIGNING_SECRET || '';
