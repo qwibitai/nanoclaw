@@ -15,6 +15,7 @@ const envConfig = readEnvFile([
   'OBSERVER_ENABLED',
   'MIN_OBSERVER_MESSAGES',
   'QUALITY_TRACKER_ENABLED',
+  'AUTO_LEARNER_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -101,3 +102,7 @@ export const MIN_OBSERVER_MESSAGES = Math.max(
 // Quality Tracker — JSONL conversation logging with implicit quality signals
 export const QUALITY_TRACKER_ENABLED =
   (process.env.QUALITY_TRACKER_ENABLED ?? envConfig.QUALITY_TRACKER_ENABLED ?? 'true') !== 'false';
+
+// Auto-Learner — detect corrections and log learnings
+export const AUTO_LEARNER_ENABLED =
+  (process.env.AUTO_LEARNER_ENABLED ?? envConfig.AUTO_LEARNER_ENABLED ?? 'true') !== 'false';
