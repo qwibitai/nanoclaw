@@ -3011,7 +3011,7 @@ async function loadPaperPortfolio() {
         currentExitCell = (t.exit_price !== null ? t.exit_price + 'c' : '--');
         let pnl = 0;
         if (t.exit_price !== null) {
-          pnl = t.side === 'yes' ? (t.exit_price - t.entry_price) * t.qty : (t.entry_price - t.exit_price) * t.qty;
+          pnl = (t.exit_price - t.entry_price) * t.qty;
         }
         const pnlColor = pnl > 0 ? '#3fb950' : pnl < 0 ? '#f85149' : '#8b949e';
         pnlCell = '<span style="color:' + pnlColor + ';">' + (pnl >= 0 ? '+' : '') + '$' + (pnl / 100).toFixed(2) + '</span>';
