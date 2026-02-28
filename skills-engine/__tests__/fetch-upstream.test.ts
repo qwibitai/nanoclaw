@@ -16,13 +16,14 @@ describe('fetch-upstream.sh', () => {
     upstreamBareDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'nanoclaw-upstream-'),
     );
-    execSync('git init --bare', { cwd: upstreamBareDir, stdio: 'pipe' });
+    execSync('git init --bare -b main', {
+      cwd: upstreamBareDir,
+      stdio: 'pipe',
+    });
 
     // Create a working repo, add files, push to the bare repo
-    const seedDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'nanoclaw-seed-'),
-    );
-    execSync('git init', { cwd: seedDir, stdio: 'pipe' });
+    const seedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-seed-'));
+    execSync('git init -b main', { cwd: seedDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
       cwd: seedDir,
       stdio: 'pipe',
@@ -33,10 +34,7 @@ describe('fetch-upstream.sh', () => {
       JSON.stringify({ name: 'nanoclaw', version: '2.0.0' }),
     );
     fs.mkdirSync(path.join(seedDir, 'src'), { recursive: true });
-    fs.writeFileSync(
-      path.join(seedDir, 'src/index.ts'),
-      'export const v = 2;',
-    );
+    fs.writeFileSync(path.join(seedDir, 'src/index.ts'), 'export const v = 2;');
     execSync('git add -A && git commit -m "upstream v2.0.0"', {
       cwd: seedDir,
       stdio: 'pipe',
@@ -45,29 +43,16 @@ describe('fetch-upstream.sh', () => {
       cwd: seedDir,
       stdio: 'pipe',
     });
-    execSync('git push origin main 2>/dev/null || git push origin master', {
+    execSync('git push origin main', {
       cwd: seedDir,
       stdio: 'pipe',
-      shell: '/bin/bash',
     });
-
-    // Rename the default branch to main in the bare repo if needed
-    try {
-      execSync('git symbolic-ref HEAD refs/heads/main', {
-        cwd: upstreamBareDir,
-        stdio: 'pipe',
-      });
-    } catch {
-      // Already on main
-    }
 
     fs.rmSync(seedDir, { recursive: true, force: true });
 
     // Create the "project" repo that will run the script
-    projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'nanoclaw-project-'),
-    );
-    execSync('git init', { cwd: projectDir, stdio: 'pipe' });
+    projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-project-'));
+    execSync('git init -b main', { cwd: projectDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', {
       cwd: projectDir,
       stdio: 'pipe',
@@ -97,7 +82,10 @@ describe('fetch-upstream.sh', () => {
       '.claude/skills/update/scripts',
     );
     fs.mkdirSync(skillScriptsDir, { recursive: true });
-    fs.copyFileSync(scriptPath, path.join(skillScriptsDir, 'fetch-upstream.sh'));
+    fs.copyFileSync(
+      scriptPath,
+      path.join(skillScriptsDir, 'fetch-upstream.sh'),
+    );
     fs.chmodSync(path.join(skillScriptsDir, 'fetch-upstream.sh'), 0o755);
   });
 
@@ -124,7 +112,10 @@ describe('fetch-upstream.sh', () => {
       );
       return { stdout, exitCode: 0 };
     } catch (err: any) {
-      return { stdout: (err.stdout ?? '') + (err.stderr ?? ''), exitCode: err.status ?? 1 };
+      return {
+        stdout: (err.stdout ?? '') + (err.stderr ?? ''),
+        exitCode: err.status ?? 1,
+      };
     }
   }
 
@@ -159,12 +150,12 @@ describe('fetch-upstream.sh', () => {
     expect(status.TEMP_DIR).toMatch(/^\/tmp\/nanoclaw-update-/);
 
     // Verify extracted files exist
-    expect(
-      fs.existsSync(path.join(status.TEMP_DIR, 'package.json')),
-    ).toBe(true);
-    expect(
-      fs.existsSync(path.join(status.TEMP_DIR, 'src/index.ts')),
-    ).toBe(true);
+    expect(fs.existsSync(path.join(status.TEMP_DIR, 'package.json'))).toBe(
+      true,
+    );
+    expect(fs.existsSync(path.join(status.TEMP_DIR, 'src/index.ts'))).toBe(
+      true,
+    );
 
     // Cleanup temp dir
     fs.rmSync(status.TEMP_DIR, { recursive: true, force: true });
@@ -172,10 +163,10 @@ describe('fetch-upstream.sh', () => {
 
   it('uses origin when it points to qwibitai/nanoclaw', () => {
     // Set origin to a URL containing qwibitai/nanoclaw
-    execSync(
-      `git remote add origin https://github.com/qwibitai/nanoclaw.git`,
-      { cwd: projectDir, stdio: 'pipe' },
-    );
+    execSync(`git remote add origin https://github.com/qwibitai/nanoclaw.git`, {
+      cwd: projectDir,
+      stdio: 'pipe',
+    });
     // We can't actually fetch from GitHub in tests, but we can verify
     // it picks the right remote. We'll add a second remote it CAN fetch from.
     execSync(`git remote add upstream ${upstreamBareDir}`, {

@@ -7,8 +7,6 @@ export {
   CUSTOM_DIR,
   LOCK_FILE,
   NANOCLAW_DIR,
-  RESOLUTIONS_DIR,
-  SHIPPED_RESOLUTIONS_DIR,
   STATE_FILE,
 } from './constants.js';
 export {
@@ -27,13 +25,7 @@ export {
   checkSystemVersion,
   readManifest,
 } from './manifest.js';
-export {
-  cleanupMergeState,
-  isGitRepo,
-  mergeFile,
-  runRerere,
-  setupRerereAdapter,
-} from './merge.js';
+export { isGitRepo, mergeFile } from './merge.js';
 export {
   loadPathRemap,
   recordPathRemap,
@@ -44,12 +36,6 @@ export { findSkillDir, replaySkills } from './replay.js';
 export type { ReplayOptions, ReplayResult } from './replay.js';
 export { uninstallSkill } from './uninstall.js';
 export { initSkillsSystem, migrateExisting } from './migrate.js';
-export {
-  clearAllResolutions,
-  findResolutionDir,
-  loadResolutions,
-  saveResolution,
-} from './resolution-cache.js';
 export { applyUpdate, previewUpdate } from './update.js';
 export {
   compareSemver,
@@ -76,7 +62,6 @@ export type {
   FileOperation,
   MergeResult,
   RebaseResult,
-  ResolutionMeta,
   SkillManifest,
   SkillState,
   UninstallResult,
