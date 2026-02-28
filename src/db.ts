@@ -1310,7 +1310,7 @@ export function getOpenLiveTradesForTicker(ticker: string): LiveTrade[] {
 export function markOrphanedRunsStopped(): number {
   const now = new Date().toISOString();
   const result = db.prepare(
-    `UPDATE trading_runs SET status = 'stopped', completed_at = ?, error = 'Orphaned by service restart' WHERE status IN ('pending', 'running')`,
+    `UPDATE trading_runs SET status = 'stopped', completed_at = ?, error = 'Orphaned by service restart' WHERE status IN ('pending', 'running') AND type != 'strategy_engine'`,
   ).run(now);
   return result.changes;
 }
