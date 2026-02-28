@@ -33,3 +33,4 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+.codemie/

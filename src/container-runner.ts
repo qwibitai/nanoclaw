@@ -39,6 +39,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  model?: string;
 }
 
 export interface ContainerOutput {
@@ -274,6 +275,7 @@ export async function runContainerAgent(
       containerName,
       mountCount: mounts.length,
       isMain: input.isMain,
+      model: input.model || '(default)',
     },
     'Spawning container agent',
   );

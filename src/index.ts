@@ -3,11 +3,15 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_MODEL,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
+import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -127,6 +131,30 @@ export function _setRegisteredGroups(
 }
 
 /**
+ * Parse --model flag from prompt and resolve aliases.
+ * Strips the flag from the prompt so the agent doesn't see it.
+ * Returns {model, prompt}.
+ */
+function parseModelFlag(prompt: string): { model?: string; prompt: string } {
+  const match = prompt.match(/^--model\s+(\S+)\s*/);
+  if (!match) {
+    return { model: DEFAULT_MODEL, prompt };
+  }
+
+  const alias = match[1];
+  const modelMap: Record<string, string> = {
+    opus: 'claude-opus-4-6',
+    sonnet: 'claude-sonnet-4-6',
+    haiku: 'claude-haiku-4-5-20251001',
+  };
+
+  const model = modelMap[alias] || alias; // Use full model ID if not in alias map
+  const strippedPrompt = prompt.slice(match[0].length);
+
+  return { model, prompt: strippedPrompt };
+}
+
+/**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
  */
@@ -136,7 +164,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const channel = findChannel(channels, chatJid);
   if (!channel) {
-    logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+    console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
     return true;
   }
 
@@ -159,7 +187,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  // Strip --model flag from the last message before formatting,
+  // then pass the model separately to runAgent.
+  const lastMsg = missedMessages[missedMessages.length - 1];
+  const { model: parsedModel, prompt: strippedContent } = parseModelFlag(
+    lastMsg.content.trim(),
+  );
+  const messagesForFormat =
+    strippedContent !== lastMsg.content.trim()
+      ? [
+          ...missedMessages.slice(0, -1),
+          { ...lastMsg, content: strippedContent },
+        ]
+      : missedMessages;
+  const prompt = formatMessages(messagesForFormat);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -191,32 +232,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    parsedModel,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -248,6 +298,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  model: string | undefined,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -299,6 +350,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -367,7 +419,9 @@ async function startMessageLoop(): Promise<void> {
 
           const channel = findChannel(channels, chatJid);
           if (!channel) {
-            logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
+            console.log(
+              `Warning: no channel owns JID ${chatJid}, skipping messages`,
+            );
             continue;
           }
 
@@ -395,7 +449,13 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          // If the latest message has a --model flag, force a new container
+          // so the flag is parsed properly. Don't pipe into the active one.
+          const lastContent =
+            messagesToSend[messagesToSend.length - 1].content.trim();
+          const hasModelFlag = /^--model\s+\S+/.test(lastContent);
+
+          if (!hasModelFlag && queue.sendMessage(chatJid, formatted)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -410,7 +470,14 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container (or --model flag forces a new one)
+            if (hasModelFlag) {
+              logger.debug(
+                { chatJid },
+                '--model flag: closing active container to force new one',
+              );
+              queue.closeStdin(chatJid);
+            }
             queue.enqueueMessageCheck(chatJid);
           }
         }
@@ -475,9 +542,17 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
+
+  if (!TELEGRAM_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -489,7 +564,7 @@ async function main(): Promise<void> {
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
-        logger.warn({ jid }, 'No channel owns JID, cannot send message');
+        console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
         return;
       }
       const text = formatOutbound(rawText);
