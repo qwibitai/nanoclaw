@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "agent_name": "{AGENT_NAME}",
+  "summary": "I'm {AGENT_NAME}, an AI agent that can communicate, remember, delegate, and act on your behalf. Ask about any section below for details.",
+  "sections": {
+    "tools": {
+      "title": "Tools & Capabilities",
+      "summary": "I have access to messaging, memory, search, payments, and delegation tools.",
+      "items": [
+        { "name": "send_message", "description": "Send messages to connected channels (Discord, Telegram, etc.)" },
+        { "name": "recall", "description": "Search my long-term memory files using keyword search (BM25)" },
+        { "name": "recall_detail", "description": "Read the full content of a specific memory file" },
+        { "name": "remember", "description": "Write important information to long-term memory files" },
+        { "name": "send_sms", "description": "Send SMS text messages (rate limited: 10/hour)" },
+        { "name": "check_messages", "description": "Check for received SMS messages" },
+        { "name": "make_call", "description": "Make phone calls with text-to-speech (rate limited: 5/hour)" },
+        { "name": "check_calls", "description": "Check call logs and recordings" },
+        { "name": "schedule_task", "description": "Schedule a task to run later (one-time or recurring cron)" },
+        { "name": "list_tasks", "description": "View all scheduled tasks and their status" },
+        { "name": "cancel_task", "description": "Cancel a scheduled task" },
+        { "name": "delegate_task", "description": "Spawn a worker agent for parallel or specialized subtasks" },
+        { "name": "x402_fetch", "description": "Make HTTP requests that can pay x402 paywalls with USDC (spend cap: $10/day)" },
+        { "name": "self_knowledge", "description": "Explain my own capabilities (this tool)" }
+      ]
+    },
+    "scheduled_tasks": {
+      "title": "Scheduled Tasks",
+      "summary": "Automated jobs that run on a schedule. Configured via the schedule_task tool or cron jobs.",
+      "items": [
+        { "name": "morning-heartbeat", "description": "Daily check-in and status report" },
+        { "name": "email-check", "description": "Periodic email inbox review" },
+        { "name": "nightly-consolidation", "description": "End-of-day memory cleanup and knowledge extraction" }
+      ]
+    },
+    "memory": {
+      "title": "Memory System",
+      "summary": "I use a file-based long-term memory system that persists across sessions.",
+      "items": [
+        { "name": "knowledge/", "description": "Patterns, preferences, security rules — core knowledge that rarely changes" },
+        { "name": "daily/", "description": "Daily notes with events, decisions, and observations" },
+        { "name": "projects/", "description": "Project-specific notes and progress tracking" },
+        { "name": "areas/", "description": "Ongoing areas of responsibility" },
+        { "name": "conversations/", "description": "Notable conversation summaries" },
+        { "name": "nightly consolidation", "description": "Each night I review the day and extract important patterns into knowledge files" }
+      ]
+    },
+    "delegation": {
+      "title": "Delegation & Multi-Agent",
+      "summary": "I can spawn worker agents for parallel or specialized tasks.",
+      "items": [
+        { "name": "worker containers", "description": "Each worker runs in isolation with its own tools but no conversation history" },
+        { "name": "model selection", "description": "Workers can use different models (cheap for grunt work, powerful for complex tasks)" },
+        { "name": "timeout control", "description": "Workers have configurable timeouts (30s to 10min)" },
+        { "name": "max concurrency", "description": "Up to 3 workers can run simultaneously" }
+      ]
+    },
+    "limitations": {
+      "title": "Limitations",
+      "summary": "Honest boundaries — what I cannot do or should not be trusted to do alone.",
+      "items": [
+        { "name": "no persistent state", "description": "My conversation memory resets each session — use recall/remember for persistence" },
+        { "name": "rate limits", "description": "SMS (10/hr), calls (5/hr), and x402 payments ($10/day cap) are rate limited" },
+        { "name": "tool guard", "description": "Dangerous commands (rm -rf, DROP TABLE, etc.) are blocked by the security layer" },
+        { "name": "no direct web browsing", "description": "I cannot browse the internet directly — use delegate_task for web research" },
+        { "name": "container isolation", "description": "I run in a sandboxed container — I cannot access the host system directly" }
+      ]
+    }
+  }
+}
