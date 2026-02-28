@@ -169,6 +169,62 @@ function evaluateGuard(
 }
 
 
+// ── Rate Limiter & Spend Tracker ─────────────────────────────────────
+// In-memory per-session. Resets on container restart (by design).
+
+interface RateLimitState { count: number; windowStart: number; }
+const rateLimitStates: Record<string, RateLimitState> = {};
+
+const RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
+  send_sms: { max: 10, windowMs: 3_600_000 },   // 10/hour
+  make_call: { max: 5, windowMs: 3_600_000 },    // 5/hour
+};
+
+function checkRateLimit(toolName: string): { allowed: boolean; message: string } {
+  const limit = RATE_LIMITS[toolName];
+  if (!limit) return { allowed: true, message: '' };
+
+  const now = Date.now();
+  const state = rateLimitStates[toolName];
+
+  if (!state || now - state.windowStart >= limit.windowMs) {
+    rateLimitStates[toolName] = { count: 1, windowStart: now };
+    return { allowed: true, message: '' };
+  }
+
+  if (state.count >= limit.max) {
+    const resetsIn = Math.ceil((limit.windowMs - (now - state.windowStart)) / 60_000);
+    return {
+      allowed: false,
+      message: `Rate limit: ${toolName} max ${limit.max}/hour reached. Resets in ~${resetsIn} min.`,
+    };
+  }
+
+  state.count++;
+  return { allowed: true, message: '' };
+}
+
+let dailySpend = { totalUsd: 0, dayStart: Date.now() };
+const DAILY_SPEND_CAP_USD = 10;
+
+function checkSpendLimit(amountUsd: number): { allowed: boolean; message: string } {
+  const now = Date.now();
+  if (now - dailySpend.dayStart >= 86_400_000) {
+    dailySpend = { totalUsd: 0, dayStart: now };
+  }
+
+  if (dailySpend.totalUsd + amountUsd > DAILY_SPEND_CAP_USD) {
+    return {
+      allowed: false,
+      message: `Daily spend cap ($${DAILY_SPEND_CAP_USD}) reached. Spent today: $${dailySpend.totalUsd.toFixed(2)}. Try again tomorrow.`,
+    };
+  }
+
+  dailySpend.totalUsd += amountUsd;
+  return { allowed: true, message: '' };
+}
+
+
 // Wrap the original server.tool to inject observability + guard
 const originalTool = server.tool.bind(server);
 type ToolCallback = (...callbackArgs: unknown[]) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
@@ -885,6 +941,10 @@ server.tool(
     if (!SW_PROJECT_ID || !SW_API_TOKEN) {
       return { content: [{ type: 'text' as const, text: 'SignalWire not configured. Ask Brandon to add credentials.' }], isError: true };
     }
+    const smsLimit = checkRateLimit('send_sms');
+    if (!smsLimit.allowed) {
+      return { content: [{ type: 'text' as const, text: smsLimit.message }], isError: true };
+    }
     const data = `From=${encodeURIComponent(SW_PHONE)}&To=${encodeURIComponent(args.to)}&Body=${encodeURIComponent(args.body)}`;
     const result = swCurl('/Messages.json', 'POST', data);
     try {
@@ -943,6 +1003,10 @@ server.tool(
   async (args) => {
     if (!SW_PROJECT_ID || !SW_API_TOKEN) {
       return { content: [{ type: 'text' as const, text: 'SignalWire not configured.' }], isError: true };
+    }
+    const callLimit = checkRateLimit('make_call');
+    if (!callLimit.allowed) {
+      return { content: [{ type: 'text' as const, text: callLimit.message }], isError: true };
     }
     // Build TwiML for TTS
     const twiml = `<Response><Say voice="${args.voice}">${args.message.replace(/[&<>"']/g, '')}</Say></Response>`;
@@ -1006,6 +1070,12 @@ server.tool(
     max_price_usd: z.number().default(1.0).describe("Maximum USDC you are willing to pay for this request. Default $1."),
   },
   async (args) => {
+    // Check daily spend cap before sending request
+    const spendCheck = checkSpendLimit(args.max_price_usd);
+    if (!spendCheck.allowed) {
+      return { content: [{ type: "text" as const, text: spendCheck.message }], isError: true };
+    }
+
     // Write request to IPC for host to process
     fs.mkdirSync(X402_REQUESTS_DIR, { recursive: true });
     fs.mkdirSync(X402_RESPONSES_DIR, { recursive: true });
