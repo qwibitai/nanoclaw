@@ -12,6 +12,7 @@ import { logger } from './logger.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
 import { applyTemplate } from './task-templates.js';
 import { RegisteredGroup } from './types.js';
+import { createWorktree, removeWorktree, isGitRepo } from './worktree.js';
 
 interface DelegateRequest {
   id: string;
@@ -21,6 +22,7 @@ interface DelegateRequest {
   source_group: string;
   source_chat_jid: string;
   timestamp: string;
+  repo?: string; // Optional: path to git repo — worker gets its own worktree
 }
 
 // Track active delegations to prevent duplicate processing
@@ -135,17 +137,42 @@ async function spawnWorker(
     return;
   }
 
+  // If a repo path is specified and it's a git repo, create an isolated worktree
+  let worktreePath: string | null = null;
+  if (request.repo && isGitRepo(request.repo)) {
+    try {
+      const wt = createWorktree(request.repo, request.id);
+      worktreePath = wt.path;
+      logger.info(
+        { delegateId: request.id, worktree: wt.path, branch: wt.branch },
+        'Created worktree for delegation',
+      );
+    } catch (err) {
+      logger.warn(
+        { delegateId: request.id, repo: request.repo, err },
+        'Failed to create worktree, continuing without isolation',
+      );
+    }
+  }
+
   // Build a delegation-specific prompt that gives the worker context
   // Apply task template for structured guidance (skips conversation/quick-check)
   const { enhancedPrompt } = applyTemplate(request.prompt, sourceGroup);
-  const workerPrompt = [
+  const workerPromptParts = [
     `You are a worker agent delegated a task. Complete it and output your findings.`,
     `Do NOT use send_message — your output goes directly back to the delegating agent.`,
     `Be concise and focused. The delegating agent will use your output.`,
-    ``,
-    `## Task`,
-    enhancedPrompt,
-  ].join('\n');
+  ];
+  if (worktreePath) {
+    workerPromptParts.push(
+      ``,
+      `## Workspace`,
+      `You have an isolated git worktree at: ${worktreePath}`,
+      `Make your changes there. Do NOT modify the main repo.`,
+    );
+  }
+  workerPromptParts.push(``, `## Task`, enhancedPrompt);
+  const workerPrompt = workerPromptParts.join('\n');
 
   try {
     let lastResult: string | null = null;
@@ -182,6 +209,7 @@ async function spawnWorker(
         result: finalResult || '(worker completed with no output)',
         model: request.model,
         status: output.status,
+        worktree: worktreePath,
       });
     } else {
       writeResponse(responsePath, {
@@ -191,7 +219,7 @@ async function spawnWorker(
     }
 
     logger.info(
-      { delegateId: request.id, status: output.status },
+      { delegateId: request.id, status: output.status, worktree: worktreePath },
       'Delegation completed',
     );
   } catch (err) {
@@ -203,12 +231,25 @@ async function spawnWorker(
       error: `Worker error: ${err instanceof Error ? err.message : String(err)}`,
       model: request.model,
     });
+  } finally {
+    // Clean up worktree after task completes (success or failure)
+    if (worktreePath && request.repo) {
+      try {
+        removeWorktree(request.repo, request.id);
+        logger.debug({ delegateId: request.id }, 'Cleaned up worktree');
+      } catch (err) {
+        logger.warn(
+          { delegateId: request.id, err },
+          'Failed to clean up worktree',
+        );
+      }
+    }
   }
 }
 
 function writeResponse(
   responsePath: string,
-  data: { result?: string; error?: string; model: string | null; status?: string },
+  data: { result?: string; error?: string; model: string | null; status?: string; worktree?: string | null },
 ): void {
   const tempPath = `${responsePath}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify({
