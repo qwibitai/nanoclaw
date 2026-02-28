@@ -48,7 +48,7 @@ import { GroupQueue } from './group-queue.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { monitorBus, MONITOR_EVENTS } from './monitor-events.js';
-import { startMonitorServer } from './monitor-server.js';
+import { snapshotActiveStrategies, startMonitorServer } from './monitor-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -694,6 +694,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    snapshotActiveStrategies();
     monitorServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();

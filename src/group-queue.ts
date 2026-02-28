@@ -24,6 +24,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  startTime: number | null;
   retryCount: number;
   debounceTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -48,6 +49,7 @@ export class GroupQueue {
         process: null,
         containerName: null,
         groupFolder: null,
+        startTime: null,
         retryCount: 0,
         debounceTimer: null,
       };
@@ -146,9 +148,9 @@ export class GroupQueue {
     activeCount: number;
     maxConcurrent: number;
     waitingCount: number;
-    groups: Array<{ jid: string; active: boolean; pendingMessages: boolean; pendingTasks: number; containerName: string | null }>;
+    groups: Array<{ jid: string; active: boolean; pendingMessages: boolean; pendingTasks: number; containerName: string | null; startTime: number | null }>;
   } {
-    const groups: Array<{ jid: string; active: boolean; pendingMessages: boolean; pendingTasks: number; containerName: string | null }> = [];
+    const groups: Array<{ jid: string; active: boolean; pendingMessages: boolean; pendingTasks: number; containerName: string | null; startTime: number | null }> = [];
     for (const [jid, state] of this.groups) {
       groups.push({
         jid,
@@ -156,6 +158,7 @@ export class GroupQueue {
         pendingMessages: state.pendingMessages,
         pendingTasks: state.pendingTasks.length,
         containerName: state.containerName,
+        startTime: state.startTime,
       });
     }
     return {
@@ -171,7 +174,7 @@ export class GroupQueue {
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
-    monitorBus.emit(MONITOR_EVENTS.CONTAINER_START, { groupName: groupFolder || groupJid, containerName, reason: 'process' });
+    monitorBus.emit(MONITOR_EVENTS.CONTAINER_START, { groupName: groupFolder || groupJid, containerName, reason: 'process', startTime: Date.now() });
   }
 
   /**
@@ -238,6 +241,7 @@ export class GroupQueue {
     state.idleWaiting = false;
     state.isTaskContainer = false;
     state.pendingMessages = false;
+    state.startTime = Date.now();
     this.activeCount++;
     monitorBus.emit(MONITOR_EVENTS.QUEUE_CHANGE, this.getState());
 
@@ -246,7 +250,7 @@ export class GroupQueue {
       'Starting container for group',
     );
 
-    const startTime = Date.now();
+    const startTime = state.startTime;
     try {
       if (this.processMessagesFn) {
         const success = await this.processMessagesFn(groupJid);
@@ -263,6 +267,7 @@ export class GroupQueue {
       const containerName = state.containerName;
       const groupFolder = state.groupFolder;
       state.active = false;
+      state.startTime = null;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -278,6 +283,7 @@ export class GroupQueue {
     state.active = true;
     state.idleWaiting = false;
     state.isTaskContainer = true;
+    state.startTime = Date.now();
     this.activeCount++;
     monitorBus.emit(MONITOR_EVENTS.QUEUE_CHANGE, this.getState());
 
@@ -286,7 +292,7 @@ export class GroupQueue {
       'Running queued task',
     );
 
-    const startTime = Date.now();
+    const startTime = state.startTime;
     try {
       await task.fn();
     } catch (err) {
@@ -296,6 +302,7 @@ export class GroupQueue {
       const groupFolder = state.groupFolder;
       state.active = false;
       state.isTaskContainer = false;
+      state.startTime = null;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;

@@ -20,6 +20,14 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const monitorUrl = process.env.NANOCLAW_MONITOR_URL || '';
+
+async function monitorFetch(endpoint: string): Promise<unknown> {
+  if (!monitorUrl) throw new Error('NANOCLAW_MONITOR_URL not configured');
+  const res = await fetch(`${monitorUrl}${endpoint}`);
+  if (!res.ok) throw new Error(`Monitor API ${endpoint}: ${res.status} ${res.statusText}`);
+  return res.json();
+}
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -318,6 +326,126 @@ Optionally specify a branch to checkout before pulling. The container will termi
         },
       ],
     };
+  },
+);
+
+// --- Host database query tools (via monitor HTTP API) ---
+
+server.tool(
+  'query_messages',
+  `Query chat message history from the database. Returns messages ordered by most recent first.
+Use this to look up what was said in a conversation, check recent messages, or search chat history.`,
+  {
+    chat_jid: z.string().optional().describe('Filter by chat JID. Defaults to the current chat.'),
+    limit: z.number().min(1).max(200).optional().describe('Max messages to return (default 50, max 200)'),
+  },
+  async (args) => {
+    try {
+      const jid = args.chat_jid || chatJid;
+      const limit = args.limit || 50;
+      const messages = await monitorFetch(`/api/messages?jid=${encodeURIComponent(jid)}&limit=${limit}`) as Array<{
+        sender_name: string;
+        content: string;
+        timestamp: string;
+        is_from_me: number;
+        is_bot_message: number;
+      }>;
+
+      if (messages.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No messages found.' }] };
+      }
+
+      const formatted = messages
+        .reverse()
+        .map(m => {
+          const who = (m.is_bot_message || m.is_from_me) ? 'Nano' : (m.sender_name || 'User');
+          const time = new Date(m.timestamp).toLocaleString();
+          return `[${time}] ${who}: ${m.content}`;
+        })
+        .join('\n');
+
+      return { content: [{ type: 'text' as const, text: formatted }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error querying messages: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'query_chats',
+  'List all known chats/conversations with their last activity time. Useful for finding chat JIDs.',
+  {},
+  async () => {
+    try {
+      const chats = await monitorFetch('/api/chats') as Array<{
+        jid: string;
+        name: string;
+        last_message_time: string;
+        channel: string;
+        is_group: number;
+      }>;
+
+      if (chats.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No chats found.' }] };
+      }
+
+      const formatted = chats
+        .map(c => {
+          const type = c.is_group ? 'group' : 'DM';
+          const ch = c.channel || 'unknown';
+          const time = c.last_message_time ? new Date(c.last_message_time).toLocaleString() : 'never';
+          return `- ${c.name} [${type}/${ch}] (jid: ${c.jid}) — last: ${time}`;
+        })
+        .join('\n');
+
+      return { content: [{ type: 'text' as const, text: `Known chats:\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error querying chats: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'query_status',
+  'Get the current system status including uptime, active containers, message count, and channel connectivity.',
+  {},
+  async () => {
+    try {
+      const status = await monitorFetch('/api/status') as Record<string, unknown>;
+
+      const uptimeMs = status.uptime as number;
+      const hours = Math.floor(uptimeMs / 3600000);
+      const minutes = Math.floor((uptimeMs % 3600000) / 60000);
+
+      const lines = [
+        `Uptime: ${hours}h ${minutes}m`,
+        `Active containers: ${status.activeContainers}/${status.maxContainers}`,
+        `Waiting in queue: ${status.waitingCount}`,
+        `Messages today: ${status.messages_today}`,
+        `Active groups: ${status.active_groups}`,
+        `Scheduled tasks: ${status.scheduled_tasks}`,
+      ];
+
+      const channels = status.channels as Record<string, { connected: boolean }> | undefined;
+      if (channels) {
+        for (const [name, ch] of Object.entries(channels)) {
+          lines.push(`Channel ${name}: ${ch.connected ? 'connected' : 'disconnected'}`);
+        }
+      }
+
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error querying status: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   },
 );
 

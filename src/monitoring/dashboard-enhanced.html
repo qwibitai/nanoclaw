@@ -547,6 +547,7 @@
   <div class="tab" onclick="switchTab('backtests')">Backtests</div>
   <div class="tab" onclick="switchTab('watchers')">Watchers</div>
   <div class="tab" onclick="switchTab('agents')">Agents</div>
+  <div class="tab" onclick="switchTab('trading')">Paper Trading</div>
 </div>
 
 <div class="stats-bar" id="statsBar"></div>
@@ -948,6 +949,40 @@
   </div>
 
   <div id="acct-sub-kalshi" style="display:none">
+  <!-- Strategy Runner Panel -->
+  <div class="panel" style="margin-bottom: 16px;">
+    <div class="panel-header">
+      Strategy Runner
+      <span id="strat-engine-badge" style="display:none; margin-left: 8px; background: #238636; color: #fff; padding: 2px 8px; border-radius: 10px; font-size: 11px; animation: pulse 2s infinite;">Running</span>
+    </div>
+    <div class="panel-body">
+      <div style="display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap;">
+        <div class="form-group" style="flex: 2; margin-bottom: 0;">
+          <label>Preset</label>
+          <select id="strat-preset-select"><option value="">-- Select Preset --</option></select>
+        </div>
+        <div class="form-group" style="flex: 1; margin-bottom: 0;">
+          <label>Mode</label>
+          <select id="strat-mode-select"><option value="paper">Paper</option><option value="live">Live</option></select>
+        </div>
+        <button class="btn btn-primary" id="strat-toggle-btn" onclick="toggleStrategyEngine()" style="height: 32px; white-space: nowrap;">Start</button>
+        <button class="btn btn-sm" onclick="createMomentumPreset()" style="height: 32px; white-space: nowrap; background: #21262d; color: #c9d1d9; border: 1px solid #30363d;">+ Quick Preset</button>
+      </div>
+      <div id="strat-live-stats" style="display: none; margin-top: 12px; padding: 10px; background: #0d1117; border: 1px solid #21262d; border-radius: 6px;">
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 12px;">
+          <div><span style="color: #8b949e;">Strategy:</span> <span id="strat-stat-name" style="color: #f0f6fc;">--</span></div>
+          <div><span style="color: #8b949e;">Uptime:</span> <span id="strat-stat-uptime" style="color: #f0f6fc;">--</span></div>
+          <div><span style="color: #8b949e;">Data Points:</span> <span id="strat-stat-data" style="color: #58a6ff;">0</span></div>
+          <div><span style="color: #8b949e;">Signals:</span> <span id="strat-stat-signals" style="color: #d29922;">0</span></div>
+          <div><span style="color: #8b949e;">Trades:</span> <span id="strat-stat-trades" style="color: #3fb950;">0</span></div>
+          <div><span style="color: #8b949e;">Errors:</span> <span id="strat-stat-errors" style="color: #f85149;">0</span></div>
+        </div>
+        <div id="strat-last-signal" style="margin-top: 6px; font-size: 11px; color: #8b949e;"></div>
+      </div>
+    </div>
+  </div>
+  <style>@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }</style>
+
   <div class="grid-2">
     <div>
       <div class="panel">
@@ -1044,6 +1079,7 @@
           <select id="preset-strategy">
             <option value="rsi_mean_reversion">RSI Mean Reversion</option>
             <option value="probability_mispricing">Probability Mispricing</option>
+            <option value="momentum_15m">15m BTC Momentum</option>
           </select>
         </div>
       </div>
@@ -1117,7 +1153,7 @@
       </div>
       <div class="form-row-3">
         <div class="form-group"><label>Strategy</label>
-          <select id="run-strategy"><option value="rsi_mean_reversion">RSI Mean Reversion</option><option value="probability_mispricing">Probability Mispricing</option></select>
+          <select id="run-strategy"><option value="rsi_mean_reversion">RSI Mean Reversion</option><option value="probability_mispricing">Probability Mispricing</option><option value="momentum_15m">15m BTC Momentum</option></select>
         </div>
         <div class="form-group"><label>Mode</label>
           <select id="run-mode"><option value="paper">Paper</option><option value="live">Live</option></select>
@@ -1402,6 +1438,50 @@
   </div>
 </div>
 
+<!-- PAPER TRADING TAB -->
+<div id="tab-trading" class="tab-content">
+  <div class="grid-3" style="margin-bottom: 16px;">
+    <div class="metric-card">
+      <div class="metric-label">Capital</div>
+      <div class="metric-value" id="trading-capital">$0.00</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Total P&L</div>
+      <div class="metric-value" id="trading-pnl">$0.00</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Return</div>
+      <div class="metric-value" id="trading-return">0.00%</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      Open Positions
+      <button class="refresh-btn" onclick="loadTradingPositions()">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker/Market</th>
+            <th>Side</th>
+            <th>Contracts</th>
+            <th>Entry Price</th>
+            <th>Current Price</th>
+            <th>P&L</th>
+            <th>P&L %</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="trading-positions-body">
+          <tr><td colspan="8" class="empty-state">No open positions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 // State
 let currentTab = 'overview';
@@ -1424,6 +1504,7 @@ function switchTab(tabName) {
   if (tabName === 'runs') { loadRuns(); loadPresetsDropdown(); }
   if (tabName === 'backtests') loadBacktests();
   if (tabName === 'watchers') { loadWatchers(); loadWatcherDropdowns(); }
+  if (tabName === 'trading') { loadTradingPositions(); startTradingRefresh(); } else { stopTradingRefresh(); }
 }
 
 // --- Trading ---
@@ -1732,6 +1813,7 @@ function formatUptime(ms) {
 // --- Initialize ---
 
 function connectSSE() {
+  isReplaying = true;
   const eventSource = new EventSource('/api/events');
 
   eventSource.onopen = () => {
@@ -1759,6 +1841,16 @@ function connectSSE() {
     }
   };
 
+  // Replay-done sentinel
+  eventSource.addEventListener('replay:done', () => {
+    isReplaying = false;
+    // Scroll agent log to bottom after replay
+    const feed = document.getElementById('agents-log-feed');
+    if (feed) feed.scrollTop = feed.scrollHeight;
+    // Hydrate any containers not captured via replay (fallback)
+    hydrateActiveContainers();
+  });
+
   // Live message events
   eventSource.addEventListener('message:received', (event) => {
     try {
@@ -1783,7 +1875,7 @@ function connectSSE() {
     try {
       const data = JSON.parse(event.data);
       addActiveContainer(data);
-      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container started: ' + (data.containerName || ''));
+      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container started: ' + (data.containerName || ''), data._ts);
     } catch (err) { console.error('SSE container:start error:', err); }
   });
 
@@ -1791,8 +1883,9 @@ function connectSSE() {
     try {
       const data = JSON.parse(event.data);
       removeActiveContainer(data);
-      const dur = data.duration ? ' (' + (data.duration / 1000).toFixed(1) + 's)' : '';
-      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container ended' + dur);
+      const durMs = data.durationMs || data.duration;
+      const dur = durMs ? ' (' + (durMs / 1000).toFixed(1) + 's)' : '';
+      appendAgentLog('lifecycle', data.groupName || data.folder || '?', 'Container ended' + dur, data._ts);
     } catch (err) { console.error('SSE container:end error:', err); }
   });
 
@@ -1804,7 +1897,7 @@ function connectSSE() {
       // Check for sub-agent lifecycle events first
       const subagentEvent = parseSubagentEvent(line);
       if (subagentEvent) {
-        handleSubagentEvent(subagentEvent, groupName);
+        handleSubagentEvent(subagentEvent, groupName, data._ts);
         return;
       }
       // Classify agent-runner log lines by prefix
@@ -1812,7 +1905,7 @@ function connectSSE() {
       if (line.includes('[assistant]')) type = 'assistant';
       else if (line.includes('[tool_call]')) type = 'tool-call';
       else if (line.includes('[tool_result]')) type = 'tool-result';
-      appendAgentLog(type, groupName, line);
+      appendAgentLog(type, groupName, line, data._ts);
     } catch (err) { console.error('SSE container:log error:', err); }
   });
 
@@ -1822,7 +1915,7 @@ function connectSSE() {
       const status = data.status || 'success';
       const type = status === 'error' ? 'output-error' : status === 'heartbeat' ? 'output-heartbeat' : 'output-success';
       const msg = data.preview ? data.preview.slice(0, 200) : '[' + status + ']';
-      appendAgentLog(type, data.groupName || '?', msg);
+      appendAgentLog(type, data.groupName || '?', msg, data._ts);
     } catch (err) { console.error('SSE container:output error:', err); }
   });
 }
@@ -1835,6 +1928,7 @@ const MAX_COMPLETED_SUBAGENTS = 20;
 const AGENT_LOG_MAX = 500;
 let agentLogCount = 0;
 let agentElapsedInterval = null;
+let isReplaying = false;
 
 function addActiveContainer(data) {
   const key = data.containerName || data.folder || data.groupName || Date.now().toString();
@@ -1848,7 +1942,7 @@ function addActiveContainer(data) {
   activeContainers.set(key, {
     groupName,
     containerName: data.containerName || key,
-    startTime: Date.now(),
+    startTime: data.startTime || data._ts || Date.now(),
   });
   renderActiveContainers();
   if (!agentElapsedInterval) {
@@ -1998,7 +2092,7 @@ function formatElapsed(ms) {
   return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
 }
 
-function appendAgentLog(type, groupName, message) {
+function appendAgentLog(type, groupName, message, replayTs) {
   const feed = document.getElementById('agents-log-feed');
   if (!feed) return;
 
@@ -2007,7 +2101,7 @@ function appendAgentLog(type, groupName, message) {
     feed.removeChild(feed.firstChild);
   }
 
-  const now = new Date();
+  const now = replayTs ? new Date(replayTs) : new Date();
   const ts = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0') + ':' + String(now.getSeconds()).padStart(2, '0');
 
   const line = document.createElement('div');
@@ -2019,12 +2113,14 @@ function appendAgentLog(type, groupName, message) {
   const countEl = document.getElementById('agents-log-count');
   if (countEl) countEl.textContent = Math.min(agentLogCount, AGENT_LOG_MAX) + ' lines';
 
-  // Auto-scroll if checkbox is checked and user is near bottom
-  const autoScroll = document.getElementById('agents-autoscroll');
-  if (autoScroll && autoScroll.checked) {
-    const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
-    if (isNearBottom || feed.children.length <= 5) {
-      feed.scrollTop = feed.scrollHeight;
+  // Auto-scroll if checkbox is checked and user is near bottom (skip during replay)
+  if (!isReplaying) {
+    const autoScroll = document.getElementById('agents-autoscroll');
+    if (autoScroll && autoScroll.checked) {
+      const isNearBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+      if (isNearBottom || feed.children.length <= 5) {
+        feed.scrollTop = feed.scrollHeight;
+      }
     }
   }
 }
@@ -2038,26 +2134,27 @@ function parseSubagentEvent(line) {
   } catch { return null; }
 }
 
-function handleSubagentEvent(evt, groupName) {
+function handleSubagentEvent(evt, groupName, replayTs) {
+  const now = replayTs || Date.now();
   if (evt._event === 'subagent:start') {
     activeSubagents.set(evt.agent_id, {
       type: evt.agent_type,
       parentGroup: groupName,
-      startTime: Date.now(),
+      startTime: now,
     });
-    appendAgentLog('subagent-start', groupName, 'Sub-agent started: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ')');
+    appendAgentLog('subagent-start', groupName, 'Sub-agent started: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ')', replayTs);
     renderActiveContainers();
   } else if (evt._event === 'subagent:stop') {
     const sa = activeSubagents.get(evt.agent_id);
-    const startTime = sa ? sa.startTime : Date.now();
-    const elapsed = sa ? formatElapsed(Date.now() - sa.startTime) : '?';
+    const saStartTime = sa ? sa.startTime : now;
+    const elapsed = sa ? formatElapsed(now - sa.startTime) : '?';
     activeSubagents.delete(evt.agent_id);
     // Store completed sub-agent with summary + full timeline
     completedSubagents.set(evt.agent_id, {
       type: evt.agent_type,
       parentGroup: sa ? sa.parentGroup : groupName,
-      startTime: startTime,
-      endTime: Date.now(),
+      startTime: saStartTime,
+      endTime: now,
       tools: evt.tools || [],
       outputPreview: evt.output_preview || '',
       steps: evt.steps || [],
@@ -2068,11 +2165,11 @@ function handleSubagentEvent(evt, groupName) {
       completedSubagents.delete(oldest);
     }
     const toolsSuffix = evt.tools && evt.tools.length > 0 ? ' | tools: ' + evt.tools.join(', ') : '';
-    appendAgentLog('subagent-stop', groupName, 'Sub-agent completed: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ') after ' + elapsed + toolsSuffix);
+    appendAgentLog('subagent-stop', groupName, 'Sub-agent completed: ' + evt.agent_type + ' (' + evt.agent_id.slice(0, 8) + ') after ' + elapsed + toolsSuffix, replayTs);
     renderActiveContainers();
   } else if (evt._event === 'task:completed') {
     const who = evt.teammate_name ? ' by ' + evt.teammate_name : '';
-    appendAgentLog('task-completed', groupName, 'Task completed' + who + ': ' + (evt.task_subject || evt.task_id));
+    appendAgentLog('task-completed', groupName, 'Task completed' + who + ': ' + (evt.task_subject || evt.task_id), replayTs);
   }
 }
 
@@ -2161,10 +2258,12 @@ async function hydrateActiveContainers() {
     const groups = await res.json();
     for (const g of groups) {
       if (g.active && g.containerName) {
+        // Skip containers already known from replay
+        if (activeContainers.has(g.containerName)) continue;
         activeContainers.set(g.containerName, {
           groupName: g.folder || g.name || '?',
           containerName: g.containerName,
-          startTime: Date.now(), // approximate — we don't know the real start time
+          startTime: g.startTime || Date.now(),
         });
       }
     }
@@ -2228,7 +2327,7 @@ function switchAccountSub(sub) {
     if (el) el.style.display = s === sub ? 'block' : 'none';
   });
   if (sub === 'paper') loadPaperPortfolio();
-  if (sub === 'kalshi') { loadKalshiBalance(); loadKalshiPositions(); loadKalshiOrders(); }
+  if (sub === 'kalshi') { loadKalshiBalance(); loadKalshiPositions(); loadKalshiOrders(); loadKalshiPresets(); loadStrategyEngineStatus(); }
   if (sub === 'markets') loadBTCWindows();
 }
 
@@ -2638,6 +2737,157 @@ async function cancelKalshiOrder(orderId) {
   } catch (err) {
     alert('Cancel error: ' + err.message);
   }
+}
+
+// --- Strategy Engine ---
+
+let _stratRunId = null;
+let _stratPollTimer = null;
+
+async function loadKalshiPresets() {
+  try {
+    const resp = await fetch('/api/trading/presets');
+    const presets = await resp.json();
+    const sel = document.getElementById('strat-preset-select');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">-- Select Preset --</option>';
+    for (const p of presets) {
+      if (p.platform !== 'kalshi' && p.platform !== 'all') continue;
+      sel.innerHTML += `<option value="${p.id}">${p.name} (${p.strategy})</option>`;
+    }
+    if (prev) sel.value = prev;
+  } catch (err) { console.error('loadKalshiPresets:', err); }
+}
+
+async function createMomentumPreset() {
+  try {
+    const resp = await fetch('/api/trading/presets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: '15m BTC Momentum',
+        platform: 'kalshi',
+        strategy: 'momentum_15m',
+        mode: 'paper',
+        initial_capital: 1000,
+        risk_params: {
+          max_position_size: 10,
+          min_confidence: 60,
+          max_drawdown: 25,
+          poly_momentum_threshold: 0.03,
+          arb_edge_threshold: 5,
+          max_contracts_per_trade: 20,
+        },
+        notes: 'Uses Polymarket 5m momentum as signal for Kalshi 15m brackets',
+      }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    alert('Preset created!');
+    loadKalshiPresets();
+  } catch (err) { alert('Error: ' + err.message); }
+}
+
+async function toggleStrategyEngine() {
+  if (_stratRunId) {
+    // Stop
+    try {
+      const resp = await fetch('/api/trading/strategy-engine/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: _stratRunId }),
+      });
+      const data = await resp.json();
+      if (data.error) { alert('Stop error: ' + data.error); return; }
+      _stratRunId = null;
+      if (_stratPollTimer) { clearInterval(_stratPollTimer); _stratPollTimer = null; }
+      updateStrategyUI(null);
+    } catch (err) { alert('Stop error: ' + err.message); }
+  } else {
+    // Start
+    const presetId = document.getElementById('strat-preset-select').value;
+    const mode = document.getElementById('strat-mode-select').value;
+    if (!presetId) { alert('Select a preset first'); return; }
+    if (mode === 'live' && !confirm('You are about to start LIVE trading. Real money will be at risk. Continue?')) return;
+
+    try {
+      const resp = await fetch('/api/trading/strategy-engine/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preset_id: presetId, mode }),
+      });
+      const data = await resp.json();
+      if (data.error) { alert('Start error: ' + data.error); return; }
+      _stratRunId = data.runId;
+      updateStrategyUI({ strategy: data.strategy, mode: data.mode, uptime: 0, stats: { signals: 0, trades: 0, dataPoints: 0, errors: 0, lastSignal: null } });
+      _stratPollTimer = setInterval(pollStrategyStatus, 5000);
+    } catch (err) { alert('Start error: ' + err.message); }
+  }
+}
+
+async function pollStrategyStatus() {
+  if (!_stratRunId) return;
+  try {
+    const resp = await fetch('/api/trading/strategy-engine/status?run_id=' + _stratRunId);
+    if (!resp.ok) { _stratRunId = null; if (_stratPollTimer) { clearInterval(_stratPollTimer); _stratPollTimer = null; } updateStrategyUI(null); return; }
+    const data = await resp.json();
+    updateStrategyUI(data);
+  } catch { /* ignore */ }
+}
+
+function updateStrategyUI(data) {
+  const badge = document.getElementById('strat-engine-badge');
+  const btn = document.getElementById('strat-toggle-btn');
+  const statsDiv = document.getElementById('strat-live-stats');
+
+  if (!data) {
+    badge.style.display = 'none';
+    btn.textContent = 'Start';
+    btn.style.background = '';
+    statsDiv.style.display = 'none';
+    return;
+  }
+
+  badge.style.display = 'inline';
+  badge.textContent = (data.mode === 'live' ? 'LIVE' : 'Paper') + ' Running';
+  badge.style.background = data.mode === 'live' ? '#da3633' : '#238636';
+  btn.textContent = 'Stop';
+  btn.style.background = '#da3633';
+  statsDiv.style.display = 'block';
+
+  const s = data.stats || {};
+  document.getElementById('strat-stat-name').textContent = data.strategy || '--';
+  const mins = Math.floor((data.uptime || 0) / 60);
+  const secs = (data.uptime || 0) % 60;
+  document.getElementById('strat-stat-uptime').textContent = mins + 'm ' + secs + 's';
+  document.getElementById('strat-stat-data').textContent = s.dataPoints || 0;
+  document.getElementById('strat-stat-signals').textContent = s.signals || 0;
+  document.getElementById('strat-stat-trades').textContent = s.trades || 0;
+  document.getElementById('strat-stat-errors').textContent = s.errors || 0;
+
+  const lastSig = document.getElementById('strat-last-signal');
+  if (s.lastSignal) {
+    lastSig.textContent = 'Last signal: ' + s.lastSignal.type + ' ' + s.lastSignal.ticker + ' (conf: ' + s.lastSignal.confidence + '%) at ' + new Date(s.lastSignal.time).toLocaleTimeString();
+    lastSig.style.color = '#d29922';
+  } else {
+    lastSig.textContent = 'Waiting for signals... (need 12+ data points, ~6 min)';
+    lastSig.style.color = '#8b949e';
+  }
+}
+
+async function loadStrategyEngineStatus() {
+  try {
+    const resp = await fetch('/api/trading/strategy-engine/status');
+    const engines = await resp.json();
+    if (Array.isArray(engines) && engines.length > 0) {
+      _stratRunId = engines[0].runId;
+      updateStrategyUI(engines[0]);
+      if (!_stratPollTimer) _stratPollTimer = setInterval(pollStrategyStatus, 5000);
+    } else {
+      _stratRunId = null;
+      updateStrategyUI(null);
+    }
+  } catch { /* ignore */ }
 }
 
 // --- Paper Portfolio ---
@@ -4123,6 +4373,82 @@ async function loadPastOptimizations() {
       <td>${new Date(r.created_at).toLocaleString()}</td>
     </tr>`).join('');
   } catch { /* ignore */ }
+}
+
+// --- Paper Trading Positions ---
+
+let tradingRefreshInterval = null;
+
+async function loadTradingPositions() {
+  try {
+    const res = await fetch('/api/trading/positions?status=open');
+    const positions = await res.json();
+
+    const body = document.getElementById('trading-positions-body');
+    if (!positions || positions.length === 0) {
+      body.innerHTML = '<tr><td colspan="8" class="empty-state">No open positions</td></tr>';
+      updateTradingSummary([], 10000); // Default capital
+      return;
+    }
+
+    // Calculate portfolio metrics
+    let totalPnl = 0;
+    const capital = 10000; // TODO: Make this configurable
+
+    body.innerHTML = positions.map(p => {
+      // For paper trading, we'll need to fetch current prices
+      // For now, show entry data and status
+      const currentPrice = p.current_price || p.entry_price;
+      const pnl = (currentPrice - p.entry_price) * p.size;
+      const pnlPct = ((currentPrice - p.entry_price) / p.entry_price) * 100;
+      totalPnl += pnl;
+
+      const statusClass = pnl > 0 ? 'positive' : pnl < 0 ? 'negative' : '';
+      const badgeClass = pnl > 0 ? 'badge-green' : pnl < 0 ? 'badge-red' : 'badge-gray';
+
+      return `<tr>
+        <td>${escapeHtml(p.symbol)}</td>
+        <td><span class="badge ${p.strategy === 'YES' || p.strategy === 'LONG' ? 'badge-green' : 'badge-red'}">${escapeHtml(p.strategy)}</span></td>
+        <td>${p.size.toFixed(0)}</td>
+        <td>$${p.entry_price.toFixed(2)}</td>
+        <td>$${currentPrice.toFixed(2)}</td>
+        <td class="${statusClass}">$${pnl.toFixed(2)}</td>
+        <td class="${statusClass}">${pnlPct > 0 ? '+' : ''}${pnlPct.toFixed(2)}%</td>
+        <td><span class="badge ${badgeClass}">${escapeHtml(p.status)}</span></td>
+      </tr>`;
+    }).join('');
+
+    updateTradingSummary(positions, capital);
+  } catch (err) {
+    console.error('Failed to load trading positions:', err);
+  }
+}
+
+function updateTradingSummary(positions, capital) {
+  const totalPnl = positions.reduce((sum, p) => {
+    const currentPrice = p.current_price || p.entry_price;
+    return sum + ((currentPrice - p.entry_price) * p.size);
+  }, 0);
+
+  const returnPct = (totalPnl / capital) * 100;
+
+  document.getElementById('trading-capital').textContent = `$${capital.toFixed(2)}`;
+  document.getElementById('trading-pnl').textContent = `$${totalPnl.toFixed(2)}`;
+  document.getElementById('trading-pnl').className = totalPnl > 0 ? 'metric-value positive' : totalPnl < 0 ? 'metric-value negative' : 'metric-value';
+  document.getElementById('trading-return').textContent = `${returnPct > 0 ? '+' : ''}${returnPct.toFixed(2)}%`;
+  document.getElementById('trading-return').className = returnPct > 0 ? 'metric-value positive' : returnPct < 0 ? 'metric-value negative' : 'metric-value';
+}
+
+function startTradingRefresh() {
+  stopTradingRefresh();
+  tradingRefreshInterval = setInterval(loadTradingPositions, 30000); // Refresh every 30 seconds
+}
+
+function stopTradingRefresh() {
+  if (tradingRefreshInterval) {
+    clearInterval(tradingRefreshInterval);
+    tradingRefreshInterval = null;
+  }
 }
 
 init();
