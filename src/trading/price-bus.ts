@@ -17,9 +17,9 @@ export interface PolyMidpointEvent {
 }
 
 export interface KxbtcBracketData {
-  readonly ticker: number;
-  readonly event_ticker: number;
-  readonly title: number;
+  readonly ticker: string;
+  readonly event_ticker: string;
+  readonly title: string;
   readonly yes_bid: number;
   readonly yes_ask: number;
   readonly no_bid: number;
@@ -103,7 +103,10 @@ export class PriceBus {
     return this;
   }
 
-  emit<K extends keyof PriceBusEvents>(event: K, payload: PriceBusEvents[K]): boolean {
+  emit<K extends keyof PriceBusEvents>(
+    event: K,
+    payload: PriceBusEvents[K],
+  ): boolean {
     return this.emitter.emit(event, payload);
   }
 

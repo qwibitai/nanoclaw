@@ -47,11 +47,11 @@ describe('PriceBus', () => {
     const payload: KalshiBracketsEvent = {
       brackets: [
         {
-          ticker: 1,
-          event_ticker: 100,
-          title: 42,
+          ticker: 'KXBTC-26FEB28-B67000',
+          event_ticker: 'KXBTC-26FEB28',
+          title: '$66,000 to $68,000',
           yes_bid: 0.35,
-          yes_ask: 0.40,
+          yes_ask: 0.4,
           no_bid: 0.58,
           no_ask: 0.65,
           last_price: 0.37,
@@ -84,10 +84,10 @@ describe('PriceBus', () => {
         {
           ticker: 'KXBTC-26MAR01-B66000',
           event_ticker: 'KXBTC-26MAR01',
-          yes_bid: 0.30,
+          yes_bid: 0.3,
           yes_ask: 0.35,
           no_bid: 0.63,
-          no_ask: 0.70,
+          no_ask: 0.7,
           last_price: 0.32,
           close_time: '2026-03-01T00:00:00Z',
           status: 'open',
