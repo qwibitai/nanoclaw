@@ -6,6 +6,12 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  MODEL_ALIAS_MAP: {
+    opus: 'claude-opus-4-6',
+    sonnet: 'claude-sonnet-4-6',
+    haiku: 'claude-haiku-4-5-20251001',
+  },
+  MODEL_OVERRIDE_TIMEOUT: 1800000,
 }));
 
 // Mock logger
@@ -160,6 +166,11 @@ function currentBot() {
 async function triggerTextMessage(ctx: ReturnType<typeof createTextCtx>) {
   const handlers = currentBot().filterHandlers.get('message:text') || [];
   for (const h of handlers) await h(ctx);
+}
+
+async function triggerCommand(name: string, ctx: any) {
+  const handler = currentBot().commandHandlers.get(name);
+  if (handler) await handler(ctx);
 }
 
 async function triggerMediaMessage(
@@ -912,6 +923,181 @@ describe('TelegramChannel', () => {
       await handler(ctx);
 
       expect(ctx.reply).toHaveBeenCalledWith('Andy is online.');
+    });
+  });
+
+  // --- Model switching commands ---
+
+  describe('model switching commands', () => {
+    function createCommandCtx(chatId = 100200300) {
+      return {
+        chat: { id: chatId, type: 'group' as const, title: 'Test Group' },
+        from: { id: 99001, first_name: 'Alice' },
+        reply: vi.fn(),
+      };
+    }
+
+    it('/opus sets override and replies confirmation', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createCommandCtx();
+      await triggerCommand('opus', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Switched to Opus for 30 min.');
+      expect(channel.getModelOverride('tg:100200300')).toBe('claude-opus-4-6');
+    });
+
+    it('/sonnet sets override and replies confirmation', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createCommandCtx();
+      await triggerCommand('sonnet', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Switched to Sonnet for 30 min.');
+      expect(channel.getModelOverride('tg:100200300')).toBe(
+        'claude-sonnet-4-6',
+      );
+    });
+
+    it('/haiku sets override and replies confirmation', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createCommandCtx();
+      await triggerCommand('haiku', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Switched to Haiku for 30 min.');
+      expect(channel.getModelOverride('tg:100200300')).toBe(
+        'claude-haiku-4-5-20251001',
+      );
+    });
+
+    it('/default clears override and replies', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      // Set override first
+      await triggerCommand('opus', createCommandCtx());
+      expect(channel.getModelOverride('tg:100200300')).toBe('claude-opus-4-6');
+
+      // Clear it
+      const ctx = createCommandCtx();
+      await triggerCommand('default', ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Model reset to default.');
+      expect(channel.getModelOverride('tg:100200300')).toBeUndefined();
+    });
+
+    it('commands are ignored for unregistered chats', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createCommandCtx(999999); // unregistered
+      await triggerCommand('opus', ctx);
+
+      expect(ctx.reply).not.toHaveBeenCalled();
+      expect(channel.getModelOverride('tg:999999')).toBeUndefined();
+    });
+
+    it('getModelOverride returns undefined when no override set', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      expect(channel.getModelOverride('tg:100200300')).toBeUndefined();
+    });
+
+    it('text message resets the inactivity timer', async () => {
+      vi.useFakeTimers();
+      try {
+        const opts = createTestOpts();
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        // Set override
+        await triggerCommand('opus', createCommandCtx());
+
+        // Advance 29 minutes — almost expired
+        vi.advanceTimersByTime(29 * 60 * 1000);
+
+        // Send a text message to reset timer
+        const textCtx = createTextCtx({ text: 'Hello' });
+        await triggerTextMessage(textCtx);
+
+        // Advance another 29 minutes — would have expired without reset
+        vi.advanceTimersByTime(29 * 60 * 1000);
+        expect(channel.getModelOverride('tg:100200300')).toBe(
+          'claude-opus-4-6',
+        );
+
+        // Advance remaining 1 minute to trigger expiry
+        vi.advanceTimersByTime(1 * 60 * 1000);
+        expect(channel.getModelOverride('tg:100200300')).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('timer expiry clears override and sends notification', async () => {
+      vi.useFakeTimers();
+      try {
+        const opts = createTestOpts();
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        await triggerCommand('opus', createCommandCtx());
+        expect(channel.getModelOverride('tg:100200300')).toBe(
+          'claude-opus-4-6',
+        );
+
+        // Advance past timeout
+        vi.advanceTimersByTime(1800000);
+
+        expect(channel.getModelOverride('tg:100200300')).toBeUndefined();
+        expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
+          '100200300',
+          'Model override expired, back to default.',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('disconnect clears all timers and overrides', async () => {
+      vi.useFakeTimers();
+      try {
+        const opts = createTestOpts();
+        const channel = new TelegramChannel('test-token', opts);
+        await channel.connect();
+
+        const sendMessageSpy = currentBot().api.sendMessage;
+
+        await triggerCommand('opus', createCommandCtx());
+        expect(channel.getModelOverride('tg:100200300')).toBe(
+          'claude-opus-4-6',
+        );
+
+        // Clear call count from /opus reply
+        sendMessageSpy.mockClear();
+
+        await channel.disconnect();
+
+        expect(channel.getModelOverride('tg:100200300')).toBeUndefined();
+        expect(channel.isConnected()).toBe(false);
+
+        // Advancing timers should not trigger sendMessage (timer was cleared)
+        vi.advanceTimersByTime(1800000);
+        expect(sendMessageSpy).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
