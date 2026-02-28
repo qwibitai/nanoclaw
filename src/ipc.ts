@@ -18,9 +18,9 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string, attachments?: string[]) => Promise<void>;
-  sendReaction: (jid: string, emoji: string, targetAuthor: string, targetTimestamp: number) => Promise<void>;
-  sendReply: (jid: string, text: string, targetAuthor: string, targetTimestamp: number, attachments?: string[]) => Promise<void>;
-  sendPoll: (jid: string, question: string, options: string[]) => Promise<void>;
+  sendReaction?: (jid: string, emoji: string, targetAuthor: string, targetTimestamp: number) => Promise<void>;
+  sendReply?: (jid: string, text: string, targetAuthor: string, targetTimestamp: number, attachments?: string[]) => Promise<void>;
+  sendPoll?: (jid: string, question: string, options: string[]) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -169,24 +169,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 } else if (data.type === 'reaction' && data.emoji && data.targetAuthor && data.targetTimestamp) {
-                  await deps.sendReaction(data.chatJid, data.emoji, data.targetAuthor, data.targetTimestamp);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
-                    'IPC reaction sent',
-                  );
+                  if (!deps.sendReaction) {
+                    logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Reaction requested but sendReaction not wired');
+                  } else {
+                    await deps.sendReaction(data.chatJid, data.emoji, data.targetAuthor, data.targetTimestamp);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
+                      'IPC reaction sent',
+                    );
+                  }
                 } else if (data.type === 'poll' && data.question && Array.isArray(data.options)) {
-                  await deps.sendPoll(data.chatJid, data.question, data.options);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup, question: data.question },
-                    'IPC poll sent',
-                  );
+                  if (!deps.sendPoll) {
+                    logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Poll requested but sendPoll not wired');
+                  } else {
+                    await deps.sendPoll(data.chatJid, data.question, data.options);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup, question: data.question },
+                      'IPC poll sent',
+                    );
+                  }
                 } else if (data.type === 'message' && data.text) {
                   const hostAttachments = resolveAttachmentPaths(
                     data.attachments,
                     sourceGroup,
                     registeredGroups,
                   );
-                  if (data.replyToTimestamp && data.replyToAuthor) {
+                  if (data.replyToTimestamp && data.replyToAuthor && deps.sendReply) {
                     await deps.sendReply(data.chatJid, data.text, data.replyToAuthor, data.replyToTimestamp, hostAttachments);
                     logger.info(
                       { chatJid: data.chatJid, sourceGroup, replyTo: data.replyToTimestamp },
