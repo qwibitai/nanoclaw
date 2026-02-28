@@ -45,6 +45,10 @@ Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM
 
 - DOCKER=running → continue to 3b
 - DOCKER=installed_not_running → start Docker: `open -a Docker` (macOS) or `sudo systemctl start docker` (Linux). Wait 15s, re-check with `docker info`.
+- DOCKER=no_permission → Docker daemon is running but user lacks permission. User is not in the docker group or group membership hasn't taken effect. Use `AskUserQuestion: Docker permission issue: Your user is not in the docker group. Would you like me to add you to the docker group now?`
+  - **Yes, help me fix**: Run `sudo usermod -aG docker $USER`. Then tell the user: "Added to docker group. You must log out and back in for the group membership to take effect. This is required for the NanoClaw service to access Docker. After logging back in, re-run step 2: `npx tsx setup/index.ts --step environment`"
+    - Do NOT continue to step 3 until the user has logged out/in and DOCKER=running.
+  - **No, I'll handle it myself**: Tell the user: "You need to fix this manually:\n  sudo usermod -aG docker $USER\nThen log out and back in for the group membership to take effect. After fixing, re-run:\n  npx tsx setup/index.ts --step environment"
 - DOCKER=not_found → Use `AskUserQuestion: Docker is required for running agents. Would you like me to install it?` If confirmed:
   - macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download at https://docker.com/products/docker-desktop
   - Linux: install with `curl -fsSL https://get.docker.com | sh && sudo usermod -aG docker $USER`. Note: user may need to log out/in for group membership.
