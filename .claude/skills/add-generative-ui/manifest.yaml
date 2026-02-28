@@ -1,0 +1,43 @@
+skill: generative-ui
+version: 1.0.0
+description: "Generative UI canvas with json-render, live update tooling, and runtime website-building skill"
+core_version: 1.0.0
+adds:
+  - src/canvas-store.ts
+  - src/canvas-store.test.ts
+  - src/canvas-server.ts
+  - src/canvas-server.test.ts
+  - scripts/build-canvas-ui.mjs
+  - web/src/index.html
+  - web/src/main.tsx
+  - web/src/styles.css
+  - web/dist/index.html
+  - web/dist/canvas-app.js
+  - web/dist/canvas-app.css
+  - container/skills/generative-ui-builder/SKILL.md
+  - container/skills/json-render-core/SKILL.md
+  - container/skills/json-render-react/SKILL.md
+  - container/skills/json-render-shadcn/SKILL.md
+modifies:
+  - src/config.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/container-runner.ts
+  - src/ipc-auth.test.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+structured:
+  npm_dependencies:
+    "@json-render/core": "^0.8.0"
+    "@json-render/react": "^0.8.0"
+    "@json-render/shadcn": "^0.8.0"
+    react: "^19.0.0"
+    react-dom: "^19.0.0"
+    esbuild: "^0.25.0"
+    fast-json-patch: "^3.1.1"
+  env_additions:
+    - GENUI_PORT
+post_apply:
+  - node scripts/build-canvas-ui.mjs
+conflicts: []
+depends: []
+test: "npx vitest run src/canvas-store.test.ts src/ipc-auth.test.ts"
