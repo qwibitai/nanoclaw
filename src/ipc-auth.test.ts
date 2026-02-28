@@ -52,6 +52,9 @@ beforeEach(() => {
 
   deps = {
     sendMessage: async () => {},
+    sendReaction: async () => {},
+    sendReply: async () => {},
+    sendPoll: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;

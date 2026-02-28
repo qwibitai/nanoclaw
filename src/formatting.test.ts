@@ -102,6 +102,113 @@ describe('formatMessages', () => {
     const result = formatMessages([]);
     expect(result).toBe('<messages>\n\n</messages>');
   });
+
+  // --- msg-id agnosticism ---
+
+  it('does NOT add msg-id for WhatsApp-style IDs (no channel prefix)', () => {
+    const result = formatMessages([makeMsg({ id: 'BAE5D2F9F95C5B08' })]);
+    expect(result).not.toContain('msg-id');
+  });
+
+  it('adds msg-id for channel-prefixed IDs (signal-<timestamp>)', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'signal-1709123456', sender: '+15551234567' }),
+    ]);
+    expect(result).toContain('msg-id="1709123456:+15551234567"');
+  });
+
+  it('adds msg-id for arbitrary channel-prefixed IDs (telegram-<id>)', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'telegram-abc123', sender: 'user42' }),
+    ]);
+    expect(result).toContain('msg-id="abc123:user42"');
+  });
+
+  it('does NOT add msg-id for numeric-only IDs', () => {
+    const result = formatMessages([makeMsg({ id: '1234567890' })]);
+    expect(result).not.toContain('msg-id');
+  });
+
+  it('does NOT add msg-id when sender is empty', () => {
+    const result = formatMessages([
+      makeMsg({ id: 'signal-1709123456', sender: '' }),
+    ]);
+    expect(result).not.toContain('msg-id');
+  });
+
+  // --- quote / reply-to context ---
+
+  it('includes replying-to attribute when message has a quote', () => {
+    const result = formatMessages([
+      makeMsg({ quote: { author: 'Bob', text: 'original message' } }),
+    ]);
+    expect(result).toContain('replying-to="Bob: original message"');
+  });
+
+  it('truncates long quotes to 100 chars', () => {
+    const longText = 'x'.repeat(150);
+    const result = formatMessages([
+      makeMsg({ quote: { author: 'Bob', text: longText } }),
+    ]);
+    expect(result).toContain('replying-to="Bob: ' + 'x'.repeat(100) + '..."');
+  });
+
+  // --- attachments ---
+
+  it('includes attachment child elements', () => {
+    const result = formatMessages([
+      makeMsg({
+        attachments: [
+          {
+            contentType: 'image/jpeg',
+            filename: 'photo.jpg',
+            hostPath: '/tmp/photo.jpg',
+            containerPath: '/workspace/group/photo.jpg',
+          },
+        ],
+      }),
+    ]);
+    expect(result).toContain('<attachment type="image/jpeg" path="/workspace/group/photo.jpg" filename="photo.jpg" />');
+  });
+
+  it('handles attachments without filename', () => {
+    const result = formatMessages([
+      makeMsg({
+        attachments: [
+          {
+            contentType: 'audio/ogg',
+            hostPath: '/tmp/voice.ogg',
+            containerPath: '/workspace/group/voice.ogg',
+          },
+        ],
+      }),
+    ]);
+    expect(result).toContain('<attachment type="audio/ogg" path="/workspace/group/voice.ogg" />');
+    expect(result).not.toContain('filename=');
+  });
+
+  // --- combined: all features on one message ---
+
+  it('combines msg-id, quote, and attachments on a single message', () => {
+    const result = formatMessages([
+      makeMsg({
+        id: 'discord-99887766',
+        sender: 'userX',
+        quote: { author: 'Alice', text: 'check this' },
+        attachments: [
+          {
+            contentType: 'image/png',
+            filename: 'screenshot.png',
+            hostPath: '/tmp/ss.png',
+            containerPath: '/workspace/group/ss.png',
+          },
+        ],
+      }),
+    ]);
+    expect(result).toContain('msg-id="99887766:userX"');
+    expect(result).toContain('replying-to="Alice: check this"');
+    expect(result).toContain('<attachment type="image/png"');
+  });
 });
 
 // --- TRIGGER_PATTERN ---

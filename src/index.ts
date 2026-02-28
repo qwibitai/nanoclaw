@@ -12,6 +12,7 @@ import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
+  writeGroupMetadataSnapshot,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -278,6 +279,11 @@ async function runAgent(
     new Set(Object.keys(registeredGroups)),
   );
 
+  // Write group metadata if the channel provides it
+  const channel = findChannel(channels, chatJid);
+  const metadata = channel?.getGroupMetadata?.(chatJid);
+  writeGroupMetadataSnapshot(group.folder, metadata);
+
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -463,7 +469,19 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (chatJid: string, msg: NewMessage) => {
+      // Handle /chatid command at router level (all channels)
+      if (msg.content.trim().toLowerCase() === '/chatid') {
+        const channel = findChannel(channels, chatJid);
+        if (channel) {
+          channel.sendMessage(chatJid, `Chat ID: ${chatJid}`).catch((err) =>
+            logger.warn({ chatJid, err }, 'Failed to send /chatid response'),
+          );
+        }
+        return; // Don't store or forward to agent
+      }
+      storeMessage(msg);
+    },
     onChatMetadata: (
       chatJid: string,
       timestamp: string,
@@ -497,10 +515,29 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, attachments) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, attachments);
+    },
+    sendReaction: (jid, emoji, targetAuthor, targetTimestamp) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendReaction) throw new Error(`No channel with reaction support for JID: ${jid}`);
+      return channel.sendReaction(jid, emoji, targetAuthor, targetTimestamp);
+    },
+    sendReply: (jid, text, targetAuthor, targetTimestamp, attachments) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendReply) {
+        // Fall back to regular message if channel doesn't support replies
+        if (!channel) throw new Error(`No channel for JID: ${jid}`);
+        return channel.sendMessage(jid, text, attachments);
+      }
+      return channel.sendReply(jid, text, targetAuthor, targetTimestamp, attachments);
+    },
+    sendPoll: (jid, question, options) => {
+      const channel = findChannel(channels, jid);
+      if (!channel?.sendPoll) throw new Error(`No channel with poll support for JID: ${jid}`);
+      return channel.sendPoll(jid, question, options);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

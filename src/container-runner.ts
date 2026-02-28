@@ -24,7 +24,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { GroupMetadata, RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -682,5 +682,23 @@ export function writeGroupsSnapshot(
       null,
       2,
     ),
+  );
+}
+
+/**
+ * Write group metadata snapshot for the container to read.
+ * Lets the agent see group description, member list, and admins.
+ */
+export function writeGroupMetadataSnapshot(
+  groupFolder: string,
+  metadata: GroupMetadata | undefined,
+): void {
+  const groupIpcDir = resolveGroupIpcPath(groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  const metadataFile = path.join(groupIpcDir, 'group_metadata.json');
+  fs.writeFileSync(
+    metadataFile,
+    JSON.stringify(metadata || { description: '', members: [], admins: [] }, null, 2),
   );
 }

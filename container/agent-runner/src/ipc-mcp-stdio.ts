@@ -44,21 +44,102 @@ server.tool(
   "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
   {
     text: z.string().describe('The message text to send'),
+    attachments: z.array(z.string()).optional().describe(
+      'File paths to send as attachments (e.g. screenshots, images). Use absolute paths like /workspace/group/screenshot.png',
+    ),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    reply_to_msg_id: z.string().optional().describe(
+      'Quote-reply to a specific message. Use the msg-id attribute from the message XML (format: "timestamp:sender"). The reply will appear as a quoted reply in channels that support it.',
+    ),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    const data: Record<string, unknown> = {
       type: 'message',
       chatJid,
       text: args.text,
+      attachments: args.attachments || undefined,
       sender: args.sender || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Parse reply_to_msg_id into target fields for the host IPC handler
+    if (args.reply_to_msg_id) {
+      const colonIdx = args.reply_to_msg_id.indexOf(':');
+      if (colonIdx > 0) {
+        data.replyToTimestamp = parseInt(args.reply_to_msg_id.slice(0, colonIdx), 10);
+        data.replyToAuthor = args.reply_to_msg_id.slice(colonIdx + 1);
+      }
+    }
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+  },
+);
+
+server.tool(
+  'send_reaction',
+  'React to a specific message with an emoji. Use the msg-id attribute from the message XML to identify the target message.',
+  {
+    emoji: z.string().describe('A single emoji to react with (e.g. "👍", "❤️", "😂")'),
+    msg_id: z.string().describe('The msg-id attribute from the target message (format: "timestamp:sender")'),
+  },
+  async (args) => {
+    const colonIdx = args.msg_id.indexOf(':');
+    if (colonIdx <= 0) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid msg_id format. Expected "timestamp:sender".' }],
+        isError: true,
+      };
+    }
+
+    const targetTimestamp = parseInt(args.msg_id.slice(0, colonIdx), 10);
+    const targetAuthor = args.msg_id.slice(colonIdx + 1);
+
+    if (isNaN(targetTimestamp)) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid timestamp in msg_id.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      targetAuthor,
+      targetTimestamp,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    return { content: [{ type: 'text' as const, text: `Reaction ${args.emoji} sent.` }] };
+  },
+);
+
+server.tool(
+  'send_poll',
+  'Create a poll in the current chat. Use for quick votes, decisions, or surveys. Only supported by channels with poll capability.',
+  {
+    question: z.string().describe('The poll question (e.g., "What should we have for dinner?")'),
+    options: z.array(z.string()).min(2).max(12).describe('Poll options (2-12 choices)'),
+  },
+  async (args) => {
+    const data = {
+      type: 'poll',
+      chatJid,
+      question: args.question,
+      options: args.options,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Poll created: "${args.question}" with ${args.options.length} options.` }] };
   },
 );
 
@@ -246,11 +327,11 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new chat group so the agent can respond to messages there. Main group only.
 
 Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us" or "signal:+1234567890")'),
     name: z.string().describe('Display name for the group'),
     folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
@@ -277,6 +358,46 @@ Use available_groups.json to find the JID for a group. The folder name should be
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+server.tool(
+  'get_group_info',
+  'Get information about the current chat group: description, member list, and admins. Returns empty data when metadata is unavailable.',
+  {},
+  async () => {
+    const metadataFile = path.join(IPC_DIR, 'group_metadata.json');
+
+    try {
+      if (!fs.existsSync(metadataFile)) {
+        return { content: [{ type: 'text' as const, text: 'No group metadata available.' }] };
+      }
+
+      const metadata = JSON.parse(fs.readFileSync(metadataFile, 'utf-8'));
+      const parts: string[] = [];
+
+      if (metadata.description) {
+        parts.push(`Description: ${metadata.description}`);
+      }
+
+      if (metadata.members?.length > 0) {
+        parts.push(`Members (${metadata.members.length}): ${metadata.members.join(', ')}`);
+      }
+
+      if (metadata.admins?.length > 0) {
+        parts.push(`Admins: ${metadata.admins.join(', ')}`);
+      }
+
+      if (parts.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'Group metadata is empty (no description, members, or admins).' }] };
+      }
+
+      return { content: [{ type: 'text' as const, text: parts.join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading group metadata: ${err instanceof Error ? err.message : String(err)}` }],
+      };
+    }
   },
 );
 

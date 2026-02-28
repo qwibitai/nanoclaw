@@ -5,6 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -16,7 +17,10 @@ import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, attachments?: string[]) => Promise<void>;
+  sendReaction: (jid: string, emoji: string, targetAuthor: string, targetTimestamp: number) => Promise<void>;
+  sendReply: (jid: string, text: string, targetAuthor: string, targetTimestamp: number, attachments?: string[]) => Promise<void>;
+  sendPoll: (jid: string, question: string, options: string[]) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -28,6 +32,82 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
 }
+
+/**
+ * Resolve container file paths to host paths using known mount mappings.
+ * Only paths under known mounts are allowed (prevents path traversal).
+ * Missing files are logged and skipped.
+ */
+function resolveAttachmentPaths(
+  containerPaths: string[] | undefined,
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): string[] | undefined {
+  if (!containerPaths || containerPaths.length === 0) return undefined;
+
+  const prefixMap: Array<[string, string]> = [];
+
+  // /workspace/group/ → groups/{folder}/
+  const groupEntry = Object.values(registeredGroups).find(
+    (g) => g.folder === sourceGroup,
+  );
+  if (groupEntry) {
+    prefixMap.push([
+      '/workspace/group/',
+      path.join(GROUPS_DIR, groupEntry.folder) + '/',
+    ]);
+  }
+
+  // /workspace/ipc/ → data/ipc/{sourceGroup}/
+  prefixMap.push([
+    '/workspace/ipc/',
+    path.join(DATA_DIR, 'ipc', sourceGroup) + '/',
+  ]);
+
+  // /workspace/extra/{name}/ → resolved from additionalMounts
+  if (groupEntry?.containerConfig?.additionalMounts) {
+    for (const mount of groupEntry.containerConfig.additionalMounts) {
+      const containerSuffix = mount.containerPath || path.basename(mount.hostPath);
+      prefixMap.push([
+        `/workspace/extra/${containerSuffix}/`,
+        mount.hostPath.replace(/^~/, process.env.HOME || '') + '/',
+      ]);
+    }
+  }
+
+  const resolved: string[] = [];
+  for (const containerPath of containerPaths) {
+    let hostPath: string | undefined;
+    for (const [containerPrefix, hostPrefix] of prefixMap) {
+      if (containerPath.startsWith(containerPrefix)) {
+        const relative = containerPath.slice(containerPrefix.length);
+        const candidate = path.resolve(path.join(hostPrefix, relative));
+        if (!candidate.startsWith(path.resolve(hostPrefix) + path.sep)) {
+          logger.warn({ containerPath, sourceGroup }, 'Path traversal rejected in attachment');
+          continue;
+        }
+        hostPath = candidate;
+        break;
+      }
+    }
+
+    if (!hostPath) {
+      logger.warn({ containerPath, sourceGroup }, 'Attachment path does not match any known mount');
+      continue;
+    }
+
+    if (!fs.existsSync(hostPath)) {
+      logger.warn({ containerPath, hostPath, sourceGroup }, 'Attachment file not found on host');
+      continue;
+    }
+
+    resolved.push(hostPath);
+  }
+
+  return resolved.length > 0 ? resolved : undefined;
+}
+
+const MAX_IPC_FILE_SIZE = 1_048_576; // 1MB
 
 let ipcWatcherRunning = false;
 
@@ -71,24 +151,54 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_SIZE) {
+                logger.warn({ file, size: stat.size, sourceGroup }, 'IPC file exceeds size limit, skipping');
+                fs.renameSync(filePath, filePath + '.oversized');
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (data.chatJid) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
+                const authorized = isMain || (targetGroup && targetGroup.folder === sourceGroup);
+
+                if (!authorized) {
                   logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, type: data.type },
                     'Unauthorized IPC message attempt blocked',
                   );
+                } else if (data.type === 'reaction' && data.emoji && data.targetAuthor && data.targetTimestamp) {
+                  await deps.sendReaction(data.chatJid, data.emoji, data.targetAuthor, data.targetTimestamp);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
+                    'IPC reaction sent',
+                  );
+                } else if (data.type === 'poll' && data.question && Array.isArray(data.options)) {
+                  await deps.sendPoll(data.chatJid, data.question, data.options);
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, question: data.question },
+                    'IPC poll sent',
+                  );
+                } else if (data.type === 'message' && data.text) {
+                  const hostAttachments = resolveAttachmentPaths(
+                    data.attachments,
+                    sourceGroup,
+                    registeredGroups,
+                  );
+                  if (data.replyToTimestamp && data.replyToAuthor) {
+                    await deps.sendReply(data.chatJid, data.text, data.replyToAuthor, data.replyToTimestamp, hostAttachments);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup, replyTo: data.replyToTimestamp },
+                      'IPC reply sent',
+                    );
+                  } else {
+                    await deps.sendMessage(data.chatJid, data.text, hostAttachments);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  }
                 }
               }
               fs.unlinkSync(filePath);
@@ -122,6 +232,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
             try {
+              const stat = fs.statSync(filePath);
+              if (stat.size > MAX_IPC_FILE_SIZE) {
+                logger.warn({ file, size: stat.size, sourceGroup }, 'IPC file exceeds size limit, skipping');
+                fs.renameSync(filePath, filePath + '.oversized');
+                continue;
+              }
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
