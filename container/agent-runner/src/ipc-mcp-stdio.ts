@@ -106,7 +106,70 @@ function logToolCall(
   fs.appendFile(logPath, entry + '\n', () => {});
 }
 
-// Wrap the original server.tool to inject observability
+
+// ── Tool Guard — pre-execution security layer ────────────────────────
+// Blocks dangerous patterns in args, enforces per-agent tool permissions.
+// Config loaded from /workspace/group/tool-guard.json (or sensible defaults).
+
+interface GuardVerdict {
+  action: 'allow' | 'block';
+  reason: string;
+}
+
+const GUARD_DEFAULT_BLOCK = [
+  'rm -rf', 'rm -r /', 'DROP TABLE', 'DROP DATABASE',
+  'TRUNCATE TABLE', 'shutdown', 'reboot', 'mkfs',
+];
+
+function loadGuardConfig(): { block: string[]; pause: string[]; allow: string[] } {
+  try {
+    const configPath = '/workspace/group/tool-guard.json';
+    if (fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      // Always merge with defaults — group configs can ADD patterns but never weaken defaults
+      const userBlock = Array.isArray(raw.block) ? raw.block : [];
+      return {
+        block: [...new Set([...GUARD_DEFAULT_BLOCK, ...userBlock])],
+        pause: Array.isArray(raw.pause) ? raw.pause : [],
+        allow: Array.isArray(raw.allow) ? raw.allow : [],
+      };
+    }
+  } catch { /* use defaults */ }
+  return { block: GUARD_DEFAULT_BLOCK, pause: [], allow: [] };
+}
+
+const guardConfig = loadGuardConfig();
+
+function evaluateGuard(
+  toolName: string,
+  callArgs: Record<string, unknown>,
+): GuardVerdict {
+  // Normalize: lowercase + collapse all whitespace to single spaces
+  const serialized = `${toolName} ${JSON.stringify(callArgs)}`.toLowerCase().replace(/\s+/g, ' ');
+
+  // 1. Block patterns (case-insensitive substring match on name + args)
+  for (const pattern of guardConfig.block) {
+    if (serialized.includes(pattern.toLowerCase())) {
+      return { action: 'block', reason: `Matched block pattern: "${pattern}"` };
+    }
+  }
+
+  // 2. Allow list (tool name — overrides pause)
+  if (guardConfig.allow.includes(toolName)) {
+    return { action: 'allow', reason: 'In allow list' };
+  }
+
+  // 3. Pause list (needs explicit approval via allow list)
+  if (guardConfig.pause.includes(toolName)) {
+    return { action: 'block', reason: `Tool "${toolName}" requires approval (in pause list)` };
+  }
+
+  // 4. Default: allow
+  return { action: 'allow', reason: 'No matching rule' };
+}
+
+
+// Wrap the original server.tool to inject observability + guard
 const originalTool = server.tool.bind(server);
 type ToolCallback = (...callbackArgs: unknown[]) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
 
@@ -123,6 +186,19 @@ server.tool = function wrappedTool(name: string, ...rest: unknown[]) {
     let resultText = '';
 
     try {
+      // ── Tool Guard: pre-execution security check ──
+      const callArgs = (typeof handlerArgs[0] === 'object' && handlerArgs[0] !== null)
+        ? handlerArgs[0] as Record<string, unknown>
+        : {};
+      const verdict = evaluateGuard(name, callArgs);
+      if (verdict.action === 'block') {
+        const msg = `⛔ Blocked by tool guard: ${verdict.reason}`;
+        resultText = msg;
+        success = false;
+        errorMsg = `GUARD_BLOCKED: ${verdict.reason}`;
+        return { content: [{ type: 'text' as const, text: msg }], isError: true };
+      }
+
       const result = await originalHandler(...handlerArgs);
       resultText = result.content?.map((c: { text: string }) => c.text).join('') ?? '';
       if (result.isError) {
@@ -742,6 +818,15 @@ Choose the right file:
     if (args.file.includes('..') || !filePath.startsWith('/workspace/group/')) {
       return {
         content: [{ type: 'text' as const, text: 'Invalid file path. Must be within your workspace.' }],
+        isError: true,
+      };
+    }
+
+    // Security: protect config files from being overwritten by the agent
+    const PROTECTED_FILES = ['tool-guard.json', 'CLAUDE.md'];
+    if (PROTECTED_FILES.includes(path.basename(args.file))) {
+      return {
+        content: [{ type: 'text' as const, text: `Cannot write to protected config file: ${path.basename(args.file)}` }],
         isError: true,
       };
     }
