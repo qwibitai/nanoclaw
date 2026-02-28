@@ -422,15 +422,20 @@ This searches the actual files on disk, not conversation history. Your nightly c
 
 Powered by BM25 relevance ranking — results are sorted by how well they match your query, not just whether they contain the words.
 
+MODE:
+- "layered" (default): Returns compact summaries — file path, category, score, and first meaningful line. Use recall_detail to fetch the full content of specific files. Saves context tokens.
+- "full": Returns full matching snippets inline (legacy behavior). Use when you need everything at once.
+
 Tips:
 - Use specific keywords: "stripe", "brandon preference", "oauth"
 - Search is case-insensitive and ranked by relevance
-- Returns matching passages with filenames, sorted by score
+- In layered mode, scan summaries first, then call recall_detail for the files you actually need
 - If you get no results, try different keywords or check daily/ for date-specific notes`,
   {
     query: z.string().describe('Search keywords (e.g. "stripe keys", "brandon", "revenue target"). Ranked by BM25 relevance.'),
     folder: z.enum(['all', 'knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']).default('all').describe('Narrow search to a specific folder, or "all" to search everywhere.'),
     max_results: z.number().default(20).describe('Maximum number of results to return.'),
+    mode: z.enum(['layered', 'full']).default('layered').describe('layered=compact summaries (use recall_detail for full content), full=full snippets inline (legacy)'),
   },
   async (args) => {
     const baseDir = '/workspace/group';
@@ -453,12 +458,88 @@ Tips:
         return { content: [{ type: 'text' as const, text: `No results for "${args.query}". Try different keywords, or check if you have written this down yet.` }] };
       }
 
-      let output = `## Recall results for "${args.query}"\\n\\n`;
-      for (const r of results) {
-        output += `**${r.file}** (score: ${r.score})\\n\`\`\`\\n${r.snippet}\\n\`\`\`\\n\\n`;
+      if (args.mode === 'full') {
+        // Full mode — legacy behavior with complete snippets
+        let output = `## Recall results for "${args.query}"\n\n`;
+        for (const r of results) {
+          output += `**${r.file}** (score: ${r.score})\n\`\`\`\n${r.snippet}\n\`\`\`\n\n`;
+        }
+        if (EMBEDDING_URL) {
+          output += `\n_Semantic search: enabled (${EMBEDDING_URL})_`;
+        }
+        return { content: [{ type: 'text' as const, text: output }] };
       }
+
+      // Layered mode — compact summaries
+      const CATEGORY_PATTERNS: Array<[RegExp, string]> = [
+        [/\bobservations?\b/i, 'observation'],
+        [/\blearnings?\b/i, 'learning'],
+        [/\bknowledge\b/i, 'knowledge'],
+        [/\bdaily\b/i, 'daily'],
+        [/\bprojects?\b/i, 'project'],
+        [/\bconversations?\b/i, 'conversation'],
+        [/\bmemory\b/i, 'memory'],
+      ];
+
+      const PRIORITY_PATTERNS: Array<[RegExp, string]> = [
+        [/\u{1F534}\s*Critical/u, 'critical'],
+        [/\u{1F7E1}\s*Useful/u, 'useful'],
+        [/\u{1F7E2}\s*Noise/u, 'noise'],
+      ];
+
+      const SKIP_LINE_PATTERNS = [
+        /^<!--.*-->$/,
+        /^---$/,
+        /^\s*$/,
+        /^#\s*$/,
+      ];
+
+      function detectCategory(filePath: string): string {
+        for (const [pattern, category] of CATEGORY_PATTERNS) {
+          if (pattern.test(filePath)) return category;
+        }
+        return 'unknown';
+      }
+
+      function detectPriority(text: string): string | null {
+        for (const [pattern, priority] of PRIORITY_PATTERNS) {
+          if (pattern.test(text)) return priority;
+        }
+        return null;
+      }
+
+      function extractFirstLine(text: string, maxLength = 120): string {
+        const lines = text.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0) continue;
+          if (SKIP_LINE_PATTERNS.some((p) => p.test(trimmed))) continue;
+          if (trimmed.length <= maxLength) return trimmed;
+          return trimmed.slice(0, maxLength - 3) + '...';
+        }
+        return '(empty)';
+      }
+
+      let output = `## Recall: "${args.query}" (${results.length} results, layered mode)\n`;
+      output += `_Use recall_detail with a file path to see full content._\n\n`;
+
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const category = detectCategory(r.file);
+        const priority = detectPriority(r.snippet);
+        const firstLine = extractFirstLine(r.snippet);
+
+        const tags: string[] = [];
+        if (category !== 'unknown') tags.push(category);
+        if (priority) tags.push(priority);
+        const tagStr = tags.length > 0 ? ` [${tags.join(', ')}]` : '';
+
+        output += `${i + 1}. **${r.file}** (${r.score})${tagStr}\n`;
+        output += `   ${firstLine}\n`;
+      }
+
       if (EMBEDDING_URL) {
-        output += `\\n_Semantic search: enabled (${EMBEDDING_URL})_`;
+        output += `\n_Semantic search: enabled (${EMBEDDING_URL})_`;
       }
 
       return { content: [{ type: 'text' as const, text: output }] };
@@ -469,60 +550,61 @@ Tips:
       };
     }
   },
-);server.tool(
-  'recall',
-  `Search your workspace files (knowledge, daily notes, projects, areas, conversations) for past information. Use this when you need to remember something — a decision, a conversation detail, a person's name, a preference, or anything you might have written down before.
+);
 
-This searches the actual files on disk, not conversation history. Your nightly consolidation writes important things here, so this is your long-term memory.
+server.tool(
+  'recall_detail',
+  `Fetch the full content of a specific workspace file. Use this after recall (layered mode) to read files that look relevant from the summaries.
 
-Tips:
-- Use specific keywords: "stripe", "brandon preference", "oauth"
-- Search is case-insensitive
-- Returns matching lines with filenames and context
-- If you get no results, try different keywords or check daily/ for date-specific notes`,
+Returns the complete file content. If the file is large, it returns the first 10,000 characters with a truncation notice.`,
   {
-    query: z.string().describe('Search keywords (e.g. "stripe keys", "brandon", "revenue target"). Case-insensitive grep across all workspace files.'),
-    folder: z.enum(['all', 'knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']).default('all').describe('Narrow search to a specific folder, or "all" to search everywhere.'),
-    max_results: z.number().default(30).describe('Maximum number of matching lines to return.'),
+    file: z.string().describe('Relative file path from recall results (e.g. "knowledge/patterns.md", "daily/2026-02-28.md")'),
   },
   async (args) => {
-    const baseDir = '/workspace/group';
-    const searchDirs = args.folder === 'all'
-      ? ['knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']
-      : [args.folder];
+    const filePath = path.join('/workspace/group', args.file);
 
-    const existingDirs = searchDirs
-      .map(d => path.join(baseDir, d))
-      .filter(d => fs.existsSync(d));
-
-    if (existingDirs.length === 0) {
-      return { content: [{ type: 'text' as const, text: 'No workspace folders found. Your memory is empty — start writing to knowledge/ and daily/ files.' }] };
+    // Security: prevent path traversal
+    if (args.file.includes('..') || !filePath.startsWith('/workspace/group/')) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid file path. Must be within your workspace.' }],
+        isError: true,
+      };
     }
 
     try {
-      // Use grep for fast search across all files
-      const escapedQuery = args.query.replace(/['"\\]/g, '\\$&');
-      const dirsArg = existingDirs.join(' ');
-      const cmd = `grep -rni --include='*.md' --include='*.txt' --include='*.json' "${escapedQuery}" ${dirsArg} 2>/dev/null | head -${args.max_results}`;
-
-      let result: string;
-      try {
-        result = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
-      } catch {
-        result = '';
+      if (!fs.existsSync(filePath)) {
+        return {
+          content: [{ type: 'text' as const, text: `File not found: ${args.file}` }],
+          isError: true,
+        };
       }
 
-      if (!result) {
-        return { content: [{ type: 'text' as const, text: `No results for "${args.query}". Try different keywords, or check if you have written this down yet.` }] };
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        return {
+          content: [{ type: 'text' as const, text: `"${args.file}" is a directory, not a file. Use recall to search within it.` }],
+          isError: true,
+        };
       }
 
-      // Clean up paths to be relative to workspace
-      const cleaned = result.replace(/\/workspace\/group\//g, '');
+      const MAX_CHARS = 10_000;
+      const content = fs.readFileSync(filePath, 'utf-8');
 
-      return { content: [{ type: 'text' as const, text: `## Recall results for "${args.query}"\n\n${cleaned}` }] };
+      if (content.length <= MAX_CHARS) {
+        return {
+          content: [{ type: 'text' as const, text: `## ${args.file}\n\n\`\`\`\n${content}\n\`\`\`` }],
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `## ${args.file} (truncated — ${content.length} chars, showing first ${MAX_CHARS})\n\n\`\`\`\n${content.slice(0, MAX_CHARS)}\n\`\`\`\n\n_File truncated. Use recall with specific keywords to find the section you need._`,
+        }],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Recall error: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `Error reading file: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }
