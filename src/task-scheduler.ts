@@ -9,6 +9,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
+import { applyTemplate } from './task-templates.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -137,7 +138,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt: applyTemplate(task.prompt, task.group_folder).enhancedPrompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,

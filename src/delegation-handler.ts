@@ -10,6 +10,7 @@ import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { logger } from './logger.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
+import { applyTemplate } from './task-templates.js';
 import { RegisteredGroup } from './types.js';
 
 interface DelegateRequest {
@@ -135,13 +136,15 @@ async function spawnWorker(
   }
 
   // Build a delegation-specific prompt that gives the worker context
+  // Apply task template for structured guidance (skips conversation/quick-check)
+  const { enhancedPrompt } = applyTemplate(request.prompt, sourceGroup);
   const workerPrompt = [
     `You are a worker agent delegated a task. Complete it and output your findings.`,
     `Do NOT use send_message — your output goes directly back to the delegating agent.`,
     `Be concise and focused. The delegating agent will use your output.`,
     ``,
     `## Task`,
-    request.prompt,
+    enhancedPrompt,
   ].join('\n');
 
   try {
