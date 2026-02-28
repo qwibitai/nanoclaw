@@ -81,7 +81,8 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        setTimeout(() => process.exit(1), 1000);
+        // Don't exit - allow API to continue working
+        // setTimeout(() => process.exit(1), 1000);
       }
 
       if (connection === 'close') {

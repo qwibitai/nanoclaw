@@ -37,6 +37,16 @@ interface ContainerOutput {
   error?: string;
 }
 
+// Streaming delta output for real-time TTS
+interface ContainerDelta {
+  type: 'delta';
+  text: string;
+  newSessionId?: string;
+}
+
+// Union type for all output types
+type ContainerMessage = ContainerOutput | ContainerDelta;
+
 interface SessionEntry {
   sessionId: string;
   fullPath: string;
@@ -111,6 +121,16 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
+  console.log(OUTPUT_END_MARKER);
+}
+
+function writeDelta(text: string, newSessionId?: string): void {
+  const delta: ContainerDelta = { type: 'delta', text };
+  if (newSessionId) {
+    (delta as ContainerDelta & { newSessionId?: string }).newSessionId = newSessionId;
+  }
+  console.log(OUTPUT_START_MARKER);
+  console.log(JSON.stringify(delta));
   console.log(OUTPUT_END_MARKER);
 }
 
@@ -471,6 +491,25 @@ async function runQuery(
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
       const tn = message as { task_id: string; status: string; summary: string };
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
+    }
+
+    // Handle streaming deltas from assistant messages
+    if (message.type === 'assistant') {
+      const assistantMsg = message as {
+        message?: { content?: Array<{ type: string; text?: string; delta?: { text?: string } }> };
+      };
+      const content = assistantMsg.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text' && block.text) {
+            // Full text block (non-streaming mode or complete)
+            writeDelta(block.text, newSessionId);
+          } else if (block.type === 'text_delta' && block.delta?.text) {
+            // Streaming delta
+            writeDelta(block.delta.text, newSessionId);
+          }
+        }
+      }
     }
 
     if (message.type === 'result') {

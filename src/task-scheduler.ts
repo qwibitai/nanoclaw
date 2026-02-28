@@ -9,7 +9,13 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import {
+  ContainerOutput,
+  ContainerDelta,
+  ContainerMessage,
+  runContainerAgent,
+  writeTasksSnapshot,
+} from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -137,7 +143,20 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
+      async (message: ContainerMessage) => {
+        // Handle streaming deltas
+        if ('type' in message && message.type === 'delta') {
+          const delta = message as ContainerDelta;
+          if (delta.text) {
+            result = delta.text;
+            await deps.sendMessage(task.chat_jid, delta.text);
+            scheduleClose();
+          }
+          return;
+        }
+
+        // Handle complete outputs
+        const streamedOutput = message as ContainerOutput;
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)

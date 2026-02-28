@@ -14,6 +14,7 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
+  MAX_CONCURRENT_CONTAINERS,
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -25,6 +26,194 @@ import { RegisteredGroup } from './types.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+// Warm container pool for low-latency API responses
+interface WarmContainer {
+  containerName: string;
+  process: ChildProcess;
+  groupFolder: string;
+  lastUsed: number;
+  busy: boolean;
+  stdin: NodeJS.WritableStream;
+  stdout: NodeJS.ReadableStream;
+  onOutput?: (output: ContainerMessage) => Promise<void>;
+  parseBuffer: string;
+  newSessionId?: string;
+  outputChain: Promise<void>;
+}
+
+const warmPool: WarmContainer[] = [];
+const MAX_WARM_CONTAINERS = 2; // Pre-warm up to 2 containers
+const WARM_CONTAINER_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Export the WarmContainer type
+export type { WarmContainer };
+
+// Clean up stale warm containers periodically
+setInterval(() => {
+  const now = Date.now();
+  for (let i = warmPool.length - 1; i >= 0; i--) {
+    const warm = warmPool[i];
+    if (!warm.busy && now - warm.lastUsed > WARM_CONTAINER_TTL) {
+      logger.debug({ containerName: warm.containerName }, 'Removing stale warm container');
+      try {
+        warm.process.kill();
+        exec(stopContainer(warm.containerName), { timeout: 15000 }, () => {});
+      } catch {}
+      warmPool.splice(i, 1);
+    }
+  }
+}, 60000); // Check every minute
+
+/**
+ * Pre-warm a container for low-latency API responses.
+ * The container starts up and waits for stdin input.
+ * Returns true if a warm container was created or already exists.
+ */
+export async function prewarmContainer(
+  group: RegisteredGroup,
+  isMain: boolean,
+): Promise<boolean> {
+  const groupFolder = group.folder;
+
+  // Check if we already have an idle warm container for this group
+  const existing = warmPool.find(
+    (w) => w.groupFolder === groupFolder && !w.busy,
+  );
+  if (existing) {
+    logger.debug({ groupFolder }, 'Warm container already available');
+    return true;
+  }
+
+  // Check if we're at capacity
+  const idleCount = warmPool.filter((w) => !w.busy).length;
+  if (idleCount >= MAX_WARM_CONTAINERS) {
+    // Remove oldest idle container to make room
+    const oldest = warmPool
+      .filter((w) => !w.busy)
+      .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+    if (oldest) {
+      logger.debug({ containerName: oldest.containerName }, 'Evicting oldest warm container');
+      try {
+        oldest.process.kill();
+        exec(stopContainer(oldest.containerName), { timeout: 15000 }, () => {});
+      } catch {}
+      const idx = warmPool.indexOf(oldest);
+      if (idx !== -1) warmPool.splice(idx, 1);
+    }
+  }
+
+  // Spawn a new warm container
+  const groupDir = resolveGroupFolderPath(group.folder);
+  fs.mkdirSync(groupDir, { recursive: true });
+
+  const mounts = buildVolumeMounts(group, isMain);
+  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+  const containerName = `nanoclaw-warm-${safeName}-${Date.now()}`;
+  const containerArgs = buildContainerArgs(mounts, containerName);
+
+  logger.info({ groupFolder, containerName }, 'Pre-warming container');
+
+  return new Promise((resolve) => {
+    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    let ready = false;
+    const readyTimeout = setTimeout(() => {
+      if (!ready) {
+        logger.warn({ containerName }, 'Warm container ready timeout');
+        container.kill();
+        resolve(false);
+      }
+    }, 30000); // 30s to become ready
+
+    container.stderr.on('data', (data) => {
+      stderr += data.toString();
+      // Agent runner logs "[agent-runner] Session initialized: xxx" when ready
+      if (!ready && stderr.includes('Session initialized:')) {
+        ready = true;
+        clearTimeout(readyTimeout);
+        warmPool.push({
+          containerName,
+          process: container,
+          groupFolder,
+          lastUsed: Date.now(),
+          busy: false,
+          stdin: container.stdin,
+          stdout: container.stdout,
+          parseBuffer: '',
+          outputChain: Promise.resolve(),
+        });
+        logger.info({ containerName, groupFolder }, 'Warm container ready');
+        resolve(true);
+      }
+    });
+
+    container.on('close', (code) => {
+      clearTimeout(readyTimeout);
+      const idx = warmPool.findIndex((w) => w.containerName === containerName);
+      if (idx !== -1) warmPool.splice(idx, 1);
+      if (!ready) {
+        logger.warn({ containerName, code, stderr }, 'Warm container failed to start');
+        resolve(false);
+      }
+    });
+
+    container.on('error', (err) => {
+      clearTimeout(readyTimeout);
+      logger.error({ containerName, error: err }, 'Warm container spawn error');
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * Get a warm container for immediate use.
+ * Returns null if no warm container is available.
+ */
+export function getWarmContainer(groupFolder: string): WarmContainer | null {
+  const warm = warmPool.find(
+    (w) => w.groupFolder === groupFolder && !w.busy,
+  );
+  if (warm) {
+    warm.busy = true;
+    warm.lastUsed = Date.now();
+    return warm;
+  }
+  return null;
+}
+
+/**
+ * Release a warm container back to the pool after use.
+ */
+export function releaseWarmContainer(containerName: string): void {
+  const warm = warmPool.find((w) => w.containerName === containerName);
+  if (warm) {
+    warm.busy = false;
+    warm.lastUsed = Date.now();
+    warm.parseBuffer = '';
+    warm.onOutput = undefined;
+    logger.debug({ containerName }, 'Warm container released');
+  }
+}
+
+/**
+ * Remove a warm container from the pool (e.g., on error).
+ */
+export function removeWarmContainer(containerName: string): void {
+  const idx = warmPool.findIndex((w) => w.containerName === containerName);
+  if (idx !== -1) {
+    const warm = warmPool[idx];
+    try {
+      warm.process.kill();
+      exec(stopContainer(containerName), { timeout: 15000 }, () => {});
+    } catch {}
+    warmPool.splice(idx, 1);
+    logger.debug({ containerName }, 'Warm container removed');
+  }
+}
 
 export interface ContainerInput {
   prompt: string;
@@ -43,6 +232,16 @@ export interface ContainerOutput {
   newSessionId?: string;
   error?: string;
 }
+
+// Streaming delta from agent (for real-time TTS)
+export interface ContainerDelta {
+  type: 'delta';
+  text: string;
+  newSessionId?: string;
+}
+
+// Union type for parsed messages
+export type ContainerMessage = ContainerOutput | ContainerDelta;
 
 interface VolumeMount {
   hostPath: string;
@@ -250,11 +449,16 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   return args;
 }
 
+/**
+ * Run container agent with optional warm container support.
+ * @param warmContainer - Optional pre-warmed container to use
+ */
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
+  onOutput?: (output: ContainerMessage) => Promise<void>,
+  warmContainer?: WarmContainer,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -293,11 +497,25 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    // Use warm container if provided, otherwise spawn new one
+    let container: ChildProcess;
+    let actualContainerName: string;
 
-    onProcess(container, containerName);
+    if (warmContainer) {
+      container = warmContainer.process;
+      actualContainerName = warmContainer.containerName;
+      logger.info(
+        { group: group.name, containerName: actualContainerName },
+        'Using pre-warmed container',
+      );
+    } else {
+      container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      actualContainerName = containerName;
+    }
+
+    onProcess(container, actualContainerName);
 
     let stdout = '';
     let stderr = '';
@@ -306,8 +524,14 @@ export async function runContainerAgent(
 
     // Pass secrets via stdin (never written to disk or mounted as files)
     input.secrets = readSecrets();
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+    if (container.stdin) {
+      container.stdin.write(JSON.stringify(input));
+      // For warm containers, don't end stdin - they stay alive for IPC messages
+      // For new containers, end stdin to signal end of initial input
+      if (!warmContainer) {
+        container.stdin.end();
+      }
+    }
     // Remove secrets from input so they don't appear in logs
     delete input.secrets;
 
@@ -316,7 +540,8 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
-    container.stdout.on('data', (data) => {
+    if (container.stdout) {
+      container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
       // Always accumulate for logging
@@ -348,14 +573,20 @@ export async function runContainerAgent(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
+            const parsed: ContainerMessage = JSON.parse(jsonStr);
+            // Handle session ID updates (present in both types)
+            if ('newSessionId' in parsed && parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
-            hadStreamingOutput = true;
+            // Track streaming output for both result and delta types
+            const isOutput = 'status' in parsed;
+            const isDelta = 'type' in parsed && (parsed as ContainerDelta).type === 'delta';
+            if (isOutput || isDelta) {
+              hadStreamingOutput = true;
+            }
             // Activity detected — reset the hard timeout
             resetTimeout();
-            // Call onOutput for all markers (including null results)
+            // Call onOutput for all markers (including null results and deltas)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
@@ -367,7 +598,9 @@ export async function runContainerAgent(
         }
       }
     });
+    }
 
+    if (container.stderr) {
     container.stderr.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
@@ -389,6 +622,7 @@ export async function runContainerAgent(
         stderr += chunk;
       }
     });
+    }
 
     let timedOut = false;
     let hadStreamingOutput = false;
@@ -399,10 +633,10 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+      logger.error({ group: group.name, containerName: actualContainerName }, 'Container timeout, stopping gracefully');
+      exec(stopContainer(actualContainerName), { timeout: 15000 }, (err) => {
         if (err) {
-          logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
+          logger.warn({ group: group.name, containerName: actualContainerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
         }
       });
@@ -427,7 +661,7 @@ export async function runContainerAgent(
           `=== Container Run Log (TIMEOUT) ===`,
           `Timestamp: ${new Date().toISOString()}`,
           `Group: ${group.name}`,
-          `Container: ${containerName}`,
+          `Container: ${actualContainerName}`,
           `Duration: ${duration}ms`,
           `Exit Code: ${code}`,
           `Had Streaming Output: ${hadStreamingOutput}`,
@@ -438,7 +672,7 @@ export async function runContainerAgent(
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName, duration, code },
+            { group: group.name, containerName: actualContainerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -452,7 +686,7 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName, duration, code },
+          { group: group.name, containerName: actualContainerName, duration, code },
           'Container timed out with no output',
         );
 
@@ -609,7 +843,7 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
+      logger.error({ group: group.name, containerName: actualContainerName, error: err }, 'Container spawn error');
       resolve({
         status: 'error',
         result: null,

@@ -8,9 +8,12 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
+import { createApi, updateSessions } from './api.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
+  ContainerDelta,
+  ContainerMessage,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -63,6 +66,8 @@ function loadState(): void {
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
+  // Sync sessions to API module
+  updateSessions(sessions);
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -182,8 +187,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
+  const output = await runAgent(group, prompt, chatJid, async (message: ContainerMessage) => {
+    // Streaming output callback — called for each agent result or delta
+    // Handle streaming deltas
+    if ('text' in message && !('result' in message)) {
+      // This is a delta
+      const text = (message as ContainerDelta).text
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .trim();
+      if (text) {
+        await channel.sendMessage(chatJid, text);
+        outputSentToUser = true;
+      }
+      resetIdleTimer();
+      return;
+    }
+
+    // Handle complete outputs
+    const result = message as ContainerOutput;
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
       // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
@@ -230,7 +251,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
+  onOutput?: (output: ContainerMessage) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   const sessionId = sessions[group.folder];
@@ -262,12 +283,13 @@ async function runAgent(
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
-    ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+    ? async (message: ContainerMessage) => {
+        // Extract session ID from either type
+        if ('newSessionId' in message && message.newSessionId) {
+          sessions[group.folder] = message.newSessionId;
+          setSession(group.folder, message.newSessionId);
         }
-        await onOutput(output);
+        await onOutput(message);
       }
     : undefined;
 
@@ -435,6 +457,15 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+
+  // Start HTTP API for external integrations (Jarvis, etc.) BEFORE channel connection
+  // This ensures API is available even if WhatsApp auth fails
+  const apiPort = parseInt(process.env.NANOCLAW_API_PORT || '3100', 10);
+  createApi({
+    registeredGroups: () => registeredGroups,
+    getAvailableGroups,
+    port: apiPort,
+  });
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
