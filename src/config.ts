@@ -76,3 +76,14 @@ export const TELEGRAM_ONLY =
   (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
 export const DEFAULT_MODEL =
   process.env.DEFAULT_MODEL || envConfig.DEFAULT_MODEL || undefined;
+
+export const MODEL_ALIAS_MAP: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5-20251001',
+};
+
+export const MODEL_OVERRIDE_TIMEOUT = parseInt(
+  process.env.MODEL_OVERRIDE_TIMEOUT || '1800000',
+  10,
+);

@@ -1,6 +1,11 @@
 import { Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import {
+  ASSISTANT_NAME,
+  MODEL_ALIAS_MAP,
+  MODEL_OVERRIDE_TIMEOUT,
+  TRIGGER_PATTERN,
+} from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -21,6 +26,8 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private modelOverrides = new Map<string, string>();
+  private modelTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -29,6 +36,34 @@ export class TelegramChannel implements Channel {
 
   async connect(): Promise<void> {
     this.bot = new Bot(this.botToken);
+
+    // Model switching commands
+    const handleModelCommand = (
+      alias: string,
+      displayName: string,
+    ): ((ctx: any) => void) => {
+      return (ctx) => {
+        const chatJid = `tg:${ctx.chat.id}`;
+        const group = this.opts.registeredGroups()[chatJid];
+        if (!group) return;
+
+        const model = MODEL_ALIAS_MAP[alias];
+        this.setModelOverride(chatJid, model);
+        ctx.reply(`Switched to ${displayName} for 30 min.`);
+      };
+    };
+
+    this.bot.command('opus', handleModelCommand('opus', 'Opus'));
+    this.bot.command('sonnet', handleModelCommand('sonnet', 'Sonnet'));
+    this.bot.command('haiku', handleModelCommand('haiku', 'Haiku'));
+    this.bot.command('default', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      this.clearModelOverride(chatJid);
+      ctx.reply('Model reset to default.');
+    });
 
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
@@ -55,6 +90,12 @@ export class TelegramChannel implements Channel {
       if (ctx.message.text.startsWith('/')) return;
 
       const chatJid = `tg:${ctx.chat.id}`;
+
+      // Reset model override inactivity timer on any text message
+      if (this.modelOverrides.has(chatJid)) {
+        this.resetModelTimer(chatJid);
+      }
+
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
@@ -237,11 +278,44 @@ export class TelegramChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    for (const timer of this.modelTimers.values()) clearTimeout(timer);
+    this.modelTimers.clear();
+    this.modelOverrides.clear();
+
     if (this.bot) {
       this.bot.stop();
       this.bot = null;
       logger.info('Telegram bot stopped');
     }
+  }
+
+  getModelOverride(jid: string): string | undefined {
+    return this.modelOverrides.get(jid);
+  }
+
+  private setModelOverride(chatJid: string, model: string): void {
+    this.modelOverrides.set(chatJid, model);
+    this.resetModelTimer(chatJid);
+  }
+
+  private clearModelOverride(chatJid: string): void {
+    const timer = this.modelTimers.get(chatJid);
+    if (timer) clearTimeout(timer);
+    this.modelTimers.delete(chatJid);
+    this.modelOverrides.delete(chatJid);
+  }
+
+  private resetModelTimer(chatJid: string): void {
+    const existing = this.modelTimers.get(chatJid);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(() => {
+      this.modelOverrides.delete(chatJid);
+      this.modelTimers.delete(chatJid);
+      this.sendMessage(chatJid, 'Model override expired, back to default.');
+    }, MODEL_OVERRIDE_TIMEOUT);
+
+    this.modelTimers.set(chatJid, timer);
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

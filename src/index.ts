@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   DEFAULT_MODEL,
   IDLE_TIMEOUT,
+  MODEL_ALIAS_MAP,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
@@ -138,17 +139,11 @@ export function _setRegisteredGroups(
 function parseModelFlag(prompt: string): { model?: string; prompt: string } {
   const match = prompt.match(/^--model\s+(\S+)\s*/);
   if (!match) {
-    return { model: DEFAULT_MODEL, prompt };
+    return { model: undefined, prompt };
   }
 
   const alias = match[1];
-  const modelMap: Record<string, string> = {
-    opus: 'claude-opus-4-6',
-    sonnet: 'claude-sonnet-4-6',
-    haiku: 'claude-haiku-4-5-20251001',
-  };
-
-  const model = modelMap[alias] || alias; // Use full model ID if not in alias map
+  const model = MODEL_ALIAS_MAP[alias] || alias; // Use full model ID if not in alias map
   const strippedPrompt = prompt.slice(match[0].length);
 
   return { model, prompt: strippedPrompt };
@@ -190,9 +185,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // Strip --model flag from the last message before formatting,
   // then pass the model separately to runAgent.
   const lastMsg = missedMessages[missedMessages.length - 1];
-  const { model: parsedModel, prompt: strippedContent } = parseModelFlag(
+  const { model: flagModel, prompt: strippedContent } = parseModelFlag(
     lastMsg.content.trim(),
   );
+  const overrideModel = channel.getModelOverride?.(chatJid);
+  const parsedModel = flagModel ?? overrideModel ?? DEFAULT_MODEL;
   const messagesForFormat =
     strippedContent !== lastMsg.content.trim()
       ? [
