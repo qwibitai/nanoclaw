@@ -47,6 +47,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { startDelegationHandler } from './delegation-handler.js';
+import { startElicitationHandler } from './elicitation-handler.js';
 import { startX402Handler } from './x402-handler.js';
 import { startSentryAgent } from './sentry-agent.js';
 import { startAcpServer } from './acp-adapter.js';
@@ -536,6 +537,42 @@ async function main(): Promise<void> {
 
   // Start delegation handler (spawns worker containers for delegate_task)
   startDelegationHandler(() => registeredGroups);
+
+  // Start elicitation handler (structured questions via IPC)
+  startElicitationHandler({
+    findChannel: (jid) => findChannel(channels, jid),
+    addReactions: async (_jid, _messageId, _emojis) => {
+      // Future: channel.addReactions() when Discord/Slack adapters support it
+    },
+    waitForResponse: async (jid, _messageId, options, allowFreetext, timeoutMs) => {
+      // Simple timeout-based: wait for next message in channel matching an option
+      const { parseTextReply } = await import('./structured-elicitation.js');
+      return new Promise((resolve) => {
+        const deadline = setTimeout(() => {
+          resolve({ chosen: null, freetext: null, timeout: true });
+        }, timeoutMs);
+
+        const poll = setInterval(() => {
+          const recent = getMessagesSince(jid, new Date(Date.now() - 2000).toISOString(), ASSISTANT_NAME);
+          for (const msg of recent) {
+            const match = parseTextReply(msg.content, options);
+            if (match) {
+              clearTimeout(deadline);
+              clearInterval(poll);
+              resolve({ chosen: match, freetext: null, timeout: false });
+              return;
+            }
+            if (allowFreetext && msg.content.trim()) {
+              clearTimeout(deadline);
+              clearInterval(poll);
+              resolve({ chosen: null, freetext: msg.content.trim(), timeout: false });
+              return;
+            }
+          }
+        }, 1000);
+      });
+    },
+  });
 
   // Start sentry agent if configured (webhook-based incident triage)
   if (SENTRY_AGENT_PORT > 0 && SENTRY_AGENT_CHANNEL) {
