@@ -188,7 +188,14 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLOUD_ML_REGION',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+];
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -511,7 +518,20 @@ async function main(): Promise<void> {
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
-  for (const [key, value] of Object.entries(containerInput.secrets || {})) {
+  const secrets = containerInput.secrets || {};
+
+  // Vertex AI: write GCP credentials to a temp file and point the env var at it.
+  // The file persists for the container's lifetime because the Google Auth library
+  // re-reads it during token refresh. The ephemeral container (--rm) handles cleanup.
+  if (secrets.CLAUDE_CODE_USE_VERTEX === '1' && secrets._GCP_CREDENTIALS_JSON) {
+    const gcpCredsPath = '/tmp/gcp-credentials.json';
+    fs.writeFileSync(gcpCredsPath, secrets._GCP_CREDENTIALS_JSON, { mode: 0o600 });
+    log('Wrote GCP credentials to temp file');
+    secrets.GOOGLE_APPLICATION_CREDENTIALS = gcpCredsPath;
+    delete secrets._GCP_CREDENTIALS_JSON;
+  }
+
+  for (const [key, value] of Object.entries(secrets)) {
     sdkEnv[key] = value;
   }
 

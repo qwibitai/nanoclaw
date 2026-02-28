@@ -75,13 +75,21 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 ## 4. Claude Authentication (No Script)
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_USE_VERTEX`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key vs Google Vertex AI?
 
 **Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+
+**Google Vertex AI:** Ask user for their GCP project ID and region. Add these to `.env`:
+```
+CLAUDE_CODE_USE_VERTEX=1
+CLOUD_ML_REGION=<region>
+ANTHROPIC_VERTEX_PROJECT_ID=<project-id>
+```
+The GCP credentials file must exist at `~/.config/gcloud/application_default_credentials.json` (created by `gcloud auth application-default login`). Verify it exists. If not, tell the user to run `gcloud auth application-default login` first. Optionally, if the user's credentials file is at a non-default path, they can add `GOOGLE_APPLICATION_CREDENTIALS=<path>` to `.env`. Do NOT set `ANTHROPIC_MODEL`.
 
 ## 5. WhatsApp Authentication
 

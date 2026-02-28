@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -202,9 +203,42 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * Supports three auth methods:
+ *   1. API Key:    ANTHROPIC_API_KEY
+ *   2. OAuth:      CLAUDE_CODE_OAUTH_TOKEN
+ *   3. Vertex AI:  CLAUDE_CODE_USE_VERTEX + CLOUD_ML_REGION +
+ *                  ANTHROPIC_VERTEX_PROJECT_ID + GCP credentials file
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_USE_VERTEX',
+    'CLOUD_ML_REGION',
+    'ANTHROPIC_VERTEX_PROJECT_ID',
+    'GOOGLE_APPLICATION_CREDENTIALS',
+  ]);
+
+  // If Vertex is enabled, read the GCP credentials file and pass its content
+  // via stdin. The .gcloud directory is a blocked mount pattern, so we cannot
+  // mount the file directly — instead the container will write it to a temp file.
+  if (secrets.CLAUDE_CODE_USE_VERTEX === '1') {
+    const credPath = secrets.GOOGLE_APPLICATION_CREDENTIALS
+      || path.join(os.homedir(), '.config', 'gcloud', 'application_default_credentials.json');
+    // Remove the host-side path — it won't be valid inside the container
+    delete secrets.GOOGLE_APPLICATION_CREDENTIALS;
+    try {
+      secrets._GCP_CREDENTIALS_JSON = fs.readFileSync(credPath, 'utf-8');
+    } catch (err) {
+      logger.warn(
+        { path: credPath, error: err },
+        'Vertex AI enabled but GCP credentials file not found',
+      );
+    }
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(

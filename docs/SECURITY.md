@@ -66,21 +66,40 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Handling
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+NanoClaw supports three authentication methods:
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
-- Any credentials matching blocked patterns
+| Method | Required `.env` Variables |
+|--------|--------------------------|
+| API Key | `ANTHROPIC_API_KEY` |
+| OAuth Token | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Google Vertex AI | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` + GCP credentials file |
+
+**Secrets Transport:**
+All credentials are passed to containers via stdin JSON — never as Docker environment variables, never as mounted files. Inside the container, they are merged into a separate `sdkEnv` object (not `process.env`) and stripped from Bash subprocess environments.
+
+**Vertex AI Credentials:**
+The GCP credentials file (`~/.config/gcloud/application_default_credentials.json`) cannot be mounted because `.gcloud` is a default blocked pattern. Instead, the host reads the file content and passes it as a secret string via stdin. The container writes it to a temp file (`/tmp/gcp-credentials.json`) with `0o600` permissions. The file persists for the container's lifetime (needed by the Google Auth library for token refresh) and is destroyed when the ephemeral container exits (`--rm`).
 
 **Credential Filtering:**
-Only these environment variables are exposed to containers:
+These environment variables are exposed to the SDK but stripped from Bash subprocesses:
 ```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+const SECRET_ENV_VARS = [
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLOUD_ML_REGION',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'GOOGLE_APPLICATION_CREDENTIALS',
+];
 ```
 
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
+**NOT Mounted:**
+- WhatsApp session (`store/auth/`) — host only
+- Mount allowlist — external, never mounted
+- GCP credentials directory (`.gcloud`) — blocked pattern
+- Any paths matching blocked patterns
+
+> **Note:** Anthropic credentials are passed to the SDK env so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment. **PRs welcome** if you have ideas for credential isolation.
 
 ## Privilege Comparison
 
