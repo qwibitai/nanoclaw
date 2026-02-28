@@ -70,7 +70,11 @@ export function acquireSingleInstanceLock(
     }
 
     const existing = readLockFile(lockPath);
-    if (existing && existing.pid !== currentPid && isProcessAlive(existing.pid)) {
+    if (
+      existing &&
+      existing.pid !== currentPid &&
+      isProcessAlive(existing.pid)
+    ) {
       throw new Error(
         `Another NanoClaw instance is already running (PID ${existing.pid}). ` +
           'Stop the existing service before starting a new one.',

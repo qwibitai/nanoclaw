@@ -216,8 +216,10 @@ function readSecrets(): Record<string, string> {
 
   const secrets: Record<string, string> = {};
 
-  if (raw.CLAUDE_CODE_OAUTH_TOKEN) secrets.CLAUDE_CODE_OAUTH_TOKEN = raw.CLAUDE_CODE_OAUTH_TOKEN;
-  if (raw.ANTHROPIC_BASE_URL) secrets.ANTHROPIC_BASE_URL = raw.ANTHROPIC_BASE_URL;
+  if (raw.CLAUDE_CODE_OAUTH_TOKEN)
+    secrets.CLAUDE_CODE_OAUTH_TOKEN = raw.CLAUDE_CODE_OAUTH_TOKEN;
+  if (raw.ANTHROPIC_BASE_URL)
+    secrets.ANTHROPIC_BASE_URL = raw.ANTHROPIC_BASE_URL;
 
   // MINIMAX_API_KEY takes priority over ANTHROPIC_API_KEY when set
   if (raw.MINIMAX_API_KEY) {

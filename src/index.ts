@@ -286,12 +286,12 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-      if (output.newSessionId) {
-        sessions[group.folder] = output.newSessionId;
-        setSession(group.folder, output.newSessionId);
+        if (output.newSessionId) {
+          sessions[group.folder] = output.newSessionId;
+          setSession(group.folder, output.newSessionId);
+        }
+        await onOutput(output);
       }
-      await onOutput(output);
-    }
     : undefined;
 
   try {
@@ -503,7 +503,9 @@ async function main(): Promise<void> {
   }
 
   if (channels.length === 0) {
-    logger.fatal('No channels configured. Set CHANNEL in .env (whatsapp, telegram, feishu).');
+    logger.fatal(
+      'No channels configured. Set CHANNEL in .env (whatsapp, telegram, feishu).',
+    );
     process.exit(1);
   }
 
@@ -550,7 +552,7 @@ async function main(): Promise<void> {
 const isDirectRun =
   process.argv[1] &&
   new URL(import.meta.url).pathname ===
-  new URL(`file://${process.argv[1]}`).pathname;
+    new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

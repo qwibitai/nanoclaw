@@ -92,7 +92,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 }
               }
               // Silently ignore ENOENT — container may have already deleted the file
-              try { fs.unlinkSync(filePath); } catch (e: unknown) {
+              try {
+                fs.unlinkSync(filePath);
+              } catch (e: unknown) {
                 if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
               }
             } catch (err) {
@@ -109,7 +111,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     filePath,
                     path.join(errorDir, `${sourceGroup}-${file}`),
                   );
-                } catch { /* file already gone, ignore */ }
+                } catch {
+                  /* file already gone, ignore */
+                }
               }
             }
           }
@@ -134,7 +138,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
               // Silently ignore ENOENT — container may have already deleted the file
-              try { fs.unlinkSync(filePath); } catch (e: unknown) {
+              try {
+                fs.unlinkSync(filePath);
+              } catch (e: unknown) {
                 if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
               }
             } catch (err) {
@@ -151,7 +157,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     filePath,
                     path.join(errorDir, `${sourceGroup}-${file}`),
                   );
-                } catch { /* file already gone, ignore */ }
+                } catch {
+                  /* file already gone, ignore */
+                }
               }
             }
           }

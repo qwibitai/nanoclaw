@@ -21,7 +21,9 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 // Comma-separated list of channels to activate: whatsapp, telegram, feishu
 // Defaults to 'whatsapp' for backwards compatibility.
 export const CHANNEL_NAMES: string[] = (
-  process.env.CHANNEL || envConfig.CHANNEL || 'whatsapp'
+  process.env.CHANNEL ||
+  envConfig.CHANNEL ||
+  'whatsapp'
 )
   .split(',')
   .map((s) => s.trim().toLowerCase())

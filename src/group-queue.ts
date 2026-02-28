@@ -73,7 +73,10 @@ export class GroupQueue {
     // Folder-level guard: prevent a second container for the same group folder
     if (folderHint && this.activeGroupFolders.has(folderHint)) {
       state.pendingMessages = true;
-      logger.debug({ groupJid, folderHint }, 'Folder already active, message queued');
+      logger.debug(
+        { groupJid, folderHint },
+        'Folder already active, message queued',
+      );
       return;
     }
 
