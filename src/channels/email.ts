@@ -1,4 +1,8 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
@@ -13,7 +17,12 @@ import {
   SMTP_PASS,
 } from '../config.js';
 import { logger } from '../logger.js';
-import type { Channel, OnChatMetadata, OnInboundMessage } from '../types.js';
+import type {
+  Channel,
+  NewMessage,
+  OnChatMetadata,
+  OnInboundMessage,
+} from '../types.js';
 
 // --- Types ---
 
@@ -32,6 +41,10 @@ export interface EmailChannelOpts {
   onEmail?: (jid: string, meta: EmailMetadata, body: string) => void;
 }
 
+const MAX_BODY_LENGTH = 4000;
+const MAX_PROCESSED_IDS = 5000;
+const ATTACHMENTS_DIR = join(process.cwd(), 'groups', 'main', 'attachments');
+
 // --- EmailChannel ---
 
 export class EmailChannel implements Channel {
@@ -43,6 +56,7 @@ export class EmailChannel implements Channel {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private threads = new Map<string, EmailMetadata>();
 
+  private processedIds = new Set<string>();
   private readonly opts: EmailChannelOpts;
 
   constructor(opts: EmailChannelOpts) {
@@ -117,6 +131,132 @@ export class EmailChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     return jid.startsWith('email:');
+  }
+
+  // --- Polling ---
+
+  async pollOnce(): Promise<void> {
+    if (!this.imap) return;
+
+    let lock: { release: () => void } | undefined;
+    try {
+      lock = await this.imap.getMailboxLock('INBOX');
+
+      const uids = await this.imap.search({ seen: false });
+      if (!uids.length) return;
+
+      for (const uid of uids) {
+        try {
+          const fetched = await this.imap.fetchOne(uid, {
+            source: true,
+            uid: true,
+          });
+
+          const parsed = await simpleParser(fetched.source);
+
+          const messageId = parsed.messageId ?? `uid:${uid}`;
+
+          // Skip already-processed
+          if (this.processedIds.has(messageId)) continue;
+
+          // Extract from info
+          const fromEntry = parsed.from?.value?.[0];
+          const fromAddr = fromEntry?.address ?? 'unknown';
+          const fromName = fromEntry?.name ?? fromAddr;
+
+          // Skip own emails
+          if (fromAddr === IMAP_USER) continue;
+
+          const subject = parsed.subject ?? '(kein Betreff)';
+
+          // Body: prefer text, fallback to html
+          let body = parsed.text ?? parsed.html ?? '';
+          if (typeof body === 'string' && body.length > MAX_BODY_LENGTH) {
+            body = body.slice(0, MAX_BODY_LENGTH);
+          }
+
+          // Handle attachments
+          const attachmentLines: string[] = [];
+          if (parsed.attachments?.length) {
+            mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+            for (const att of parsed.attachments) {
+              const ts = Date.now();
+              const filename = att.filename ?? `attachment-${ts}`;
+              const safeName = `${ts}-${filename}`;
+              const filePath = join(ATTACHMENTS_DIR, safeName);
+              writeFileSync(filePath, att.content);
+              attachmentLines.push(`[Anhang: ${filename} (${filePath})]`);
+            }
+          }
+
+          // Build chat JID from message ID
+          const chatJid = `email:${messageId}`;
+
+          // Thread metadata
+          const meta: EmailMetadata = {
+            messageId,
+            from: fromAddr,
+            fromName,
+            subject,
+            inReplyTo: parsed.inReplyTo as string | undefined,
+            references: Array.isArray(parsed.references)
+              ? parsed.references.join(' ')
+              : (parsed.references as string | undefined),
+          };
+          this.threads.set(chatJid, meta);
+
+          // Format inbound message
+          const parts = [
+            `[Email von ${fromName} <${fromAddr}>]`,
+            `Betreff: ${subject}`,
+            '',
+            body,
+          ];
+          if (attachmentLines.length) {
+            parts.push(...attachmentLines);
+          }
+
+          const message: NewMessage = {
+            id: messageId,
+            chat_jid: chatJid,
+            sender: fromAddr,
+            sender_name: fromName,
+            content: parts.join('\n'),
+            timestamp: new Date().toISOString(),
+          };
+
+          // Deliver callbacks
+          if (this.opts.onEmail) {
+            this.opts.onEmail(chatJid, meta, body);
+          }
+          this.opts.onMessage(chatJid, message);
+
+          // Mark as read
+          await this.imap.messageFlagsAdd([uid], ['\\Seen'], { uid: true });
+
+          // Track processed ID (cap at MAX_PROCESSED_IDS)
+          this.processedIds.add(messageId);
+          if (this.processedIds.size > MAX_PROCESSED_IDS) {
+            const oldest = this.processedIds.values().next().value!;
+            this.processedIds.delete(oldest);
+          }
+        } catch (msgErr) {
+          logger.error({ err: msgErr, uid }, 'Failed to process email UID');
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'IMAP poll error');
+    } finally {
+      lock?.release();
+    }
+  }
+
+  startPolling(intervalMs: number): void {
+    logger.info('Email polling started (interval: %dms)', intervalMs);
+    // Poll immediately
+    void this.pollOnce();
+    // Then on interval
+    this.pollTimer = setInterval(() => void this.pollOnce(), intervalMs);
   }
 
   // --- Email-specific accessors ---
