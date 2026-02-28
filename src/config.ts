@@ -11,6 +11,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
   'ALLOWED_USERS',
   'OBSERVER_ENABLED',
   'MIN_OBSERVER_MESSAGES',
@@ -82,6 +84,12 @@ export const DISCORD_BOT_TOKEN =
   process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '';
 export const DISCORD_ONLY =
   (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
+
+// Slack configuration (Socket Mode — no public URL needed)
+export const SLACK_BOT_TOKEN =
+  process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN =
+  process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
 
 // DM allowlist — comma-separated Discord user IDs. Empty = allow all.
 const allowedUsersRaw =
