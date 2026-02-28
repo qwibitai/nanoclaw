@@ -41,6 +41,112 @@ const server = new McpServer({
 });
 
 
+// ── Tool Observability — log every tool call to JSONL ────────────────
+// Async append, non-blocking. Credential patterns scrubbed from args.
+
+const SESSION_ID = `${groupFolder}-${Date.now()}`;
+
+const CRED_PATTERNS = [
+  /\b(sk-[a-zA-Z0-9]{20,})\b/g,
+  /\b(ghp_[a-zA-Z0-9]{36,})\b/g,
+  /\b(AKIA[A-Z0-9]{12,})\b/g,
+  /\b(xoxb-[a-zA-Z0-9-]+)\b/g,
+  /\b(Bearer\s+[a-zA-Z0-9._-]{20,})\b/g,
+  /\b([a-f0-9]{64})\b/g,
+];
+
+function scrubText(text: string): string {
+  let r = text;
+  for (const p of CRED_PATTERNS) r = r.replace(p, '[REDACTED]');
+  return r;
+}
+
+function scrubObjValues(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string') {
+      let s = scrubText(v);
+      if (s.length > 500) s = s.slice(0, 500) + '...';
+      out[k] = s;
+    } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      out[k] = scrubObjValues(v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function logToolCall(
+  tool: string,
+  args: Record<string, unknown>,
+  durationMs: number,
+  resultSize: number,
+  success: boolean,
+  error?: string,
+): void {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const logPath = path.join(IPC_DIR, `tool-calls-${yyyy}-${mm}-${dd}.jsonl`);
+
+  const entry = JSON.stringify({
+    timestamp: now.toISOString(),
+    tool,
+    args: scrubObjValues(args),
+    duration_ms: Math.round(durationMs),
+    result_size: resultSize,
+    success,
+    ...(error ? { error: scrubText(error).slice(0, 200) } : {}),
+    session_id: SESSION_ID,
+  });
+
+  // Async append — fire and forget, never blocks tool execution
+  fs.appendFile(logPath, entry + '\n', () => {});
+}
+
+// Wrap the original server.tool to inject observability
+const originalTool = server.tool.bind(server);
+type ToolCallback = (...callbackArgs: unknown[]) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
+
+server.tool = function wrappedTool(name: string, ...rest: unknown[]) {
+  // server.tool has overloads: (name, desc, schema, handler) or (name, schema, handler)
+  // The handler is always the last argument
+  const handlerIdx = rest.length - 1;
+  const originalHandler = rest[handlerIdx] as ToolCallback;
+
+  rest[handlerIdx] = async function observedHandler(...handlerArgs: unknown[]) {
+    const start = performance.now();
+    let success = true;
+    let errorMsg: string | undefined;
+    let resultText = '';
+
+    try {
+      const result = await originalHandler(...handlerArgs);
+      resultText = result.content?.map((c: { text: string }) => c.text).join('') ?? '';
+      if (result.isError) {
+        success = false;
+        errorMsg = resultText.slice(0, 200);
+      }
+      return result;
+    } catch (err) {
+      success = false;
+      errorMsg = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      const duration = performance.now() - start;
+      const args = (typeof handlerArgs[0] === 'object' && handlerArgs[0] !== null)
+        ? handlerArgs[0] as Record<string, unknown>
+        : {};
+      logToolCall(name, args, duration, resultText.length, success, errorMsg);
+    }
+  };
+
+  return (originalTool as Function)(name, ...rest);
+} as typeof server.tool;
+
+
 // ── BM25 Search (pure JS, zero deps) ────────────────────────────────
 // Indexes workspace files on-the-fly into an in-memory BM25 index.
 // Future: if EMBEDDING_URL is set, also query embeddings and merge via RRF.
