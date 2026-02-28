@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ImapFlow } from 'imapflow';
-import { simpleParser } from 'mailparser';
+import { simpleParser, type ParsedMail } from 'mailparser';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 
@@ -143,7 +143,7 @@ export class EmailChannel implements Channel {
       lock = await this.imap.getMailboxLock('INBOX');
 
       const uids = await this.imap.search({ seen: false });
-      if (!uids.length) return;
+      if (!uids || !uids.length) return;
 
       for (const uid of uids) {
         try {
@@ -151,8 +151,9 @@ export class EmailChannel implements Channel {
             source: true,
             uid: true,
           });
+          if (!fetched) continue;
 
-          const parsed = await simpleParser(fetched.source);
+          const parsed = await simpleParser(fetched.source!) as ParsedMail;
 
           const messageId = parsed.messageId ?? `uid:${uid}`;
 
@@ -170,8 +171,8 @@ export class EmailChannel implements Channel {
           const subject = parsed.subject ?? '(kein Betreff)';
 
           // Body: prefer text, fallback to html
-          let body = parsed.text ?? parsed.html ?? '';
-          if (typeof body === 'string' && body.length > MAX_BODY_LENGTH) {
+          let body = (parsed.text || parsed.html || '') as string;
+          if (body.length > MAX_BODY_LENGTH) {
             body = body.slice(0, MAX_BODY_LENGTH);
           }
 

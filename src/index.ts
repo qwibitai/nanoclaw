@@ -3,13 +3,16 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  EMAIL_POLL_INTERVAL,
   IDLE_TIMEOUT,
+  IMAP_HOST,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TELEGRAM_BOT_TOKEN,
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
+import { EmailChannel } from './channels/email.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
@@ -492,6 +495,21 @@ async function main(): Promise<void> {
     await whatsapp.connect();
   }
 
+  let emailChannel: EmailChannel | undefined;
+  if (IMAP_HOST) {
+    emailChannel = new EmailChannel({
+      onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+      onChatMetadata: (chatJid, timestamp, name, channel, isGroup) =>
+        storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+      onEmail: (chatJid, metadata) => {
+        storeChatMetadata(chatJid, new Date().toISOString(), metadata.fromName, 'email', false);
+      },
+    });
+    channels.push(emailChannel);
+    await emailChannel.connect();
+    emailChannel.startPolling(EMAIL_POLL_INTERVAL);
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -522,6 +540,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    emailChannel,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
