@@ -22,11 +22,22 @@ vi.mock('./logger.js', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
+/** Default valid JSON observation (matches ObservationOutputSchema). */
+const DEFAULT_OBSERVATION_JSON = JSON.stringify({
+  observations: [
+    {
+      time: '14:32',
+      topic: 'Sample observation',
+      priority: 'critical',
+      points: ['Key point'],
+      referencedDates: ['2026-02-27'],
+    },
+  ],
+});
+
 /** Builds a default successful OpenRouter-style LLM response. */
 function mockLLMResponse(content?: string): Response {
-  const body =
-    content ??
-    '### 14:32 — Sample observation (\uD83D\uDD34 Critical)\n- Key point\nReferenced: 2026-02-27';
+  const body = content ?? DEFAULT_OBSERVATION_JSON;
   return new Response(
     JSON.stringify({
       choices: [{ message: { content: body } }],
@@ -83,7 +94,7 @@ describe('observeConversation', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 1. Happy path — produces markdown observations
+  // 1. Happy path — produces markdown observations from validated JSON
   // -----------------------------------------------------------------------
   it('should produce markdown observations from sample conversation', async () => {
     const msgs = sampleMessages(5);
@@ -94,7 +105,8 @@ describe('observeConversation', () => {
     // writeFileSync must have been called with markdown content
     expect(fs.writeFileSync).toHaveBeenCalled();
     const writtenContent = (fs.writeFileSync as Mock).mock.calls[0][1] as string;
-    expect(writtenContent).toContain('observation');
+    expect(writtenContent).toContain('Sample observation');
+    expect(writtenContent).toContain('Key point');
   });
 
   // -----------------------------------------------------------------------

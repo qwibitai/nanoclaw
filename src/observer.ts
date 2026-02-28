@@ -8,6 +8,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { logger } from './logger.js';
+import { ObservationOutputSchema, observationToMarkdown } from './schemas.js';
+import { validateLLMOutput } from './validate-llm.js';
 
 // ---------------------------------------------------------------------------
 // In-memory state
@@ -172,18 +174,29 @@ export async function observeConversation(
       conversationText = conversationText.slice(-MAX_TOTAL_CHARS);
     }
 
-    // Build LLM prompt with hard delimiters
+    // Build LLM prompt with hard delimiters — request JSON for Zod validation
     const systemPrompt = [
       'You are an observation extraction agent. Given a conversation between a user and a bot assistant, extract key observations.',
-      'Assign priority markers:',
-      '  \uD83D\uDD34 Critical \u2014 decisions, commitments, errors, action items',
-      '  \uD83D\uDFE1 Useful \u2014 preferences, context, ongoing topics',
-      '  \uD83D\uDFE2 Noise \u2014 pleasantries, trivial exchanges',
+      'Assign priorities:',
+      '  "critical" — decisions, commitments, errors, action items',
+      '  "useful" — preferences, context, ongoing topics',
+      '  "noise" — pleasantries, trivial exchanges',
       'For each observation, note any referenced dates (dates mentioned in the conversation).',
-      'Format output as markdown with timestamps (HH:MM format) and priority markers.',
-      'Example: ### 14:32 \u2014 Topic (\uD83D\uDD34 Critical)\n- Key point\nReferenced: 2026-02-27',
       '',
       'IMPORTANT: Only report what is actually in the conversation. Do not fabricate information.',
+      '',
+      'Respond with ONLY a JSON object in this exact format (no markdown, no explanation):',
+      '{',
+      '  "observations": [',
+      '    {',
+      '      "time": "HH:MM",',
+      '      "topic": "Brief topic summary",',
+      '      "priority": "critical" | "useful" | "noise",',
+      '      "points": ["Key observation 1", "Key observation 2"],',
+      '      "referencedDates": ["YYYY-MM-DD"]',
+      '    }',
+      '  ]',
+      '}',
     ].join('\n');
 
     const userPrompt = [
@@ -242,13 +255,13 @@ export async function observeConversation(
       return;
     }
 
-    // Parse response
-    let observationText: string;
+    // Parse LLM response — extract content string
+    let rawContent: string;
     try {
       const json = await response.json() as {
         choices?: Array<{ message?: { content?: string } }>;
       };
-      observationText = json.choices?.[0]?.message?.content ?? '';
+      rawContent = json.choices?.[0]?.message?.content ?? '';
     } catch (err) {
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
@@ -256,21 +269,41 @@ export async function observeConversation(
       return;
     }
 
-    if (!observationText) {
+    if (!rawContent) {
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
       logger.warn({ consecutiveFailures }, 'Observer received empty LLM response');
       return;
     }
 
-    // Validate output — reject injection patterns
-    if (containsInjection(observationText)) {
+    // Validate output — reject injection patterns (check raw text before parsing)
+    if (containsInjection(rawContent)) {
       logger.warn('Observer rejected LLM output containing instruction patterns');
       return;
     }
 
-    // Scrub credentials from LLM output before writing to disk
-    observationText = scrubCredentials(observationText);
+    // Validate against Zod schema FIRST (raw JSON must be structurally valid)
+    const validated = await validateLLMOutput({
+      raw: rawContent,
+      schema: ObservationOutputSchema,
+      label: 'observer',
+    });
+
+    if (!validated) {
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
+      logger.warn({ consecutiveFailures }, 'Observer Zod validation failed after retry');
+      return;
+    }
+
+    // Scrub credentials from validated fields (NOT raw JSON — regex breaks JSON structure)
+    for (const obs of validated.observations) {
+      obs.topic = scrubCredentials(obs.topic);
+      obs.points = obs.points.map((p) => scrubCredentials(p));
+    }
+
+    // Serialize validated + scrubbed data to markdown (backwards-compatible format)
+    const observationText = observationToMarkdown(validated, dateStr);
 
     // Reset circuit breaker on success
     consecutiveFailures = 0;

@@ -129,13 +129,21 @@ beforeEach(() => {
   // Restore env
   delete process.env.OBSERVER_ENABLED;
 
-  // Default: fetch returns a clean observation
+  // Default: fetch returns a valid JSON observation (matches ObservationOutputSchema)
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
     ok: true,
     json: async () =>
       JSON.parse(
-        makeLlmResponse('## Observation\nRoutine greeting. Priority: Noise'),
+        makeLlmResponse(JSON.stringify({
+          observations: [{
+            time: '08:00',
+            topic: 'Routine greeting',
+            priority: 'noise',
+            points: ['Standard morning greeting'],
+            referencedDates: [],
+          }],
+        })),
       ),
   });
   vi.stubGlobal('fetch', mockFetch);
@@ -165,16 +173,21 @@ describe('EVAL-FIRST: Observer Boundary Assertions', () => {
       await loadObserver();
     _resetCooldownsForTesting();
 
-    // Mock fetch returns an observation that contains leaked credentials.
+    // Mock fetch returns a valid JSON observation that contains leaked credentials.
     // The implementation MUST scrub these before writing to disk.
-    const leakedObservation = [
-      '## Observation',
-      'User shared API key sk-proj-abc123def456 during conversation.',
-      'Also found GitHub token ghp_1234567890abcdef1234567890abcdef12345678 in logs.',
-      'AWS key AKIAIOSFODNN7EXAMPLE was mentioned.',
-      'Another secret: sk-ant-api03-xxxxxxxxxxxx.',
-      'Priority: Critical',
-    ].join('\n');
+    const leakedObservation = JSON.stringify({
+      observations: [{
+        time: '14:00',
+        topic: 'User shared API key sk-proj-abc123def456 during conversation',
+        priority: 'critical',
+        points: [
+          'Found GitHub token ghp_1234567890abcdef1234567890abcdef12345678 in logs',
+          'AWS key AKIAIOSFODNN7EXAMPLE was mentioned',
+          'Another secret: sk-ant-api03-xxxxxxxxxxxx',
+        ],
+        referencedDates: [],
+      }],
+    });
 
     mockFetch.mockResolvedValueOnce({
       ok: true,
