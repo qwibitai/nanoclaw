@@ -182,6 +182,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  const lastMessage = missedMessages[missedMessages.length - 1];
+  await channel.markThinking?.(chatJid, lastMessage.id);
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -212,6 +214,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+  if (!outputSentToUser) {
+    await channel.clearThinking?.(chatJid);
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -399,6 +404,10 @@ async function startMessageLoop(): Promise<void> {
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
+            const lastMsg = messagesToSend[messagesToSend.length - 1];
+            channel.markThinking?.(chatJid, lastMsg.id)?.catch((err) =>
+              logger.warn({ chatJid, err }, 'Failed to set thinking reaction'),
+            );
             // Show typing indicator while the container processes the piped message
             channel.setTyping?.(chatJid, true)?.catch((err) =>
               logger.warn({ chatJid, err }, 'Failed to set typing indicator'),

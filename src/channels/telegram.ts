@@ -197,6 +197,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private pendingReactions = new Map<string, number>();
 
   constructor(botToken: string, opts: TelegramChannelOpts) {
     this.botToken = botToken;
@@ -413,6 +414,8 @@ export class TelegramChannel implements Channel {
       return;
     }
 
+    await this.clearThinking(jid);
+
     try {
       const numericId = jid.replace(/^tg:/, '');
 
@@ -458,6 +461,31 @@ export class TelegramChannel implements Channel {
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+    }
+  }
+
+  async markThinking(jid: string, messageId: string): Promise<void> {
+    if (!this.bot) return;
+    try {
+      await this.clearThinking(jid);
+      const numericId = jid.replace(/^tg:/, '');
+      const msgId = parseInt(messageId, 10);
+      await this.bot.api.setMessageReaction(numericId, msgId, [{ type: 'emoji', emoji: '👀' }]);
+      this.pendingReactions.set(jid, msgId);
+    } catch (err) {
+      logger.debug({ jid, messageId, err }, 'Failed to set thinking reaction');
+    }
+  }
+
+  async clearThinking(jid: string): Promise<void> {
+    const msgId = this.pendingReactions.get(jid);
+    if (!this.bot || msgId === undefined) return;
+    this.pendingReactions.delete(jid);
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      await this.bot.api.setMessageReaction(numericId, msgId, []);
+    } catch (err) {
+      logger.debug({ jid, err }, 'Failed to clear thinking reaction');
     }
   }
 }

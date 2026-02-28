@@ -87,6 +87,9 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: reaction-based "thinking" indicator on a specific message.
+  markThinking?(jid: string, messageId: string): Promise<void>;
+  clearThinking?(jid: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
