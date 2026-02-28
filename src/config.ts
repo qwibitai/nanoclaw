@@ -6,10 +6,15 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'HTTP_PORT',
+  'HTTP_API_KEY',
+]);
 
 export const ASSISTANT_NAME =
-  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+  process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Nova';
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -62,3 +67,12 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// OpenAI-compatible HTTP API (for Open WebUI and Alexa/HA integration)
+export const HTTP_PORT = parseInt(
+  process.env.HTTP_PORT || envConfig.HTTP_PORT || '4000',
+  10,
+);
+// Optional bearer token for the HTTP API. Empty string = no auth required.
+export const HTTP_API_KEY =
+  process.env.HTTP_API_KEY || envConfig.HTTP_API_KEY || '';

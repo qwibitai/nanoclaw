@@ -9,6 +9,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { OpenAIApiChannel } from './channels/openai-api.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -478,6 +479,15 @@ async function main(): Promise<void> {
   whatsapp = new WhatsAppChannel(channelOpts);
   channels.push(whatsapp);
   await whatsapp.connect();
+
+  const httpApi = new OpenAIApiChannel({
+    registeredGroups: () => registeredGroups,
+    getSessions: () => sessions,
+    queue,
+    registerGroup,
+  });
+  channels.push(httpApi);
+  await httpApi.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
