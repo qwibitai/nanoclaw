@@ -15,7 +15,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
-import { readEnvFile } from './env.js';
+import { readEnvFile, readHostClaudeEnv } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -110,27 +110,31 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+  {
+    // Always regenerate so changes to host auth (ANTHROPIC_BASE_URL etc.) take effect
+    // immediately on the next container run without requiring a re-setup.
+    //
+    // Priority: .env > ~/.claude/settings.json (host) > built-in defaults.
+    // This lets users override individual keys in .env while still inheriting the
+    // rest from the host, enabling zero-copy host-auth passthrough.
+    const configKeys = ['ANTHROPIC_BASE_URL', 'API_TIMEOUT_MS', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'];
+    const apiConfig = { ...readHostClaudeEnv(configKeys), ...readEnvFile(configKeys) };
+    const settingsEnv: Record<string, string> = {
+      // Enable agent swarms (subagent orchestration)
+      // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+      CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+      // Load CLAUDE.md from additional mounted directories
+      // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+      CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+      // Enable Claude's memory feature (persists user preferences between sessions)
+      // https://code.claude.com/docs/en/memory#manage-auto-memory
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    };
+    if (apiConfig.ANTHROPIC_BASE_URL) settingsEnv.ANTHROPIC_BASE_URL = apiConfig.ANTHROPIC_BASE_URL;
+    if (apiConfig.API_TIMEOUT_MS) settingsEnv.API_TIMEOUT_MS = apiConfig.API_TIMEOUT_MS;
+    if (apiConfig.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC)
+      settingsEnv.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = apiConfig.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC;
+    fs.writeFileSync(settingsFile, JSON.stringify({ env: settingsEnv }, null, 2) + '\n');
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -200,11 +204,16 @@ function buildVolumeMounts(
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Read allowed secrets for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * Priority: .env > ~/.claude/settings.json (host).
+ * Host settings act as a fallback, enabling zero-copy host-auth passthrough
+ * for setups that use third-party API providers (e.g. Zhipu coding plan).
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const secretKeys = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+  return { ...readHostClaudeEnv(secretKeys), ...readEnvFile(secretKeys) };
 }
 
 function buildContainerArgs(

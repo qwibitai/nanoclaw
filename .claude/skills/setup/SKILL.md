@@ -75,13 +75,50 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 ## 4. Claude Authentication (No Script)
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `ANTHROPIC_AUTH_TOKEN`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key vs Reuse host machine authorization?
 
 **Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+
+**Reuse host machine authorization:** NanoClaw reads `~/.claude/settings.json` automatically at runtime — no values need to be copied to `.env`. Verify the host is correctly configured:
+
+1. Run:
+   ```bash
+   node -e '
+   const fs = require("fs"), os = require("os");
+   const p = os.homedir() + "/.claude/settings.json";
+   try {
+     const s = JSON.parse(fs.readFileSync(p, "utf8"));
+     const env = s.env || {};
+     const token = env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY || "";
+     if (token === "") { console.log("MISSING_TOKEN"); process.exit(1); }
+     console.log("OK base_url=" + (env.ANTHROPIC_BASE_URL || "(default)"));
+   } catch (e) { console.log("MISSING_FILE"); process.exit(1); }
+   '
+   ```
+
+   - If `MISSING_FILE`: tell the user `~/.claude/settings.json` is not found. Ask them to configure their host Claude installation first, then retry.
+   - If `MISSING_TOKEN`: tell the user `~/.claude/settings.json` exists but contains no API token (`ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY`). Ask them to add the token to the host settings, then retry.
+   - If `OK`: continue.
+
+2. Ensure `~/.claude.json` has `hasCompletedOnboarding: true` (required by Claude CLI to skip interactive onboarding inside the container):
+   ```bash
+   node -e '
+   const fs = require("fs"), p = require("os").homedir() + "/.claude.json";
+   let d = {};
+   try { d = JSON.parse(fs.readFileSync(p, "utf8")); } catch {}
+   if (d.hasCompletedOnboarding !== true) {
+     d.hasCompletedOnboarding = true;
+     fs.writeFileSync(p, JSON.stringify(d, null, 2));
+     console.log("SET hasCompletedOnboarding=true");
+   } else { console.log("OK already set"); }
+   '
+   ```
+
+3. Tell the user: "Host authorization verified. NanoClaw will read `~/.claude/settings.json` automatically on every container run — no `.env` changes needed. Values in `.env` take precedence if you ever need a per-project override."
 
 ## 5. WhatsApp Authentication
 
