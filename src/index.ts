@@ -617,7 +617,7 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
-  await pullLatestMain();
+  // pullLatestMain() removed — deploy.sh handles building before restart
   await cleanupWorktrees();
   ensureContainerSystemRunning();
   initDatabase();
