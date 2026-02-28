@@ -202,9 +202,31 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * MiniMax support: if MINIMAX_API_KEY is set, it is mapped to ANTHROPIC_API_KEY
+ * so the Claude Agent SDK redirects to MiniMax's Anthropic-compatible endpoint.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const raw = readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'MINIMAX_API_KEY',
+  ]);
+
+  const secrets: Record<string, string> = {};
+
+  if (raw.CLAUDE_CODE_OAUTH_TOKEN) secrets.CLAUDE_CODE_OAUTH_TOKEN = raw.CLAUDE_CODE_OAUTH_TOKEN;
+  if (raw.ANTHROPIC_BASE_URL) secrets.ANTHROPIC_BASE_URL = raw.ANTHROPIC_BASE_URL;
+
+  // MINIMAX_API_KEY takes priority over ANTHROPIC_API_KEY when set
+  if (raw.MINIMAX_API_KEY) {
+    secrets.ANTHROPIC_API_KEY = raw.MINIMAX_API_KEY;
+  } else if (raw.ANTHROPIC_API_KEY) {
+    secrets.ANTHROPIC_API_KEY = raw.ANTHROPIC_API_KEY;
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(

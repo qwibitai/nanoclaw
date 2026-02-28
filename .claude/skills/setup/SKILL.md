@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate with a messaging channel (WhatsApp, Telegram, or Feishu), register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
 # NanoClaw Setup
@@ -73,7 +73,20 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Choose Messaging Channel
+
+AskUserQuestion: Which messaging channel do you want to use?
+- **WhatsApp** (default)
+- **Telegram**
+- **Feishu / Lark**
+
+You can also enable multiple channels at once (e.g. WhatsApp + Telegram). Record the choice as `CHOSEN_CHANNELS` (comma-separated, lowercase).
+
+Write `CHANNEL=<CHOSEN_CHANNELS>` to `.env` (create the file if it doesn't exist, preserving any existing keys).
+
+---
+
+## 5a. Claude Authentication (No Script)
 
 If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
 
@@ -83,7 +96,13 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 5. WhatsApp Authentication
+---
+
+## 5b. Channel Authentication
+
+Run the authentication step(s) for each chosen channel:
+
+### If WhatsApp is chosen
 
 If HAS_AUTH=true, confirm: keep or re-authenticate?
 
@@ -98,7 +117,29 @@ Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser
 
 **If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
 
+### If Telegram is chosen
+
+1. Tell the user: "Open Telegram and message **@BotFather**. Send `/newbot`, follow the prompts to name your bot, then copy the **bot token** it gives you."
+2. AskUserQuestion: Please paste your Telegram bot token.
+3. Write `TELEGRAM_BOT_TOKEN=<token>` to `.env`.
+4. Confirm: `node -e "const t=require('fs').readFileSync('.env','utf8');console.log(t.includes('TELEGRAM_BOT_TOKEN') ? 'OK' : 'MISSING')"`
+
+### If Feishu / Lark is chosen
+
+1. Tell the user:
+   - Go to [Feishu Open Platform](https://open.feishu.cn/) → **Create app** → Self-built app.
+   - Under **Permissions & Scopes**, add: `im:message`, `im:message:send_as_bot`, `im:chat`.
+   - Under **Event Subscriptions**, enable **"Use WebSocket to receive events"** and subscribe to the `im.message.receive_v1` event.
+   - Copy the **App ID** and **App Secret** from the Credentials page.
+2. AskUserQuestion: Please paste your Feishu App ID.
+3. AskUserQuestion: Please paste your Feishu App Secret.
+4. Write `FEISHU_APP_ID=<id>` and `FEISHU_APP_SECRET=<secret>` to `.env`.
+
+---
+
 ## 6. Configure Trigger and Channel Type
+
+**If WhatsApp is chosen:**
 
 Get bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
@@ -107,16 +148,54 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 **Shared number:** Self-chat (recommended) or Solo group
 **Dedicated number:** DM with bot (recommended) or Solo group with bot
 
+**If Telegram is chosen:**
+
+AskUserQuestion: Trigger word (default: Andy)?
+
+Main channel will be a Telegram group or DM. The bot will respond to messages starting with `@<TriggerWord>`.
+
+**If Feishu is chosen:**
+
+AskUserQuestion: Group chat or private DM with the bot?
+- **Group chat** — Add the bot to a group
+- **Private DM** — Chat with the bot directly one-on-one (recommended for personal use)
+
+AskUserQuestion: Trigger word (default: Andy)?
+
+- **Group chat:** Bot responds to messages starting with `@<TriggerWord>`
+- **DM:** Trigger word not required — every message is forwarded to the agent
+
 ## 7. Sync and Select Group (If Group Channel)
 
-**Personal chat:** JID = `NUMBER@s.whatsapp.net`
-**DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
+**WhatsApp — Personal chat:** JID = `NUMBER@s.whatsapp.net`
+**WhatsApp — DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
 
-**Group:**
+**WhatsApp — Group:**
 1. `npx tsx setup/index.ts --step groups` (Bash timeout: 60000ms)
 2. BUILD=failed → fix TypeScript, re-run. GROUPS_IN_DB=0 → check logs.
 3. `npx tsx setup/index.ts --step groups -- --list` for pipe-separated JID|name lines.
 4. Present candidates as AskUserQuestion (names only, not JIDs).
+
+**Telegram — Group:**
+1. Tell the user: "Add your bot to the Telegram group, then send any message in it."
+2. Tell the user: "Run `npm run dev` briefly, watch the log for a line like `onChatMetadata chatJid=-1001234567890@telegram`. Copy that JID."
+3. AskUserQuestion: Paste the Telegram group JID (e.g. `-1001234567890@telegram`).
+4. Use that as the JID directly.
+
+**Telegram — DM:**
+1. Tell the user to message the bot directly.
+2. The JID will be `<user_chat_id>@telegram`. Prompt them to find it the same way as above.
+
+**Feishu — Group chat:**
+1. Tell the user: "Add the bot to your Feishu group chat, then send a message."
+2. Run `npm run dev` briefly, watch logs for `onChatMetadata chatJid=oc_...@feishu`. Copy that JID.
+3. AskUserQuestion: Paste the Feishu group JID (e.g. `oc_abcdef1234@feishu`).
+
+**Feishu — Private DM:**
+1. Tell the user: "Open Feishu, search for your bot by name, and send it any message."
+2. Run `npm run dev` briefly, watch logs for `onChatMetadata chatJid=...@feishu`. Copy that JID. (DM JIDs start with `ou_` for the user's p2p chat.)
+3. AskUserQuestion: Paste the Feishu DM JID.
+4. Use `--no-trigger-required` when registering in Step 8 — no trigger word needed for DMs.
 
 ## 8. Register Channel
 
@@ -182,5 +261,9 @@ Tell user to test: send a message in their registered chat. Show: `tail -f logs/
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
 **WhatsApp disconnected:** `npm run auth` then rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux).
+
+**Telegram bot not responding:** Confirm `TELEGRAM_BOT_TOKEN` is correctly set in `.env`. Check that the bot was added to the group and has permission to read messages (disable privacy mode via @BotFather → `/setprivacy` → Disable).
+
+**Feishu bot not responding:** Confirm `FEISHU_APP_ID` and `FEISHU_APP_SECRET` are set. Ensure WebSocket event subscription is enabled and `im.message.receive_v1` is subscribed. Check that the bot is added to the target group.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`

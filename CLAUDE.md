@@ -4,7 +4,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process that connects to one or more messaging channels (WhatsApp, Telegram, Feishu), routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory. Channel(s) selected via `CHANNEL` env var.
 
 ## Key Files
 
@@ -12,6 +12,8 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 |------|---------|
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/channels/telegram.ts` | Telegram Bot connection, send/receive |
+| `src/channels/feishu.ts` | Feishu/Lark connection (WebSocket), send/receive |
 | `src/ipc.ts` | IPC watcher and task processing |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |

@@ -3,12 +3,15 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CHANNEL_NAMES,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
+import { TelegramChannel } from './channels/telegram.js';
+import { FeishuChannel } from './channels/feishu.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -38,6 +41,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { acquireSingleInstanceLock, InstanceLock } from './single-instance.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -51,9 +55,10 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
+let whatsapp: WhatsAppChannel | undefined;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let instanceLock: InstanceLock | null = null;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -281,12 +286,12 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
-        }
-        await onOutput(output);
+      if (output.newSessionId) {
+        sessions[group.folder] = output.newSessionId;
+        setSession(group.folder, output.newSessionId);
       }
+      await onOutput(output);
+    }
     : undefined;
 
   try {
@@ -411,7 +416,7 @@ async function startMessageLoop(): Promise<void> {
               );
           } else {
             // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
+            queue.enqueueMessageCheck(chatJid, group.folder);
           }
         }
       }
@@ -435,7 +440,7 @@ function recoverPendingMessages(): void {
         { group: group.name, pendingCount: pending.length },
         'Recovery: found unprocessed messages',
       );
-      queue.enqueueMessageCheck(chatJid);
+      queue.enqueueMessageCheck(chatJid, group.folder);
     }
   }
 }
@@ -446,6 +451,9 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  instanceLock = acquireSingleInstanceLock();
+  process.on('exit', () => instanceLock?.release());
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -456,6 +464,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    instanceLock?.release();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -474,10 +483,29 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Create and connect channels based on CHANNEL env var
+  for (const channelName of CHANNEL_NAMES) {
+    if (channelName === 'whatsapp') {
+      whatsapp = new WhatsAppChannel(channelOpts);
+      channels.push(whatsapp);
+      await whatsapp.connect();
+    } else if (channelName === 'telegram') {
+      const tg = new TelegramChannel(channelOpts);
+      channels.push(tg);
+      await tg.connect();
+    } else if (channelName === 'feishu') {
+      const fs = new FeishuChannel(channelOpts);
+      channels.push(fs);
+      await fs.connect();
+    } else {
+      logger.warn({ channelName }, 'Unknown channel name, skipping');
+    }
+  }
+
+  if (channels.length === 0) {
+    logger.fatal('No channels configured. Set CHANNEL in .env (whatsapp, telegram, feishu).');
+    process.exit(1);
+  }
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -522,7 +550,7 @@ async function main(): Promise<void> {
 const isDirectRun =
   process.argv[1] &&
   new URL(import.meta.url).pathname ===
-    new URL(`file://${process.argv[1]}`).pathname;
+  new URL(`file://${process.argv[1]}`).pathname;
 
 if (isDirectRun) {
   main().catch((err) => {

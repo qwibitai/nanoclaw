@@ -33,6 +33,8 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  /** Tracks folders that currently have a running container (belt-and-suspenders guard). */
+  private activeGroupFolders = new Set<string>();
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -57,7 +59,7 @@ export class GroupQueue {
     this.processMessagesFn = fn;
   }
 
-  enqueueMessageCheck(groupJid: string): void {
+  enqueueMessageCheck(groupJid: string, folderHint?: string): void {
     if (this.shuttingDown) return;
 
     const state = this.getGroup(groupJid);
@@ -65,6 +67,13 @@ export class GroupQueue {
     if (state.active) {
       state.pendingMessages = true;
       logger.debug({ groupJid }, 'Container active, message queued');
+      return;
+    }
+
+    // Folder-level guard: prevent a second container for the same group folder
+    if (folderHint && this.activeGroupFolders.has(folderHint)) {
+      state.pendingMessages = true;
+      logger.debug({ groupJid, folderHint }, 'Folder already active, message queued');
       return;
     }
 
@@ -132,7 +141,10 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
-    if (groupFolder) state.groupFolder = groupFolder;
+    if (groupFolder) {
+      state.groupFolder = groupFolder;
+      this.activeGroupFolders.add(groupFolder);
+    }
   }
 
   /**
@@ -216,6 +228,7 @@ export class GroupQueue {
       logger.error({ groupJid, err }, 'Error processing messages for group');
       this.scheduleRetry(groupJid, state);
     } finally {
+      if (state.groupFolder) this.activeGroupFolders.delete(state.groupFolder);
       state.active = false;
       state.process = null;
       state.containerName = null;
@@ -242,6 +255,7 @@ export class GroupQueue {
     } catch (err) {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
+      if (state.groupFolder) this.activeGroupFolders.delete(state.groupFolder);
       state.active = false;
       state.isTaskContainer = false;
       state.process = null;

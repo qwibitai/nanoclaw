@@ -15,10 +15,17 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
+    "service:install": "./scripts/service-mode.sh install",
+    "service:start": "./scripts/service-mode.sh start",
+    "service:stop": "./scripts/service-mode.sh stop",
+    "service:restart": "./scripts/service-mode.sh restart",
+    "service:status": "./scripts/service-mode.sh status",
+    "service:logs": "./scripts/service-mode.sh logs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
@@ -26,6 +33,7 @@
     "pino-pretty": "^13.0.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
+    "telegraf": "^4.16.3",
     "yaml": "^2.8.2",
     "zod": "^4.3.6"
   },

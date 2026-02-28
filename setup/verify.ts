@@ -99,7 +99,7 @@ export async function run(_args: string[]): Promise<void> {
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
+    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|MINIMAX_API_KEY)=/m.test(envContent)) {
       credentials = 'configured';
     }
   }
@@ -138,11 +138,17 @@ export async function run(_args: string[]): Promise<void> {
   }
 
   // Determine overall status
+  // WhatsApp auth is only required when the CHANNEL includes whatsapp
+  const channelEnv = fs.existsSync(path.join(projectRoot, '.env'))
+    ? (fs.readFileSync(path.join(projectRoot, '.env'), 'utf-8').match(/^CHANNEL=(.+)/m)?.[1]?.trim() ?? 'whatsapp')
+    : 'whatsapp';
+  const needsWhatsappAuth = channelEnv.includes('whatsapp');
+
   const status =
     service === 'running' &&
-    credentials !== 'missing' &&
-    whatsappAuth !== 'not_found' &&
-    registeredGroups > 0
+      credentials !== 'missing' &&
+      (!needsWhatsappAuth || whatsappAuth !== 'not_found') &&
+      registeredGroups > 0
       ? 'success'
       : 'failed';
 
