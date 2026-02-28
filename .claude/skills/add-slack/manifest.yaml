@@ -1,0 +1,21 @@
+skill: slack
+version: 1.0.0
+description: "Slack Bot integration via @slack/bolt with Socket Mode"
+core_version: 0.1.0
+adds:
+  - src/channels/slack.ts
+  - src/channels/slack.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies:
+    "@slack/bolt": "^4.6.0"
+  env_additions:
+    - SLACK_BOT_TOKEN
+    - SLACK_APP_TOKEN
+    - SLACK_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/slack.test.ts"

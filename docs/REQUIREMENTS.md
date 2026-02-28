@@ -172,6 +172,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ### Skills
 - `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
+- `/update` - Pull upstream changes, merge with customizations, run migrations
 
 ### Deployment
 - Runs on local Mac via launchd

@@ -16,6 +16,8 @@ const BASE_RETRY_MS = 5000;
 
 interface GroupState {
   active: boolean;
+  idleWaiting: boolean;
+  isTaskContainer: boolean;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
@@ -37,6 +39,8 @@ export class GroupQueue {
     if (!state) {
       state = {
         active: false,
+        idleWaiting: false,
+        isTaskContainer: false,
         pendingMessages: false,
         pendingTasks: [],
         process: null,
@@ -76,7 +80,9 @@ export class GroupQueue {
       return;
     }
 
-    this.runForGroup(groupJid, 'messages');
+    this.runForGroup(groupJid, 'messages').catch((err) =>
+      logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
+    );
   }
 
   enqueueTask(groupJid: string, taskId: string, fn: () => Promise<void>): void {
@@ -92,6 +98,9 @@ export class GroupQueue {
 
     if (state.active) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
+      if (state.idleWaiting) {
+        this.closeStdin(groupJid);
+      }
       logger.debug({ groupJid, taskId }, 'Container active, task queued');
       return;
     }
@@ -109,14 +118,33 @@ export class GroupQueue {
     }
 
     // Run immediately
-    this.runTask(groupJid, { id: taskId, groupJid, fn });
+    this.runTask(groupJid, { id: taskId, groupJid, fn }).catch((err) =>
+      logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
+    );
   }
 
-  registerProcess(groupJid: string, proc: ChildProcess, containerName: string, groupFolder?: string): void {
+  registerProcess(
+    groupJid: string,
+    proc: ChildProcess,
+    containerName: string,
+    groupFolder?: string,
+  ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+  }
+
+  /**
+   * Mark the container as idle-waiting (finished work, waiting for IPC input).
+   * If tasks are pending, preempt the idle container immediately.
+   */
+  notifyIdle(groupJid: string): void {
+    const state = this.getGroup(groupJid);
+    state.idleWaiting = true;
+    if (state.pendingTasks.length > 0) {
+      this.closeStdin(groupJid);
+    }
   }
 
   /**
@@ -125,7 +153,9 @@ export class GroupQueue {
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return false;
+    if (!state.active || !state.groupFolder || state.isTaskContainer)
+      return false;
+    state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -163,6 +193,8 @@ export class GroupQueue {
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.idleWaiting = false;
+    state.isTaskContainer = false;
     state.pendingMessages = false;
     this.activeCount++;
 
@@ -196,6 +228,8 @@ export class GroupQueue {
   private async runTask(groupJid: string, task: QueuedTask): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
+    state.idleWaiting = false;
+    state.isTaskContainer = true;
     this.activeCount++;
 
     logger.debug(
@@ -209,6 +243,7 @@ export class GroupQueue {
       logger.error({ groupJid, taskId: task.id, err }, 'Error running task');
     } finally {
       state.active = false;
+      state.isTaskContainer = false;
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
@@ -248,13 +283,23 @@ export class GroupQueue {
     // Tasks first (they won't be re-discovered from SQLite like messages)
     if (state.pendingTasks.length > 0) {
       const task = state.pendingTasks.shift()!;
-      this.runTask(groupJid, task);
+      this.runTask(groupJid, task).catch((err) =>
+        logger.error(
+          { groupJid, taskId: task.id, err },
+          'Unhandled error in runTask (drain)',
+        ),
+      );
       return;
     }
 
     // Then pending messages
     if (state.pendingMessages) {
-      this.runForGroup(groupJid, 'drain');
+      this.runForGroup(groupJid, 'drain').catch((err) =>
+        logger.error(
+          { groupJid, err },
+          'Unhandled error in runForGroup (drain)',
+        ),
+      );
       return;
     }
 
@@ -273,9 +318,19 @@ export class GroupQueue {
       // Prioritize tasks over messages
       if (state.pendingTasks.length > 0) {
         const task = state.pendingTasks.shift()!;
-        this.runTask(nextJid, task);
+        this.runTask(nextJid, task).catch((err) =>
+          logger.error(
+            { groupJid: nextJid, taskId: task.id, err },
+            'Unhandled error in runTask (waiting)',
+          ),
+        );
       } else if (state.pendingMessages) {
-        this.runForGroup(nextJid, 'drain');
+        this.runForGroup(nextJid, 'drain').catch((err) =>
+          logger.error(
+            { groupJid: nextJid, err },
+            'Unhandled error in runForGroup (waiting)',
+          ),
+        );
       }
       // If neither pending, skip this group
     }

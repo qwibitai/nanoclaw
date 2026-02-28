@@ -49,8 +49,9 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 
 # 3. Rebuild host and restart service
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
-# Verify: launchctl list | grep nanoclaw shows PID and exit code 0
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
+# Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
 ```
 
 ## Configuration
@@ -271,12 +272,14 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 
 ```bash
 npm run build
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 **Verify success:**
 ```bash
-launchctl list | grep nanoclaw  # Should show PID and exit code 0 or -
+launchctl list | grep nanoclaw  # macOS — should show PID and exit code 0 or -
+# Linux: systemctl --user status nanoclaw
 ```
 
 ## Usage via WhatsApp
@@ -342,7 +345,8 @@ echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
 
 ```bash
 npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
 ```
 
 ### Browser Lock Files

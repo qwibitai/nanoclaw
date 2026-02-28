@@ -95,9 +95,7 @@ describe('replay', () => {
       expect(result.perSkill.telegram.success).toBe(true);
 
       // Added file should exist
-      expect(fs.existsSync(path.join(tmpDir, 'src', 'telegram.ts'))).toBe(
-        true,
-      );
+      expect(fs.existsSync(path.join(tmpDir, 'src', 'telegram.ts'))).toBe(true);
       expect(
         fs.readFileSync(path.join(tmpDir, 'src', 'telegram.ts'), 'utf-8'),
       ).toBe('telegram code\n');
@@ -134,7 +132,8 @@ describe('replay', () => {
         modifies: ['src/config.ts'],
         addFiles: { 'src/telegram.ts': 'tg code' },
         modifyFiles: {
-          'src/config.ts': 'telegram import\nline1\nline2\nline3\nline4\nline5\n',
+          'src/config.ts':
+            'telegram import\nline1\nline2\nline3\nline4\nline5\n',
         },
         dirName: 'skill-pkg-tg',
       });
@@ -148,7 +147,8 @@ describe('replay', () => {
         modifies: ['src/config.ts'],
         addFiles: { 'src/discord.ts': 'dc code' },
         modifyFiles: {
-          'src/config.ts': 'line1\nline2\nline3\nline4\nline5\ndiscord import\n',
+          'src/config.ts':
+            'line1\nline2\nline3\nline4\nline5\ndiscord import\n',
         },
         dirName: 'skill-pkg-dc',
       });
@@ -164,12 +164,8 @@ describe('replay', () => {
       expect(result.perSkill.discord.success).toBe(true);
 
       // Both added files should exist
-      expect(fs.existsSync(path.join(tmpDir, 'src', 'telegram.ts'))).toBe(
-        true,
-      );
-      expect(fs.existsSync(path.join(tmpDir, 'src', 'discord.ts'))).toBe(
-        true,
-      );
+      expect(fs.existsSync(path.join(tmpDir, 'src', 'telegram.ts'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'src', 'discord.ts'))).toBe(true);
 
       // Config should have both changes
       const config = fs.readFileSync(
@@ -226,7 +222,11 @@ describe('replay', () => {
 
       const result = await replaySkills({
         skills: ['skill-a', 'skill-b', 'skill-c'],
-        skillDirs: { 'skill-a': skill1Dir, 'skill-b': skill2Dir, 'skill-c': skill3Dir },
+        skillDirs: {
+          'skill-a': skill1Dir,
+          'skill-b': skill2Dir,
+          'skill-c': skill3Dir,
+        },
         projectRoot: tmpDir,
       });
 

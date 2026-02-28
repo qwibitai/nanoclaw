@@ -15,7 +15,7 @@ import readline from 'readline';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
-  fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -28,30 +28,16 @@ const logger = pino({
   level: 'warn', // Quiet logging - only show errors
 });
 
-let cachedVersion: [number, number, number] | null = null;
-
-async function resolveWhatsAppVersion(): Promise<
-  [number, number, number] | undefined
-> {
-  if (cachedVersion) return cachedVersion;
-  try {
-    const { version } = await fetchLatestBaileysVersion();
-    cachedVersion = version as [number, number, number];
-    return cachedVersion;
-  } catch (err: any) {
-    console.warn(
-      `Warning: failed to fetch latest WhatsApp version (${err?.message || 'unknown error'}). Using Baileys default.`,
-    );
-    return undefined;
-  }
-}
 
 // Check for --pairing-code flag and phone number
 const usePairingCode = process.argv.includes('--pairing-code');
 const phoneArg = process.argv.find((_, i, arr) => arr[i - 1] === '--phone');
 
 function askQuestion(prompt: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
   return new Promise((resolve) => {
     rl.question(prompt, (answer) => {
       rl.close();
@@ -60,9 +46,11 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function connectSocket(phoneNumber?: string, isReconnect = false): Promise<void> {
+async function connectSocket(
+  phoneNumber?: string,
+  isReconnect = false,
+): Promise<void> {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const version = await resolveWhatsAppVersion();
 
   if (state.creds.registered && !isReconnect) {
     fs.writeFileSync(STATUS_FILE, 'already_authenticated');
@@ -73,6 +61,13 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     process.exit(0);
   }
 
+  const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
+    logger.warn(
+      { err },
+      'Failed to fetch latest WA Web version, using default',
+    );
+    return { version: undefined };
+  });
   const sock = makeWASocket({
     ...(version ? { version } : {}),
     auth: {
@@ -143,7 +138,9 @@ async function connectSocket(phoneNumber?: string, isReconnect = false): Promise
     if (connection === 'open') {
       fs.writeFileSync(STATUS_FILE, 'authenticated');
       // Clean up QR file now that we're connected
-      try { fs.unlinkSync(QR_FILE); } catch {}
+      try {
+        fs.unlinkSync(QR_FILE);
+      } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
       console.log('  You can now start the NanoClaw service.\n');
@@ -160,12 +157,18 @@ async function authenticate(): Promise<void> {
   fs.mkdirSync(AUTH_DIR, { recursive: true });
 
   // Clean up any stale QR/status files from previous runs
-  try { fs.unlinkSync(QR_FILE); } catch {}
-  try { fs.unlinkSync(STATUS_FILE); } catch {}
+  try {
+    fs.unlinkSync(QR_FILE);
+  } catch {}
+  try {
+    fs.unlinkSync(STATUS_FILE);
+  } catch {}
 
   let phoneNumber = phoneArg;
   if (usePairingCode && !phoneNumber) {
-    phoneNumber = await askQuestion('Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ');
+    phoneNumber = await askQuestion(
+      'Enter your phone number (with country code, no + or spaces, e.g. 14155551234): ',
+    );
   }
 
   console.log('Starting WhatsApp authentication...\n');

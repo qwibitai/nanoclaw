@@ -11,6 +11,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -357,6 +358,13 @@ export async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        if (!isValidGroupFolder(data.folder)) {
+          logger.warn(
+            { sourceGroup, folder: data.folder },
+            'Invalid register_group request - unsafe folder name',
+          );
+          break;
+        }
         deps.registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
