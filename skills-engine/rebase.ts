@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
@@ -8,14 +8,7 @@ import { clearBackup, createBackup, restoreBackup } from './backup.js';
 import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { acquireLock } from './lock.js';
-import {
-  cleanupMergeState,
-  isGitRepo,
-  mergeFile,
-  runRerere,
-  setupRerereAdapter,
-} from './merge.js';
-import { clearAllResolutions } from './resolution-cache.js';
+import { mergeFile } from './merge.js';
 import { computeFileHash, readState, writeState } from './state.js';
 import type { RebaseResult } from './types.js';
 
@@ -34,9 +27,7 @@ function walkDir(dir: string, root: string): string[] {
   return results;
 }
 
-function collectTrackedFiles(
-  state: ReturnType<typeof readState>,
-): Set<string> {
+function collectTrackedFiles(state: ReturnType<typeof readState>): Set<string> {
   const tracked = new Set<string>();
 
   for (const skill of state.applied_skills) {
@@ -126,11 +117,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       }
 
       // Save combined patch
-      const patchPath = path.join(
-        projectRoot,
-        NANOCLAW_DIR,
-        'combined.patch',
-      );
+      const patchPath = path.join(projectRoot, NANOCLAW_DIR, 'combined.patch');
       fs.writeFileSync(patchPath, combinedPatch, 'utf-8');
 
       if (newBasePath) {
@@ -190,9 +177,6 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
             continue;
           }
 
-          // Save "ours" (new base content) before merge overwrites it
-          const oursContent = newBaseContent;
-
           // Three-way merge: current(new base) ← old-base → saved(modifications)
           const tmpSaved = path.join(
             os.tmpdir(),
@@ -204,23 +188,6 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
           fs.unlinkSync(tmpSaved);
 
           if (!result.clean) {
-            // Try rerere resolution (three-level model)
-            if (isGitRepo()) {
-              const baseContent = fs.readFileSync(oldBasePath, 'utf-8');
-              setupRerereAdapter(relPath, baseContent, oursContent, saved);
-              const autoResolved = runRerere(currentPath);
-
-              if (autoResolved) {
-                execFileSync('git', ['add', relPath], { stdio: 'pipe' });
-                execSync('git rerere', { stdio: 'pipe' });
-                cleanupMergeState(relPath);
-                continue;
-              }
-
-              cleanupMergeState(relPath);
-            }
-
-            // Unresolved — conflict markers remain in working tree
             mergeConflicts.push(relPath);
           }
         }
@@ -270,9 +237,6 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       delete state.custom_modifications;
       state.rebased_at = now;
       writeState(state);
-
-      // Clear stale resolution cache (base has changed, old resolutions invalid)
-      clearAllResolutions(projectRoot);
 
       clearBackup();
 

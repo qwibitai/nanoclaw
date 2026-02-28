@@ -35,12 +35,24 @@ function parseArgs(args: string[]): RegisterArgs {
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
-      case '--jid': result.jid = args[++i] || ''; break;
-      case '--name': result.name = args[++i] || ''; break;
-      case '--trigger': result.trigger = args[++i] || ''; break;
-      case '--folder': result.folder = args[++i] || ''; break;
-      case '--no-trigger-required': result.requiresTrigger = false; break;
-      case '--assistant-name': result.assistantName = args[++i] || 'Andy'; break;
+      case '--jid':
+        result.jid = args[++i] || '';
+        break;
+      case '--name':
+        result.name = args[++i] || '';
+        break;
+      case '--trigger':
+        result.trigger = args[++i] || '';
+        break;
+      case '--folder':
+        result.folder = args[++i] || '';
+        break;
+      case '--no-trigger-required':
+        result.requiresTrigger = false;
+        break;
+      case '--assistant-name':
+        result.assistantName = args[++i] || 'Andy';
+        break;
     }
   }
 
@@ -95,18 +107,30 @@ export async function run(args: string[]): Promise<void> {
     `INSERT OR REPLACE INTO registered_groups
      (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
      VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-  ).run(parsed.jid, parsed.name, parsed.folder, parsed.trigger, timestamp, requiresTriggerInt);
+  ).run(
+    parsed.jid,
+    parsed.name,
+    parsed.folder,
+    parsed.trigger,
+    timestamp,
+    requiresTriggerInt,
+  );
 
   db.close();
   logger.info('Wrote registration to SQLite');
 
   // Create group folders
-  fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, 'groups', parsed.folder, 'logs'), {
+    recursive: true,
+  });
 
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
-    logger.info({ from: 'Andy', to: parsed.assistantName }, 'Updating assistant name');
+    logger.info(
+      { from: 'Andy', to: parsed.assistantName },
+      'Updating assistant name',
+    );
 
     const mdFiles = [
       path.join(projectRoot, 'groups', 'global', 'CLAUDE.md'),
@@ -117,7 +141,10 @@ export async function run(args: string[]): Promise<void> {
       if (fs.existsSync(mdFile)) {
         let content = fs.readFileSync(mdFile, 'utf-8');
         content = content.replace(/^# Andy$/m, `# ${parsed.assistantName}`);
-        content = content.replace(/You are Andy/g, `You are ${parsed.assistantName}`);
+        content = content.replace(
+          /You are Andy/g,
+          `You are ${parsed.assistantName}`,
+        );
         fs.writeFileSync(mdFile, content);
         logger.info({ file: mdFile }, 'Updated CLAUDE.md');
       }
