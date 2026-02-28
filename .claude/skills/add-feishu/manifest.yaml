@@ -1,0 +1,21 @@
+skill: feishu
+version: 1.0.0
+description: "Feishu/Lark channel via WebSocket with auto-register and auto-cleanup"
+core_version: 0.1.0
+adds:
+  - src/channels/feishu.ts
+  - tests/feishu.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/db.ts
+  - src/ipc.ts
+structured:
+  npm_dependencies:
+    "@larksuiteoapi/node-sdk": "^7.0.0"
+  env_additions:
+    - FEISHU_APP_ID
+    - FEISHU_APP_SECRET
+conflicts: []
+depends: []
+test: "npx vitest run tests/feishu.test.ts"
