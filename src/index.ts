@@ -11,9 +11,12 @@ import {
   MIN_OBSERVER_MESSAGES,
   POLL_INTERVAL,
   ROUTER_ENABLED,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -481,6 +484,12 @@ async function main(): Promise<void> {
     const discord = new DiscordChannel(DISCORD_BOT_TOKEN, channelOpts);
     channels.push(discord);
     await discord.connect();
+  }
+
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    const slack = new SlackChannel(SLACK_BOT_TOKEN, SLACK_APP_TOKEN, channelOpts);
+    channels.push(slack);
+    await slack.connect();
   }
 
   if (!DISCORD_ONLY) {
