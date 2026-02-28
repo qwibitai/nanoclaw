@@ -11,7 +11,17 @@ This skill adds Telegram support to NanoClaw using the skills engine for determi
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, verify the code changes are actually in place before skipping:
+
+```bash
+# Check key files and imports
+test -f src/channels/telegram.ts && echo "FILE=exists" || echo "FILE=missing"
+grep -q "TelegramChannel" src/index.ts 2>/dev/null && echo "IMPORT=present" || echo "IMPORT=missing"
+grep -q "TELEGRAM_BOT_TOKEN" src/config.ts 2>/dev/null && echo "CONFIG=present" || echo "CONFIG=missing"
+```
+
+- All three checks pass → skip to Phase 3 (Setup). The code changes are in place.
+- Any check fails → state/code mismatch (e.g., changes were reverted after the skill was recorded). Proceed to Phase 2 to re-apply. The skills engine handles this idempotently.
 
 ### Ask the user
 
@@ -202,9 +212,54 @@ Group Privacy is enabled (default). Fix:
 
 ### Getting chat ID
 
-If `/chatid` doesn't work:
-- Verify token: `curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"`
-- Check bot is started: `tail -f logs/nanoclaw.log`
+If `/chatid` doesn't work, diagnose in order:
+
+**1. Verify the Telegram code is actually loaded:**
+```bash
+test -f src/channels/telegram.ts && echo "OK: telegram.ts exists" || echo "ERROR: telegram.ts missing"
+grep -q "TelegramChannel" src/index.ts && echo "OK: imported" || echo "ERROR: not imported"
+grep -q "TELEGRAM_BOT_TOKEN" src/config.ts && echo "OK: config present" || echo "ERROR: config missing"
+```
+If any check fails, see **State/code mismatch** below.
+
+**2. Verify the bot connected:**
+```bash
+grep "Telegram bot connected" logs/nanoclaw.log | tail -1
+```
+No output means the TelegramChannel never started — check token and state next.
+
+**3. Verify token:**
+```bash
+source .env && curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"
+```
+
+**4. Check full service logs:**
+```bash
+tail -50 logs/nanoclaw.log
+```
+
+### State/code mismatch (state.yaml says applied but bot not connecting)
+
+Symptoms:
+- `/chatid` gets no response
+- No "Telegram bot connected" line in `logs/nanoclaw.log`
+- `.nanoclaw/state.yaml` lists `telegram` but `src/channels/telegram.ts` is missing or `src/index.ts` has no `TelegramChannel` import
+
+Cause: Code changes were undone (e.g., git revert, editor undo) after the skill was recorded in `state.yaml`.
+
+Fix — re-apply the skill (idempotent, safe to re-run):
+
+```bash
+npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
+npm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
+# Linux: systemctl --user restart nanoclaw
+```
+
+Verify the bot connected after restart:
+```bash
+grep "Telegram bot connected" logs/nanoclaw.log | tail -1
+```
 
 ## After Setup
 
