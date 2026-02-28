@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
-import { MarketWatcher, NewMessage, OptimizationResult, PaperTrade, RegisteredGroup, ScheduledTask, TaskRunLog, TradingPreset, TradingRun, User } from './types.js';
+import { LiveTrade, MarketWatcher, NewMessage, OptimizationResult, PaperTrade, RegisteredGroup, ScheduledTask, TaskRunLog, TradingPreset, TradingRun, User } from './types.js';
 
 let db: Database.Database;
 
@@ -337,6 +337,13 @@ function createSchema(database: Database.Database): void {
     /* table already exists */
   }
 
+  // Add last_snapshot_at column to trading_runs (for strategy auto-resume)
+  try {
+    database.exec(`ALTER TABLE trading_runs ADD COLUMN last_snapshot_at TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add strategy column to paper_trades if it doesn't exist (migration)
   try {
     database.exec(`ALTER TABLE paper_trades ADD COLUMN strategy TEXT NOT NULL DEFAULT 'uncategorized'`);
@@ -348,6 +355,46 @@ function createSchema(database: Database.Database): void {
     database.exec(`UPDATE paper_trades SET strategy = 'momentum_15m' WHERE id = 'pt-seed-trade7'`);
   } catch {
     /* column already exists */
+  }
+
+  // Add run_id column to paper_trades if it doesn't exist (migration)
+  try {
+    database.exec(`ALTER TABLE paper_trades ADD COLUMN run_id TEXT`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_paper_trades_run_id ON paper_trades(run_id)`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Live trades table
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS live_trades (
+        id TEXT PRIMARY KEY,
+        kalshi_order_id TEXT,
+        ticker TEXT NOT NULL,
+        market_title TEXT,
+        side TEXT NOT NULL,
+        action TEXT NOT NULL,
+        qty INTEGER NOT NULL,
+        entry_price INTEGER NOT NULL,
+        fill_price INTEGER,
+        exit_price INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending',
+        strategy TEXT NOT NULL,
+        run_id TEXT,
+        market_type TEXT DEFAULT 'kalshi',
+        event_ticker TEXT,
+        close_time TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        filled_at TEXT,
+        settled_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_live_trades_status ON live_trades(status);
+      CREATE INDEX IF NOT EXISTS idx_live_trades_run_id ON live_trades(run_id);
+    `);
+  } catch {
+    /* table already exists */
   }
 }
 
@@ -843,6 +890,15 @@ export function getRecentMessages(chatJid?: string, limit = 50): Array<{
     .all(clampedLimit) as any[];
 }
 
+export function getMessageCountToday(): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const row = db
+    .prepare(`SELECT COUNT(*) as count FROM messages WHERE timestamp >= ?`)
+    .get(today.toISOString()) as { count: number } | undefined;
+  return row?.count ?? 0;
+}
+
 export function getTaskRunLogs(taskId?: string, limit = 50): Array<{
   id: number;
   task_id: string;
@@ -948,13 +1004,13 @@ export function deletePreset(id: string): void {
 
 export function createRun(run: TradingRun): void {
   db.prepare(
-    `INSERT INTO trading_runs (id, preset_id, task_id, type, status, platform, strategy, mode, initial_capital, risk_params, start_date, end_date, results, created_at, completed_at, error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO trading_runs (id, preset_id, task_id, type, status, platform, strategy, mode, initial_capital, risk_params, start_date, end_date, results, created_at, completed_at, error, last_snapshot_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     run.id, run.preset_id, run.task_id, run.type, run.status, run.platform,
     run.strategy, run.mode, run.initial_capital, run.risk_params,
     run.start_date, run.end_date, run.results, run.created_at,
-    run.completed_at, run.error,
+    run.completed_at, run.error, run.last_snapshot_at,
   );
 }
 
@@ -971,7 +1027,7 @@ export function getRunById(id: string): TradingRun | undefined {
   return db.prepare('SELECT * FROM trading_runs WHERE id = ?').get(id) as TradingRun | undefined;
 }
 
-export function updateRun(id: string, updates: Partial<Pick<TradingRun, 'status' | 'task_id' | 'results' | 'completed_at' | 'error'>>): void {
+export function updateRun(id: string, updates: Partial<Pick<TradingRun, 'status' | 'task_id' | 'results' | 'completed_at' | 'error' | 'last_snapshot_at'>>): void {
   const fields: string[] = [];
   const values: unknown[] = [];
 
@@ -980,10 +1036,17 @@ export function updateRun(id: string, updates: Partial<Pick<TradingRun, 'status'
   if (updates.results !== undefined) { fields.push('results = ?'); values.push(updates.results); }
   if (updates.completed_at !== undefined) { fields.push('completed_at = ?'); values.push(updates.completed_at); }
   if (updates.error !== undefined) { fields.push('error = ?'); values.push(updates.error); }
+  if (updates.last_snapshot_at !== undefined) { fields.push('last_snapshot_at = ?'); values.push(updates.last_snapshot_at); }
 
   if (fields.length === 0) return;
   values.push(id);
   db.prepare(`UPDATE trading_runs SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function getRunningStrategyRuns(): TradingRun[] {
+  return db.prepare(
+    "SELECT * FROM trading_runs WHERE type = 'strategy_engine' AND status = 'running'",
+  ).all() as TradingRun[];
 }
 
 // --- Account Config accessors ---
@@ -1083,6 +1146,21 @@ export function getRecordedData(watcherId: string, tokenId?: string, limit?: num
   return db.prepare(sql).all(...params) as any[];
 }
 
+export function getMarketDataBySlug(slug: string, outcome?: string): Array<{
+  timestamp: string;
+  price: number;
+  metadata: string | null;
+}> {
+  let sql = `SELECT timestamp, price, metadata FROM market_data WHERE metadata LIKE ?`;
+  const params: unknown[] = [`%"market_slug":"${slug}"%`];
+  if (outcome) {
+    sql += ` AND metadata LIKE ?`;
+    params.push(`%"outcome":"${outcome}"%`);
+  }
+  sql += ` ORDER BY timestamp DESC LIMIT 30`;
+  return db.prepare(sql).all(...params) as any[];
+}
+
 // --- Optimization Result accessors ---
 
 export function createOptimizationResult(result: OptimizationResult): void {
@@ -1107,22 +1185,29 @@ export function getOptimizationResults(watcherId?: string): OptimizationResult[]
 
 export function createPaperTrade(trade: PaperTrade): void {
   db.prepare(
-    `INSERT INTO paper_trades (id, ticker, market_title, side, action, qty, entry_price, exit_price, status, strategy, market_type, event_ticker, close_time, notes, created_at, settled_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO paper_trades (id, ticker, market_title, side, action, qty, entry_price, exit_price, status, strategy, run_id, market_type, event_ticker, close_time, notes, created_at, settled_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     trade.id, trade.ticker, trade.market_title, trade.side, trade.action,
     trade.qty, trade.entry_price, trade.exit_price, trade.status,
-    trade.strategy || 'uncategorized',
+    trade.strategy || 'uncategorized', trade.run_id || null,
     trade.market_type, trade.event_ticker, trade.close_time, trade.notes,
     trade.created_at, trade.settled_at,
   );
 }
 
-export function getAllPaperTrades(status?: string): PaperTrade[] {
-  if (status) {
-    return db.prepare('SELECT * FROM paper_trades WHERE status = ? ORDER BY created_at DESC').all(status) as PaperTrade[];
-  }
-  return db.prepare('SELECT * FROM paper_trades ORDER BY created_at DESC').all() as PaperTrade[];
+export function getAllPaperTrades(status?: string, runId?: string): PaperTrade[] {
+  let sql = 'SELECT * FROM paper_trades WHERE 1=1';
+  const params: unknown[] = [];
+  if (status) { sql += ' AND status = ?'; params.push(status); }
+  if (runId) { sql += ' AND run_id = ?'; params.push(runId); }
+  sql += ' ORDER BY created_at DESC';
+  return db.prepare(sql).all(...params) as PaperTrade[];
+}
+
+export function deletePaperTradesByRunId(runId: string): number {
+  const result = db.prepare('DELETE FROM paper_trades WHERE run_id = ?').run(runId);
+  return result.changes;
 }
 
 export function getPaperTradeById(id: string): PaperTrade | undefined {
@@ -1144,6 +1229,90 @@ export function updatePaperTrade(id: string, updates: Partial<Pick<PaperTrade, '
 
 export function deletePaperTrade(id: string): void {
   db.prepare('DELETE FROM paper_trades WHERE id = ?').run(id);
+}
+
+export function getOpenPaperTradesForTicker(ticker: string): PaperTrade[] {
+  return db.prepare(
+    'SELECT * FROM paper_trades WHERE ticker = ? AND status = ? ORDER BY created_at DESC',
+  ).all(ticker, 'open') as PaperTrade[];
+}
+
+export function getExpiredOpenPaperTrades(): PaperTrade[] {
+  return db.prepare(
+    `SELECT * FROM paper_trades WHERE status = 'open' AND close_time IS NOT NULL AND close_time < datetime('now')`,
+  ).all() as PaperTrade[];
+}
+
+export function getDailySettledPnl(dateStr: string): { total_pnl_cents: number; settled_count: number } {
+  const row = db.prepare(
+    `SELECT COALESCE(SUM((exit_price - entry_price) * qty), 0) as total_pnl_cents, COUNT(*) as settled_count FROM paper_trades WHERE settled_at IS NOT NULL AND settled_at >= ? AND status IN ('won', 'lost') AND exit_price IS NOT NULL`,
+  ).get(dateStr + 'T00:00:00Z') as { total_pnl_cents: number; settled_count: number };
+  return row;
+}
+
+// --- Live Trade accessors ---
+
+export function createLiveTrade(trade: LiveTrade): void {
+  db.prepare(
+    `INSERT INTO live_trades (id, kalshi_order_id, ticker, market_title, side, action, qty, entry_price, fill_price, exit_price, status, strategy, run_id, market_type, event_ticker, close_time, notes, created_at, filled_at, settled_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    trade.id, trade.kalshi_order_id, trade.ticker, trade.market_title, trade.side,
+    trade.action, trade.qty, trade.entry_price, trade.fill_price, trade.exit_price,
+    trade.status, trade.strategy, trade.run_id, trade.market_type,
+    trade.event_ticker, trade.close_time, trade.notes, trade.created_at,
+    trade.filled_at, trade.settled_at,
+  );
+}
+
+export function getAllLiveTrades(status?: string): LiveTrade[] {
+  if (status) {
+    return db.prepare('SELECT * FROM live_trades WHERE status = ? ORDER BY created_at DESC').all(status) as LiveTrade[];
+  }
+  return db.prepare('SELECT * FROM live_trades ORDER BY created_at DESC').all() as LiveTrade[];
+}
+
+export function getLiveTradeById(id: string): LiveTrade | undefined {
+  return db.prepare('SELECT * FROM live_trades WHERE id = ?').get(id) as LiveTrade | undefined;
+}
+
+export function updateLiveTrade(id: string, updates: Partial<Pick<LiveTrade, 'fill_price' | 'exit_price' | 'status' | 'settled_at' | 'kalshi_order_id' | 'notes' | 'filled_at'>>): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (updates.fill_price !== undefined) { fields.push('fill_price = ?'); values.push(updates.fill_price); }
+  if (updates.exit_price !== undefined) { fields.push('exit_price = ?'); values.push(updates.exit_price); }
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status); }
+  if (updates.settled_at !== undefined) { fields.push('settled_at = ?'); values.push(updates.settled_at); }
+  if (updates.kalshi_order_id !== undefined) { fields.push('kalshi_order_id = ?'); values.push(updates.kalshi_order_id); }
+  if (updates.notes !== undefined) { fields.push('notes = ?'); values.push(updates.notes); }
+  if (updates.filled_at !== undefined) { fields.push('filled_at = ?'); values.push(updates.filled_at); }
+  if (fields.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE live_trades SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function getOpenLiveTrades(): LiveTrade[] {
+  return db.prepare(
+    `SELECT * FROM live_trades WHERE status IN ('pending', 'filled') ORDER BY created_at DESC`,
+  ).all() as LiveTrade[];
+}
+
+export function getLiveTradeByOrderId(kalshiOrderId: string): LiveTrade | undefined {
+  return db.prepare('SELECT * FROM live_trades WHERE kalshi_order_id = ?').get(kalshiOrderId) as LiveTrade | undefined;
+}
+
+export function getOpenLiveTradesForTicker(ticker: string): LiveTrade[] {
+  return db.prepare(
+    `SELECT * FROM live_trades WHERE ticker = ? AND status IN ('pending', 'filled') ORDER BY created_at DESC`,
+  ).all(ticker) as LiveTrade[];
+}
+
+export function markOrphanedRunsStopped(): number {
+  const now = new Date().toISOString();
+  const result = db.prepare(
+    `UPDATE trading_runs SET status = 'stopped', completed_at = ?, error = 'Orphaned by service restart' WHERE status IN ('pending', 'running')`,
+  ).run(now);
+  return result.changes;
 }
 
 // --- JSON migration ---

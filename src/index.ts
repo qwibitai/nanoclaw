@@ -272,7 +272,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   };
 
   await channel.setTyping?.(chatJid, true);
-  await channel.sendMessage(chatJid, 'Got it, working on this now.');
   let hadError = false;
   let outputSentToUser = false;
 
@@ -513,7 +512,6 @@ async function startMessageLoop(): Promise<void> {
             saveState();
             // Show typing indicator while the container processes the piped message
             channel.setTyping?.(chatJid, true);
-            channel.sendMessage(chatJid, 'Got it, working on this now.');
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
