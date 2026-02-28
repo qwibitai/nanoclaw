@@ -31,8 +31,12 @@ export interface WhatsAppChannelOpts {
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
+  private static MAX_CONSECUTIVE_FAILURES = 10;
+  private static MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+
   private sock!: WASocket;
   private connected = false;
+  private consecutiveFailures = 0;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -91,21 +95,34 @@ export class WhatsAppChannel implements Channel {
         logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.consecutiveFailures++;
+          if (this.consecutiveFailures >= WhatsAppChannel.MAX_CONSECUTIVE_FAILURES) {
+            const msg =
+              'WhatsApp connection failed repeatedly. Re-authentication may be needed. Run /setup.';
+            logger.error(msg);
+            exec(
+              `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
+            );
+            setTimeout(() => process.exit(1), 1000);
+            return;
+          }
+          const backoffMs = Math.min(
+            Math.pow(2, this.consecutiveFailures) * 1000,
+            WhatsAppChannel.MAX_BACKOFF_MS,
+          );
+          logger.info({ backoffMs, attempt: this.consecutiveFailures }, 'Reconnecting after backoff...');
+          setTimeout(() => {
+            this.connectInternal().catch((err) => {
+              logger.error({ err }, 'Reconnection attempt failed');
+            });
+          }, backoffMs);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.consecutiveFailures = 0;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
