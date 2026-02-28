@@ -28,6 +28,14 @@ Small codebases were always a good thing. With coding agents, there's now a huge
 
 This badge gives some indication of how easy it will be to work with an agent on the codebase, and will hopefully be a visual reminder to avoid bloat.
 
+## Examples
+
+Repos using repo-tokens:
+
+| Repo | Badge |
+|------|-------|
+| [NanoClaw](https://github.com/qwibitai/NanoClaw) | ![tokens](https://raw.githubusercontent.com/qwibitai/NanoClaw/main/repo-tokens/badge.svg) |
+
 ### Full workflow example
 
 ```yaml
