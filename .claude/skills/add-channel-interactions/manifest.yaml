@@ -1,0 +1,17 @@
+skill: channel-interactions
+version: 1.0.0
+description: "Channel-agnostic interaction features: reactions, replies, polls, typing indicators, attachments, and group metadata"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/types.ts
+  - src/ipc.ts
+  - src/router.ts
+  - src/index.ts
+  - src/container-runner.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/formatting.test.ts
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run src/formatting.test.ts"
