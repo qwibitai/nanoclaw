@@ -3,9 +3,9 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
+# Install system dependencies for Firefox + X11
 RUN apt-get update && apt-get install -y \
-    chromium \
+    firefox-esr \
     fonts-liberation \
     fonts-noto-color-emoji \
     libgbm1 \
@@ -21,16 +21,22 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
+    libwayland-client0 \
+    libwayland-cursor0 \
+    libwayland-egl1 \
+    libxkbcommon0 \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chromium path for agent-browser
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
-ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+# Install @playwright/mcp (provides `playwright-mcp` binary) and claude-code globally
+RUN npm install -g @playwright/mcp @anthropic-ai/claude-code
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install Firefox browser using the exact playwright version bundled with @playwright/mcp.
+# This ensures the browser revision aligns with what playwright-mcp expects at runtime.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN PW_CLI=$(find /usr/local/lib/node_modules -name "cli.js" -path "*/playwright/cli.js" 2>/dev/null | head -1) && \
+    [ -n "$PW_CLI" ] && node "$PW_CLI" install --with-deps firefox
 
 # Create app directory
 WORKDIR /app
