@@ -48,6 +48,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { startDelegationHandler } from './delegation-handler.js';
 import { startElicitationHandler } from './elicitation-handler.js';
+import { startRelayHandler } from './relay-handler.js';
 import { startX402Handler } from './x402-handler.js';
 import { startSentryAgent } from './sentry-agent.js';
 import { startAcpServer } from './acp-adapter.js';
@@ -571,6 +572,14 @@ async function main(): Promise<void> {
           }
         }, 1000);
       });
+    },
+  });
+
+  // Start relay handler (agent-to-agent peer messaging via IPC)
+  startRelayHandler({
+    isRegisteredGroup: (folder) => {
+      const groups = registeredGroups;
+      return Object.values(groups).some((g) => g.folder === folder);
     },
   });
 
