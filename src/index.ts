@@ -10,6 +10,7 @@ import {
   MIN_OBSERVER_MESSAGES,
   OBSERVER_ENABLED,
   POLL_INTERVAL,
+  QUALITY_TRACKER_ENABLED,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
@@ -247,6 +248,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ),
       )
       .catch((err) => logger.warn({ err, group: group.name }, 'Observer failed (non-blocking)'));
+  }
+
+  // Quality Tracker: fire-and-forget JSONL logging with implicit quality signals
+  if (QUALITY_TRACKER_ENABLED) {
+    import('./quality-tracker.js')
+      .then(({ trackConversationQuality }) =>
+        trackConversationQuality(
+          group.folder,
+          missedMessages.map((m) => ({
+            sender_name: m.sender_name,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+          botResponses,
+        ),
+      )
+      .catch((err) => logger.warn({ err, group: group.name }, 'Quality tracker failed (non-blocking)'));
   }
 
   return true;

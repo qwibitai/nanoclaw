@@ -99,6 +99,23 @@ export const QualitySignalSchema = z.object({
 
 export type QualitySignal = z.infer<typeof QualitySignalSchema>;
 
+export const ConversationLogEntrySchema = z.object({
+  groupFolder: z.string().min(1),
+  timestamp: z.string().min(1),
+  userMessages: z.array(
+    z.object({
+      sender: z.string().min(1),
+      content: z.string(),
+      timestamp: z.string(),
+    }),
+  ),
+  botResponses: z.array(z.string()),
+  signal: z.enum(['positive', 'negative', 'neutral']),
+  evidence: z.string().describe('What triggered this signal classification'),
+});
+
+export type ConversationLogEntry = z.infer<typeof ConversationLogEntrySchema>;
+
 // ---------------------------------------------------------------------------
 // Per-step Evaluation (#22) — step validation result
 // ---------------------------------------------------------------------------
