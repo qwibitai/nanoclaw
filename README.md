@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A pluggable AI assistant platform. Agents run in containers. Channels install as skills. Small enough to read, built to be yours.
+  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
 </p>
 
 <p align="center">
@@ -19,9 +19,11 @@
   <a href="https://github.com/qwibitai/nanoclaw/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" valign="middle"></a>
 </p>
 
-NanoClaw ships as a minimal core with **no channels built in.** You add exactly the channels you need — WhatsApp, Telegram, Slack, Discord, Gmail — by running [skills](#skills-over-features) inside Claude Code. Each channel self-registers at startup; unconfigured channels are silently skipped. No feature flags, no config toggles — just clean code that does what you need.
+Using Claude Code, NanoClaw can dynamically rewrite its code to customize its feature set for your needs.
 
-## Why
+**New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
+
+## Why I Built NanoClaw
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
 
@@ -32,19 +34,12 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ```bash
 git clone https://github.com/qwibitai/NanoClaw.git
 cd NanoClaw
-claude                         # launches Claude Code CLI
+claude
 ```
 
-Inside the Claude Code prompt, run:
+Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
 
-```
-/setup                         # installs deps, authenticates, configures containers
-/add-whatsapp                  # or /add-telegram, /add-slack, /add-discord, /add-gmail
-```
-
-> **Note:** Commands prefixed with `/` are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
-
-You can run multiple channels simultaneously or use just one.
+> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
 
 ## Upgrading from Pre-Pluggable Versions
 
@@ -61,39 +56,37 @@ You can run multiple channels simultaneously or use just one.
 
 ## Philosophy
 
-<a id="skills-over-features"></a>
+**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
 
-**Small enough to understand.** One process, a few source files, no microservices. Want to understand the full codebase? Ask Claude Code to walk you through it. The whole thing fits in a single context window.
+**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker). They can only see what's explicitly mounted. Bash access is safe because commands execute inside the container, not on your host.
+**Built for the individual user.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NanoClaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
 
-**Built for the individual.** NanoClaw isn't a monolithic framework; it's software that fits each user's exact needs. Fork it, point Claude Code at it, and make it yours.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
+**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
 
 **AI-native.**
-- No installation wizard — Claude Code guides setup.
-- No monitoring dashboard — ask Claude what's happening.
-- No debugging tools — describe the problem and Claude fixes it.
+- No installation wizard; Claude Code guides setup.
+- No monitoring dashboard; ask Claude what's happening.
+- No debugging tools; describe the problem and Claude fixes it.
 
-**Skills over features.** This is the core design principle. Traditional platforms bolt on every channel behind feature flags and configuration layers. NanoClaw does the opposite: channels, integrations, and capabilities are [Claude Code skills](https://code.claude.com/docs/en/skills) that **mutate your fork.** Run `/add-telegram` and you get clean, auditable Telegram code committed to your codebase — not a 15-channel abstraction layer you'll never read.
+**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
 
-**Best harness, best model.** NanoClaw runs on the Claude Agent SDK — you're running Claude Code directly. Its coding and problem-solving capabilities let it modify, expand, and tailor NanoClaw to each user.
+**Best harness, best model.** NanoClaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NanoClaw and tailor it to each user.
 
 ## What It Supports
 
-- **Pluggable channels** — Add WhatsApp (`/add-whatsapp`), Telegram (`/add-telegram`), Slack (`/add-slack`), Discord (`/add-discord`), or Gmail (`/add-gmail`). Run one or many simultaneously.
-- **Isolated group context** — Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox.
-- **Main channel** — Your private channel (self-chat) for admin control; every other group is fully isolated.
-- **Scheduled tasks** — Recurring jobs that run Claude and can message you back.
-- **Web access** — Search and fetch content from the web.
-- **Container isolation** — Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux).
-- **Agent Swarms** — Spin up teams of specialized agents that collaborate on complex tasks via [Agent Teams](https://code.claude.com/docs/en/agent-teams).
-- **Zero-config channel discovery** — Channels auto-detect credentials at startup. If credentials exist, the channel connects. Nothing to toggle.
+- **Pluggable channels** - Add WhatsApp (`/add-whatsapp`), Telegram (`/add-telegram`), Discord (`/add-discord`), Slack (`/add-slack`), or Gmail (`/add-gmail`) via skills. Run one or many simultaneously.
+- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
+- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
+- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Web access** - Search and fetch content from the Web
+- **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
+- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
+- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
 
-Talk to your assistant with the trigger word (default: `@Andy`) from any connected channel:
+Talk to your assistant with the trigger word (default: `@Andy`):
 
 ```
 @Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
@@ -101,7 +94,7 @@ Talk to your assistant with the trigger word (default: `@Andy`) from any connect
 @Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
 ```
 
-From the main channel (your self-chat), manage groups and tasks:
+From the main channel (your self-chat), you can manage groups and tasks:
 ```
 @Andy list all scheduled tasks across groups
 @Andy pause the Monday briefing task
@@ -110,14 +103,14 @@ From the main channel (your self-chat), manage groups and tasks:
 
 ## Customizing
 
-No configuration files. Tell Claude Code what you want:
+NanoClaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
 
 - "Change the trigger word to @Bob"
-- "Make responses shorter and more direct"
+- "Remember in the future to make responses shorter and more direct"
 - "Add a custom greeting when I say good morning"
 - "Store conversation summaries weekly"
 
-Or run `/customize` inside Claude Code for guided changes.
+Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
 
@@ -125,22 +118,19 @@ The codebase is small enough that Claude can safely modify it.
 
 **Don't add features. Add skills.**
 
-Want to add a new channel or integration? Contribute a skill (`.claude/skills/add-<name>/`) that teaches Claude Code how to transform a NanoClaw installation. Users run the skill on their fork and get clean code that does exactly what they need — not a bloated system trying to support every use case simultaneously.
+If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NanoClaw installation to use Telegram.
 
-See existing channel skills (`/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail`) for the pattern.
+Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
 ### RFS (Request for Skills)
 
 Skills we'd like to see:
 
 **Communication Channels**
-- `/add-signal` — Add Signal as a channel
+- `/add-signal` - Add Signal as a channel
 
 **Session Management**
-- `/clear` — Compact the conversation (summarize context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
-
-**Platform Support**
-- `/setup-windows` — Windows support via WSL2 + Docker
+- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
 ## Requirements
 
@@ -151,75 +141,24 @@ Skills we'd like to see:
 
 ## Architecture
 
-```mermaid
-graph LR
-    subgraph Channels["Pluggable Channels"]
-        WA[WhatsApp]
-        TG[Telegram]
-        SL[Slack]
-        DC[Discord]
-        New["Other Channel (Signal, Gmail...)"]
-    end
-
-    subgraph Orchestrator["Orchestrator — index.ts"]
-        ML[Message Loop]
-        GQ[Group Queue]
-        RT[Router]
-        TS[Task Scheduler]
-        DB[(SQLite)]
-    end
-
-    subgraph Execution["Container Execution"]
-        CR[Container Runner]
-        LC["Linux Container"]
-        IPC[IPC Watcher]
-    end
-
-    %% Flow
-    WA & TG & SL & DC & New -->|onMessage| ML
-    ML --> GQ
-    GQ -->|concurrency| CR
-    CR --> LC
-    LC -->|filesystem IPC| IPC
-    IPC -->|tasks & messages| RT
-    RT -->|Channel.sendMessage| Channels
-    TS -->|due tasks| CR
-    
-    %% DB Connections
-    DB <--> ML
-    DB <--> TS
-
-    %% Styling for the dynamic channel
-    style New stroke-dasharray: 5 5,stroke-width:2px
+```
+Channels (pluggable) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
 ```
 
-Single Node.js process. Channels are pluggable — each registers a factory function via `src/channels/registry.ts`, and the orchestrator instantiates whichever channels have credentials present. Agents execute in isolated Linux containers. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Channels are pluggable — each self-registers at startup and the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+
+For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
 
 Key files:
-
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/registry.ts` | Channel registry — the pluggable channel system |
-| `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
-| `src/router.ts` | Message formatting and outbound routing |
-| `src/ipc.ts` | IPC watcher and task processing |
-| `src/group-queue.ts` | Per-group queue with global concurrency limit |
-| `src/container-runner.ts` | Spawns streaming agent containers |
-| `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations (messages, groups, sessions, state) |
-| `src/types.ts` | `Channel` interface, message types |
-| `groups/*/CLAUDE.md` | Per-group agent memory |
-
-### Adding a Channel
-
-Channels follow a self-registration pattern. Each channel skill adds a file to `src/channels/` that:
-
-1. Implements the `Channel` interface (`connect`, `sendMessage`, `ownsJid`, `disconnect`, ...)
-2. Calls `registerChannel(name, factory)` at module load
-3. Returns `null` from the factory if credentials are missing
-
-The barrel file `src/channels/index.ts` imports all channel modules, triggering registration. The orchestrator loops through registered channels and connects whichever ones return a valid instance. No if-else chains, no feature flags — just the factory pattern.
+- `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/channels/registry.ts` - Channel registry (pluggable channel system)
+- `src/ipc.ts` - IPC watcher and task processing
+- `src/router.ts` - Message formatting and outbound routing
+- `src/group-queue.ts` - Per-group queue with global concurrency limit
+- `src/container-runner.ts` - Spawns streaming agent containers
+- `src/task-scheduler.ts` - Runs scheduled tasks
+- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
+- `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
 
@@ -229,31 +168,31 @@ Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) 
 
 **Can I run this on Linux?**
 
-Yes. Docker is the default runtime and works on both macOS and Linux. Run `/setup` inside Claude Code.
+Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
 
 **Is this secure?**
 
 Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 
-**How do I add a channel?**
-
-Run the corresponding skill inside Claude Code: `/add-whatsapp`, `/add-telegram`, `/add-slack`, `/add-discord`, or `/add-gmail`. Each skill installs the channel code, guides you through authentication, and registers it. You can run multiple channels at the same time.
-
 **Why no configuration files?**
 
-We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they need, rather than configuring a generic system. If you prefer config files, tell Claude to add them.
+We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
 
 **How do I debug issues?**
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" Or run `/debug` inside Claude Code for guided troubleshooting.
+Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
 
-**Why isn't setup working for me?**
+**Why isn't the setup working for me?**
 
-During setup, Claude will try to dynamically fix issues. If that doesn't work, run `/debug` inside Claude Code. If Claude finds an issue likely affecting other users, open a PR to modify the setup SKILL.md.
+If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
 
 **What changes will be accepted into the codebase?**
 
-Security fixes, bug fixes, and clear improvements to the core. Everything else — new channels, integrations, platform support — should be contributed as skills. This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
+Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
+
+Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
+
+This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
 
 ## Community
 
