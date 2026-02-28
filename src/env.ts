@@ -4,9 +4,16 @@ import { logger } from './logger.js';
 
 /**
  * Parse the .env file and return values for the requested keys.
+ *
  * Does NOT load anything into process.env — callers decide what to
  * do with the values. This keeps secrets out of the process environment
  * so they don't leak to child processes.
+ *
+ * If the .env file doesn't exist or cannot be read, returns an empty
+ * object (callers should use default values in this case).
+ *
+ * @param keys - Array of environment variable names to extract
+ * @returns Record mapping key names to their values from .env
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
   const envFile = path.join(process.cwd(), '.env');
