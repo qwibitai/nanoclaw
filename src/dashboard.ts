@@ -11,6 +11,7 @@ interface DashboardDeps {
   getWhatsAppStatus: () => boolean;
   startedAt: number;
   teamManager?: TeamManager;
+  sendMessage?: (jid: string, text: string) => Promise<void>;
 }
 
 function formatUptime(ms: number): string {
@@ -106,6 +107,14 @@ code{background:#334155;padding:1px 4px;border-radius:3px;font-size:.8rem}
 .badge.paused{background:#713f12;color:#fde047}
 .badge.completed{background:#1e3a5f;color:#7dd3fc}
 .empty{color:#475569;padding:1rem;text-align:center;font-size:.85rem}
+.send-box{background:#1e293b;border-radius:8px;padding:1rem;display:flex;flex-direction:column;gap:.5rem}
+.send-box select{background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:.4rem .6rem;font-size:.85rem}
+.send-box textarea{background:#0f172a;color:#e2e8f0;border:1px solid #475569;border-radius:4px;padding:.5rem;font-size:.85rem;resize:vertical;font-family:inherit}
+.send-box button{background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:.5rem 1rem;font-size:.85rem;cursor:pointer;align-self:flex-end}
+.send-box button:hover{background:#2563eb}
+.send-box button:disabled{background:#475569;cursor:not-allowed}
+.send-ok{color:#22c55e;font-size:.8rem;margin-top:.25rem}
+.send-err{color:#ef4444;font-size:.8rem;margin-top:.25rem}
 footer{margin-top:2rem;text-align:center;color:#475569;font-size:.75rem}
 </style>
 </head>
@@ -152,6 +161,37 @@ ${
     ? `<table><thead><tr><th>ID</th><th>Group</th><th>Prompt</th><th>Schedule</th><th>Status</th><th>Next Run</th></tr></thead><tbody>${taskRows}</tbody></table>`
     : '<div class="empty">No scheduled tasks</div>'
 }
+
+<h2>Send Message</h2>
+<div class="send-box">
+  <select id="send-jid">
+    ${data.registeredGroups.map((g: any) => `<option value="${esc(g.jid)}">${esc(g.name)}</option>`).join('')}
+  </select>
+  <textarea id="send-text" placeholder="메시지 입력..." rows="2"></textarea>
+  <button id="send-btn">전송</button>
+  <div id="send-status"></div>
+</div>
+<script>
+document.getElementById('send-btn').addEventListener('click', async () => {
+  const jid = document.getElementById('send-jid').value;
+  const text = document.getElementById('send-text').value.trim();
+  const status = document.getElementById('send-status');
+  if (!text) { status.textContent = '메시지를 입력하세요'; status.className = 'send-err'; return; }
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true; btn.textContent = '전송 중...';
+  try {
+    const res = await fetch('/api/send', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({jid, text}) });
+    const data = await res.json();
+    if (data.ok) { status.textContent = '전송 완료!'; status.className = 'send-ok'; document.getElementById('send-text').value = ''; }
+    else { status.textContent = data.error || '전송 실패'; status.className = 'send-err'; }
+  } catch(e) { status.textContent = '전송 실패: ' + e.message; status.className = 'send-err'; }
+  btn.disabled = false; btn.textContent = '전송';
+  setTimeout(() => { status.textContent = ''; }, 3000);
+});
+document.getElementById('send-text').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('send-btn').click(); }
+});
+</script>
 
 <footer>Auto-refreshes every 30s &middot; <a href="/teams" style="color:#64748b">Teams</a> &middot; <a href="/api/status" style="color:#64748b">JSON API</a></footer>
 </body>
@@ -270,13 +310,41 @@ ${teamSections || '<div class="empty">No teams configured</div>'}
 
 export function startDashboard(deps: DashboardDeps): void {
   const server = http.createServer((req, res) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    // POST /api/send — send a WhatsApp message
+    if (req.method === 'POST' && url.pathname === '/api/send') {
+      if (!deps.sendMessage) {
+        res.writeHead(501, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'sendMessage not configured' }));
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { jid, text } = JSON.parse(body);
+          if (!jid || !text) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'jid and text are required' }));
+            return;
+          }
+          await deps.sendMessage!(jid, text);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Send failed' }));
+        }
+      });
+      return;
+    }
+
     if (req.method !== 'GET') {
       res.writeHead(405);
       res.end('Method Not Allowed');
       return;
     }
-
-    const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
     if (url.pathname === '/api/status') {
       const data = gatherData(deps);
@@ -316,7 +384,7 @@ export function startDashboard(deps: DashboardDeps): void {
     res.end('Not Found');
   });
 
-  server.listen(DASHBOARD_PORT, '127.0.0.1', () => {
-    logger.info({ port: DASHBOARD_PORT }, 'Dashboard started (localhost only)');
+  server.listen(DASHBOARD_PORT, '0.0.0.0', () => {
+    logger.info({ port: DASHBOARD_PORT }, 'Dashboard started');
   });
 }

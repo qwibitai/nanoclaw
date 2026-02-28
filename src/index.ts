@@ -498,6 +498,11 @@ async function main(): Promise<void> {
     getWhatsAppStatus: () => whatsapp?.isConnected?.() ?? false,
     startedAt: Date.now(),
     teamManager,
+    sendMessage: async (jid, text) => {
+      const ch = findChannel(channels, jid);
+      if (!ch) throw new Error(`No channel for JID: ${jid}`);
+      await ch.sendMessage(jid, text);
+    },
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
