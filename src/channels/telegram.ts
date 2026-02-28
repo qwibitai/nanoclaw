@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { Api, Bot } from 'grammy';
+import { Marked, type MarkedExtension } from 'marked';
 
 import { ASSISTANT_NAME, GROUPS_DIR, RESET_COMMAND_PATTERN, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
@@ -19,75 +20,201 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Convert standard Markdown to Telegram-compatible HTML.
- * Handles code blocks, inline code, bold, italic, strikethrough, links, and headers.
- * Content inside code/pre blocks is HTML-escaped but not otherwise transformed.
+ * Telegram-compatible renderer as a plain object.
+ * marked v17 requires renderer overrides as a plain object, not a class instance.
  */
-function markdownToTelegramHtml(md: string): string {
-  const placeholders: string[] = [];
-
-  function ph(html: string): string {
-    const idx = placeholders.length;
-    placeholders.push(html);
-    return `\x00${idx}\x00`;
-  }
-
-  let result = md;
-
-  // 1. Extract fenced code blocks
-  result = result.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const escaped = escapeHtml(code.replace(/\n$/, ''));
-    return ph(
-      lang
-        ? `<pre><code class="language-${lang}">${escaped}</code></pre>`
-        : `<pre>${escaped}</pre>`,
-    );
-  });
-
-  // 2. Extract inline code
-  result = result.replace(/`([^`\n]+)`/g, (_, code) =>
-    ph(`<code>${escapeHtml(code)}</code>`),
-  );
-
-  // 3. Escape HTML in remaining text (preserve placeholders)
-  result = result
-    .split(/(\x00\d+\x00)/)
-    .map((part) => (/^\x00\d+\x00$/.test(part) ? part : escapeHtml(part)))
-    .join('');
-
-  // 4. Convert markdown formatting to HTML
-  // Agent uses messaging-style: *bold*, _italic_, ~strikethrough~
-  result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-  result = result.replace(
-    /(?<!\*)\*(?!\s|\*)(.+?)(?<!\s)\*(?!\*)/g,
-    '<b>$1</b>',
-  );
-  result = result.replace(
-    /(?<![\w\\])_(?!\s)(.+?)(?<!\s)_(?!\w)/g,
-    '<i>$1</i>',
-  );
-  result = result.replace(/~~(.+?)~~/g, '<s>$1</s>');
-  result = result.replace(/(?<!~)~(?!~)(.+?)(?<!~)~(?!~)/g, '<s>$1</s>');
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2">$1</a>',
-  );
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, '<b>$1</b>');
-  // Blockquotes: collapse consecutive > lines into a single <blockquote>
-  result = result.replace(
-    /(?:^&gt; (.+)$\n?)+/gm,
-    (match) => {
-      const inner = match.replace(/^&gt; /gm, '').replace(/\n$/, '');
-      return `<blockquote>${inner}</blockquote>\n`;
+const telegramRenderer: MarkedExtension = {
+  renderer: {
+    heading({ tokens }) {
+      // Telegram has no heading tag — render as bold
+      return `<b>${this.parser.parseInline(tokens)}</b>\n\n`;
     },
-  );
 
-  // 5. Restore placeholders
-  result = result.replace(/\x00(\d+)\x00/g, (_, idx) =>
-    placeholders[parseInt(idx)],
-  );
+    paragraph({ tokens }) {
+      return `${this.parser.parseInline(tokens)}\n\n`;
+    },
 
-  return result;
+    blockquote({ tokens }) {
+      const body = this.parser.parse(tokens).replace(/\n+$/, '');
+      return `<blockquote>${body}</blockquote>\n\n`;
+    },
+
+    code({ text, lang }) {
+      const escaped = escapeHtml(text);
+      if (lang) {
+        return `<pre><code class="language-${lang}">${escaped}</code></pre>\n\n`;
+      }
+      return `<pre>${escaped}</pre>\n\n`;
+    },
+
+    codespan({ text }) {
+      return `<code>${escapeHtml(text)}</code>`;
+    },
+
+    strong({ tokens }) {
+      return `<b>${this.parser.parseInline(tokens)}</b>`;
+    },
+
+    em({ tokens }) {
+      return `<i>${this.parser.parseInline(tokens)}</i>`;
+    },
+
+    del({ tokens }) {
+      return `<s>${this.parser.parseInline(tokens)}</s>`;
+    },
+
+    link({ href, tokens }) {
+      return `<a href="${href}">${this.parser.parseInline(tokens)}</a>`;
+    },
+
+    image({ text }) {
+      // Telegram can't render images inline — degrade to text
+      return text ? escapeHtml(text) : '';
+    },
+
+    list({ items, ordered, start }) {
+      // Telegram has no list tags — render as text lines with bullets/numbers
+      const lines = items.map((item: any, i: number) => {
+        const prefix = ordered ? `${Number(start ?? 1) + i}. ` : '• ';
+        const content = this.parser.parse(item.tokens).replace(/\n+$/, '');
+        return `${prefix}${content}`;
+      });
+      return lines.join('\n') + '\n\n';
+    },
+
+    listitem(token: any) {
+      return this.parser.parse(token.tokens);
+    },
+
+    hr() {
+      return '\n';
+    },
+
+    html({ text }) {
+      // Escape raw HTML in source to prevent injection
+      return escapeHtml(text);
+    },
+
+    table({ header, rows }) {
+      // Degrade to text: header row + data rows separated by " | "
+      const headerCells = header.map((cell: any) => this.parser.parseInline(cell.tokens));
+      const lines = [headerCells.join(' | ')];
+      for (const row of rows) {
+        lines.push(row.map((cell: any) => this.parser.parseInline(cell.tokens)).join(' | '));
+      }
+      return lines.join('\n') + '\n\n';
+    },
+
+    br() {
+      return '\n';
+    },
+
+    text(token: any) {
+      if ('tokens' in token && token.tokens) {
+        return this.parser.parseInline(token.tokens);
+      }
+      return escapeHtml(token.raw);
+    },
+  },
+};
+
+/**
+ * Custom extension: __underline__ → <u>
+ * Must have higher priority than marked's default __ (strong) handling.
+ */
+const underlineExtension: MarkedExtension = {
+  extensions: [{
+    name: 'underline',
+    level: 'inline',
+    start(src: string) { return src.indexOf('__'); },
+    tokenizer(src: string) {
+      const match = /^__(?!\s)([\s\S]*?[^\s])__(?!_)/.exec(src);
+      if (match) {
+        return {
+          type: 'underline',
+          raw: match[0],
+          text: match[1],
+          tokens: this.lexer.inlineTokens(match[1]),
+        };
+      }
+      return undefined;
+    },
+    renderer(token) {
+      return `<u>${this.parser.parseInline(token.tokens!)}</u>`;
+    },
+  }],
+};
+
+/**
+ * Custom extension: ||spoiler|| → <tg-spoiler>
+ */
+const spoilerExtension: MarkedExtension = {
+  extensions: [{
+    name: 'spoiler',
+    level: 'inline',
+    start(src: string) { return src.indexOf('||'); },
+    tokenizer(src: string) {
+      const match = /^\|\|(?!\s)([\s\S]*?[^\s])\|\|/.exec(src);
+      if (match) {
+        return {
+          type: 'spoiler',
+          raw: match[0],
+          text: match[1],
+          tokens: this.lexer.inlineTokens(match[1]),
+        };
+      }
+      return undefined;
+    },
+    renderer(token) {
+      return `<tg-spoiler>${this.parser.parseInline(token.tokens!)}</tg-spoiler>`;
+    },
+  }],
+};
+
+/**
+ * Custom extension: ~single tilde strikethrough~ → <s>
+ * Standard markdown uses ~~double~~, but Telegram uses ~single~.
+ */
+const singleTildeExtension: MarkedExtension = {
+  extensions: [{
+    name: 'singleTilde',
+    level: 'inline',
+    start(src: string) { return src.indexOf('~'); },
+    tokenizer(src: string) {
+      // Match single ~ but not ~~ (which is standard strikethrough)
+      const match = /^~(?!~)(?!\s)([\s\S]*?[^\s~])~(?!~)/.exec(src);
+      if (match) {
+        return {
+          type: 'singleTilde',
+          raw: match[0],
+          text: match[1],
+          tokens: this.lexer.inlineTokens(match[1]),
+        };
+      }
+      return undefined;
+    },
+    renderer(token) {
+      return `<s>${this.parser.parseInline(token.tokens!)}</s>`;
+    },
+  }],
+};
+
+// Build a configured marked instance
+const telegramMarked = new Marked(
+  underlineExtension,
+  spoilerExtension,
+  singleTildeExtension,
+  telegramRenderer,
+);
+
+/**
+ * Convert standard Markdown to Telegram-compatible HTML.
+ * Uses marked for proper AST parsing — handles nested formatting correctly.
+ */
+export function markdownToTelegramHtml(md: string): string {
+  const html = telegramMarked.parse(md, { async: false }) as string;
+  // Trim trailing newlines that marked/our renderer adds
+  return html.replace(/\n+$/, '');
 }
 
 /**

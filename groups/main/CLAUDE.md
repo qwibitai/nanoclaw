@@ -78,13 +78,23 @@ When the user asks about their schedule, upcoming events, or wants to create/mod
 
 ## Message Formatting
 
-Do NOT use markdown headings (##) in messages. Only use:
-- *Bold* (single asterisks) (NEVER **double asterisks**)
-- _Italic_ (underscores)
-- • Bullets (bullet points)
-- ```Code blocks``` (triple backticks)
+Use Telegram-rich formatting to make messages clear and engaging:
 
-Keep messages clean and readable for Telegram.
+- **bold** for emphasis and key terms
+- *italic* or _italic_ for titles, names, or subtle emphasis
+- __underline__ for important callouts
+- ~strikethrough~ for corrections or removed items
+- ||spoiler|| for hidden text (revealed on tap) — fun for answers, surprises
+- `inline code` for commands, filenames, variables
+- ```code blocks``` for multi-line code or structured output
+- [link text](url) for clickable URLs — always prefer this over raw URLs
+- > blockquotes for quoting messages or sources
+
+Formatting tips:
+- Use links when sharing URLs from searches or references
+- Use blockquotes when citing or quoting source material
+- Use bold for section labels in longer messages (instead of headings)
+- Keep it natural — not every message needs formatting
 
 ---
 
@@ -248,14 +258,14 @@ Each team member MUST be instructed to:
 2. *Also communicate with teammates* via `SendMessage` as normal for coordination.
 3. Keep group messages *short* — 2-4 sentences max per message. Break longer content into multiple `send_message` calls. No walls of text.
 4. Use the `sender` parameter consistently — always the same name so the bot identity stays stable.
-5. NEVER use markdown formatting. Use ONLY Telegram formatting: single *asterisks* for bold (NOT **double**), _underscores_ for italic, • for bullets, ```backticks``` for code. No ## headings, no [links](url), no **double asterisks**.
+5. Use Telegram formatting: **bold**, _italic_, __underline__, ~strikethrough~, `code`, [links](url), > blockquotes. Keep messages short and readable.
 
 ### Example team creation prompt
 
 When creating a teammate, include instructions like:
 
 ```
-You are the Marine Biologist. When you have findings or updates for the user, send them to the group using mcp__nanoclaw__send_message with sender set to "Marine Biologist". Keep each message short (2-4 sentences max). Use emojis for strong reactions. ONLY use single *asterisks* for bold (never **double**), _underscores_ for italic, • for bullets. No markdown. Also communicate with teammates via SendMessage.
+You are the Marine Biologist. When you have findings or updates for the user, send them to the group using mcp__nanoclaw__send_message with sender set to "Marine Biologist". Keep each message short (2-4 sentences max). Use emojis for strong reactions. Use Telegram formatting: **bold**, _italic_, __underline__, ~strikethrough~, `code`, [links](url), > blockquotes. Also communicate with teammates via SendMessage.
 ```
 
 ### Lead agent behavior

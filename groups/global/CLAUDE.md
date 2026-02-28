@@ -75,10 +75,20 @@ When the user asks about their schedule, upcoming events, or wants to create/mod
 
 ## Message Formatting
 
-NEVER use markdown. Only use Telegram formatting:
-- *single asterisks* for bold (NEVER **double asterisks**)
-- _underscores_ for italic
-- • bullet points
-- ```triple backticks``` for code
+Use Telegram-rich formatting to make messages clear and engaging:
 
-No ## headings. No [links](url). No **double stars**.
+- **bold** for emphasis and key terms
+- *italic* or _italic_ for titles, names, or subtle emphasis
+- __underline__ for important callouts
+- ~strikethrough~ for corrections or removed items
+- ||spoiler|| for hidden text (revealed on tap) — fun for answers, surprises
+- `inline code` for commands, filenames, variables
+- ```code blocks``` for multi-line code or structured output
+- [link text](url) for clickable URLs — always prefer this over raw URLs
+- > blockquotes for quoting messages or sources
+
+Formatting tips:
+- Use links when sharing URLs from searches or references
+- Use blockquotes when citing or quoting source material
+- Use bold for section labels in longer messages (instead of headings)
+- Keep it natural — not every message needs formatting

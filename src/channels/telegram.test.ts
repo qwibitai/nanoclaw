@@ -64,7 +64,7 @@ vi.mock('grammy', () => ({
   },
 }));
 
-import { TelegramChannel, TelegramChannelOpts } from './telegram.js';
+import { TelegramChannel, TelegramChannelOpts, markdownToTelegramHtml } from './telegram.js';
 
 // --- Test helpers ---
 
@@ -922,6 +922,188 @@ describe('TelegramChannel', () => {
     it('has name "telegram"', () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.name).toBe('telegram');
+    });
+  });
+});
+
+// --- markdownToTelegramHtml tests ---
+
+describe('markdownToTelegramHtml', () => {
+  // --- Basic formatting ---
+
+  describe('basic formatting', () => {
+    it('converts **bold** to <b>', () => {
+      expect(markdownToTelegramHtml('**bold**')).toBe('<b>bold</b>');
+    });
+
+    it('converts *italic* to <i> (standard markdown)', () => {
+      expect(markdownToTelegramHtml('*italic*')).toBe('<i>italic</i>');
+    });
+
+    it('converts _italic_ to <i>', () => {
+      expect(markdownToTelegramHtml('_italic_')).toBe('<i>italic</i>');
+    });
+
+    it('converts ~~strikethrough~~ to <s>', () => {
+      expect(markdownToTelegramHtml('~~removed~~')).toBe('<s>removed</s>');
+    });
+
+    it('converts ~single tilde strikethrough~ to <s>', () => {
+      expect(markdownToTelegramHtml('~removed~')).toBe('<s>removed</s>');
+    });
+
+    it('converts `inline code` to <code>', () => {
+      expect(markdownToTelegramHtml('run `npm test` now')).toBe(
+        'run <code>npm test</code> now',
+      );
+    });
+
+    it('converts [text](url) to <a href>', () => {
+      expect(markdownToTelegramHtml('[click](https://example.com)')).toBe(
+        '<a href="https://example.com">click</a>',
+      );
+    });
+
+    it('converts blockquotes to <blockquote>', () => {
+      expect(markdownToTelegramHtml('> quoted text')).toBe(
+        '<blockquote>quoted text</blockquote>',
+      );
+    });
+
+    it('converts headings to bold', () => {
+      expect(markdownToTelegramHtml('# Title')).toBe('<b>Title</b>');
+      expect(markdownToTelegramHtml('### Subtitle')).toBe('<b>Subtitle</b>');
+    });
+  });
+
+  // --- Code blocks ---
+
+  describe('code blocks', () => {
+    it('converts fenced code blocks to <pre>', () => {
+      const result = markdownToTelegramHtml('```\nconst x = 1;\n```');
+      expect(result).toBe('<pre>const x = 1;</pre>');
+    });
+
+    it('converts fenced code blocks with language', () => {
+      const result = markdownToTelegramHtml('```js\nconst x = 1;\n```');
+      expect(result).toBe('<pre><code class="language-js">const x = 1;</code></pre>');
+    });
+
+    it('preserves content inside code blocks without formatting', () => {
+      const result = markdownToTelegramHtml('```\n**not bold** _not italic_\n```');
+      expect(result).toBe('<pre>**not bold** _not italic_</pre>');
+    });
+
+    it('escapes HTML inside code blocks', () => {
+      const result = markdownToTelegramHtml('```\n<script>alert("xss")</script>\n```');
+      expect(result).toContain('&lt;script&gt;');
+      expect(result).not.toContain('<script>');
+    });
+  });
+
+  // --- Custom extensions ---
+
+  describe('underline extension', () => {
+    it('converts __underline__ to <u>', () => {
+      expect(markdownToTelegramHtml('__underline__')).toBe('<u>underline</u>');
+    });
+
+    it('__underline__ and _italic_ coexist', () => {
+      const result = markdownToTelegramHtml('__underline__ and _italic_');
+      expect(result).toContain('<u>underline</u>');
+      expect(result).toContain('<i>italic</i>');
+    });
+  });
+
+  describe('spoiler extension', () => {
+    it('converts ||spoiler|| to <tg-spoiler>', () => {
+      expect(markdownToTelegramHtml('||hidden||')).toBe(
+        '<tg-spoiler>hidden</tg-spoiler>',
+      );
+    });
+
+    it('handles spoiler with surrounding text', () => {
+      const result = markdownToTelegramHtml('The answer is ||42|| obviously');
+      expect(result).toContain('<tg-spoiler>42</tg-spoiler>');
+    });
+  });
+
+  // --- Nested formatting ---
+
+  describe('nested formatting', () => {
+    it('handles bold with italic inside', () => {
+      const result = markdownToTelegramHtml('**bold _and italic_**');
+      expect(result).toBe('<b>bold <i>and italic</i></b>');
+    });
+
+    it('handles italic with bold inside', () => {
+      const result = markdownToTelegramHtml('_italic **and bold**_');
+      expect(result).toBe('<i>italic <b>and bold</b></i>');
+    });
+  });
+
+  // --- Lists ---
+
+  describe('lists', () => {
+    it('converts unordered lists to bullet text', () => {
+      const result = markdownToTelegramHtml('- item one\n- item two');
+      expect(result).toContain('• item one');
+      expect(result).toContain('• item two');
+    });
+
+    it('converts ordered lists to numbered text', () => {
+      const result = markdownToTelegramHtml('1. first\n2. second');
+      expect(result).toContain('1. first');
+      expect(result).toContain('2. second');
+    });
+  });
+
+  // --- Unsupported elements ---
+
+  describe('unsupported elements', () => {
+    it('degrades images to text', () => {
+      const result = markdownToTelegramHtml('![alt text](https://example.com/img.png)');
+      expect(result).not.toContain('<img');
+      expect(result).toContain('alt text');
+    });
+
+    it('degrades tables to text', () => {
+      const result = markdownToTelegramHtml('| A | B |\n|---|---|\n| 1 | 2 |');
+      expect(result).toContain('A');
+      expect(result).toContain('B');
+      expect(result).not.toContain('<table');
+    });
+  });
+
+  // --- HTML escaping ---
+
+  describe('HTML escaping', () => {
+    it('escapes HTML in source to prevent injection', () => {
+      const result = markdownToTelegramHtml('<script>alert("xss")</script>');
+      expect(result).not.toContain('<script>');
+      expect(result).toContain('&lt;script&gt;');
+    });
+
+    it('escapes angle brackets in plain text', () => {
+      const result = markdownToTelegramHtml('use <b>not this</b> for bold');
+      expect(result).toContain('&lt;b&gt;');
+    });
+
+    it('escapes HTML inside inline code', () => {
+      const result = markdownToTelegramHtml('`<div>`');
+      expect(result).toBe('<code>&lt;div&gt;</code>');
+    });
+  });
+
+  // --- Plain text ---
+
+  describe('plain text', () => {
+    it('passes plain text through with HTML escaping', () => {
+      expect(markdownToTelegramHtml('hello world')).toBe('hello world');
+    });
+
+    it('handles empty string', () => {
+      expect(markdownToTelegramHtml('')).toBe('');
     });
   });
 });
