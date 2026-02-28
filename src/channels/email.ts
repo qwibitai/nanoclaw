@@ -33,6 +33,7 @@ export interface EmailMetadata {
   subject: string;
   inReplyTo?: string;
   references?: string;
+  body?: string;
 }
 
 export interface EmailChannelOpts {
@@ -203,8 +204,15 @@ export class EmailChannel implements Channel {
             references: Array.isArray(parsed.references)
               ? parsed.references.join(' ')
               : (parsed.references as string | undefined),
+            body,
           };
           this.threads.set(chatJid, meta);
+
+          // Cap threads map at MAX_PROCESSED_IDS
+          if (this.threads.size > MAX_PROCESSED_IDS) {
+            const oldestKey = this.threads.keys().next().value!;
+            this.threads.delete(oldestKey);
+          }
 
           // Format inbound message
           const parts = [
@@ -224,6 +232,7 @@ export class EmailChannel implements Channel {
             sender_name: fromName,
             content: parts.join('\n'),
             timestamp: new Date().toISOString(),
+            is_from_me: false,
           };
 
           // Deliver callbacks

@@ -311,7 +311,7 @@ server.tool(
   async (args) => {
     const data = {
       type: 'email_read',
-      message_id: args.message_id,
+      messageId: args.message_id,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
@@ -336,7 +336,7 @@ server.tool(
   async (args) => {
     const data = {
       type: 'email_reply',
-      message_id: args.message_id,
+      messageId: args.message_id,
       text: args.text,
       attachments: args.attachments,
       groupFolder,
@@ -360,7 +360,7 @@ server.tool(
   async (args) => {
     const data = {
       type: 'email_forward',
-      message_id: args.message_id,
+      messageId: args.message_id,
       to: args.to,
       comment: args.comment,
       groupFolder,

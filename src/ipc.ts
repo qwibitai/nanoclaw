@@ -413,7 +413,7 @@ export async function processTaskIpc(
           cc: data.cc || undefined,
           attachments: data.attachments?.map((a) => ({
             filename: a.filename,
-            path: a.path,
+            path: containerToHostPath(a.path, sourceGroup),
           })),
         });
         logger.info({ to: data.to, subject: data.subject }, 'Email sent via IPC');
@@ -456,7 +456,7 @@ export async function processTaskIpc(
           text: data.text,
           attachments: data.attachments?.map((a) => ({
             filename: a.filename,
-            path: a.path,
+            path: containerToHostPath(a.path, sourceGroup),
           })),
         });
         logger.info(
@@ -497,7 +497,8 @@ export async function processTaskIpc(
           fwdMeta.from +
           '>\n' +
           'Betreff: ' +
-          fwdMeta.subject;
+          fwdMeta.subject +
+          (fwdMeta.body ? '\n\n' + fwdMeta.body : '');
         await transporter.sendMail({
           from: `${EMAIL_FROM_NAME} <${SMTP_USER}>`,
           to: data.to,
@@ -505,7 +506,7 @@ export async function processTaskIpc(
           text: fwdBody,
           attachments: data.attachments?.map((a) => ({
             filename: a.filename,
-            path: a.path,
+            path: containerToHostPath(a.path, sourceGroup),
           })),
         });
         logger.info(
@@ -577,6 +578,9 @@ export async function processTaskIpc(
             `Message-ID: ${readMeta.messageId}`,
           ];
           if (readMeta.inReplyTo) info.push(`In-Reply-To: ${readMeta.inReplyTo}`);
+          if (readMeta.body) {
+            info.push('', readMeta.body);
+          }
           await deps.sendMessage(chatJid, info.join('\n'));
         }
         logger.info({ messageId: data.messageId }, 'Email metadata read via IPC');
@@ -589,6 +593,23 @@ export async function processTaskIpc(
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
+}
+
+/** Translate container paths to host paths for attachments. */
+function containerToHostPath(containerPath: string, sourceGroup: string): string {
+  // /workspace/group/... -> groups/{sourceGroup}/...
+  if (containerPath.startsWith('/workspace/group/')) {
+    return path.join('groups', sourceGroup, containerPath.slice('/workspace/group/'.length));
+  }
+  // /workspace/extra/... -> groups/{sourceGroup}/extra/...
+  if (containerPath.startsWith('/workspace/extra/')) {
+    return path.join('groups', sourceGroup, 'extra', containerPath.slice('/workspace/extra/'.length));
+  }
+  // /workspace/ipc/... or other workspace paths
+  if (containerPath.startsWith('/workspace/')) {
+    return path.join('groups', sourceGroup, containerPath.slice('/workspace/'.length));
+  }
+  return containerPath;
 }
 
 /** Resolve the chat JID for a given source group folder. */
