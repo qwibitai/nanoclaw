@@ -47,7 +47,11 @@ function mockLLMResponse(content?: string): Response {
 }
 
 function sampleMessages(count = 5) {
-  const msgs: Array<{ sender_name: string; content: string; timestamp: string }> = [];
+  const msgs: Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }> = [];
   for (let i = 0; i < count; i++) {
     msgs.push({
       sender_name: `user-${i}`,
@@ -104,7 +108,8 @@ describe('observeConversation', () => {
 
     // writeFileSync must have been called with markdown content
     expect(fs.writeFileSync).toHaveBeenCalled();
-    const writtenContent = (fs.writeFileSync as Mock).mock.calls[0][1] as string;
+    const writtenContent = (fs.writeFileSync as Mock).mock
+      .calls[0][1] as string;
     expect(writtenContent).toContain('Sample observation');
     expect(writtenContent).toContain('Key point');
   });
@@ -116,7 +121,8 @@ describe('observeConversation', () => {
     const msgs = [
       {
         sender_name: 'user',
-        content: 'My key is sk-abc123secret and pk-livekey999 also or-routertoken',
+        content:
+          'My key is sk-abc123secret and pk-livekey999 also or-routertoken',
         timestamp: new Date().toISOString(),
       },
     ];
@@ -225,7 +231,9 @@ describe('observeConversation', () => {
     const written = (fs.writeFileSync as Mock).mock.calls[0][1] as string;
 
     // Must contain at least one priority marker from the LLM mock response
-    const hasPriorityMarker = /[\uD83D\uDD34\uD83D\uDFE1\uD83D\uDFE2]/.test(written);
+    const hasPriorityMarker = /[\uD83D\uDD34\uD83D\uDFE1\uD83D\uDFE2]/u.test(
+      written,
+    );
     expect(hasPriorityMarker).toBe(true);
 
     // Must contain a timestamp
@@ -273,7 +281,11 @@ describe('observeConversation', () => {
       fetchMock = vi.fn().mockResolvedValue(mockLLMResponse(malicious));
       vi.stubGlobal('fetch', fetchMock);
 
-      await observeConversation('main', sampleMessages(3), sampleBotResponses(1));
+      await observeConversation(
+        'main',
+        sampleMessages(3),
+        sampleBotResponses(1),
+      );
 
       // writeFileSync should NOT have been called — observations rejected
       expect(fs.writeFileSync).not.toHaveBeenCalled();
@@ -324,7 +336,11 @@ describe('observeConversation', () => {
   // 12. Use resolveGroupFolderPath for file paths
   // -----------------------------------------------------------------------
   it('should use resolveGroupFolderPath for file paths', async () => {
-    await observeConversation('test-group', sampleMessages(3), sampleBotResponses(1));
+    await observeConversation(
+      'test-group',
+      sampleMessages(3),
+      sampleBotResponses(1),
+    );
 
     expect(resolveGroupFolderPath).toHaveBeenCalledWith('test-group');
   });
@@ -334,7 +350,11 @@ describe('observeConversation', () => {
   // -----------------------------------------------------------------------
   it('should enforce per-group 5-min cooldown', async () => {
     // First call — should proceed normally
-    await observeConversation('cooldown-group', sampleMessages(3), sampleBotResponses(1));
+    await observeConversation(
+      'cooldown-group',
+      sampleMessages(3),
+      sampleBotResponses(1),
+    );
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // Second call — same group, within 5 minutes — should skip

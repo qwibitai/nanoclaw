@@ -145,10 +145,10 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
-        model: task.model || selectModel(
-          task.prompt,
-          loadModelRoutingConfig(task.group_folder),
-        ).model,
+        model:
+          task.model ||
+          selectModel(task.prompt, loadModelRoutingConfig(task.group_folder))
+            .model,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
@@ -221,15 +221,17 @@ async function runTask(
   // Log and notify if task was auto-paused after repeated failures
   if (wasError) {
     const updated = getTaskById(task.id);
-    if (updated && updated.status === "paused") {
+    if (updated && updated.status === 'paused') {
       logger.warn(
         { taskId: task.id },
-        "Task auto-paused after repeated failures",
+        'Task auto-paused after repeated failures',
       );
-      deps.sendMessage(
-        task.chat_jid,
-        `⚠️ Cron "${task.id}" auto-paused after 5 consecutive failures. Last error: ${error?.slice(0, 200)}`,
-      ).catch(() => {});
+      deps
+        .sendMessage(
+          task.chat_jid,
+          `⚠️ Cron "${task.id}" auto-paused after 5 consecutive failures. Last error: ${error?.slice(0, 200)}`,
+        )
+        .catch(() => {});
     }
   }
 }

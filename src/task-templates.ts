@@ -39,13 +39,13 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       '2. Identify 3-5 credible sources (official docs, primary sources, reputable publications)',
       '3. Cross-reference findings across sources — look for consensus and contradictions',
       '4. Synthesize into actionable insights with confidence levels',
-      '5. Note gaps — what couldn\'t be verified?',
+      "5. Note gaps — what couldn't be verified?",
     ].join('\n'),
     antiPatterns: [
       'Single-source conclusions — always cross-reference',
       'Outdated information presented as current — check dates',
       'Speculation presented as fact — label uncertainty explicitly',
-      'Shallow summaries that don\'t answer the actual question',
+      "Shallow summaries that don't answer the actual question",
     ],
     evaluation: [
       'Question fully answered with evidence',
@@ -53,7 +53,8 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       'Confidence levels stated for key claims',
       'Actionable next steps included',
     ],
-    outputFormat: '## Research: {topic}\n\n### Findings\n{findings}\n\n### Sources\n{sources}\n\n### Confidence & Gaps\n{confidence}',
+    outputFormat:
+      '## Research: {topic}\n\n### Findings\n{findings}\n\n### Sources\n{sources}\n\n### Confidence & Gaps\n{confidence}',
   },
 
   grunt: {
@@ -83,7 +84,7 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       '1. Understand what the person is actually asking or saying',
       '2. Respond naturally — match their tone and energy',
       '3. Be helpful without being verbose',
-      '4. If action is needed, do it; don\'t just talk about it',
+      "4. If action is needed, do it; don't just talk about it",
     ].join('\n'),
     antiPatterns: [
       'Over-explaining simple things',
@@ -102,7 +103,7 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
   analysis: {
     type: 'analysis',
     method: [
-      '1. Define what\'s being analyzed and the success criteria',
+      "1. Define what's being analyzed and the success criteria",
       '2. Gather relevant data points and context',
       '3. Apply structured methodology (comparative, root-cause, cost-benefit, etc.)',
       '4. Present findings with supporting evidence',
@@ -120,7 +121,8 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       'Recommendations are specific and actionable',
       'Limitations and assumptions are stated',
     ],
-    outputFormat: '## Analysis: {topic}\n\n### Methodology\n{methodology}\n\n### Findings\n{findings}\n\n### Recommendations\n{recommendations}',
+    outputFormat:
+      '## Analysis: {topic}\n\n### Methodology\n{methodology}\n\n### Findings\n{findings}\n\n### Recommendations\n{recommendations}',
   },
 
   content: {
@@ -158,7 +160,7 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       '5. Test it — run the code, verify the output',
     ].join('\n'),
     antiPatterns: [
-      'Over-engineering — don\'t add abstractions for one use case',
+      "Over-engineering — don't add abstractions for one use case",
       'Ignoring existing patterns in the codebase',
       'Writing code without testing it',
       'Adding unnecessary comments, types, or error handling',
@@ -184,10 +186,7 @@ const BUILTIN_TEMPLATES: Record<TaskType, TaskTemplate> = {
       'Over-investigating when a simple check was asked for',
       'Providing analysis when a yes/no answer suffices',
     ],
-    evaluation: [
-      'Question answered directly',
-      'Response is concise',
-    ],
+    evaluation: ['Question answered directly', 'Response is concise'],
     outputFormat: '{result}',
   },
 };
@@ -207,7 +206,11 @@ export function loadTemplate(
 ): TaskTemplate {
   // 1. Try group-specific template
   if (groupFolder) {
-    const template = loadTemplateFromDir(taskType, groupFolder, resolveGroupFolderPathFn);
+    const template = loadTemplateFromDir(
+      taskType,
+      groupFolder,
+      resolveGroupFolderPathFn,
+    );
     if (template) return template;
   }
 
@@ -292,9 +295,14 @@ export function parseTemplateMarkdown(
   return {
     type: taskType,
     method,
-    antiPatterns: extractListItems(sections['anti-patterns'] ?? sections['antipatterns'] ?? ''),
+    antiPatterns: extractListItems(
+      sections['anti-patterns'] ?? sections['antipatterns'] ?? '',
+    ),
     evaluation: extractListItems(sections['evaluation'] ?? ''),
-    outputFormat: sections['output format'] ?? sections['outputformat'] ?? BUILTIN_TEMPLATES[taskType].outputFormat,
+    outputFormat:
+      sections['output format'] ??
+      sections['outputformat'] ??
+      BUILTIN_TEMPLATES[taskType].outputFormat,
   };
 }
 
@@ -346,7 +354,11 @@ export function applyTemplate(
   resolveGroupFolderPathFn?: (folder: string) => string,
 ): { enhancedPrompt: string; taskType: TaskType; templateUsed: boolean } {
   const taskType = classifyTask(prompt);
-  const template = loadTemplate(taskType, groupFolder, resolveGroupFolderPathFn);
+  const template = loadTemplate(
+    taskType,
+    groupFolder,
+    resolveGroupFolderPathFn,
+  );
 
   // Don't wrap conversation or quick-check — keep them lightweight
   if (taskType === 'conversation' || taskType === 'quick-check') {

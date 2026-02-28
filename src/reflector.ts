@@ -198,7 +198,10 @@ export async function reflectOnMemory(
 
     // Check if observer directory exists
     if (!fs.existsSync(observerDir)) {
-      logger.info({ groupFolder }, 'Reflector: no observer directory, nothing to prune');
+      logger.info(
+        { groupFolder },
+        'Reflector: no observer directory, nothing to prune',
+      );
       return { actions, summary: 'No observer data found.' };
     }
 
@@ -270,7 +273,10 @@ export async function reflectOnMemory(
         : `Pruned ${totalPruned} entries across ${filesDeleted + filesRewritten} files ` +
           `(${filesDeleted} deleted, ${filesRewritten} rewritten).`;
 
-    logger.info({ groupFolder, totalPruned, filesDeleted, filesRewritten }, 'Reflector complete');
+    logger.info(
+      { groupFolder, totalPruned, filesDeleted, filesRewritten },
+      'Reflector complete',
+    );
 
     return { actions, summary };
   } catch (err) {

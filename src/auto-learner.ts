@@ -108,7 +108,11 @@ function learningToMarkdown(entry: LearningEntry, dateStr: string): string {
 
 export async function processLearning(
   groupFolder: string,
-  userMessages: Array<{ sender_name: string; content: string; timestamp: string }>,
+  userMessages: Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }>,
   botResponses: string[],
 ): Promise<void> {
   try {
@@ -124,12 +128,18 @@ export async function processLearning(
 
     // Circuit breaker (with time-based auto-reset)
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-      if (circuitBreakerTrippedAt > 0 && Date.now() - circuitBreakerTrippedAt >= CIRCUIT_BREAKER_RESET_MS) {
+      if (
+        circuitBreakerTrippedAt > 0 &&
+        Date.now() - circuitBreakerTrippedAt >= CIRCUIT_BREAKER_RESET_MS
+      ) {
         consecutiveFailures = 0;
         circuitBreakerTrippedAt = 0;
         logger.info('Auto-learner circuit breaker reset — probing');
       } else {
-        logger.warn({ consecutiveFailures }, 'Auto-learner circuit breaker engaged — skipping');
+        logger.warn(
+          { consecutiveFailures },
+          'Auto-learner circuit breaker engaged — skipping',
+        );
         return;
       }
     }
@@ -167,11 +177,15 @@ export async function processLearning(
     }
 
     // Build conversation text for LLM (scrubbed, truncated)
-    const conversationText = userMessages
-      .map((m) => `[${m.sender_name}] ${scrubCredentials(m.content.slice(0, MAX_MESSAGE_LENGTH))}`)
-      .join('\n')
-      + '\n'
-      + botResponses
+    const conversationText =
+      userMessages
+        .map(
+          (m) =>
+            `[${m.sender_name}] ${scrubCredentials(m.content.slice(0, MAX_MESSAGE_LENGTH))}`,
+        )
+        .join('\n') +
+      '\n' +
+      botResponses
         .map((r) => `[bot] ${scrubCredentials(r.slice(0, MAX_MESSAGE_LENGTH))}`)
         .join('\n');
 
@@ -203,8 +217,12 @@ export async function processLearning(
     // Read secrets
     const { readEnvFile } = await import('./env.js');
     const secrets = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
-    const baseUrl = secrets.ANTHROPIC_BASE_URL || process.env.ANTHROPIC_BASE_URL || 'https://openrouter.ai/api';
-    const authToken = secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '';
+    const baseUrl =
+      secrets.ANTHROPIC_BASE_URL ||
+      process.env.ANTHROPIC_BASE_URL ||
+      'https://openrouter.ai/api';
+    const authToken =
+      secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '';
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
@@ -229,7 +247,8 @@ export async function processLearning(
       });
     } catch (err) {
       consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        circuitBreakerTrippedAt = Date.now();
       logger.warn({ err, consecutiveFailures }, 'Auto-learner LLM call failed');
       return;
     } finally {
@@ -238,8 +257,12 @@ export async function processLearning(
 
     if (!response.ok) {
       consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
-      logger.warn({ status: response.status, consecutiveFailures }, 'Auto-learner LLM returned non-ok');
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        circuitBreakerTrippedAt = Date.now();
+      logger.warn(
+        { status: response.status, consecutiveFailures },
+        'Auto-learner LLM returned non-ok',
+      );
       return;
     }
 
@@ -251,15 +274,23 @@ export async function processLearning(
       rawContent = json.choices?.[0]?.message?.content ?? '';
     } catch (err) {
       consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
-      logger.warn({ err, consecutiveFailures }, 'Auto-learner failed to parse LLM response');
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        circuitBreakerTrippedAt = Date.now();
+      logger.warn(
+        { err, consecutiveFailures },
+        'Auto-learner failed to parse LLM response',
+      );
       return;
     }
 
     if (!rawContent) {
       consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
-      logger.warn({ consecutiveFailures }, 'Auto-learner received empty LLM response');
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        circuitBreakerTrippedAt = Date.now();
+      logger.warn(
+        { consecutiveFailures },
+        'Auto-learner received empty LLM response',
+      );
       return;
     }
 
@@ -272,8 +303,12 @@ export async function processLearning(
 
     if (!validated) {
       consecutiveFailures++;
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) circuitBreakerTrippedAt = Date.now();
-      logger.warn({ consecutiveFailures }, 'Auto-learner Zod validation failed');
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
+        circuitBreakerTrippedAt = Date.now();
+      logger.warn(
+        { consecutiveFailures },
+        'Auto-learner Zod validation failed',
+      );
       return;
     }
 
@@ -305,9 +340,15 @@ export async function processLearning(
 
     fs.writeFileSync(filePath, fileContent, 'utf-8');
 
-    logger.info({ groupFolder, filePath, knowledgeFile: validated.knowledgeFile }, 'Auto-learner logged correction');
+    logger.info(
+      { groupFolder, filePath, knowledgeFile: validated.knowledgeFile },
+      'Auto-learner logged correction',
+    );
   } catch (err) {
-    logger.error({ err }, 'Auto-learner unexpected error (caught at top level)');
+    logger.error(
+      { err },
+      'Auto-learner unexpected error (caught at top level)',
+    );
   }
 }
 

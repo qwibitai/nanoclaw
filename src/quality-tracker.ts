@@ -90,7 +90,10 @@ export function extractSignal(
     }
   }
 
-  return { signal: 'neutral', evidence: 'No positive or negative patterns detected' };
+  return {
+    signal: 'neutral',
+    evidence: 'No positive or negative patterns detected',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +120,11 @@ function scrubForLog(text: string): string {
 
 export async function trackConversationQuality(
   groupFolder: string,
-  userMessages: Array<{ sender_name: string; content: string; timestamp: string }>,
+  userMessages: Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }>,
   botResponses: string[],
 ): Promise<void> {
   try {
@@ -178,6 +185,9 @@ export async function trackConversationQuality(
       'Quality tracker logged conversation',
     );
   } catch (err) {
-    logger.error({ err }, 'Quality tracker unexpected error (caught at top level)');
+    logger.error(
+      { err },
+      'Quality tracker unexpected error (caught at top level)',
+    );
   }
 }

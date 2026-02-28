@@ -63,10 +63,10 @@ export function detectPriority(text: string): Priority {
 // ---------------------------------------------------------------------------
 
 const SKIP_PATTERNS = [
-  /^<!--.*-->$/,      // HTML comments
-  /^---$/,            // YAML frontmatter delimiters
-  /^\s*$/,            // empty lines
-  /^#\s*$/,           // empty headings
+  /^<!--.*-->$/, // HTML comments
+  /^---$/, // YAML frontmatter delimiters
+  /^\s*$/, // empty lines
+  /^#\s*$/, // empty headings
 ];
 
 /**

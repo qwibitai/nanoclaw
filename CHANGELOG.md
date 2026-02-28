@@ -1,3 +1,3 @@
 # Changelog
 
-All notable changes to NanoClaw will be documented in this file.
+All notable changes to Sovereign will be documented in this file.

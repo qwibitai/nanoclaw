@@ -7,7 +7,6 @@
  * Usage: npx tsx src/whatsapp-auth.ts
  */
 import fs from 'fs';
-import path from 'path';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import readline from 'readline';
@@ -90,8 +89,11 @@ async function connectSocket(
         console.log('  3. Tap "Link with phone number instead"');
         console.log(`  4. Enter this code: ${code}\n`);
         fs.writeFileSync(STATUS_FILE, `pairing_code:${code}`);
-      } catch (err: any) {
-        console.error('Failed to request pairing code:', err.message);
+      } catch (err: unknown) {
+        console.error(
+          'Failed to request pairing code:',
+          err instanceof Error ? err.message : String(err),
+        );
         process.exit(1);
       }
     }, 3000);
@@ -111,7 +113,9 @@ async function connectSocket(
     }
 
     if (connection === 'close') {
-      const reason = (lastDisconnect?.error as any)?.output?.statusCode;
+      const reason = (
+        lastDisconnect?.error as unknown as { output?: { statusCode?: number } }
+      )?.output?.statusCode;
 
       if (reason === DisconnectReason.loggedOut) {
         fs.writeFileSync(STATUS_FILE, 'failed:logged_out');
@@ -141,7 +145,7 @@ async function connectSocket(
       } catch {}
       console.log('\n✓ Successfully authenticated with WhatsApp!');
       console.log('  Credentials saved to store/auth/');
-      console.log('  You can now start the NanoClaw service.\n');
+      console.log('  You can now start the Sovereign service.\n');
 
       // Give it a moment to save credentials, then exit
       setTimeout(() => process.exit(0), 1000);

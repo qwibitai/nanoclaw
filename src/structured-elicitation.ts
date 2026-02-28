@@ -23,12 +23,27 @@ export interface ElicitationResponse {
   timestamp: string;
 }
 
-const NUMBER_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+const NUMBER_EMOJIS = [
+  '1️⃣',
+  '2️⃣',
+  '3️⃣',
+  '4️⃣',
+  '5️⃣',
+  '6️⃣',
+  '7️⃣',
+  '8️⃣',
+  '9️⃣',
+  '🔟',
+];
 
 /**
  * Format a question with numbered options for display in chat.
  */
-export function formatQuestion(question: string, options: string[], allowFreetext: boolean): string {
+export function formatQuestion(
+  question: string,
+  options: string[],
+  allowFreetext: boolean,
+): string {
   const lines = [question, ''];
   for (let i = 0; i < options.length; i++) {
     const emoji = NUMBER_EMOJIS[i] || `${i + 1}.`;
@@ -58,7 +73,10 @@ export function getReactionEmojis(optionCount: number): string[] {
  * Map a reaction emoji back to the chosen option text.
  * Returns null if the emoji doesn't match any option.
  */
-export function resolveReaction(emoji: string, options: string[]): string | null {
+export function resolveReaction(
+  emoji: string,
+  options: string[],
+): string | null {
   const index = NUMBER_EMOJIS.indexOf(emoji);
   if (index >= 0 && index < options.length) {
     return options[index];

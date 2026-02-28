@@ -12,24 +12,36 @@ import {
 // ---------------------------------------------------------------------------
 describe('scrubCredentials', () => {
   it('scrubs sk- API keys', () => {
-    expect(scrubCredentials('key is sk-abcdefghijklmnopqrstuvwx')).toContain('[REDACTED]');
-    expect(scrubCredentials('key is sk-abcdefghijklmnopqrstuvwx')).not.toContain('sk-');
+    expect(scrubCredentials('key is sk-abcdefghijklmnopqrstuvwx')).toContain(
+      '[REDACTED]',
+    );
+    expect(
+      scrubCredentials('key is sk-abcdefghijklmnopqrstuvwx'),
+    ).not.toContain('sk-');
   });
 
   it('scrubs GitHub tokens (ghp_)', () => {
-    expect(scrubCredentials('token ghp_abcdefghijklmnopqrstuvwxyz1234567890')).toContain('[REDACTED]');
+    expect(
+      scrubCredentials('token ghp_abcdefghijklmnopqrstuvwxyz1234567890'),
+    ).toContain('[REDACTED]');
   });
 
   it('scrubs AWS access keys (AKIA)', () => {
-    expect(scrubCredentials('aws AKIAIOSFODNN7EXAMPLE')).toContain('[REDACTED]');
+    expect(scrubCredentials('aws AKIAIOSFODNN7EXAMPLE')).toContain(
+      '[REDACTED]',
+    );
   });
 
   it('scrubs Slack tokens (xoxb-)', () => {
-    expect(scrubCredentials('slack xoxb-123456789-abcdefgh')).toContain('[REDACTED]');
+    expect(scrubCredentials('slack xoxb-123456789-abcdefgh')).toContain(
+      '[REDACTED]',
+    );
   });
 
   it('scrubs Bearer tokens', () => {
-    expect(scrubCredentials('Authorization: Bearer eyJhbGciOiJIUzI1NiIs')).toContain('[REDACTED]');
+    expect(
+      scrubCredentials('Authorization: Bearer eyJhbGciOiJIUzI1NiIs'),
+    ).toContain('[REDACTED]');
   });
 
   it('leaves safe text untouched', () => {
@@ -46,7 +58,10 @@ describe('scrubCredentials', () => {
 // ---------------------------------------------------------------------------
 describe('scrubArgs', () => {
   it('scrubs string values containing credentials', () => {
-    const result = scrubArgs({ query: 'sk-abcdefghijklmnopqrstuvwx', limit: 10 });
+    const result = scrubArgs({
+      query: 'sk-abcdefghijklmnopqrstuvwx',
+      limit: 10,
+    });
     expect(result.query).toContain('[REDACTED]');
     expect(result.limit).toBe(10);
   });
@@ -58,7 +73,9 @@ describe('scrubArgs', () => {
   });
 
   it('recursively scrubs nested objects', () => {
-    const result = scrubArgs({ headers: { auth: 'Bearer eyJhbGciOiJIUzI1NiIsABCDE' } });
+    const result = scrubArgs({
+      headers: { auth: 'Bearer eyJhbGciOiJIUzI1NiIsABCDE' },
+    });
     const headers = result.headers as Record<string, unknown>;
     expect(headers.auth).toContain('[REDACTED]');
   });
@@ -96,7 +113,7 @@ describe('createToolCallEntry', () => {
     expect(entry.session_id).toBe('session-123');
     expect(entry.error).toBeUndefined();
     expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect((entry.args.query as string)).toContain('[REDACTED]');
+    expect(entry.args.query as string).toContain('[REDACTED]');
     expect(entry.args.max_results).toBe(20);
   });
 
@@ -127,7 +144,14 @@ describe('createToolCallEntry', () => {
 // ---------------------------------------------------------------------------
 describe('serializeEntry', () => {
   it('serializes to single-line JSON', () => {
-    const entry = createToolCallEntry('recall', { query: 'test' }, 10, 'ok', true, 's1');
+    const entry = createToolCallEntry(
+      'recall',
+      { query: 'test' },
+      10,
+      'ok',
+      true,
+      's1',
+    );
     const line = serializeEntry(entry);
 
     expect(line).not.toContain('\n');

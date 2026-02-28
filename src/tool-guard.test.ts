@@ -22,13 +22,21 @@ describe('evaluateToolCall', () => {
 
   // Block patterns
   it('blocks when args contain a block pattern', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'Run rm -rf /' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'Run rm -rf /' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('block_pattern');
   });
 
   it('blocks case-insensitively', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'drop table users' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'drop table users' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('block_pattern');
   });
@@ -40,16 +48,24 @@ describe('evaluateToolCall', () => {
   });
 
   it('block pattern takes priority over allow list', () => {
-    const v = evaluateToolCall('recall', { query: 'rm -rf cleanup scripts' }, config);
+    const v = evaluateToolCall(
+      'recall',
+      { query: 'rm -rf cleanup scripts' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('block_pattern');
   });
 
   it('catches block patterns in nested args', () => {
-    const v = evaluateToolCall('delegate_task', {
-      prompt: 'please help',
-      config: { command: 'DROP TABLE users' },
-    }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      {
+        prompt: 'please help',
+        config: { command: 'DROP TABLE users' },
+      },
+      config,
+    );
     expect(v.action).toBe('block');
   });
 
@@ -68,19 +84,31 @@ describe('evaluateToolCall', () => {
 
   // Pause list
   it('blocks tools in pause list not in allow list', () => {
-    const v = evaluateToolCall('send_sms', { to: '+1234567890', body: 'hi' }, config);
+    const v = evaluateToolCall(
+      'send_sms',
+      { to: '+1234567890', body: 'hi' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('pause_list');
   });
 
   it('blocks x402_fetch in pause list', () => {
-    const v = evaluateToolCall('x402_fetch', { url: 'https://example.com' }, config);
+    const v = evaluateToolCall(
+      'x402_fetch',
+      { url: 'https://example.com' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('pause_list');
   });
 
   it('blocks delegate_task in pause list (clean args)', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'research TypeScript' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'research TypeScript' },
+      config,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('pause_list');
   });
@@ -107,51 +135,87 @@ describe('evaluateToolCall', () => {
 
   // Whitespace evasion resistance
   it('catches double-space evasion: "rm  -rf"', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'rm  -rf /' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'rm  -rf /' },
+      config,
+    );
     expect(v.action).toBe('block');
   });
 
   it('catches tab evasion: "rm\\t-rf"', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'rm\t-rf /' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'rm\t-rf /' },
+      config,
+    );
     expect(v.action).toBe('block');
   });
 
   it('catches newline evasion: "rm\\n-rf"', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'rm\n-rf /' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'rm\n-rf /' },
+      config,
+    );
     expect(v.action).toBe('block');
   });
 
   it('catches multi-whitespace evasion: "DROP  \\t TABLE"', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'DROP  \t TABLE users' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'DROP  \t TABLE users' },
+      config,
+    );
     expect(v.action).toBe('block');
   });
 
   // Default config
   it('default config blocks dangerous patterns', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'run rm -rf /' }, DEFAULT_CONFIG);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'run rm -rf /' },
+      DEFAULT_CONFIG,
+    );
     expect(v.action).toBe('block');
     expect(v.rule).toBe('block_pattern');
   });
 
   it('default config allows normal tool calls', () => {
-    const v = evaluateToolCall('send_sms', { to: '+1234', body: 'hi' }, DEFAULT_CONFIG);
+    const v = evaluateToolCall(
+      'send_sms',
+      { to: '+1234', body: 'hi' },
+      DEFAULT_CONFIG,
+    );
     expect(v.action).toBe('allow');
     expect(v.rule).toBe('default');
   });
 
   it('default config blocks DROP DATABASE', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'DROP DATABASE production' }, DEFAULT_CONFIG);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'DROP DATABASE production' },
+      DEFAULT_CONFIG,
+    );
     expect(v.action).toBe('block');
   });
 
   it('default config blocks TRUNCATE TABLE', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'TRUNCATE TABLE logs' }, DEFAULT_CONFIG);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'TRUNCATE TABLE logs' },
+      DEFAULT_CONFIG,
+    );
     expect(v.action).toBe('block');
   });
 
   // Reason strings
   it('includes pattern in block reason', () => {
-    const v = evaluateToolCall('delegate_task', { prompt: 'rm -rf /tmp' }, config);
+    const v = evaluateToolCall(
+      'delegate_task',
+      { prompt: 'rm -rf /tmp' },
+      config,
+    );
     expect(v.reason).toContain('rm -rf');
   });
 
@@ -213,7 +277,11 @@ describe('loadToolGuardConfig', () => {
     fs.mkdirSync(groupDir, { recursive: true });
     fs.writeFileSync(
       path.join(groupDir, 'tool-guard.json'),
-      JSON.stringify({ block: ['EVIL'], pause: ['send_sms'], allow: ['recall'] }),
+      JSON.stringify({
+        block: ['EVIL'],
+        pause: ['send_sms'],
+        allow: ['recall'],
+      }),
     );
 
     const config = loadToolGuardConfig('mygroup', () => groupDir);

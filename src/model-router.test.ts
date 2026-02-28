@@ -117,7 +117,11 @@ describe('selectModel', () => {
   });
 
   it('explicit model override wins', () => {
-    const result = selectModel('Format as CSV', DEFAULT_ROUTES, 'google/gemini-2.5-flash');
+    const result = selectModel(
+      'Format as CSV',
+      DEFAULT_ROUTES,
+      'google/gemini-2.5-flash',
+    );
     expect(result.model).toBe('google/gemini-2.5-flash');
     expect(result.reason).toBe('explicit override');
   });

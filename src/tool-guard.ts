@@ -74,7 +74,9 @@ export function evaluateToolCall(
   config: ToolGuardConfig,
 ): GuardVerdict {
   // 1. Block patterns: case-insensitive substring match, whitespace normalized
-  const serialized = `${toolName} ${JSON.stringify(args)}`.toLowerCase().replace(/\s+/g, ' ');
+  const serialized = `${toolName} ${JSON.stringify(args)}`
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
 
   for (const pattern of config.block) {
     if (serialized.includes(pattern.toLowerCase())) {

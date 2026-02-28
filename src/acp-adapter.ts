@@ -81,7 +81,9 @@ export class SovereignAcpAgent implements acp.Agent {
     };
   }
 
-  async authenticate(_params: AuthenticateRequest): Promise<AuthenticateResponse> {
+  async authenticate(
+    _params: AuthenticateRequest,
+  ): Promise<AuthenticateResponse> {
     // No auth required — return empty response
     return {};
   }
@@ -225,10 +227,7 @@ export function startAcpServer(): void {
   const output = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>;
   const stream = acp.ndJsonStream(input, output);
 
-  new acp.AgentSideConnection(
-    (conn) => new SovereignAcpAgent(conn),
-    stream,
-  );
+  new acp.AgentSideConnection((conn) => new SovereignAcpAgent(conn), stream);
 
   logger.info('ACP adapter started on stdio');
 }

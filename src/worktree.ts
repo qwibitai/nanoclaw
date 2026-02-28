@@ -92,7 +92,7 @@ export function listWorktrees(repoDir: string): WorktreeInfo[] {
     const wtPath = path.join(worktreesDir, entry.name);
 
     // Read the branch from git
-    let branch = '';
+    let branch: string;
     try {
       branch = execSync('git rev-parse --abbrev-ref HEAD', {
         cwd: wtPath,

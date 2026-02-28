@@ -21,7 +21,9 @@ describe('classifySeverity', () => {
   });
 
   it('classifies OOM as critical', () => {
-    expect(classifySeverity('', 'Container killed: out of memory', 'generic')).toBe('critical');
+    expect(
+      classifySeverity('', 'Container killed: out of memory', 'generic'),
+    ).toBe('critical');
   });
 
   it('classifies timeout as warning', () => {
@@ -29,15 +31,21 @@ describe('classifySeverity', () => {
   });
 
   it('classifies rate limit as warning', () => {
-    expect(classifySeverity('429 rate limit exceeded', '', 'generic')).toBe('warning');
+    expect(classifySeverity('429 rate limit exceeded', '', 'generic')).toBe(
+      'warning',
+    );
   });
 
   it('classifies high CPU as warning', () => {
-    expect(classifySeverity('High CPU usage on api-server', '', 'generic')).toBe('warning');
+    expect(
+      classifySeverity('High CPU usage on api-server', '', 'generic'),
+    ).toBe('warning');
   });
 
   it('classifies unknown as info', () => {
-    expect(classifySeverity('Deploy complete', 'version 1.2.3', 'generic')).toBe('info');
+    expect(
+      classifySeverity('Deploy complete', 'version 1.2.3', 'generic'),
+    ).toBe('info');
   });
 });
 
@@ -116,7 +124,9 @@ describe('parseGenericPayload', () => {
   });
 
   it('normalizes severity strings', () => {
-    expect(parseGenericPayload({ severity: 'fatal' }).severity).toBe('critical');
+    expect(parseGenericPayload({ severity: 'fatal' }).severity).toBe(
+      'critical',
+    );
     expect(parseGenericPayload({ severity: 'warn' }).severity).toBe('warning');
     expect(parseGenericPayload({ severity: 'low' }).severity).toBe('info');
   });
@@ -213,7 +223,14 @@ describe('formatTriageMessage', () => {
         timestamp: '2026-01-01T00:00:00Z',
         raw: {},
       },
-      [{ id: 'clear-cache', pattern: 'cache.*full', description: 'Clear cache', command: 'redis-cli flushall' }],
+      [
+        {
+          id: 'clear-cache',
+          pattern: 'cache.*full',
+          description: 'Clear cache',
+          command: 'redis-cli flushall',
+        },
+      ],
     );
 
     const msg = formatTriageMessage(result);

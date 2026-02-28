@@ -85,7 +85,9 @@ export function createToolCallEntry(
  * Scrub credential patterns from all string values in an args object.
  * Truncates long string values to keep log entries manageable.
  */
-export function scrubArgs(args: Record<string, unknown>): Record<string, unknown> {
+export function scrubArgs(
+  args: Record<string, unknown>,
+): Record<string, unknown> {
   const MAX_ARG_LENGTH = 500;
   const result: Record<string, unknown> = {};
 
@@ -96,7 +98,11 @@ export function scrubArgs(args: Record<string, unknown>): Record<string, unknown
         scrubbed = scrubbed.slice(0, MAX_ARG_LENGTH) + '...';
       }
       result[key] = scrubbed;
-    } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    } else if (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
       result[key] = scrubArgs(value as Record<string, unknown>);
     } else {
       result[key] = value;

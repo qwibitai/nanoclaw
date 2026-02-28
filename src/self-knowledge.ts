@@ -57,7 +57,9 @@ export function formatOverview(doc: CapabilitiesDoc): string {
   }
 
   lines.push('');
-  lines.push('_Ask about a specific section for details (e.g. "tell me about your tools")._');
+  lines.push(
+    '_Ask about a specific section for details (e.g. "tell me about your tools")._',
+  );
 
   return lines.join('\n');
 }
@@ -65,7 +67,10 @@ export function formatOverview(doc: CapabilitiesDoc): string {
 /**
  * Detailed view of a single section with all items.
  */
-export function formatSection(doc: CapabilitiesDoc, sectionName: string): string | null {
+export function formatSection(
+  doc: CapabilitiesDoc,
+  sectionName: string,
+): string | null {
   const section = doc.sections[sectionName];
   if (!section) return null;
 
@@ -95,7 +100,10 @@ export function listSections(doc: CapabilitiesDoc): string[] {
  * Fuzzy match a user query to a section name.
  * Returns the best match or null.
  */
-export function matchSection(doc: CapabilitiesDoc, query: string): string | null {
+export function matchSection(
+  doc: CapabilitiesDoc,
+  query: string,
+): string | null {
   const q = query.toLowerCase().trim();
   const keys = Object.keys(doc.sections);
 
@@ -103,13 +111,14 @@ export function matchSection(doc: CapabilitiesDoc, query: string): string | null
   if (keys.includes(q)) return q;
 
   // Partial match on key
-  const keyMatch = keys.find(k => k.includes(q) || q.includes(k));
+  const keyMatch = keys.find((k) => k.includes(q) || q.includes(k));
   if (keyMatch) return keyMatch;
 
   // Partial match on title
-  const titleMatch = keys.find(k =>
-    doc.sections[k].title.toLowerCase().includes(q) ||
-    q.includes(doc.sections[k].title.toLowerCase()),
+  const titleMatch = keys.find(
+    (k) =>
+      doc.sections[k].title.toLowerCase().includes(q) ||
+      q.includes(doc.sections[k].title.toLowerCase()),
   );
   if (titleMatch) return titleMatch;
 

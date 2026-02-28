@@ -50,31 +50,37 @@ beforeEach(() => {
 
 describe('categorizeContent', () => {
   it('should categorize operational content', () => {
-    expect(categorizeContent('Deploy the server to production, update the config')).toBe(
-      'operational',
-    );
+    expect(
+      categorizeContent('Deploy the server to production, update the config'),
+    ).toBe('operational');
   });
 
   it('should categorize people content', () => {
-    expect(categorizeContent("Brandon prefers dark mode and his email is test@test.com")).toBe(
-      'people',
-    );
+    expect(
+      categorizeContent(
+        'Brandon prefers dark mode and his email is test@test.com',
+      ),
+    ).toBe('people');
   });
 
   it('should categorize incidents content', () => {
-    expect(categorizeContent('Server crashed at 3am, root cause was memory leak')).toBe(
-      'incidents',
-    );
+    expect(
+      categorizeContent('Server crashed at 3am, root cause was memory leak'),
+    ).toBe('incidents');
   });
 
   it('should categorize decisions content', () => {
     expect(
-      categorizeContent('We decided to go with PostgreSQL, the rationale was better JSON support'),
+      categorizeContent(
+        'We decided to go with PostgreSQL, the rationale was better JSON support',
+      ),
     ).toBe('decisions');
   });
 
   it('should default to operational for ambiguous content', () => {
-    expect(categorizeContent('some random text with no keywords')).toBe('operational');
+    expect(categorizeContent('some random text with no keywords')).toBe(
+      'operational',
+    );
   });
 
   it('should handle empty string', () => {
@@ -221,7 +227,12 @@ describe('readAllMemory', () => {
 
     const all = await readAllMemory('main');
     expect(Object.keys(all)).toEqual(
-      expect.arrayContaining(['operational', 'people', 'incidents', 'decisions']),
+      expect.arrayContaining([
+        'operational',
+        'people',
+        'incidents',
+        'decisions',
+      ]),
     );
   });
 

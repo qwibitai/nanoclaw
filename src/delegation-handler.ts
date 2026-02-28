@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, GROUPS_DIR } from './config.js';
+import { DATA_DIR } from './config.js';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { logger } from './logger.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
@@ -41,7 +41,10 @@ export function startDelegationHandler(
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
         try {
-          return fs.statSync(path.join(ipcBaseDir, f)).isDirectory() && f !== 'errors';
+          return (
+            fs.statSync(path.join(ipcBaseDir, f)).isDirectory() &&
+            f !== 'errors'
+          );
         } catch {
           return false;
         }
@@ -52,12 +55,18 @@ export function startDelegationHandler(
     }
 
     for (const sourceGroup of groupFolders) {
-      const requestsDir = path.join(ipcBaseDir, sourceGroup, 'delegate-requests');
+      const requestsDir = path.join(
+        ipcBaseDir,
+        sourceGroup,
+        'delegate-requests',
+      );
       if (!fs.existsSync(requestsDir)) continue;
 
       let requestFiles: string[];
       try {
-        requestFiles = fs.readdirSync(requestsDir).filter((f) => f.endsWith('.json'));
+        requestFiles = fs
+          .readdirSync(requestsDir)
+          .filter((f) => f.endsWith('.json'));
       } catch {
         continue;
       }
@@ -78,7 +87,9 @@ export function startDelegationHandler(
           request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         } catch (err) {
           logger.error({ file, err }, 'Failed to parse delegate request');
-          try { fs.unlinkSync(filePath); } catch {}
+          try {
+            fs.unlinkSync(filePath);
+          } catch {}
           continue;
         }
 
@@ -86,7 +97,9 @@ export function startDelegationHandler(
         if (activeDelegations.has(request.id)) continue;
 
         // Remove request file immediately to prevent re-processing
-        try { fs.unlinkSync(filePath); } catch {}
+        try {
+          fs.unlinkSync(filePath);
+        } catch {}
 
         activeDelegations.add(request.id);
 
@@ -96,9 +109,11 @@ export function startDelegationHandler(
         );
 
         // Spawn worker in background (don't block the poll loop)
-        spawnWorker(request, sourceGroup, ipcBaseDir, registeredGroups).finally(() => {
-          activeDelegations.delete(request.id);
-        });
+        spawnWorker(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
+          () => {
+            activeDelegations.delete(request.id);
+          },
+        );
       }
     }
 
@@ -186,10 +201,10 @@ async function spawnWorker(
         isMain: false, // Workers are never main — restricted permissions
         isScheduledTask: true, // Treat like a scheduled task (isolated)
         assistantName: 'Worker',
-        model: request.model || selectModel(
-          request.prompt,
-          loadModelRoutingConfig(sourceGroup),
-        ).model,
+        model:
+          request.model ||
+          selectModel(request.prompt, loadModelRoutingConfig(sourceGroup))
+            .model,
       },
       (_proc, _name) => {
         // We don't track the process — container-runner handles cleanup
@@ -223,10 +238,7 @@ async function spawnWorker(
       'Delegation completed',
     );
   } catch (err) {
-    logger.error(
-      { delegateId: request.id, err },
-      'Delegation failed',
-    );
+    logger.error({ delegateId: request.id, err }, 'Delegation failed');
     writeResponse(responsePath, {
       error: `Worker error: ${err instanceof Error ? err.message : String(err)}`,
       model: request.model,
@@ -249,12 +261,25 @@ async function spawnWorker(
 
 function writeResponse(
   responsePath: string,
-  data: { result?: string; error?: string; model: string | null; status?: string; worktree?: string | null },
+  data: {
+    result?: string;
+    error?: string;
+    model: string | null;
+    status?: string;
+    worktree?: string | null;
+  },
 ): void {
   const tempPath = `${responsePath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify({
-    ...data,
-    timestamp: new Date().toISOString(),
-  }, null, 2));
+  fs.writeFileSync(
+    tempPath,
+    JSON.stringify(
+      {
+        ...data,
+        timestamp: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
   fs.renameSync(tempPath, responsePath);
 }

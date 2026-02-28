@@ -138,7 +138,13 @@ describe('observationToMarkdown', () => {
 describe('Future agent schemas (placeholder validation)', () => {
   it('should validate ReflectorOutput', () => {
     const result = ReflectorOutputSchema.safeParse({
-      actions: [{ action: 'prune', targetPath: 'daily/observer/old.md', reason: 'Stale noise' }],
+      actions: [
+        {
+          action: 'prune',
+          targetPath: 'daily/observer/old.md',
+          reason: 'Stale noise',
+        },
+      ],
       summary: 'Pruned 1 stale file',
     });
     expect(result.success).toBe(true);

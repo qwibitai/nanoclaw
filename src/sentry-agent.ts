@@ -64,7 +64,7 @@ export function parseSentryPayload(body: Record<string, unknown>): Alert {
     title,
     message,
     severity: classifySeverity(title, message, 'sentry'),
-    service: ((event.project || 'unknown') as string),
+    service: (event.project || 'unknown') as string,
     timestamp: new Date().toISOString(),
     raw: body,
   };
@@ -74,9 +74,13 @@ export function parseSentryPayload(body: Record<string, unknown>): Alert {
  * Parse an UptimeRobot webhook payload into a normalized Alert.
  */
 export function parseUptimeRobotPayload(body: Record<string, unknown>): Alert {
-  const monitorName = (body.monitorFriendlyName || body.monitor_friendly_name || 'Unknown') as string;
+  const monitorName = (body.monitorFriendlyName ||
+    body.monitor_friendly_name ||
+    'Unknown') as string;
   const alertType = (body.alertType || body.alert_type || '1') as string;
-  const isDown = alertType === '1' || String(body.alertTypeFriendlyName).toLowerCase().includes('down');
+  const isDown =
+    alertType === '1' ||
+    String(body.alertTypeFriendlyName).toLowerCase().includes('down');
 
   return {
     id: `uptimerobot-${Date.now()}`,
@@ -96,14 +100,18 @@ export function parseUptimeRobotPayload(body: Record<string, unknown>): Alert {
 export function parseGenericPayload(body: Record<string, unknown>): Alert {
   const title = (body.title || body.name || body.subject || 'Alert') as string;
   const message = (body.message || body.body || body.text || title) as string;
-  const severity = (body.severity || body.level || body.priority) as string | undefined;
+  const severity = (body.severity || body.level || body.priority) as
+    | string
+    | undefined;
 
   return {
     id: `generic-${Date.now()}`,
     source: 'generic',
     title,
     message,
-    severity: severity ? normalizeSeverity(severity) : classifySeverity(title, message, 'generic'),
+    severity: severity
+      ? normalizeSeverity(severity)
+      : classifySeverity(title, message, 'generic'),
     service: (body.service || body.project || 'unknown') as string,
     timestamp: new Date().toISOString(),
     raw: body,
@@ -113,19 +121,38 @@ export function parseGenericPayload(body: Record<string, unknown>): Alert {
 // ── Classification ─────────────────────────────────────────────────
 
 const CRITICAL_PATTERNS = [
-  /down/i, /crash/i, /fatal/i, /outage/i, /unresponsive/i,
-  /oom/i, /out of memory/i, /disk full/i, /502/i, /503/i, /500/i,
+  /down/i,
+  /crash/i,
+  /fatal/i,
+  /outage/i,
+  /unresponsive/i,
+  /oom/i,
+  /out of memory/i,
+  /disk full/i,
+  /502/i,
+  /503/i,
+  /500/i,
 ];
 
 const WARNING_PATTERNS = [
-  /slow/i, /timeout/i, /retry/i, /degraded/i, /high.*(cpu|memory|latency)/i,
-  /rate.?limit/i, /429/i, /connection.*(refused|reset)/i,
+  /slow/i,
+  /timeout/i,
+  /retry/i,
+  /degraded/i,
+  /high.*(cpu|memory|latency)/i,
+  /rate.?limit/i,
+  /429/i,
+  /connection.*(refused|reset)/i,
 ];
 
 /**
  * Classify alert severity based on content patterns.
  */
-export function classifySeverity(title: string, message: string, _source: string): Severity {
+export function classifySeverity(
+  title: string,
+  message: string,
+  _source: string,
+): Severity {
   const text = `${title} ${message}`;
   if (CRITICAL_PATTERNS.some((p) => p.test(text))) return 'critical';
   if (WARNING_PATTERNS.some((p) => p.test(text))) return 'warning';
@@ -134,7 +161,8 @@ export function classifySeverity(title: string, message: string, _source: string
 
 function normalizeSeverity(raw: string): Severity {
   const lower = raw.toLowerCase();
-  if (['critical', 'fatal', 'error', 'high', 'p1'].includes(lower)) return 'critical';
+  if (['critical', 'fatal', 'error', 'high', 'p1'].includes(lower))
+    return 'critical';
   if (['warning', 'warn', 'medium', 'p2'].includes(lower)) return 'warning';
   return 'info';
 }
@@ -144,18 +172,27 @@ function normalizeSeverity(raw: string): Severity {
 /**
  * Triage an alert: generate summary and check for auto-fixes.
  */
-export function triageAlert(alert: Alert, autoFixes: AutoFix[] = []): TriageResult {
-  const severityEmoji = { critical: '🔴', warning: '🟡', info: '🔵' }[alert.severity];
+export function triageAlert(
+  alert: Alert,
+  autoFixes: AutoFix[] = [],
+): TriageResult {
+  const severityEmoji = { critical: '🔴', warning: '🟡', info: '🔵' }[
+    alert.severity
+  ];
 
   const summary = [
     `${severityEmoji} **${alert.severity.toUpperCase()}** — ${alert.title}`,
     `Service: ${alert.service} | Source: ${alert.source}`,
     alert.message !== alert.title ? `Details: ${alert.message}` : '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 
   // Check for matching auto-fixes
   const text = `${alert.title} ${alert.message}`;
-  const matchingFix = autoFixes.find((fix) => new RegExp(fix.pattern, 'i').test(text));
+  const matchingFix = autoFixes.find((fix) =>
+    new RegExp(fix.pattern, 'i').test(text),
+  );
 
   const recommendedAction = matchingFix
     ? `Auto-fix available: ${matchingFix.description}`
@@ -215,8 +252,12 @@ export function startSentryAgent(
 
     // Optional webhook secret validation
     if (config.webhookSecret) {
-      const authHeader = req.headers['x-webhook-secret'] || req.headers['authorization'];
-      if (authHeader !== config.webhookSecret && authHeader !== `Bearer ${config.webhookSecret}`) {
+      const authHeader =
+        req.headers['x-webhook-secret'] || req.headers['authorization'];
+      if (
+        authHeader !== config.webhookSecret &&
+        authHeader !== `Bearer ${config.webhookSecret}`
+      ) {
         res.writeHead(401);
         res.end('Unauthorized');
         return;
@@ -269,13 +310,17 @@ export function startSentryAgent(
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, alertId: alert.id, severity: alert.severity }));
+    res.end(
+      JSON.stringify({ ok: true, alertId: alert.id, severity: alert.severity }),
+    );
   });
 
   server.listen(config.port, () => {
     logger.info({ port: config.port }, 'Sentry agent webhook server started');
     console.log(`\n  Sentry agent listening on port ${config.port}`);
-    console.log(`  Endpoints: /webhook/sentry, /webhook/uptimerobot, /webhook/generic\n`);
+    console.log(
+      `  Endpoints: /webhook/sentry, /webhook/uptimerobot, /webhook/generic\n`,
+    );
   });
 
   return server;

@@ -29,7 +29,10 @@ interface ParseError {
   error: string;
 }
 
-function tryParseAndValidate<T>(raw: string, schema: z.ZodType<T>): ParseResult<T> | ParseError {
+function tryParseAndValidate<T>(
+  raw: string,
+  schema: z.ZodType<T>,
+): ParseResult<T> | ParseError {
   // Step 1: Extract JSON from LLM text (may be wrapped in markdown code fences)
   let jsonStr = raw.trim();
 
@@ -44,7 +47,10 @@ function tryParseAndValidate<T>(raw: string, schema: z.ZodType<T>): ParseResult<
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
-    return { success: false, error: `JSON parse error: ${(e as Error).message}` };
+    return {
+      success: false,
+      error: `JSON parse error: ${(e as Error).message}`,
+    };
   }
 
   // Step 3: Validate against Zod schema
@@ -53,18 +59,25 @@ function tryParseAndValidate<T>(raw: string, schema: z.ZodType<T>): ParseResult<
     return { success: true, data: result.data };
   }
 
-  const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+  const issues = result.error.issues
+    .map((i) => `${i.path.join('.')}: ${i.message}`)
+    .join('; ');
   return { success: false, error: `Validation failed: ${issues}` };
 }
 
-export async function validateLLMOutput<T>(opts: ValidateLLMOptions<T>): Promise<T | null> {
+export async function validateLLMOutput<T>(
+  opts: ValidateLLMOptions<T>,
+): Promise<T | null> {
   const label = opts.label ?? 'agent';
 
   // Attempt 1
   const attempt1 = tryParseAndValidate(opts.raw, opts.schema);
   if (attempt1.success) return attempt1.data;
 
-  logger.warn({ label, error: attempt1.error }, 'LLM output validation failed — attempt 1');
+  logger.warn(
+    { label, error: attempt1.error },
+    'LLM output validation failed — attempt 1',
+  );
 
   // Attempt 2: retry with error feedback
   if (opts.onRetry) {
@@ -73,7 +86,10 @@ export async function validateLLMOutput<T>(opts: ValidateLLMOptions<T>): Promise
       const attempt2 = tryParseAndValidate(retryRaw, opts.schema);
       if (attempt2.success) return attempt2.data;
 
-      logger.warn({ label, error: attempt2.error }, 'LLM output validation failed — attempt 2 (circuit-break)');
+      logger.warn(
+        { label, error: attempt2.error },
+        'LLM output validation failed — attempt 2 (circuit-break)',
+      );
     } catch (err) {
       logger.warn({ label, err }, 'LLM retry callback failed (circuit-break)');
     }

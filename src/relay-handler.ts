@@ -13,7 +13,6 @@ import {
   validateRelayMessage,
   buildDelivery,
   buildLogEntry,
-  formatRelayMessage,
 } from './agent-relay.js';
 
 // Track active relay deliveries to prevent duplicates
@@ -36,7 +35,10 @@ export function startRelayHandler(deps: RelayHandlerDeps): void {
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
         try {
-          return fs.statSync(path.join(ipcBaseDir, f)).isDirectory() && f !== 'errors';
+          return (
+            fs.statSync(path.join(ipcBaseDir, f)).isDirectory() &&
+            f !== 'errors'
+          );
         } catch {
           return false;
         }
@@ -65,14 +67,18 @@ export function startRelayHandler(deps: RelayHandlerDeps): void {
           msg = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         } catch (err) {
           logger.error({ file, err }, 'Failed to parse relay message');
-          try { fs.unlinkSync(filePath); } catch {}
+          try {
+            fs.unlinkSync(filePath);
+          } catch {}
           continue;
         }
 
         if (activeRelays.has(msg.id)) continue;
 
         // Remove outbox file immediately
-        try { fs.unlinkSync(filePath); } catch {}
+        try {
+          fs.unlinkSync(filePath);
+        } catch {}
         activeRelays.add(msg.id);
 
         try {
@@ -99,8 +105,17 @@ function routeMessage(
   // Validate message
   const validationError = validateRelayMessage(msg);
   if (validationError) {
-    logger.warn({ msgId: msg.id, error: validationError }, 'Invalid relay message');
-    writeDeliveryReceipt(ipcBaseDir, msg.from, msg.id, 'undeliverable', validationError);
+    logger.warn(
+      { msgId: msg.id, error: validationError },
+      'Invalid relay message',
+    );
+    writeDeliveryReceipt(
+      ipcBaseDir,
+      msg.from,
+      msg.id,
+      'undeliverable',
+      validationError,
+    );
     return;
   }
 
@@ -109,7 +124,12 @@ function routeMessage(
     const reason = `Target agent '${msg.to}' is not registered`;
     logger.warn({ msgId: msg.id, to: msg.to }, reason);
     writeDeliveryReceipt(ipcBaseDir, msg.from, msg.id, 'undeliverable', reason);
-    logRelayMessage(relayLogDir, msg, buildDelivery(msg.id, 'undeliverable', reason), deps);
+    logRelayMessage(
+      relayLogDir,
+      msg,
+      buildDelivery(msg.id, 'undeliverable', reason),
+      deps,
+    );
     return;
   }
 

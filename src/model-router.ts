@@ -209,10 +209,7 @@ export function loadModelRoutingConfig(
       const validated = ModelRoutingConfigSchema.safeParse(parsed);
 
       if (validated.success) {
-        logger.info(
-          { groupFolder },
-          'Loaded custom model routing config',
-        );
+        logger.info({ groupFolder }, 'Loaded custom model routing config');
         return validated.data;
       }
 

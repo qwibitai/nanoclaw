@@ -56,7 +56,11 @@ async function loadObserver() {
   return {
     observeConversation: mod.observeConversation as (
       groupFolder: string,
-      userMessages: Array<{ sender_name: string; content: string; timestamp: string }>,
+      userMessages: Array<{
+        sender_name: string;
+        content: string;
+        timestamp: string;
+      }>,
       botResponses: string[],
     ) => Promise<void>,
     _resetCooldownsForTesting: mod._resetCooldownsForTesting as () => void,
@@ -135,15 +139,19 @@ beforeEach(() => {
     ok: true,
     json: async () =>
       JSON.parse(
-        makeLlmResponse(JSON.stringify({
-          observations: [{
-            time: '08:00',
-            topic: 'Routine greeting',
-            priority: 'noise',
-            points: ['Standard morning greeting'],
-            referencedDates: [],
-          }],
-        })),
+        makeLlmResponse(
+          JSON.stringify({
+            observations: [
+              {
+                time: '08:00',
+                topic: 'Routine greeting',
+                priority: 'noise',
+                points: ['Standard morning greeting'],
+                referencedDates: [],
+              },
+            ],
+          }),
+        ),
       ),
   });
   vi.stubGlobal('fetch', mockFetch);
@@ -176,17 +184,19 @@ describe('EVAL-FIRST: Observer Boundary Assertions', () => {
     // Mock fetch returns a valid JSON observation that contains leaked credentials.
     // The implementation MUST scrub these before writing to disk.
     const leakedObservation = JSON.stringify({
-      observations: [{
-        time: '14:00',
-        topic: 'User shared API key sk-proj-abc123def456 during conversation',
-        priority: 'critical',
-        points: [
-          'Found GitHub token ghp_1234567890abcdef1234567890abcdef12345678 in logs',
-          'AWS key AKIAIOSFODNN7EXAMPLE was mentioned',
-          'Another secret: sk-ant-api03-xxxxxxxxxxxx',
-        ],
-        referencedDates: [],
-      }],
+      observations: [
+        {
+          time: '14:00',
+          topic: 'User shared API key sk-proj-abc123def456 during conversation',
+          priority: 'critical',
+          points: [
+            'Found GitHub token ghp_1234567890abcdef1234567890abcdef12345678 in logs',
+            'AWS key AKIAIOSFODNN7EXAMPLE was mentioned',
+            'Another secret: sk-ant-api03-xxxxxxxxxxxx',
+          ],
+          referencedDates: [],
+        },
+      ],
     });
 
     mockFetch.mockResolvedValueOnce({
@@ -203,14 +213,15 @@ describe('EVAL-FIRST: Observer Boundary Assertions', () => {
     // Verify writeFileSync was called
     expect(fs.writeFileSync).toHaveBeenCalled();
 
-    const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+    const writtenContent = vi.mocked(fs.writeFileSync).mock
+      .calls[0][1] as string;
 
     // Credential patterns that MUST NOT appear in output
     const credentialPatterns = [
-      /sk-[a-zA-Z0-9_-]{10,}/,           // OpenAI / Anthropic keys
-      /ghp_[a-zA-Z0-9]{36,}/,            // GitHub personal access tokens
-      /AKIA[0-9A-Z]{16}/,                // AWS access key IDs
-      /sk-ant-api\d{2}-[a-zA-Z0-9_-]+/,  // Anthropic API keys
+      /sk-[a-zA-Z0-9_-]{10,}/, // OpenAI / Anthropic keys
+      /ghp_[a-zA-Z0-9]{36,}/, // GitHub personal access tokens
+      /AKIA[0-9A-Z]{16}/, // AWS access key IDs
+      /sk-ant-api\d{2}-[a-zA-Z0-9_-]+/, // Anthropic API keys
     ];
 
     for (const pattern of credentialPatterns) {
@@ -249,7 +260,8 @@ describe('EVAL-FIRST: Observer Boundary Assertions', () => {
 
     expect(fs.writeFileSync).toHaveBeenCalled();
 
-    const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+    const writtenContent = vi.mocked(fs.writeFileSync).mock
+      .calls[0][1] as string;
 
     // The pre-existing content MUST still appear, unchanged, in the written output.
     // The observer appends; it never overwrites or modifies previous sections.
@@ -381,7 +393,8 @@ describe('SCAFFOLD: LLM-as-Judge Evals', () => {
     );
 
     expect(fs.writeFileSync).toHaveBeenCalled();
-    const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+    const writtenContent = vi.mocked(fs.writeFileSync).mock
+      .calls[0][1] as string;
 
     // Judge criterion: written output must contain Critical priority indicator
     expect(writtenContent).toMatch(/critical/i);
@@ -416,7 +429,8 @@ describe('SCAFFOLD: LLM-as-Judge Evals', () => {
     );
 
     expect(fs.writeFileSync).toHaveBeenCalled();
-    const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+    const writtenContent = vi.mocked(fs.writeFileSync).mock
+      .calls[0][1] as string;
 
     // Judge criterion: Noise marker present, no fabricated decisions
     expect(writtenContent).toMatch(/noise/i);
@@ -430,7 +444,7 @@ describe('SCAFFOLD: LLM-as-Judge Evals', () => {
 
 describe('SCAFFOLD: Outcome Evals', () => {
   // SCAFFOLD — verify after implementation
-  it.skip('SCAFFOLD: file created at correct path with daily/observer/ and today\'s date', async () => {
+  it.skip("SCAFFOLD: file created at correct path with daily/observer/ and today's date", async () => {
     const { observeConversation, _resetCooldownsForTesting } =
       await loadObserver();
     _resetCooldownsForTesting();
@@ -493,7 +507,8 @@ describe('SCAFFOLD: Outcome Evals', () => {
     );
 
     expect(fs.writeFileSync).toHaveBeenCalled();
-    const writtenContent = vi.mocked(fs.writeFileSync).mock.calls[0][1] as string;
+    const writtenContent = vi.mocked(fs.writeFileSync).mock
+      .calls[0][1] as string;
 
     // Output must reference the date mentioned in conversation
     const containsDate =

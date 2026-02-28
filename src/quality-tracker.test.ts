@@ -64,12 +64,16 @@ describe('quality-tracker', () => {
     });
 
     it('should detect positive signal from "perfect"', () => {
-      const result = extractSignal([{ content: 'Perfect, exactly what I needed' }]);
+      const result = extractSignal([
+        { content: 'Perfect, exactly what I needed' },
+      ]);
       expect(result.signal).toBe('positive');
     });
 
     it('should detect negative signal from correction', () => {
-      const result = extractSignal([{ content: "That's not what I asked for" }]);
+      const result = extractSignal([
+        { content: "That's not what I asked for" },
+      ]);
       expect(result.signal).toBe('negative');
     });
 
@@ -84,7 +88,9 @@ describe('quality-tracker', () => {
     });
 
     it('should return neutral for ordinary messages', () => {
-      const result = extractSignal([{ content: 'Can you check the deployment status?' }]);
+      const result = extractSignal([
+        { content: 'Can you check the deployment status?' },
+      ]);
       expect(result.signal).toBe('neutral');
     });
 
@@ -175,7 +181,9 @@ describe('quality-tracker', () => {
     });
 
     it('should use resolveGroupFolderPath for file paths', async () => {
-      await trackConversationQuality('test-group', sampleMessages(2), ['Reply']);
+      await trackConversationQuality('test-group', sampleMessages(2), [
+        'Reply',
+      ]);
 
       expect(resolveGroupFolderPath).toHaveBeenCalledWith('test-group');
     });

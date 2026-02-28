@@ -53,18 +53,110 @@ export interface ValidateStepResult<T> {
 // ---------------------------------------------------------------------------
 
 const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-  'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-  'should', 'may', 'might', 'shall', 'can', 'need', 'must',
-  'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as',
-  'into', 'through', 'during', 'before', 'after', 'above', 'below',
-  'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
-  'neither', 'each', 'every', 'all', 'any', 'few', 'more', 'most',
-  'other', 'some', 'such', 'no', 'only', 'own', 'same', 'than',
-  'too', 'very', 'just', 'also', 'that', 'this', 'these', 'those',
-  'it', 'its', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he',
-  'him', 'his', 'she', 'her', 'they', 'them', 'their', 'what', 'which',
-  'who', 'when', 'where', 'how', 'if', 'then', 'else', 'up', 'out',
+  'the',
+  'a',
+  'an',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'shall',
+  'can',
+  'need',
+  'must',
+  'to',
+  'of',
+  'in',
+  'for',
+  'on',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'into',
+  'through',
+  'during',
+  'before',
+  'after',
+  'above',
+  'below',
+  'and',
+  'but',
+  'or',
+  'nor',
+  'not',
+  'so',
+  'yet',
+  'both',
+  'either',
+  'neither',
+  'each',
+  'every',
+  'all',
+  'any',
+  'few',
+  'more',
+  'most',
+  'other',
+  'some',
+  'such',
+  'no',
+  'only',
+  'own',
+  'same',
+  'than',
+  'too',
+  'very',
+  'just',
+  'also',
+  'that',
+  'this',
+  'these',
+  'those',
+  'it',
+  'its',
+  'i',
+  'me',
+  'my',
+  'we',
+  'our',
+  'you',
+  'your',
+  'he',
+  'him',
+  'his',
+  'she',
+  'her',
+  'they',
+  'them',
+  'their',
+  'what',
+  'which',
+  'who',
+  'when',
+  'where',
+  'how',
+  'if',
+  'then',
+  'else',
+  'up',
+  'out',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -113,7 +205,10 @@ function tryParseAndValidate<T>(
   try {
     parsed = JSON.parse(jsonStr);
   } catch (e) {
-    return { success: false, error: `JSON parse error: ${(e as Error).message}` };
+    return {
+      success: false,
+      error: `JSON parse error: ${(e as Error).message}`,
+    };
   }
 
   const result = schema.safeParse(parsed);
@@ -232,11 +327,16 @@ async function runContentValidation<T>(
       // Re-run content validators on retry output
       const retryIssues: string[] = [];
       for (const validator of validators) {
-        retryIssues.push(...validator.check(retryParsed.data, opts.inputContext));
+        retryIssues.push(
+          ...validator.check(retryParsed.data, opts.inputContext),
+        );
       }
 
       if (retryIssues.length === 0) {
-        logger.info({ label, stepName: opts.stepName }, 'Step validation passed on retry');
+        logger.info(
+          { label, stepName: opts.stepName },
+          'Step validation passed on retry',
+        );
         return {
           data: retryParsed.data,
           validation: {
@@ -294,10 +394,15 @@ export async function validateStep<T>(
     // Schema failed — try retry if available
     if (opts.onRetry) {
       try {
-        const retryRaw = await opts.onRetry(`Schema validation error: ${attempt1.error}`);
+        const retryRaw = await opts.onRetry(
+          `Schema validation error: ${attempt1.error}`,
+        );
         const attempt2 = tryParseAndValidate(retryRaw, opts.schema);
         if (!attempt2.success) {
-          logger.warn({ label, error: attempt2.error }, 'Step schema retry failed');
+          logger.warn(
+            { label, error: attempt2.error },
+            'Step schema retry failed',
+          );
           return {
             data: null,
             validation: {

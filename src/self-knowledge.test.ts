@@ -27,7 +27,10 @@ const SAMPLE_DOC: CapabilitiesDoc = {
       title: 'Scheduled Tasks',
       summary: 'Automated jobs that run on a schedule.',
       items: [
-        { name: 'morning-heartbeat', description: 'Daily morning check-in at 7am' },
+        {
+          name: 'morning-heartbeat',
+          description: 'Daily morning check-in at 7am',
+        },
       ],
     },
     memory: {
@@ -39,7 +42,10 @@ const SAMPLE_DOC: CapabilitiesDoc = {
       title: 'Limitations',
       summary: 'What I cannot do.',
       items: [
-        { name: 'no-internet-browsing', description: 'Cannot browse the web directly' },
+        {
+          name: 'no-internet-browsing',
+          description: 'Cannot browse the web directly',
+        },
       ],
     },
   },
@@ -131,7 +137,12 @@ describe('formatSection', () => {
 describe('listSections', () => {
   it('returns all section keys', () => {
     const sections = listSections(SAMPLE_DOC);
-    expect(sections).toEqual(['tools', 'scheduled_tasks', 'memory', 'limitations']);
+    expect(sections).toEqual([
+      'tools',
+      'scheduled_tasks',
+      'memory',
+      'limitations',
+    ]);
   });
 
   it('returns empty array for no sections', () => {

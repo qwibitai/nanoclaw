@@ -83,7 +83,9 @@ describe('validateLLMOutput', () => {
   });
 
   it('should retry once on JSON parse failure with error feedback', async () => {
-    const onRetry = vi.fn().mockResolvedValue('{"name": "recovered", "value": 1}');
+    const onRetry = vi
+      .fn()
+      .mockResolvedValue('{"name": "recovered", "value": 1}');
 
     const result = await validateLLMOutput({
       raw: 'garbage', // not JSON

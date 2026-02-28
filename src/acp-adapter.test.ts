@@ -40,9 +40,7 @@ describe('extractPromptText', () => {
   });
 
   it('preserves whitespace in text content', () => {
-    const blocks = [
-      { type: 'text' as const, text: '  indented\n\ttabbed  ' },
-    ];
+    const blocks = [{ type: 'text' as const, text: '  indented\n\ttabbed  ' }];
     expect(extractPromptText(blocks)).toBe('  indented\n\ttabbed  ');
   });
 });

@@ -11,7 +11,11 @@ import {
 
 describe('formatQuestion', () => {
   it('formats question with numbered options', () => {
-    const result = formatQuestion('Pick one:', ['Alpha', 'Beta', 'Gamma'], false);
+    const result = formatQuestion(
+      'Pick one:',
+      ['Alpha', 'Beta', 'Gamma'],
+      false,
+    );
     expect(result).toContain('Pick one:');
     expect(result).toContain('1️⃣ Alpha');
     expect(result).toContain('2️⃣ Beta');

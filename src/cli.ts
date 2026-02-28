@@ -18,12 +18,7 @@ import path from 'path';
 import { execSync, spawn } from 'child_process';
 import readline from 'readline';
 
-import {
-  deploy,
-  rollback,
-  listReleases,
-  getCurrentRelease,
-} from './deploy.js';
+import { deploy, rollback, listReleases, getCurrentRelease } from './deploy.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -68,8 +63,12 @@ async function cmdInit(): Promise<void> {
   const name = await prompt('Agent name (e.g. Adam): ');
   if (!name) error('Agent name is required');
 
-  const discordToken = await prompt('Discord bot token (or press Enter to skip): ');
-  const openrouterKey = await prompt('OpenRouter API key (or press Enter to skip): ');
+  const discordToken = await prompt(
+    'Discord bot token (or press Enter to skip): ',
+  );
+  const openrouterKey = await prompt(
+    'OpenRouter API key (or press Enter to skip): ',
+  );
   const assistantName = name;
 
   // Create .env file
@@ -166,7 +165,10 @@ function cmdStatus(): void {
   if (releases.length > 0) {
     print(`Releases: ${releases.length} (keeping last 5)`);
     for (const r of releases) {
-      const date = new Date(r.timestamp).toISOString().replace('T', ' ').slice(0, 19);
+      const date = new Date(r.timestamp)
+        .toISOString()
+        .replace('T', ' ')
+        .slice(0, 19);
       print(`  ${r.isCurrent ? '→' : ' '} ${r.sha} (${date})`);
     }
   }
@@ -183,7 +185,9 @@ function cmdStatus(): void {
       print('Containers:');
       for (const line of containers.split('\n')) {
         const [name, status, running] = line.split('\t');
-        print(`  ${status?.includes('healthy') ? '✓' : '●'} ${name} — ${status} (${running})`);
+        print(
+          `  ${status?.includes('healthy') ? '✓' : '●'} ${name} — ${status} (${running})`,
+        );
       }
     } else {
       print('Containers: none running');
@@ -195,9 +199,12 @@ function cmdStatus(): void {
   // Memory / disk
   print('');
   try {
-    const mem = execSync("free -h 2>/dev/null | head -2 || vm_stat 2>/dev/null | head -3", {
-      encoding: 'utf-8',
-    }).trim();
+    const mem = execSync(
+      'free -h 2>/dev/null | head -2 || vm_stat 2>/dev/null | head -3',
+      {
+        encoding: 'utf-8',
+      },
+    ).trim();
     if (mem) print(`Memory:\n  ${mem.split('\n').join('\n  ')}`);
   } catch {
     // Not critical
@@ -262,7 +269,8 @@ function cmdAgentAdd(args: string[]): void {
 }
 
 function cmdHelp(): void {
-  print(`
+  print(
+    `
 Sovereign CLI — manage your AI agents
 
 Usage: sovereign <command> [options]
@@ -275,7 +283,8 @@ Commands:
   logs [--follow]      Tail agent logs
   agent add <name>     Create new agent from template
   help                 Show this help
-`.trim());
+`.trim(),
+  );
 }
 
 // ── Internal helpers ────────────────────────────────────────────────

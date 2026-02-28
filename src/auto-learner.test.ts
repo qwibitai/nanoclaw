@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Mock } from 'vitest';
 import fs from 'node:fs';
-import { processLearning, _resetForTesting, detectCorrection } from './auto-learner.js';
+import {
+  processLearning,
+  _resetForTesting,
+  detectCorrection,
+} from './auto-learner.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 
@@ -93,32 +97,44 @@ describe('auto-learner', () => {
   // -------------------------------------------------------------------------
   describe('detectCorrection', () => {
     it('should detect "No, my X is Y" pattern', () => {
-      const result = detectCorrection([{ content: 'No, my meeting is at 3pm not 2pm' }]);
+      const result = detectCorrection([
+        { content: 'No, my meeting is at 3pm not 2pm' },
+      ]);
       expect(result).not.toBeNull();
     });
 
     it('should detect "Actually, it\'s X" pattern', () => {
-      const result = detectCorrection([{ content: "Actually, it's Tuesday not Monday" }]);
+      const result = detectCorrection([
+        { content: "Actually, it's Tuesday not Monday" },
+      ]);
       expect(result).not.toBeNull();
     });
 
     it('should detect "that\'s not right" pattern', () => {
-      const result = detectCorrection([{ content: "That's not right, the port is 8080" }]);
+      const result = detectCorrection([
+        { content: "That's not right, the port is 8080" },
+      ]);
       expect(result).not.toBeNull();
     });
 
     it('should detect "I meant X" pattern', () => {
-      const result = detectCorrection([{ content: 'I meant the staging server, not prod' }]);
+      const result = detectCorrection([
+        { content: 'I meant the staging server, not prod' },
+      ]);
       expect(result).not.toBeNull();
     });
 
     it('should detect "correction:" pattern', () => {
-      const result = detectCorrection([{ content: 'Correction: the deadline is Friday' }]);
+      const result = detectCorrection([
+        { content: 'Correction: the deadline is Friday' },
+      ]);
       expect(result).not.toBeNull();
     });
 
     it('should return null for normal messages', () => {
-      const result = detectCorrection([{ content: 'Check the deployment status please' }]);
+      const result = detectCorrection([
+        { content: 'Check the deployment status please' },
+      ]);
       expect(result).toBeNull();
     });
 
@@ -133,7 +149,9 @@ describe('auto-learner', () => {
   // -------------------------------------------------------------------------
   describe('processLearning', () => {
     it('should call LLM and write learning when correction detected', async () => {
-      await processLearning('main', correctionMessages(), ['Your meeting is at 2pm']);
+      await processLearning('main', correctionMessages(), [
+        'Your meeting is at 2pm',
+      ]);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fs.writeFileSync).toHaveBeenCalled();
@@ -167,7 +185,10 @@ describe('auto-learner', () => {
 
     it('should scrub credentials from LLM output', async () => {
       const leakedLearning = JSON.stringify({
-        correction: { wrong: 'key was sk-old-secret-key-12345', right: 'key was sk-new-secret-key-67890' },
+        correction: {
+          wrong: 'key was sk-old-secret-key-12345',
+          right: 'key was sk-new-secret-key-67890',
+        },
         source: 'conversation',
         knowledgeFile: 'operational.md',
         context: 'User corrected API key reference',
@@ -220,7 +241,8 @@ describe('auto-learner', () => {
     });
 
     it('should append to existing LEARNINGS.md without overwriting', async () => {
-      const existing = '<!-- source: auto-learner -->\n## Learnings\n\n### 2026-02-27 — Old correction\n- **Wrong:** old\n- **Right:** new\n';
+      const existing =
+        '<!-- source: auto-learner -->\n## Learnings\n\n### 2026-02-27 — Old correction\n- **Wrong:** old\n- **Right:** new\n';
 
       (fs.existsSync as Mock).mockReturnValue(true);
       (fs.statSync as Mock).mockReturnValue({ size: existing.length });

@@ -14,8 +14,14 @@ export const ObservationItemSchema = z.object({
   time: z.string().describe('HH:MM format timestamp'),
   topic: z.string().min(1).describe('Brief topic summary'),
   priority: z.enum(['critical', 'useful', 'noise']),
-  points: z.array(z.string().min(1)).min(1).describe('Key observations as bullet points'),
-  referencedDates: z.array(z.string()).default([]).describe('Dates mentioned in conversation'),
+  points: z
+    .array(z.string().min(1))
+    .min(1)
+    .describe('Key observations as bullet points'),
+  referencedDates: z
+    .array(z.string())
+    .default([])
+    .describe('Dates mentioned in conversation'),
 });
 
 export const ObservationOutputSchema = z.object({
@@ -50,7 +56,9 @@ export type ReflectorOutput = z.infer<typeof ReflectorOutputSchema>;
 export const MemoryEntrySchema = z.object({
   category: z.enum(['operational', 'people', 'incidents', 'decisions']),
   content: z.string().min(1),
-  source: z.string().describe('Where this came from (conversation, observation, manual)'),
+  source: z
+    .string()
+    .describe('Where this came from (conversation, observation, manual)'),
   timestamp: z.string(),
 });
 
@@ -145,7 +153,10 @@ const PRIORITY_LABEL: Record<ObservationItem['priority'], string> = {
   noise: 'Noise',
 };
 
-export function observationToMarkdown(output: ObservationOutput, dateStr: string): string {
+export function observationToMarkdown(
+  output: ObservationOutput,
+  dateStr: string,
+): string {
   return output.observations
     .map((obs) => {
       const emoji = PRIORITY_EMOJI[obs.priority];

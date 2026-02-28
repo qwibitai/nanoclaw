@@ -3,7 +3,6 @@ import {
   loadTemplate,
   parseTemplateMarkdown,
   applyTemplate,
-  type TaskTemplate,
 } from './task-templates.js';
 
 // Mock dependencies
@@ -44,7 +43,7 @@ describe('parseTemplateMarkdown', () => {
     expect(result!.type).toBe('research');
     expect(result!.method).toContain('Do step one');
     expect(result!.method).toContain('Do step two');
-    expect(result!.antiPatterns).toEqual(['Don\'t do this', 'Don\'t do that']);
+    expect(result!.antiPatterns).toEqual(["Don't do this", "Don't do that"]);
     expect(result!.evaluation).toEqual(['Check this', 'Check that']);
     expect(result!.outputFormat).toBe('{result}');
   });
@@ -110,7 +109,15 @@ describe('loadTemplate', () => {
   });
 
   it('returns built-in for every task type', () => {
-    const types = ['research', 'grunt', 'conversation', 'analysis', 'content', 'code', 'quick-check'] as const;
+    const types = [
+      'research',
+      'grunt',
+      'conversation',
+      'analysis',
+      'content',
+      'code',
+      'quick-check',
+    ] as const;
     for (const type of types) {
       const template = loadTemplate(type);
       expect(template.type).toBe(type);
@@ -204,7 +211,15 @@ describe('applyTemplate', () => {
 // ---------------------------------------------------------------------------
 describe('built-in templates', () => {
   it('all templates have non-empty method', () => {
-    const types = ['research', 'grunt', 'conversation', 'analysis', 'content', 'code', 'quick-check'] as const;
+    const types = [
+      'research',
+      'grunt',
+      'conversation',
+      'analysis',
+      'content',
+      'code',
+      'quick-check',
+    ] as const;
     for (const type of types) {
       const t = loadTemplate(type);
       expect(t.method.length).toBeGreaterThan(10);

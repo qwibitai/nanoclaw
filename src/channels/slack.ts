@@ -44,14 +44,16 @@ export class SlackChannel implements Channel {
 
     // Get bot's own user ID so we can detect mentions
     try {
-      const authResult = await this.app.client.auth.test({ token: this.botToken });
+      const authResult = await this.app.client.auth.test({
+        token: this.botToken,
+      });
       this.botUserId = (authResult.user_id as string) || null;
     } catch (err) {
       logger.warn({ err }, 'Failed to get Slack bot user ID');
     }
 
     // Listen for all messages (channels, DMs, threads)
-    this.app.message(async ({ message, say }) => {
+    this.app.message(async ({ message }) => {
       // Skip bot messages, message_changed events, etc.
       if (!('text' in message) || !('user' in message)) return;
       if (message.subtype) return; // edited, deleted, etc.
@@ -76,7 +78,7 @@ export class SlackChannel implements Channel {
       }
 
       // Resolve channel name for metadata
-      let chatName = channelId;
+      let chatName: string;
       try {
         const channelInfo = await this.app!.client.conversations.info({
           token: this.botToken,
@@ -90,7 +92,9 @@ export class SlackChannel implements Channel {
 
       // Translate @bot mentions into trigger format
       if (this.botUserId && content.includes(`<@${this.botUserId}>`)) {
-        content = content.replace(new RegExp(`<@${this.botUserId}>`, 'g'), '').trim();
+        content = content
+          .replace(new RegExp(`<@${this.botUserId}>`, 'g'), '')
+          .trim();
         if (!TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
@@ -109,7 +113,10 @@ export class SlackChannel implements Channel {
       // Only deliver for registered groups
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
-        logger.debug({ chatJid, chatName }, 'Message from unregistered Slack channel');
+        logger.debug(
+          { chatJid, chatName },
+          'Message from unregistered Slack channel',
+        );
         return;
       }
 
@@ -123,7 +130,10 @@ export class SlackChannel implements Channel {
         is_from_me: false,
       });
 
-      logger.info({ chatJid, chatName, sender: senderName }, 'Slack message stored');
+      logger.info(
+        { chatJid, chatName, sender: senderName },
+        'Slack message stored',
+      );
     });
 
     await this.app.start();

@@ -10,9 +10,9 @@ import { DATA_DIR } from './config.js';
 import { logger } from './logger.js';
 import {
   formatQuestion,
-  getReactionEmojis,
-  resolveReaction,
-  parseTextReply,
+  getReactionEmojis as _getReactionEmojis,
+  resolveReaction as _resolveReaction,
+  parseTextReply as _parseTextReply,
   buildResponse,
   ElicitationRequest,
 } from './structured-elicitation.js';
@@ -23,14 +23,22 @@ const activeElicitations = new Set<string>();
 
 export interface ElicitationDeps {
   findChannel: (jid: string) => Channel | undefined;
-  addReactions: (jid: string, messageId: string, emojis: string[]) => Promise<void>;
+  addReactions: (
+    jid: string,
+    messageId: string,
+    emojis: string[],
+  ) => Promise<void>;
   waitForResponse: (
     jid: string,
     messageId: string,
     options: string[],
     allowFreetext: boolean,
     timeoutMs: number,
-  ) => Promise<{ chosen: string | null; freetext: string | null; timeout: boolean }>;
+  ) => Promise<{
+    chosen: string | null;
+    freetext: string | null;
+    timeout: boolean;
+  }>;
 }
 
 export function startElicitationHandler(deps: ElicitationDeps): void {
@@ -41,7 +49,10 @@ export function startElicitationHandler(deps: ElicitationDeps): void {
     try {
       groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
         try {
-          return fs.statSync(path.join(ipcBaseDir, f)).isDirectory() && f !== 'errors';
+          return (
+            fs.statSync(path.join(ipcBaseDir, f)).isDirectory() &&
+            f !== 'errors'
+          );
         } catch {
           return false;
         }
@@ -52,12 +63,18 @@ export function startElicitationHandler(deps: ElicitationDeps): void {
     }
 
     for (const sourceGroup of groupFolders) {
-      const requestsDir = path.join(ipcBaseDir, sourceGroup, 'elicitation-requests');
+      const requestsDir = path.join(
+        ipcBaseDir,
+        sourceGroup,
+        'elicitation-requests',
+      );
       if (!fs.existsSync(requestsDir)) continue;
 
       let requestFiles: string[];
       try {
-        requestFiles = fs.readdirSync(requestsDir).filter((f) => f.endsWith('.json'));
+        requestFiles = fs
+          .readdirSync(requestsDir)
+          .filter((f) => f.endsWith('.json'));
       } catch {
         continue;
       }
@@ -70,20 +87,26 @@ export function startElicitationHandler(deps: ElicitationDeps): void {
           request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
         } catch (err) {
           logger.error({ file, err }, 'Failed to parse elicitation request');
-          try { fs.unlinkSync(filePath); } catch {}
+          try {
+            fs.unlinkSync(filePath);
+          } catch {}
           continue;
         }
 
         if (activeElicitations.has(request.id)) continue;
 
         // Remove request file immediately
-        try { fs.unlinkSync(filePath); } catch {}
+        try {
+          fs.unlinkSync(filePath);
+        } catch {}
         activeElicitations.add(request.id);
 
         // Process in background
-        handleElicitation(request, sourceGroup, ipcBaseDir, deps).finally(() => {
-          activeElicitations.delete(request.id);
-        });
+        handleElicitation(request, sourceGroup, ipcBaseDir, deps).finally(
+          () => {
+            activeElicitations.delete(request.id);
+          },
+        );
       }
     }
 
@@ -100,7 +123,11 @@ async function handleElicitation(
   ipcBaseDir: string,
   deps: ElicitationDeps,
 ): Promise<void> {
-  const responsesDir = path.join(ipcBaseDir, sourceGroup, 'elicitation-responses');
+  const responsesDir = path.join(
+    ipcBaseDir,
+    sourceGroup,
+    'elicitation-responses',
+  );
   fs.mkdirSync(responsesDir, { recursive: true });
   const responsePath = path.join(responsesDir, `${request.id}.json`);
 
@@ -111,12 +138,19 @@ async function handleElicitation(
   }
 
   // Format and send the question
-  const questionText = formatQuestion(request.question, request.options, request.allowFreetext);
+  const questionText = formatQuestion(
+    request.question,
+    request.options,
+    request.allowFreetext,
+  );
 
   try {
     await channel.sendMessage(request.sourceChatJid, questionText);
   } catch (err) {
-    logger.error({ elicitationId: request.id, err }, 'Failed to send elicitation question');
+    logger.error(
+      { elicitationId: request.id, err },
+      'Failed to send elicitation question',
+    );
     writeResponse(responsePath, buildResponse(request.id, null, null, true));
     return;
   }
@@ -134,15 +168,17 @@ async function handleElicitation(
       timeoutMs,
     );
 
-    writeResponse(responsePath, buildResponse(
-      request.id,
-      result.chosen,
-      result.freetext,
-      result.timeout,
-    ));
+    writeResponse(
+      responsePath,
+      buildResponse(request.id, result.chosen, result.freetext, result.timeout),
+    );
 
     logger.info(
-      { elicitationId: request.id, chosen: result.chosen, timeout: result.timeout },
+      {
+        elicitationId: request.id,
+        chosen: result.chosen,
+        timeout: result.timeout,
+      },
       'Elicitation completed',
     );
   } catch (err) {

@@ -8,7 +8,6 @@ import {
   formatFullResults,
   type BM25ResultInput,
   type RecallCategory,
-  type Priority,
 } from './progressive-recall.js';
 
 // ---------------------------------------------------------------------------
@@ -39,15 +38,21 @@ describe('detectCategory', () => {
 // ---------------------------------------------------------------------------
 describe('detectPriority', () => {
   it('detects critical priority', () => {
-    expect(detectPriority('### 10:30 — Server Down (\uD83D\uDD34 Critical)')).toBe('critical');
+    expect(
+      detectPriority('### 10:30 — Server Down (\uD83D\uDD34 Critical)'),
+    ).toBe('critical');
   });
 
   it('detects useful priority', () => {
-    expect(detectPriority('### 14:00 — Meeting Notes (\uD83D\uDFE1 Useful)')).toBe('useful');
+    expect(
+      detectPriority('### 14:00 — Meeting Notes (\uD83D\uDFE1 Useful)'),
+    ).toBe('useful');
   });
 
   it('detects noise priority', () => {
-    expect(detectPriority('### 09:00 — Weather Check (\uD83D\uDFE2 Noise)')).toBe('noise');
+    expect(
+      detectPriority('### 09:00 — Weather Check (\uD83D\uDFE2 Noise)'),
+    ).toBe('noise');
   });
 
   it('returns null for no priority marker', () => {
@@ -72,11 +77,15 @@ describe('extractFirstLine', () => {
   });
 
   it('skips HTML comments', () => {
-    expect(extractFirstLine('<!-- source: observer -->\n## Learnings')).toBe('## Learnings');
+    expect(extractFirstLine('<!-- source: observer -->\n## Learnings')).toBe(
+      '## Learnings',
+    );
   });
 
   it('skips YAML frontmatter delimiters', () => {
-    expect(extractFirstLine('---\ntitle: Test\n---\nContent')).toBe('title: Test');
+    expect(extractFirstLine('---\ntitle: Test\n---\nContent')).toBe(
+      'title: Test',
+    );
   });
 
   it('truncates long lines', () => {
@@ -111,7 +120,8 @@ describe('summarizeResult', () => {
   it('creates summary with category and first line', () => {
     const result: BM25ResultInput = {
       file: 'knowledge/patterns.md',
-      snippet: '## Pattern: Always verify before claiming\n- Run the check\n- Read output',
+      snippet:
+        '## Pattern: Always verify before claiming\n- Run the check\n- Read output',
       score: 4.52,
     };
 
@@ -126,7 +136,8 @@ describe('summarizeResult', () => {
   it('detects priority from observation snippets', () => {
     const result: BM25ResultInput = {
       file: 'observations/2026-02-28.md',
-      snippet: '### 10:30 \u2014 Server Down (\uD83D\uDD34 Critical)\n- Server crashed\n- Root cause: OOM',
+      snippet:
+        '### 10:30 \u2014 Server Down (\uD83D\uDD34 Critical)\n- Server crashed\n- Root cause: OOM',
       score: 6.1,
     };
 
@@ -213,7 +224,11 @@ describe('formatLayeredResults', () => {
 describe('formatFullResults', () => {
   it('formats results with full snippets in code blocks', () => {
     const results: BM25ResultInput[] = [
-      { file: 'knowledge/test.md', snippet: 'Full content here\nWith multiple lines', score: 3.0 },
+      {
+        file: 'knowledge/test.md',
+        snippet: 'Full content here\nWith multiple lines',
+        score: 3.0,
+      },
     ];
     const output = formatFullResults(results, 'test');
     expect(output).toContain('```');

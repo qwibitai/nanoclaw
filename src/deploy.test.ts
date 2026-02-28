@@ -156,7 +156,11 @@ describe('rollback', () => {
     // Ensure v2 has a newer timestamp
     const relDir = path.join(tmpDir, RELEASES_DIR);
     const t = Date.now();
-    fs.utimesSync(path.join(relDir, 'v1'), (t - 2000) / 1000, (t - 2000) / 1000);
+    fs.utimesSync(
+      path.join(relDir, 'v1'),
+      (t - 2000) / 1000,
+      (t - 2000) / 1000,
+    );
 
     createRelease(tmpDir, 'v2', sourceDir);
     fs.utimesSync(path.join(relDir, 'v2'), t / 1000, t / 1000);

@@ -15,11 +15,11 @@ import { logger } from './logger.js';
 const X402_POLL_INTERVAL = 500; // 500ms — fast enough for request/response
 
 let x402Running = false;
-let walletReady = false;
+let _walletReady = false;
 let fetchWithPayment: typeof fetch | null = null;
 
 async function initWallet(): Promise<boolean> {
-  const secrets = readEnvFile(["BASE_WALLET_PRIVATE_KEY"]);
+  const secrets = readEnvFile(['BASE_WALLET_PRIVATE_KEY']);
   const privateKey = secrets.BASE_WALLET_PRIVATE_KEY;
   if (!privateKey) {
     logger.debug('BASE_WALLET_PRIVATE_KEY not set, x402 handler disabled');
@@ -28,7 +28,8 @@ async function initWallet(): Promise<boolean> {
 
   try {
     // Dynamic imports (ESM packages)
-    const { x402Client, wrapFetchWithPayment: wrap } = await import('@x402/fetch');
+    const { x402Client, wrapFetchWithPayment: wrap } =
+      await import('@x402/fetch');
     const { registerExactEvmScheme } = await import('@x402/evm/exact/client');
     const { privateKeyToAccount } = await import('viem/accounts');
 
@@ -67,7 +68,9 @@ async function processRequest(
   }
 
   // Remove request file (we've read it)
-  try { fs.unlinkSync(requestPath); } catch {}
+  try {
+    fs.unlinkSync(requestPath);
+  } catch {}
 
   const responsePath = path.join(responsesDir, `${requestData.id}.json`);
 
@@ -77,7 +80,11 @@ async function processRequest(
   }
 
   logger.info(
-    { id: requestData.id, url: requestData.url, maxPrice: requestData.max_price_usd },
+    {
+      id: requestData.id,
+      url: requestData.url,
+      maxPrice: requestData.max_price_usd,
+    },
     'Processing x402 request',
   );
 
@@ -116,7 +123,13 @@ async function processRequest(
 
     if (paid) {
       logger.info(
-        { id: requestData.id, status: response.status, paid, amountUsd, txHash },
+        {
+          id: requestData.id,
+          status: response.status,
+          paid,
+          amountUsd,
+          txHash,
+        },
         'x402 request completed with payment',
       );
     } else {
@@ -154,7 +167,7 @@ export function startX402Handler(): void {
 
   // Init wallet asynchronously
   initWallet().then((ready) => {
-    walletReady = ready;
+    _walletReady = ready;
     if (!ready) {
       logger.debug('x402 handler not started (no wallet key)');
       x402Running = false;
@@ -168,7 +181,10 @@ export function startX402Handler(): void {
         // Scan all group IPC directories for x402 requests
         const groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
           try {
-            return fs.statSync(path.join(ipcBaseDir, f)).isDirectory() && f !== 'errors';
+            return (
+              fs.statSync(path.join(ipcBaseDir, f)).isDirectory() &&
+              f !== 'errors'
+            );
           } catch {
             return false;
           }
@@ -180,12 +196,11 @@ export function startX402Handler(): void {
 
           if (!fs.existsSync(requestsDir)) continue;
 
-          const files = fs.readdirSync(requestsDir).filter((f) => f.endsWith('.json'));
+          const files = fs
+            .readdirSync(requestsDir)
+            .filter((f) => f.endsWith('.json'));
           for (const file of files) {
-            await processRequest(
-              path.join(requestsDir, file),
-              responsesDir,
-            );
+            await processRequest(path.join(requestsDir, file), responsesDir);
           }
         }
       } catch (err) {

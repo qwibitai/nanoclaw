@@ -8,17 +8,17 @@
 
 export interface RelayMessage {
   id: string;
-  from: string;       // source group folder (agent identity)
-  to: string;         // target group folder
-  content: string;    // message body
-  replyTo?: string;   // optional: ID of message being replied to
+  from: string; // source group folder (agent identity)
+  to: string; // target group folder
+  content: string; // message body
+  replyTo?: string; // optional: ID of message being replied to
   timestamp: string;
 }
 
 export interface RelayDelivery {
   id: string;
   status: 'delivered' | 'undeliverable';
-  reason?: string;    // set when undeliverable (target not registered, etc.)
+  reason?: string; // set when undeliverable (target not registered, etc.)
   timestamp: string;
 }
 
@@ -38,8 +38,10 @@ export function validateRelayMessage(msg: unknown): string | null {
   if (typeof m.id !== 'string' || !m.id) return 'Missing or empty id';
   if (typeof m.from !== 'string' || !m.from) return 'Missing or empty from';
   if (typeof m.to !== 'string' || !m.to) return 'Missing or empty to';
-  if (typeof m.content !== 'string' || !m.content) return 'Missing or empty content';
-  if (typeof m.timestamp !== 'string' || !m.timestamp) return 'Missing or empty timestamp';
+  if (typeof m.content !== 'string' || !m.content)
+    return 'Missing or empty content';
+  if (typeof m.timestamp !== 'string' || !m.timestamp)
+    return 'Missing or empty timestamp';
   if (m.from === m.to) return 'Cannot send message to self';
 
   return null;
@@ -76,10 +78,7 @@ export function buildLogEntry(
  * Used when showing relay traffic in the observable log.
  */
 export function formatRelayMessage(msg: RelayMessage): string {
-  const lines = [
-    `[Relay] ${msg.from} → ${msg.to}`,
-    msg.content,
-  ];
+  const lines = [`[Relay] ${msg.from} → ${msg.to}`, msg.content];
   if (msg.replyTo) {
     lines.splice(1, 0, `(reply to ${msg.replyTo})`);
   }

@@ -93,7 +93,6 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-
   // Add consecutive_errors column for auto-disable after repeated failures
   try {
     database.exec(
@@ -359,11 +358,15 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
-
 export function getRecentMessages(
   chatJid: string,
   limit: number = 50,
-): { sender_name: string; content: string; timestamp: string; is_from_me: boolean }[] {
+): {
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: boolean;
+}[] {
   const sql = `
     SELECT sender_name, content, timestamp,
            CASE WHEN is_bot_message = 1 OR sender = 'me' THEN 1 ELSE 0 END as is_from_me
@@ -379,7 +382,7 @@ export function getRecentMessages(
     timestamp: string;
     is_from_me: number;
   }[];
-  return rows.reverse().map(r => ({
+  return rows.reverse().map((r) => ({
     sender_name: r.sender_name,
     content: r.content,
     timestamp: r.timestamp,

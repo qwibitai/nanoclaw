@@ -345,7 +345,10 @@ export async function processHindsight(
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
         circuitBreakerTrippedAt = Date.now();
-      logger.warn({ consecutiveFailures }, 'Hindsight received empty LLM response');
+      logger.warn(
+        { consecutiveFailures },
+        'Hindsight received empty LLM response',
+      );
       return;
     }
 
@@ -367,8 +370,12 @@ export async function processHindsight(
     // Scrub credentials from validated fields
     validated.failureType = scrubCredentials(validated.failureType);
     validated.whatWentWrong = scrubCredentials(validated.whatWentWrong);
-    validated.whatShouldHaveBeen = scrubCredentials(validated.whatShouldHaveBeen);
-    validated.actionableLearning = scrubCredentials(validated.actionableLearning);
+    validated.whatShouldHaveBeen = scrubCredentials(
+      validated.whatShouldHaveBeen,
+    );
+    validated.actionableLearning = scrubCredentials(
+      validated.actionableLearning,
+    );
 
     // Serialize to markdown
     const hindsightText = hindsightToMarkdown(validated, dateStr);

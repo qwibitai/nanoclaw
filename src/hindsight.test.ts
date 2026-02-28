@@ -29,8 +29,10 @@ vi.mock('./logger.js', () => ({
 const DEFAULT_HINDSIGHT_JSON = JSON.stringify({
   failureType: 'repeated misunderstanding',
   whatWentWrong: 'Bot kept giving wrong time for the meeting',
-  whatShouldHaveBeen: 'Should have confirmed the correct time on first correction',
-  actionableLearning: 'When user corrects a factual claim, update immediately and confirm',
+  whatShouldHaveBeen:
+    'Should have confirmed the correct time on first correction',
+  actionableLearning:
+    'When user corrects a factual claim, update immediately and confirm',
   severity: 'moderate',
 });
 
@@ -128,7 +130,7 @@ describe('hindsight', () => {
     it('should detect repeated corrections', () => {
       const result = detectFrustration([
         { content: "No, it's 3pm not 2pm" },
-        { content: "Actually, I said the blue one" },
+        { content: 'Actually, I said the blue one' },
         { content: "That's not right, try again" },
       ]);
       expect(result.correctionCount).toBeGreaterThanOrEqual(2);
@@ -177,7 +179,9 @@ describe('hindsight', () => {
     });
 
     it('should NOT call LLM for normal messages', async () => {
-      await processHindsight('main', normalMessages(), ['The weather looks good']);
+      await processHindsight('main', normalMessages(), [
+        'The weather looks good',
+      ]);
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(fs.writeFileSync).not.toHaveBeenCalled();

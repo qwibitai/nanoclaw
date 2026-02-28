@@ -20,7 +20,12 @@ import type { MemoryEntry } from './schemas.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DOMAINS = ['operational', 'people', 'incidents', 'decisions'] as const;
+export const DOMAINS = [
+  'operational',
+  'people',
+  'incidents',
+  'decisions',
+] as const;
 export type Domain = (typeof DOMAINS)[number];
 
 const DOMAIN_FILES: Record<Domain, string> = {
@@ -31,7 +36,8 @@ const DOMAIN_FILES: Record<Domain, string> = {
 };
 
 const DOMAIN_HEADERS: Record<Domain, string> = {
-  operational: '# Operational Knowledge\n\nConfigs, processes, how things work.\n',
+  operational:
+    '# Operational Knowledge\n\nConfigs, processes, how things work.\n',
   people: '# People\n\nUser preferences, names, relationships.\n',
   incidents: '# Incidents\n\nPast failures, lessons learned.\n',
   decisions: '# Decisions\n\nKey decisions and their reasoning.\n',
@@ -64,12 +70,9 @@ function scrubCredentials(text: string): string {
 
 function entryToMarkdown(entry: MemoryEntry): string {
   const dateStr = entry.timestamp || new Date().toISOString().split('T')[0];
-  return [
-    `## ${dateStr} \u2014 ${entry.source}`,
-    '',
-    entry.content,
-    '',
-  ].join('\n');
+  return [`## ${dateStr} \u2014 ${entry.source}`, '', entry.content, ''].join(
+    '\n',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +151,11 @@ export async function writeMemoryEntry(
     if (fs.existsSync(filePath)) {
       fs.appendFileSync(filePath, '\n' + markdown, 'utf-8');
     } else {
-      fs.writeFileSync(filePath, DOMAIN_HEADERS[domain] + '\n' + markdown, 'utf-8');
+      fs.writeFileSync(
+        filePath,
+        DOMAIN_HEADERS[domain] + '\n' + markdown,
+        'utf-8',
+      );
     }
 
     logger.info(
@@ -263,7 +270,10 @@ export async function migrateFromSingleFile(
 
   try {
     if (!fs.existsSync(sourceFilePath)) {
-      logger.info({ sourceFilePath }, 'Structured memory: source file not found, nothing to migrate');
+      logger.info(
+        { sourceFilePath },
+        'Structured memory: source file not found, nothing to migrate',
+      );
       return counts;
     }
 
@@ -277,7 +287,10 @@ export async function migrateFromSingleFile(
 
     for (const section of sections) {
       const trimmed = section.trim();
-      if (!trimmed || trimmed.startsWith('# ') && !trimmed.startsWith('## ')) {
+      if (
+        !trimmed ||
+        (trimmed.startsWith('# ') && !trimmed.startsWith('## '))
+      ) {
         continue; // skip top-level headers
       }
 

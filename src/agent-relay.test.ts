@@ -22,7 +22,9 @@ describe('validateRelayMessage', () => {
   });
 
   it('returns null for message with replyTo', () => {
-    expect(validateRelayMessage({ ...validMsg, replyTo: 'relay-0' })).toBeNull();
+    expect(
+      validateRelayMessage({ ...validMsg, replyTo: 'relay-0' }),
+    ).toBeNull();
   });
 
   it('rejects non-object', () => {
@@ -31,27 +33,39 @@ describe('validateRelayMessage', () => {
   });
 
   it('rejects missing id', () => {
-    expect(validateRelayMessage({ ...validMsg, id: '' })).toBe('Missing or empty id');
+    expect(validateRelayMessage({ ...validMsg, id: '' })).toBe(
+      'Missing or empty id',
+    );
   });
 
   it('rejects missing from', () => {
-    expect(validateRelayMessage({ ...validMsg, from: '' })).toBe('Missing or empty from');
+    expect(validateRelayMessage({ ...validMsg, from: '' })).toBe(
+      'Missing or empty from',
+    );
   });
 
   it('rejects missing to', () => {
-    expect(validateRelayMessage({ ...validMsg, to: '' })).toBe('Missing or empty to');
+    expect(validateRelayMessage({ ...validMsg, to: '' })).toBe(
+      'Missing or empty to',
+    );
   });
 
   it('rejects missing content', () => {
-    expect(validateRelayMessage({ ...validMsg, content: '' })).toBe('Missing or empty content');
+    expect(validateRelayMessage({ ...validMsg, content: '' })).toBe(
+      'Missing or empty content',
+    );
   });
 
   it('rejects missing timestamp', () => {
-    expect(validateRelayMessage({ ...validMsg, timestamp: '' })).toBe('Missing or empty timestamp');
+    expect(validateRelayMessage({ ...validMsg, timestamp: '' })).toBe(
+      'Missing or empty timestamp',
+    );
   });
 
   it('rejects self-send', () => {
-    expect(validateRelayMessage({ ...validMsg, to: 'main' })).toBe('Cannot send message to self');
+    expect(validateRelayMessage({ ...validMsg, to: 'main' })).toBe(
+      'Cannot send message to self',
+    );
   });
 });
 
@@ -65,7 +79,11 @@ describe('buildDelivery', () => {
   });
 
   it('builds undeliverable receipt with reason', () => {
-    const d = buildDelivery('relay-2', 'undeliverable', 'Target not registered');
+    const d = buildDelivery(
+      'relay-2',
+      'undeliverable',
+      'Target not registered',
+    );
     expect(d.status).toBe('undeliverable');
     expect(d.reason).toBe('Target not registered');
   });

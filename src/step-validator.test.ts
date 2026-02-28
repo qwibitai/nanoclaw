@@ -29,7 +29,7 @@ const TestSchema = z.object({
   summary: z.string().min(1),
   score: z.number().int().nonnegative(),
 });
-type TestOutput = z.infer<typeof TestSchema>;
+type _TestOutput = z.infer<typeof TestSchema>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -138,7 +138,10 @@ describe('lengthBounds', () => {
 
   it('should fail when output exceeds limit', () => {
     const validator = lengthBounds(10);
-    const issues = validator.check({ topic: 'this is definitely longer than ten chars' }, '');
+    const issues = validator.check(
+      { topic: 'this is definitely longer than ten chars' },
+      '',
+    );
     expect(issues.length).toBe(1);
     expect(issues[0]).toContain('exceeds length bound');
   });
@@ -151,7 +154,10 @@ describe('lengthBounds', () => {
 describe('inputGrounding', () => {
   it('should pass when output is grounded in input', () => {
     const validator = inputGrounding(0.15);
-    const output = { topic: 'meeting schedule', summary: 'moved to 3pm Tuesday' };
+    const output = {
+      topic: 'meeting schedule',
+      summary: 'moved to 3pm Tuesday',
+    };
     const issues = validator.check(output, CONVERSATION_INPUT);
     expect(issues).toEqual([]);
   });
@@ -160,7 +166,8 @@ describe('inputGrounding', () => {
     const validator = inputGrounding(0.15);
     const output = {
       topic: 'quantum computing breakthrough',
-      summary: 'NASA launched satellite constellation for Mars exploration program',
+      summary:
+        'NASA launched satellite constellation for Mars exploration program',
     };
     const issues = validator.check(output, CONVERSATION_INPUT);
     expect(issues.length).toBe(1);

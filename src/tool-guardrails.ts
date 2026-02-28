@@ -21,7 +21,12 @@ export function checkRateLimit(
   maxPerWindow: number,
   windowMs: number,
   now: number = Date.now(),
-): { allowed: boolean; remaining: number; resetsIn: number; newState: RateLimiterState } {
+): {
+  allowed: boolean;
+  remaining: number;
+  resetsIn: number;
+  newState: RateLimiterState;
+} {
   if (!state || now - state.windowStart >= windowMs) {
     // New window
     return {
@@ -66,7 +71,12 @@ export function checkSpendLimit(
   amountUsd: number,
   dailyCapUsd: number,
   now: number = Date.now(),
-): { allowed: boolean; totalToday: number; remaining: number; newState: SpendState } {
+): {
+  allowed: boolean;
+  totalToday: number;
+  remaining: number;
+  newState: SpendState;
+} {
   const dayMs = 86_400_000;
 
   if (!state || now - state.dayStart >= dayMs) {
@@ -99,9 +109,12 @@ export function checkSpendLimit(
 
 // ── Default Limits ───────────────────────────────────────────────────
 
-export const DEFAULT_RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
-  send_sms: { max: 10, windowMs: 3_600_000 },   // 10 per hour
-  make_call: { max: 5, windowMs: 3_600_000 },    // 5 per hour
+export const DEFAULT_RATE_LIMITS: Record<
+  string,
+  { max: number; windowMs: number }
+> = {
+  send_sms: { max: 10, windowMs: 3_600_000 }, // 10 per hour
+  make_call: { max: 5, windowMs: 3_600_000 }, // 5 per hour
 };
 
 export const DEFAULT_DAILY_SPEND_CAP_USD = 10;

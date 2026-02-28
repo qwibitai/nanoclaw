@@ -23,7 +23,10 @@ import { logger } from './logger.js';
 const RoutingConditionSchema: z.ZodType<RoutingCondition> = z.lazy(() =>
   z.discriminatedUnion('type', [
     z.object({ type: z.literal('always') }),
-    z.object({ type: z.literal('minMessages'), min: z.number().int().positive() }),
+    z.object({
+      type: z.literal('minMessages'),
+      min: z.number().int().positive(),
+    }),
     z.object({ type: z.literal('frustrationDetected') }),
     z.object({ type: z.literal('correctionDetected') }),
     z.object({
@@ -90,7 +93,11 @@ export interface RoutingConfig {
 
 export interface RoutingContext {
   groupFolder: string;
-  userMessages: Array<{ sender_name: string; content: string; timestamp: string }>;
+  userMessages: Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+  }>;
   botResponses: string[];
 }
 
@@ -149,7 +156,9 @@ export function evaluateCondition(
       const detected = frustrationResult?.detected ?? false;
       return {
         matched: detected,
-        reason: detected ? 'frustration signals detected' : 'no frustration signals',
+        reason: detected
+          ? 'frustration signals detected'
+          : 'no frustration signals',
       };
     }
 

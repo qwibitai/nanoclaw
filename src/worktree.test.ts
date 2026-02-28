@@ -17,7 +17,10 @@ let testRepo: string;
 function initTestRepo(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sovereign-wt-'));
   execSync('git init', { cwd: dir, stdio: 'pipe' });
-  execSync('git config user.email "test@test.com"', { cwd: dir, stdio: 'pipe' });
+  execSync('git config user.email "test@test.com"', {
+    cwd: dir,
+    stdio: 'pipe',
+  });
   execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' });
   // Need at least one commit for worktrees to work
   fs.writeFileSync(path.join(dir, 'README.md'), '# Test');
@@ -61,7 +64,10 @@ describe('createWorktree', () => {
     // Create a branch with different content
     execSync('git checkout -b feature-x', { cwd: testRepo, stdio: 'pipe' });
     fs.writeFileSync(path.join(testRepo, 'feature.txt'), 'hello');
-    execSync('git add . && git commit -m "feature"', { cwd: testRepo, stdio: 'pipe' });
+    execSync('git add . && git commit -m "feature"', {
+      cwd: testRepo,
+      stdio: 'pipe',
+    });
     execSync('git checkout -', { cwd: testRepo, stdio: 'pipe' });
 
     const wt = createWorktree(testRepo, 'task-from-branch', 'feature-x');

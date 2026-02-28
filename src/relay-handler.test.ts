@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-import { startRelayHandler, RelayHandlerDeps } from './relay-handler.js';
+import './relay-handler.js';
 
 describe('relay-handler', () => {
   let tmpDir: string;
@@ -25,7 +25,7 @@ describe('relay-handler', () => {
     delete process.env.NANOCLAW_DATA_DIR;
   });
 
-  function writeOutboxMessage(from: string, msg: object): void {
+  function _writeOutboxMessage(from: string, msg: object): void {
     const outboxDir = path.join(ipcDir, from, 'relay-outbox');
     fs.mkdirSync(outboxDir, { recursive: true });
     const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
@@ -35,7 +35,8 @@ describe('relay-handler', () => {
   function readInbox(group: string): object[] {
     const inboxDir = path.join(ipcDir, group, 'relay-inbox');
     if (!fs.existsSync(inboxDir)) return [];
-    return fs.readdirSync(inboxDir)
+    return fs
+      .readdirSync(inboxDir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => JSON.parse(fs.readFileSync(path.join(inboxDir, f), 'utf-8')));
   }
@@ -43,9 +44,12 @@ describe('relay-handler', () => {
   function readReceipts(group: string): object[] {
     const receiptsDir = path.join(ipcDir, group, 'relay-receipts');
     if (!fs.existsSync(receiptsDir)) return [];
-    return fs.readdirSync(receiptsDir)
+    return fs
+      .readdirSync(receiptsDir)
       .filter((f) => f.endsWith('.json'))
-      .map((f) => JSON.parse(fs.readFileSync(path.join(receiptsDir, f), 'utf-8')));
+      .map((f) =>
+        JSON.parse(fs.readFileSync(path.join(receiptsDir, f), 'utf-8')),
+      );
   }
 
   // Since startRelayHandler uses DATA_DIR from config at import time,
@@ -70,12 +74,17 @@ describe('relay-handler', () => {
     // Write to inbox directly (simulating what routeMessage does)
     const inboxDir = path.join(ipcDir, 'research', 'relay-inbox');
     fs.mkdirSync(inboxDir, { recursive: true });
-    fs.writeFileSync(path.join(inboxDir, `${msg.id}.json`), JSON.stringify(msg));
+    fs.writeFileSync(
+      path.join(inboxDir, `${msg.id}.json`),
+      JSON.stringify(msg),
+    );
 
     const inbox = readInbox('research');
     expect(inbox).toHaveLength(1);
     expect((inbox[0] as { id: string }).id).toBe('relay-test-1');
-    expect((inbox[0] as { content: string }).content).toBe('Hello research agent');
+    expect((inbox[0] as { content: string }).content).toBe(
+      'Hello research agent',
+    );
   });
 
   it('delivery receipt structure is correct', () => {
@@ -87,7 +96,10 @@ describe('relay-handler', () => {
       status: 'delivered',
       timestamp: new Date().toISOString(),
     };
-    fs.writeFileSync(path.join(receiptsDir, `${receipt.id}.json`), JSON.stringify(receipt));
+    fs.writeFileSync(
+      path.join(receiptsDir, `${receipt.id}.json`),
+      JSON.stringify(receipt),
+    );
 
     const receipts = readReceipts('main');
     expect(receipts).toHaveLength(1);

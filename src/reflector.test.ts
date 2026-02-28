@@ -11,7 +11,7 @@ import {
   reflectOnMemory,
 } from './reflector.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { logger } from './logger.js';
+import { logger as _logger } from './logger.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -294,7 +294,9 @@ describe('reflectOnMemory', () => {
     const result = await reflectOnMemory('main', { noiseMaxAgeDays: 30 });
 
     expect(fs.unlinkSync).toHaveBeenCalled();
-    expect(result.actions.some((a) => a.reason.includes('file deleted'))).toBe(true);
+    expect(result.actions.some((a) => a.reason.includes('file deleted'))).toBe(
+      true,
+    );
   });
 
   it('should rewrite file when some entries remain', async () => {

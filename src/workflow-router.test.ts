@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Mock } from 'vitest';
 import fs from 'node:fs';
 import {
@@ -10,7 +10,6 @@ import {
   type RoutingCondition,
   type RoutingContext,
   type RoutingConfig,
-  type RoutingRule,
 } from './workflow-router.js';
 import { detectFrustration } from './hindsight.js';
 import { observeConversation } from './observer.js';
@@ -30,13 +29,17 @@ vi.mock('./auto-learner.js', () => ({
 }));
 vi.mock('./hindsight.js', () => ({
   processHindsight: vi.fn().mockResolvedValue(undefined),
-  detectFrustration: vi.fn().mockReturnValue({ detected: false, signals: [], correctionCount: 0 }),
+  detectFrustration: vi
+    .fn()
+    .mockReturnValue({ detected: false, signals: [], correctionCount: 0 }),
 }));
 vi.mock('./reflector.js', () => ({
   reflectOnMemory: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./group-folder.js', () => ({
-  resolveGroupFolderPath: vi.fn().mockImplementation((f: string) => `/tmp/test-groups/${f}`),
+  resolveGroupFolderPath: vi
+    .fn()
+    .mockImplementation((f: string) => `/tmp/test-groups/${f}`),
 }));
 vi.mock('./logger.js', () => ({
   logger: {
@@ -56,7 +59,11 @@ function makeContext(overrides?: Partial<RoutingContext>): RoutingContext {
   return {
     groupFolder: 'main',
     userMessages: [
-      { sender_name: 'user', content: 'Hello there', timestamp: new Date().toISOString() },
+      {
+        sender_name: 'user',
+        content: 'Hello there',
+        timestamp: new Date().toISOString(),
+      },
     ],
     botResponses: ['Hi! How can I help?'],
     ...overrides,
@@ -73,8 +80,16 @@ function manyMessages(count: number): RoutingContext['userMessages'] {
 
 function correctionMessages(): RoutingContext['userMessages'] {
   return [
-    { sender_name: 'user', content: "No, it's 3pm not 2pm", timestamp: new Date().toISOString() },
-    { sender_name: 'user', content: "Actually, the blue one", timestamp: new Date().toISOString() },
+    {
+      sender_name: 'user',
+      content: "No, it's 3pm not 2pm",
+      timestamp: new Date().toISOString(),
+    },
+    {
+      sender_name: 'user',
+      content: 'Actually, the blue one',
+      timestamp: new Date().toISOString(),
+    },
   ];
 }
 
@@ -85,7 +100,11 @@ function correctionMessages(): RoutingContext['userMessages'] {
 describe('workflow-router', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (detectFrustration as Mock).mockReturnValue({ detected: false, signals: [], correctionCount: 0 });
+    (detectFrustration as Mock).mockReturnValue({
+      detected: false,
+      signals: [],
+      correctionCount: 0,
+    });
     (fs.existsSync as Mock).mockReturnValue(false);
     (fs.readFileSync as Mock).mockReturnValue('');
   });
@@ -126,11 +145,9 @@ describe('workflow-router', () => {
 
     it('frustrationDetected uses provided frustration result', () => {
       const ctx = makeContext();
-      const result = evaluateCondition(
-        { type: 'frustrationDetected' },
-        ctx,
-        { detected: true },
-      );
+      const result = evaluateCondition({ type: 'frustrationDetected' }, ctx, {
+        detected: true,
+      });
       expect(result.matched).toBe(true);
     });
 
@@ -144,10 +161,7 @@ describe('workflow-router', () => {
       const ctx = makeContext({ userMessages: manyMessages(5) });
       const condition: RoutingCondition = {
         type: 'all',
-        conditions: [
-          { type: 'always' },
-          { type: 'minMessages', min: 5 },
-        ],
+        conditions: [{ type: 'always' }, { type: 'minMessages', min: 5 }],
       };
       expect(evaluateCondition(condition, ctx).matched).toBe(true);
     });
@@ -156,10 +170,7 @@ describe('workflow-router', () => {
       const ctx = makeContext({ userMessages: manyMessages(3) });
       const condition: RoutingCondition = {
         type: 'all',
-        conditions: [
-          { type: 'always' },
-          { type: 'minMessages', min: 5 },
-        ],
+        conditions: [{ type: 'always' }, { type: 'minMessages', min: 5 }],
       };
       expect(evaluateCondition(condition, ctx).matched).toBe(false);
     });
@@ -168,10 +179,7 @@ describe('workflow-router', () => {
       const ctx = makeContext({ userMessages: manyMessages(3) });
       const condition: RoutingCondition = {
         type: 'any',
-        conditions: [
-          { type: 'minMessages', min: 10 },
-          { type: 'always' },
-        ],
+        conditions: [{ type: 'minMessages', min: 10 }, { type: 'always' }],
       };
       expect(evaluateCondition(condition, ctx).matched).toBe(true);
     });
@@ -284,7 +292,13 @@ describe('workflow-router', () => {
               type: 'all',
               conditions: [
                 { type: 'minMessages', min: 3 },
-                { type: 'any', conditions: [{ type: 'correctionDetected' }, { type: 'always' }] },
+                {
+                  type: 'any',
+                  conditions: [
+                    { type: 'correctionDetected' },
+                    { type: 'always' },
+                  ],
+                },
               ],
             },
             action: { type: 'autoLearner' },
