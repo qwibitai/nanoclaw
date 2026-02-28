@@ -14,6 +14,7 @@ const envConfig = readEnvFile([
   'ALLOWED_USERS',
   'OBSERVER_ENABLED',
   'MIN_OBSERVER_MESSAGES',
+  'QUALITY_TRACKER_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -96,3 +97,7 @@ export const MIN_OBSERVER_MESSAGES = Math.max(
   1,
   parseInt(process.env.MIN_OBSERVER_MESSAGES || envConfig.MIN_OBSERVER_MESSAGES || '5', 10) || 5,
 );
+
+// Quality Tracker — JSONL conversation logging with implicit quality signals
+export const QUALITY_TRACKER_ENABLED =
+  (process.env.QUALITY_TRACKER_ENABLED ?? envConfig.QUALITY_TRACKER_ENABLED ?? 'true') !== 'false';
