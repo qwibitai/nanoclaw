@@ -41,19 +41,6 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
 
-## Upgrading from Pre-Pluggable Versions
-
-> **Breaking change.** WhatsApp is no longer bundled in the core — it's now a pluggable skill, just like every other channel. If you're upgrading an existing installation:
->
-> ```bash
-> claude                       # open Claude Code in your NanoClaw directory
-> ```
-> ```
-> /add-whatsapp                # re-installs WhatsApp as a pluggable channel
-> ```
->
-> Your existing auth credentials, groups, and scheduled tasks are preserved. The skill just wires WhatsApp back into the new channel registry.
-
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NanoClaw codebase, just ask Claude Code to walk you through it.
@@ -197,6 +184,10 @@ This keeps the base system minimal and lets every user customize their installat
 ## Community
 
 Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
 
 ## License
 
