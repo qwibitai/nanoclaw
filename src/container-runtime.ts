@@ -74,10 +74,15 @@ export function cleanupOrphans(): void {
     for (const name of orphans) {
       try {
         execSync(stopContainer(name), { stdio: 'pipe' });
-      } catch { /* already stopped */ }
+      } catch {
+        /* already stopped */
+      }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
