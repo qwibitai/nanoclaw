@@ -12,6 +12,7 @@ import {
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
+import { handleHostCommand } from './host-commands.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -381,7 +382,16 @@ export async function processTaskIpc(
       }
       break;
 
-    default:
-      logger.warn({ type: data.type }, 'Unknown IPC task type');
+    default: {
+      const handled = await handleHostCommand(
+        data,
+        sourceGroup,
+        isMain,
+        deps.sendMessage,
+      );
+      if (!handled) {
+        logger.warn({ type: data.type }, 'Unknown IPC task type');
+      }
+    }
   }
 }
