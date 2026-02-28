@@ -17,6 +17,7 @@ const envConfig = readEnvFile([
   'QUALITY_TRACKER_ENABLED',
   'AUTO_LEARNER_ENABLED',
   'HINDSIGHT_ENABLED',
+  'ROUTER_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -111,3 +112,7 @@ export const AUTO_LEARNER_ENABLED =
 // Hindsight — auto post-mortem on failed conversations
 export const HINDSIGHT_ENABLED =
   (process.env.HINDSIGHT_ENABLED ?? envConfig.HINDSIGHT_ENABLED ?? 'true') !== 'false';
+
+// Workflow Router — deterministic routing between agent steps
+export const ROUTER_ENABLED =
+  (process.env.ROUTER_ENABLED ?? envConfig.ROUTER_ENABLED ?? 'true') !== 'false';
