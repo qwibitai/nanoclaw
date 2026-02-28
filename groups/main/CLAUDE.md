@@ -32,7 +32,10 @@ Workflow:
 - Keep all facts truthful — never fabricate experience. Only reframe, reorder, and emphasize existing experience
 - Quantified metrics from the master CV (hours saved, team sizes, release counts) should be preserved
 - Run the humanizer skill on the tailored resume before saving — strip AI writing patterns, vary sentence rhythm, ensure it reads like a human wrote it
-- Save the humanized version and send a summary of what changed and why
+- Save the humanized version
+- Create an AI-Slop Reviewer teammate: read `/workspace/group/job-hunting/reviewer-instructions.md`, create a teammate with those instructions plus the saved file path. The reviewer checks the document against humanizer criteria and returns PASS or ISSUES
+- If PASS: send summary of changes to user
+- If ISSUES: include the reviewer's findings in your response (e.g. "Reviewer flagged: … Consider running humanizer again or editing manually") and still send the file
 
 ### 2. Cover Letter Drafting
 
@@ -50,7 +53,10 @@ Workflow:
   - Closes with enthusiasm and a clear call to action
 - Keep tone professional but warm, not generic
 - Run the humanizer skill on the cover letter before saving — remove AI vocabulary, promotional language, em dash overuse, and generic conclusions; make it sound like Michelle actually wrote it
-- Save the humanized draft and send it for review
+- Save the humanized draft
+- Create an AI-Slop Reviewer teammate: read `/workspace/group/job-hunting/reviewer-instructions.md`, create a teammate with those instructions plus the saved file path. The reviewer checks the document against humanizer criteria and returns PASS or ISSUES
+- If PASS: send the cover letter for review with a brief summary
+- If ISSUES: include the reviewer's findings in your response (e.g. "Reviewer flagged: … Consider running humanizer again or editing manually") and still send the file
 
 ### 3. Interview Prep
 
@@ -108,6 +114,14 @@ These are examples of what the user might send and how to respond:
 - "What's my pipeline?" → Summarize the application tracker
 - "I got a rejection from Google" → Update tracker status, offer encouragement
 - "Research [company] for me" → Company research, save to interview-prep/
+
+### AI-Slop Reviewer
+
+After saving a tailored resume or cover letter, create an AI-Slop Reviewer teammate to check the document does not read like AI-slop.
+
+- **Instructions file**: `/workspace/group/job-hunting/reviewer-instructions.md` — read this and pass its content when creating the teammate, appending the document path (e.g. "Read the document at /workspace/group/job-hunting/tailored-resumes/figma-senior-design-systems.md")
+- **Teammate name**: "AI-Slop Reviewer"
+- **Output**: Reviewer returns PASS or ISSUES. Include the assessment in your response to the user. If ISSUES, suggest running humanizer again or editing manually
 
 ### File Naming Conventions
 
