@@ -11,6 +11,9 @@ import {
   MIN_OBSERVER_MESSAGES,
   POLL_INTERVAL,
   ROUTER_ENABLED,
+  SENTRY_AGENT_CHANNEL,
+  SENTRY_AGENT_PORT,
+  SENTRY_WEBHOOK_SECRET,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
   TRIGGER_PATTERN,
@@ -45,6 +48,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { startDelegationHandler } from './delegation-handler.js';
 import { startX402Handler } from './x402-handler.js';
+import { startSentryAgent } from './sentry-agent.js';
 import { startAcpServer } from './acp-adapter.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
@@ -532,6 +536,21 @@ async function main(): Promise<void> {
 
   // Start delegation handler (spawns worker containers for delegate_task)
   startDelegationHandler(() => registeredGroups);
+
+  // Start sentry agent if configured (webhook-based incident triage)
+  if (SENTRY_AGENT_PORT > 0 && SENTRY_AGENT_CHANNEL) {
+    startSentryAgent(
+      {
+        port: SENTRY_AGENT_PORT,
+        channelJid: SENTRY_AGENT_CHANNEL,
+        webhookSecret: SENTRY_WEBHOOK_SECRET || undefined,
+      },
+      async (jid, text) => {
+        const channel = findChannel(channels, jid);
+        if (channel) await channel.sendMessage(jid, text);
+      },
+    );
+  }
 
   // Start ACP adapter if enabled (makes agents driveable from Zed, Cursor, etc.)
   if (ACP_ENABLED) {
