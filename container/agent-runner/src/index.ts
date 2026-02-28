@@ -19,6 +19,21 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface ImageAttachment {
+  kind: 'image';
+  mediaType: string;
+  base64: string;
+  filename: string;
+}
+
+interface FileAttachment {
+  kind: 'file';
+  filename: string;
+  workspacePath: string;
+}
+
+type MessageAttachment = ImageAttachment | FileAttachment;
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -29,6 +44,7 @@ interface ContainerInput {
   assistantName?: string;
   secrets?: Record<string, string>;
   model?: string;
+  attachments?: MessageAttachment[];
 }
 
 interface ContainerOutput {
@@ -49,9 +65,13 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -69,10 +89,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -350,6 +370,34 @@ function waitForIpcMessage(): Promise<string | null> {
 }
 
 /**
+ * Build prompt content with optional image attachments for Claude vision.
+ * Returns plain string when no attachments, or content blocks array with images.
+ */
+function buildPromptContent(
+  text: string,
+  attachments?: MessageAttachment[],
+): string | ContentBlock[] {
+  if (!attachments?.length) return text;
+
+  const blocks: ContentBlock[] = [];
+  for (const att of attachments) {
+    if (att.kind === 'image') {
+      blocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: att.mediaType, data: att.base64 },
+      });
+    } else {
+      blocks.push({
+        type: 'text',
+        text: `[File saved: /workspace/group/${att.workspacePath} (${att.filename}). Use the Read tool to access it.]`,
+      });
+    }
+  }
+  blocks.push({ type: 'text', text });
+  return blocks;
+}
+
+/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
@@ -357,6 +405,7 @@ function waitForIpcMessage(): Promise<string | null> {
  */
 async function runQuery(
   prompt: string,
+  attachments: MessageAttachment[] | undefined,
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
@@ -364,7 +413,8 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  const initialContent = buildPromptContent(prompt, attachments);
+  stream.push(initialContent);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -537,13 +587,24 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // Extract attachments for the first query only (images → vision, files → disk reference)
+  const attachments = containerInput.attachments;
+  if (attachments?.length) {
+    log(`Received ${attachments.length} attachment(s): ${attachments.map(a => a.kind).join(', ')}`);
+  }
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let isFirstQuery = true;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, model: ${containerInput.model || '(default)'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      // Only pass attachments on the first query
+      const queryAttachments = isFirstQuery ? attachments : undefined;
+      isFirstQuery = false;
+
+      const queryResult = await runQuery(prompt, queryAttachments, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }

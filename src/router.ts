@@ -1,4 +1,4 @@
-import { Channel, NewMessage } from './types.js';
+import { Channel, MessageAttachment, NewMessage } from './types.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -15,6 +15,10 @@ export function formatMessages(messages: NewMessage[]): string {
       `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`,
   );
   return `<messages>\n${lines.join('\n')}\n</messages>`;
+}
+
+export function extractAttachments(messages: NewMessage[]): MessageAttachment[] {
+  return messages.flatMap((m) => m.attachments || []);
 }
 
 export function stripInternalTags(text: string): string {
