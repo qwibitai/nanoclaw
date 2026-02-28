@@ -1,0 +1,39 @@
+{
+  "name": "nanoclaw-codex-provider",
+  "version": "0.1.0",
+  "description": "OpenAI Codex provider plugin for NanoClaw — use your ChatGPT Plus/Pro subscription as an LLM backend",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "nanoclaw",
+    "codex",
+    "openai",
+    "chatgpt",
+    "oauth",
+    "gpt-5",
+    "llm",
+    "provider",
+    "plugin"
+  ],
+  "files": [
+    "host.ts",
+    "provider-codex.ts",
+    "types.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "codex-oauth": "^0.1.0"
+  },
+  "peerDependencies": {
+    "nanoclaw": "*"
+  },
+  "peerDependenciesMeta": {
+    "nanoclaw": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
