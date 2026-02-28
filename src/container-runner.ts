@@ -668,8 +668,11 @@ export function writeGroupsSnapshot(
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
 
-  // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
+  // Main sees all groups; registered groups see their registered peers so
+  // they can use send_message with target_chat_jid to notify other groups.
+  const visibleGroups = isMain
+    ? groups
+    : groups.filter((g) => registeredJids.has(g.jid));
 
   const groupsFile = path.join(groupIpcDir, 'available_groups.json');
   fs.writeFileSync(

@@ -41,15 +41,17 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group. To send to a different registered group, supply target_chat_jid (find JIDs in /workspace/ipc/available_groups.json).",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    target_chat_jid: z.string().optional().describe('Send to a different registered group instead of the current one. Find JIDs in /workspace/ipc/available_groups.json.'),
   },
   async (args) => {
+    const targetJid = args.target_chat_jid || chatJid;
     const data: Record<string, string | undefined> = {
       type: 'message',
-      chatJid,
+      chatJid: targetJid,
       text: args.text,
       sender: args.sender || undefined,
       groupFolder,

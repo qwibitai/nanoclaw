@@ -75,10 +75,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
+                // Any registered group can send to any other registered target.
+                // The source identity comes from the IPC directory (host-controlled),
+                // so it cannot be spoofed by container-side code.
+                if (isMain || targetGroup) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
@@ -87,7 +87,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                    'Unauthorized IPC message attempt blocked (target not registered)',
                   );
                 }
               }
