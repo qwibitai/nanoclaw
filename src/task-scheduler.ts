@@ -8,6 +8,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { selectModel, loadModelRoutingConfig } from './model-router.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -143,7 +144,10 @@ async function runTask(
         isMain,
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
-        model: task.model || undefined,
+        model: task.model || selectModel(
+          task.prompt,
+          loadModelRoutingConfig(task.group_folder),
+        ).model,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

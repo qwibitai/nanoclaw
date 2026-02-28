@@ -9,6 +9,7 @@ import path from 'path';
 import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { logger } from './logger.js';
+import { selectModel, loadModelRoutingConfig } from './model-router.js';
 import { RegisteredGroup } from './types.js';
 
 interface DelegateRequest {
@@ -155,7 +156,10 @@ async function spawnWorker(
         isMain: false, // Workers are never main — restricted permissions
         isScheduledTask: true, // Treat like a scheduled task (isolated)
         assistantName: 'Worker',
-        model: request.model || undefined,
+        model: request.model || selectModel(
+          request.prompt,
+          loadModelRoutingConfig(sourceGroup),
+        ).model,
       },
       (_proc, _name) => {
         // We don't track the process — container-runner handles cleanup
