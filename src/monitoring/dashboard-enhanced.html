@@ -1882,6 +1882,17 @@ function connectSSE() {
       appendAgentLog(type, data.groupName || '?', msg, data._ts);
     } catch (err) { console.error('SSE container:output error:', err); }
   });
+
+  eventSource.addEventListener('paper-trade:update', () => {
+    // Refresh paper portfolio if the paper tab is visible
+    const paperTab = document.getElementById('acct-sub-paper');
+    if (paperTab && paperTab.style.display !== 'none') {
+      loadPaperPortfolio();
+      // Reset countdown since we just refreshed
+      paperRefreshSecondsLeft = PAPER_REFRESH_SECONDS;
+      renderPaperCountdown();
+    }
+  });
 }
 
 // --- Agent monitoring ---

@@ -15,4 +15,5 @@ export const MONITOR_EVENTS = {
   CHANNEL_STATUS: 'channel:status',
   CONTAINER_LOG: 'container:log',
   CONTAINER_OUTPUT: 'container:output',
+  PAPER_TRADE_UPDATE: 'paper-trade:update',
 } as const;
