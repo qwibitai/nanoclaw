@@ -6,6 +6,7 @@ import {
   AUTO_LEARNER_ENABLED,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
+  HINDSIGHT_ENABLED,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   MIN_OBSERVER_MESSAGES,
@@ -283,6 +284,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ),
       )
       .catch((err) => logger.warn({ err, group: group.name }, 'Auto-learner failed (non-blocking)'));
+  }
+
+  // Hindsight: fire-and-forget post-mortem on frustrated conversations
+  if (HINDSIGHT_ENABLED) {
+    import('./hindsight.js')
+      .then(({ processHindsight }) =>
+        processHindsight(
+          group.folder,
+          missedMessages.map((m) => ({
+            sender_name: m.sender_name,
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
+          botResponses,
+        ),
+      )
+      .catch((err) => logger.warn({ err, group: group.name }, 'Hindsight failed (non-blocking)'));
   }
 
   return true;

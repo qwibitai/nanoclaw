@@ -16,6 +16,7 @@ const envConfig = readEnvFile([
   'MIN_OBSERVER_MESSAGES',
   'QUALITY_TRACKER_ENABLED',
   'AUTO_LEARNER_ENABLED',
+  'HINDSIGHT_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -106,3 +107,7 @@ export const QUALITY_TRACKER_ENABLED =
 // Auto-Learner — detect corrections and log learnings
 export const AUTO_LEARNER_ENABLED =
   (process.env.AUTO_LEARNER_ENABLED ?? envConfig.AUTO_LEARNER_ENABLED ?? 'true') !== 'false';
+
+// Hindsight — auto post-mortem on failed conversations
+export const HINDSIGHT_ENABLED =
+  (process.env.HINDSIGHT_ENABLED ?? envConfig.HINDSIGHT_ENABLED ?? 'true') !== 'false';
