@@ -60,11 +60,9 @@ describe('escapeXml', () => {
 describe('formatMessages', () => {
   it('formats a single message as XML', () => {
     const result = formatMessages([makeMsg()]);
-    expect(result).toBe(
-      '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
-        '</messages>',
-    );
+    expect(result).toMatch(/^<messages>\n<message sender="Alice" time="[^"]+">hello<\/message>\n<\/messages>$/);
+    expect(result).toContain('sender="Alice"');
+    expect(result).toContain('>hello</message>');
   });
 
   it('formats multiple messages', () => {

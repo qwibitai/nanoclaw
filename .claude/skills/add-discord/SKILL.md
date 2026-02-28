@@ -12,9 +12,9 @@ Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 
 
 Use `AskUserQuestion` to collect configuration:
 
-AskUserQuestion: Should Discord replace WhatsApp or run alongside it?
-- **Replace WhatsApp** - Discord will be the only channel (sets DISCORD_ONLY=true)
-- **Alongside** - Both Discord and WhatsApp channels active
+AskUserQuestion: Should Discord replace Telegram or run alongside it?
+- **Replace Telegram** - Discord will be the only channel
+- **Alongside** - Both Discord and Telegram channels active
 
 AskUserQuestion: Do you have a Discord bot token, or do you need to create one?
 
@@ -93,7 +93,7 @@ Add to `.env`:
 DISCORD_BOT_TOKEN=<their-token>
 ```
 
-If they chose to replace WhatsApp:
+If they chose to replace Telegram:
 
 ```bash
 DISCORD_ONLY=true

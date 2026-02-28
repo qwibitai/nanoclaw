@@ -56,7 +56,7 @@ function markdownToTelegramHtml(md: string): string {
     .join('');
 
   // 4. Convert markdown formatting to HTML
-  // Agent uses WhatsApp-style: *bold*, _italic_, ~strikethrough~
+  // Agent uses messaging-style: *bold*, _italic_, ~strikethrough~
   result = result.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   result = result.replace(
     /(?<!\*)\*(?!\s|\*)(.+?)(?<!\s)\*(?!\*)/g,

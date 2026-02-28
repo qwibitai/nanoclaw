@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  RESET_COMMAND_PATTERN: /\/(?:reset|clear)\b/i,
 }));
 
 // Mock logger
@@ -704,6 +705,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Hello',
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -717,6 +719,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '-1001234567890',
         'Group message',
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -733,11 +736,13 @@ describe('TelegramChannel', () => {
         1,
         '100200300',
         'x'.repeat(4096),
+        { parse_mode: 'HTML' },
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         2,
         '100200300',
         'x'.repeat(904),
+        { parse_mode: 'HTML' },
       );
     });
 
@@ -791,13 +796,9 @@ describe('TelegramChannel', () => {
       expect(channel.ownsJid('tg:-1001234567890')).toBe(true);
     });
 
-    it('does not own WhatsApp group JIDs', () => {
+    it('does not own non-Telegram JIDs', () => {
       const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.ownsJid('12345@g.us')).toBe(false);
-    });
-
-    it('does not own WhatsApp DM JIDs', () => {
-      const channel = new TelegramChannel('test-token', createTestOpts());
       expect(channel.ownsJid('12345@s.whatsapp.net')).toBe(false);
     });
 

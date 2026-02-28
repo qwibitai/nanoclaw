@@ -146,7 +146,6 @@ function setupLinux(projectRoot: string, nodePath: string, homeDir: string): voi
 
 /**
  * Kill any orphaned nanoclaw node processes left from previous runs or debugging.
- * Prevents WhatsApp "conflict" disconnects when two instances connect simultaneously.
  */
 function killOrphanedProcesses(projectRoot: string): void {
   try {
@@ -241,7 +240,7 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     );
   }
 
-  // Kill orphaned nanoclaw processes to avoid WhatsApp conflict errors
+  // Kill orphaned nanoclaw processes
   killOrphanedProcesses(projectRoot);
 
   // Enable and start

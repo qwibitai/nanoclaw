@@ -43,15 +43,15 @@ claude
 
 **AI 原生:** 无安装向导(由 Claude Code 指导安装)。无需监控仪表盘，直接询问 Claude 即可了解系统状况。无调试工具(描述问题，Claude 会修复它)。
 
-**技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Telegram）。相反，他们应该贡献像 `/add-telegram` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造您的 fork。最终，您得到的是只做您需要事情的整洁代码。
+**技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Discord）。相反，他们应该贡献像 `/add-discord` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造您的 fork。最终，您得到的是只做您需要事情的整洁代码。
 
 **最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着您直接运行的就是 Claude Code。工具套件至关重要。一个低效的工具套件会让再聪明的模型也显得迟钝，而一个优秀的套件则能赋予它们超凡的能力。Claude Code (在我看来) 是市面上最好的工具套件。
 
 ## 功能支持
 
-- **WhatsApp 输入/输出** - 通过手机给 Claude 发消息
+- **Telegram 输入/输出** - 通过 Telegram 给 Claude 发消息
 - **隔离的群组上下文** - 每个群组都拥有独立的 `CLAUDE.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
-- **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
+- **主频道** - 您的私有频道（与 bot 的私聊），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
 - **网络访问** - 搜索和抓取网页内容
 - **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
@@ -92,24 +92,20 @@ claude
 
 **不要添加功能，而是添加技能。**
 
-如果您想添加 Telegram 支持，不要创建一个 PR 同时添加 Telegram 和 WhatsApp。而是贡献一个技能文件 (`.claude/skills/add-telegram/SKILL.md`)，教 Claude Code 如何改造一个 NanoClaw 安装以使用 Telegram。
+如果您想添加 Discord 支持，不要创建一个 PR 同时添加 Discord 和 Telegram。而是贡献一个技能文件 (`.claude/skills/add-discord/SKILL.md`)，教 Claude Code 如何改造一个 NanoClaw 安装以使用 Discord。
 
-然后用户在自己的 fork 上运行 `/add-telegram`，就能得到只做他们需要事情的整洁代码，而不是一个试图支持所有用例的臃肿系统。
+然后用户在自己的 fork 上运行 `/add-discord`，就能得到只做他们需要事情的整洁代码，而不是一个试图支持所有用例的臃肿系统。
 
 ### RFS (技能征集)
 
 我们希望看到的技能：
 
 **通信渠道**
-- `/add-telegram` - 添加 Telegram 作为渠道。应提供选项让用户选择替换 WhatsApp 或作为额外渠道添加。也应能将其添加为控制渠道（可以触发动作）或仅作为被其他地方触发的动作所使用的渠道。
-- `/add-slack` - 添加 Slack
 - `/add-discord` - 添加 Discord
+- `/add-sms` - 通过 Twilio 或类似服务添加 SMS
 
 **平台支持**
 - `/setup-windows` - 通过 WSL2 + Docker 支持 Windows
-
-**会话管理**
-- `/add-clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
 ## 系统要求
 
@@ -121,14 +117,14 @@ claude
 ## 架构
 
 ```
-WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+Telegram (grammy) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
 单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组的消息队列都带有全局并发控制。通过文件系统进行进程间通信（IPC）。
 
 关键文件：
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
-- `src/channels/whatsapp.ts` - WhatsApp 连接、认证、收发消息
+- `src/channels/telegram.ts` - Telegram bot 连接、收发消息
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由
 - `src/group-queue.ts` - 各带全局并发限制的群组队列
@@ -139,9 +135,9 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 ## FAQ
 
-**为什么是 WhatsApp 而不是 Telegram/Signal 等？**
+**为什么是 Telegram？**
 
-因为我用 WhatsApp。Fork 这个项目然后运行一个技能来改变它。正是这个项目的核心理念。
+因为我用 Telegram。Fork 这个项目然后运行一个技能来添加您喜欢的渠道。正是这个项目的核心理念。
 
 **为什么是 Docker？**
 

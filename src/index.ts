@@ -7,17 +7,11 @@ import {
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   RESET_COMMAND_PATTERN,
-  SLACK_ALLOWED_USER_ID,
-  SLACK_APP_TOKEN,
-  SLACK_BOT_TOKEN,
   TELEGRAM_BOT_POOL,
   TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
-import { SlackChannel } from './channels/slack.js';
 import { initBotPool, TelegramChannel } from './channels/telegram.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -59,7 +53,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -480,23 +473,6 @@ async function main(): Promise<void> {
     }
   }
 
-  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-    const slack = new SlackChannel(
-      SLACK_BOT_TOKEN,
-      SLACK_APP_TOKEN,
-      channelOpts,
-      SLACK_ALLOWED_USER_ID || undefined,
-    );
-    channels.push(slack);
-    await slack.connect();
-  }
-
-  if (!TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
-  }
-
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -536,7 +512,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) => whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
