@@ -116,3 +116,7 @@ export const HINDSIGHT_ENABLED =
 // Workflow Router — deterministic routing between agent steps
 export const ROUTER_ENABLED =
   (process.env.ROUTER_ENABLED ?? envConfig.ROUTER_ENABLED ?? 'true') !== 'false';
+
+// ACP (Agent Client Protocol) — makes agents driveable from external tools
+export const ACP_ENABLED =
+  (process.env.ACP_ENABLED || '') === 'true';

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ACP_ENABLED,
   ASSISTANT_NAME,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
@@ -41,6 +42,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { startDelegationHandler } from './delegation-handler.js';
 import { startX402Handler } from './x402-handler.js';
+import { startAcpServer } from './acp-adapter.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -521,6 +523,11 @@ async function main(): Promise<void> {
 
   // Start delegation handler (spawns worker containers for delegate_task)
   startDelegationHandler(() => registeredGroups);
+
+  // Start ACP adapter if enabled (makes agents driveable from Zed, Cursor, etc.)
+  if (ACP_ENABLED) {
+    startAcpServer();
+  }
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
