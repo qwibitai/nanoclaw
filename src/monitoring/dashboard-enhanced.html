@@ -495,6 +495,39 @@
     50% { opacity: 0.5; }
   }
 
+  #run-portfolio-detail {
+    margin-top: 16px;
+    animation: modal-fade-in 0.15s ease;
+  }
+  #run-portfolio-detail .run-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #21262d;
+    flex-wrap: wrap;
+  }
+  #run-portfolio-detail .run-detail-header h3 {
+    font-size: 14px;
+    color: #f0f6fc;
+    margin: 0;
+    font-weight: 600;
+  }
+  #runs-active-body tr.run-row-clickable,
+  #runs-completed-body tr.run-row-clickable {
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #runs-active-body tr.run-row-clickable:hover,
+  #runs-completed-body tr.run-row-clickable:hover {
+    background: #1c2128;
+  }
+  #runs-active-body tr.run-row-selected,
+  #runs-completed-body tr.run-row-selected {
+    background: #1c2128;
+    box-shadow: inset 3px 0 0 #58a6ff;
+  }
+
   .sub-tabs {
     display: flex;
     gap: 4px;
@@ -1141,6 +1174,86 @@
         <thead><tr><th>ID</th><th>Type</th><th>Strategy</th><th>Platform</th><th>P&L</th><th>Win Rate</th><th>Completed</th></tr></thead>
         <tbody id="runs-completed-body"><tr><td colspan="7" class="empty-state">No completed runs</td></tr></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Per-Run Portfolio Detail (hidden by default) -->
+  <div id="run-portfolio-detail" class="panel" style="display: none;">
+    <div class="run-detail-header">
+      <button onclick="closeRunPortfolio()" style="background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">Back to runs</button>
+      <h3 id="run-detail-title">Run Portfolio</h3>
+      <span id="run-detail-badges" style="display: flex; gap: 6px;"></span>
+    </div>
+    <div class="panel-body">
+      <!-- Summary bar -->
+      <div id="run-detail-summary" style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;">
+        <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 120px;">
+          <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Realized P&L</div>
+          <div id="run-detail-pnl" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+        </div>
+        <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 120px;">
+          <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Unrealized P&L</div>
+          <div id="run-detail-unrealized" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+        </div>
+        <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 100px;">
+          <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Win Rate</div>
+          <div id="run-detail-winrate" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+        </div>
+        <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 100px;">
+          <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Open Exposure</div>
+          <div id="run-detail-exposure" style="font-size: 18px; font-weight: 700; color: #8b949e;">--</div>
+        </div>
+        <div style="background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 14px; flex: 1; min-width: 80px;">
+          <div style="color: #8b949e; font-size: 11px; text-transform: uppercase;">Trades</div>
+          <div id="run-detail-tradecount" style="font-size: 18px; font-weight: 700; color: #c9d1d9;">--</div>
+        </div>
+      </div>
+
+      <!-- Strategy Breakdown -->
+      <div id="run-detail-strat-panel" style="margin-bottom: 12px; display: none;">
+        <div style="font-weight: 600; color: #f0f6fc; margin-bottom: 8px;">Strategy Breakdown</div>
+        <div style="overflow-x: auto;">
+          <table style="width: 100%; font-size: 12px;">
+            <thead>
+              <tr style="background: #0d1117;">
+                <th style="padding: 5px 8px; text-align: left; color: #8b949e; font-weight: 600;">Strategy</th>
+                <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Trades</th>
+                <th style="padding: 5px 8px; text-align: center; color: #8b949e; font-weight: 600;">W/L</th>
+                <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Win%</th>
+                <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">P&L</th>
+                <th style="padding: 5px 8px; text-align: right; color: #8b949e; font-weight: 600;">Avg Return</th>
+              </tr>
+            </thead>
+            <tbody id="run-detail-strat-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Trades table -->
+      <div style="margin-bottom: 8px;">
+        <span style="font-weight: 600; color: #f0f6fc;">Trades</span>
+        <label style="color: #8b949e; cursor: pointer; font-size: 11px; margin-left: 12px;"><input type="checkbox" id="run-detail-show-closed" onchange="loadRunPortfolioDetail(_currentRunDetailId)" style="margin-right: 4px;">Show settled</label>
+      </div>
+      <div style="overflow-x: auto;">
+        <table style="width: 100%; font-size: 12px;">
+          <thead>
+            <tr style="background: #0d1117;">
+              <th style="padding: 6px 8px; text-align: left; color: #8b949e; font-weight: 600;">Ticker</th>
+              <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Strat</th>
+              <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Side</th>
+              <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Qty</th>
+              <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Entry</th>
+              <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Current/Exit</th>
+              <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">P&L</th>
+              <th style="padding: 6px 8px; text-align: center; color: #8b949e; font-weight: 600;">Status</th>
+              <th style="padding: 6px 8px; text-align: right; color: #8b949e; font-weight: 600;">Closes</th>
+            </tr>
+          </thead>
+          <tbody id="run-detail-trades-body">
+            <tr><td colspan="9" class="empty-state" style="padding: 16px;">Select a run to view trades</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -3413,17 +3526,20 @@ async function loadRuns() {
     if (!active.length) {
       activeBody.innerHTML = '<tr><td colspan="7" class="empty-state">No active runs</td></tr>';
     } else {
-      activeBody.innerHTML = active.map(r => `
-        <tr>
+      activeBody.innerHTML = active.map(r => {
+        const selected = _currentRunDetailId === r.id ? ' run-row-selected' : '';
+        const label = escapeHtml(r.strategy) + ' (' + escapeHtml(r.type) + ')';
+        return `
+        <tr class="run-row-clickable${selected}" data-run-id="${r.id}" onclick="showRunPortfolio('${r.id}', '${label}')">
           <td><code>${r.id.slice(0, 16)}</code></td>
           <td>${escapeHtml(r.type)}</td>
           <td>${escapeHtml(r.strategy)}</td>
           <td>${escapeHtml(r.platform)}</td>
           <td><span class="badge badge-green badge-pulsing">${r.status}</span></td>
           <td>${new Date(r.created_at).toLocaleString()}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="stopRun('${r.id}')">Stop</button></td>
-        </tr>
-      `).join('');
+          <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); stopRun('${r.id}')">Stop</button></td>
+        </tr>`;
+      }).join('');
     }
 
     const completedBody = document.getElementById('runs-completed-body');
@@ -3439,8 +3555,10 @@ async function loadRuns() {
             winRate = ((res.win_rate || 0) * 100).toFixed(1) + '%';
           }
         } catch {}
+        const selected = _currentRunDetailId === r.id ? ' run-row-selected' : '';
+        const label = escapeHtml(r.strategy) + ' (' + escapeHtml(r.type) + ')';
         return `
-          <tr>
+          <tr class="run-row-clickable${selected}" data-run-id="${r.id}" onclick="showRunPortfolio('${r.id}', '${label}')">
             <td><code>${r.id.slice(0, 16)}</code></td>
             <td>${escapeHtml(r.type)}</td>
             <td>${escapeHtml(r.strategy)}</td>
@@ -3513,6 +3631,184 @@ async function stopRun(id) {
     });
     loadRuns();
   } catch (err) { alert('Error: ' + err.message); }
+}
+
+// --- Run Portfolio Detail ---
+
+let _currentRunDetailId = null;
+
+function showRunPortfolio(runId, label) {
+  _currentRunDetailId = runId;
+  // Highlight selected row
+  document.querySelectorAll('#runs-active-body tr, #runs-completed-body tr').forEach(tr => {
+    tr.classList.toggle('run-row-selected', tr.dataset.runId === runId);
+  });
+  const panel = document.getElementById('run-portfolio-detail');
+  document.getElementById('run-detail-title').textContent = label || 'Run ' + runId.slice(0, 16);
+  panel.style.display = '';
+  loadRunPortfolioDetail(runId);
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeRunPortfolio() {
+  _currentRunDetailId = null;
+  document.getElementById('run-portfolio-detail').style.display = 'none';
+  document.querySelectorAll('#runs-active-body tr, #runs-completed-body tr').forEach(tr => {
+    tr.classList.remove('run-row-selected');
+  });
+}
+
+async function loadRunPortfolioDetail(runId) {
+  try {
+    const resp = await fetch('/api/trading/paper/portfolio?run_id=' + encodeURIComponent(runId));
+    const data = await resp.json();
+    if (data.error) return;
+
+    // Summary metrics
+    const pnlCents = data.total_pnl_cents || 0;
+    const pnlEl = document.getElementById('run-detail-pnl');
+    pnlEl.textContent = (pnlCents >= 0 ? '+' : '') + '$' + (pnlCents / 100).toFixed(2);
+    pnlEl.style.color = pnlCents > 0 ? '#3fb950' : pnlCents < 0 ? '#f85149' : '#8b949e';
+
+    const uPnlCents = data.unrealized_pnl_cents || 0;
+    const uPnlEl = document.getElementById('run-detail-unrealized');
+    uPnlEl.textContent = (uPnlCents >= 0 ? '+' : '') + '$' + (uPnlCents / 100).toFixed(2);
+    uPnlEl.style.color = uPnlCents > 0 ? '#3fb950' : uPnlCents < 0 ? '#f85149' : '#8b949e';
+
+    const wrEl = document.getElementById('run-detail-winrate');
+    wrEl.textContent = data.closed_trades > 0 ? data.win_rate + '%' : '--';
+    wrEl.style.color = data.win_rate >= 50 ? '#3fb950' : data.win_rate > 0 ? '#f85149' : '#8b949e';
+
+    document.getElementById('run-detail-exposure').textContent = '$' + (data.open_exposure / 100).toFixed(2);
+    document.getElementById('run-detail-tradecount').textContent = data.total_trades + ' (' + data.open_trades + ' open)';
+
+    // Strategy breakdown
+    const stratPanel = document.getElementById('run-detail-strat-panel');
+    const stratBody = document.getElementById('run-detail-strat-body');
+    const byStrategy = data.by_strategy || {};
+    const stratKeys = Object.keys(byStrategy);
+    const hasClosedStrats = stratKeys.some(k => byStrategy[k].wins + byStrategy[k].losses > 0);
+    if (stratKeys.length > 0 && hasClosedStrats) {
+      stratPanel.style.display = '';
+      const stratLabels = { center_bracket: 'Center Bracket', spread: 'Spread', directional: 'Directional', momentum_15m: '15m Momentum', lottery: 'Lottery', arbitrage: 'Arbitrage', uncategorized: 'Other' };
+      const stratColors = { center_bracket: '#58a6ff', spread: '#d2a8ff', directional: '#f0883e', momentum_15m: '#3fb950', lottery: '#f85149', arbitrage: '#e3b341', uncategorized: '#8b949e' };
+      stratKeys.sort((a, b) => {
+        const aClosed = byStrategy[a].wins + byStrategy[a].losses;
+        const bClosed = byStrategy[b].wins + byStrategy[b].losses;
+        if (aClosed > 0 && bClosed === 0) return -1;
+        if (aClosed === 0 && bClosed > 0) return 1;
+        return byStrategy[b].pnl_cents - byStrategy[a].pnl_cents;
+      });
+      let shtml = '';
+      for (const k of stratKeys) {
+        const s = byStrategy[k];
+        const closed = s.wins + s.losses;
+        const label = stratLabels[k] || k;
+        const color = stratColors[k] || '#8b949e';
+        const wrText = closed > 0 ? s.win_rate + '%' : '--';
+        const pnlColor = s.pnl_cents > 0 ? '#3fb950' : s.pnl_cents < 0 ? '#f85149' : '#8b949e';
+        const pnlText = closed > 0 ? ((s.pnl_cents >= 0 ? '+' : '') + '$' + s.pnl.toFixed(2)) : '$0.00';
+        const retText = closed > 0 ? ((s.avg_return_pct >= 0 ? '+' : '') + s.avg_return_pct + '%') : (s.open > 0 ? '(open)' : '--');
+        shtml += '<tr>';
+        shtml += '<td style="padding:4px 8px;"><span style="color:' + color + ';font-weight:600;">' + escapeHtml(label) + '</span></td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + s.trades + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:center;">' + s.wins + '/' + s.losses + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + wrText + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;color:' + pnlColor + ';">' + pnlText + '</td>';
+        shtml += '<td style="padding:4px 8px;text-align:right;">' + retText + '</td>';
+        shtml += '</tr>';
+      }
+      stratBody.innerHTML = shtml;
+    } else {
+      stratPanel.style.display = 'none';
+    }
+
+    // Trades table
+    const showClosed = document.getElementById('run-detail-show-closed')?.checked;
+    const trades = [];
+    for (const t of (data.open_positions || [])) {
+      trades.push({ ...t, _type: 'open' });
+    }
+    if (showClosed) {
+      for (const t of (data.closed_positions || [])) {
+        trades.push({ ...t, _type: 'closed' });
+      }
+    }
+
+    const tbody = document.getElementById('run-detail-trades-body');
+    if (!trades.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-state" style="padding: 16px;">No trades' + (showClosed ? '' : ' (check "Show settled" for history)') + '</td></tr>';
+      return;
+    }
+
+    const stratColorMap = { center_bracket: '#58a6ff', spread: '#d2a8ff', directional: '#f0883e', momentum_15m: '#3fb950', lottery: '#f85149', arbitrage: '#e3b341', uncategorized: '#8b949e' };
+    const stratLabelMap = { center_bracket: 'CB', spread: 'SPR', directional: 'DIR', momentum_15m: '15M', lottery: 'LOT', arbitrage: 'ARB', uncategorized: '?' };
+    const stratFullMap = { center_bracket: 'Center Bracket', spread: 'Spread', directional: 'Directional', momentum_15m: '15m Momentum', lottery: 'Lottery', arbitrage: 'Arbitrage', uncategorized: 'Other' };
+
+    let html = '';
+    for (const t of trades) {
+      const isOpen = t._type === 'open';
+      const sideBadge = t.side === 'yes'
+        ? '<span class="badge badge-green">YES</span>'
+        : '<span class="badge badge-red">NO</span>';
+
+      let currentExitCell = '';
+      let pnlCell = '';
+
+      if (isOpen) {
+        const cp = t.current_price;
+        currentExitCell = cp !== null ? cp + 'c' : '<span style="color:#8b949e;">--</span>';
+        const uPnl = t.unrealized_pnl || 0;
+        const pnlColor = uPnl > 0 ? '#3fb950' : uPnl < 0 ? '#f85149' : '#8b949e';
+        pnlCell = '<span style="color:' + pnlColor + ';">' + (uPnl >= 0 ? '+' : '') + '$' + (uPnl / 100).toFixed(2) + '</span>';
+      } else {
+        currentExitCell = (t.exit_price !== null ? t.exit_price + 'c' : '--');
+        let pnl = 0;
+        if (t.exit_price !== null) {
+          pnl = (t.exit_price - t.entry_price) * t.qty;
+        }
+        const pnlColor = pnl > 0 ? '#3fb950' : pnl < 0 ? '#f85149' : '#8b949e';
+        pnlCell = '<span style="color:' + pnlColor + ';">' + (pnl >= 0 ? '+' : '') + '$' + (pnl / 100).toFixed(2) + '</span>';
+      }
+
+      let statusBadge = '';
+      if (t.status === 'open') statusBadge = '<span class="badge badge-green">OPEN</span>';
+      else if (t.status === 'won') statusBadge = '<span class="badge badge-green">WIN</span>';
+      else if (t.status === 'lost') statusBadge = '<span class="badge badge-red">LOSS</span>';
+      else if (t.status === 'cancelled') statusBadge = '<span class="badge badge-gray">CANCEL</span>';
+
+      const tickerDisplay = t.ticker.length > 25 ? t.ticker.slice(0, 25) + '...' : t.ticker;
+      const strat = t.strategy || 'uncategorized';
+      const stratColor = stratColorMap[strat] || '#8b949e';
+      const stratLabel = stratLabelMap[strat] || strat.slice(0, 3).toUpperCase();
+      const stratFull = stratFullMap[strat] || strat;
+      const stratBadge = '<span style="background:' + stratColor + '22;color:' + stratColor + ';padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;" title="' + escapeHtml(stratFull) + '">' + stratLabel + '</span>';
+
+      let closeCell = '<span style="color:#8b949e;">--</span>';
+      if (t.close_time) {
+        const cd = new Date(t.close_time);
+        const timeStr = cd.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        const diffMs = cd - new Date();
+        const color = (t.status === 'open' && diffMs < 0) ? '#f85149' : (t.status === 'open' && diffMs < 3600000) ? '#f0883e' : '#8b949e';
+        closeCell = '<span style="color:' + color + ';">' + timeStr + '</span>';
+      }
+
+      html += '<tr>';
+      html += '<td style="font-size:11px;font-family:monospace;white-space:nowrap;" title="' + escapeHtml(t.ticker) + '">' + escapeHtml(tickerDisplay) + '</td>';
+      html += '<td style="text-align:center;">' + stratBadge + '</td>';
+      html += '<td style="text-align:center;">' + sideBadge + '</td>';
+      html += '<td style="text-align:right;">' + t.qty + '</td>';
+      html += '<td style="text-align:right;">' + t.entry_price + 'c</td>';
+      html += '<td style="text-align:right;">' + currentExitCell + '</td>';
+      html += '<td style="text-align:right;">' + pnlCell + '</td>';
+      html += '<td style="text-align:center;">' + statusBadge + '</td>';
+      html += '<td style="text-align:right;font-size:11px;white-space:nowrap;" title="' + escapeHtml(t.close_time || '') + '">' + closeCell + '</td>';
+      html += '</tr>';
+    }
+    tbody.innerHTML = html;
+  } catch (err) {
+    console.error('Run portfolio detail load error:', err);
+  }
 }
 
 // --- Backtests ---
