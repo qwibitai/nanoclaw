@@ -18,6 +18,8 @@ export function readEnvFile(keys: string[]): Record<string, string> {
     return {};
   }
 
+  if (!content || typeof content !== 'string') return {};
+
   const result: Record<string, string> = {};
   const wanted = new Set(keys);
 

@@ -4,6 +4,9 @@
   "description": "Personal Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "sovereign": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -20,6 +23,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
+    "@slack/bolt": "^4.6.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "@x402/evm": "^2.5.0",
     "@x402/fetch": "^2.5.0",

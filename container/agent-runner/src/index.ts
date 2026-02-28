@@ -210,6 +210,35 @@ function createSanitizeBashHook(): HookCallback {
   };
 }
 
+// Block patterns for dangerous Bash commands (mirrors MCP tool guard).
+const BASH_BLOCK_PATTERNS = [
+  'rm -rf', 'rm -r /', 'drop table', 'drop database',
+  'truncate table', 'shutdown', 'reboot', 'mkfs',
+];
+
+function createBashGuardHook(): HookCallback {
+  return async (input, _toolUseId, _context) => {
+    const preInput = input as PreToolUseHookInput;
+    const command = (preInput.tool_input as { command?: string })?.command;
+    if (!command) return {};
+
+    // Normalize whitespace and lowercase for matching
+    const normalized = command.toLowerCase().replace(/\s+/g, ' ');
+    for (const pattern of BASH_BLOCK_PATTERNS) {
+      if (normalized.includes(pattern)) {
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            decision: 'block',
+            reason: `Blocked by tool guard: matched "${pattern}"`,
+          },
+        };
+      }
+    }
+    return {};
+  };
+}
+
 function sanitizeFilename(summary: string): string {
   return summary
     .toLowerCase()
@@ -458,7 +487,7 @@ async function runQuery(
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
-        PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [createBashGuardHook(), createSanitizeBashHook()] }],
       },
     }
   })) {

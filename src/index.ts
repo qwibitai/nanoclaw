@@ -2,15 +2,24 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ACP_ENABLED,
   ASSISTANT_NAME,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MIN_OBSERVER_MESSAGES,
   POLL_INTERVAL,
+  ROUTER_ENABLED,
+  SENTRY_AGENT_CHANNEL,
+  SENTRY_AGENT_PORT,
+  SENTRY_WEBHOOK_SECRET,
+  SLACK_APP_TOKEN,
+  SLACK_BOT_TOKEN,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
+import { SlackChannel } from './channels/slack.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -38,7 +47,11 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { startDelegationHandler } from './delegation-handler.js';
+import { startElicitationHandler } from './elicitation-handler.js';
+import { startRelayHandler } from './relay-handler.js';
 import { startX402Handler } from './x402-handler.js';
+import { startSentryAgent } from './sentry-agent.js';
+import { startAcpServer } from './acp-adapter.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -186,6 +199,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  const botResponses: string[] = [];
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -197,6 +211,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        botResponses.push(text);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -226,6 +241,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     saveState();
     logger.warn({ group: group.name }, 'Agent error, rolled back message cursor for retry');
     return false;
+  }
+
+  // Workflow Router: evaluate all post-conversation rules (fire-and-forget)
+  if (ROUTER_ENABLED) {
+    import('./workflow-router.js')
+      .then(({ routeAfterConversation, loadRoutingConfig }) => {
+        const config = loadRoutingConfig(group.folder, MIN_OBSERVER_MESSAGES);
+        return routeAfterConversation(
+          {
+            groupFolder: group.folder,
+            userMessages: missedMessages.map((m) => ({
+              sender_name: m.sender_name,
+              content: m.content,
+              timestamp: m.timestamp,
+            })),
+            botResponses,
+          },
+          config,
+        );
+      })
+      .catch((err) => logger.warn({ err, group: group.name }, 'Workflow router failed (non-blocking)'));
   }
 
   return true;
@@ -456,6 +492,12 @@ async function main(): Promise<void> {
     await discord.connect();
   }
 
+  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
+    const slack = new SlackChannel(SLACK_BOT_TOKEN, SLACK_APP_TOKEN, channelOpts);
+    channels.push(slack);
+    await slack.connect();
+  }
+
   if (!DISCORD_ONLY) {
     whatsapp = new WhatsAppChannel(channelOpts);
     channels.push(whatsapp);
@@ -496,6 +538,70 @@ async function main(): Promise<void> {
 
   // Start delegation handler (spawns worker containers for delegate_task)
   startDelegationHandler(() => registeredGroups);
+
+  // Start elicitation handler (structured questions via IPC)
+  startElicitationHandler({
+    findChannel: (jid) => findChannel(channels, jid),
+    addReactions: async (_jid, _messageId, _emojis) => {
+      // Future: channel.addReactions() when Discord/Slack adapters support it
+    },
+    waitForResponse: async (jid, _messageId, options, allowFreetext, timeoutMs) => {
+      // Simple timeout-based: wait for next message in channel matching an option
+      const { parseTextReply } = await import('./structured-elicitation.js');
+      return new Promise((resolve) => {
+        const deadline = setTimeout(() => {
+          resolve({ chosen: null, freetext: null, timeout: true });
+        }, timeoutMs);
+
+        const poll = setInterval(() => {
+          const recent = getMessagesSince(jid, new Date(Date.now() - 2000).toISOString(), ASSISTANT_NAME);
+          for (const msg of recent) {
+            const match = parseTextReply(msg.content, options);
+            if (match) {
+              clearTimeout(deadline);
+              clearInterval(poll);
+              resolve({ chosen: match, freetext: null, timeout: false });
+              return;
+            }
+            if (allowFreetext && msg.content.trim()) {
+              clearTimeout(deadline);
+              clearInterval(poll);
+              resolve({ chosen: null, freetext: msg.content.trim(), timeout: false });
+              return;
+            }
+          }
+        }, 1000);
+      });
+    },
+  });
+
+  // Start relay handler (agent-to-agent peer messaging via IPC)
+  startRelayHandler({
+    isRegisteredGroup: (folder) => {
+      const groups = registeredGroups;
+      return Object.values(groups).some((g) => g.folder === folder);
+    },
+  });
+
+  // Start sentry agent if configured (webhook-based incident triage)
+  if (SENTRY_AGENT_PORT > 0 && SENTRY_AGENT_CHANNEL) {
+    startSentryAgent(
+      {
+        port: SENTRY_AGENT_PORT,
+        channelJid: SENTRY_AGENT_CHANNEL,
+        webhookSecret: SENTRY_WEBHOOK_SECRET || undefined,
+      },
+      async (jid, text) => {
+        const channel = findChannel(channels, jid);
+        if (channel) await channel.sendMessage(jid, text);
+      },
+    );
+  }
+
+  // Start ACP adapter if enabled (makes agents driveable from Zed, Cursor, etc.)
+  if (ACP_ENABLED) {
+    startAcpServer();
+  }
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

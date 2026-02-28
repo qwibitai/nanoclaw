@@ -11,7 +11,15 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'DISCORD_BOT_TOKEN',
   'DISCORD_ONLY',
+  'SLACK_BOT_TOKEN',
+  'SLACK_APP_TOKEN',
   'ALLOWED_USERS',
+  'OBSERVER_ENABLED',
+  'MIN_OBSERVER_MESSAGES',
+  'QUALITY_TRACKER_ENABLED',
+  'AUTO_LEARNER_ENABLED',
+  'HINDSIGHT_ENABLED',
+  'ROUTER_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -77,6 +85,12 @@ export const DISCORD_BOT_TOKEN =
 export const DISCORD_ONLY =
   (process.env.DISCORD_ONLY || envConfig.DISCORD_ONLY) === 'true';
 
+// Slack configuration (Socket Mode — no public URL needed)
+export const SLACK_BOT_TOKEN =
+  process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
+export const SLACK_APP_TOKEN =
+  process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+
 // DM allowlist — comma-separated Discord user IDs. Empty = allow all.
 const allowedUsersRaw =
   process.env.ALLOWED_USERS || envConfig.ALLOWED_USERS || '';
@@ -86,3 +100,41 @@ export const ALLOWED_USERS: Set<string> = new Set(
     .map((id) => id.trim())
     .filter(Boolean),
 );
+
+// Observer — auto-compress conversations into prioritized observations
+export const OBSERVER_ENABLED =
+  (process.env.OBSERVER_ENABLED ?? envConfig.OBSERVER_ENABLED ?? 'true') !== 'false';
+export const MIN_OBSERVER_MESSAGES = Math.max(
+  1,
+  parseInt(process.env.MIN_OBSERVER_MESSAGES || envConfig.MIN_OBSERVER_MESSAGES || '5', 10) || 5,
+);
+
+// Quality Tracker — JSONL conversation logging with implicit quality signals
+export const QUALITY_TRACKER_ENABLED =
+  (process.env.QUALITY_TRACKER_ENABLED ?? envConfig.QUALITY_TRACKER_ENABLED ?? 'true') !== 'false';
+
+// Auto-Learner — detect corrections and log learnings
+export const AUTO_LEARNER_ENABLED =
+  (process.env.AUTO_LEARNER_ENABLED ?? envConfig.AUTO_LEARNER_ENABLED ?? 'true') !== 'false';
+
+// Hindsight — auto post-mortem on failed conversations
+export const HINDSIGHT_ENABLED =
+  (process.env.HINDSIGHT_ENABLED ?? envConfig.HINDSIGHT_ENABLED ?? 'true') !== 'false';
+
+// Workflow Router — deterministic routing between agent steps
+export const ROUTER_ENABLED =
+  (process.env.ROUTER_ENABLED ?? envConfig.ROUTER_ENABLED ?? 'true') !== 'false';
+
+// ACP (Agent Client Protocol) — makes agents driveable from external tools
+export const ACP_ENABLED =
+  (process.env.ACP_ENABLED || '') === 'true';
+
+// Sentry Agent — automated incident triage
+export const SENTRY_AGENT_PORT = parseInt(
+  process.env.SENTRY_AGENT_PORT || '0',
+  10,
+); // 0 = disabled
+export const SENTRY_AGENT_CHANNEL =
+  process.env.SENTRY_AGENT_CHANNEL || ''; // JID to post alerts to
+export const SENTRY_WEBHOOK_SECRET =
+  process.env.SENTRY_WEBHOOK_SECRET || '';

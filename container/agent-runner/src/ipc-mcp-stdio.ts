@@ -41,6 +41,244 @@ const server = new McpServer({
 });
 
 
+// ── Tool Observability — log every tool call to JSONL ────────────────
+// Async append, non-blocking. Credential patterns scrubbed from args.
+
+const SESSION_ID = `${groupFolder}-${Date.now()}`;
+
+const CRED_PATTERNS = [
+  /\b(sk-[a-zA-Z0-9]{20,})\b/g,
+  /\b(ghp_[a-zA-Z0-9]{36,})\b/g,
+  /\b(AKIA[A-Z0-9]{12,})\b/g,
+  /\b(xoxb-[a-zA-Z0-9-]+)\b/g,
+  /\b(Bearer\s+[a-zA-Z0-9._-]{20,})\b/g,
+  /\b([a-f0-9]{64})\b/g,
+];
+
+function scrubText(text: string): string {
+  let r = text;
+  for (const p of CRED_PATTERNS) r = r.replace(p, '[REDACTED]');
+  return r;
+}
+
+function scrubObjValues(obj: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === 'string') {
+      let s = scrubText(v);
+      if (s.length > 500) s = s.slice(0, 500) + '...';
+      out[k] = s;
+    } else if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      out[k] = scrubObjValues(v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function logToolCall(
+  tool: string,
+  args: Record<string, unknown>,
+  durationMs: number,
+  resultSize: number,
+  success: boolean,
+  error?: string,
+): void {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const logPath = path.join(IPC_DIR, `tool-calls-${yyyy}-${mm}-${dd}.jsonl`);
+
+  const entry = JSON.stringify({
+    timestamp: now.toISOString(),
+    tool,
+    args: scrubObjValues(args),
+    duration_ms: Math.round(durationMs),
+    result_size: resultSize,
+    success,
+    ...(error ? { error: scrubText(error).slice(0, 200) } : {}),
+    session_id: SESSION_ID,
+  });
+
+  // Async append — fire and forget, never blocks tool execution
+  fs.appendFile(logPath, entry + '\n', () => {});
+}
+
+
+// ── Tool Guard — pre-execution security layer ────────────────────────
+// Blocks dangerous patterns in args, enforces per-agent tool permissions.
+// Config loaded from /workspace/group/tool-guard.json (or sensible defaults).
+
+interface GuardVerdict {
+  action: 'allow' | 'block';
+  reason: string;
+}
+
+const GUARD_DEFAULT_BLOCK = [
+  'rm -rf', 'rm -r /', 'DROP TABLE', 'DROP DATABASE',
+  'TRUNCATE TABLE', 'shutdown', 'reboot', 'mkfs',
+];
+
+function loadGuardConfig(): { block: string[]; pause: string[]; allow: string[] } {
+  try {
+    const configPath = '/workspace/group/tool-guard.json';
+    if (fs.existsSync(configPath)) {
+      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      // Always merge with defaults — group configs can ADD patterns but never weaken defaults
+      const userBlock = Array.isArray(raw.block) ? raw.block : [];
+      return {
+        block: [...new Set([...GUARD_DEFAULT_BLOCK, ...userBlock])],
+        pause: Array.isArray(raw.pause) ? raw.pause : [],
+        allow: Array.isArray(raw.allow) ? raw.allow : [],
+      };
+    }
+  } catch { /* use defaults */ }
+  return { block: GUARD_DEFAULT_BLOCK, pause: [], allow: [] };
+}
+
+const guardConfig = loadGuardConfig();
+
+function evaluateGuard(
+  toolName: string,
+  callArgs: Record<string, unknown>,
+): GuardVerdict {
+  // Normalize: lowercase + collapse all whitespace to single spaces
+  const serialized = `${toolName} ${JSON.stringify(callArgs)}`.toLowerCase().replace(/\s+/g, ' ');
+
+  // 1. Block patterns (case-insensitive substring match on name + args)
+  for (const pattern of guardConfig.block) {
+    if (serialized.includes(pattern.toLowerCase())) {
+      return { action: 'block', reason: `Matched block pattern: "${pattern}"` };
+    }
+  }
+
+  // 2. Allow list (tool name — overrides pause)
+  if (guardConfig.allow.includes(toolName)) {
+    return { action: 'allow', reason: 'In allow list' };
+  }
+
+  // 3. Pause list (needs explicit approval via allow list)
+  if (guardConfig.pause.includes(toolName)) {
+    return { action: 'block', reason: `Tool "${toolName}" requires approval (in pause list)` };
+  }
+
+  // 4. Default: allow
+  return { action: 'allow', reason: 'No matching rule' };
+}
+
+
+// ── Rate Limiter & Spend Tracker ─────────────────────────────────────
+// In-memory per-session. Resets on container restart (by design).
+
+interface RateLimitState { count: number; windowStart: number; }
+const rateLimitStates: Record<string, RateLimitState> = {};
+
+const RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
+  send_sms: { max: 10, windowMs: 3_600_000 },   // 10/hour
+  make_call: { max: 5, windowMs: 3_600_000 },    // 5/hour
+};
+
+function checkRateLimit(toolName: string): { allowed: boolean; message: string } {
+  const limit = RATE_LIMITS[toolName];
+  if (!limit) return { allowed: true, message: '' };
+
+  const now = Date.now();
+  const state = rateLimitStates[toolName];
+
+  if (!state || now - state.windowStart >= limit.windowMs) {
+    rateLimitStates[toolName] = { count: 1, windowStart: now };
+    return { allowed: true, message: '' };
+  }
+
+  if (state.count >= limit.max) {
+    const resetsIn = Math.ceil((limit.windowMs - (now - state.windowStart)) / 60_000);
+    return {
+      allowed: false,
+      message: `Rate limit: ${toolName} max ${limit.max}/hour reached. Resets in ~${resetsIn} min.`,
+    };
+  }
+
+  state.count++;
+  return { allowed: true, message: '' };
+}
+
+let dailySpend = { totalUsd: 0, dayStart: Date.now() };
+const DAILY_SPEND_CAP_USD = 10;
+
+function checkSpendLimit(amountUsd: number): { allowed: boolean; message: string } {
+  const now = Date.now();
+  if (now - dailySpend.dayStart >= 86_400_000) {
+    dailySpend = { totalUsd: 0, dayStart: now };
+  }
+
+  if (dailySpend.totalUsd + amountUsd > DAILY_SPEND_CAP_USD) {
+    return {
+      allowed: false,
+      message: `Daily spend cap ($${DAILY_SPEND_CAP_USD}) reached. Spent today: $${dailySpend.totalUsd.toFixed(2)}. Try again tomorrow.`,
+    };
+  }
+
+  dailySpend.totalUsd += amountUsd;
+  return { allowed: true, message: '' };
+}
+
+
+// Wrap the original server.tool to inject observability + guard
+const originalTool = server.tool.bind(server);
+type ToolCallback = (...callbackArgs: unknown[]) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
+
+server.tool = function wrappedTool(name: string, ...rest: unknown[]) {
+  // server.tool has overloads: (name, desc, schema, handler) or (name, schema, handler)
+  // The handler is always the last argument
+  const handlerIdx = rest.length - 1;
+  const originalHandler = rest[handlerIdx] as ToolCallback;
+
+  rest[handlerIdx] = async function observedHandler(...handlerArgs: unknown[]) {
+    const start = performance.now();
+    let success = true;
+    let errorMsg: string | undefined;
+    let resultText = '';
+
+    try {
+      // ── Tool Guard: pre-execution security check ──
+      const callArgs = (typeof handlerArgs[0] === 'object' && handlerArgs[0] !== null)
+        ? handlerArgs[0] as Record<string, unknown>
+        : {};
+      const verdict = evaluateGuard(name, callArgs);
+      if (verdict.action === 'block') {
+        const msg = `⛔ Blocked by tool guard: ${verdict.reason}`;
+        resultText = msg;
+        success = false;
+        errorMsg = `GUARD_BLOCKED: ${verdict.reason}`;
+        return { content: [{ type: 'text' as const, text: msg }], isError: true };
+      }
+
+      const result = await originalHandler(...handlerArgs);
+      resultText = result.content?.map((c: { text: string }) => c.text).join('') ?? '';
+      if (result.isError) {
+        success = false;
+        errorMsg = resultText.slice(0, 200);
+      }
+      return result;
+    } catch (err) {
+      success = false;
+      errorMsg = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      const duration = performance.now() - start;
+      const args = (typeof handlerArgs[0] === 'object' && handlerArgs[0] !== null)
+        ? handlerArgs[0] as Record<string, unknown>
+        : {};
+      logToolCall(name, args, duration, resultText.length, success, errorMsg);
+    }
+  };
+
+  return (originalTool as Function)(name, ...rest);
+} as typeof server.tool;
+
+
 // ── BM25 Search (pure JS, zero deps) ────────────────────────────────
 // Indexes workspace files on-the-fly into an in-memory BM25 index.
 // Future: if EMBEDDING_URL is set, also query embeddings and merge via RRF.
@@ -422,15 +660,20 @@ This searches the actual files on disk, not conversation history. Your nightly c
 
 Powered by BM25 relevance ranking — results are sorted by how well they match your query, not just whether they contain the words.
 
+MODE:
+- "layered" (default): Returns compact summaries — file path, category, score, and first meaningful line. Use recall_detail to fetch the full content of specific files. Saves context tokens.
+- "full": Returns full matching snippets inline (legacy behavior). Use when you need everything at once.
+
 Tips:
 - Use specific keywords: "stripe", "brandon preference", "oauth"
 - Search is case-insensitive and ranked by relevance
-- Returns matching passages with filenames, sorted by score
+- In layered mode, scan summaries first, then call recall_detail for the files you actually need
 - If you get no results, try different keywords or check daily/ for date-specific notes`,
   {
     query: z.string().describe('Search keywords (e.g. "stripe keys", "brandon", "revenue target"). Ranked by BM25 relevance.'),
     folder: z.enum(['all', 'knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']).default('all').describe('Narrow search to a specific folder, or "all" to search everywhere.'),
     max_results: z.number().default(20).describe('Maximum number of results to return.'),
+    mode: z.enum(['layered', 'full']).default('layered').describe('layered=compact summaries (use recall_detail for full content), full=full snippets inline (legacy)'),
   },
   async (args) => {
     const baseDir = '/workspace/group';
@@ -453,12 +696,88 @@ Tips:
         return { content: [{ type: 'text' as const, text: `No results for "${args.query}". Try different keywords, or check if you have written this down yet.` }] };
       }
 
-      let output = `## Recall results for "${args.query}"\\n\\n`;
-      for (const r of results) {
-        output += `**${r.file}** (score: ${r.score})\\n\`\`\`\\n${r.snippet}\\n\`\`\`\\n\\n`;
+      if (args.mode === 'full') {
+        // Full mode — legacy behavior with complete snippets
+        let output = `## Recall results for "${args.query}"\n\n`;
+        for (const r of results) {
+          output += `**${r.file}** (score: ${r.score})\n\`\`\`\n${r.snippet}\n\`\`\`\n\n`;
+        }
+        if (EMBEDDING_URL) {
+          output += `\n_Semantic search: enabled (${EMBEDDING_URL})_`;
+        }
+        return { content: [{ type: 'text' as const, text: output }] };
       }
+
+      // Layered mode — compact summaries
+      const CATEGORY_PATTERNS: Array<[RegExp, string]> = [
+        [/\bobservations?\b/i, 'observation'],
+        [/\blearnings?\b/i, 'learning'],
+        [/\bknowledge\b/i, 'knowledge'],
+        [/\bdaily\b/i, 'daily'],
+        [/\bprojects?\b/i, 'project'],
+        [/\bconversations?\b/i, 'conversation'],
+        [/\bmemory\b/i, 'memory'],
+      ];
+
+      const PRIORITY_PATTERNS: Array<[RegExp, string]> = [
+        [/\u{1F534}\s*Critical/u, 'critical'],
+        [/\u{1F7E1}\s*Useful/u, 'useful'],
+        [/\u{1F7E2}\s*Noise/u, 'noise'],
+      ];
+
+      const SKIP_LINE_PATTERNS = [
+        /^<!--.*-->$/,
+        /^---$/,
+        /^\s*$/,
+        /^#\s*$/,
+      ];
+
+      function detectCategory(filePath: string): string {
+        for (const [pattern, category] of CATEGORY_PATTERNS) {
+          if (pattern.test(filePath)) return category;
+        }
+        return 'unknown';
+      }
+
+      function detectPriority(text: string): string | null {
+        for (const [pattern, priority] of PRIORITY_PATTERNS) {
+          if (pattern.test(text)) return priority;
+        }
+        return null;
+      }
+
+      function extractFirstLine(text: string, maxLength = 120): string {
+        const lines = text.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed.length === 0) continue;
+          if (SKIP_LINE_PATTERNS.some((p) => p.test(trimmed))) continue;
+          if (trimmed.length <= maxLength) return trimmed;
+          return trimmed.slice(0, maxLength - 3) + '...';
+        }
+        return '(empty)';
+      }
+
+      let output = `## Recall: "${args.query}" (${results.length} results, layered mode)\n`;
+      output += `_Use recall_detail with a file path to see full content._\n\n`;
+
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const category = detectCategory(r.file);
+        const priority = detectPriority(r.snippet);
+        const firstLine = extractFirstLine(r.snippet);
+
+        const tags: string[] = [];
+        if (category !== 'unknown') tags.push(category);
+        if (priority) tags.push(priority);
+        const tagStr = tags.length > 0 ? ` [${tags.join(', ')}]` : '';
+
+        output += `${i + 1}. **${r.file}** (${r.score})${tagStr}\n`;
+        output += `   ${firstLine}\n`;
+      }
+
       if (EMBEDDING_URL) {
-        output += `\\n_Semantic search: enabled (${EMBEDDING_URL})_`;
+        output += `\n_Semantic search: enabled (${EMBEDDING_URL})_`;
       }
 
       return { content: [{ type: 'text' as const, text: output }] };
@@ -469,60 +788,61 @@ Tips:
       };
     }
   },
-);server.tool(
-  'recall',
-  `Search your workspace files (knowledge, daily notes, projects, areas, conversations) for past information. Use this when you need to remember something — a decision, a conversation detail, a person's name, a preference, or anything you might have written down before.
+);
 
-This searches the actual files on disk, not conversation history. Your nightly consolidation writes important things here, so this is your long-term memory.
+server.tool(
+  'recall_detail',
+  `Fetch the full content of a specific workspace file. Use this after recall (layered mode) to read files that look relevant from the summaries.
 
-Tips:
-- Use specific keywords: "stripe", "brandon preference", "oauth"
-- Search is case-insensitive
-- Returns matching lines with filenames and context
-- If you get no results, try different keywords or check daily/ for date-specific notes`,
+Returns the complete file content. If the file is large, it returns the first 10,000 characters with a truncation notice.`,
   {
-    query: z.string().describe('Search keywords (e.g. "stripe keys", "brandon", "revenue target"). Case-insensitive grep across all workspace files.'),
-    folder: z.enum(['all', 'knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']).default('all').describe('Narrow search to a specific folder, or "all" to search everywhere.'),
-    max_results: z.number().default(30).describe('Maximum number of matching lines to return.'),
+    file: z.string().describe('Relative file path from recall results (e.g. "knowledge/patterns.md", "daily/2026-02-28.md")'),
   },
   async (args) => {
-    const baseDir = '/workspace/group';
-    const searchDirs = args.folder === 'all'
-      ? ['knowledge', 'daily', 'projects', 'areas', 'conversations', 'resources']
-      : [args.folder];
+    const filePath = path.join('/workspace/group', args.file);
 
-    const existingDirs = searchDirs
-      .map(d => path.join(baseDir, d))
-      .filter(d => fs.existsSync(d));
-
-    if (existingDirs.length === 0) {
-      return { content: [{ type: 'text' as const, text: 'No workspace folders found. Your memory is empty — start writing to knowledge/ and daily/ files.' }] };
+    // Security: prevent path traversal
+    if (args.file.includes('..') || !filePath.startsWith('/workspace/group/')) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid file path. Must be within your workspace.' }],
+        isError: true,
+      };
     }
 
     try {
-      // Use grep for fast search across all files
-      const escapedQuery = args.query.replace(/['"\\]/g, '\\$&');
-      const dirsArg = existingDirs.join(' ');
-      const cmd = `grep -rni --include='*.md' --include='*.txt' --include='*.json' "${escapedQuery}" ${dirsArg} 2>/dev/null | head -${args.max_results}`;
-
-      let result: string;
-      try {
-        result = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
-      } catch {
-        result = '';
+      if (!fs.existsSync(filePath)) {
+        return {
+          content: [{ type: 'text' as const, text: `File not found: ${args.file}` }],
+          isError: true,
+        };
       }
 
-      if (!result) {
-        return { content: [{ type: 'text' as const, text: `No results for "${args.query}". Try different keywords, or check if you have written this down yet.` }] };
+      const stat = fs.statSync(filePath);
+      if (stat.isDirectory()) {
+        return {
+          content: [{ type: 'text' as const, text: `"${args.file}" is a directory, not a file. Use recall to search within it.` }],
+          isError: true,
+        };
       }
 
-      // Clean up paths to be relative to workspace
-      const cleaned = result.replace(/\/workspace\/group\//g, '');
+      const MAX_CHARS = 10_000;
+      const content = fs.readFileSync(filePath, 'utf-8');
 
-      return { content: [{ type: 'text' as const, text: `## Recall results for "${args.query}"\n\n${cleaned}` }] };
+      if (content.length <= MAX_CHARS) {
+        return {
+          content: [{ type: 'text' as const, text: `## ${args.file}\n\n\`\`\`\n${content}\n\`\`\`` }],
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `## ${args.file} (truncated — ${content.length} chars, showing first ${MAX_CHARS})\n\n\`\`\`\n${content.slice(0, MAX_CHARS)}\n\`\`\`\n\n_File truncated. Use recall with specific keywords to find the section you need._`,
+        }],
+      };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Recall error: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `Error reading file: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }
@@ -554,6 +874,15 @@ Choose the right file:
     if (args.file.includes('..') || !filePath.startsWith('/workspace/group/')) {
       return {
         content: [{ type: 'text' as const, text: 'Invalid file path. Must be within your workspace.' }],
+        isError: true,
+      };
+    }
+
+    // Security: protect config files from being overwritten by the agent
+    const PROTECTED_FILES = ['tool-guard.json', 'CLAUDE.md'];
+    if (PROTECTED_FILES.includes(path.basename(args.file))) {
+      return {
+        content: [{ type: 'text' as const, text: `Cannot write to protected config file: ${path.basename(args.file)}` }],
         isError: true,
       };
     }
@@ -611,6 +940,10 @@ server.tool(
   async (args) => {
     if (!SW_PROJECT_ID || !SW_API_TOKEN) {
       return { content: [{ type: 'text' as const, text: 'SignalWire not configured. Ask Brandon to add credentials.' }], isError: true };
+    }
+    const smsLimit = checkRateLimit('send_sms');
+    if (!smsLimit.allowed) {
+      return { content: [{ type: 'text' as const, text: smsLimit.message }], isError: true };
     }
     const data = `From=${encodeURIComponent(SW_PHONE)}&To=${encodeURIComponent(args.to)}&Body=${encodeURIComponent(args.body)}`;
     const result = swCurl('/Messages.json', 'POST', data);
@@ -670,6 +1003,10 @@ server.tool(
   async (args) => {
     if (!SW_PROJECT_ID || !SW_API_TOKEN) {
       return { content: [{ type: 'text' as const, text: 'SignalWire not configured.' }], isError: true };
+    }
+    const callLimit = checkRateLimit('make_call');
+    if (!callLimit.allowed) {
+      return { content: [{ type: 'text' as const, text: callLimit.message }], isError: true };
     }
     // Build TwiML for TTS
     const twiml = `<Response><Say voice="${args.voice}">${args.message.replace(/[&<>"']/g, '')}</Say></Response>`;
@@ -733,6 +1070,12 @@ server.tool(
     max_price_usd: z.number().default(1.0).describe("Maximum USDC you are willing to pay for this request. Default $1."),
   },
   async (args) => {
+    // Check daily spend cap before sending request
+    const spendCheck = checkSpendLimit(args.max_price_usd);
+    if (!spendCheck.allowed) {
+      return { content: [{ type: "text" as const, text: spendCheck.message }], isError: true };
+    }
+
     // Write request to IPC for host to process
     fs.mkdirSync(X402_REQUESTS_DIR, { recursive: true });
     fs.mkdirSync(X402_RESPONSES_DIR, { recursive: true });
@@ -865,6 +1208,330 @@ Tips:
     // Timeout
     try { fs.unlinkSync(requestPath); } catch {}
     return { content: [{ type: "text" as const, text: `Worker timed out after ${timeoutSec}s. The task may still be running — check back later.` }], isError: true };
+  },
+);
+
+// --- Structured Elicitation: ask user questions with predefined options ---
+// Agent writes request to IPC, host sends to Discord/Slack with reactions, result comes back.
+
+const ELICITATION_REQUESTS_DIR = path.join(IPC_DIR, "elicitation-requests");
+const ELICITATION_RESPONSES_DIR = path.join(IPC_DIR, "elicitation-responses");
+
+server.tool(
+  "ask_structured",
+  `Ask the user a question with predefined options. Instead of free-text questions,
+present numbered choices that the user can select by clicking a reaction or typing a number.
+
+Use this when:
+• You need a decision between specific alternatives
+• You want to confirm an action (Yes/No)
+• You're presenting a prioritized list for selection
+
+The user sees numbered options with emoji reactions (1️⃣ 2️⃣ 3️⃣) in Discord/Slack.
+Returns their selection or freetext response if allowed.`,
+  {
+    question: z.string().describe("The question to ask the user"),
+    options: z.array(z.string()).min(2).max(10).describe("Options to present (2-10)"),
+    allow_freetext: z.boolean().default(false).describe("Allow a custom typed response beyond the options"),
+    timeout_seconds: z.number().default(300).describe("Seconds to wait for response (default 300 = 5 min)"),
+  },
+  async (args) => {
+    fs.mkdirSync(ELICITATION_REQUESTS_DIR, { recursive: true });
+    fs.mkdirSync(ELICITATION_RESPONSES_DIR, { recursive: true });
+
+    const elicitId = `elicit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestPath = path.join(ELICITATION_REQUESTS_DIR, `${elicitId}.json`);
+
+    const timeoutSec = Math.min(Math.max(args.timeout_seconds, 30), 600);
+
+    fs.writeFileSync(requestPath, JSON.stringify({
+      id: elicitId,
+      question: args.question,
+      options: args.options,
+      allowFreetext: args.allow_freetext,
+      timeoutSeconds: timeoutSec,
+      sourceGroup: groupFolder,
+      sourceChatJid: chatJid,
+      timestamp: new Date().toISOString(),
+    }));
+
+    // Poll for response
+    const responsePath = path.join(ELICITATION_RESPONSES_DIR, `${elicitId}.json`);
+    const timeout = timeoutSec * 1000;
+    const interval = 1000;
+    const start = Date.now();
+
+    while (Date.now() - start < timeout) {
+      if (fs.existsSync(responsePath)) {
+        try {
+          const response = JSON.parse(fs.readFileSync(responsePath, "utf-8"));
+          try { fs.unlinkSync(responsePath); } catch {}
+
+          if (response.timeout) {
+            return { content: [{ type: "text" as const, text: `User did not respond within ${timeoutSec}s.` }] };
+          }
+
+          const result: Record<string, unknown> = {};
+          if (response.chosen) result.chosen = response.chosen;
+          if (response.freetext) result.freetext = response.freetext;
+
+          return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
+        } catch (err) {
+          return { content: [{ type: "text" as const, text: `Failed to parse elicitation response: ${err}` }], isError: true };
+        }
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+
+    try { fs.unlinkSync(requestPath); } catch {}
+    return { content: [{ type: "text" as const, text: `User did not respond within ${timeoutSec}s.` }] };
+  },
+);
+
+// --- Self-Knowledge: progressive disclosure of agent capabilities ---
+// Reads capabilities.json from workspace, returns overview or section detail.
+
+interface SelfKnowledgeSection {
+  title: string;
+  summary: string;
+  items: Array<{ name: string; description: string }>;
+}
+
+interface SelfKnowledgeDoc {
+  version: number;
+  agent_name: string;
+  summary: string;
+  sections: Record<string, SelfKnowledgeSection>;
+}
+
+function loadCapabilities(): SelfKnowledgeDoc | null {
+  const capPath = '/workspace/group/knowledge/capabilities.json';
+  try {
+    if (!fs.existsSync(capPath)) return null;
+    const raw = JSON.parse(fs.readFileSync(capPath, 'utf-8'));
+    // Minimal validation — trust the file structure
+    if (!raw.summary || !raw.sections) return null;
+    return {
+      version: raw.version || 1,
+      agent_name: raw.agent_name || 'Agent',
+      summary: raw.summary,
+      sections: raw.sections,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function formatSelfKnowledgeOverview(doc: SelfKnowledgeDoc): string {
+  const lines: string[] = [];
+  lines.push(`# ${doc.agent_name}`);
+  lines.push('');
+  lines.push(doc.summary);
+  lines.push('');
+  lines.push('## Available sections');
+  lines.push('');
+  for (const [key, section] of Object.entries(doc.sections)) {
+    lines.push(`- **${key}** — ${section.summary}`);
+  }
+  lines.push('');
+  lines.push('_Ask about a specific section for details (e.g. "tell me about your tools")._');
+  return lines.join('\n');
+}
+
+function formatSelfKnowledgeSection(section: SelfKnowledgeSection): string {
+  const lines: string[] = [];
+  lines.push(`# ${section.title}`);
+  lines.push('');
+  lines.push(section.summary);
+  if (section.items && section.items.length > 0) {
+    lines.push('');
+    for (const item of section.items) {
+      lines.push(`- **${item.name}** — ${item.description}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function matchSelfKnowledgeSection(doc: SelfKnowledgeDoc, query: string): string | null {
+  const q = query.toLowerCase().trim();
+  const keys = Object.keys(doc.sections);
+  if (keys.includes(q)) return q;
+  const keyMatch = keys.find(k => k.includes(q) || q.includes(k));
+  if (keyMatch) return keyMatch;
+  const titleMatch = keys.find(k =>
+    doc.sections[k].title.toLowerCase().includes(q) ||
+    q.includes(doc.sections[k].title.toLowerCase()),
+  );
+  if (titleMatch) return titleMatch;
+  return null;
+}
+
+server.tool(
+  'self_knowledge',
+  `Explain your own capabilities. Use this when someone asks "what can you do?", "help", "about", or wants to know your tools, limits, or features.
+
+With no section specified, returns a high-level overview. With a section name, returns detailed information about that area.
+
+Available sections vary by agent but typically include: tools, scheduled_tasks, memory, delegation, limitations.`,
+  {
+    section: z.string().optional().describe('Section to show details for (e.g. "tools", "memory", "limitations"). Omit for overview.'),
+  },
+  async (args) => {
+    const doc = loadCapabilities();
+    if (!doc) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: 'No capabilities file found. Create knowledge/capabilities.json in your workspace to enable self-knowledge.',
+        }],
+      };
+    }
+
+    if (!args.section) {
+      return { content: [{ type: 'text' as const, text: formatSelfKnowledgeOverview(doc) }] };
+    }
+
+    const matched = matchSelfKnowledgeSection(doc, args.section);
+    if (!matched) {
+      const available = Object.keys(doc.sections).join(', ');
+      return {
+        content: [{
+          type: 'text' as const,
+          text: `Unknown section "${args.section}". Available: ${available}`,
+        }],
+        isError: true,
+      };
+    }
+
+    return { content: [{ type: 'text' as const, text: formatSelfKnowledgeSection(doc.sections[matched]) }] };
+  },
+);
+
+// --- Agent Relay: peer-to-peer messaging between agents ---
+// Agent writes message to relay-outbox/, host routes to target's relay-inbox/.
+// Delivery receipts written to relay-receipts/. All traffic logged by host.
+
+const RELAY_OUTBOX_DIR = path.join(IPC_DIR, "relay-outbox");
+const RELAY_INBOX_DIR = path.join(IPC_DIR, "relay-inbox");
+const RELAY_RECEIPTS_DIR = path.join(IPC_DIR, "relay-receipts");
+
+server.tool(
+  "send_relay",
+  `Send a message to another agent. The message goes through the host relay —
+the target agent will find it in their inbox next time they check.
+
+Use this for:
+• Asking another agent for clarification on a delegated task
+• Sharing findings with a peer agent
+• Coordinating work across agents (e.g. "I finished part A, you can start part B")
+
+Messages are logged for human observability. The human can monitor all relay traffic.`,
+  {
+    to: z.string().describe("Target agent's group folder name (e.g. 'research', 'trading')"),
+    content: z.string().describe("Message body — include all context the target needs"),
+    reply_to: z.string().optional().describe("Optional: ID of a message you're replying to"),
+  },
+  async (args) => {
+    fs.mkdirSync(RELAY_OUTBOX_DIR, { recursive: true });
+    fs.mkdirSync(RELAY_RECEIPTS_DIR, { recursive: true });
+
+    const relayId = `relay-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const msg = {
+      id: relayId,
+      from: groupFolder,
+      to: args.to,
+      content: args.content,
+      replyTo: args.reply_to || undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    const outboxPath = path.join(RELAY_OUTBOX_DIR, `${relayId}.json`);
+    fs.writeFileSync(outboxPath, JSON.stringify(msg, null, 2));
+
+    // Poll for delivery receipt (host processes quickly)
+    const receiptPath = path.join(RELAY_RECEIPTS_DIR, `${relayId}.json`);
+    const timeout = 30000; // 30s max wait for delivery
+    const interval = 500;
+    const start = Date.now();
+
+    while (Date.now() - start < timeout) {
+      if (fs.existsSync(receiptPath)) {
+        try {
+          const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8"));
+          try { fs.unlinkSync(receiptPath); } catch {}
+
+          if (receipt.status === 'delivered') {
+            return { content: [{ type: "text" as const, text: `Message delivered to ${args.to} (id: ${relayId})` }] };
+          } else {
+            return { content: [{ type: "text" as const, text: `Message undeliverable: ${receipt.reason || 'unknown error'}` }], isError: true };
+          }
+        } catch (err) {
+          return { content: [{ type: "text" as const, text: `Failed to read delivery receipt: ${err}` }], isError: true };
+        }
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+
+    return { content: [{ type: "text" as const, text: `Delivery receipt timeout after 30s — message may still be delivered` }], isError: true };
+  },
+);
+
+server.tool(
+  "check_relay",
+  `Check your relay inbox for messages from other agents. Returns all pending
+messages and removes them from the inbox (read-once).
+
+Use this periodically during long tasks to see if other agents need anything.`,
+  {},
+  async () => {
+    if (!fs.existsSync(RELAY_INBOX_DIR)) {
+      return { content: [{ type: "text" as const, text: "No messages in relay inbox." }] };
+    }
+
+    let files: string[];
+    try {
+      files = fs.readdirSync(RELAY_INBOX_DIR).filter((f) => f.endsWith('.json'));
+    } catch {
+      return { content: [{ type: "text" as const, text: "No messages in relay inbox." }] };
+    }
+
+    if (files.length === 0) {
+      return { content: [{ type: "text" as const, text: "No messages in relay inbox." }] };
+    }
+
+    const messages: Array<{ id: string; from: string; content: string; replyTo?: string; timestamp: string }> = [];
+
+    for (const file of files) {
+      const filePath = path.join(RELAY_INBOX_DIR, file);
+      try {
+        const msg = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        messages.push({
+          id: msg.id,
+          from: msg.from,
+          content: msg.content,
+          replyTo: msg.replyTo,
+          timestamp: msg.timestamp,
+        });
+        // Read-once: remove after reading
+        try { fs.unlinkSync(filePath); } catch {}
+      } catch {
+        // Skip corrupt files
+        try { fs.unlinkSync(filePath); } catch {}
+      }
+    }
+
+    if (messages.length === 0) {
+      return { content: [{ type: "text" as const, text: "No messages in relay inbox." }] };
+    }
+
+    const formatted = messages.map((m) => {
+      let text = `**From ${m.from}** (${m.id})\n${m.content}`;
+      if (m.replyTo) text = `**From ${m.from}** (reply to ${m.replyTo})\n${m.content}`;
+      return text;
+    }).join('\n\n---\n\n');
+
+    return { content: [{ type: "text" as const, text: `📨 ${messages.length} relay message(s):\n\n${formatted}` }] };
   },
 );
 
