@@ -1,0 +1,7 @@
+{
+  "webAccess": {
+    "webFetch": true,
+    "webSearch": false,
+    "fetchAllowlist": ["https://api.example.com/", "https://docs.example.com/"]
+  }
+}
