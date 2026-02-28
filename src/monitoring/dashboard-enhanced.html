@@ -922,6 +922,13 @@
       Trades
       <span style="float: right; font-size: 11px;">
         <label style="color: #8b949e; cursor: pointer;"><input type="checkbox" id="paper-show-closed" onchange="loadPaperPortfolio()" style="margin-right: 4px;">Show settled</label>
+        <span style="display: inline-flex; align-items: center; gap: 4px; margin-left: 12px;">
+          <label style="color: #8b949e;">Run:</label>
+          <select id="paper-run-filter" onchange="onPaperRunFilterChange()" style="background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 2px 6px; border-radius: 4px; font-size: 11px; max-width: 200px;">
+            <option value="">All runs</option>
+          </select>
+          <button onclick="deletePaperRunTrades()" id="paper-delete-run-btn" style="display:none; background: #da3633; color: #fff; border: none; padding: 2px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">Delete run</button>
+        </span>
       </span>
     </div>
     <div class="panel-body" style="padding: 0; overflow-x: auto;">
@@ -2326,7 +2333,7 @@ function switchAccountSub(sub) {
     const el = document.getElementById('acct-sub-' + s);
     if (el) el.style.display = s === sub ? 'block' : 'none';
   });
-  if (sub === 'paper') loadPaperPortfolio();
+  if (sub === 'paper') { populatePaperRunFilter(); loadPaperPortfolio(); }
   if (sub === 'kalshi') { loadKalshiBalance(); loadKalshiPositions(); loadKalshiOrders(); loadKalshiPresets(); loadStrategyEngineStatus(); }
   if (sub === 'markets') loadBTCWindows();
 }
@@ -2896,7 +2903,10 @@ let _paperPortfolioData = null;
 
 async function loadPaperPortfolio() {
   try {
-    const resp = await fetch('/api/trading/paper/portfolio');
+    let url = '/api/trading/paper/portfolio';
+    const runFilter = document.getElementById('paper-run-filter')?.value;
+    if (runFilter) url += '?run_id=' + encodeURIComponent(runFilter);
+    const resp = await fetch(url);
     const data = await resp.json();
     if (data.error) return;
     _paperPortfolioData = data;
@@ -3001,7 +3011,7 @@ async function loadPaperPortfolio() {
         currentExitCell = (t.exit_price !== null ? t.exit_price + 'c' : '--');
         let pnl = 0;
         if (t.exit_price !== null) {
-          pnl = t.side === 'yes' ? (t.exit_price - t.entry_price) * t.qty : (t.entry_price - t.exit_price) * t.qty;
+          pnl = (t.exit_price - t.entry_price) * t.qty;
         }
         const pnlColor = pnl > 0 ? '#3fb950' : pnl < 0 ? '#f85149' : '#8b949e';
         pnlCell = '<span style="color:' + pnlColor + ';">' + (pnl >= 0 ? '+' : '') + '$' + (pnl / 100).toFixed(2) + '</span>';
@@ -3141,6 +3151,66 @@ async function deletePaperTrade(id) {
     loadPaperPortfolio();
   } catch (err) {
     alert('Error deleting trade: ' + err.message);
+  }
+}
+
+function onPaperRunFilterChange() {
+  const sel = document.getElementById('paper-run-filter');
+  const btn = document.getElementById('paper-delete-run-btn');
+  btn.style.display = sel.value ? 'inline-block' : 'none';
+  loadPaperPortfolio();
+}
+
+async function populatePaperRunFilter() {
+  try {
+    const resp = await fetch('/api/trading/runs');
+    const runs = await resp.json();
+    const sel = document.getElementById('paper-run-filter');
+    const curVal = sel.value;
+    // Clear all but "All runs"
+    while (sel.options.length > 1) sel.remove(1);
+    // Add runs that are strategy_engine type (paper mode) — newest first
+    const paperRuns = runs
+      .filter(r => r.type === 'strategy_engine' && r.mode === 'paper')
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    for (const r of paperRuns) {
+      const opt = document.createElement('option');
+      opt.value = r.id;
+      const date = new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const statusIcon = ['running', 'pending'].includes(r.status) ? ' *' : '';
+      opt.textContent = r.strategy + ' (' + date + ')' + statusIcon;
+      sel.appendChild(opt);
+    }
+    // Restore selection if it still exists
+    if (curVal && [...sel.options].some(o => o.value === curVal)) {
+      sel.value = curVal;
+    }
+  } catch (err) {
+    console.error('Failed to populate run filter:', err);
+  }
+}
+
+async function deletePaperRunTrades() {
+  const runId = document.getElementById('paper-run-filter').value;
+  if (!runId) return;
+  const sel = document.getElementById('paper-run-filter');
+  const label = sel.options[sel.selectedIndex]?.textContent || runId;
+  if (!confirm('Delete ALL paper trades for run "' + label + '"? This cannot be undone.')) return;
+  try {
+    const resp = await fetch('/api/trading/paper/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: runId }),
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); return; }
+    alert('Deleted ' + (data.count || 0) + ' trades.');
+    // Reset filter and reload
+    sel.value = '';
+    document.getElementById('paper-delete-run-btn').style.display = 'none';
+    loadPaperPortfolio();
+  } catch (err) {
+    alert('Error deleting run trades: ' + err.message);
   }
 }
 

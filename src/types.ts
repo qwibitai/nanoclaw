@@ -130,6 +130,7 @@ export interface TradingRun {
   created_at: string;
   completed_at: string | null;
   error: string | null;
+  last_snapshot_at: string | null;
 }
 
 export interface MarketWatcher {
@@ -166,11 +167,35 @@ export interface PaperTrade {
   exit_price: number | null;
   status: string;
   strategy: string;
+  run_id: string | null;
   market_type: string | null;
   event_ticker: string | null;
   close_time: string | null;
   notes: string | null;
   created_at: string;
+  settled_at: string | null;
+}
+
+export interface LiveTrade {
+  id: string;
+  kalshi_order_id: string | null;
+  ticker: string;
+  market_title: string | null;
+  side: string;
+  action: string;
+  qty: number;
+  entry_price: number;
+  fill_price: number | null;
+  exit_price: number | null;
+  status: string;  // pending | filled | settled | cancelled | failed
+  strategy: string;
+  run_id: string | null;
+  market_type: string | null;
+  event_ticker: string | null;
+  close_time: string | null;
+  notes: string | null;
+  created_at: string;
+  filled_at: string | null;
   settled_at: string | null;
 }
 

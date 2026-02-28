@@ -14,6 +14,7 @@ import {
   createRun,
   createWatcher,
   deletePaperTrade,
+  deletePaperTradesByRunId,
   deletePreset,
   getAllLiveTrades,
   getDailySettledPnl,
@@ -697,6 +698,7 @@ async function executeStrategyTrade(
       exit_price: null,
       status: 'open',
       strategy: run.strategy,
+      run_id: run.runId,
       market_type: 'kalshi',
       event_ticker: kalshiMarket.event_ticker || null,
       close_time: kalshiMarket.close_time || null,
@@ -2831,6 +2833,7 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
           exit_price: null,
           status: 'open',
           strategy: body.strategy || 'uncategorized',
+          run_id: body.run_id || null,
           market_type: body.market_type || null,
           event_ticker: body.event_ticker || null,
           close_time: body.close_time || null,
@@ -2871,9 +2874,14 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
     if (pathname === '/api/trading/paper/delete' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        if (!body.id) { json(res, { error: 'id required' }, 400); return; }
+        if (body.run_id) {
+          const count = deletePaperTradesByRunId(body.run_id);
+          json(res, { deleted: true, count });
+          return;
+        }
+        if (!body.id) { json(res, { error: 'id or run_id required' }, 400); return; }
         deletePaperTrade(body.id);
-        json(res, { deleted: true });
+        json(res, { deleted: true, count: 1 });
       } catch (err: any) {
         json(res, { error: err.message }, 500);
       }
@@ -2882,7 +2890,8 @@ Follow the 7-agent workflow: scan markets, assess probability, check risk limits
 
     if (pathname === '/api/trading/paper/portfolio') {
       try {
-        const allTrades = getAllPaperTrades();
+        const params = parseQuery(req.url || '');
+        const allTrades = getAllPaperTrades(undefined, params.run_id || undefined);
         const openTrades = allTrades.filter(t => t.status === 'open');
         const closedTrades = allTrades.filter(t => t.status !== 'open');
 
