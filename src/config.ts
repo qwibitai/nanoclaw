@@ -15,6 +15,8 @@ export const ASSISTANT_HAS_OWN_NUMBER =
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
+export const USAGE_POLL_INTERVAL = 30 * 60 * 1000; // 30 minutes
+export const USAGE_ALERT_COOLDOWN = 2 * 60 * 60 * 1000; // 2 hours
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
