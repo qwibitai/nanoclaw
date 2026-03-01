@@ -8,11 +8,12 @@ NanoClaw can automatically detect when the `main` branch is updated on GitHub an
 2. **Change Detection**: When a new commit is detected, the deployment process starts automatically
 3. **Deployment Steps**: Executes the same steps from the manual deployment guide:
    - Record current state (for rollback)
-   - Stash any uncommitted changes
+   - Stash any uncommitted changes (including untracked files)
    - Pull latest changes from `origin/main`
-   - Analyze what changed (dependencies, source code, etc.)
+   - Analyze what changed (dependencies, source code, container, etc.)
    - Install dependencies (if `package.json` changed)
    - Rebuild TypeScript (if source code changed)
+   - Rebuild container (if Dockerfile changed)
    - Restart the systemd service
    - Verify service is running
 4. **Notifications**: Sends real-time notifications to your main chat about deployment progress and results
@@ -125,7 +126,7 @@ For auto-deployment to work, your host system needs:
 ### Safety Features
 
 1. **Read-only git operations**: Only `git fetch` and `git pull` are used
-2. **Stashing, not discarding**: Local changes are stashed, not deleted
+2. **Stashing, not discarding**: Local changes (including untracked files) are stashed, not deleted
 3. **Rollback information**: Previous commit hash is recorded before deployment
 4. **Service verification**: Checks that service is running after restart
 5. **Error notifications**: You're immediately notified of any failures
@@ -144,11 +145,18 @@ For auto-deployment to work, your host system needs:
 - Old version may still be running (if restart failed)
 - **Solution**: Check logs with `journalctl --user -u nanoclaw -n 50`
 
-**Scenario: Merge conflicts**
-- If you have local uncommitted changes that conflict with remote
-- Git pull will fail
+**Scenario: Untracked files conflict with incoming changes**
+- Files committed in the container but untracked on host
+- Auto-deployment stashes them with `--include-untracked` before pulling
+- Pull proceeds cleanly
+- Stashed files can be recovered with `git stash pop` if needed
+- **No manual intervention required**
+
+**Scenario: True merge conflicts (modified tracked files)**
+- If you have local modifications to tracked files that conflict with remote
+- Git pull will fail even after stashing
 - You'll be notified
-- **Solution**: Manually resolve conflicts or discard local changes
+- **Solution**: Manually resolve conflicts or reset to origin/main
 
 ## Manual Rollback
 

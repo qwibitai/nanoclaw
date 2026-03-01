@@ -158,13 +158,13 @@ export async function executeDeploy(
       if (statusResult.stdout.length > 0) {
         logger.info('Uncommitted changes detected, stashing');
         await execCommand(
-          'git stash push -m "Auto-deployment stash"',
+          'git stash push --include-untracked -m "Auto-deployment stash"',
           projectRoot,
         );
         steps.push({
           name: 'Stash uncommitted changes',
           success: true,
-          output: 'Stashed local changes',
+          output: 'Stashed local changes (including untracked files)',
           duration: Date.now() - stashStart,
         });
       } else {
