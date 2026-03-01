@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { PROACTIVE_AGENT_ENABLED } from './config.js';
 import { logger } from './logger.js';
 import { validateLLMOutput } from './validate-llm.js';
 
@@ -202,7 +203,7 @@ export async function detectProactiveOpportunities(
 ): Promise<void> {
   try {
     // Kill switch
-    if (process.env.PROACTIVE_AGENT_ENABLED === 'false') return;
+    if (!PROACTIVE_AGENT_ENABLED) return;
 
     // Circuit breaker (with time-based auto-reset)
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {

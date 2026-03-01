@@ -3,14 +3,12 @@
  * Serves an HTML dashboard and JSON API endpoints for monitoring
  * groups, tasks, memory, and system health.
  */
+import crypto from 'crypto';
 import http from 'http';
 
 import {
   DASHBOARD_AUTH_TOKEN,
   DASHBOARD_PORT,
-  GROUPS_DIR,
-  STORE_DIR,
-  DATA_DIR,
 } from './config.js';
 import { logger } from './logger.js';
 import {
@@ -18,14 +16,10 @@ import {
   getAllTasks,
   getEmbeddingChunkCount,
   getAllDbRoutines,
-  getMessageCountByGroup,
-  getLastActivityByGroup,
+  getMessageStatsByGroup,
 } from './db.js';
 
 const startTime = Date.now();
-
-/** Exported for tests to verify uptime calculations. */
-export const _startTimeForTests = startTime;
 
 // ── Auth Middleware ──────────────────────────────────────────────────
 
@@ -35,8 +29,11 @@ function checkAuth(
 ): boolean {
   if (!DASHBOARD_AUTH_TOKEN) return true;
 
-  const authHeader = req.headers['authorization'];
-  if (authHeader === `Bearer ${DASHBOARD_AUTH_TOKEN}`) return true;
+  const authHeader = req.headers['authorization'] || '';
+  const expected = `Bearer ${DASHBOARD_AUTH_TOKEN}`;
+  const a = Buffer.from(authHeader);
+  const b = Buffer.from(expected);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) return true;
 
   res.writeHead(401, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Unauthorized' }));
@@ -45,10 +42,13 @@ function checkAuth(
 
 // ── CORS Headers ────────────────────────────────────────────────────
 
-function setCorsHeaders(res: http.ServerResponse): void {
+function setSecurityHeaders(res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Cache-Control', 'no-store');
 }
 
 // ── Route Handlers ──────────────────────────────────────────────────
@@ -57,7 +57,7 @@ function handleHealth(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, uptime: process.uptime() }));
 }
@@ -66,7 +66,7 @@ function handleStatus(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
   try {
     const groups = getAllRegisteredGroups();
     const tasks = getAllTasks();
@@ -84,11 +84,6 @@ function handleStatus(
       groups: Object.keys(groups).length,
       tasks: tasks.length,
       activeTasks: tasks.filter((t) => t.status === 'active').length,
-      paths: {
-        groups: GROUPS_DIR,
-        store: STORE_DIR,
-        data: DATA_DIR,
-      },
     };
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -104,11 +99,10 @@ function handleGroups(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
   try {
     const groups = getAllRegisteredGroups();
-    const messageCounts = getMessageCountByGroup();
-    const lastActivity = getLastActivityByGroup();
+    const messageStats = getMessageStatsByGroup();
 
     const payload = Object.entries(groups).map(([jid, group]) => ({
       jid,
@@ -116,8 +110,8 @@ function handleGroups(
       folder: group.folder,
       trigger: group.trigger,
       added_at: group.added_at,
-      messageCount: messageCounts[jid] || 0,
-      lastActivity: lastActivity[jid] || null,
+      messageCount: messageStats[jid]?.count || 0,
+      lastActivity: messageStats[jid]?.lastActivity || null,
     }));
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -133,7 +127,7 @@ function handleMemory(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
   try {
     const embeddingChunks = getEmbeddingChunkCount();
     const routines = getAllDbRoutines();
@@ -162,7 +156,7 @@ function handleDashboardPage(
   _req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setCorsHeaders(res);
+  setSecurityHeaders(res);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(getDashboardHtml());
 }
@@ -337,10 +331,12 @@ function getDashboardHtml(): string {
         tbody.innerHTML = '';
         groups.forEach(function(g) {
           var tr = document.createElement('tr');
-          tr.innerHTML = '<td>' + (g.name || '--') + '</td>'
-            + '<td>' + (g.folder || '--') + '</td>'
-            + '<td>' + (g.messageCount || 0) + '</td>'
-            + '<td>' + (g.lastActivity ? new Date(g.lastActivity).toLocaleString() : '--') + '</td>';
+          var cells = [g.name || '--', g.folder || '--', String(g.messageCount || 0), g.lastActivity ? new Date(g.lastActivity).toLocaleString() : '--'];
+          cells.forEach(function(text) {
+            var td = document.createElement('td');
+            td.textContent = text;
+            tr.appendChild(td);
+          });
           tbody.appendChild(tr);
         });
 
@@ -383,7 +379,7 @@ export function startDashboard(): http.Server {
   const server = http.createServer((req, res) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
-      setCorsHeaders(res);
+      setSecurityHeaders(res);
       res.writeHead(204);
       res.end();
       return;
@@ -412,15 +408,22 @@ export function startDashboard(): http.Server {
         handleMemory(req, res);
         break;
       default:
-        setCorsHeaders(res);
+        setSecurityHeaders(res);
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
         break;
     }
   });
 
-  server.listen(DASHBOARD_PORT, () => {
-    logger.info({ port: DASHBOARD_PORT }, 'Dashboard server started');
+  server.timeout = 10_000;
+  server.maxConnections = 20;
+
+  if (!DASHBOARD_AUTH_TOKEN) {
+    logger.warn('Dashboard enabled without DASHBOARD_AUTH_TOKEN — running unauthenticated');
+  }
+
+  server.listen(DASHBOARD_PORT, '127.0.0.1', () => {
+    logger.info({ port: DASHBOARD_PORT, host: '127.0.0.1' }, 'Dashboard server started');
   });
 
   return server;

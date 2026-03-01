@@ -14,14 +14,16 @@ vi.mock('./group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn(() => '/tmp/test-group'),
 }));
 
+vi.mock('./config.js', () => ({
+  SEMANTIC_ROUTING_ENABLED: false,
+}));
+
 vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Disable semantic routing so these tests exercise keyword fallback only
-  process.env.SEMANTIC_ROUTING_ENABLED = 'false';
 });
 
 // ---------------------------------------------------------------------------

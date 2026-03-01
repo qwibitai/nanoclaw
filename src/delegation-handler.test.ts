@@ -143,7 +143,7 @@ describe('swarm requests', () => {
         { prompt: 'Research task A' },
         { prompt: 'Research task B' },
       ],
-      synthesis_prompt: null,
+
       timeout_seconds: 600,
       source_group: 'test',
       source_chat_jid: 'dc:123',
@@ -165,7 +165,7 @@ describe('swarm requests', () => {
         { prompt: 'Research task A' },
         { prompt: 'Research task B' },
       ],
-      synthesis_prompt: null,
+
       timeout_seconds: 60,
       source_group: 'test',
       source_chat_jid: 'dc:123',
@@ -217,59 +217,24 @@ describe('swarm requests', () => {
 });
 
 // ---------------------------------------------------------------------------
-// MAX_CONCURRENT_WORKERS cap
-// ---------------------------------------------------------------------------
-describe('MAX_CONCURRENT_WORKERS', () => {
-  it('respects 3-worker global cap', () => {
-    // The MAX_CONCURRENT_WORKERS constant is 3
-    // This is tested by the handler's internal logic:
-    // if (activeDelegations.size >= MAX_CONCURRENT_WORKERS) break;
-    expect(3).toBe(3); // Constant is correctly set
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Kill switch
-// ---------------------------------------------------------------------------
-describe('kill switch', () => {
-  it('swarm kill switch check uses AGENT_SWARM_ENABLED env var', () => {
-    // When AGENT_SWARM_ENABLED is 'false', the swarm processing block is skipped
-    process.env.AGENT_SWARM_ENABLED = 'false';
-    expect(process.env.AGENT_SWARM_ENABLED).toBe('false');
-
-    // When unset (default), swarm is enabled
-    delete process.env.AGENT_SWARM_ENABLED;
-    expect(process.env.AGENT_SWARM_ENABLED).toBeUndefined();
-    // The handler checks: process.env.AGENT_SWARM_ENABLED !== 'false'
-    // undefined !== 'false' is true, so swarm is enabled by default
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Response writing
+// Response writing (via IPC filesystem)
 // ---------------------------------------------------------------------------
 describe('response writing', () => {
-  it('delegate response has correct fields', () => {
-    const response = {
-      result: 'Task completed',
-      model: 'claude-sonnet-4-6',
-      status: 'success',
-      worktree: null,
-      timestamp: new Date().toISOString(),
-    };
+  it('response file uses atomic write pattern (temp + rename)', async () => {
+    const responsesDir = path.join(TEST_IPC_DIR, 'test', 'delegate-responses');
+    fs.mkdirSync(responsesDir, { recursive: true });
 
-    expect(response.result).toBeTruthy();
-    expect(response.timestamp).toBeTruthy();
-    expect(response.status).toBe('success');
-  });
+    // Simulate a response write using the same pattern as delegation-handler
+    const responsePath = path.join(responsesDir, 'test-response.json');
+    const tempPath = `${responsePath}.tmp`;
+    const data = { result: 'done', model: null, timestamp: new Date().toISOString() };
+    fs.writeFileSync(tempPath, JSON.stringify(data));
+    fs.renameSync(tempPath, responsePath);
 
-  it('error response has error field', () => {
-    const response = {
-      error: 'Worker failed with unknown error',
-      model: null,
-      timestamp: new Date().toISOString(),
-    };
-
-    expect(response.error).toBeTruthy();
+    // Verify the response can be read and has correct shape
+    const parsed = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+    expect(parsed.result).toBe('done');
+    expect(parsed.timestamp).toBeTruthy();
+    expect(fs.existsSync(tempPath)).toBe(false); // temp file removed by rename
   });
 });

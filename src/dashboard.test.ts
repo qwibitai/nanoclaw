@@ -4,9 +4,6 @@ import http from 'http';
 vi.mock('./config.js', () => ({
   DASHBOARD_AUTH_TOKEN: '',
   DASHBOARD_PORT: 0,
-  GROUPS_DIR: '/tmp/test-groups',
-  STORE_DIR: '/tmp/test-store',
-  DATA_DIR: '/tmp/test-data',
 }));
 
 vi.mock('./logger.js', () => ({
@@ -23,12 +20,10 @@ vi.mock('./db.js', () => ({
     },
   })),
   getAllTasks: vi.fn(() => []),
-  getAllChats: vi.fn(() => []),
   getEmbeddingChunkCount: vi.fn(() => 42),
   getAllDbRoutines: vi.fn(() => []),
-  getMessageCountByGroup: vi.fn(() => ({ 'dc:123': 10 })),
-  getLastActivityByGroup: vi.fn(() => ({
-    'dc:123': '2024-01-01T00:00:00Z',
+  getMessageStatsByGroup: vi.fn(() => ({
+    'dc:123': { count: 10, lastActivity: '2024-01-01T00:00:00Z' },
   })),
 }));
 

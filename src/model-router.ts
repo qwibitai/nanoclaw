@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { SEMANTIC_ROUTING_ENABLED } from './config.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 
@@ -187,8 +188,7 @@ export async function selectModel(
   }
 
   // Try semantic classification first (if enabled)
-  const semanticEnabled = process.env.SEMANTIC_ROUTING_ENABLED !== 'false';
-  if (semanticEnabled) {
+  if (SEMANTIC_ROUTING_ENABLED) {
     try {
       const { semanticClassifyTask } = await import('./semantic-router.js');
       const result = await semanticClassifyTask(prompt);

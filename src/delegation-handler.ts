@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, AGENT_SWARM_ENABLED } from './config.js';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { logger } from './logger.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
@@ -28,7 +28,6 @@ interface DelegateRequest {
 interface SwarmRequest {
   id: string;
   subtasks: Array<{ prompt: string; model?: string }>;
-  synthesis_prompt: string | null;
   timeout_seconds: number;
   source_group: string;
   source_chat_jid: string;
@@ -128,7 +127,7 @@ export function startDelegationHandler(
       }
 
       // --- Swarm requests (v2.5) ---
-      if (process.env.AGENT_SWARM_ENABLED !== 'false') {
+      if (AGENT_SWARM_ENABLED) {
         const swarmDir = path.join(ipcBaseDir, sourceGroup, 'swarm-requests');
         if (fs.existsSync(swarmDir)) {
           let swarmFiles: string[];

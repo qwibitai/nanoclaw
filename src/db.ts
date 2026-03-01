@@ -36,6 +36,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_messages_chat_jid ON messages(chat_jid, timestamp);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -848,28 +849,45 @@ export function pruneOldRoutineRuns(maxAgeDays: number = 30): number {
 
 // --- Dashboard query accessors ---
 
-export function getMessageCountByGroup(): Record<string, number> {
+export function getMessageStatsByGroup(): Record<
+  string,
+  { count: number; lastActivity: string }
+> {
   const rows = db
     .prepare(
-      'SELECT chat_jid, COUNT(*) as count FROM messages GROUP BY chat_jid',
+      'SELECT chat_jid, COUNT(*) as count, MAX(timestamp) as last_activity FROM messages GROUP BY chat_jid',
     )
-    .all() as Array<{ chat_jid: string; count: number }>;
-  const result: Record<string, number> = {};
+    .all() as Array<{
+    chat_jid: string;
+    count: number;
+    last_activity: string;
+  }>;
+  const result: Record<string, { count: number; lastActivity: string }> = {};
   for (const row of rows) {
-    result[row.chat_jid] = row.count;
+    result[row.chat_jid] = {
+      count: row.count,
+      lastActivity: row.last_activity,
+    };
   }
   return result;
 }
 
+/** @deprecated Use getMessageStatsByGroup instead */
+export function getMessageCountByGroup(): Record<string, number> {
+  const stats = getMessageStatsByGroup();
+  const result: Record<string, number> = {};
+  for (const [jid, s] of Object.entries(stats)) {
+    result[jid] = s.count;
+  }
+  return result;
+}
+
+/** @deprecated Use getMessageStatsByGroup instead */
 export function getLastActivityByGroup(): Record<string, string> {
-  const rows = db
-    .prepare(
-      'SELECT chat_jid, MAX(timestamp) as last_activity FROM messages GROUP BY chat_jid',
-    )
-    .all() as Array<{ chat_jid: string; last_activity: string }>;
+  const stats = getMessageStatsByGroup();
   const result: Record<string, string> = {};
-  for (const row of rows) {
-    result[row.chat_jid] = row.last_activity;
+  for (const [jid, s] of Object.entries(stats)) {
+    result[jid] = s.lastActivity;
   }
   return result;
 }

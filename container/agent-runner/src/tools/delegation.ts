@@ -110,7 +110,6 @@ Tips:
         prompt: z.string().describe('Complete prompt for this subtask. Include ALL context — the worker has no conversation history.'),
         model: z.string().optional().describe('Model for this subtask (default: auto-selected)'),
       })).min(2).max(3).describe('The subtasks to run in parallel (2-3 items)'),
-      synthesis_prompt: z.string().optional().describe('Optional prompt for how to combine the results. Default: summarize all worker outputs.'),
       timeout_seconds: z.number().default(600).describe('Max seconds to wait for all results (default 600 = 10 min)'),
     },
     async (args) => {
@@ -124,7 +123,6 @@ Tips:
       fs.writeFileSync(requestPath, JSON.stringify({
         id: swarmId,
         subtasks: args.subtasks,
-        synthesis_prompt: args.synthesis_prompt || null,
         timeout_seconds: timeoutSec,
         source_group: ctx.groupFolder,
         source_chat_jid: ctx.chatJid,
