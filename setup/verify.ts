@@ -104,11 +104,19 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 4. Check WhatsApp auth
+  // 4. Check WhatsApp auth (skip if TELEGRAM_ONLY)
   let whatsappAuth = 'not_found';
-  const authDir = path.join(projectRoot, 'store', 'auth');
-  if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
-    whatsappAuth = 'authenticated';
+  const envContent2 = fs.existsSync(path.join(projectRoot, '.env'))
+    ? fs.readFileSync(path.join(projectRoot, '.env'), 'utf-8')
+    : '';
+  const telegramOnly = /^TELEGRAM_ONLY=true/m.test(envContent2);
+  if (telegramOnly) {
+    whatsappAuth = 'skipped';
+  } else {
+    const authDir = path.join(projectRoot, 'store', 'auth');
+    if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
+      whatsappAuth = 'authenticated';
+    }
   }
 
   // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
@@ -141,7 +149,7 @@ export async function run(_args: string[]): Promise<void> {
   const status =
     service === 'running' &&
     credentials !== 'missing' &&
-    whatsappAuth !== 'not_found' &&
+    whatsappAuth !== 'not_found' &&  // 'skipped' passes this check
     registeredGroups > 0
       ? 'success'
       : 'failed';
