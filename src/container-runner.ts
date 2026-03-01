@@ -216,7 +216,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'PARCEL_API_KEY', 'TOMORROW_IO_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'PARCEL_API_KEY', 'TOMORROW_IO_API_KEY', 'GEMINI_API_KEY']);
 }
 
 function buildContainerArgs(
@@ -229,12 +229,15 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Pass API keys so curl commands in Bash can access them
-  const envVars = readEnvFile(['PARCEL_API_KEY', 'TOMORROW_IO_API_KEY']);
+  const envVars = readEnvFile(['PARCEL_API_KEY', 'TOMORROW_IO_API_KEY', 'GEMINI_API_KEY']);
   if (envVars.PARCEL_API_KEY) {
     args.push('-e', `PARCEL_API_KEY=${envVars.PARCEL_API_KEY}`);
   }
   if (envVars.TOMORROW_IO_API_KEY) {
     args.push('-e', `TOMORROW_IO_API_KEY=${envVars.TOMORROW_IO_API_KEY}`);
+  }
+  if (envVars.GEMINI_API_KEY) {
+    args.push('-e', `GEMINI_API_KEY=${envVars.GEMINI_API_KEY}`);
   }
 
   // Run as host user so bind-mounted files are accessible.

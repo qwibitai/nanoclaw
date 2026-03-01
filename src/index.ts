@@ -550,6 +550,15 @@ async function main(): Promise<void> {
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
     },
+    sendPhoto: (jid, filePath, caption?) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (channel.sendPhoto) {
+        return channel.sendPhoto(jid, filePath, caption);
+      }
+      // Fallback: send caption as text for channels without photo support
+      return channel.sendMessage(jid, caption || '[Image]');
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroupMetadata: () => Promise.resolve(),

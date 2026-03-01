@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 import { Marked, type MarkedExtension } from 'marked';
 
 import { ASSISTANT_NAME, GROUPS_DIR, RESET_COMMAND_PATTERN, TRIGGER_PATTERN } from '../config.js';
@@ -260,6 +260,47 @@ export async function initBotPool(tokens: string[]): Promise<void> {
   }
   if (poolApis.length > 0) {
     logger.info({ count: poolApis.length }, 'Telegram bot pool ready');
+  }
+}
+
+/**
+ * Send a photo via a pool bot assigned to the given sender name.
+ */
+export async function sendPoolPhoto(
+  chatId: string,
+  filePath: string,
+  sender: string,
+  groupFolder: string,
+  caption?: string,
+): Promise<void> {
+  if (poolApis.length === 0) return;
+
+  const key = `${groupFolder}:${sender}`;
+  let idx = senderBotMap.get(key);
+  if (idx === undefined) {
+    idx = nextPoolIndex % poolApis.length;
+    nextPoolIndex++;
+    senderBotMap.set(key, idx);
+    try {
+      await poolApis[idx].setMyName(sender);
+      await new Promise((r) => setTimeout(r, 2000));
+      logger.info({ sender, groupFolder, poolIndex: idx }, 'Assigned and renamed pool bot');
+    } catch (err) {
+      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+    }
+  }
+
+  const api = poolApis[idx];
+  try {
+    const numericId = chatId.replace(/^tg:/, '');
+    const truncatedCaption = caption && caption.length > 1024 ? caption.slice(0, 1021) + '...' : caption;
+    await api.sendPhoto(numericId, new InputFile(filePath), {
+      caption: truncatedCaption,
+      parse_mode: 'HTML',
+    });
+    logger.info({ chatId, sender, poolIndex: idx }, 'Pool photo sent');
+  } catch (err) {
+    logger.error({ chatId, sender, err }, 'Failed to send pool photo');
   }
 }
 
@@ -533,6 +574,27 @@ export class TelegramChannel implements Channel {
         },
       });
     });
+  }
+
+  async sendPhoto(jid: string, filePath: string, caption?: string): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    await this.clearThinking(jid);
+
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      const truncatedCaption = caption && caption.length > 1024 ? caption.slice(0, 1021) + '...' : caption;
+      await this.bot.api.sendPhoto(numericId, new InputFile(filePath), {
+        caption: truncatedCaption,
+        parse_mode: 'HTML',
+      });
+      logger.info({ jid, filePath }, 'Telegram photo sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Telegram photo');
+    }
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {

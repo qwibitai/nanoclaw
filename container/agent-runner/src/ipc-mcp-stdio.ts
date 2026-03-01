@@ -81,6 +81,38 @@ server.tool(
 );
 
 server.tool(
+  'send_photo',
+  "Send a photo/image to the user or group. Use this after generating an image with the image-gen skill to deliver it to the chat.",
+  {
+    file_path: z.string().describe('Absolute path to the image file in the container (e.g., /workspace/group/media/generated/123.png)'),
+    caption: z.string().optional().describe('Optional caption text to display with the photo'),
+    sender: z.string().optional().describe('Your role/identity name (e.g. "Artist"). When set, photo appears from a dedicated bot in Telegram.'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'photo',
+      chatJid,
+      filePath: args.file_path,
+      caption: args.caption || undefined,
+      sender: args.sender || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Photo sent.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
