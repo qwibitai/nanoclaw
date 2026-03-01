@@ -28,6 +28,7 @@ import {
   probeRootlessDocker,
 } from './container-runtime.js';
 import {
+  closeDatabase,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -690,6 +691,7 @@ async function main(): Promise<void> {
         }
       }
     }
+    closeDatabase();
     saveState();
 
     // Send "Restarting..." to active chats (skip GitHub — comments are permanent)

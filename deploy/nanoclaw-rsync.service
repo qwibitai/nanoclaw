@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync NanoClaw data to GCS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/nanoclaw/deploy/gcs-backup.sh
+TimeoutStartSec=1800

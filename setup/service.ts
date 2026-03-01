@@ -233,9 +233,37 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  // Check if Litestream backup is configured
+  const envPath = path.join(projectRoot, '.env');
+  let litestreamEnabled = false;
+  let gcsBucket = '';
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    litestreamEnabled = /^LITESTREAM_ENABLED=true$/m.test(envContent);
+    const bucketMatch = envContent.match(/^GCS_BACKUP_BUCKET=(.+)$/m);
+    if (bucketMatch) gcsBucket = bucketMatch[1].trim();
+  }
+
+  // Build After/Wants lines conditionally for Litestream
+  const afterTargets = ['network.target'];
+  const wantsTargets: string[] = [];
+  const envLines = [
+    `Environment=HOME=${homeDir}`,
+    `Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`,
+  ];
+
+  if (litestreamEnabled && !runningAsRoot) {
+    afterTargets.push('litestream.service');
+    wantsTargets.push('litestream.service');
+    envLines.push('Environment=LITESTREAM_ENABLED=true');
+    if (gcsBucket) {
+      envLines.push(`Environment=GCS_BACKUP_BUCKET=${gcsBucket}`);
+    }
+  }
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
-After=network.target
+After=${afterTargets.join(' ')}${wantsTargets.length > 0 ? `\nWants=${wantsTargets.join(' ')}` : ''}
 
 [Service]
 Type=simple
@@ -243,8 +271,7 @@ ExecStart=${nodePath} ${projectRoot}/dist/index.js
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
-Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+${envLines.join('\n')}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -293,6 +320,11 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     // Not active
   }
 
+  // Install Litestream units if backup is configured (user-level only)
+  if (litestreamEnabled && !runningAsRoot) {
+    installLitestreamUnits(projectRoot, homeDir, gcsBucket, systemctlPrefix);
+  }
+
   emitStatus('SETUP_SERVICE', {
     SERVICE_TYPE: runningAsRoot ? 'systemd-system' : 'systemd-user',
     NODE_PATH: nodePath,
@@ -300,9 +332,93 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
+    ...(litestreamEnabled ? { LITESTREAM_ENABLED: true } : {}),
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
+}
+
+/**
+ * Install Litestream and rsync systemd units for GCS backup.
+ * Generates per-tenant litestream.yml with the correct bucket name.
+ */
+function installLitestreamUnits(
+  projectRoot: string,
+  homeDir: string,
+  gcsBucket: string,
+  systemctlPrefix: string,
+): void {
+  const username = os.userInfo().username;
+  const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
+  fs.mkdirSync(unitDir, { recursive: true });
+
+  // Enable linger so user-level services survive SSH disconnect
+  try {
+    execSync(`loginctl enable-linger ${username}`, { stdio: 'ignore' });
+    logger.info({ username }, 'Enabled loginctl linger');
+  } catch {
+    logger.warn('loginctl enable-linger failed (may need sudo)');
+  }
+
+  // Generate per-tenant litestream.yml
+  const litestreamConfig = `dbs:
+  - path: ${homeDir}/nanoclaw/store/messages.db
+    replicas:
+      - type: gcs
+        bucket: ${gcsBucket}
+        path: litestream/messages.db
+        sync-interval: 10s
+        snapshot-interval: 1h
+`;
+  const litestreamConfigPath = path.join(homeDir, '.config', 'litestream.yml');
+  fs.writeFileSync(litestreamConfigPath, litestreamConfig);
+  logger.info({ litestreamConfigPath }, 'Wrote Litestream config');
+
+  // Copy service units from deploy/ to user systemd dir
+  const deployDir = path.join(projectRoot, 'deploy');
+  for (const unitFile of [
+    'litestream.service',
+    'nanoclaw-rsync.service',
+    'nanoclaw-rsync.timer',
+  ]) {
+    const src = path.join(deployDir, unitFile);
+    const dst = path.join(unitDir, unitFile);
+    if (fs.existsSync(src)) {
+      let content = fs.readFileSync(src, 'utf-8');
+      // For rsync service, set the GCS_BACKUP_BUCKET environment
+      if (unitFile === 'nanoclaw-rsync.service' && gcsBucket) {
+        content = content.replace(
+          /\[Service\]/,
+          `[Service]\nEnvironment=GCS_BACKUP_BUCKET=${gcsBucket}`,
+        );
+      }
+      fs.writeFileSync(dst, content);
+      logger.info({ dst }, `Installed ${unitFile}`);
+    }
+  }
+
+  // Reload and enable units
+  try {
+    execSync(`${systemctlPrefix} daemon-reload`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable litestream`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable nanoclaw-rsync.timer`, {
+      stdio: 'ignore',
+    });
+    logger.info('Enabled Litestream and rsync timer');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to enable Litestream units');
+  }
+
+  // Start Litestream (rsync timer starts on boot)
+  try {
+    execSync(`${systemctlPrefix} start litestream`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} start nanoclaw-rsync.timer`, {
+      stdio: 'ignore',
+    });
+    logger.info('Started Litestream and rsync timer');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to start Litestream units');
+  }
 }
 
 function setupNohupFallback(

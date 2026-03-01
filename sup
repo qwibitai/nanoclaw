@@ -85,6 +85,30 @@ SNAP_CMD='
   else
     echo "(sqlite3 not available or db not found)"
   fi
+
+  echo
+  echo "=== Backup Status ==="
+  if systemctl --user is-active litestream >/dev/null 2>&1; then
+    echo "Litestream: active"
+  elif systemctl --user is-failed litestream >/dev/null 2>&1; then
+    echo "!! Litestream: FAILED"
+    systemctl --user status litestream --no-pager 2>/dev/null | head -5 || true
+  else
+    echo "Litestream: not running"
+  fi
+
+  WAL_FILE=~/nanoclaw/store/messages.db-wal
+  if [ -f "$WAL_FILE" ]; then
+    WAL_SIZE=$(stat -c%s "$WAL_FILE" 2>/dev/null || stat -f%z "$WAL_FILE" 2>/dev/null || echo "?")
+    echo "WAL size: ${WAL_SIZE} bytes"
+  fi
+
+  if systemctl --user is-active nanoclaw-rsync.timer >/dev/null 2>&1; then
+    echo "rsync timer: active"
+    systemctl --user list-timers nanoclaw-rsync.timer --no-pager 2>/dev/null | tail -2 || true
+  else
+    echo "rsync timer: not running"
+  fi
 '
 
 TAIL_CMD='

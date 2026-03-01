@@ -2,7 +2,12 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DATA_DIR,
+  LITESTREAM_ENABLED,
+  STORE_DIR,
+} from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -184,6 +189,15 @@ export function initDatabase(): void {
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');
+
+  // Litestream manages WAL checkpointing — disable app-side checkpointing
+  // Only when Litestream is running (GCE), not on local dev (macOS)
+  if (LITESTREAM_ENABLED) {
+    db.pragma('wal_autocheckpoint = 0');
+    logger.info(
+      'Disabled WAL autocheckpoint (Litestream manages checkpointing)',
+    );
+  }
 
   createSchema(db);
 
@@ -764,6 +778,13 @@ export function getMessageHistory(
     timestamp: string;
     is_bot_message: number;
   }>;
+}
+
+export function closeDatabase(): void {
+  if (db) {
+    db.close();
+    logger.info('Database closed');
+  }
 }
 
 // --- JSON migration ---

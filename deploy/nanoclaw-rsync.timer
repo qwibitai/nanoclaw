@@ -1,0 +1,9 @@
+[Unit]
+Description=NanoClaw GCS backup sync timer
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+
+[Install]
+WantedBy=timers.target

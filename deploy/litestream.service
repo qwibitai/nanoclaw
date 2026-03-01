@@ -1,0 +1,17 @@
+[Unit]
+Description=Litestream replication for NanoClaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+ExecStartPre=/usr/bin/litestream restore -if-db-not-exists -if-replica-exists -parallelism 16 -config %h/.config/litestream.yml %h/nanoclaw/store/messages.db
+
+ExecStart=/usr/bin/litestream replicate -config %h/.config/litestream.yml
+
+[Install]
+WantedBy=default.target

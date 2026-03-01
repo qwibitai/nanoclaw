@@ -13,6 +13,8 @@ const envConfig = readEnvFile([
   'CONTAINER_CPUS',
   'CONTAINER_MEMORY',
   'CONTAINER_PIDS_LIMIT',
+  'LITESTREAM_ENABLED',
+  'GCS_BACKUP_BUCKET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -126,3 +128,9 @@ export const TIMEZONE =
 // Anton's brain: company context cloned from a git repo
 export const BRAIN_REPO_URL = process.env.BRAIN_REPO_URL || '';
 export const BRAIN_DIR = path.resolve(DATA_DIR, 'brain');
+
+// Litestream backup (GCE only — disabled on local dev)
+export const LITESTREAM_ENABLED =
+  (process.env.LITESTREAM_ENABLED || envConfig.LITESTREAM_ENABLED) === 'true';
+export const GCS_BACKUP_BUCKET =
+  process.env.GCS_BACKUP_BUCKET || envConfig.GCS_BACKUP_BUCKET || '';

@@ -1,0 +1,15 @@
+# Litestream configuration for NanoClaw SQLite backup to GCS.
+#
+# This is a TEMPLATE — paths and bucket names must be customized per tenant.
+# On multi-tenant VMs, setup/service.ts generates a per-tenant copy
+# with the correct home directory and bucket name.
+#
+# GCS authentication uses the VM's attached service account (no key files).
+dbs:
+  - path: /home/nanoclaw/nanoclaw/store/messages.db
+    replicas:
+      - type: gcs
+        bucket: REPLACE_WITH_BUCKET_NAME
+        path: litestream/messages.db
+        sync-interval: 10s
+        snapshot-interval: 1h
