@@ -43,9 +43,46 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
-## WhatsApp Formatting (and other messaging apps)
+## Agent Teams
 
-Do NOT use markdown headings (##) in WhatsApp messages. Only use:
+When creating a team to tackle a complex task, follow these rules:
+
+### CRITICAL: Follow the user's prompt exactly
+
+Create *exactly* the team the user asked for — same number of agents, same roles, same names. Do NOT add extra agents, rename roles, or use generic names like "Researcher 1". If the user says "a marine biologist, a physicist, and Alexander Hamilton", create exactly those three agents with those exact names.
+
+### Team member instructions
+
+Each team member MUST be instructed to:
+
+1. *Share progress in the group* via `mcp__nanoclaw__send_message` with a `sender` parameter matching their exact role/character name (e.g., `sender: "Marine Biologist"` or `sender: "Alexander Hamilton"`). This makes their messages appear from a dedicated bot in Telegram.
+2. *Also communicate with teammates* via `SendMessage` as normal for coordination.
+3. Keep group messages *short* — 2-4 sentences max per message. Break longer content into multiple `send_message` calls. No walls of text.
+4. Use the `sender` parameter consistently — always the same name so the bot identity stays stable.
+5. NEVER use markdown formatting. Use ONLY WhatsApp/Telegram formatting: single *asterisks* for bold (NOT **double**), _underscores_ for italic, • for bullets, ```backticks``` for code. No ## headings, no [links](url), no **double asterisks**.
+
+### Example team member prompt
+
+When creating a teammate, include instructions like:
+
+```
+You are the Marine Biologist. When you have findings or updates for the user, send them to the group using mcp__nanoclaw__send_message with sender set to "Marine Biologist". Keep each message short (2-4 sentences max). Use emojis for strong reactions. ONLY use single *asterisks* for bold (never **double**), _underscores_ for italic, • for bullets. No markdown. Also communicate with teammates via SendMessage.
+```
+
+### Lead agent behavior
+
+As the lead agent who created the team:
+
+- You do NOT need to react to or relay every teammate message. The user sees those directly from the teammate bots.
+- Send your own messages only to comment, share thoughts, synthesize, or direct the team.
+- When processing an internal update from a teammate that doesn't need a user-facing response, wrap your *entire* output in `<internal>` tags.
+- Focus on high-level coordination and the final synthesis.
+
+---
+
+## Message Formatting (Telegram)
+
+Do NOT use markdown headings (##) in Telegram messages. Only use:
 - *Bold* (single asterisks) (NEVER **double asterisks**)
 - _Italic_ (underscores)
 - • Bullets (bullet points)
@@ -77,6 +114,8 @@ Key paths inside the container:
 
 ## Managing Groups
 
+This system uses **Telegram** exclusively (`TELEGRAM_ONLY=true`). Telegram JIDs use the format `tg:-xxxx` (e.g., `tg:-1001234567890`).
+
 ### Finding Available Groups
 
 Available groups are provided in `/workspace/ipc/available_groups.json`:
@@ -85,8 +124,8 @@ Available groups are provided in `/workspace/ipc/available_groups.json`:
 {
   "groups": [
     {
-      "jid": "120363336345536173@g.us",
-      "name": "Family Chat",
+      "jid": "tg:-1001234567890",
+      "name": "Engineering",
       "lastActivity": "2026-01-31T12:00:00.000Z",
       "isRegistered": false
     }
@@ -95,15 +134,7 @@ Available groups are provided in `/workspace/ipc/available_groups.json`:
 }
 ```
 
-Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
-
-If a group the user mentions isn't in the list, request a fresh sync:
-
-```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
-```
-
-Then wait a moment and re-read `available_groups.json`.
+**Note**: Telegram groups appear here automatically after their first message to the bot. There is no manual sync step needed — unlike WhatsApp, Telegram chats self-register on first contact.
 
 **Fallback**: Query the SQLite database directly:
 
@@ -111,91 +142,112 @@ Then wait a moment and re-read `available_groups.json`.
 sqlite3 /workspace/project/store/messages.db "
   SELECT jid, name, last_message_time
   FROM chats
-  WHERE jid LIKE '%@g.us' AND jid != '__group_sync__'
+  WHERE jid LIKE 'tg:%'
   ORDER BY last_message_time DESC
-  LIMIT 10;
+  LIMIT 20;
 "
 ```
 
-### Registered Groups Config
+### Registered Groups
 
-Groups are registered in `/workspace/project/data/registered_groups.json`:
+Groups are stored in the SQLite database (`registered_groups` table). To list all registered groups:
 
-```json
-{
-  "1234567890-1234567890@g.us": {
-    "name": "Family Chat",
-    "folder": "family-chat",
-    "trigger": "@Andy",
-    "added_at": "2024-01-31T12:00:00.000Z"
-  }
-}
+```bash
+sqlite3 /workspace/project/store/messages.db "
+  SELECT jid, name, folder, trigger_pattern, requires_trigger
+  FROM registered_groups;
+"
 ```
 
 Fields:
-- **Key**: The WhatsApp JID (unique identifier for the chat)
+- **jid**: The Telegram chat ID in `tg:-xxxx` format
 - **name**: Display name for the group
 - **folder**: Folder name under `groups/` for this group's files and memory
-- **trigger**: The trigger word (usually same as global, but could differ)
-- **requiresTrigger**: Whether `@trigger` prefix is needed (default: `true`). Set to `false` for solo/personal chats where all messages should be processed
+- **trigger_pattern**: The trigger word (e.g., `@Mani`)
+- **requiresTrigger**: `1` = only respond when `@Mani` is mentioned, `0` = respond to all messages
 - **added_at**: ISO timestamp when registered
 
 ### Trigger Behavior
 
 - **Main group**: No trigger needed — all messages are processed automatically
-- **Groups with `requiresTrigger: false`**: No trigger needed — all messages processed (use for 1-on-1 or solo chats)
-- **Other groups** (default): Messages must start with `@AssistantName` to be processed
+- **Groups with `requiresTrigger: false`**: All messages processed (use for 1-on-1 / personal chats)
+- **Other groups** (default): Messages must include `@Mani` to be processed
 
 ### Adding a Group
 
-1. Query the database to find the group's JID
-2. Read `/workspace/project/data/registered_groups.json`
-3. Add the new group entry with `containerConfig` if needed
-4. Write the updated JSON back
-5. Create the group folder: `/workspace/project/groups/{folder-name}/`
-6. Optionally create an initial `CLAUDE.md` for the group
+To register a new Telegram group, write a `register_group` IPC task:
 
-Example folder name conventions:
-- "Family Chat" → `family-chat`
-- "Work Team" → `work-team`
-- Use lowercase, hyphens instead of spaces
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:-1001234567890",
+  "name": "Engineering",
+  "folder": "engineering",
+  "trigger": "@Mani",
+  "requiresTrigger": true
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+```
+
+Then create the group folder and an initial `CLAUDE.md`:
+
+```bash
+mkdir -p /workspace/project/groups/engineering/logs
+```
+
+And create `/workspace/project/groups/engineering/CLAUDE.md` with appropriate context for that group.
+
+Folder name conventions:
+- "Engineering Team" → `engineering`
+- "Stock Team" → `stock-team`
+- "Marketing Team" → `marketing`
+- "Personal" → `personal`
+- Use lowercase, hyphens instead of spaces, keep it short
 
 #### Adding Additional Directories for a Group
 
-Groups can have extra directories mounted. Add `containerConfig` to their entry:
+If a group needs access to extra host directories, include `containerConfig` in the IPC task:
 
-```json
-{
-  "1234567890@g.us": {
-    "name": "Dev Team",
-    "folder": "dev-team",
-    "trigger": "@Andy",
-    "added_at": "2026-01-31T12:00:00Z",
-    "containerConfig": {
-      "additionalMounts": [
-        {
-          "hostPath": "~/projects/webapp",
-          "containerPath": "webapp",
-          "readonly": false
-        }
-      ]
-    }
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:-1001234567890",
+  "name": "Engineering",
+  "folder": "engineering",
+  "trigger": "@Mani",
+  "requiresTrigger": true,
+  "containerConfig": {
+    "additionalMounts": [
+      {
+        "hostPath": "~/projects/webapp",
+        "containerPath": "webapp",
+        "readonly": false
+      }
+    ]
   }
-}
+}' > /workspace/ipc/tasks/register_$(date +%s).json
 ```
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
-4. The group folder and its files remain (don't delete them)
+Delete the row from the `registered_groups` table:
+
+```bash
+sqlite3 /workspace/project/store/messages.db \
+  "DELETE FROM registered_groups WHERE jid = 'tg:-1001234567890';"
+```
+
+The group folder and its files remain intact — data is never deleted automatically.
 
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+```bash
+sqlite3 /workspace/project/store/messages.db \
+  "SELECT jid, name, folder FROM registered_groups;"
+```
+
+Or read the snapshot: `cat /workspace/ipc/available_groups.json`
 
 ---
 
@@ -207,7 +259,7 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ## Scheduling for Other Groups
 
-When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
-- `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
+When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's Telegram JID:
+- `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "tg:-1001234567890")`
 
 The task will run in that group's context with access to their files and memory.
