@@ -37,7 +37,7 @@ fi
 # Get current version from local package.json
 CURRENT_VERSION="unknown"
 if [ -f package.json ]; then
-  CURRENT_VERSION=$(node -e "console.log(require('./package.json').version || 'unknown')")
+  CURRENT_VERSION=$(jq -r '.version // "unknown"' package.json 2>/dev/null || echo "unknown")
 fi
 
 # Create temp dir and extract only the paths the skills engine tracks.
@@ -71,7 +71,7 @@ git archive "$REMOTE/main" -- $PATHS | tar -x -C "$TEMP_DIR"
 # Get new version from extracted package.json
 NEW_VERSION="unknown"
 if [ -f "$TEMP_DIR/package.json" ]; then
-  NEW_VERSION=$(node -e "console.log(require('$TEMP_DIR/package.json').version || 'unknown')")
+  NEW_VERSION=$(jq -r '.version // "unknown"' "$TEMP_DIR/package.json" 2>/dev/null || echo "unknown")
 fi
 
 echo ""
