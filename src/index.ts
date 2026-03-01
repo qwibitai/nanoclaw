@@ -10,9 +10,12 @@ import {
   TELEGRAM_BOT_POOL,
   TELEGRAM_ONLY,
   TRIGGER_PATTERN,
+  WEBSOCKET_ENABLED,
+  WEBSOCKET_PORT,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { TelegramChannel, initBotPool } from './channels/telegram.js';
+import { WebSocketChannel } from './channels/websocket.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -441,6 +444,40 @@ function recoverPendingMessages(): void {
 }
 
 
+const BETTER_WORK_CLAUDE_MD = `# better-work
+
+Eres un asistente de productividad personal.
+
+## Idioma
+Responde siempre en español. Sin excepciones para las respuestas al usuario.
+Puedes leer y escribir en catalán e inglés cuando el usuario lo pida explícitamente (emails, documentos, traducciones). Nunca lo hagas de forma espontánea.
+
+## Tono
+Directo y conciso. Sin relleno, sin frases de cortesía vacías.
+
+## Filesystem
+Tienes acceso al filesystem del grupo en /workspace/group/.
+`;
+
+function ensureBetterWorkGroup(): void {
+  const jid = 'ws:better-work';
+  if (registeredGroups[jid]) return;
+
+  registerGroup(jid, {
+    name: 'better-work',
+    folder: 'better-work',
+    trigger: '@Nano',
+    added_at: new Date().toISOString(),
+    requiresTrigger: false,
+  });
+
+  const groupDir = resolveGroupFolderPath('better-work');
+  const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
+  if (!fs.existsSync(claudeMdPath)) {
+    fs.writeFileSync(claudeMdPath, BETTER_WORK_CLAUDE_MD);
+  }
+}
+
 async function main(): Promise<void> {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -487,6 +524,16 @@ async function main(): Promise<void> {
     if (TELEGRAM_BOT_POOL.length > 0) {
       await initBotPool(TELEGRAM_BOT_POOL);
     }
+  }
+
+  if (WEBSOCKET_ENABLED) {
+    const wsChannel = new WebSocketChannel(WEBSOCKET_PORT, {
+      onMessage: channelOpts.onMessage,
+      onChatMetadata: channelOpts.onChatMetadata,
+    });
+    channels.push(wsChannel);
+    await wsChannel.connect();
+    ensureBetterWorkGroup();
   }
 
   // Start subsystems (independently of connection handler)
