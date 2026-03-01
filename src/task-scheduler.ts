@@ -8,6 +8,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
+import { datePrefix } from './date-utils.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -136,7 +137,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt: datePrefix() + task.prompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
