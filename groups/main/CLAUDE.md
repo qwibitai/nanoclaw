@@ -156,6 +156,20 @@ bash /home/node/.claude/skills/speech-to-text/transcribe.sh <path>
 ```
 Then respond to the transcribed content naturally. Do not ask the user — just transcribe and reply.
 
+### Voice replies
+
+When responding to a voice message, **always send both text and audio**:
+
+1. **First**, generate the voice reply using `synthesize.sh`.
+2. **Then**, send both text and audio in a single call using `mcp__nanoclaw__send_voice` with both the `text` and `file_path` parameters. The `text` is delivered first, then the voice message follows — all in one tool call.
+3. **Finally**, wrap any remaining output in `<internal>` tags so it isn't sent as a duplicate text message.
+
+For the audio response, decide based on context:
+- **Short/simple response** (a few sentences) → speak the same content as the text
+- **Long/detailed response** (lists, data, multiple paragraphs) → speak a higher-level summary instead, since the user can read the text for full details
+
+Only send voice replies when responding to voice messages. For regular text messages, respond with text only unless the user specifically asks for audio.
+
 ---
 
 ## Admin Context

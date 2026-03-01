@@ -117,6 +117,7 @@ server.tool(
   "Send a voice message to the user or group. Use after generating speech audio with the text-to-speech skill.",
   {
     file_path: z.string().describe('Absolute path to the OGG Opus audio file in the container (e.g., /workspace/group/media/generated/123.ogg)'),
+    text: z.string().optional().describe('Text response to send before the voice message. Delivers text first, then voice — use this instead of calling send_message + send_voice separately.'),
     caption: z.string().optional().describe('Optional caption text to display with the voice message'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Assistant"). When set, voice message appears from a dedicated bot in Telegram.'),
   },
@@ -132,6 +133,7 @@ server.tool(
       type: 'voice',
       chatJid,
       filePath: args.file_path,
+      text: args.text || undefined,
       caption: args.caption || undefined,
       sender: args.sender || undefined,
       groupFolder,

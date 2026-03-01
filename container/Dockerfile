@@ -29,24 +29,6 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Build whisper.cpp for speech-to-text transcription
-RUN apt-get update && apt-get install -y --no-install-recommends cmake build-essential ca-certificates \
-    && git clone --depth 1 --branch v1.7.4 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper \
-    && cmake -S /tmp/whisper -B /tmp/whisper/build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF \
-    && cmake --build /tmp/whisper/build --target whisper-cli -j$(nproc) \
-    && cp /tmp/whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli \
-    && cp /tmp/whisper/build/src/libwhisper.so* /usr/local/lib/ \
-    && cp /tmp/whisper/build/ggml/src/libggml*.so* /usr/local/lib/ \
-    && ldconfig \
-    && mkdir -p /usr/local/share/whisper \
-    && curl -L -o /usr/local/share/whisper/ggml-base.en.bin \
-       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin \
-    && rm -rf /tmp/whisper \
-    && apt-get purge -y cmake build-essential \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
-
-
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

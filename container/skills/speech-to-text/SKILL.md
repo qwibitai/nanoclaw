@@ -4,7 +4,7 @@ description: Transcribe voice messages and audio files to text. Use immediately 
 allowed-tools: Bash(transcribe:*)
 ---
 
-# Speech-to-Text (whisper.cpp)
+# Speech-to-Text (Gemini)
 
 Transcribe voice messages and audio files using the `transcribe.sh` script.
 

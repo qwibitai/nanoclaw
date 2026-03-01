@@ -163,6 +163,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       'IPC voice file not found on host',
                     );
                   } else if (data.sender && data.chatJid.startsWith('tg:')) {
+                    if (data.text) {
+                      await sendPoolMessage(
+                        data.chatJid,
+                        data.text,
+                        data.sender,
+                        sourceGroup,
+                      );
+                    }
                     await sendPoolVoice(
                       data.chatJid,
                       hostPath,
@@ -171,6 +179,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                       data.caption,
                     );
                   } else {
+                    if (data.text) {
+                      await deps.sendMessage(data.chatJid, data.text);
+                    }
                     await deps.sendVoice(data.chatJid, hostPath, data.caption);
                   }
                   logger.info(
