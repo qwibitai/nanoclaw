@@ -54,7 +54,7 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-function buildVolumeMounts(
+export function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
 ): VolumeMount[] {
@@ -162,9 +162,8 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // Always sync core agent-runner source so MCP tool updates propagate
+  // to existing groups (same pattern as skills sync above).
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
@@ -177,12 +176,29 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+  if (fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
+    readonly: false,
+  });
+
+  // Per-group extensions directory for agent-added custom tools.
+  // Never overwritten by core sync — agents can safely add tools here.
+  const groupExtensionsDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-extensions',
+  );
+  if (!fs.existsSync(groupExtensionsDir)) {
+    fs.mkdirSync(groupExtensionsDir, { recursive: true });
+  }
+  mounts.push({
+    hostPath: groupExtensionsDir,
+    containerPath: '/app/extensions',
     readonly: false,
   });
 
