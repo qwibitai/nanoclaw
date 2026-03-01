@@ -22,6 +22,26 @@ describe('JID ownership patterns', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
   });
+
+  it('Slack channel JID: starts with slack:', () => {
+    const jid = 'slack:C0123456789';
+    expect(jid.startsWith('slack:')).toBe(true);
+  });
+
+  it('Slack DM JID: starts with slack:D', () => {
+    const jid = 'slack:D0123456789';
+    expect(jid.startsWith('slack:')).toBe(true);
+  });
+
+  it('Gmail JID: starts with gmail:', () => {
+    const jid = 'gmail:abc123def';
+    expect(jid.startsWith('gmail:')).toBe(true);
+  });
+
+  it('Gmail thread JID: starts with gmail: followed by thread ID', () => {
+    const jid = 'gmail:18d3f4a5b6c7d8e9';
+    expect(jid.startsWith('gmail:')).toBe(true);
+  });
 });
 
 // --- getAvailableGroups ---
@@ -166,5 +186,125 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+
+  it('includes Slack channel JIDs', () => {
+    storeChatMetadata(
+      'slack:C0123456789',
+      '2024-01-01T00:00:01.000Z',
+      'Slack Channel',
+      'slack',
+      true,
+    );
+    storeChatMetadata(
+      'user@s.whatsapp.net',
+      '2024-01-01T00:00:02.000Z',
+      'User DM',
+      'whatsapp',
+      false,
+    );
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('slack:C0123456789');
+  });
+
+  it('returns Slack DM JIDs as groups when is_group is true', () => {
+    storeChatMetadata(
+      'slack:D0123456789',
+      '2024-01-01T00:00:01.000Z',
+      'Slack DM',
+      'slack',
+      true,
+    );
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('slack:D0123456789');
+    expect(groups[0].name).toBe('Slack DM');
+  });
+
+  it('marks registered Slack channels correctly', () => {
+    storeChatMetadata(
+      'slack:C0123456789',
+      '2024-01-01T00:00:01.000Z',
+      'Slack Registered',
+      'slack',
+      true,
+    );
+    storeChatMetadata(
+      'slack:C9999999999',
+      '2024-01-01T00:00:02.000Z',
+      'Slack Unregistered',
+      'slack',
+      true,
+    );
+
+    _setRegisteredGroups({
+      'slack:C0123456789': {
+        name: 'Slack Registered',
+        folder: 'slack-registered',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const groups = getAvailableGroups();
+    const slackReg = groups.find((g) => g.jid === 'slack:C0123456789');
+    const slackUnreg = groups.find((g) => g.jid === 'slack:C9999999999');
+
+    expect(slackReg?.isRegistered).toBe(true);
+    expect(slackUnreg?.isRegistered).toBe(false);
+  });
+
+  it('mixes WhatsApp and Slack chats ordered by activity', () => {
+    storeChatMetadata(
+      'wa@g.us',
+      '2024-01-01T00:00:01.000Z',
+      'WhatsApp',
+      'whatsapp',
+      true,
+    );
+    storeChatMetadata(
+      'slack:C100',
+      '2024-01-01T00:00:03.000Z',
+      'Slack',
+      'slack',
+      true,
+    );
+    storeChatMetadata(
+      'wa2@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'WhatsApp 2',
+      'whatsapp',
+      true,
+    );
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(3);
+    expect(groups[0].jid).toBe('slack:C100');
+    expect(groups[1].jid).toBe('wa2@g.us');
+    expect(groups[2].jid).toBe('wa@g.us');
+  });
+
+  it('excludes Gmail threads from group list (Gmail threads are not groups)', () => {
+    storeChatMetadata(
+      'gmail:abc123',
+      '2024-01-01T00:00:01.000Z',
+      'Email thread',
+      'gmail',
+      false,
+    );
+    storeChatMetadata(
+      'group@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'Group',
+      'whatsapp',
+      true,
+    );
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('group@g.us');
   });
 });

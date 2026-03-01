@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -60,6 +61,7 @@ function buildVolumeMounts(
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
+  const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
@@ -150,6 +152,71 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false, // MCP may need to refresh OAuth tokens
+    });
+  }
+
+  // Google Calendar MCP credentials
+  const calendarMcpDir = path.join(homeDir, '.google-calendar-mcp');
+  if (fs.existsSync(calendarMcpDir)) {
+    mounts.push({
+      hostPath: calendarMcpDir,
+      containerPath: '/home/node/.google-calendar-mcp',
+      readonly: false,
+    });
+  }
+
+  // Google Docs/Sheets MCP credentials
+  const docsMcpDir = path.join(homeDir, '.config', 'google-docs-mcp');
+  if (fs.existsSync(docsMcpDir)) {
+    mounts.push({
+      hostPath: docsMcpDir,
+      containerPath: '/home/node/.config/google-docs-mcp',
+      readonly: false,
+    });
+  }
+
+  // X11 display passthrough via XWayland (for browser automation on physical display)
+  const hostUid = process.getuid?.();
+  const xdgRuntime = hostUid != null ? `/run/user/${hostUid}` : null;
+  if (
+    xdgRuntime &&
+    fs.existsSync(xdgRuntime) &&
+    fs.existsSync('/tmp/.X11-unix')
+  ) {
+    const xauthName = fs
+      .readdirSync(xdgRuntime)
+      .find((f) => f.startsWith('.mutter-Xwaylandauth.'));
+    if (xauthName) {
+      mounts.push({
+        hostPath: '/tmp/.X11-unix',
+        containerPath: '/tmp/.X11-unix',
+        readonly: false,
+      });
+      mounts.push({
+        hostPath: path.join(xdgRuntime, xauthName),
+        containerPath: '/tmp/.xauthority',
+        readonly: true,
+      });
+    }
+  }
+
+  // Browser profile directory (persistent Firefox profile for @playwright/mcp)
+  const browserDir = path.join(homeDir, '.nanoclaw-browser');
+  if (fs.existsSync(browserDir)) {
+    mounts.push({
+      hostPath: browserDir,
+      containerPath: '/home/node/.nanoclaw-browser',
+      readonly: false,
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -204,7 +271,12 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+  ]);
 }
 
 function buildContainerArgs(
@@ -232,6 +304,19 @@ function buildContainerArgs(
     } else {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
+  }
+
+  // Display passthrough: X11 via XWayland for browser on physical display
+  const xdgRuntime = hostUid != null ? `/run/user/${hostUid}` : null;
+  const xauthName =
+    xdgRuntime && fs.existsSync(xdgRuntime)
+      ? fs
+          .readdirSync(xdgRuntime)
+          .find((f) => f.startsWith('.mutter-Xwaylandauth.'))
+      : null;
+  if (xauthName && fs.existsSync('/tmp/.X11-unix')) {
+    args.push('-e', `DISPLAY=${process.env.DISPLAY || ':0'}`);
+    args.push('-e', 'XAUTHORITY=/tmp/.xauthority');
   }
 
   args.push(CONTAINER_IMAGE);

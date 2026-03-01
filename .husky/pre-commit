@@ -1,1 +1,5 @@
-npm run format:fix
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Run formatting check before commit
+npm run format:check

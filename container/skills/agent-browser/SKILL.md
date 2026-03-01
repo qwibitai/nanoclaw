@@ -1,159 +1,77 @@
 ---
 name: agent-browser
 description: Browse the web for any task — research topics, read articles, interact with web apps, fill forms, take screenshots, extract data, and test web pages. Use whenever a browser would be useful, not just when the user explicitly asks.
-allowed-tools: Bash(agent-browser:*)
+allowed-tools: mcp__playwright__*
 ---
 
-# Browser Automation with agent-browser
+# Browser Automation with Playwright MCP
+
+Browser automation uses the `@playwright/mcp` MCP server, which provides Firefox with X11 display passthrough (visible on the kitchen display).
 
 ## Quick start
 
-```bash
-agent-browser open <url>        # Navigate to page
-agent-browser snapshot -i       # Get interactive elements with refs
-agent-browser click @e1         # Click element by ref
-agent-browser fill @e2 "text"   # Fill input by ref
-agent-browser close             # Close browser
+```
+mcp__playwright__browser_navigate url="https://example.com"
+mcp__playwright__browser_snapshot
+mcp__playwright__browser_click element="Submit button"
+mcp__playwright__browser_screenshot
 ```
 
 ## Core workflow
 
-1. Navigate: `agent-browser open <url>`
-2. Snapshot: `agent-browser snapshot -i` (returns elements with refs like `@e1`, `@e2`)
-3. Interact using refs from the snapshot
+1. Navigate: `browser_navigate url="<url>"`
+2. Snapshot: `browser_snapshot` (returns accessibility tree with interactive elements)
+3. Interact using element descriptions from the snapshot
 4. Re-snapshot after navigation or significant DOM changes
 
-## Commands
+## Key tools
 
 ### Navigation
+- `mcp__playwright__browser_navigate` — Go to URL
+- `mcp__playwright__browser_go_back` / `browser_go_forward` — History navigation
 
-```bash
-agent-browser open <url>      # Navigate to URL
-agent-browser back            # Go back
-agent-browser forward         # Go forward
-agent-browser reload          # Reload page
-agent-browser close           # Close browser
-```
+### Page analysis
+- `mcp__playwright__browser_snapshot` — Accessibility tree (use this to find elements)
+- `mcp__playwright__browser_screenshot` — Capture visible page as image
 
-### Snapshot (page analysis)
+### Interactions
+- `mcp__playwright__browser_click` — Click an element
+- `mcp__playwright__browser_type` — Type text into focused element
+- `mcp__playwright__browser_fill` — Fill an input field
+- `mcp__playwright__browser_select_option` — Choose dropdown option
+- `mcp__playwright__browser_check` / `browser_uncheck` — Toggle checkboxes
+- `mcp__playwright__browser_hover` — Hover over element
+- `mcp__playwright__browser_press_key` — Press keyboard key
+- `mcp__playwright__browser_drag` — Drag and drop
 
-```bash
-agent-browser snapshot            # Full accessibility tree
-agent-browser snapshot -i         # Interactive elements only (recommended)
-agent-browser snapshot -c         # Compact output
-agent-browser snapshot -d 3       # Limit depth to 3
-agent-browser snapshot -s "#main" # Scope to CSS selector
-```
-
-### Interactions (use @refs from snapshot)
-
-```bash
-agent-browser click @e1           # Click
-agent-browser dblclick @e1        # Double-click
-agent-browser fill @e2 "text"     # Clear and type
-agent-browser type @e2 "text"     # Type without clearing
-agent-browser press Enter         # Press key
-agent-browser hover @e1           # Hover
-agent-browser check @e1           # Check checkbox
-agent-browser uncheck @e1         # Uncheck checkbox
-agent-browser select @e1 "value"  # Select dropdown option
-agent-browser scroll down 500     # Scroll page
-agent-browser upload @e1 file.pdf # Upload files
-```
-
-### Get information
-
-```bash
-agent-browser get text @e1        # Get element text
-agent-browser get html @e1        # Get innerHTML
-agent-browser get value @e1       # Get input value
-agent-browser get attr @e1 href   # Get attribute
-agent-browser get title           # Get page title
-agent-browser get url             # Get current URL
-agent-browser get count ".item"   # Count matching elements
-```
-
-### Screenshots & PDF
-
-```bash
-agent-browser screenshot          # Save to temp directory
-agent-browser screenshot path.png # Save to specific path
-agent-browser screenshot --full   # Full page
-agent-browser pdf output.pdf      # Save as PDF
-```
-
-### Wait
-
-```bash
-agent-browser wait @e1                     # Wait for element
-agent-browser wait 2000                    # Wait milliseconds
-agent-browser wait --text "Success"        # Wait for text
-agent-browser wait --url "**/dashboard"    # Wait for URL pattern
-agent-browser wait --load networkidle      # Wait for network idle
-```
-
-### Semantic locators (alternative to refs)
-
-```bash
-agent-browser find role button click --name "Submit"
-agent-browser find text "Sign In" click
-agent-browser find label "Email" fill "user@test.com"
-agent-browser find placeholder "Search" type "query"
-```
-
-### Authentication with saved state
-
-```bash
-# Login once
-agent-browser open https://app.example.com/login
-agent-browser snapshot -i
-agent-browser fill @e1 "username"
-agent-browser fill @e2 "password"
-agent-browser click @e3
-agent-browser wait --url "**/dashboard"
-agent-browser state save auth.json
-
-# Later: load saved state
-agent-browser state load auth.json
-agent-browser open https://app.example.com/dashboard
-```
-
-### Cookies & Storage
-
-```bash
-agent-browser cookies                     # Get all cookies
-agent-browser cookies set name value      # Set cookie
-agent-browser cookies clear               # Clear cookies
-agent-browser storage local               # Get localStorage
-agent-browser storage local set k v       # Set value
-```
+### Waiting
+- `mcp__playwright__browser_wait_for` — Wait for element, text, or URL
 
 ### JavaScript
+- `mcp__playwright__browser_evaluate` — Run JavaScript in page context
 
-```bash
-agent-browser eval "document.title"   # Run JavaScript
-```
+### Tabs
+- `mcp__playwright__browser_tab_new` — Open new tab
+- `mcp__playwright__browser_tab_list` — List open tabs
+- `mcp__playwright__browser_tab_select` — Switch to tab
+- `mcp__playwright__browser_tab_close` — Close tab
 
 ## Example: Form submission
 
-```bash
-agent-browser open https://example.com/form
-agent-browser snapshot -i
-# Output shows: textbox "Email" [ref=e1], textbox "Password" [ref=e2], button "Submit" [ref=e3]
-
-agent-browser fill @e1 "user@example.com"
-agent-browser fill @e2 "password123"
-agent-browser click @e3
-agent-browser wait --load networkidle
-agent-browser snapshot -i  # Check result
+```
+mcp__playwright__browser_navigate url="https://example.com/login"
+mcp__playwright__browser_snapshot
+# Snapshot shows: textbox "Email", textbox "Password", button "Sign In"
+mcp__playwright__browser_fill element="Email" value="user@example.com"
+mcp__playwright__browser_fill element="Password" value="password123"
+mcp__playwright__browser_click element="Sign In"
+mcp__playwright__browser_wait_for text="Dashboard"
+mcp__playwright__browser_snapshot
 ```
 
-## Example: Data extraction
+## Notes
 
-```bash
-agent-browser open https://example.com/products
-agent-browser snapshot -i
-agent-browser get text @e1  # Get product title
-agent-browser get attr @e2 href  # Get link URL
-agent-browser screenshot products.png
-```
+- The browser profile persists at `/home/node/.nanoclaw-browser/firefox-profile` across sessions
+- Firefox opens visibly on the kitchen display (X11 via XWayland)
+- Google and other web accounts stay logged in between sessions via the persistent profile
+- For OAuth flows: navigate to the auth URL, complete login on the kitchen display, done
