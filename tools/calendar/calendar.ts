@@ -122,6 +122,9 @@ async function listEvents(
     end: e.end?.dateTime || e.end?.date,
     status: e.status,
     attendees: e.attendees?.map(a => ({ email: a.email, responseStatus: a.responseStatus })),
+    meetLink: e.conferenceData?.entryPoints?.find(
+      (ep: { entryPointType?: string }) => ep.entryPointType === 'video'
+    )?.uri || null,
   }));
 
   console.log(JSON.stringify({
@@ -162,7 +165,21 @@ async function createEvent(
     }
   }
 
-  const res = await cal.events.insert({ calendarId, requestBody: event });
+  // Add Google Meet conferencing if --meet flag is set (or by default for all events)
+  if (flags.meet !== 'false') {
+    event.conferenceData = {
+      createRequest: {
+        requestId: `meet-${Date.now()}`,
+        conferenceSolutionKey: { type: 'hangoutsMeet' },
+      },
+    };
+  }
+
+  const res = await cal.events.insert({
+    calendarId,
+    requestBody: event,
+    conferenceDataVersion: 1,
+  });
 
   console.log(JSON.stringify({
     status: 'success',
@@ -173,6 +190,9 @@ async function createEvent(
       start: res.data.start?.dateTime || res.data.start?.date,
       end: res.data.end?.dateTime || res.data.end?.date,
       htmlLink: res.data.htmlLink,
+      meetLink: res.data.conferenceData?.entryPoints?.find(
+        (e: { entryPointType?: string }) => e.entryPointType === 'video'
+      )?.uri || null,
     },
   }));
 }
