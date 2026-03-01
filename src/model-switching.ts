@@ -1,6 +1,8 @@
 // In-memory model/thinking overrides per group session.
 // No DB persistence — cleared on pool eviction or explicit reset.
 
+import { logger } from './logger.js';
+
 export const ALLOWED_MODELS: string[] = [
   'claude-sonnet-4-20250514',
   'claude-haiku-4-5-20251001',
@@ -38,6 +40,7 @@ export function setModel(groupFolder: string, modelName: string): SetModelResult
 
   const existing = overrides.get(groupFolder) ?? {};
   overrides.set(groupFolder, { ...existing, model: modelName });
+  logger.debug({ groupFolder, model: modelName }, 'Model override set');
   return { success: true };
 }
 
@@ -52,6 +55,7 @@ export function getOverride(groupFolder: string): Override {
 
 export function clearOverride(groupFolder: string): void {
   overrides.delete(groupFolder);
+  logger.debug({ groupFolder }, 'Model override cleared');
 }
 
 export function listModels(): string[] {

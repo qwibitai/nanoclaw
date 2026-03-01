@@ -6,6 +6,8 @@
  */
 import { execSync } from 'child_process';
 
+import { logger } from './logger.js';
+
 const CONTAINER_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
 export interface PoolEntry {
@@ -67,6 +69,7 @@ export class SessionPool {
 
     this.pool.delete(groupFolder);
     entry.lastUsed = Date.now();
+    logger.debug({ groupFolder, containerId: entry.containerId }, 'Session pool hit');
     return entry;
   }
 
@@ -97,6 +100,7 @@ export class SessionPool {
       groupFolder,
       lastUsed: Date.now(),
     });
+    logger.debug({ groupFolder, containerId, poolSize: this.pool.size }, 'Session released to pool');
   }
 
   /**
@@ -108,6 +112,7 @@ export class SessionPool {
     if (!entry) return;
 
     this.pool.delete(groupFolder);
+    logger.debug({ groupFolder, containerId: entry.containerId }, 'Session evicted from pool');
     try {
       stopContainer(entry.containerId);
     } catch {

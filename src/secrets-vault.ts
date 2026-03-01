@@ -2,6 +2,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { logger } from './logger.js';
+
 const HKDF_INFO = 'sovereign-secrets-v1';
 const SALT_LEN = 32;
 const NONCE_LEN = 12;
@@ -131,6 +133,7 @@ export class SecretsVault {
     const data = readSecrets(this.secretsFile);
     data[name] = encrypt(this.masterKey, value);
     writeSecretsAtomic(this.secretsFile, data);
+    logger.debug({ secret: name }, 'Secret stored');
   }
 
   async get(name: string): Promise<string | undefined> {
@@ -151,6 +154,7 @@ export class SecretsVault {
     const data = readSecrets(this.secretsFile);
     delete data[name];
     writeSecretsAtomic(this.secretsFile, data);
+    logger.debug({ secret: name }, 'Secret deleted');
   }
 
   async rotate(newMasterKey: string): Promise<void> {
@@ -170,5 +174,6 @@ export class SecretsVault {
 
     // Update in-memory master key
     this.masterKey = newMasterKey;
+    logger.info({ secretCount: Object.keys(reEncrypted).length }, 'Secrets vault rotated');
   }
 }

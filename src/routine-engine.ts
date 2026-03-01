@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 
+import { logger } from './logger.js';
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -210,6 +212,7 @@ export class RoutineEngine {
 
     const stored = { ...routine };
     this.routines.set(routine.name, stored);
+    logger.debug({ routine: routine.name, group: routine.group, trigger: routine.trigger.type }, 'Routine added');
 
     // Persist to DB
     if (this.callbacks.persistence) {
@@ -221,6 +224,7 @@ export class RoutineEngine {
     this.routines.delete(name);
     this.regexCache.delete(name);
     this.lastEventFireAt.delete(name);
+    logger.debug({ routine: name }, 'Routine removed');
 
     // Remove from DB
     if (this.callbacks.persistence) {
@@ -403,6 +407,7 @@ export class RoutineEngine {
     // Global concurrency cap (P1 fix — prevents cost spiral from many routines)
     if (this.globalRunning >= this.MAX_GLOBAL_CONCURRENT) {
       run.error = 'Global concurrency limit reached';
+      logger.warn({ routine: routine.name, globalRunning: this.globalRunning }, 'Routine skipped — global concurrency limit');
       return run;
     }
     this.globalRunning++;
@@ -464,6 +469,7 @@ export class RoutineEngine {
       // Auto-pause after 5 consecutive failures
       if (routine.consecutiveFailures >= 5) {
         routine.enabled = false;
+        logger.warn({ routine: routine.name, failures: routine.consecutiveFailures }, 'Routine auto-paused');
         this.callbacks.onNotify({
           routineName: routine.name,
           group: routine.group,
