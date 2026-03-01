@@ -846,6 +846,34 @@ export function pruneOldRoutineRuns(maxAgeDays: number = 30): number {
   return result.changes;
 }
 
+// --- Dashboard query accessors ---
+
+export function getMessageCountByGroup(): Record<string, number> {
+  const rows = db
+    .prepare(
+      'SELECT chat_jid, COUNT(*) as count FROM messages GROUP BY chat_jid',
+    )
+    .all() as Array<{ chat_jid: string; count: number }>;
+  const result: Record<string, number> = {};
+  for (const row of rows) {
+    result[row.chat_jid] = row.count;
+  }
+  return result;
+}
+
+export function getLastActivityByGroup(): Record<string, string> {
+  const rows = db
+    .prepare(
+      'SELECT chat_jid, MAX(timestamp) as last_activity FROM messages GROUP BY chat_jid',
+    )
+    .all() as Array<{ chat_jid: string; last_activity: string }>;
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    result[row.chat_jid] = row.last_activity;
+  }
+  return result;
+}
+
 // --- JSON migration ---
 
 function migrateJsonState(): void {

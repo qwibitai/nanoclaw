@@ -46,6 +46,8 @@ const RoutingActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('autoLearner') }),
   z.object({ type: z.literal('hindsight') }),
   z.object({ type: z.literal('reflector') }),
+  z.object({ type: z.literal('memoryImprover') }),
+  z.object({ type: z.literal('proactiveAgent') }),
 ]);
 
 const RoutingRuleSchema = z.object({
@@ -77,7 +79,9 @@ export type RoutingAction =
   | { type: 'qualityTracker' }
   | { type: 'autoLearner' }
   | { type: 'hindsight' }
-  | { type: 'reflector' };
+  | { type: 'reflector' }
+  | { type: 'memoryImprover' }
+  | { type: 'proactiveAgent' };
 
 export interface RoutingRule {
   id: string;
@@ -308,6 +312,16 @@ async function executeAction(
     case 'reflector': {
       const { reflectOnMemory } = await import('./reflector.js');
       await reflectOnMemory(ctx.groupFolder);
+      break;
+    }
+    case 'memoryImprover': {
+      const { improveMemory } = await import('./memory-improver.js');
+      await improveMemory(ctx.groupFolder);
+      break;
+    }
+    case 'proactiveAgent': {
+      const { detectProactiveOpportunities } = await import('./proactive-agent.js');
+      await detectProactiveOpportunities(ctx.groupFolder);
       break;
     }
   }

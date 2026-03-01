@@ -147,7 +147,7 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         model:
           task.model ||
-          selectModel(task.prompt, loadModelRoutingConfig(task.group_folder))
+          (await selectModel(task.prompt, loadModelRoutingConfig(task.group_folder)))
             .model,
       },
       (proc, containerName) =>

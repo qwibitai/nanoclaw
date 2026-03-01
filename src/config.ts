@@ -20,6 +20,11 @@ const envConfig = readEnvFile([
   'AUTO_LEARNER_ENABLED',
   'HINDSIGHT_ENABLED',
   'ROUTER_ENABLED',
+  'SEMANTIC_ROUTING_ENABLED',
+  'DASHBOARD_ENABLED',
+  'AGENT_SWARM_ENABLED',
+  'MEMORY_IMPROVER_ENABLED',
+  'PROACTIVE_AGENT_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -170,6 +175,33 @@ export const POOL_IDLE_TIMEOUT = Math.max(
   60_000,
   parseInt(process.env.POOL_IDLE_TIMEOUT || '600000', 10) || 600_000,
 );
+
+// === v2.5 Feature Kill Switches ===
+export const SEMANTIC_ROUTING_ENABLED =
+  (process.env.SEMANTIC_ROUTING_ENABLED ??
+    envConfig.SEMANTIC_ROUTING_ENABLED ??
+    'true') !== 'false';
+export const DASHBOARD_ENABLED =
+  (process.env.DASHBOARD_ENABLED ?? envConfig.DASHBOARD_ENABLED ?? 'false') !==
+  'false';
+export const DASHBOARD_PORT = parseInt(
+  process.env.DASHBOARD_PORT || '3457',
+  10,
+);
+export const DASHBOARD_AUTH_TOKEN =
+  process.env.DASHBOARD_AUTH_TOKEN || '';
+export const AGENT_SWARM_ENABLED =
+  (process.env.AGENT_SWARM_ENABLED ??
+    envConfig.AGENT_SWARM_ENABLED ??
+    'true') !== 'false';
+export const MEMORY_IMPROVER_ENABLED =
+  (process.env.MEMORY_IMPROVER_ENABLED ??
+    envConfig.MEMORY_IMPROVER_ENABLED ??
+    'true') !== 'false';
+export const PROACTIVE_AGENT_ENABLED =
+  (process.env.PROACTIVE_AGENT_ENABLED ??
+    envConfig.PROACTIVE_AGENT_ENABLED ??
+    'true') !== 'false';
 
 // Sentry Agent — automated incident triage
 export const SENTRY_AGENT_PORT = parseInt(

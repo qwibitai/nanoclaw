@@ -367,4 +367,126 @@ Choose the right file:
       }
     },
   );
+
+  // --- Self-Improving Memory tools (v2.5) ---
+
+  server.tool(
+    'review_proposed_updates',
+    `Review proposed additions to your CLAUDE.md instructions.
+
+The memory-improver analyzes your LEARNINGS.md and proposes new lines to add to CLAUDE.md. These proposals are staged in learnings/PROPOSED_UPDATES.md and never auto-applied.
+
+Use this tool to read the proposals before deciding which to apply.`,
+    {},
+    async () => {
+      const proposalsPath = path.join('/workspace/group', 'learnings', 'PROPOSED_UPDATES.md');
+
+      if (!fs.existsSync(proposalsPath)) {
+        return {
+          content: [{ type: 'text' as const, text: 'No proposed updates found. The memory-improver has not generated any proposals yet.' }],
+        };
+      }
+
+      try {
+        const content = fs.readFileSync(proposalsPath, 'utf-8');
+        if (!content.trim()) {
+          return {
+            content: [{ type: 'text' as const, text: 'PROPOSED_UPDATES.md exists but is empty.' }],
+          };
+        }
+        return {
+          content: [{ type: 'text' as const, text: content }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error reading proposals: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'apply_memory_update',
+    `Apply a proposed update to your CLAUDE.md instructions.
+
+After reviewing proposals with review_proposed_updates, use this to approve and apply a specific proposal. The content is APPENDED to your CLAUDE.md (never overwrites). The applied proposal is then removed from PROPOSED_UPDATES.md.
+
+Provide the proposal number (1-based) from the PROPOSED_UPDATES.md file.`,
+    {
+      proposal_number: z.number().int().positive().describe('The proposal number to apply (1-based, from review_proposed_updates output)'),
+    },
+    async (args) => {
+      const proposalsPath = path.join('/workspace/group', 'learnings', 'PROPOSED_UPDATES.md');
+      const claudePath = path.join('/workspace/group', 'CLAUDE.md');
+
+      if (!fs.existsSync(proposalsPath)) {
+        return {
+          content: [{ type: 'text' as const, text: 'No proposed updates found.' }],
+          isError: true,
+        };
+      }
+
+      try {
+        const content = fs.readFileSync(proposalsPath, 'utf-8');
+
+        // Parse proposals — each starts with "## Proposal N"
+        const proposalBlocks = content.split(/(?=## Proposal \d+)/);
+        const proposals = proposalBlocks.filter((b) => b.startsWith('## Proposal'));
+
+        if (args.proposal_number < 1 || args.proposal_number > proposals.length) {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid proposal number ${args.proposal_number}. There are ${proposals.length} proposals.` }],
+            isError: true,
+          };
+        }
+
+        const proposal = proposals[args.proposal_number - 1];
+
+        // Extract content between code fences
+        const codeMatch = proposal.match(/```\n([\s\S]*?)\n```/);
+        if (!codeMatch) {
+          return {
+            content: [{ type: 'text' as const, text: `Could not extract content from proposal ${args.proposal_number}.` }],
+            isError: true,
+          };
+        }
+
+        const newContent = codeMatch[1].trim();
+
+        // Extract section header
+        const sectionMatch = proposal.match(/\*\*Section:\*\*\s*(.+)/);
+        const section = sectionMatch ? sectionMatch[1].trim() : '';
+
+        // Append to CLAUDE.md
+        const separator = fs.existsSync(claudePath) ? '\n\n' : '';
+        const addendum = section
+          ? `${separator}${section}\n${newContent}\n`
+          : `${separator}${newContent}\n`;
+        fs.appendFileSync(claudePath, addendum);
+
+        // Remove the applied proposal from PROPOSED_UPDATES.md
+        const remaining = proposals.filter((_, i) => i !== args.proposal_number - 1);
+        if (remaining.length === 0) {
+          fs.unlinkSync(proposalsPath);
+        } else {
+          // Re-number and rewrite
+          const header = proposalBlocks.find((b) => !b.startsWith('## Proposal')) || '';
+          const renumbered = remaining.map((block, i) =>
+            block.replace(/## Proposal \d+/, `## Proposal ${i + 1}`),
+          );
+          fs.writeFileSync(proposalsPath, header + renumbered.join(''));
+        }
+
+        return {
+          content: [{ type: 'text' as const, text: `Applied proposal ${args.proposal_number} to CLAUDE.md. ${remaining.length} proposals remaining.` }],
+        };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error applying proposal: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
 }
