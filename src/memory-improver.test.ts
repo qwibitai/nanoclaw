@@ -29,6 +29,10 @@ vi.mock('./env.js', () => ({
     ANTHROPIC_BASE_URL: '',
     ANTHROPIC_AUTH_TOKEN: '',
   })),
+  resolveAnthropicApiConfig: vi.fn(() => ({
+    baseUrl: 'https://openrouter.ai/api',
+    authToken: '',
+  })),
 }));
 
 vi.mock('./validate-llm.js', () => ({

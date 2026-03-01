@@ -3,6 +3,7 @@ import http from 'http';
 
 vi.mock('./config.js', () => ({
   DASHBOARD_AUTH_TOKEN: '',
+  DASHBOARD_ALLOW_UNAUTH: true,
   DASHBOARD_PORT: 0,
 }));
 
@@ -68,6 +69,7 @@ describe('Dashboard', () => {
     // Reset config mock to no auth by default
     const config = await import('./config.js');
     (config as Record<string, unknown>).DASHBOARD_AUTH_TOKEN = '';
+    (config as Record<string, unknown>).DASHBOARD_ALLOW_UNAUTH = true;
 
     const { startDashboard } = await import('./dashboard.js');
     server = startDashboard();
@@ -186,7 +188,7 @@ describe('Dashboard', () => {
   });
 
   it('allows requests when no auth token is configured', async () => {
-    // Default setup has no auth token
+    // Default setup has no auth token but allows unauthenticated local access
     const res = await fetch(`${baseUrl}/api/health`);
     expect(res.status).toBe(200);
   });
@@ -225,7 +227,31 @@ describe('Dashboard', () => {
 
   it('CORS headers are set on API responses', async () => {
     const res = await fetch(`${baseUrl}/api/status`);
-    expect(res.headers['access-control-allow-origin']).toBe('*');
+    expect(res.headers['access-control-allow-origin']).toContain(
+      '127.0.0.1',
+    );
     expect(res.headers['access-control-allow-methods']).toContain('GET');
+  });
+
+  it('throws on startup when auth token is missing and unauthenticated mode is disabled', async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+
+    const config = await import('./config.js');
+    (config as Record<string, unknown>).DASHBOARD_AUTH_TOKEN = '';
+    (config as Record<string, unknown>).DASHBOARD_ALLOW_UNAUTH = false;
+
+    const { startDashboard } = await import('./dashboard.js');
+    expect(() => startDashboard()).toThrow(/DASHBOARD_AUTH_TOKEN/i);
+
+    // Restore server for afterEach
+    (config as Record<string, unknown>).DASHBOARD_ALLOW_UNAUTH = true;
+    server = startDashboard();
+    await new Promise<void>((resolve) => {
+      server.on('listening', resolve);
+    });
+    const addr = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${addr.port}`;
   });
 });

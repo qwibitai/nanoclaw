@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import { HindsightReportSchema } from './schemas.js';
 import { validateLLMOutput } from './validate-llm.js';
 import type { HindsightReport } from './schemas.js';
@@ -116,24 +117,6 @@ export function detectFrustration(
     signals,
     correctionCount,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Credential scrubbing
-// ---------------------------------------------------------------------------
-
-function scrubCredentials(text: string): string {
-  return text
-    .replace(/\bghp_[a-zA-Z0-9]+/g, 'ghp_***')
-    .replace(/\bAKIA[0-9A-Z]{16}/g, 'AKIA***')
-    .replace(/\bxoxb-[a-zA-Z0-9_-]+/g, 'xoxb-***')
-    .replace(/\bsk-[a-zA-Z0-9_-]{10,}/g, 'sk-***')
-    .replace(/\bpk-[a-zA-Z0-9_-]{10,}/g, 'pk-***')
-    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***')
-    .replace(
-      /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-      '$1=***',
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -273,14 +256,8 @@ export async function processHindsight(
     ].join('\n');
 
     // Read secrets
-    const { readEnvFile } = await import('./env.js');
-    const secrets = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
-    const baseUrl =
-      secrets.ANTHROPIC_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      'https://openrouter.ai/api';
-    const authToken =
-      secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '';
+    const { resolveAnthropicApiConfig } = await import('./env.js');
+    const { baseUrl, authToken } = resolveAnthropicApiConfig();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);

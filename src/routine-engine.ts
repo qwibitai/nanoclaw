@@ -280,7 +280,7 @@ export class RoutineEngine {
   async checkCronRoutines(now: number): Promise<RoutineRun[]> {
     const runs: RoutineRun[] = [];
 
-    for (const [name, routine] of this.routines) {
+    for (const [, routine] of this.routines) {
       if (!routine.enabled) continue;
       if (routine.trigger.type !== 'cron') continue;
       if (routine.nextFireAt === undefined || routine.nextFireAt > now) continue;

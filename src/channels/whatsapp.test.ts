@@ -223,15 +223,16 @@ describe('WhatsAppChannel', () => {
       await connectChannel(channel);
 
       // Disconnect
-      (channel as any).connected = false;
+      (channel as unknown as { connected: boolean }).connected = false;
 
       // Queue a message while disconnected
       await channel.sendMessage('test@g.us', 'Queued message');
       expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
 
       // Reconnect
-      (channel as any).connected = true;
-      await (channel as any).flushOutgoingQueue();
+      (channel as unknown as { connected: boolean }).connected = true;
+      await (channel as unknown as { flushOutgoingQueue: () => Promise<void> })
+        .flushOutgoingQueue();
 
       // Group messages get prefixed when flushed
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {

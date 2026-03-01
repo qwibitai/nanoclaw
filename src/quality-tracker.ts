@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import type { ConversationLogEntry } from './schemas.js';
 
 // ---------------------------------------------------------------------------
@@ -97,24 +98,6 @@ export function extractSignal(
 }
 
 // ---------------------------------------------------------------------------
-// Credential scrubbing (reuse from observer patterns)
-// ---------------------------------------------------------------------------
-
-function scrubForLog(text: string): string {
-  return text
-    .replace(/\bghp_[a-zA-Z0-9]+/g, 'ghp_***')
-    .replace(/\bAKIA[0-9A-Z]{16}/g, 'AKIA***')
-    .replace(/\bxoxb-[a-zA-Z0-9_-]+/g, 'xoxb-***')
-    .replace(/\bsk-[a-zA-Z0-9_-]{10,}/g, 'sk-***')
-    .replace(/\bpk-[a-zA-Z0-9_-]{10,}/g, 'pk-***')
-    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***')
-    .replace(
-      /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-      '$1=***',
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
@@ -166,11 +149,11 @@ export async function trackConversationQuality(
       timestamp: new Date().toISOString(),
       userMessages: userMessages.map((m) => ({
         sender: m.sender_name,
-        content: scrubForLog(m.content.slice(0, MAX_MESSAGE_LENGTH)),
+        content: scrubCredentials(m.content.slice(0, MAX_MESSAGE_LENGTH)),
         timestamp: m.timestamp,
       })),
       botResponses: botResponses.map((r) =>
-        scrubForLog(r.slice(0, MAX_MESSAGE_LENGTH)),
+        scrubCredentials(r.slice(0, MAX_MESSAGE_LENGTH)),
       ),
       signal,
       evidence,

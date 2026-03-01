@@ -4,11 +4,6 @@ import {
   RoutineEngine,
   WebhookServer,
   type Routine,
-  type Trigger,
-  type RoutineAction,
-  type RoutineGuardrails,
-  type RoutineRun,
-  type NotifyConfig,
 } from './routine-engine.js';
 
 // ---------------------------------------------------------------------------
@@ -523,7 +518,7 @@ describe('WebhookServer', () => {
   it('should default to port 3456', () => {
     server = new WebhookServer({ engine });
     // The default port should be 3456 as specified
-    expect((server as any).port ?? 3456).toBe(3456);
+    expect((server as { port?: number }).port ?? 3456).toBe(3456);
   });
 
   it('should rate limit webhook endpoint (10 req/min)', async () => {

@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import { MemoryEntrySchema } from './schemas.js';
 import type { MemoryEntry } from './schemas.js';
 
@@ -45,24 +46,6 @@ const DOMAIN_HEADERS: Record<Domain, string> = {
 
 const MAX_FILE_SIZE = 200 * 1024; // 200 KB per domain file
 const MAX_ENTRY_LENGTH = 5000; // chars per entry content
-
-// ---------------------------------------------------------------------------
-// Credential scrubbing (shared pattern)
-// ---------------------------------------------------------------------------
-
-function scrubCredentials(text: string): string {
-  return text
-    .replace(/\bghp_[a-zA-Z0-9]+/g, 'ghp_***')
-    .replace(/\bAKIA[0-9A-Z]{16}/g, 'AKIA***')
-    .replace(/\bxoxb-[a-zA-Z0-9_-]+/g, 'xoxb-***')
-    .replace(/\bsk-[a-zA-Z0-9_-]{10,}/g, 'sk-***')
-    .replace(/\bpk-[a-zA-Z0-9_-]{10,}/g, 'pk-***')
-    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***')
-    .replace(
-      /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-      '$1=***',
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Entry serialization

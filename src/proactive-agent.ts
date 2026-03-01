@@ -12,6 +12,7 @@ import { z } from 'zod';
 
 import { PROACTIVE_AGENT_ENABLED } from './config.js';
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import { validateLLMOutput } from './validate-llm.js';
 
 // ---------------------------------------------------------------------------
@@ -52,34 +53,6 @@ export const ProactiveOutputSchema = z.object({
 
 export type ProactiveSuggestion = z.infer<typeof ProactiveSuggestionSchema>;
 export type ProactiveOutput = z.infer<typeof ProactiveOutputSchema>;
-
-// ---------------------------------------------------------------------------
-// Credential scrubbing (same pattern as observer.ts)
-// ---------------------------------------------------------------------------
-
-function scrubCredentials(text: string): string {
-  return text
-    .replace(/\bghp_[a-zA-Z0-9]+/g, 'ghp_***REDACTED***')
-    .replace(/\bAKIA[0-9A-Z]{16}/g, 'AKIA***REDACTED***')
-    .replace(/\bxoxb-[a-zA-Z0-9_-]+/g, 'xoxb-***REDACTED***')
-    .replace(/\bya29\.[a-zA-Z0-9_-]+/g, 'ya29.***REDACTED***')
-    .replace(/\bsk-ant-api\d{2}-[a-zA-Z0-9_-]+/g, 'sk-ant-***REDACTED***')
-    .replace(/\b(or-|ant-)[a-zA-Z0-9_-]{10,}/g, '$1***REDACTED***')
-    .replace(/\bsk-[a-zA-Z0-9_-]{10,}/g, 'sk-***REDACTED***')
-    .replace(/\bpk-[a-zA-Z0-9_-]{10,}/g, 'pk-***REDACTED***')
-    .replace(/\b(xai|gsk|eyJ)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
-    .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***REDACTED***')
-    .replace(
-      /[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g,
-      '***DISCORD_TOKEN_REDACTED***',
-    )
-    .replace(/\b0x[a-fA-F0-9]{64}\b/g, '0x***PRIVATE_KEY_REDACTED***')
-    .replace(/\b[a-fA-F0-9]{40,}\b/g, '***HEX_REDACTED***')
-    .replace(
-      /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-      '$1=***REDACTED***',
-    );
-}
 
 // ---------------------------------------------------------------------------
 // Pre-filter: extract topic frequency map from observer files
@@ -305,14 +278,8 @@ export async function detectProactiveOpportunities(
     ].join('\n');
 
     // Read secrets
-    const { readEnvFile } = await import('./env.js');
-    const secrets = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
-    const baseUrl =
-      secrets.ANTHROPIC_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      'https://openrouter.ai/api';
-    const authToken =
-      secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '';
+    const { resolveAnthropicApiConfig } = await import('./env.js');
+    const { baseUrl, authToken } = resolveAnthropicApiConfig();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);

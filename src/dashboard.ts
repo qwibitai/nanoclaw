@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import http from 'http';
 
 import {
+  DASHBOARD_ALLOW_UNAUTH,
   DASHBOARD_AUTH_TOKEN,
   DASHBOARD_PORT,
 } from './config.js';
@@ -18,8 +19,6 @@ import {
   getAllDbRoutines,
   getMessageStatsByGroup,
 } from './db.js';
-
-const startTime = Date.now();
 
 // ── Auth Middleware ──────────────────────────────────────────────────
 
@@ -42,8 +41,18 @@ function checkAuth(
 
 // ── CORS Headers ────────────────────────────────────────────────────
 
-function setSecurityHeaders(res: http.ServerResponse): void {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+function setSecurityHeaders(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): void {
+  const origin = req.headers.origin || '';
+  const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+  const allowedOrigin = localhostOriginPattern.test(origin)
+    ? origin
+    : `http://127.0.0.1:${DASHBOARD_PORT}`;
+
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -54,19 +63,19 @@ function setSecurityHeaders(res: http.ServerResponse): void {
 // ── Route Handlers ──────────────────────────────────────────────────
 
 function handleHealth(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setSecurityHeaders(res);
+  setSecurityHeaders(req, res);
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ ok: true, uptime: process.uptime() }));
 }
 
 function handleStatus(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setSecurityHeaders(res);
+  setSecurityHeaders(req, res);
   try {
     const groups = getAllRegisteredGroups();
     const tasks = getAllTasks();
@@ -96,10 +105,10 @@ function handleStatus(
 }
 
 function handleGroups(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setSecurityHeaders(res);
+  setSecurityHeaders(req, res);
   try {
     const groups = getAllRegisteredGroups();
     const messageStats = getMessageStatsByGroup();
@@ -124,10 +133,10 @@ function handleGroups(
 }
 
 function handleMemory(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setSecurityHeaders(res);
+  setSecurityHeaders(req, res);
   try {
     const embeddingChunks = getEmbeddingChunkCount();
     const routines = getAllDbRoutines();
@@ -153,10 +162,10 @@ function handleMemory(
 }
 
 function handleDashboardPage(
-  _req: http.IncomingMessage,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): void {
-  setSecurityHeaders(res);
+  setSecurityHeaders(req, res);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(getDashboardHtml());
 }
@@ -379,7 +388,7 @@ export function startDashboard(): http.Server {
   const server = http.createServer((req, res) => {
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
-      setSecurityHeaders(res);
+      setSecurityHeaders(req, res);
       res.writeHead(204);
       res.end();
       return;
@@ -408,7 +417,7 @@ export function startDashboard(): http.Server {
         handleMemory(req, res);
         break;
       default:
-        setSecurityHeaders(res);
+        setSecurityHeaders(req, res);
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
         break;
@@ -418,8 +427,17 @@ export function startDashboard(): http.Server {
   server.timeout = 10_000;
   server.maxConnections = 20;
 
-  if (!DASHBOARD_AUTH_TOKEN) {
-    logger.warn('Dashboard enabled without DASHBOARD_AUTH_TOKEN — running unauthenticated');
+  if (!DASHBOARD_AUTH_TOKEN && !DASHBOARD_ALLOW_UNAUTH) {
+    const msg =
+      'Dashboard requires DASHBOARD_AUTH_TOKEN (or set DASHBOARD_ALLOW_UNAUTH=true for local-only development)';
+    logger.error(msg);
+    throw new Error(msg);
+  }
+
+  if (!DASHBOARD_AUTH_TOKEN && DASHBOARD_ALLOW_UNAUTH) {
+    logger.warn(
+      'Dashboard running unauthenticated because DASHBOARD_ALLOW_UNAUTH=true',
+    );
   }
 
   server.listen(DASHBOARD_PORT, '127.0.0.1', () => {

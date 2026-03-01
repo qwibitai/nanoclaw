@@ -160,7 +160,7 @@ beforeEach(() => {
   vi.mocked(fs.existsSync).mockReturnValue(false);
   vi.mocked(fs.readFileSync).mockReturnValue('');
   vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-  vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+  vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as never);
 });
 
 afterEach(() => {

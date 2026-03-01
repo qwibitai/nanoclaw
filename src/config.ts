@@ -22,6 +22,7 @@ const envConfig = readEnvFile([
   'ROUTER_ENABLED',
   'SEMANTIC_ROUTING_ENABLED',
   'DASHBOARD_ENABLED',
+  'DASHBOARD_ALLOW_UNAUTH',
   'AGENT_SWARM_ENABLED',
   'MEMORY_IMPROVER_ENABLED',
   'PROACTIVE_AGENT_ENABLED',
@@ -184,6 +185,10 @@ export const SEMANTIC_ROUTING_ENABLED =
 export const DASHBOARD_ENABLED =
   (process.env.DASHBOARD_ENABLED ?? envConfig.DASHBOARD_ENABLED ?? 'false') !==
   'false';
+export const DASHBOARD_ALLOW_UNAUTH =
+  (process.env.DASHBOARD_ALLOW_UNAUTH ??
+    envConfig.DASHBOARD_ALLOW_UNAUTH ??
+    'false') === 'true';
 export const DASHBOARD_PORT = parseInt(
   process.env.DASHBOARD_PORT || '3457',
   10,

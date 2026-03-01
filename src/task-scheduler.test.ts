@@ -40,7 +40,9 @@ describe('task scheduler', () => {
     startSchedulerLoop({
       registeredGroups: () => ({}),
       getSessions: () => ({}),
-      queue: { enqueueTask } as any,
+      queue: { enqueueTask } as unknown as {
+        enqueueTask: (jid: string, taskId: string, fn: () => Promise<void>) => void;
+      },
       onProcess: () => {},
       sendMessage: async () => {},
     });

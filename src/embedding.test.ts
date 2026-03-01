@@ -7,7 +7,7 @@
  * All tests written from spec only — no production code was read.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   chunkText,
   generateEmbeddings,
@@ -22,11 +22,6 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/** Create a Float32Array of `dim` dimensions filled with `value`. */
-function makeVector(dim: number, value: number): Float32Array {
-  return new Float32Array(dim).fill(value);
-}
 
 /** Create a normalized random-ish vector of 512 dims for testing. */
 function makeUnitVector(seed: number): Float32Array {
@@ -433,7 +428,7 @@ describe('indexFile', () => {
     // because content hash (SHA-256) matches
     const content = 'This is test content that should be hashed.';
 
-    const firstResult = await indexFile('test-group', 'notes.md', content);
+    await indexFile('test-group', 'notes.md', content);
     const secondResult = await indexFile('test-group', 'notes.md', content);
 
     // Second indexing should report 0 new embeddings generated
@@ -464,7 +459,7 @@ describe('indexFile', () => {
 
   it('should use SHA-256 content hash for change detection', async () => {
     // Different content should produce different hashes and trigger re-embedding
-    const result1 = await indexFile('test-group', 'notes.md', 'Version 1 content');
+    await indexFile('test-group', 'notes.md', 'Version 1 content');
     const result2 = await indexFile('test-group', 'notes.md', 'Version 2 content');
 
     // Second call has different content, so it should re-embed

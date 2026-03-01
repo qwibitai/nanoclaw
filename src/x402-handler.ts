@@ -35,6 +35,7 @@ async function initWallet(): Promise<boolean> {
 
     const account = privateKeyToAccount(privateKey as `0x${string}`);
     const client = new x402Client();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerExactEvmScheme(client, { signer: account as any });
     fetchWithPayment = wrap(fetch, client);
 

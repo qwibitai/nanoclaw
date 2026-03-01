@@ -599,7 +599,7 @@ describe('schedule_task context_mode', () => {
         prompt: 'bad context',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
-        context_mode: 'bogus' as any,
+        context_mode: 'bogus' as unknown as 'group' | 'isolated',
         targetJid: 'other@g.us',
       },
       'main',
