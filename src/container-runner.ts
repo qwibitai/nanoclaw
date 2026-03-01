@@ -319,6 +319,25 @@ function buildContainerArgs(
     args.push('-e', 'XAUTHORITY=/tmp/.xauthority');
   }
 
+  // Audio passthrough: PulseAudio socket forwarding for media playback
+  // Enables audio from browser (YouTube, Netflix, etc.) to reach host display
+  const pulseSocket = xdgRuntime ? path.join(xdgRuntime, 'pulse', 'native') : null;
+  if (pulseSocket && fs.existsSync(pulseSocket)) {
+    args.push('-v', `${pulseSocket}:/tmp/pulse-socket`);
+    args.push('-e', 'PULSE_SERVER=unix:/tmp/pulse-socket');
+    logger.debug({ pulseSocket }, 'PulseAudio socket forwarding enabled');
+  } else {
+    logger.debug('PulseAudio socket not found - audio will not work in browser');
+  }
+
+  // Alternative: PipeWire support for newer systems
+  const pipewireSocket = xdgRuntime ? path.join(xdgRuntime, 'pipewire-0') : null;
+  if (!pulseSocket && pipewireSocket && fs.existsSync(pipewireSocket)) {
+    args.push('-v', `${pipewireSocket}:/tmp/pipewire-0`);
+    args.push('-e', 'PIPEWIRE_RUNTIME_DIR=/tmp');
+    logger.debug({ pipewireSocket }, 'PipeWire socket forwarding enabled');
+  }
+
   args.push(CONTAINER_IMAGE);
 
   return args;
