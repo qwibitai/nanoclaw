@@ -20,7 +20,7 @@ The entire codebase should be something you can read and understand. One Node.js
 
 ### Security Through True Isolation
 
-Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Docker containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
+Instead of application-level permission systems trying to prevent agents from accessing things, agents run in actual Linux containers. The isolation is at the OS level. Agents can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your Mac.
 
 ### Built for One User
 
@@ -55,7 +55,8 @@ Skills to add or switch to different messaging platforms:
 - `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
 ### Container Runtime
-The project uses Docker for cross-platform support (macOS and Linux).
+The project uses Docker by default (cross-platform). For macOS users who prefer Apple Container:
+- `/convert-to-apple-container` - Switch from Docker to Apple Container (macOS-only)
 
 ### Platform Support
 - `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
@@ -69,7 +70,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 **Core components:**
 - **Claude Agent SDK** as the core agent
-- **Docker** for isolated agent execution
+- **Containers** for isolated agent execution (Linux VMs)
 - **WhatsApp** as the primary I/O channel
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
@@ -102,7 +103,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Sessions auto-compact when context gets too long, preserving critical information
 
 ### Container Isolation
-- All agents run inside Docker containers
+- All agents run inside containers (lightweight Linux VMs)
 - Each agent invocation spawns a container with mounted directories
 - Containers provide filesystem isolation - agents can only see mounted paths
 - Bash access is safe because commands run inside the container, not on the host
@@ -120,7 +121,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ### Group Management
 - New groups are added explicitly via the main channel
-- Groups are registered by editing `data/registered_groups.json`
+- Groups are registered in SQLite (via the main channel or IPC `register_group` command)
 - Each group gets a dedicated folder under `groups/`
 - Groups can have additional directories mounted via `containerConfig`
 
@@ -171,6 +172,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ### Skills
 - `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
+- `/update` - Pull upstream changes, merge with customizations, run migrations
 
 ### Deployment
 - Runs on local Mac via launchd

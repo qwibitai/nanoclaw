@@ -10,11 +10,11 @@ This guide covers debugging the containerized agent execution system.
 ## Architecture Overview
 
 ```
-Host (macOS/Linux)                   Container (Docker)
+Host (macOS)                          Container (Linux VM)
 ─────────────────────────────────────────────────────────────
 src/container-runner.ts               container/agent-runner/
     │                                      │
-    │ spawns Docker container              │ runs Claude Agent SDK
+    │ spawns container                      │ runs Claude Agent SDK
     │ with volume mounts                   │ with MCP servers
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
@@ -43,9 +43,11 @@ Set `LOG_LEVEL=debug` for verbose output:
 # For development
 LOG_LEVEL=debug npm run dev
 
-# For launchd service, add to plist EnvironmentVariables:
+# For launchd service (macOS), add to plist EnvironmentVariables:
 <key>LOG_LEVEL</key>
 <string>debug</string>
+# For systemd service (Linux), add to unit [Service] section:
+# Environment=LOG_LEVEL=debug
 ```
 
 Debug level shows:
@@ -80,11 +82,13 @@ cat .env  # Should show one of:
 
 ### 2. Environment Variables Not Passing
 
-**Security approach:** The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. This keeps credentials out of process listings and ensures other environment variables in `.env` are not exposed.
+**Runtime note:** Environment variables passed via `-e` may be lost when using `-i` (interactive/piped stdin).
+
+**Workaround:** The system extracts only authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) from `.env` and mounts them for sourcing inside the container. Other env vars are not exposed.
 
 To verify env vars are reaching the container:
 ```bash
-echo '{}' | docker run -i --rm \
+echo '{}' | docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
   --entrypoint /bin/bash nanoclaw-agent:latest \
   -c 'export $(cat /workspace/env-dir/env | xargs); echo "OAuth: ${#CLAUDE_CODE_OAUTH_TOKEN} chars, API: ${#ANTHROPIC_API_KEY} chars"'
@@ -92,9 +96,9 @@ echo '{}' | docker run -i --rm \
 
 ### 3. Mount Issues
 
-**Docker mount syntax:**
-- Use `-v` for all mounts
-- Readonly mounts use `:ro` suffix:
+**Container mount notes:**
+- Docker supports both `-v` and `--mount` syntax
+- Use `:ro` suffix for readonly mounts:
   ```bash
   # Readonly
   -v /path:/container/path:ro
@@ -181,7 +185,7 @@ cp .env data/env/env
 
 # Run test query
 echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
-  docker run -i --rm \
+  docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
   -v $(pwd)/groups/test:/workspace/group \
   -v $(pwd)/data/ipc:/workspace/ipc \
@@ -274,8 +278,8 @@ rm -rf data/sessions/
 # Clear sessions for a specific group
 rm -rf data/sessions/{groupFolder}/.claude/
 
-# Also clear the session ID from NanoClaw's tracking
-echo '{}' > data/sessions.json
+# Also clear the session ID from NanoClaw's tracking (stored in SQLite)
+sqlite3 store/messages.db "DELETE FROM sessions WHERE group_folder = '{groupFolder}'"
 ```
 
 To verify session resumption is working, check the logs for the same session ID across messages:
@@ -324,11 +328,11 @@ echo -e "\n1. Authentication configured?"
 echo -e "\n2. Env file copied for container?"
 [ -f data/env/env ] && echo "OK" || echo "MISSING - will be created on first run"
 
-echo -e "\n3. Docker daemon running?"
-docker info &>/dev/null && echo "OK" || echo "NOT RUNNING - start Docker Desktop (macOS) or 'sudo systemctl start docker' (Linux)"
+echo -e "\n3. Container runtime running?"
+docker info &>/dev/null && echo "OK" || echo "NOT RUNNING - start Docker Desktop (macOS) or sudo systemctl start docker (Linux)"
 
 echo -e "\n4. Container image exists?"
-echo '{}' | docker run -i --rm --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
+echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "OK" 2>/dev/null || echo "MISSING - run ./container/build.sh"
 
 echo -e "\n5. Session mount path correct?"
 grep -q "/home/node/.claude" src/container-runner.ts 2>/dev/null && echo "OK" || echo "WRONG - should mount to /home/node/.claude/, not /root/.claude/"

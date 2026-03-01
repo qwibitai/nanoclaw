@@ -1,0 +1,20 @@
+skill: discord
+version: 1.0.0
+description: "Discord Bot integration via discord.js"
+core_version: 0.1.0
+adds:
+  - src/channels/discord.ts
+  - src/channels/discord.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies:
+    discord.js: "^14.18.0"
+  env_additions:
+    - DISCORD_BOT_TOKEN
+    - DISCORD_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/discord.test.ts"
