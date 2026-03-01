@@ -1,0 +1,22 @@
+skill: perplexity-research
+version: 1.0.0
+description: "Web research via Perplexity Pro API (sonar, sonar-pro, sonar-deep-research)"
+core_version: 0.1.0
+adds:
+  - container/skills/perplexity-research/SKILL.md
+modifies:
+  - src/container-runner.ts
+modify_base:
+  src/container-runner.ts: _accumulated
+structured:
+  env_additions:
+    - PERPLEXITY_API_KEY
+conflicts: []
+incompatible_with: []
+depends:
+  - auth-recovery
+  - google-home
+  - container-hardening
+  - whatsapp-search
+tested_with: []
+test: "npx tsc --noEmit"
