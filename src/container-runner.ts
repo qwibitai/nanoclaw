@@ -191,7 +191,10 @@ function buildVolumeMounts(
         const dstMtime = fs.statSync(dstIndex).mtimeMs;
         if (srcMtime > dstMtime) {
           fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-          logger.info({ group: group.folder }, 'Updated agent-runner source from upstream');
+          logger.info(
+            { group: group.folder },
+            'Updated agent-runner source from upstream',
+          );
         }
       }
     }

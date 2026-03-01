@@ -226,7 +226,13 @@ export class TelegramChannel implements Channel {
 
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       let attachments: MessageAttachment[] | undefined;
       try {
@@ -236,24 +242,31 @@ export class TelegramChannel implements Channel {
         if (buffer) {
           const ext = 'jpg';
           const savedName = `${Date.now()}-photo.${ext}`;
-          const mediaDir = path.join(resolveGroupFolderPath(group.folder), 'media');
+          const mediaDir = path.join(
+            resolveGroupFolderPath(group.folder),
+            'media',
+          );
           fs.mkdirSync(mediaDir, { recursive: true });
           fs.writeFileSync(path.join(mediaDir, savedName), buffer);
 
           const MAX_BASE64_BYTES = 5 * 1024 * 1024;
           if (buffer.length <= MAX_BASE64_BYTES) {
-            attachments = [{
-              kind: 'image',
-              mediaType: 'image/jpeg',
-              base64: buffer.toString('base64'),
-              filename: savedName,
-            }];
+            attachments = [
+              {
+                kind: 'image',
+                mediaType: 'image/jpeg',
+                base64: buffer.toString('base64'),
+                filename: savedName,
+              },
+            ];
           } else {
-            attachments = [{
-              kind: 'file',
-              filename: savedName,
-              workspacePath: `media/${savedName}`,
-            }];
+            attachments = [
+              {
+                kind: 'file',
+                filename: savedName,
+                workspacePath: `media/${savedName}`,
+              },
+            ];
           }
         }
       } catch (err) {
@@ -288,7 +301,13 @@ export class TelegramChannel implements Channel {
 
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       let attachments: MessageAttachment[] | undefined;
       const video = ctx.message.video;
@@ -299,14 +318,19 @@ export class TelegramChannel implements Channel {
           if (buffer) {
             const ext = video.mime_type?.split('/')[1] || 'mp4';
             const savedName = `${Date.now()}-video.${ext}`;
-            const mediaDir = path.join(resolveGroupFolderPath(group.folder), 'media');
+            const mediaDir = path.join(
+              resolveGroupFolderPath(group.folder),
+              'media',
+            );
             fs.mkdirSync(mediaDir, { recursive: true });
             fs.writeFileSync(path.join(mediaDir, savedName), buffer);
-            attachments = [{
-              kind: 'file',
-              filename: savedName,
-              workspacePath: `media/${savedName}`,
-            }];
+            attachments = [
+              {
+                kind: 'file',
+                filename: savedName,
+                workspacePath: `media/${savedName}`,
+              },
+            ];
           }
         } catch (err) {
           logger.warn({ err, chatJid }, 'Failed to download Telegram video');
@@ -393,7 +417,13 @@ export class TelegramChannel implements Channel {
 
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
 
       let attachments: MessageAttachment[] | undefined;
       const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -403,28 +433,42 @@ export class TelegramChannel implements Channel {
           if (buffer) {
             const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
             const savedName = `${Date.now()}-${safeName}`;
-            const mediaDir = path.join(resolveGroupFolderPath(group.folder), 'media');
+            const mediaDir = path.join(
+              resolveGroupFolderPath(group.folder),
+              'media',
+            );
             fs.mkdirSync(mediaDir, { recursive: true });
             fs.writeFileSync(path.join(mediaDir, savedName), buffer);
 
             // Images sent as documents (uncompressed) get vision support too
             const mime = doc?.mime_type || '';
-            const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
-            const isImage = imageTypes.includes(mime as typeof imageTypes[number]);
+            const imageTypes = [
+              'image/jpeg',
+              'image/png',
+              'image/gif',
+              'image/webp',
+            ] as const;
+            const isImage = imageTypes.includes(
+              mime as (typeof imageTypes)[number],
+            );
             const MAX_BASE64_BYTES = 5 * 1024 * 1024;
             if (isImage && buffer.length <= MAX_BASE64_BYTES) {
-              attachments = [{
-                kind: 'image',
-                mediaType: mime as typeof imageTypes[number],
-                base64: buffer.toString('base64'),
-                filename: savedName,
-              }];
+              attachments = [
+                {
+                  kind: 'image',
+                  mediaType: mime as (typeof imageTypes)[number],
+                  base64: buffer.toString('base64'),
+                  filename: savedName,
+                },
+              ];
             } else {
-              attachments = [{
-                kind: 'file',
-                filename: originalName,
-                workspacePath: `media/${savedName}`,
-              }];
+              attachments = [
+                {
+                  kind: 'file',
+                  filename: originalName,
+                  workspacePath: `media/${savedName}`,
+                },
+              ];
             }
           }
         } catch (err) {

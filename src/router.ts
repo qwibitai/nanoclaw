@@ -17,7 +17,9 @@ export function formatMessages(messages: NewMessage[]): string {
   return `<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
-export function extractAttachments(messages: NewMessage[]): MessageAttachment[] {
+export function extractAttachments(
+  messages: NewMessage[],
+): MessageAttachment[] {
   return messages.flatMap((m) => m.attachments || []);
 }
 

@@ -42,9 +42,19 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { extractAttachments, findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  extractAttachments,
+  findChannel,
+  formatMessages,
+  formatOutbound,
+} from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, MessageAttachment, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  MessageAttachment,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -210,7 +220,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length, attachmentCount: attachments?.length || 0 },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      attachmentCount: attachments?.length || 0,
+    },
     'Processing messages',
   );
 
@@ -459,7 +473,11 @@ async function startMessageLoop(): Promise<void> {
           const hasModelFlag = /^--model\s+\S+/.test(lastContent);
           const hasAttachments = pendingAttachments.has(chatJid);
 
-          if (!hasModelFlag && !hasAttachments && queue.sendMessage(chatJid, formatted)) {
+          if (
+            !hasModelFlag &&
+            !hasAttachments &&
+            queue.sendMessage(chatJid, formatted)
+          ) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -538,7 +556,11 @@ async function main(): Promise<void> {
       storeMessage(msg);
       if (msg.attachments?.length) {
         logger.info(
-          { chatJid: msg.chat_jid, count: msg.attachments.length, kinds: msg.attachments.map(a => a.kind) },
+          {
+            chatJid: msg.chat_jid,
+            count: msg.attachments.length,
+            kinds: msg.attachments.map((a) => a.kind),
+          },
           'Caching attachments from inbound message',
         );
         const existing = pendingAttachments.get(msg.chat_jid) || [];
