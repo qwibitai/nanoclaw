@@ -7,6 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>{{NODE_PATH}}</string>
+        <string>--max-old-space-size=512</string>
         <string>{{PROJECT_ROOT}}/dist/index.js</string>
     </array>
     <key>WorkingDirectory</key>
