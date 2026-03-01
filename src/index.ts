@@ -42,9 +42,19 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
-import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  extractAttachments,
+  findChannel,
+  formatMessages,
+  formatOutbound,
+} from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  MessageAttachment,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -59,6 +69,7 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const pendingAttachments = new Map<string, MessageAttachment[]>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -198,6 +209,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ]
       : missedMessages;
   const prompt = formatMessages(messagesForFormat);
+  const attachments = pendingAttachments.get(chatJid);
+  pendingAttachments.delete(chatJid);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -207,7 +220,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    {
+      group: group.name,
+      messageCount: missedMessages.length,
+      attachmentCount: attachments?.length || 0,
+    },
     'Processing messages',
   );
 
@@ -234,6 +251,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     prompt,
     chatJid,
     parsedModel,
+    attachments,
     async (result) => {
       // Streaming output callback — called for each agent result
       if (result.result) {
@@ -296,6 +314,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   model: string | undefined,
+  attachments: MessageAttachment[] | undefined,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -348,6 +367,7 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
         model,
+        attachments,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -446,13 +466,18 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
-          // If the latest message has a --model flag, force a new container
-          // so the flag is parsed properly. Don't pipe into the active one.
+          // If the latest message has a --model flag or there are pending
+          // attachments, force a new container instead of piping to active one.
           const lastContent =
             messagesToSend[messagesToSend.length - 1].content.trim();
           const hasModelFlag = /^--model\s+\S+/.test(lastContent);
+          const hasAttachments = pendingAttachments.has(chatJid);
 
-          if (!hasModelFlag && queue.sendMessage(chatJid, formatted)) {
+          if (
+            !hasModelFlag &&
+            !hasAttachments &&
+            queue.sendMessage(chatJid, formatted)
+          ) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -467,11 +492,11 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container (or --model flag forces a new one)
-            if (hasModelFlag) {
+            // No active container (or --model flag / attachments force a new one)
+            if (hasModelFlag || hasAttachments) {
               logger.debug(
-                { chatJid },
-                '--model flag: closing active container to force new one',
+                { chatJid, hasModelFlag, hasAttachments },
+                'Closing active container to force new one',
               );
               queue.closeStdin(chatJid);
             }
@@ -527,7 +552,22 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (_chatJid: string, msg: NewMessage) => {
+      storeMessage(msg);
+      if (msg.attachments?.length) {
+        logger.info(
+          {
+            chatJid: msg.chat_jid,
+            count: msg.attachments.length,
+            kinds: msg.attachments.map((a) => a.kind),
+          },
+          'Caching attachments from inbound message',
+        );
+        const existing = pendingAttachments.get(msg.chat_jid) || [];
+        existing.push(...msg.attachments);
+        pendingAttachments.set(msg.chat_jid, existing);
+      }
+    },
     onChatMetadata: (
       chatJid: string,
       timestamp: string,

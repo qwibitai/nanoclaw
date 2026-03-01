@@ -40,6 +40,7 @@ export interface ContainerInput {
   assistantName?: string;
   secrets?: Record<string, string>;
   model?: string;
+  attachments?: import('./types.js').MessageAttachment[];
 }
 
 export interface ContainerOutput {
@@ -178,8 +179,25 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    if (!fs.existsSync(groupAgentRunnerDir)) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    } else {
+      // Sync upstream changes: overwrite per-group files that are older than upstream
+      const srcIndex = path.join(agentRunnerSrc, 'index.ts');
+      const dstIndex = path.join(groupAgentRunnerDir, 'index.ts');
+      if (fs.existsSync(srcIndex) && fs.existsSync(dstIndex)) {
+        const srcMtime = fs.statSync(srcIndex).mtimeMs;
+        const dstMtime = fs.statSync(dstIndex).mtimeMs;
+        if (srcMtime > dstMtime) {
+          fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+          logger.info(
+            { group: group.folder },
+            'Updated agent-runner source from upstream',
+          );
+        }
+      }
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,

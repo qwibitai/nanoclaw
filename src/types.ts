@@ -41,6 +41,21 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface ImageAttachment {
+  kind: 'image';
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+  base64: string;
+  filename: string;
+}
+
+export interface FileAttachment {
+  kind: 'file';
+  filename: string;
+  workspacePath: string; // relative to /workspace/group, e.g. "media/1709123456-report.pdf"
+}
+
+export type MessageAttachment = ImageAttachment | FileAttachment;
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -50,6 +65,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  attachments?: MessageAttachment[];
 }
 
 export interface ScheduledTask {
