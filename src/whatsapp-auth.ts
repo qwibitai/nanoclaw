@@ -83,7 +83,9 @@ async function connectSocket(
     // Only on first connect (not reconnect after 515)
     setTimeout(async () => {
       try {
-        const code = await sock.requestPairingCode(phoneNumber!);
+        // Strip non-numeric characters (e.g. leading +) — Baileys expects digits only
+        const normalizedPhone = phoneNumber!.replace(/\D/g, '');
+        const code = await sock.requestPairingCode(normalizedPhone);
         console.log(`\n🔗 Your pairing code: ${code}\n`);
         console.log('  1. Open WhatsApp on your phone');
         console.log('  2. Tap Settings → Linked Devices → Link a Device');
@@ -143,8 +145,8 @@ async function connectSocket(
       console.log('  Credentials saved to store/auth/');
       console.log('  You can now start the NanoClaw service.\n');
 
-      // Give it a moment to save credentials, then exit
-      setTimeout(() => process.exit(0), 1000);
+      // Give credentials time to finish writing, then exit
+      setTimeout(() => process.exit(0), 3000);
     }
   });
 
