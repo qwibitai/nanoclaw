@@ -494,3 +494,73 @@ describe('removeFileEmbeddings', () => {
     expect(result.removedChunks).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Group folder & file path validation guards
+// ---------------------------------------------------------------------------
+
+describe('input validation guards', () => {
+  const badGroupFolders = [
+    '',
+    '../escape',
+    'has/slash',
+    '.starts-with-dot',
+    '-starts-with-dash',
+    'a'.repeat(65), // exceeds 64 char max
+  ];
+
+  const badFilePaths = [
+    '',
+    '/absolute/path.md',
+    '../escape/path.md',
+    'nested/../escape.md',
+  ];
+
+  describe('indexFile rejects invalid group folders', () => {
+    for (const bad of badGroupFolders) {
+      it(`rejects groupFolder "${bad}"`, async () => {
+        await expect(indexFile(bad, 'file.md', 'content')).rejects.toThrow('Invalid group folder');
+      });
+    }
+  });
+
+  describe('indexFile rejects invalid file paths', () => {
+    for (const bad of badFilePaths) {
+      it(`rejects filePath "${bad}"`, async () => {
+        await expect(indexFile('valid-group', bad, 'content')).rejects.toThrow('Invalid file path');
+      });
+    }
+  });
+
+  describe('vectorSearch rejects invalid group folders', () => {
+    for (const bad of badGroupFolders) {
+      it(`rejects groupFolder "${bad}"`, async () => {
+        await expect(vectorSearch('query', bad)).rejects.toThrow('Invalid group folder');
+      });
+    }
+  });
+
+  describe('hybridSearch rejects invalid group folders', () => {
+    for (const bad of badGroupFolders) {
+      it(`rejects groupFolder "${bad}"`, async () => {
+        await expect(hybridSearch('query', bad)).rejects.toThrow('Invalid group folder');
+      });
+    }
+  });
+
+  describe('removeFileEmbeddings rejects invalid group folders', () => {
+    for (const bad of badGroupFolders) {
+      it(`rejects groupFolder "${bad}"`, async () => {
+        await expect(removeFileEmbeddings(bad, 'file.md')).rejects.toThrow('Invalid group folder');
+      });
+    }
+  });
+
+  describe('removeFileEmbeddings rejects invalid file paths', () => {
+    for (const bad of badFilePaths) {
+      it(`rejects filePath "${bad}"`, async () => {
+        await expect(removeFileEmbeddings('valid-group', bad)).rejects.toThrow('Invalid file path');
+      });
+    }
+  });
+});

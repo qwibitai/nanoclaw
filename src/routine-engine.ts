@@ -2,6 +2,14 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const MIN_CRON_COOLDOWN_MS = 300_000; // 5 minutes — mandatory floor for cron routines
+const MIN_EVENT_DEDUP_MS = 60_000; // 1 minute — mandatory floor for event routines
+const MAX_DAILY_RUNS_DEFAULT = 50; // per-routine daily cap
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -23,6 +31,7 @@ export interface RoutineGuardrails {
   cooldownMs?: number;
   maxConcurrent?: number;
   dedupWindowMs?: number;
+  maxDailyRuns?: number;
 }
 
 export interface NotifyConfig {
@@ -112,10 +121,18 @@ function computeNextFireAt(cron: string, after: number): number {
 // RoutineEngine
 // ---------------------------------------------------------------------------
 
+export interface RoutinePersistence {
+  saveRoutine(routine: Routine): void;
+  deleteRoutine(name: string): void;
+  loadAllRoutines(): Routine[];
+  logRun(run: RoutineRun): void;
+}
+
 interface RoutineEngineCallbacks {
   onLightweightAction: (action: RoutineAction) => Promise<string>;
   onFullJobAction: (action: RoutineAction) => Promise<unknown>;
   onNotify: (info: { routineName: string; group: string; message: string }) => void;
+  persistence?: RoutinePersistence;
 }
 
 export class RoutineEngine {
@@ -125,11 +142,33 @@ export class RoutineEngine {
   private lastEventFireAt = new Map<string, number>();
   private callbacks: RoutineEngineCallbacks;
   private rateLimitMap = new Map<string, number[]>();
+  private dailyRunCounts = new Map<string, { date: string; count: number }>();
   private globalRunning = 0;
   private readonly MAX_GLOBAL_CONCURRENT = 5;
 
   constructor(callbacks: RoutineEngineCallbacks) {
     this.callbacks = callbacks;
+  }
+
+  /**
+   * Load all routines from the persistence layer (call at startup).
+   */
+  loadFromPersistence(): number {
+    if (!this.callbacks.persistence) return 0;
+    const routines = this.callbacks.persistence.loadAllRoutines();
+    for (const routine of routines) {
+      this.routines.set(routine.name, routine);
+      // Rebuild regex cache for event-type routines
+      if (routine.trigger.type === 'event' && routine.trigger.pattern) {
+        try {
+          this.regexCache.set(routine.name, new RegExp(routine.trigger.pattern));
+        } catch {
+          // Invalid regex in DB — disable routine
+          routine.enabled = false;
+        }
+      }
+    }
+    return routines.length;
   }
 
   // ---- CRUD ----
@@ -143,6 +182,10 @@ export class RoutineEngine {
     // Validate trigger-specific fields
     if (routine.trigger.type === 'cron') {
       validateCron(routine.trigger.cron!);
+      // Enforce minimum cooldown for cron routines (cost safety)
+      if (!routine.guardrails.cooldownMs || routine.guardrails.cooldownMs < MIN_CRON_COOLDOWN_MS) {
+        routine.guardrails.cooldownMs = MIN_CRON_COOLDOWN_MS;
+      }
     }
 
     if (routine.trigger.type === 'event') {
@@ -154,15 +197,35 @@ export class RoutineEngine {
           `Routine "${routine.name}" has invalid regex pattern: ${routine.trigger.pattern}`,
         );
       }
+      // Enforce minimum dedup window for event routines (cost safety)
+      if (!routine.guardrails.dedupWindowMs || routine.guardrails.dedupWindowMs < MIN_EVENT_DEDUP_MS) {
+        routine.guardrails.dedupWindowMs = MIN_EVENT_DEDUP_MS;
+      }
     }
 
-    this.routines.set(routine.name, { ...routine });
+    // Set default daily run cap if not specified
+    if (routine.guardrails.maxDailyRuns === undefined) {
+      routine.guardrails.maxDailyRuns = MAX_DAILY_RUNS_DEFAULT;
+    }
+
+    const stored = { ...routine };
+    this.routines.set(routine.name, stored);
+
+    // Persist to DB
+    if (this.callbacks.persistence) {
+      this.callbacks.persistence.saveRoutine(stored);
+    }
   }
 
   removeRoutine(name: string): void {
     this.routines.delete(name);
     this.regexCache.delete(name);
     this.lastEventFireAt.delete(name);
+
+    // Remove from DB
+    if (this.callbacks.persistence) {
+      this.callbacks.persistence.deleteRoutine(name);
+    }
   }
 
   getRoutine(name: string): Routine | undefined {
@@ -318,6 +381,15 @@ export class RoutineEngine {
       }
     }
 
+    // Daily run cap
+    if (g.maxDailyRuns !== undefined) {
+      const today = new Date(now).toISOString().slice(0, 10);
+      const dailyEntry = this.dailyRunCounts.get(routine.name);
+      if (dailyEntry && dailyEntry.date === today && dailyEntry.count >= g.maxDailyRuns) {
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -338,6 +410,15 @@ export class RoutineEngine {
     // Track per-routine concurrency
     const currentRunning = this.runningCounts.get(routine.name) ?? 0;
     this.runningCounts.set(routine.name, currentRunning + 1);
+
+    // Track daily runs
+    const today = new Date(now).toISOString().slice(0, 10);
+    const dailyEntry = this.dailyRunCounts.get(routine.name);
+    if (dailyEntry && dailyEntry.date === today) {
+      dailyEntry.count++;
+    } else {
+      this.dailyRunCounts.set(routine.name, { date: today, count: 1 });
+    }
 
     try {
       if (routine.action.type === 'lightweight') {
@@ -393,6 +474,12 @@ export class RoutineEngine {
       this.globalRunning--;
       const count = this.runningCounts.get(routine.name) ?? 1;
       this.runningCounts.set(routine.name, Math.max(0, count - 1));
+
+      // Persist routine state changes and run log
+      if (this.callbacks.persistence) {
+        this.callbacks.persistence.saveRoutine(routine);
+        this.callbacks.persistence.logRun(run);
+      }
     }
 
     return run;

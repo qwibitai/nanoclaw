@@ -44,7 +44,43 @@ interface RemoveResult {
 }
 
 // ---------------------------------------------------------------------------
-// In-memory store (used when no external DB is provided)
+// Persistence adapter — optional SQLite backing for the in-memory store
+// ---------------------------------------------------------------------------
+
+export interface EmbeddingPersistence {
+  loadChunksForGroup(groupFolder: string): StoredChunk[];
+  loadChunksForFile(groupFolder: string, filePath: string): StoredChunk[];
+  saveChunk(chunk: StoredChunk): void;
+  removeChunksForFile(groupFolder: string, filePath: string): number;
+  getChunkCount(): number;
+}
+
+let persistence: EmbeddingPersistence | null = null;
+
+/**
+ * Set an optional persistence adapter (e.g., SQLite via db.ts).
+ * When set, all writes are persisted and initial loads hydrate from storage.
+ * When not set, the store is purely in-memory (test mode).
+ */
+export function setEmbeddingPersistence(p: EmbeddingPersistence | null): void {
+  persistence = p;
+}
+
+/**
+ * Hydrate the in-memory store from the persistence layer for a group.
+ * Call this at startup for each active group.
+ */
+export function loadGroupFromPersistence(groupFolder: string): number {
+  if (!persistence) return 0;
+  const chunks = persistence.loadChunksForGroup(groupFolder);
+  for (const chunk of chunks) {
+    store.set(storeKey(chunk.groupFolder, chunk.filePath, chunk.chunkIndex), chunk);
+  }
+  return chunks.length;
+}
+
+// ---------------------------------------------------------------------------
+// In-memory store (write-through to persistence when available)
 // ---------------------------------------------------------------------------
 
 const store: Map<string, StoredChunk> = new Map();
@@ -84,6 +120,10 @@ function removeChunksForFile(groupFolder: string, filePath: string): number {
       removed++;
     }
   }
+  // Also remove from persistence
+  if (persistence) {
+    persistence.removeChunksForFile(groupFolder, filePath);
+  }
   return removed;
 }
 
@@ -96,6 +136,23 @@ const MAX_FILE_SIZE = 1024 * 1024; // 1MB
 const MAX_EMBEDDING_INPUT_CHARS = 32_000; // ~8K tokens — safety cap for direct callers
 const MAX_STORE_SIZE = 10_000; // Max chunks in memory — prevents OOM on 4GB VPS
 const EMBEDDING_MODEL = 'text-embedding-3-small';
+
+// Group folder validation — prevents path traversal and cross-group pollution
+const GROUP_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+function assertValidGroupFolder(folder: string): void {
+  if (!folder || !GROUP_FOLDER_PATTERN.test(folder) || folder.includes('..') || folder.includes('/')) {
+    throw new Error(`Invalid group folder: ${folder}`);
+  }
+}
+
+function normalizeFilePath(filePath: string): string {
+  // Reject absolute paths and path traversal
+  if (!filePath || filePath.startsWith('/') || filePath.includes('..')) {
+    throw new Error(`Invalid file path: ${filePath}`);
+  }
+  return filePath;
+}
 
 function isHybridEnabled(): boolean {
   const val = process.env.HYBRID_MEMORY_ENABLED;
@@ -416,6 +473,8 @@ export async function vectorSearch(
   groupFolder: string,
   topK: number = 50,
 ): Promise<SearchResult[]> {
+  assertValidGroupFolder(groupFolder);
+
   if (!query || query.trim().length === 0) {
     throw new Error('Cannot search with empty query');
   }
@@ -467,6 +526,8 @@ export async function hybridSearch(
   groupFolder: string,
   topK: number = 10,
 ): Promise<SearchResult[]> {
+  assertValidGroupFolder(groupFolder);
+
   if (!query || query.trim().length === 0) {
     throw new Error('Cannot search with empty query');
   }
@@ -552,6 +613,9 @@ export async function indexFile(
   filePath: string,
   content: string,
 ): Promise<IndexResult> {
+  assertValidGroupFolder(groupFolder);
+  filePath = normalizeFilePath(filePath);
+
   // Check file size (>1MB = skip)
   const contentBytes = Buffer.byteLength(content, 'utf-8');
   if (contentBytes > MAX_FILE_SIZE) {
@@ -626,6 +690,11 @@ export async function indexFile(
     };
 
     store.set(storeKey(groupFolder, filePath, i), storedChunk);
+
+    // Write-through to persistence
+    if (persistence) {
+      persistence.saveChunk(storedChunk);
+    }
   }
 
   // P0-2: Evict oldest entries if store exceeds MAX_STORE_SIZE
@@ -657,6 +726,9 @@ export async function removeFileEmbeddings(
   groupFolder: string,
   filePath: string,
 ): Promise<RemoveResult> {
+  assertValidGroupFolder(groupFolder);
+  filePath = normalizeFilePath(filePath);
+
   const removed = removeChunksForFile(groupFolder, filePath);
   return { removedChunks: removed };
 }

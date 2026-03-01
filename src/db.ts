@@ -65,6 +65,40 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
+    CREATE TABLE IF NOT EXISTS embedding_chunks (
+      id TEXT PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      embedding BLOB,
+      UNIQUE(group_folder, file_path, chunk_index)
+    );
+    CREATE INDEX IF NOT EXISTS idx_embedding_group ON embedding_chunks(group_folder);
+    CREATE INDEX IF NOT EXISTS idx_embedding_file ON embedding_chunks(group_folder, file_path);
+
+    CREATE TABLE IF NOT EXISTS routines (
+      name TEXT PRIMARY KEY,
+      group_name TEXT NOT NULL,
+      config TEXT NOT NULL,
+      enabled INTEGER DEFAULT 1,
+      consecutive_failures INTEGER DEFAULT 0,
+      last_run_at TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS routine_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      routine_name TEXT NOT NULL,
+      group_name TEXT NOT NULL,
+      started_at TEXT NOT NULL,
+      result TEXT,
+      error TEXT,
+      FOREIGN KEY (routine_name) REFERENCES routines(name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_routine_runs ON routine_runs(routine_name, started_at);
+
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -677,6 +711,132 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Embedding chunk accessors ---
+
+export interface DbEmbeddingChunk {
+  id: string;
+  group_folder: string;
+  file_path: string;
+  chunk_index: number;
+  content: string;
+  content_hash: string;
+  embedding: Buffer | null;
+}
+
+export function storeEmbeddingChunk(chunk: DbEmbeddingChunk): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO embedding_chunks (id, group_folder, file_path, chunk_index, content, content_hash, embedding)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    chunk.id,
+    chunk.group_folder,
+    chunk.file_path,
+    chunk.chunk_index,
+    chunk.content,
+    chunk.content_hash,
+    chunk.embedding,
+  );
+}
+
+export function getEmbeddingChunksForGroup(
+  groupFolder: string,
+): DbEmbeddingChunk[] {
+  return db
+    .prepare('SELECT * FROM embedding_chunks WHERE group_folder = ?')
+    .all(groupFolder) as DbEmbeddingChunk[];
+}
+
+export function getEmbeddingChunksForFile(
+  groupFolder: string,
+  filePath: string,
+): DbEmbeddingChunk[] {
+  return db
+    .prepare(
+      'SELECT * FROM embedding_chunks WHERE group_folder = ? AND file_path = ?',
+    )
+    .all(groupFolder, filePath) as DbEmbeddingChunk[];
+}
+
+export function removeEmbeddingChunksForFile(
+  groupFolder: string,
+  filePath: string,
+): number {
+  const result = db
+    .prepare(
+      'DELETE FROM embedding_chunks WHERE group_folder = ? AND file_path = ?',
+    )
+    .run(groupFolder, filePath);
+  return result.changes;
+}
+
+export function getEmbeddingChunkCount(): number {
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM embedding_chunks')
+    .get() as { count: number };
+  return row.count;
+}
+
+// --- Routine accessors ---
+
+export interface DbRoutine {
+  name: string;
+  group_name: string;
+  config: string;
+  enabled: number;
+  consecutive_failures: number;
+  last_run_at: string | null;
+  created_at: string;
+}
+
+export function storeDbRoutine(routine: DbRoutine): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO routines (name, group_name, config, enabled, consecutive_failures, last_run_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    routine.name,
+    routine.group_name,
+    routine.config,
+    routine.enabled,
+    routine.consecutive_failures,
+    routine.last_run_at,
+    routine.created_at,
+  );
+}
+
+export function getDbRoutine(name: string): DbRoutine | undefined {
+  return db
+    .prepare('SELECT * FROM routines WHERE name = ?')
+    .get(name) as DbRoutine | undefined;
+}
+
+export function getAllDbRoutines(): DbRoutine[] {
+  return db.prepare('SELECT * FROM routines').all() as DbRoutine[];
+}
+
+export function deleteDbRoutine(name: string): void {
+  db.prepare('DELETE FROM routine_runs WHERE routine_name = ?').run(name);
+  db.prepare('DELETE FROM routines WHERE name = ?').run(name);
+}
+
+export function logDbRoutineRun(run: {
+  routine_name: string;
+  group_name: string;
+  started_at: string;
+  result?: string;
+  error?: string;
+}): void {
+  db.prepare(
+    `INSERT INTO routine_runs (routine_name, group_name, started_at, result, error)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(
+    run.routine_name,
+    run.group_name,
+    run.started_at,
+    run.result ?? null,
+    run.error ?? null,
+  );
 }
 
 // --- JSON migration ---

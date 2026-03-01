@@ -160,7 +160,7 @@ export class FailoverProvider {
     this.providers = opts.providers;
     this.failureThreshold = opts.failureThreshold;
     this.cooldownMs = opts.cooldownMs ?? 60_000;
-    this.maxTotalAttempts = opts.maxTotalAttempts ?? 15;
+    this.maxTotalAttempts = opts.maxTotalAttempts ?? 6;
 
     for (const p of this.providers) {
       this.state.set(p.name, { failureCount: 0, cooldownStartedAt: null });
