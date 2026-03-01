@@ -1,12 +1,10 @@
 import { ChildProcess } from 'child_process';
-import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import {
   ASSISTANT_NAME,
   MAIN_GROUP_FOLDER,
   SCHEDULER_POLL_INTERVAL,
-  TIMEZONE,
 } from './config.js';
 import {
   ContainerOutput,
@@ -14,6 +12,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  claimTaskRun,
   getAllTasks,
   getDueTasks,
   getTaskById,
@@ -21,6 +20,7 @@ import {
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+import { computeNextRun } from './schedule-utils.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -192,17 +192,7 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
+  const nextRun = computeNextRun(task.schedule_type, task.schedule_value);
 
   const resultSummary = error
     ? `Error: ${error}`
@@ -236,8 +226,14 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
-        deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
-          runTask(currentTask, deps),
+        // Advance next_run immediately so getDueTasks() won't re-pick this
+        // task on the next poll while it is still running.
+        claimTaskRun(currentTask.id, computeNextRun(currentTask.schedule_type, currentTask.schedule_value));
+
+        deps.queue.enqueueTask(
+          currentTask.chat_jid,
+          currentTask.id,
+          () => runTask(currentTask, deps),
         );
       }
     } catch (err) {

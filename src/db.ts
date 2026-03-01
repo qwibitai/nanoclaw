@@ -442,6 +442,14 @@ export function getDueTasks(): ScheduledTask[] {
     .all(now) as ScheduledTask[];
 }
 
+/**
+ * Advance next_run immediately when a task is claimed for execution.
+ * Prevents getDueTasks() from re-picking the same task while it is still running.
+ */
+export function claimTaskRun(id: string, nextRun: string | null): void {
+  db.prepare(`UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`).run(nextRun, id);
+}
+
 export function updateTaskAfterRun(
   id: string,
   nextRun: string | null,
