@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import * as sqliteVec from 'sqlite-vec';
 
 import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -13,6 +14,13 @@ import {
 } from './types.js';
 
 let db: Database.Database;
+
+/** Get the database instance. Must call initDatabase() first. */
+export function getDb(): Database.Database {
+  if (!db)
+    throw new Error('Database not initialized — call initDatabase() first');
+  return db;
+}
 
 function createSchema(database: Database.Database): void {
   database.exec(`
@@ -133,6 +141,10 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+
+  // Load sqlite-vec extension for vector search
+  sqliteVec.load(db);
+
   createSchema(db);
 
   // Migrate from JSON files if they exist

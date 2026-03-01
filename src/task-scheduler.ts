@@ -1,6 +1,7 @@
 import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
+import path from 'path';
 
 import {
   ASSISTANT_NAME,
@@ -22,9 +23,10 @@ import {
   updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup, ScheduledTask } from './types.js';
+import { buildMemorySnapshot, retrieveMemoryContext } from './memory.js';
+import { NewMessage, RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -110,6 +112,36 @@ async function runTask(
     })),
   );
 
+  // Retrieve memory context (RAG) to prepend to the task prompt
+  let memoryContext = '';
+  try {
+    memoryContext = await retrieveMemoryContext(task.group_folder, [
+      { content: task.prompt } as NewMessage,
+    ]);
+  } catch (err) {
+    logger.warn(
+      { taskId: task.id, err },
+      'Memory retrieval failed for scheduled task',
+    );
+  }
+
+  // Write memory snapshot so the agent can see existing memory IDs
+  const groupIpcDir = resolveGroupIpcPath(task.group_folder);
+  try {
+    const snapshot = buildMemorySnapshot(task.group_folder);
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'memory_snapshot.json'),
+      JSON.stringify(snapshot, null, 2),
+    );
+  } catch (err) {
+    logger.warn(
+      { taskId: task.id, err },
+      'Failed to write memory snapshot for scheduled task',
+    );
+  }
+
+  const prompt = memoryContext + task.prompt;
+
   let result: string | null = null;
   let error: string | null = null;
 
@@ -136,7 +168,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
