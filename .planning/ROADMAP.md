@@ -36,7 +36,10 @@ Plans:
   1. Un adjunto enviado desde el panel (base64) se guarda en `groups/better-work/inbox/attachments/` y el agente recibe la referencia en el mensaje
   2. Un archivo generado por el agente en `groups/better-work/files/` es accesible via HTTP en el puerto configurado (default 3002)
   3. El mensaje de respuesta del agente incluye la URL `/files/...` cuando hay adjuntos salientes
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 02-01-PLAN.md — WEBSOCKET_FILES_PORT config + adjuntos entrantes + HTTP estático + adjuntos salientes
 
 ## Progress
 
@@ -46,4 +49,4 @@ Phases execute in numeric order: 1 → 2
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. WebSocket Channel | 3/3 | Complete | 2026-03-01 |
-| 2. Attachments | 0/? | Not started | - |
+| 2. Attachments | 0/1 | Not started | - |
