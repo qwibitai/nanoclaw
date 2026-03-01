@@ -21,8 +21,8 @@ export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
-const HOME_DIR = process.env.HOME || os.homedir();
+export const PROJECT_ROOT = process.cwd();
+export const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
 export const MOUNT_ALLOWLIST_PATH = path.join(
@@ -72,3 +72,10 @@ export const TIMEZONE =
 // from .env via readEnvFile() to keep secrets off process.env.
 export const SLACK_ONLY =
   (process.env.SLACK_ONLY || envConfig.SLACK_ONLY) === 'true';
+
+// Auto-deployment configuration
+export const AUTO_DEPLOY_ENABLED = process.env.AUTO_DEPLOY_ENABLED !== 'false'; // Enabled by default
+export const AUTO_DEPLOY_POLL_INTERVAL = parseInt(
+  process.env.AUTO_DEPLOY_POLL_INTERVAL || '60000',
+  10,
+); // 1 minute default

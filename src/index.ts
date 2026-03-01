@@ -3,10 +3,13 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  AUTO_DEPLOY_ENABLED,
+  AUTO_DEPLOY_POLL_INTERVAL,
   DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  PROJECT_ROOT,
   SLACK_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -45,6 +48,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { readEnvFile } from './env.js';
+import { startAutoDeployLoop } from './auto-deploy.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -533,6 +537,27 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();
+
+  // Start auto-deployment monitoring (only on main group's host)
+  if (AUTO_DEPLOY_ENABLED) {
+    startAutoDeployLoop(
+      PROJECT_ROOT,
+      AUTO_DEPLOY_POLL_INTERVAL,
+      async (message) => {
+        // Send deployment notifications to main group
+        const mainJid = Object.keys(registeredGroups).find(
+          (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER,
+        );
+        if (mainJid) {
+          const channel = findChannel(channels, mainJid);
+          if (channel) {
+            await channel.sendMessage(mainJid, message);
+          }
+        }
+      },
+    );
+    logger.info('Auto-deployment monitoring enabled');
+  }
 }
 
 // Guard: only run when executed directly, not when imported by tests
