@@ -90,9 +90,13 @@ export class GmailChannel implements Channel {
 
     // Start polling with error backoff
     const schedulePoll = () => {
-      const backoffMs = this.consecutiveErrors > 0
-        ? Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000)
-        : this.pollIntervalMs;
+      const backoffMs =
+        this.consecutiveErrors > 0
+          ? Math.min(
+              this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+              30 * 60 * 1000,
+            )
+          : this.pollIntervalMs;
       this.pollTimer = setTimeout(() => {
         this.pollForMessages()
           .catch((err) => logger.error({ err }, 'Gmail poll error'))
@@ -209,8 +213,18 @@ export class GmailChannel implements Channel {
       this.consecutiveErrors = 0;
     } catch (err) {
       this.consecutiveErrors++;
-      const backoffMs = Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000);
-      logger.error({ err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs }, 'Gmail poll failed');
+      const backoffMs = Math.min(
+        this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+        30 * 60 * 1000,
+      );
+      logger.error(
+        {
+          err,
+          consecutiveErrors: this.consecutiveErrors,
+          nextPollMs: backoffMs,
+        },
+        'Gmail poll failed',
+      );
     }
   }
 
