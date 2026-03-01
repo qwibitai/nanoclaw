@@ -1,7 +1,7 @@
 ---
 title: "feat: Add Litestream and rsync backup to GCS"
 type: feat
-status: active
+status: completed
 date: 2026-02-28
 ---
 
