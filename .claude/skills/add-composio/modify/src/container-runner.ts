@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -18,11 +19,7 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  CONTAINER_RUNTIME_BIN,
-  readonlyMountArgs,
-  stopContainer,
-} from './container-runtime.js';
+import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -46,6 +43,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cost_usd?: number;
+  };
 }
 
 interface VolumeMount {
@@ -111,26 +115,19 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+    fs.writeFileSync(settingsFile, JSON.stringify({
+      env: {
+        // Enable agent swarms (subagent orchestration)
+        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+        // Load CLAUDE.md from additional mounted directories
+        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+        // Enable Claude's memory feature (persists user preferences between sessions)
+        // https://code.claude.com/docs/en/memory#manage-auto-memory
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+      },
+    }, null, 2) + '\n');
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -165,18 +162,8 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(
-    projectRoot,
-    'container',
-    'agent-runner',
-    'src',
-  );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
+  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
+  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
@@ -204,18 +191,10 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_AUTH_TOKEN',
-  ]);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
 }
 
-function buildContainerArgs(
-  mounts: VolumeMount[],
-  containerName: string,
-): string[] {
+function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -231,21 +210,12 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
-  // Pass Composio credentials if configured
-  // API key: ~/.composio/api.key (x-api-key header for the MCP server)
-  // MCP URL: ~/.composio/mcp.url (dedicated MCP server endpoint)
+  // Pass Composio API key if configured (~/.composio/api.key)
   const composioKeyFile = path.join(os.homedir(), '.composio', 'api.key');
   if (fs.existsSync(composioKeyFile)) {
     try {
       const key = fs.readFileSync(composioKeyFile, 'utf-8').trim();
       if (key) args.push('-e', `COMPOSIO_API_KEY=${key}`);
-    } catch { /* not configured, skip */ }
-  }
-  const composioUrlFile = path.join(os.homedir(), '.composio', 'mcp.url');
-  if (fs.existsSync(composioUrlFile)) {
-    try {
-      const url = fs.readFileSync(composioUrlFile, 'utf-8').trim();
-      if (url) args.push('-e', `COMPOSIO_MCP_URL=${url}`);
     } catch { /* not configured, skip */ }
   }
 
@@ -411,16 +381,10 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error(
-        { group: group.name, containerName },
-        'Container timeout, stopping gracefully',
-      );
+      logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
       exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
         if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
+          logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');
         }
       });
@@ -441,18 +405,15 @@ export async function runContainerAgent(
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(
-          timeoutLog,
-          [
-            `=== Container Run Log (TIMEOUT) ===`,
-            `Timestamp: ${new Date().toISOString()}`,
-            `Group: ${group.name}`,
-            `Container: ${containerName}`,
-            `Duration: ${duration}ms`,
-            `Exit Code: ${code}`,
-            `Had Streaming Output: ${hadStreamingOutput}`,
-          ].join('\n'),
-        );
+        fs.writeFileSync(timeoutLog, [
+          `=== Container Run Log (TIMEOUT) ===`,
+          `Timestamp: ${new Date().toISOString()}`,
+          `Group: ${group.name}`,
+          `Container: ${containerName}`,
+          `Duration: ${duration}ms`,
+          `Exit Code: ${code}`,
+          `Had Streaming Output: ${hadStreamingOutput}`,
+        ].join('\n'));
 
         // Timeout after output = idle cleanup, not failure.
         // The agent already sent its response; this is just the
@@ -487,8 +448,7 @@ export async function runContainerAgent(
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const logFile = path.join(logsDir, `container-${timestamp}.log`);
-      const isVerbose =
-        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+      const isVerbose = process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
 
       const logLines = [
         `=== Container Run Log ===`,
@@ -631,10 +591,7 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      logger.error(
-        { group: group.name, containerName, error: err },
-        'Container spawn error',
-      );
+      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
       resolve({
         status: 'error',
         result: null,
