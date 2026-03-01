@@ -12,6 +12,7 @@ import path from 'path';
 import Database from 'better-sqlite3';
 
 import { STORE_DIR } from '../src/config.js';
+import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import {
   getPlatform,
@@ -104,12 +105,38 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 4. Check WhatsApp auth
-  let whatsappAuth = 'not_found';
+  // 4. Check channel auth (detect configured channels by credentials)
+  const envVars = readEnvFile([
+    'TELEGRAM_BOT_TOKEN',
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'DISCORD_BOT_TOKEN',
+  ]);
+
+  const channelAuth: Record<string, string> = {};
+
+  // WhatsApp: check for auth credentials on disk
   const authDir = path.join(projectRoot, 'store', 'auth');
   if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
-    whatsappAuth = 'authenticated';
+    channelAuth.whatsapp = 'authenticated';
   }
+
+  // Token-based channels: check .env
+  if (process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN) {
+    channelAuth.telegram = 'configured';
+  }
+  if (
+    (process.env.SLACK_BOT_TOKEN || envVars.SLACK_BOT_TOKEN) &&
+    (process.env.SLACK_APP_TOKEN || envVars.SLACK_APP_TOKEN)
+  ) {
+    channelAuth.slack = 'configured';
+  }
+  if (process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN) {
+    channelAuth.discord = 'configured';
+  }
+
+  const configuredChannels = Object.keys(channelAuth);
+  const anyChannelConfigured = configuredChannels.length > 0;
 
   // 5. Check registered groups (using better-sqlite3, not sqlite3 CLI)
   let registeredGroups = 0;
@@ -141,18 +168,19 @@ export async function run(_args: string[]): Promise<void> {
   const status =
     service === 'running' &&
     credentials !== 'missing' &&
-    whatsappAuth !== 'not_found' &&
+    anyChannelConfigured &&
     registeredGroups > 0
       ? 'success'
       : 'failed';
 
-  logger.info({ status }, 'Verification complete');
+  logger.info({ status, channelAuth }, 'Verification complete');
 
   emitStatus('VERIFY', {
     SERVICE: service,
     CONTAINER_RUNTIME: containerRuntime,
     CREDENTIALS: credentials,
-    WHATSAPP_AUTH: whatsappAuth,
+    CONFIGURED_CHANNELS: configuredChannels.join(','),
+    CHANNEL_AUTH: JSON.stringify(channelAuth),
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
     STATUS: status,

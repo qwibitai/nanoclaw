@@ -12,10 +12,6 @@ Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 
 
 Use `AskUserQuestion` to collect configuration:
 
-AskUserQuestion: Should Discord replace WhatsApp or run alongside it?
-- **Replace WhatsApp** - Discord will be the only channel (sets DISCORD_ONLY=true)
-- **Alongside** - Both Discord and WhatsApp channels active
-
 AskUserQuestion: Do you have a Discord bot token, or do you need to create one?
 
 If they have one, collect it now. If not, we'll create one in Phase 3.
@@ -41,18 +37,14 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-discord
 ```
 
 This deterministically:
-- Adds `src/channels/discord.ts` (DiscordChannel class implementing Channel interface)
+- Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
-- Three-way merges Discord support into `src/index.ts` (multi-channel support, findChannel routing)
-- Three-way merges Discord config into `src/config.ts` (DISCORD_BOT_TOKEN, DISCORD_ONLY exports)
-- Three-way merges updated routing tests into `src/routing.test.ts`
+- Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
 - Installs the `discord.js` npm dependency
-- Updates `.env.example` with `DISCORD_BOT_TOKEN` and `DISCORD_ONLY`
 - Records the application in `.nanoclaw/state.yaml`
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
-- `modify/src/config.ts.intent.md` — what changed for config.ts
+If the apply reports merge conflicts, read the intent file:
+- `modify/src/channels/index.ts.intent.md` — what changed and invariants
 
 ### Validate code changes
 
@@ -93,16 +85,12 @@ Add to `.env`:
 DISCORD_BOT_TOKEN=<their-token>
 ```
 
-If they chose to replace WhatsApp:
-
-```bash
-DISCORD_ONLY=true
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 
 ```bash
-cp .env data/env/env
+mkdir -p data/env && cp .env data/env/env
 ```
 
 The container reads environment from `data/env/env`, not `.env` directly.

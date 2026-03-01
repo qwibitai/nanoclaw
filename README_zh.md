@@ -12,14 +12,20 @@
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
+<p align="center">
+  <a href="https://github.com/qwibitai/nanoclaw/actions"><img src="https://github.com/qwibitai/nanoclaw/workflows/CI/badge.svg" alt="Build Status" valign="middle"></a>&nbsp; • &nbsp;
+  <a href="https://github.com/qwibitai/nanoclaw/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" valign="middle"></a>&nbsp; • &nbsp;
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white" alt="TypeScript" valign="middle">&nbsp; • &nbsp;
+  <a href="https://github.com/qwibitai/nanoclaw/pulls"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" valign="middle"></a>
+</p>
 
 **新功能：** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。可轻松组建智能体团队，在您的聊天中高效协作。
 
 ## 我为什么创建这个项目
 
-[OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，愿景宏大。但我无法安心使用一个我不了解却能访问我个人隐私的软件。OpenClaw 有 52+ 个模块、8 个配置管理文件、45+ 个依赖项，以及为 15 个渠道提供商设计的抽象层。其安全性是应用级别的（通过白名单、配对码实现），而非操作系统级别的隔离。所有东西都在一个共享内存的 Node 进程中运行。
+[OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，但我无法安心使用一个我不了解却能访问我个人隐私的软件。OpenClaw 有近 50 万行代码、53 个配置文件和 70+ 个依赖项。其安全性是应用级别的（通过白名单、配对码实现），而非操作系统级别的隔离。所有东西都在一个共享内存的 Node 进程中运行。
 
-NanoClaw 用一个您能在 8 分钟内理解的代码库，为您提供了同样的核心功能。只有一个进程，少数几个文件。智能体（Agent）运行在具有文件系统隔离的真实 Linux 容器中，而不是依赖于权限检查。
+NanoClaw 用一个您能快速理解的代码库，为您提供了同样的核心功能。只有一个进程，少数几个文件。智能体（Agent）运行在具有文件系统隔离的真实 Linux 容器中，而不是依赖于权限检查。
 
 ## 快速开始
 
@@ -31,25 +37,40 @@ claude
 
 然后运行 `/setup`。Claude Code 会处理一切：依赖安装、身份验证、容器设置、服务配置。
 
+> **注意：** 以 `/` 开头的命令（如 `/setup`、`/add-whatsapp`）是 [Claude Code 技能](https://code.claude.com/docs/en/skills)。请在 `claude` CLI 提示符中输入，而非在普通终端中。
+
+## 从旧版本升级
+
+> **破坏性变更。** WhatsApp 不再内置于核心 — 它现在是一个可插拔技能，与其他渠道一样。如果您正在升级现有安装：
+>
+> ```bash
+> claude                       # 在 NanoClaw 目录中打开 Claude Code
+> ```
+> ```
+> /add-whatsapp                # 以可插拔渠道形式重新安装 WhatsApp
+> ```
+>
+> 您现有的身份验证凭据、群组和计划任务会被保留。该技能只是将 WhatsApp 重新接入新的渠道注册表。
+
 ## 设计哲学
 
 **小巧易懂：** 单一进程，少量源文件。无微服务、无消息队列、无复杂抽象层。让 Claude Code 引导您轻松上手。
 
 **通过隔离保障安全:** 智能体运行在 Linux 容器（在 macOS 上是 Apple Container，或 Docker）中。它们只能看到被明确挂载的内容。即便通过 Bash 访问也十分安全，因为所有命令都在容器内执行，不会直接操作您的宿主机。
 
-**为单一用户打造:** 这不是一个框架，是一个完全符合我个人需求的、可工作的软件。您可以 Fork 本项目，然后让 Claude Code 根据您的精确需求进行修改和适配。
+**为单一用户打造:** 这不是一个框架，是一个完全符合您个人需求的、可工作的软件。您可以 Fork 本项目，然后让 Claude Code 根据您的精确需求进行修改和适配。
 
 **定制即代码修改:** 没有繁杂的配置文件。想要不同的行为？直接修改代码。代码库足够小，这样做是安全的。
 
-**AI 原生:** 无安装向导(由 Claude Code 指导安装)。无需监控仪表盘，直接询问 Claude 即可了解系统状况。无调试工具(描述问题，Claude 会修复它)。
+**AI 原生:** 无安装向导（由 Claude Code 指导安装）。无需监控仪表盘，直接询问 Claude 即可了解系统状况。无调试工具（描述问题，Claude 会修复它）。
 
 **技能（Skills）优于功能（Features）:** 贡献者不应该向代码库添加新功能（例如支持 Telegram）。相反，他们应该贡献像 `/add-telegram` 这样的 [Claude Code 技能](https://code.claude.com/docs/en/skills)，这些技能可以改造您的 fork。最终，您得到的是只做您需要事情的整洁代码。
 
-**最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着您直接运行的就是 Claude Code。工具套件至关重要。一个低效的工具套件会让再聪明的模型也显得迟钝，而一个优秀的套件则能赋予它们超凡的能力。Claude Code (在我看来) 是市面上最好的工具套件。
+**最好的工具套件，最好的模型:** 本项目运行在 Claude Agent SDK 之上，这意味着您直接运行的就是 Claude Code。Claude Code 高度强大，其编码和问题解决能力使其能够修改和扩展 NanoClaw，为每个用户量身定制。
 
 ## 功能支持
 
-- **WhatsApp 输入/输出** - 通过手机给 Claude 发消息
+- **可插拔渠道** - 通过技能添加 WhatsApp (`/add-whatsapp`)、Telegram (`/add-telegram`)、Discord (`/add-discord`)、Slack (`/add-slack`) 或 Gmail (`/add-gmail`)。可同时运行一个或多个。
 - **隔离的群组上下文** - 每个群组都拥有独立的 `CLAUDE.md` 记忆和隔离的文件系统。它们在各自的容器沙箱中运行，且仅挂载所需的文件系统。
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
@@ -101,15 +122,10 @@ claude
 我们希望看到的技能：
 
 **通信渠道**
-- `/add-telegram` - 添加 Telegram 作为渠道。应提供选项让用户选择替换 WhatsApp 或作为额外渠道添加。也应能将其添加为控制渠道（可以触发动作）或仅作为被其他地方触发的动作所使用的渠道。
-- `/add-slack` - 添加 Slack
-- `/add-discord` - 添加 Discord
-
-**平台支持**
-- `/setup-windows` - 通过 WSL2 + Docker 支持 Windows
+- `/add-signal` - 添加 Signal 作为渠道
 
 **会话管理**
-- `/add-clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
+- `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
 ## 系统要求
 
@@ -121,27 +137,25 @@ claude
 ## 架构
 
 ```
-WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
+渠道（可插拔） --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) --> 响应
 ```
 
-单一 Node.js 进程。智能体在具有挂载目录的隔离 Linux 容器中执行。每个群组的消息队列都带有全局并发控制。通过文件系统进行进程间通信（IPC）。
+单一 Node.js 进程。渠道可插拔 — 每个渠道在启动时自注册，编排器连接具有凭据的渠道。智能体在具有文件系统隔离的 Linux 容器中执行。每个群组的消息队列带有并发控制。通过文件系统进行 IPC。
+
+完整架构详情请见 [docs/SPEC.md](docs/SPEC.md)。
 
 关键文件：
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
-- `src/channels/whatsapp.ts` - WhatsApp 连接、认证、收发消息
+- `src/channels/registry.ts` - 渠道注册表（可插拔渠道系统）
 - `src/ipc.ts` - IPC 监听与任务处理
 - `src/router.ts` - 消息格式化与出站路由
-- `src/group-queue.ts` - 各带全局并发限制的群组队列
+- `src/group-queue.ts` - 带全局并发限制的群组队列
 - `src/container-runner.ts` - 生成流式智能体容器
 - `src/task-scheduler.ts` - 运行计划任务
 - `src/db.ts` - SQLite 操作（消息、群组、会话、状态）
 - `groups/*/CLAUDE.md` - 各群组的记忆
 
 ## FAQ
-
-**为什么是 WhatsApp 而不是 Telegram/Signal 等？**
-
-因为我用 WhatsApp。Fork 这个项目然后运行一个技能来改变它。正是这个项目的核心理念。
 
 **为什么是 Docker？**
 

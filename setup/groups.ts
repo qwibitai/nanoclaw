@@ -1,5 +1,7 @@
 /**
- * Step: groups — Connect to WhatsApp, fetch group metadata, write to DB.
+ * Step: groups — Fetch group metadata from messaging platforms, write to DB.
+ * WhatsApp requires an upfront sync (Baileys groupFetchAllParticipating).
+ * Other channels discover group names at runtime — this step auto-skips for them.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
 import { execSync } from 'child_process';
@@ -62,6 +64,25 @@ async function listGroups(limit: number): Promise<void> {
 }
 
 async function syncGroups(projectRoot: string): Promise<void> {
+  // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime.
+  // Detect WhatsApp by checking for auth credentials on disk.
+  const authDir = path.join(projectRoot, 'store', 'auth');
+  const hasWhatsAppAuth =
+    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+
+  if (!hasWhatsAppAuth) {
+    logger.info('WhatsApp auth not found — skipping group sync');
+    emitStatus('SYNC_GROUPS', {
+      BUILD: 'skipped',
+      SYNC: 'skipped',
+      GROUPS_IN_DB: 0,
+      REASON: 'whatsapp_not_configured',
+      STATUS: 'success',
+      LOG: 'logs/setup.log',
+    });
+    return;
+  }
+
   // Build TypeScript first
   logger.info('Building TypeScript');
   let buildOk = false;

@@ -157,6 +157,14 @@ Report final status:
 - Any warnings (failed custom patches, failed skill tests, migration issues)
 - Build and test status
 
+## Known Migrations
+
+### 1.2.0 — WhatsApp moved from core to skill
+
+WhatsApp was the only channel ever bundled in core. From 1.2.0 it is a pluggable skill. After applying this update, if `store/auth/` exists (the user was running WhatsApp), apply the WhatsApp skill: `npx tsx skills-engine/apply.ts .claude/skills/add-whatsapp`. If it fails, tell the user to run `/add-whatsapp` manually.
+
+All other channels were always skills, so the update system's built-in skill re-application handles them automatically.
+
 ## Troubleshooting
 
 **No upstream remote:** The fetch script auto-adds `upstream` pointing to `https://github.com/qwibitai/nanoclaw.git`. If the user forked from a different URL, they should set the remote manually: `git remote add upstream <url>`.

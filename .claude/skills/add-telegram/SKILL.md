@@ -17,10 +17,6 @@ Read `.nanoclaw/state.yaml`. If `telegram` is in `applied_skills`, skip to Phase
 
 Use `AskUserQuestion` to collect configuration:
 
-AskUserQuestion: Should Telegram replace WhatsApp or run alongside it?
-- **Replace WhatsApp** - Telegram will be the only channel (sets TELEGRAM_ONLY=true)
-- **Alongside** - Both Telegram and WhatsApp channels active
-
 AskUserQuestion: Do you have a Telegram bot token, or do you need to create one?
 
 If they have one, collect it now. If not, we'll create one in Phase 3.
@@ -46,18 +42,15 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
 ```
 
 This deterministically:
-- Adds `src/channels/telegram.ts` (TelegramChannel class implementing Channel interface)
+- Adds `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/telegram.test.ts` (46 unit tests)
-- Three-way merges Telegram support into `src/index.ts` (multi-channel support, findChannel routing)
-- Three-way merges Telegram config into `src/config.ts` (TELEGRAM_BOT_TOKEN, TELEGRAM_ONLY exports)
-- Three-way merges updated routing tests into `src/routing.test.ts`
+- Appends `import './telegram.js'` to the channel barrel file `src/channels/index.ts`
 - Installs the `grammy` npm dependency
-- Updates `.env.example` with `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ONLY`
+- Updates `.env.example` with `TELEGRAM_BOT_TOKEN`
 - Records the application in `.nanoclaw/state.yaml`
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
-- `modify/src/config.ts.intent.md` — what changed for config.ts
+If the apply reports merge conflicts, read the intent file:
+- `modify/src/channels/index.ts.intent.md` — what changed and invariants
 
 ### Validate code changes
 
@@ -92,11 +85,7 @@ Add to `.env`:
 TELEGRAM_BOT_TOKEN=<their-token>
 ```
 
-If they chose to replace WhatsApp:
-
-```bash
-TELEGRAM_ONLY=true
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 
@@ -233,11 +222,9 @@ If they say yes, invoke the `/add-telegram-swarm` skill.
 
 To remove Telegram integration:
 
-1. Delete `src/channels/telegram.ts`
-2. Remove `TelegramChannel` import and creation from `src/index.ts`
-3. Remove `channels` array and revert to using `whatsapp` directly in `processGroupMessages`, scheduler deps, and IPC deps
-4. Revert `getAvailableGroups()` filter to only include `@g.us` chats
-5. Remove Telegram config (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_ONLY`) from `src/config.ts`
-6. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
-7. Uninstall: `npm uninstall grammy`
-8. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+1. Delete `src/channels/telegram.ts` and `src/channels/telegram.test.ts`
+2. Remove `import './telegram.js'` from `src/channels/index.ts`
+3. Remove `TELEGRAM_BOT_TOKEN` from `.env`
+4. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
+5. Uninstall: `npm uninstall grammy`
+6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

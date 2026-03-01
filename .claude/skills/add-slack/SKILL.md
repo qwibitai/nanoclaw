@@ -15,11 +15,7 @@ Read `.nanoclaw/state.yaml`. If `slack` is in `applied_skills`, skip to Phase 3 
 
 ### Ask the user
 
-1. **Mode**: Replace WhatsApp or add alongside it?
-   - Replace → will set `SLACK_ONLY=true`
-   - Alongside → both channels active (default)
-
-2. **Do they already have a Slack app configured?** If yes, collect the Bot Token and App Token now. If no, we'll create one in Phase 3.
+**Do they already have a Slack app configured?** If yes, collect the Bot Token and App Token now. If no, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
@@ -42,19 +38,14 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-slack
 ```
 
 This deterministically:
-- Adds `src/channels/slack.ts` (SlackChannel class implementing Channel interface)
+- Adds `src/channels/slack.ts` (SlackChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/slack.test.ts` (46 unit tests)
-- Three-way merges Slack support into `src/index.ts` (multi-channel support, conditional channel creation)
-- Three-way merges Slack config into `src/config.ts` (SLACK_ONLY export)
-- Three-way merges updated routing tests into `src/routing.test.ts`
+- Appends `import './slack.js'` to the channel barrel file `src/channels/index.ts`
 - Installs the `@slack/bolt` npm dependency
-- Updates `.env.example` with `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `SLACK_ONLY`
 - Records the application in `.nanoclaw/state.yaml`
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/index.ts.intent.md` — what changed and invariants for index.ts
-- `modify/src/config.ts.intent.md` — what changed for config.ts
-- `modify/src/routing.test.ts.intent.md` — what changed for routing tests
+If the apply reports merge conflicts, read the intent file:
+- `modify/src/channels/index.ts.intent.md` — what changed and invariants
 
 ### Validate code changes
 
@@ -89,11 +80,7 @@ SLACK_BOT_TOKEN=xoxb-your-bot-token
 SLACK_APP_TOKEN=xapp-your-app-token
 ```
 
-If they chose to replace WhatsApp:
-
-```bash
-SLACK_ONLY=true
-```
+Channels auto-enable when their credentials are present — no extra configuration needed.
 
 Sync to container environment:
 
@@ -215,7 +202,7 @@ The Slack channel supports:
 - **Public channels** — Bot must be added to the channel
 - **Private channels** — Bot must be invited to the channel
 - **Direct messages** — Users can DM the bot directly
-- **Multi-channel** — Can run alongside WhatsApp (default) or replace it (`SLACK_ONLY=true`)
+- **Multi-channel** — Can run alongside WhatsApp or other channels (auto-enabled by credentials)
 
 ## Known Limitations
 

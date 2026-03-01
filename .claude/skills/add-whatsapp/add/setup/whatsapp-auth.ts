@@ -1,6 +1,5 @@
 /**
- * Step: whatsapp-auth — Full WhatsApp auth flow with polling.
- * Replaces 04-auth-whatsapp.sh
+ * Step: whatsapp-auth — WhatsApp interactive auth (QR code / pairing code).
  */
 import { execSync, spawn } from 'child_process';
 import fs from 'fs';
@@ -125,6 +124,7 @@ function emitAuthStatus(
 
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
+
   const { method, phone } = parseArgs(args);
   const statusFile = path.join(projectRoot, 'store', 'auth-status.txt');
   const qrFile = path.join(projectRoot, 'store', 'qr-data.txt');
@@ -157,7 +157,7 @@ export async function run(args: string[]): Promise<void> {
   }
 
   // Clean stale state
-  logger.info({ method }, 'Starting WhatsApp auth');
+  logger.info({ method }, 'Starting channel authentication');
   try {
     fs.rmSync(path.join(projectRoot, 'store', 'auth'), {
       recursive: true,

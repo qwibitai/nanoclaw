@@ -1,8 +1,8 @@
 /**
  * Step: register — Write channel registration config, create group folders.
- * Replaces 06-register-channel.sh
  *
- * Fixes: SQL injection (parameterized queries), sed -i '' (uses fs directly).
+ * Accepts --channel to specify the messaging platform (whatsapp, telegram, slack, discord).
+ * Uses parameterized SQL queries to prevent injection.
  */
 import fs from 'fs';
 import path from 'path';
@@ -19,6 +19,7 @@ interface RegisterArgs {
   name: string;
   trigger: string;
   folder: string;
+  channel: string;
   requiresTrigger: boolean;
   assistantName: string;
 }
@@ -29,6 +30,7 @@ function parseArgs(args: string[]): RegisterArgs {
     name: '',
     trigger: '',
     folder: '',
+    channel: 'whatsapp', // backward-compat: pre-refactor installs omit --channel
     requiresTrigger: true,
     assistantName: 'Andy',
   };
@@ -46,6 +48,9 @@ function parseArgs(args: string[]): RegisterArgs {
         break;
       case '--folder':
         result.folder = args[++i] || '';
+        break;
+      case '--channel':
+        result.channel = (args[++i] || '').toLowerCase();
         break;
       case '--no-trigger-required':
         result.requiresTrigger = false;
@@ -83,8 +88,10 @@ export async function run(args: string[]): Promise<void> {
 
   logger.info(parsed, 'Registering channel');
 
-  // Ensure data directory exists
+  // Ensure data and store directories exist (store/ may not exist on
+  // fresh installs that skip WhatsApp auth, which normally creates it)
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
+  fs.mkdirSync(STORE_DIR, { recursive: true });
 
   // Write to SQLite using parameterized queries (no SQL injection)
   const dbPath = path.join(STORE_DIR, 'messages.db');
@@ -174,6 +181,7 @@ export async function run(args: string[]): Promise<void> {
     JID: parsed.jid,
     NAME: parsed.name,
     FOLDER: parsed.folder,
+    CHANNEL: parsed.channel,
     TRIGGER: parsed.trigger,
     REQUIRES_TRIGGER: parsed.requiresTrigger,
     ASSISTANT_NAME: parsed.assistantName,
