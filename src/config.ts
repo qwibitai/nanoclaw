@@ -11,6 +11,8 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
+  'WEBSOCKET_ENABLED',
+  'WEBSOCKET_PORT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -77,3 +79,10 @@ export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);
+
+export const WEBSOCKET_ENABLED =
+  (process.env.WEBSOCKET_ENABLED ?? envConfig.WEBSOCKET_ENABLED ?? 'true') !== 'false';
+export const WEBSOCKET_PORT = parseInt(
+  process.env.WEBSOCKET_PORT || envConfig.WEBSOCKET_PORT || '3001',
+  10,
+);
