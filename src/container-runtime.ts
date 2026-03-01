@@ -111,13 +111,14 @@ export function cleanupOrphans(): void {
     if (isLinux) {
       const output = execSync(
         `docker ps --filter name=nanoclaw- --format '{{.Names}}'`,
-        { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+        { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8', timeout: 5000 },
       );
       orphans = output.trim().split('\n').filter(Boolean);
     } else {
       const output = execSync('container ls --format json', {
         stdio: ['pipe', 'pipe', 'pipe'],
         encoding: 'utf-8',
+        timeout: 5000,
       });
       // Handle empty output and gracefully parse
       const containers = JSON.parse(output || '[]');
@@ -136,7 +137,7 @@ export function cleanupOrphans(): void {
       try {
         stopContainer(name);
       } catch {
-        /* already stopped */
+        /* already stopped or timed out */
       }
     }
     if (orphans.length > 0) {
