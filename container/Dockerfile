@@ -3,7 +3,7 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Firefox + X11
+# Install system dependencies for Firefox + X11 + Audio support
 RUN apt-get update && apt-get install -y \
     firefox-esr \
     fonts-liberation \
@@ -25,9 +25,20 @@ RUN apt-get update && apt-get install -y \
     libwayland-cursor0 \
     libwayland-egl1 \
     libxkbcommon0 \
+    pulseaudio \
     curl \
     git \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Pre-install Widevine CDM for Firefox DRM support (Netflix, etc.)
+RUN mkdir -p /opt/widevine && \
+    curl -L https://dl.google.com/widevine-cdm/4.10.2710.0-linux-x64.zip -o /tmp/widevine.zip && \
+    unzip /tmp/widevine.zip -d /opt/widevine && \
+    rm /tmp/widevine.zip && \
+    chmod -R 755 /opt/widevine
+
+ENV MOZ_GMP_PATH=/opt/widevine
 
 # Install @playwright/mcp (provides `playwright-mcp` binary) and claude-code globally
 RUN npm install -g @playwright/mcp @anthropic-ai/claude-code
