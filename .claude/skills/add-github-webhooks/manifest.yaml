@@ -1,0 +1,10 @@
+skill: add-github-webhooks
+version: 1.0.0
+description: "Receive GitHub webhook events (issues, PRs, push) as agent messages"
+core_version: 0.1.0
+adds: []
+modifies: []
+structured:
+  env_additions: []
+conflicts: []
+depends: []

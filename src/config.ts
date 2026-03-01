@@ -62,3 +62,5 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3333', 10);
