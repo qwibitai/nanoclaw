@@ -20,6 +20,7 @@ Single Node.js process that connects to Telegram, routes messages to Claude Agen
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `dashboard/` | Next.js web dashboard (separate app, port 3000) |
 
 ## Skills
 
@@ -40,6 +41,10 @@ Run commands directly—don't tell the user to run them.
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
+
+# Dashboard
+cd dashboard && npm run dev   # Dev server on :3000
+cd dashboard && npm run build # Production build
 ```
 
 Service management:

@@ -82,6 +82,16 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+
+    // Dashboard source — main group can edit the Next.js dashboard
+    const dashboardDir = path.join(projectRoot, 'dashboard');
+    if (fs.existsSync(dashboardDir)) {
+      mounts.push({
+        hostPath: dashboardDir,
+        containerPath: '/workspace/dashboard',
+        readonly: false,
+      });
+    }
   } else {
     // Other groups only get their own folder
     mounts.push({

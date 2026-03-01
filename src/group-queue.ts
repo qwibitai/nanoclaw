@@ -340,6 +340,26 @@ export class GroupQueue {
     }
   }
 
+  getStatus(): { activeCount: number; maxConcurrent: number; waitingCount: number; groups: Record<string, { active: boolean; idleWaiting: boolean; isTaskContainer: boolean; pendingMessages: boolean; pendingTaskCount: number; containerName: string | null }> } {
+    const groups: Record<string, { active: boolean; idleWaiting: boolean; isTaskContainer: boolean; pendingMessages: boolean; pendingTaskCount: number; containerName: string | null }> = {};
+    for (const [jid, state] of this.groups) {
+      groups[jid] = {
+        active: state.active,
+        idleWaiting: state.idleWaiting,
+        isTaskContainer: state.isTaskContainer,
+        pendingMessages: state.pendingMessages,
+        pendingTaskCount: state.pendingTasks.length,
+        containerName: state.containerName,
+      };
+    }
+    return {
+      activeCount: this.activeCount,
+      maxConcurrent: MAX_CONCURRENT_CONTAINERS,
+      waitingCount: this.waitingGroups.length,
+      groups,
+    };
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

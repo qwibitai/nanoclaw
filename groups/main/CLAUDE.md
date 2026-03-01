@@ -285,6 +285,53 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Web Dashboard
+
+A Next.js dashboard runs at `accipiter.local:3000` showing system status, messages, groups, and tasks.
+
+### Container Mount
+
+The dashboard source is mounted read-write at `/workspace/dashboard`. You can edit any file there to customize pages or add features.
+
+### Custom Pages
+
+You can create custom pages that appear at `/custom/{name}` by writing files to `/workspace/group/dashboard/`:
+
+**Markdown page** — just write a `.md` file:
+```bash
+echo '# Notes\nSome content here' > /workspace/group/dashboard/notes.md
+# Accessible at http://accipiter.local:3000/custom/notes
+```
+
+**JSON page with widgets** — supports markdown, SQL queries, and tables:
+```json
+// /workspace/group/dashboard/report.json
+{
+  "title": "Weekly Report",
+  "widgets": [
+    { "type": "markdown", "content": "# Summary\nKey findings..." },
+    { "type": "query", "sql": "SELECT count(*) as count FROM messages WHERE timestamp > ?", "params": ["2026-02-22"] },
+    { "type": "table", "columns": ["Name", "Value"], "data": [["Total", "42"]] }
+  ]
+}
+```
+
+SQL queries are **read-only** (`SELECT` only) against `store/messages.db`.
+
+### Dashboard Structure
+
+Key paths inside `/workspace/dashboard`:
+- `src/app/page.tsx` — Overview page
+- `src/app/groups/page.tsx` — Groups list
+- `src/app/messages/page.tsx` — Message search
+- `src/app/tasks/page.tsx` — Task management
+- `src/app/custom/[...slug]/page.tsx` — Custom page renderer
+- `src/lib/db.ts` — Database queries
+- `src/lib/status.ts` — Runtime status reader
+- `src/lib/ipc.ts` — IPC command writer
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:

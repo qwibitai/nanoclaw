@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -58,6 +59,39 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const startedAt = Date.now();
+
+const STATUS_INTERVAL = 10_000;
+
+function writeStatusFile(): void {
+  const statusPath = path.join(DATA_DIR, 'status.json');
+  const queueStatus = queue.getStatus();
+  const status = {
+    uptime: Date.now() - startedAt,
+    startedAt: new Date(startedAt).toISOString(),
+    timestamp: new Date().toISOString(),
+    channels: channels.map((ch) => ({
+      name: ch.name,
+      connected: ch.isConnected(),
+    })),
+    queue: queueStatus,
+    groups: Object.fromEntries(
+      Object.entries(registeredGroups).map(([jid, g]) => [
+        jid,
+        { name: g.name, folder: g.folder },
+      ]),
+    ),
+    lastTimestamp,
+  };
+  try {
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    const tmpPath = `${statusPath}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(status, null, 2));
+    fs.renameSync(tmpPath, statusPath);
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write status file');
+  }
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -568,6 +602,8 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+  writeStatusFile();
+  setInterval(writeStatusFile, STATUS_INTERVAL);
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
