@@ -22,6 +22,8 @@ const envConfig = readEnvFile([
   'ROUTER_ENABLED',
   'SEMANTIC_ROUTING_ENABLED',
   'DASHBOARD_ENABLED',
+  'DASHBOARD_PORT',
+  'DASHBOARD_AUTH_TOKEN',
   'DASHBOARD_ALLOW_UNAUTH',
   'AGENT_SWARM_ENABLED',
   'MEMORY_IMPROVER_ENABLED',
@@ -190,11 +192,11 @@ export const DASHBOARD_ALLOW_UNAUTH =
     envConfig.DASHBOARD_ALLOW_UNAUTH ??
     'false') === 'true';
 export const DASHBOARD_PORT = parseInt(
-  process.env.DASHBOARD_PORT || '3457',
+  process.env.DASHBOARD_PORT || envConfig.DASHBOARD_PORT || '3457',
   10,
 );
 export const DASHBOARD_AUTH_TOKEN =
-  process.env.DASHBOARD_AUTH_TOKEN || '';
+  process.env.DASHBOARD_AUTH_TOKEN || envConfig.DASHBOARD_AUTH_TOKEN || '';
 export const AGENT_SWARM_ENABLED =
   (process.env.AGENT_SWARM_ENABLED ??
     envConfig.AGENT_SWARM_ENABLED ??
