@@ -15,7 +15,7 @@
 
 **新功能：** 首个支持 [Agent Swarms（智能体集群）](https://code.claude.com/docs/en/agent-teams) 的 AI 助手。可轻松组建智能体团队，在您的聊天中高效协作。
 
-## 我为什么创建这个项目
+## 项目背景
 
 [OpenClaw](https://github.com/openclaw/openclaw) 是一个令人印象深刻的项目，愿景宏大。但我无法安心使用一个我不了解却能访问我个人隐私的软件。OpenClaw 有 52+ 个模块、8 个配置管理文件、45+ 个依赖项，以及为 15 个渠道提供商设计的抽象层。其安全性是应用级别的（通过白名单、配对码实现），而非操作系统级别的隔离。所有东西都在一个共享内存的 Node 进程中运行。
 
@@ -88,6 +88,16 @@ claude
 
 代码库足够小，Claude 可以安全地修改它。
 
+## 更新
+
+将最新的 NanoClaw 更改拉取到您的 fork 中：
+
+```bash
+claude
+```
+
+然后运行 `/update`。Claude Code 会抓取上游、预览更改、合并您的自定义内容、运行迁移并验证结果。
+
 ## 贡献
 
 **不要添加功能，而是添加技能。**
@@ -101,9 +111,7 @@ claude
 我们希望看到的技能：
 
 **通信渠道**
-- `/add-telegram` - 添加 Telegram 作为渠道。应提供选项让用户选择替换 WhatsApp 或作为额外渠道添加。也应能将其添加为控制渠道（可以触发动作）或仅作为被其他地方触发的动作所使用的渠道。
 - `/add-slack` - 添加 Slack
-- `/add-discord` - 添加 Discord
 
 **平台支持**
 - `/setup-windows` - 通过 WSL2 + Docker 支持 Windows
@@ -147,7 +155,7 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 macOS 上，您可以选择通过运行 `/convert-to-apple-container` 切换到 Apple Container，以获得更轻量级的原生运行时体验。
 
-**我可以在 Linux 上运行吗？**
+**可以在 Linux 上运行吗？**
 
 可以。Docker 是默认的容器运行时，在 macOS 和 Linux 上都可以使用。只需运行 `/setup`。
 
@@ -159,11 +167,11 @@ Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 
 
 我们不希望配置泛滥。每个用户都应该定制它，让代码完全符合他们的需求，而不是去配置一个通用的系统。如果您喜欢用配置文件，告诉 Claude 让它加上。
 
-**我该如何调试问题？**
+**有疑问如何调试？**
 
 问 Claude Code。"为什么计划任务没有运行？" "最近的日志里有什么？" "为什么这条消息没有得到回应？" 这就是 AI 原生的方法。
 
-**为什么我的安装不成功？**
+**为什么安装不成功？**
 
 我不知道。运行 `claude`，然后运行 `/debug`。如果 Claude 发现一个可能影响其他用户的问题，请开一个 PR 来修改 `SKILL.md` 安装文件。
 
