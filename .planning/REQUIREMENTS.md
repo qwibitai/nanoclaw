@@ -9,20 +9,20 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 ### Channel Core
 
-- [ ] **CHAN-01**: El canal WebSocket implementa la interfaz `Channel` definida en `src/types.ts`
-- [ ] **CHAN-02**: `connect()` levanta el servidor WebSocket en el puerto configurado (`WEBSOCKET_PORT`, default 3001)
-- [ ] **CHAN-03**: `ownsJid(jid)` retorna `true` para JIDs con prefijo `ws:`
-- [ ] **CHAN-04**: `isConnected()` retorna `true` cuando hay al menos un cliente WS conectado
-- [ ] **CHAN-05**: Si el cliente se desconecta y reconecta, el servidor sigue funcionando sin reiniciar NanoClaw
-- [ ] **CHAN-06**: `disconnect()` cierra el servidor WebSocket limpiamente
+- [x] **CHAN-01**: El canal WebSocket implementa la interfaz `Channel` definida en `src/types.ts`
+- [x] **CHAN-02**: `connect()` levanta el servidor WebSocket en el puerto configurado (`WEBSOCKET_PORT`, default 3001)
+- [x] **CHAN-03**: `ownsJid(jid)` retorna `true` para JIDs con prefijo `ws:`
+- [x] **CHAN-04**: `isConnected()` retorna `true` cuando hay al menos un cliente WS conectado
+- [x] **CHAN-05**: Si el cliente se desconecta y reconecta, el servidor sigue funcionando sin reiniciar NanoClaw
+- [x] **CHAN-06**: `disconnect()` cierra el servidor WebSocket limpiamente
 
 ### Message Protocol
 
-- [ ] **PROTO-01**: Mensajes entrantes `{type:"chat", content:string}` se convierten a `NewMessage` y se pasan a `opts.onMessage()`
-- [ ] **PROTO-02**: Mensajes entrantes `{type:"system", action:string, payload:object}` se convierten a `NewMessage` con content `[SYSTEM] action: payload_json` y se pasan a `opts.onMessage()`
-- [ ] **PROTO-03**: `sendMessage(jid, text)` envía `{type:"chat", content:text}` al cliente WS conectado
-- [ ] **PROTO-04**: `setTyping(jid, isTyping)` envía `{type:"system", event:"typing", payload:{isTyping}}` al cliente WS
-- [ ] **PROTO-05**: Mensajes enviados mientras no hay cliente conectado se almacenan en un buffer limitado y se entregan al reconectar
+- [x] **PROTO-01**: Mensajes entrantes `{type:"chat", content:string}` se convierten a `NewMessage` y se pasan a `opts.onMessage()`
+- [x] **PROTO-02**: Mensajes entrantes `{type:"system", action:string, payload:object}` se convierten a `NewMessage` con content `[SYSTEM] action: payload_json` y se pasan a `opts.onMessage()`
+- [x] **PROTO-03**: `sendMessage(jid, text)` envía `{type:"chat", content:text}` al cliente WS conectado
+- [x] **PROTO-04**: `setTyping(jid, isTyping)` envía `{type:"system", event:"typing", payload:{isTyping}}` al cliente WS
+- [x] **PROTO-05**: Mensajes enviados mientras no hay cliente conectado se almacenan en un buffer limitado y se entregan al reconectar
 
 ### Attachments
 
@@ -73,17 +73,17 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CHAN-01 | Phase 1 | Pending |
-| CHAN-02 | Phase 1 | Pending |
-| CHAN-03 | Phase 1 | Pending |
-| CHAN-04 | Phase 1 | Pending |
-| CHAN-05 | Phase 1 | Pending |
-| CHAN-06 | Phase 1 | Pending |
-| PROTO-01 | Phase 1 | Pending |
-| PROTO-02 | Phase 1 | Pending |
-| PROTO-03 | Phase 1 | Pending |
-| PROTO-04 | Phase 1 | Pending |
-| PROTO-05 | Phase 1 | Pending |
+| CHAN-01 | Phase 1 | Complete |
+| CHAN-02 | Phase 1 | Complete |
+| CHAN-03 | Phase 1 | Complete |
+| CHAN-04 | Phase 1 | Complete |
+| CHAN-05 | Phase 1 | Complete |
+| CHAN-06 | Phase 1 | Complete |
+| PROTO-01 | Phase 1 | Complete |
+| PROTO-02 | Phase 1 | Complete |
+| PROTO-03 | Phase 1 | Complete |
+| PROTO-04 | Phase 1 | Complete |
+| PROTO-05 | Phase 1 | Complete |
 | ATT-01 | Phase 2 | Pending |
 | ATT-02 | Phase 2 | Pending |
 | ATT-03 | Phase 2 | Pending |
