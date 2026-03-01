@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import makeWASocket, {
@@ -26,6 +27,16 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+// Select appropriate browser based on platform
+function getBrowser() {
+  const platform = os.platform();
+  if (platform === 'darwin') {
+    return Browsers.macOS('Chrome');
+  }
+  // Linux (including WSL2) and other Unix-like systems
+  return Browsers.unix('Chrome');
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -76,7 +87,7 @@ export class WhatsAppChannel implements Channel {
       },
       printQRInTerminal: false,
       logger,
-      browser: Browsers.macOS('Chrome'),
+      browser: getBrowser(),
     });
 
     this.sock.ev.on('connection.update', (update) => {

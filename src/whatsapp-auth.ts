@@ -19,10 +19,21 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
+import os from 'os';
 
 const AUTH_DIR = './store/auth';
 const QR_FILE = './store/qr-data.txt';
 const STATUS_FILE = './store/auth-status.txt';
+
+// Select appropriate browser based on platform
+const getBrowser = () => {
+  const platform = os.platform();
+  if (platform === 'darwin') {
+    return Browsers.macOS('Chrome');
+  }
+  // Linux (including WSL2) and other Unix-like systems
+  return Browsers.unix('Chrome');
+};
 
 const logger = pino({
   level: 'warn', // Quiet logging - only show errors
@@ -75,7 +86,7 @@ async function connectSocket(
     },
     printQRInTerminal: false,
     logger,
-    browser: Browsers.macOS('Chrome'),
+    browser: getBrowser(),
   });
 
   if (usePairingCode && phoneNumber && !state.creds.me) {
