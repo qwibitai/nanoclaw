@@ -629,7 +629,10 @@ async function main(): Promise<void> {
       });
     }
   } catch (err) {
-    logger.warn({ err }, 'Google Chat channel failed to connect, continuing without it');
+    logger.warn(
+      { err },
+      'Google Chat channel failed to connect, continuing without it',
+    );
   }
 
   // Start subsystems (independently of connection handler)

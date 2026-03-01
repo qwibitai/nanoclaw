@@ -36,7 +36,8 @@ export class GoogleChatChannel implements Channel {
     this.opts = opts;
     this.pollIntervalMs = pollIntervalMs;
     const envConfig = readEnvFile(['GOOGLE_CHAT_SPACE_ID']);
-    this.spaceId = process.env.GOOGLE_CHAT_SPACE_ID || envConfig.GOOGLE_CHAT_SPACE_ID || '';
+    this.spaceId =
+      process.env.GOOGLE_CHAT_SPACE_ID || envConfig.GOOGLE_CHAT_SPACE_ID || '';
   }
 
   async connect(): Promise<void> {
@@ -88,9 +89,13 @@ export class GoogleChatChannel implements Channel {
 
     // Start polling with error backoff
     const schedulePoll = () => {
-      const backoffMs = this.consecutiveErrors > 0
-        ? Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000)
-        : this.pollIntervalMs;
+      const backoffMs =
+        this.consecutiveErrors > 0
+          ? Math.min(
+              this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+              30 * 60 * 1000,
+            )
+          : this.pollIntervalMs;
       this.pollTimer = setTimeout(() => {
         this.pollForMessages()
           .catch((err) => logger.error({ err }, 'Google Chat poll error'))
@@ -157,7 +162,8 @@ export class GoogleChatChannel implements Channel {
       if (this.lastPollTime) {
         filterParts.push(`createTime > "${this.lastPollTime}"`);
       }
-      const filter = filterParts.length > 0 ? filterParts.join(' AND ') : undefined;
+      const filter =
+        filterParts.length > 0 ? filterParts.join(' AND ') : undefined;
 
       const res = await this.chat.spaces.messages.list({
         parent: `spaces/${this.spaceId}`,
@@ -181,8 +187,18 @@ export class GoogleChatChannel implements Channel {
       this.consecutiveErrors = 0;
     } catch (err) {
       this.consecutiveErrors++;
-      const backoffMs = Math.min(this.pollIntervalMs * Math.pow(2, this.consecutiveErrors), 30 * 60 * 1000);
-      logger.error({ err, consecutiveErrors: this.consecutiveErrors, nextPollMs: backoffMs }, 'Google Chat poll failed');
+      const backoffMs = Math.min(
+        this.pollIntervalMs * Math.pow(2, this.consecutiveErrors),
+        30 * 60 * 1000,
+      );
+      logger.error(
+        {
+          err,
+          consecutiveErrors: this.consecutiveErrors,
+          nextPollMs: backoffMs,
+        },
+        'Google Chat poll failed',
+      );
     }
   }
 
@@ -198,7 +214,13 @@ export class GoogleChatChannel implements Channel {
     const chatJid = `gchat:${this.spaceId}`;
 
     // Store chat metadata
-    this.opts.onChatMetadata(chatJid, createTime, `Google Chat DM`, 'googlechat', false);
+    this.opts.onChatMetadata(
+      chatJid,
+      createTime,
+      `Google Chat DM`,
+      'googlechat',
+      false,
+    );
 
     // Deliver under the gchat: JID so replies route back through Google Chat.
     // The gchat: JID must be registered (pointing to the main folder) for
@@ -213,9 +235,6 @@ export class GoogleChatChannel implements Channel {
       is_from_me: false,
     });
 
-    logger.info(
-      { chatJid, from: senderName },
-      'Google Chat message delivered',
-    );
+    logger.info({ chatJid, from: senderName }, 'Google Chat message delivered');
   }
 }

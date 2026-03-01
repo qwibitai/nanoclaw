@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { GoogleChatChannel, GoogleChatChannelOpts } from './googlechat.js';
 
-function makeOpts(overrides?: Partial<GoogleChatChannelOpts>): GoogleChatChannelOpts {
+function makeOpts(
+  overrides?: Partial<GoogleChatChannelOpts>,
+): GoogleChatChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
