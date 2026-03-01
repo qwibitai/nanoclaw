@@ -3,6 +3,9 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { execSync } from 'child_process';
+import os from 'os';
+
 import {
   DATA_DIR,
   GROUPS_DIR,
@@ -226,6 +229,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For rebuild_dashboard
+    requestId?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -443,6 +448,88 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'rebuild_dashboard':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized rebuild_dashboard attempt blocked',
+        );
+        break;
+      }
+      if (!data.requestId) {
+        logger.warn('rebuild_dashboard missing requestId');
+        break;
+      }
+      {
+        const dashboardDir = path.join(process.cwd(), 'dashboard');
+        const responsesDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'responses',
+        );
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(
+          responsesDir,
+          `${data.requestId}.json`,
+        );
+
+        let buildOutput = '';
+        let buildSuccess = false;
+
+        // launchd PATH may not include the node/npm directory.
+        // Derive it from the running node binary so execSync can find npm.
+        const nodeBinDir = path.dirname(process.execPath);
+        const execEnv = {
+          ...process.env,
+          PATH: `${nodeBinDir}:${process.env.PATH || ''}`,
+        };
+
+        try {
+          buildOutput = execSync('npm run build', {
+            cwd: dashboardDir,
+            stdio: 'pipe',
+            timeout: 120_000,
+            env: execEnv,
+          }).toString();
+          buildSuccess = true;
+        } catch (err: unknown) {
+          const execErr = err as { stdout?: Buffer; stderr?: Buffer };
+          buildOutput = [
+            execErr.stdout?.toString() || '',
+            execErr.stderr?.toString() || '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+        }
+
+        if (buildSuccess) {
+          try {
+            const uid = os.userInfo().uid;
+            execSync(
+              `launchctl kickstart -k gui/${uid}/com.nanoclaw-dashboard`,
+              { stdio: 'pipe', timeout: 10_000 },
+            );
+          } catch (restartErr) {
+            logger.warn(
+              { err: restartErr },
+              'Dashboard launchctl restart failed (build succeeded)',
+            );
+            buildOutput += '\n[Warning: launchctl restart failed]';
+          }
+        }
+
+        fs.writeFileSync(
+          responseFile,
+          JSON.stringify({ success: buildSuccess, output: buildOutput }),
+        );
+        logger.info(
+          { requestId: data.requestId, success: buildSuccess },
+          'Dashboard rebuild completed',
         );
       }
       break;
