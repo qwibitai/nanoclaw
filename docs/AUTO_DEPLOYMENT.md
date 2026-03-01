@@ -26,8 +26,8 @@ Auto-deployment is **enabled by default**. Configure it via environment variable
 # Disable auto-deployment
 AUTO_DEPLOY_ENABLED=false
 
-# Change polling interval (default: 60000ms = 1 minute)
-AUTO_DEPLOY_POLL_INTERVAL=120000  # Check every 2 minutes
+# Change polling interval (default: 60 seconds = 1 minute)
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=120  # Check every 2 minutes
 ```
 
 Add these to your `.env` file or set them as environment variables.
@@ -325,10 +325,10 @@ try {
 
 ```bash
 # Production: check every 5 minutes
-AUTO_DEPLOY_POLL_INTERVAL=300000
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=300
 
 # Development: check every 30 seconds
-AUTO_DEPLOY_POLL_INTERVAL=30000
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=30
 ```
 
 ### Send notifications to multiple chats

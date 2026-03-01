@@ -4,7 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   AUTO_DEPLOY_ENABLED,
-  AUTO_DEPLOY_POLL_INTERVAL,
+  AUTO_DEPLOY_POLL_INTERVAL_SECONDS,
   DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -542,7 +542,7 @@ async function main(): Promise<void> {
   if (AUTO_DEPLOY_ENABLED) {
     startAutoDeployLoop(
       PROJECT_ROOT,
-      AUTO_DEPLOY_POLL_INTERVAL,
+      AUTO_DEPLOY_POLL_INTERVAL_SECONDS * 1000, // Convert seconds to milliseconds
       async (message) => {
         // Send deployment notifications to main group
         const mainJid = Object.keys(registeredGroups).find(

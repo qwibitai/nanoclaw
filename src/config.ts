@@ -75,7 +75,7 @@ export const SLACK_ONLY =
 
 // Auto-deployment configuration
 export const AUTO_DEPLOY_ENABLED = process.env.AUTO_DEPLOY_ENABLED !== 'false'; // Enabled by default
-export const AUTO_DEPLOY_POLL_INTERVAL = parseInt(
-  process.env.AUTO_DEPLOY_POLL_INTERVAL || '60000',
+export const AUTO_DEPLOY_POLL_INTERVAL_SECONDS = parseInt(
+  process.env.AUTO_DEPLOY_POLL_INTERVAL_SECONDS || '60',
   10,
-); // 1 minute default
+); // 60 seconds (1 minute) default
