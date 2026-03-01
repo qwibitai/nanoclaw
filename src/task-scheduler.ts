@@ -26,6 +26,30 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
+/**
+ * Compute the next run time for a scheduled task.
+ * For cron: next wall-clock occurrence from now (timezone-aware; fromTime ignored).
+ * For interval: fromTime + interval milliseconds.
+ * For once: null (no further runs).
+ */
+export function computeNextRun(
+  task: Pick<ScheduledTask, 'schedule_type' | 'schedule_value'>,
+  fromTime: number = Date.now(),
+): string | null {
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    return interval.next().toISOString();
+  }
+  if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    return new Date(fromTime + ms).toISOString();
+  }
+  // 'once' tasks have no next run
+  return null;
+}
+
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
@@ -192,23 +216,14 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
-
   const resultSummary = error
     ? `Error: ${error}`
     : result
       ? result.slice(0, 200)
       : 'Completed';
+
+  // Re-derive next_run from completion time (prevents interval drift).
+  const nextRun = computeNextRun(task, Date.now());
   updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
@@ -235,6 +250,10 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         if (!currentTask || currentTask.status !== 'active') {
           continue;
         }
+
+        // Advance next_run before enqueuing to prevent duplicate pickup.
+        const advancedNextRun = computeNextRun(currentTask);
+        updateTask(currentTask.id, { next_run: advancedNextRun });
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),
