@@ -54,10 +54,10 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-function buildVolumeMounts(
+async function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
-): VolumeMount[] {
+): Promise<VolumeMount[]> {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
@@ -91,12 +91,15 @@ function buildVolumeMounts(
     // Global memory directory (read-only for non-main)
     // Only directory mounts are supported, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
+    try {
+      await fs.promises.stat(globalDir);
       mounts.push({
         hostPath: globalDir,
         containerPath: '/workspace/global',
         readonly: true,
       });
+    } catch {
+      // globalDir does not exist, skip
     }
   }
 
@@ -108,10 +111,15 @@ function buildVolumeMounts(
     group.folder,
     '.claude',
   );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
+  await fs.promises.mkdir(groupSessionsDir, { recursive: true });
+  // When running as root, the container's node user (uid 1000) needs write access
+  // to create subdirectories like .claude/debug/ and .claude/projects/
+  await fs.promises.chmod(groupSessionsDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
+  try {
+    await fs.promises.stat(settingsFile);
+  } catch {
+    await fs.promises.writeFile(
       settingsFile,
       JSON.stringify(
         {
@@ -136,13 +144,17 @@ function buildVolumeMounts(
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
+  try {
+    const skillDirs = await fs.promises.readdir(skillsSrc);
+    for (const skillDir of skillDirs) {
       const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const stat = await fs.promises.stat(srcDir);
+      if (!stat.isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      await fs.promises.cp(srcDir, dstDir, { recursive: true });
     }
+  } catch {
+    // skillsSrc does not exist, skip
   }
   mounts.push({
     hostPath: groupSessionsDir,
@@ -153,9 +165,11 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  await fs.promises.mkdir(path.join(groupIpcDir, 'messages'), {
+    recursive: true,
+  });
+  await fs.promises.mkdir(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  await fs.promises.mkdir(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -177,8 +191,18 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  try {
+    await fs.promises.stat(groupAgentRunnerDir);
+    // already exists, skip copy
+  } catch {
+    try {
+      await fs.promises.stat(agentRunnerSrc);
+      await fs.promises.cp(agentRunnerSrc, groupAgentRunnerDir, {
+        recursive: true,
+      });
+    } catch {
+      // agentRunnerSrc does not exist, skip
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -255,7 +279,7 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = await buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
