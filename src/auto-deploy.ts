@@ -411,8 +411,107 @@ export async function executeDeploy(
       `❌ *Deployment failed!*\n` +
         `• Error: ${error}\n` +
         `• Duration: ${(totalDuration / 1000).toFixed(1)}s\n` +
-        `• Manual intervention may be required`,
+        `• Attempting automatic rollback...`,
     );
+
+    // Attempt automatic rollback if we have a previous commit
+    if (previousCommit) {
+      const rollbackStart = Date.now();
+      try {
+        await notify('🔄 Rolling back to previous commit...');
+
+        // Reset to previous commit
+        await execCommand(
+          `git reset --hard ${previousCommit}`,
+          projectRoot,
+          30000,
+        );
+        steps.push({
+          name: 'Rollback: Reset to previous commit',
+          success: true,
+          output: `Reset to ${previousCommit.slice(0, 7)}`,
+          duration: Date.now() - rollbackStart,
+        });
+
+        // Reinstall dependencies
+        const reinstallStart = Date.now();
+        await notify('📦 Reinstalling dependencies...');
+        await execCommand('npm install', projectRoot, 120000);
+        steps.push({
+          name: 'Rollback: Reinstall dependencies',
+          success: true,
+          duration: Date.now() - reinstallStart,
+        });
+
+        // Rebuild TypeScript
+        const rebuildStart = Date.now();
+        await notify('🔨 Rebuilding TypeScript...');
+        await execCommand('npm run build', projectRoot, 120000);
+        steps.push({
+          name: 'Rollback: Rebuild TypeScript',
+          success: true,
+          duration: Date.now() - rebuildStart,
+        });
+
+        // Restart service
+        const restartStart = Date.now();
+        await notify('🔄 Restarting service...');
+        await execCommand(
+          'systemctl --user restart nanoclaw',
+          projectRoot,
+          120000,
+        );
+        steps.push({
+          name: 'Rollback: Restart service',
+          success: true,
+          duration: Date.now() - restartStart,
+        });
+
+        // Verify service
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        const verifyStart = Date.now();
+        const verifyResult = await execCommand(
+          'systemctl --user is-active nanoclaw',
+          projectRoot,
+          10000,
+        );
+        const isActive = verifyResult.stdout === 'active';
+        steps.push({
+          name: 'Rollback: Verify service',
+          success: isActive,
+          output: verifyResult.stdout,
+          duration: Date.now() - verifyStart,
+        });
+
+        if (isActive) {
+          await notify(
+            `✅ *Rollback successful!*\n` +
+              `• Restored to: ${previousCommit.slice(0, 7)}\n` +
+              `• Service is running\n` +
+              `• Original error: ${error}`,
+          );
+        } else {
+          throw new Error('Service not active after rollback');
+        }
+      } catch (rollbackErr) {
+        const rollbackError =
+          rollbackErr instanceof Error
+            ? rollbackErr.message
+            : String(rollbackErr);
+        await notify(
+          `❌ *Rollback failed!*\n` +
+            `• Rollback error: ${rollbackError}\n` +
+            `• Original error: ${error}\n` +
+            `• Manual intervention required`,
+        );
+        steps.push({
+          name: 'Rollback failed',
+          success: false,
+          error: rollbackError,
+          duration: Date.now() - rollbackStart,
+        });
+      }
+    }
 
     return {
       success: false,

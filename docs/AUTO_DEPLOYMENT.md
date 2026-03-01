@@ -125,25 +125,28 @@ For auto-deployment to work, your host system needs:
 
 ### Safety Features
 
-1. **Read-only git operations**: Only `git fetch` and `git pull` are used
+1. **Read-only git operations**: Only `git fetch` and `git pull` are used (except during rollback)
 2. **Stashing, not discarding**: Local changes (including untracked files) are stashed, not deleted
-3. **Rollback information**: Previous commit hash is recorded before deployment
-4. **Service verification**: Checks that service is running after restart
+3. **Automatic rollback**: If deployment fails, automatically reverts to previous commit and rebuilds
+4. **Service verification**: Checks that service is running after restart (and after rollback)
 5. **Error notifications**: You're immediately notified of any failures
 
 ### What Could Go Wrong?
 
 **Scenario: Broken code gets merged to main**
 - Auto-deployment will pull and deploy it
-- If the build fails, you'll be notified
-- Service restart might fail, leaving the old version running
-- **Solution**: Revert the bad commit on GitHub, auto-deployment will pull the fix
+- If the build fails, automatic rollback triggers
+- System reverts to previous commit, reinstalls deps, rebuilds, and restarts
+- You're notified whether rollback succeeded or failed
+- **No manual intervention required** (unless rollback also fails)
 
 **Scenario: Service fails to start after deployment**
-- You'll receive a notification
 - Service verification will fail
-- Old version may still be running (if restart failed)
-- **Solution**: Check logs with `journalctl --user -u nanoclaw -n 50`
+- Automatic rollback triggers immediately
+- System reverts to previous known-working commit
+- Service is restarted from the rollback state
+- You're notified of the rollback result
+- **No manual intervention required** (unless rollback also fails)
 
 **Scenario: Untracked files conflict with incoming changes**
 - Files committed in the container but untracked on host
@@ -158,9 +161,42 @@ For auto-deployment to work, your host system needs:
 - You'll be notified
 - **Solution**: Manually resolve conflicts or reset to origin/main
 
+## Automatic Rollback
+
+If deployment fails at any critical step (dependency installation, TypeScript build, container rebuild, service restart, or service verification), the system automatically:
+
+1. Resets to the previous commit with `git reset --hard`
+2. Reinstalls dependencies from package.json
+3. Rebuilds TypeScript
+4. Restarts the service
+5. Verifies the service is active
+
+You'll receive notifications during the rollback process:
+```
+❌ Deployment failed!
+• Error: Failed to build: npm run build exited with code 1
+• Duration: 25.3s
+• Attempting automatic rollback...
+
+🔄 Rolling back to previous commit...
+
+📦 Reinstalling dependencies...
+
+🔨 Rebuilding TypeScript...
+
+🔄 Restarting service...
+
+✅ Rollback successful!
+• Restored to: a1b2c3d
+• Service is running
+• Original error: Failed to build: npm run build exited with code 1
+```
+
+If automatic rollback fails, you'll be notified and need to intervene manually.
+
 ## Manual Rollback
 
-If auto-deployment causes issues, you can manually roll back:
+If automatic rollback fails or you need to roll back manually for other reasons:
 
 ```bash
 cd ~/nanoclaw
@@ -359,9 +395,9 @@ startAutoDeployLoop(
 
 Planned improvements for auto-deployment:
 
-- [ ] Container rebuild detection (when Dockerfile changes)
-- [ ] Automatic rollback on service failure
-- [ ] Health check after deployment
+- [x] Container rebuild detection (when Dockerfile changes) ✅
+- [x] Automatic rollback on service failure ✅
+- [ ] Health check after deployment (beyond basic service status)
 - [ ] Deployment approval flow (manual confirmation before deploying)
 - [ ] Webhook support (instead of polling)
 - [ ] Deploy on git tags only (e.g., `v1.0.0`)
