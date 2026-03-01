@@ -1,11 +1,13 @@
 ---
 name: add-telegram
-description: Add Telegram as a channel. Can replace WhatsApp entirely or run alongside it. Also configurable as a control-only channel (triggers actions) or passive channel (receives notifications only).
+description: Add Telegram as a channel with Topics/Forum thread support. Can replace WhatsApp entirely or run alongside it. Also configurable as a control-only channel (triggers actions) or passive channel (receives notifications only).
 ---
 
 # Add Telegram Channel
 
 This skill adds Telegram support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+
+**Includes support for Telegram Topics (forum threads)** — each topic can be registered as its own isolated group with independent memory and context.
 
 ## Phase 1: Pre-flight
 
@@ -46,7 +48,11 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
 ```
 
 This deterministically:
-- Adds `src/channels/telegram.ts` (TelegramChannel class implementing Channel interface)
+- Adds `src/channels/telegram.ts` (TelegramChannel class with Topics support)
+  - Topic-aware JID format: `tg:chatid:topicid`
+  - `/chatid` command reports topic ID when used inside a thread
+  - Inbound and outbound messages routed to/from correct thread
+  - Topic registration is opt-in
 - Adds `src/channels/telegram.test.ts` (46 unit tests)
 - Three-way merges Telegram support into `src/index.ts` (multi-channel support, findChannel routing)
 - Three-way merges Telegram config into `src/config.ts` (TELEGRAM_BOT_TOKEN, TELEGRAM_ONLY exports)
@@ -135,36 +141,97 @@ Tell the user:
 > 1. Open your bot in Telegram (search for its username)
 > 2. Send `/chatid` — it will reply with the chat ID
 > 3. For groups: add the bot to the group first, then send `/chatid` in the group
+> 4. **For topics**: Go to the specific topic thread and send `/chatid` there
 
-Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234567890`).
+Wait for the user to provide the chat ID.
+
+**Chat ID formats:**
+- Regular chat: `tg:123456789` or `tg:-1001234567890`
+- Topic thread: `tg:-1001234567890:20` (includes topic ID after the second colon)
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+Registration is done via IPC — write a JSON task file and the host process picks it up immediately (no restart needed). Then create the group folder.
 
-For a main chat (responds to all messages, uses the `main` folder):
+**Main chat** (responds to all messages, no trigger needed):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-});
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>",
+  "name": "<chat-name>",
+  "folder": "main",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/main
 ```
 
-For additional chats (trigger-only):
+**Additional chat** (trigger-only):
 
-```typescript
-registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "<folder-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>",
+  "name": "<chat-name>",
+  "folder": "<folder-name>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": true
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<folder-name>
 ```
+
+**Topic thread** — each topic gets its own agent with independent memory and context:
+
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>:<topic-id>",
+  "name": "<topic-name>",
+  "folder": "<topic-folder>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<topic-folder>
+```
+
+**Topic with a project directory mounted:**
+
+```bash
+echo '{
+  "type": "register_group",
+  "jid": "tg:<chat-id>:<topic-id>",
+  "name": "<topic-name>",
+  "folder": "<topic-folder>",
+  "trigger": "@ASSISTANT_NAME",
+  "requiresTrigger": false,
+  "containerConfig": {
+    "additionalMounts": [
+      {
+        "hostPath": "~/projects/your-project",
+        "containerPath": "your-project",
+        "readonly": false
+      }
+    ]
+  }
+}' > /workspace/ipc/tasks/register_$(date +%s).json
+
+mkdir -p /workspace/project/groups/<topic-folder>
+```
+
+> **Note on mounts:** The host path must already be in `~/.config/nanoclaw/mount-allowlist.json` on the host machine. This file lives outside the project root and must be edited manually — it cannot be modified from within a container. Ask the user to add the path before registering.
+
+**Topic registration behavior:**
+
+When a message arrives in a topic:
+1. Check topic-specific registration (`tg:chatid:topicid`) → if registered, deliver to that agent
+2. Check base chat registration (`tg:chatid`) → if registered, skip (prevents duplicate processing)
+3. Neither registered → ignore message
+
+Topics are opt-in: a registered base chat will not automatically process its topic messages.
 
 ## Phase 5: Verify
 
@@ -175,6 +242,7 @@ Tell the user:
 > Send a message to your registered Telegram chat:
 > - For main chat: Any message works
 > - For non-main: `@Andy hello` or @mention the bot
+> - For topics: Send a message in the registered topic thread
 >
 > The bot should respond within a few seconds.
 
@@ -199,6 +267,12 @@ Check:
 Group Privacy is enabled (default). Fix:
 1. `@BotFather` > `/mybots` > select bot > **Bot Settings** > **Group Privacy** > **Turn off**
 2. Remove and re-add the bot to the group (required for the change to take effect)
+
+### Topic messages not being processed
+
+1. Verify the topic is registered with the full JID (`tg:chatid:topicid`)
+2. Ensure the base chat (`tg:chatid`) is NOT also registered
+3. Check logs for: `Topic message in registered chat - topic not separately registered`
 
 ### Getting chat ID
 

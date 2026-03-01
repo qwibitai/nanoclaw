@@ -33,14 +33,19 @@ export class TelegramChannel implements Channel {
     // Command to get chat ID (useful for registration)
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
+      const threadId = (ctx.message as any)?.message_thread_id;
       const chatType = ctx.chat.type;
+      const baseChatJid = `tg:${chatId}`;
+      const fullChatJid = threadId ? `${baseChatJid}:${threadId}` : baseChatJid;
       const chatName =
         chatType === 'private'
           ? ctx.from?.first_name || 'Private'
           : (ctx.chat as any).title || 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+        threadId
+          ? `Chat ID: \`${fullChatJid}\`\nTopic ID: ${threadId}\nName: ${chatName}\nType: ${chatType}`
+          : `Chat ID: \`${fullChatJid}\`\nName: ${chatName}\nType: ${chatType}`,
         { parse_mode: 'Markdown' },
       );
     });
@@ -54,7 +59,10 @@ export class TelegramChannel implements Channel {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
 
-      const chatJid = `tg:${ctx.chat.id}`;
+      // Support Telegram topics/threads via message_thread_id
+      const threadId = ctx.message.message_thread_id;
+      const baseChatJid = `tg:${ctx.chat.id}`;
+      const chatJid = threadId ? `${baseChatJid}:${threadId}` : baseChatJid;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
@@ -95,8 +103,21 @@ export class TelegramChannel implements Channel {
       const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
       this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
 
-      // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
+      // Check for registered group - try topic-specific first, then fall back to base chat
+      let group = this.opts.registeredGroups()[chatJid];
+      if (!group && threadId) {
+        // If topic-specific group not found, check if base chat is registered
+        group = this.opts.registeredGroups()[baseChatJid];
+        // If base chat is registered, do NOT process topic messages separately
+        // unless the topic itself is registered. This allows topics to be opt-in.
+        if (group) {
+          logger.debug(
+            { chatJid, baseChatJid, threadId },
+            'Topic message in registered chat - topic not separately registered',
+          );
+          return;
+        }
+      }
       if (!group) {
         logger.debug(
           { chatJid, chatName },
@@ -124,7 +145,10 @@ export class TelegramChannel implements Channel {
 
     // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = (ctx: any, placeholder: string) => {
-      const chatJid = `tg:${ctx.chat.id}`;
+      const threadId = ctx.message.message_thread_id;
+      const baseChatJid = `tg:${ctx.chat.id}`;
+      const chatJid = threadId ? `${baseChatJid}:${threadId}` : baseChatJid;
+
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
 
@@ -196,17 +220,25 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      // Extract topic ID from JID if present (format: tg:chatid:topicid)
+      const parts = jid.replace(/^tg:/, '').split(':');
+      const numericId = parts[0];
+      const threadId = parts.length > 1 ? parseInt(parts[1], 10) : undefined;
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await this.bot.api.sendMessage(numericId, text, {
+          message_thread_id: threadId,
+        });
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
             numericId,
             text.slice(i, i + MAX_LENGTH),
+            {
+              message_thread_id: threadId,
+            },
           );
         }
       }
