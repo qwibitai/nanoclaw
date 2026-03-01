@@ -12,6 +12,8 @@ const nav = [
   { href: '/groups', label: 'Groups' },
   { href: '/messages', label: 'Messages' },
   { href: '/tasks', label: 'Tasks' },
+  { href: '/books', label: 'Books' },
+  { href: '/memories', label: 'Memories' },
 ];
 
 export default function RootLayout({
