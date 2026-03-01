@@ -1,0 +1,12 @@
+skill: use-local-whisper
+version: 1.0.0
+description: "Switch voice transcription from OpenAI Whisper API to local whisper.cpp"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/transcription.ts
+structured: {}
+conflicts: []
+depends:
+  - voice-transcription
+test: "npx vitest run src/channels/whatsapp.test.ts"
