@@ -5,9 +5,10 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsx scripts/apply-skills.ts && tsc && tsx scripts/clean-skills.ts --force",
+    "build:quick": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "dev": "tsx scripts/apply-skills.ts && tsx watch src/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -16,7 +17,10 @@
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "apply-skills": "tsx scripts/apply-skills.ts",
+    "clean-skills": "tsx scripts/clean-skills.ts",
+    "package-skill": "tsx scripts/package-skill.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

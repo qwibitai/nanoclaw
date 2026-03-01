@@ -11,6 +11,7 @@ export interface SkillManifest {
     docker_compose_services?: Record<string, unknown>;
   };
   file_ops?: FileOperation[];
+  modify_base?: Record<string, string>;
   conflicts: string[];
   depends: string[];
   test?: string;
@@ -18,6 +19,7 @@ export interface SkillManifest {
   license?: string;
   min_skills_system_version?: string;
   tested_with?: string[];
+  incompatible_with?: string[];
   post_apply?: string[];
 }
 
