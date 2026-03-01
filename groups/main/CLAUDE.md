@@ -60,6 +60,10 @@ When you receive an email notification (messages starting with `[Email from ...`
 
 You have Gmail tools available — use them only when explicitly asked or approved by Mike.
 
+## Google Chat
+
+Google Chat is a full bidirectional channel. Messages from Google Chat appear directly in your conversation (no `[Google Chat from ...]` prefix). Your replies are automatically sent back to Google Chat — you don't need to do anything special. Just respond normally.
+
 ## Message Formatting
 
 Format messages based on the channel. Check the group folder name prefix:

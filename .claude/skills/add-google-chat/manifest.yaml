@@ -1,0 +1,16 @@
+skill: google-chat
+version: 1.0.0
+description: "Google Chat channel via Google Chat API"
+core_version: 0.1.0
+adds:
+  - src/channels/googlechat.ts
+  - src/channels/googlechat.test.ts
+modifies:
+  - src/index.ts
+  - src/container-runner.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies: {}
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/googlechat.test.ts"
