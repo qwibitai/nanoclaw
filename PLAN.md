@@ -6,7 +6,7 @@
 - [x] PLAN — 6 phases spec'd, pre-mortem done, seam analysis done
 - [x] DESTROY — skipped (folded into PLAN pre-mortem per medium build)
 - [x] APPROVE — user approved 2026-03-01
-- [ ] IMPLEMENT — Wave 1 done (Ph1+Ph4), Wave 2 next (Ph2+Ph5), Wave 3 (Ph3+Ph6)
+- [ ] IMPLEMENT — Wave 1 done (Ph1+Ph4), Wave 2 done (Ph2+Ph5), Wave 3 next (Ph3+Ph6)
 - [ ] REVIEW — diff-anchored code review
 - [ ] CLEAN — lint, dead code, formatting
 - [ ] PROVE — evidence manifest, ship gate
