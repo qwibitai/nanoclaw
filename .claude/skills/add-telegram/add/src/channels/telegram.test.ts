@@ -8,6 +8,11 @@ vi.mock('../config.js', () => ({
   TRIGGER_PATTERN: /^@Andy\b/i,
 }));
 
+// Pass-through: conversion logic is the library's responsibility, not ours
+vi.mock('telegramify-markdown', () => ({
+  default: (text: string) => text,
+}));
+
 // Mock logger
 vi.mock('../logger.js', () => ({
   logger: {
@@ -704,6 +709,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '100200300',
         'Hello',
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -717,6 +723,7 @@ describe('TelegramChannel', () => {
       expect(currentBot().api.sendMessage).toHaveBeenCalledWith(
         '-1001234567890',
         'Group message',
+        { parse_mode: 'MarkdownV2' },
       );
     });
 
@@ -733,11 +740,13 @@ describe('TelegramChannel', () => {
         1,
         '100200300',
         'x'.repeat(4096),
+        { parse_mode: 'MarkdownV2' },
       );
       expect(currentBot().api.sendMessage).toHaveBeenNthCalledWith(
         2,
         '100200300',
         'x'.repeat(904),
+        { parse_mode: 'MarkdownV2' },
       );
     });
 

@@ -12,6 +12,7 @@ modifies:
 structured:
   npm_dependencies:
     grammy: "^1.39.3"
+    telegramify-markdown: "^1.3.2"
   env_additions:
     - TELEGRAM_BOT_TOKEN
     - TELEGRAM_ONLY
