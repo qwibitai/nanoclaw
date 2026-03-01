@@ -211,3 +211,20 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+## Available Tools
+
+**jq** — Safe JSON processor. Use for parsing and filtering API responses.
+
+```bash
+# Extract data from JSON
+jq '.data[] | select(.status == "active") | {id, name}' input.json
+
+# Parse API response
+curl -s https://api.example.com/items | jq '.items | length'
+
+# Validate JSON
+jq . malformed.json  # fails with clear error if invalid
+```
+
+Prefer `jq` over `node -e` for JSON operations — it has no code execution risk.
