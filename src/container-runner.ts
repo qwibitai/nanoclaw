@@ -235,6 +235,12 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Pass Home Assistant credentials if configured
+  // Read from .env file directly (process.env is not populated from .env)
+  const haEnv = readEnvFile(['HA_URL', 'HA_TOKEN']);
+  if (haEnv.HA_URL) args.push('-e', `HA_URL=${haEnv.HA_URL}`);
+  if (haEnv.HA_TOKEN) args.push('-e', `HA_TOKEN=${haEnv.HA_TOKEN}`);
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
