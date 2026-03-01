@@ -1,4 +1,14 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Client,
+  Events,
+  GatewayIntentBits,
+  Message,
+  TextChannel,
+  ThreadChannel,
+} from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
@@ -9,10 +19,17 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+export type ApprovalCallback = (
+  action: string,
+  userId: string,
+  messageId: string,
+) => void;
+
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onApproval?: ApprovalCallback;
 }
 
 export class DiscordChannel implements Channel {
@@ -21,6 +38,8 @@ export class DiscordChannel implements Channel {
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
   private botToken: string;
+  /** Maps parent channelId → threadId for routing replies into threads */
+  private activeThreads = new Map<string, string>();
 
   constructor(botToken: string, opts: DiscordChannelOpts) {
     this.botToken = botToken;
@@ -41,7 +60,18 @@ export class DiscordChannel implements Channel {
       // Ignore bot messages (including own)
       if (message.author.bot) return;
 
-      const channelId = message.channelId;
+      // Thread support: if message is in a thread, resolve to parent channel
+      // so it matches the registered group, but track the thread for replies
+      let channelId = message.channelId;
+      if (message.channel.isThread()) {
+        const thread = message.channel as ThreadChannel;
+        const parentId = thread.parentId;
+        if (parentId) {
+          this.activeThreads.set(parentId, channelId);
+          channelId = parentId;
+        }
+      }
+
       const chatJid = `dc:${channelId}`;
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
@@ -151,6 +181,28 @@ export class DiscordChannel implements Channel {
       );
     });
 
+    // Handle button interactions (approval workflow)
+    this.client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isButton()) return;
+
+      const [action, refId] = interaction.customId.split(':');
+      if (!action || !refId) return;
+
+      logger.info(
+        { action, refId, user: interaction.user.tag },
+        'Discord button interaction',
+      );
+
+      if (this.opts.onApproval) {
+        this.opts.onApproval(action, interaction.user.id, refId);
+      }
+
+      await interaction.update({
+        content: `${interaction.message.content}\n\n**${action === 'approve' ? 'Approved' : 'Rejected'}** by ${interaction.user.displayName}`,
+        components: [], // Remove buttons after click
+      });
+    });
+
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
@@ -181,7 +233,11 @@ export class DiscordChannel implements Channel {
 
     try {
       const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
+
+      // Thread support: if a thread is active for this channel, reply there
+      const threadId = this.activeThreads.get(channelId);
+      const targetId = threadId ?? channelId;
+      const channel = await this.client.channels.fetch(targetId);
 
       if (!channel || !('send' in channel)) {
         logger.warn({ jid }, 'Discord channel not found or not text-based');
@@ -199,9 +255,49 @@ export class DiscordChannel implements Channel {
           await textChannel.send(text.slice(i, i + MAX_LENGTH));
         }
       }
-      logger.info({ jid, length: text.length }, 'Discord message sent');
+      logger.info(
+        { jid, threadId: threadId ?? null, length: text.length },
+        'Discord message sent',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
+    }
+  }
+
+  /** Send a message with Approve/Reject buttons for agent operation approval */
+  async sendApprovalRequest(
+    jid: string,
+    text: string,
+    refId: string,
+  ): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      const channelId = jid.replace(/^dc:/, '');
+      const threadId = this.activeThreads.get(channelId);
+      const channel = await this.client.channels.fetch(threadId ?? channelId);
+
+      if (!channel || !('send' in channel)) return;
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`approve:${refId}`)
+          .setLabel('Approve')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`reject:${refId}`)
+          .setLabel('Reject')
+          .setStyle(ButtonStyle.Danger),
+      );
+
+      await (channel as TextChannel).send({
+        content: text,
+        components: [row],
+      });
+
+      logger.info({ jid, refId }, 'Discord approval request sent');
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send Discord approval request');
     }
   }
 

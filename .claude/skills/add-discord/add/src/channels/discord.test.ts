@@ -29,6 +29,7 @@ vi.mock('discord.js', () => {
     MessageCreate: 'messageCreate',
     ClientReady: 'ready',
     Error: 'error',
+    InteractionCreate: 'interactionCreate',
   };
 
   const GatewayIntentBits = {
@@ -85,12 +86,30 @@ vi.mock('discord.js', () => {
 
   // Mock TextChannel type
   class TextChannel {}
+  class ThreadChannel {}
+
+  // Mock button builders
+  class ButtonBuilder {
+    data: any = {};
+    setCustomId(id: string) { this.data.customId = id; return this; }
+    setLabel(label: string) { this.data.label = label; return this; }
+    setStyle(style: any) { this.data.style = style; return this; }
+  }
+  class ActionRowBuilder {
+    components: any[] = [];
+    addComponents(...items: any[]) { this.components.push(...items); return this; }
+  }
+  const ButtonStyle = { Success: 3, Danger: 4 };
 
   return {
     Client: MockClient,
     Events,
     GatewayIntentBits,
     TextChannel,
+    ThreadChannel,
+    ButtonBuilder,
+    ActionRowBuilder,
+    ButtonStyle,
   };
 });
 
@@ -131,6 +150,7 @@ function createMessage(overrides: {
   attachments?: Map<string, any>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
+  threadParentId?: string;
 }) {
   const channelId = overrides.channelId ?? '1234567890123456';
   const authorId = overrides.authorId ?? '55512345';
@@ -140,6 +160,8 @@ function createMessage(overrides: {
   if (overrides.mentionsBotId) {
     mentionsMap.set(botId, { id: botId });
   }
+
+  const isThread = !!overrides.threadParentId;
 
   return {
     channelId,
@@ -160,6 +182,8 @@ function createMessage(overrides: {
       : null,
     channel: {
       name: overrides.channelName ?? 'general',
+      isThread: () => isThread,
+      parentId: overrides.threadParentId ?? null,
       messages: {
         fetch: vi.fn().mockResolvedValue({
           author: { username: 'Bob', displayName: 'Bob' },
@@ -748,6 +772,131 @@ describe('DiscordChannel', () => {
       await channel.setTyping('dc:1234567890123456', true);
 
       // No error
+    });
+  });
+
+  // --- Thread support ---
+
+  describe('thread support', () => {
+    it('resolves thread messages to parent channel for group lookup', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Message comes from thread "thread_111" whose parent is "1234567890123456"
+      const msg = createMessage({
+        channelId: 'thread_111',
+        threadParentId: '1234567890123456',
+        content: 'Thread reply',
+        guildName: 'Server',
+        channelName: 'general',
+      });
+      await triggerMessage(msg);
+
+      // Should match the registered parent channel
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: 'Thread reply',
+          chat_jid: 'dc:1234567890123456',
+        }),
+      );
+    });
+
+    it('routes replies to active thread', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // First, receive a thread message to activate thread routing
+      const msg = createMessage({
+        channelId: 'thread_111',
+        threadParentId: '1234567890123456',
+        content: 'Thread message',
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      // Now send a reply — should fetch the thread channel, not the parent
+      await channel.sendMessage('dc:1234567890123456', 'Reply in thread');
+
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith('thread_111');
+    });
+
+    it('falls back to parent channel when no active thread', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage('dc:1234567890123456', 'No thread');
+
+      expect(currentClient().channels.fetch).toHaveBeenCalledWith('1234567890123456');
+    });
+  });
+
+  // --- Approval buttons ---
+
+  describe('approval buttons', () => {
+    it('sends approval request with buttons', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      await channel.sendApprovalRequest(
+        'dc:1234567890123456',
+        'Deploy to production?',
+        'deploy-123',
+      );
+
+      expect(mockChannel.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: 'Deploy to production?',
+          components: expect.arrayContaining([
+            expect.objectContaining({
+              components: expect.arrayContaining([
+                expect.objectContaining({
+                  data: expect.objectContaining({ customId: 'approve:deploy-123' }),
+                }),
+                expect.objectContaining({
+                  data: expect.objectContaining({ customId: 'reject:deploy-123' }),
+                }),
+              ]),
+            }),
+          ]),
+        }),
+      );
+    });
+
+    it('handles button interaction and calls onApproval', async () => {
+      const onApproval = vi.fn();
+      const opts = createTestOpts({ onApproval });
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Simulate a button interaction
+      const interaction = {
+        isButton: () => true,
+        customId: 'approve:deploy-123',
+        user: { id: '55512345', tag: 'Alice#1234', displayName: 'Alice' },
+        message: { content: 'Deploy to production?' },
+        update: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const handlers = currentClient().eventHandlers.get('interactionCreate') || [];
+      for (const h of handlers) await h(interaction);
+
+      expect(onApproval).toHaveBeenCalledWith('approve', '55512345', 'deploy-123');
+      expect(interaction.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          components: [],
+        }),
+      );
     });
   });
 

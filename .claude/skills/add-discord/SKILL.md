@@ -210,6 +210,8 @@ If you can't copy the channel ID:
 
 The Discord bot supports:
 - Text messages in registered channels
+- **Thread support**: Messages in threads are routed to the parent channel's registered group, and replies are sent back into the thread
+- **Approval buttons**: `sendApprovalRequest(jid, text, refId)` sends Approve/Reject buttons; wire `onApproval` callback to handle clicks
 - Attachment descriptions (images, videos, files shown as placeholders)
 - Reply context (shows who the user is replying to)
 - @mention translation (Discord `<@botId>` → NanoClaw trigger format)
