@@ -2,6 +2,25 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
 
+function parseEnvValue(rawValue: string): string {
+  const value = rawValue.trimStart();
+  if (!value) return '';
+  if (value.startsWith('#')) return '';
+
+  // Quoted values keep inline # characters.
+  if (value.startsWith('"') || value.startsWith("'")) {
+    const quote = value[0];
+    const endIdx = value.lastIndexOf(quote);
+    if (endIdx > 0) {
+      return value.slice(1, endIdx);
+    }
+    return value.slice(1);
+  }
+
+  // Unquoted values treat whitespace + # as an inline comment start.
+  return value.replace(/\s+#.*$/, '').trim();
+}
+
 /**
  * Parse the .env file and return values for the requested keys.
  * Does NOT load anything into process.env — callers decide what to
@@ -26,17 +45,16 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
-    const eqIdx = trimmed.indexOf('=');
+    const normalized = trimmed.startsWith('export ')
+      ? trimmed.slice('export '.length).trim()
+      : trimmed;
+
+    const eqIdx = normalized.indexOf('=');
     if (eqIdx === -1) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
+    const key = normalized.slice(0, eqIdx).trim();
     if (!wanted.has(key)) continue;
-    let value = trimmed.slice(eqIdx + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
+    const rawValue = normalized.slice(eqIdx + 1);
+    const value = parseEnvValue(rawValue);
     if (value) result[key] = value;
   }
 
