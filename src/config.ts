@@ -101,7 +101,7 @@ export const MODEL_INTERACTIVE =
   process.env.MODEL_INTERACTIVE || 'claude-sonnet-4-6';
 // Per-query USD budget caps (0 = no cap)
 export const BUDGET_SCHEDULED = parseFloat(
-  process.env.BUDGET_SCHEDULED || '0.05',
+  process.env.BUDGET_SCHEDULED || '0.25',
 );
 export const BUDGET_SCHEDULED_HEAVY = parseFloat(
   process.env.BUDGET_SCHEDULED_HEAVY || '0.50',

@@ -50,7 +50,7 @@ async function getToken(): Promise<string> {
 
   const res = await fetch(`${BASE_URL}/api/auth/vendor/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Origin': 'https://vending-front-end.vercel.app' },
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   });
 
@@ -82,7 +82,7 @@ async function apiGet(endpoint: string, params?: Record<string, string>): Promis
   }
 
   const res = await fetch(url.toString(), {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Origin': 'https://vending-front-end.vercel.app' },
   });
 
   if (res.status === 401) {
@@ -90,7 +90,7 @@ async function apiGet(endpoint: string, params?: Record<string, string>): Promis
     if (fs.existsSync(TOKEN_FILE)) fs.unlinkSync(TOKEN_FILE);
     const newToken = await getToken();
     const retry = await fetch(url.toString(), {
-      headers: { Authorization: `Bearer ${newToken}` },
+      headers: { Authorization: `Bearer ${newToken}`, 'Origin': 'https://vending-front-end.vercel.app' },
     });
     if (!retry.ok) throw new Error(`IDDI API error: ${retry.status} ${await retry.text()}`);
     return retry.json();

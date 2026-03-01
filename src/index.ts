@@ -30,6 +30,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  hasBotReplyAfter,
   getRouterState,
   getTaskById,
   initDatabase,
@@ -442,11 +443,26 @@ function recoverPendingMessages(): void {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
     if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
+      // Check if bot already replied after the last pending user message.
+      // This prevents re-processing on repeated restarts where the cursor
+      // wasn't saved but the bot DID respond.
+      const lastPendingTs = pending[pending.length - 1].timestamp;
+      const botRepliedAfter = hasBotReplyAfter(chatJid, lastPendingTs, ASSISTANT_NAME);
+      if (botRepliedAfter) {
+        // Bot already handled these — just advance the cursor silently
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: bot already replied, advancing cursor',
+        );
+        lastAgentTimestamp[chatJid] = lastPendingTs;
+        saveState();
+      } else {
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: found unprocessed messages',
+        );
+        queue.enqueueMessageCheck(chatJid);
+      }
     }
   }
 }
