@@ -35,7 +35,7 @@ claude
 
 **小巧易懂：** 单一进程，少量源文件。无微服务、无消息队列、无复杂抽象层。让 Claude Code 引导您轻松上手。
 
-**通过隔离保障安全:** 智能体运行在 Linux 容器（在 macOS 上是 Apple Container，或 Docker）中。它们只能看到被明确挂载的内容。即便通过 Bash 访问也十分安全，因为所有命令都在容器内执行，不会直接操作您的宿主机。
+**通过隔离保障安全:** 智能体运行在 Linux 容器（在 macOS 上是 Apple Container，或任何兼容 Docker 的运行时）中。它们只能看到被明确挂载的内容。即便通过 Bash 访问也十分安全，因为所有命令都在容器内执行，不会直接操作您的宿主机。
 
 **为单一用户打造:** 这不是一个框架，是一个完全符合我个人需求的、可工作的软件。您可以 Fork 本项目，然后让 Claude Code 根据您的精确需求进行修改和适配。
 
@@ -54,7 +54,7 @@ claude
 - **主频道** - 您的私有频道（self-chat），用于管理控制；其他所有群组都完全隔离
 - **计划任务** - 运行 Claude 的周期性作业，并可以给您回发消息
 - **网络访问** - 搜索和抓取网页内容
-- **容器隔离** - 智能体在 Apple Container (macOS) 或 Docker (macOS/Linux) 的沙箱中运行
+- **容器隔离** - 智能体在 Apple Container (macOS) 或任何兼容 Docker 的运行时 (macOS/Linux) 的沙箱中运行，包括 [Colima](https://github.com/abiosoft/colima) 和 [OrbStack](https://orbstack.dev)
 - **智能体集群（Agent Swarms）** - 启动多个专业智能体团队，协作完成复杂任务（首个支持此功能的个人 AI 助手）
 - **可选集成** - 通过技能添加 Gmail (`/add-gmail`) 等更多功能
 
@@ -116,7 +116,7 @@ claude
 - macOS 或 Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) 或 [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container) (macOS) 或任何兼容 Docker 的运行时 (macOS/Linux) — 如 [Docker Desktop](https://docker.com/products/docker-desktop)、[Colima](https://github.com/abiosoft/colima) 或 [OrbStack](https://orbstack.dev)
 
 ## 架构
 
@@ -145,11 +145,11 @@ WhatsApp (baileys) --> SQLite --> 轮询循环 --> 容器 (Claude Agent SDK) -->
 
 **为什么是 Docker？**
 
-Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 macOS 上，您可以选择通过运行 `/convert-to-apple-container` 切换到 Apple Container，以获得更轻量级的原生运行时体验。
+NanoClaw 使用 Docker API 进行容器隔离，这意味着任何兼容 Docker 的运行时都可以使用 — [Docker Desktop](https://docker.com/products/docker-desktop)、[Colima](https://github.com/abiosoft/colima)、[OrbStack](https://orbstack.dev) 等。这提供了跨平台支持（macOS 和 Linux）和成熟的生态系统。在 macOS 上，您也可以选择通过运行 `/convert-to-apple-container` 切换到 Apple Container，以获得更轻量级的原生运行时体验。
 
 **我可以在 Linux 上运行吗？**
 
-可以。Docker 是默认的容器运行时，在 macOS 和 Linux 上都可以使用。只需运行 `/setup`。
+可以。任何兼容 Docker 的运行时都是默认选择，在 macOS 和 Linux 上都可以使用。只需运行 `/setup`。
 
 **这个项目安全吗？**
 
