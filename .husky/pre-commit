@@ -1,1 +1,12 @@
 npm run format:fix
+
+# Warn if src/ differs from upstream (catches accidental commits of applied state)
+if git remote get-url upstream >/dev/null 2>&1; then
+  if ! git diff --quiet upstream/main -- src/ 2>/dev/null; then
+    echo ""
+    echo "WARNING: src/ differs from upstream/main."
+    echo "If you're committing skill files, this is expected during development."
+    echo "Run 'npm run clean-skills' before committing if src/ should be clean."
+    echo ""
+  fi
+fi

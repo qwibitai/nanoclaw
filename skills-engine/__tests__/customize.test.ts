@@ -15,11 +15,7 @@ import {
   cleanup,
   writeState,
 } from './test-helpers.js';
-import {
-  readState,
-  recordSkillApplication,
-  computeFileHash,
-} from '../state.js';
+import { readState, recordSkillApplication, computeFileHash } from '../state.js';
 
 describe('customize', () => {
   let tmpDir: string;
@@ -120,13 +116,7 @@ describe('customize', () => {
     fs.writeFileSync(trackedFile, 'export const x = 2;');
 
     // Make the base file a directory to cause diff to exit with code 2
-    const baseFilePath = path.join(
-      tmpDir,
-      '.nanoclaw',
-      'base',
-      'src',
-      'app.ts',
-    );
+    const baseFilePath = path.join(tmpDir, '.nanoclaw', 'base', 'src', 'app.ts');
     fs.mkdirSync(baseFilePath, { recursive: true });
 
     expect(() => commitCustomize()).toThrow(/diff error/i);

@@ -94,9 +94,7 @@ export function mergeNpmDependencies(
 
   if (pkg.devDependencies) {
     pkg.devDependencies = Object.fromEntries(
-      Object.entries(pkg.devDependencies).sort(([a], [b]) =>
-        a.localeCompare(b),
-      ),
+      Object.entries(pkg.devDependencies).sort(([a], [b]) => a.localeCompare(b)),
     );
   }
 
@@ -194,8 +192,5 @@ export function mergeDockerComposeServices(
 }
 
 export function runNpmInstall(): void {
-  execSync('npm install --legacy-peer-deps', {
-    stdio: 'inherit',
-    cwd: process.cwd(),
-  });
+  execSync('npm install --legacy-peer-deps', { stdio: 'inherit', cwd: process.cwd() });
 }

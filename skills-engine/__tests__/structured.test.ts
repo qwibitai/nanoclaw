@@ -68,17 +68,10 @@ describe('structured', () => {
   describe('mergeNpmDependencies', () => {
     it('adds new dependencies', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(
-        pkgPath,
-        JSON.stringify(
-          {
-            name: 'test',
-            dependencies: { existing: '^1.0.0' },
-          },
-          null,
-          2,
-        ),
-      );
+      fs.writeFileSync(pkgPath, JSON.stringify({
+        name: 'test',
+        dependencies: { existing: '^1.0.0' },
+      }, null, 2));
 
       mergeNpmDependencies(pkgPath, { newdep: '^2.0.0' });
 
@@ -89,17 +82,10 @@ describe('structured', () => {
 
     it('resolves compatible ^ ranges', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(
-        pkgPath,
-        JSON.stringify(
-          {
-            name: 'test',
-            dependencies: { dep: '^1.0.0' },
-          },
-          null,
-          2,
-        ),
-      );
+      fs.writeFileSync(pkgPath, JSON.stringify({
+        name: 'test',
+        dependencies: { dep: '^1.0.0' },
+      }, null, 2));
 
       mergeNpmDependencies(pkgPath, { dep: '^1.1.0' });
 
@@ -109,18 +95,11 @@ describe('structured', () => {
 
     it('sorts devDependencies after merge', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(
-        pkgPath,
-        JSON.stringify(
-          {
-            name: 'test',
-            dependencies: {},
-            devDependencies: { zlib: '^1.0.0', acorn: '^2.0.0' },
-          },
-          null,
-          2,
-        ),
-      );
+      fs.writeFileSync(pkgPath, JSON.stringify({
+        name: 'test',
+        dependencies: {},
+        devDependencies: { zlib: '^1.0.0', acorn: '^2.0.0' },
+      }, null, 2));
 
       mergeNpmDependencies(pkgPath, { middle: '^1.0.0' });
 
@@ -131,17 +110,10 @@ describe('structured', () => {
 
     it('throws on incompatible major versions', () => {
       const pkgPath = path.join(tmpDir, 'package.json');
-      fs.writeFileSync(
-        pkgPath,
-        JSON.stringify(
-          {
-            name: 'test',
-            dependencies: { dep: '^1.0.0' },
-          },
-          null,
-          2,
-        ),
-      );
+      fs.writeFileSync(pkgPath, JSON.stringify({
+        name: 'test',
+        dependencies: { dep: '^1.0.0' },
+      }, null, 2));
 
       expect(() => mergeNpmDependencies(pkgPath, { dep: '^2.0.0' })).toThrow();
     });
@@ -198,10 +170,7 @@ describe('structured', () => {
   describe('mergeDockerComposeServices', () => {
     it('adds new services', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(
-        composePath,
-        'version: "3"\nservices:\n  web:\n    image: nginx\n',
-      );
+      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n');
 
       mergeDockerComposeServices(composePath, {
         redis: { image: 'redis:7' },
@@ -213,10 +182,7 @@ describe('structured', () => {
 
     it('skips existing services', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(
-        composePath,
-        'version: "3"\nservices:\n  web:\n    image: nginx\n',
-      );
+      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n');
 
       mergeDockerComposeServices(composePath, {
         web: { image: 'apache' },
@@ -228,16 +194,11 @@ describe('structured', () => {
 
     it('throws on port collision', () => {
       const composePath = path.join(tmpDir, 'docker-compose.yaml');
-      fs.writeFileSync(
-        composePath,
-        'version: "3"\nservices:\n  web:\n    image: nginx\n    ports:\n      - "8080:80"\n',
-      );
+      fs.writeFileSync(composePath, 'version: "3"\nservices:\n  web:\n    image: nginx\n    ports:\n      - "8080:80"\n');
 
-      expect(() =>
-        mergeDockerComposeServices(composePath, {
-          api: { image: 'node', ports: ['8080:3000'] },
-        }),
-      ).toThrow();
+      expect(() => mergeDockerComposeServices(composePath, {
+        api: { image: 'node', ports: ['8080:3000'] },
+      })).toThrow();
     });
   });
 });
