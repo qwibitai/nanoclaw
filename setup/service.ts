@@ -352,9 +352,20 @@ function installLitestreamUnits(
   const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
   fs.mkdirSync(unitDir, { recursive: true });
 
+  // Validate bucket name before generating configs
+  if (gcsBucket && !/^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(gcsBucket)) {
+    logger.error(
+      { gcsBucket },
+      'Invalid GCS_BACKUP_BUCKET name, skipping Litestream setup',
+    );
+    return;
+  }
+
   // Enable linger so user-level services survive SSH disconnect
   try {
-    execSync(`loginctl enable-linger ${username}`, { stdio: 'ignore' });
+    execSync(`loginctl enable-linger ${JSON.stringify(username)}`, {
+      stdio: 'ignore',
+    });
     logger.info({ username }, 'Enabled loginctl linger');
   } catch {
     logger.warn('loginctl enable-linger failed (may need sudo)');
@@ -362,7 +373,7 @@ function installLitestreamUnits(
 
   // Generate per-tenant litestream.yml
   const litestreamConfig = `dbs:
-  - path: ${homeDir}/nanoclaw/store/messages.db
+  - path: ${projectRoot}/store/messages.db
     replicas:
       - type: gcs
         bucket: ${gcsBucket}
@@ -394,30 +405,46 @@ function installLitestreamUnits(
       }
       fs.writeFileSync(dst, content);
       logger.info({ dst }, `Installed ${unitFile}`);
+    } else {
+      logger.warn({ src }, `Unit file not found, skipping ${unitFile}`);
     }
   }
 
   // Reload and enable units
   try {
     execSync(`${systemctlPrefix} daemon-reload`, { stdio: 'ignore' });
+  } catch (err) {
+    logger.warn({ err }, 'systemctl daemon-reload failed');
+  }
+  try {
     execSync(`${systemctlPrefix} enable litestream`, { stdio: 'ignore' });
+    logger.info('Enabled litestream');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to enable litestream');
+  }
+  try {
     execSync(`${systemctlPrefix} enable nanoclaw-rsync.timer`, {
       stdio: 'ignore',
     });
-    logger.info('Enabled Litestream and rsync timer');
+    logger.info('Enabled nanoclaw-rsync.timer');
   } catch (err) {
-    logger.warn({ err }, 'Failed to enable Litestream units');
+    logger.warn({ err }, 'Failed to enable nanoclaw-rsync.timer');
   }
 
   // Start Litestream (rsync timer starts on boot)
   try {
     execSync(`${systemctlPrefix} start litestream`, { stdio: 'ignore' });
+    logger.info('Started litestream');
+  } catch (err) {
+    logger.warn({ err }, 'Failed to start litestream');
+  }
+  try {
     execSync(`${systemctlPrefix} start nanoclaw-rsync.timer`, {
       stdio: 'ignore',
     });
-    logger.info('Started Litestream and rsync timer');
+    logger.info('Started nanoclaw-rsync.timer');
   } catch (err) {
-    logger.warn({ err }, 'Failed to start Litestream units');
+    logger.warn({ err }, 'Failed to start nanoclaw-rsync.timer');
   }
 }
 

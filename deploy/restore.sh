@@ -5,6 +5,12 @@ BUCKET="${GCS_BACKUP_BUCKET:?GCS_BACKUP_BUCKET not set}"
 PROJECT_DIR="${HOME}/nanoclaw"
 DB_PATH="${PROJECT_DIR}/store/messages.db"
 
+# Validate bucket name to prevent injection
+if [[ ! "$BUCKET" =~ ^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$ ]]; then
+  echo "ERROR: Invalid bucket name: $BUCKET"
+  exit 1
+fi
+
 echo "1. Stopping services..."
 systemctl --user stop nanoclaw 2>/dev/null || true
 systemctl --user stop nanoclaw-rsync.timer 2>/dev/null || true

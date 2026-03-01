@@ -691,7 +691,6 @@ async function main(): Promise<void> {
         }
       }
     }
-    closeDatabase();
     saveState();
 
     // Send "Restarting..." to active chats (skip GitHub — comments are permanent)
@@ -716,6 +715,7 @@ async function main(): Promise<void> {
     // Disconnect channels first to stop accepting new messages during shutdown
     for (const ch of channels) await ch.disconnect();
     await queue.shutdown(10000);
+    closeDatabase();
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));
