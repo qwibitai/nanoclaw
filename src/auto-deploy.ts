@@ -46,11 +46,11 @@ async function execCommand(
     });
 
     child.on('close', (code) => {
-      resolve({
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        exitCode: code ?? 0,
-      });
+      if (code !== 0) {
+        reject(new Error(`Command failed with exit code ${code}: ${stderr.trim()}`));
+      } else {
+        resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: 0 });
+      }
     });
 
     child.on('error', (err) => {
@@ -324,6 +324,52 @@ export async function executeDeploy(
           });
           throw new Error(`Failed to rebuild container: ${error}`);
         }
+      }
+
+      // Step 6.6: Check and fix host audio dependencies
+      try {
+        logger.info('Checking host audio server availability...');
+        const audioCheckScript = path.join(projectRoot, 'scripts', 'ensure-audio-server.sh');
+
+        try {
+          const result = await execCommand(`bash "${audioCheckScript}"`, projectRoot, 30000);
+          steps.push({
+            name: 'Check host audio server',
+            success: true,
+            output: result.stdout || 'Audio server verified or fixed',
+            duration: Date.now() - rebuildStart,
+          });
+          logger.info('Host audio server check passed');
+        } catch (audioError: any) {
+          // Audio is not critical - warn but don't fail deployment
+          const exitCode = audioError.message.match(/exit code (\d+)/)?.[1];
+          if (exitCode === '2') {
+            logger.warn('Headless environment - audio not required');
+            steps.push({
+              name: 'Check host audio server',
+              success: true,
+              output: 'Headless environment - audio not needed',
+              duration: Date.now() - rebuildStart,
+            });
+          } else {
+            logger.warn('Audio server check failed - browser audio will not work');
+            steps.push({
+              name: 'Check host audio server',
+              success: true,
+              output: 'Warning: Audio may not work (non-critical)',
+              duration: Date.now() - rebuildStart,
+            });
+          }
+        }
+      } catch (err) {
+        // Script execution failed entirely - log but continue
+        logger.error({ error: err }, 'Failed to run audio check script');
+        steps.push({
+          name: 'Check host audio server',
+          success: true,
+          output: 'Audio check skipped due to error',
+          duration: Date.now() - rebuildStart,
+        });
       }
 
       // Step 7: Restart service
