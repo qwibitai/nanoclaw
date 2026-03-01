@@ -1,4 +1,42 @@
 ---
+## 2026-03-01 - Pre-Compact: Sovereign v2.0 IMPLEMENT Wave 1 (receipts pending)
+
+**SDLC Stage:** IMPLEMENT, Wave 1 (Phase 1 + Phase 4 in parallel)
+**Task:** Fill proof receipts for Ph1+Ph4 tasks, checkpoint commit, then Wave 2
+**Modified files:** src/provider-chain.ts (NEW), src/provider-chain.test.ts (NEW), src/embedding.ts (NEW), src/embedding.test.ts (NEW), STATE.md, PLAN.md, .claude/risk-policy.json
+**Progress:**
+- DONE: PLAN.md overwritten with v2.0 content. risk-policy.json updated to v2 (12 high-risk files). APPROVE gate passed. Feature branch `feature/v2-six-features` created. Phase 1 Test Author (28 tests) + Phase 4 Test Author (34 tests) → Implementers made all 62 tests GREEN. Security sentinel ran on both files — all P0/P1 issues FIXED:
+  - Ph1: maxTotalAttempts=15 global call budget, retry-after clamped [1s,60s], cooldownMs wired for auto-recovery
+  - Ph4: MAX_STORE_SIZE=10K eviction, MAX_EMBEDDING_INPUT_CHARS=32K, SSRF protection (HTTPS-only base URL), error body sanitization (truncate+redact Bearer), input length validation
+- NOT DONE: Proof receipts not yet filled in STATE.md task checkboxes. Full regression check started (7 pre-existing failures in discord.test/db.test/setup tests — NOT from our changes, existed before branch). Need to: fill receipts, checkpoint commit Ph1+Ph4, then start Wave 2 (Ph2 Secrets Vault + Ph5 Model Switching). Waves 2 and 3 still ahead.
+- P2 findings logged for REVIEW: error cast typing (Ph1), cross-phase result envelope (Ph1), cosineSimilarity length check (Ph4), BM25 word-boundary matching (Ph4), chunk overlap edge cases (Ph4), degraded fallback warning (Ph4)
+**Test results:** 62/62 passing (28 provider-chain + 34 embedding). tsc --noEmit clean. Pre-existing suite: 886 pass, 83 fail (7 test files — all pre-existing, none from our code)
+**Key context:**
+- Branch: feature/v2-six-features (no commits yet — need checkpoint)
+- After compact: re-invoke /do → reads STATE.md → resumes IMPLEMENT → fill receipts → checkpoint commit → Wave 2
+- Wave execution: Wave 1 (Ph1||Ph4) DONE → Wave 2 (Ph2||Ph5) NEXT → Wave 3 (Ph3||Ph6) LAST
+- Pre-existing test failures: discord.test.ts, db.test.ts, setup/environment.test.ts, setup/register.test.ts — existed on main before our branch
+
+---
+## 2026-03-01 - Pre-Compact: Sovereign v2.0 PLAN stage (APPROVE pending)
+
+**SDLC Stage:** APPROVE (RECON→INTERVIEW→PLAN complete, DESTROY not yet run)
+**Task:** Write PLAN.md (stale — has Observer Agent content), present for user approval
+**Modified files:** STATE.md (written fresh with 6 phase specs), PLAN.md (needs overwrite)
+**Progress:**
+- DONE: RECON (architecture scan, domain detection agentic+paid-api, size=medium), INTERVIEW (4 questions answered: OpenAI embeddings, session-level model switch, yes webhooks, env var master key), PLAN research (4 parallel agents: ChaCha20→switched to AES-256-GCM, BM25+vector RRF k=60, session pool LRU, extension points mapped), IronClaw deep dive (read actual source: 3-layer provider fallback, RRF, routine engine types, secrets vault, sandbox), Pre-mortem (9 risks), Decompose (6 phases with full WHEN/THEN specs), Decisions (16 entries in STATE.md)
+- NOT DONE: PLAN.md needs rewriting with v2.0 content (currently stale Observer Agent plan). risk-policy.json needs updating. DESTROY stage. APPROVE gate. TaskList creation. Context break.
+**Test results:** N/A (planning stage, no code written)
+**Key context:**
+- 6 phases: (1) Provider Fallback Chain, (2) Encrypted Secrets Vault, (3) Warm-Start Session Pool, (4) Hybrid Memory BM25+Vector, (5) In-Chat Model Switching, (6) Routine Engine + Webhooks
+- Parallel waves: Wave 1: Ph1||Ph4, Wave 2: Ph2||Ph5, Wave 3: Ph3||Ph6
+- IronClaw insights adopted: AES-256-GCM+HKDF (not ChaCha20), 3-layer decorator (Retry→Failover→CircuitBreaker), Trigger/Action/Guardrails types, ROUTINE_OK sentinel, RRF k=60
+- Host-side provider fallback (no container changes needed for v2.0)
+- All phase specs written in STATE.md with Intent + WHEN/THEN + Test Cases + Operational Constraints
+- PLAN.md file on disk is STALE (Observer Agent v0.2.0 content) — must be overwritten
+- After compact: re-invoke /do → it reads STATE.md → resumes at APPROVE (write PLAN.md, then present)
+
+---
 ## 2026-03-01 - Session End: Sovereign v2.0 roadmap finalized
 
 **What we worked on:** Researched 8 claw competitors + open-core pricing models, wrote brainstorm doc for v2.0, rescoped from full SaaS platform to lean feature integration (6 features, ~1500 lines, stay under 35K total)

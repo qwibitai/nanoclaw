@@ -1,11 +1,20 @@
 {
-  "version": "1",
-  "generated": "2026-02-27T20:00:00Z",
+  "version": "2",
+  "generated": "2026-03-01T12:00:00Z",
   "riskTierRules": {
     "high": [
       "src/observer.ts",
       "src/index.ts",
-      "src/config.ts"
+      "src/config.ts",
+      "src/provider-chain.ts",
+      "src/secrets-vault.ts",
+      "src/session-pool.ts",
+      "src/embedding.ts",
+      "src/routine-engine.ts",
+      "src/webhook-server.ts",
+      "src/container-runner.ts",
+      "src/db.ts",
+      "src/model-router.ts"
     ],
     "low": ["**"]
   },
