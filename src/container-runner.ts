@@ -185,6 +185,16 @@ function buildVolumeMounts(
     });
   }
 
+  // Apple Maps credentials (for Maps Server API: directions, ETA, geocoding)
+  const appleMapsDir = path.join(os.homedir(), '.apple-maps');
+  if (fs.existsSync(appleMapsDir)) {
+    mounts.push({
+      hostPath: appleMapsDir,
+      containerPath: '/home/node/.apple-maps',
+      readonly: true,
+    });
+  }
+
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.

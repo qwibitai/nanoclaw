@@ -305,6 +305,47 @@ export async function sendPoolPhoto(
 }
 
 /**
+ * Send a voice message via a pool bot assigned to the given sender name.
+ */
+export async function sendPoolVoice(
+  chatId: string,
+  filePath: string,
+  sender: string,
+  groupFolder: string,
+  caption?: string,
+): Promise<void> {
+  if (poolApis.length === 0) return;
+
+  const key = `${groupFolder}:${sender}`;
+  let idx = senderBotMap.get(key);
+  if (idx === undefined) {
+    idx = nextPoolIndex % poolApis.length;
+    nextPoolIndex++;
+    senderBotMap.set(key, idx);
+    try {
+      await poolApis[idx].setMyName(sender);
+      await new Promise((r) => setTimeout(r, 2000));
+      logger.info({ sender, groupFolder, poolIndex: idx }, 'Assigned and renamed pool bot');
+    } catch (err) {
+      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+    }
+  }
+
+  const api = poolApis[idx];
+  try {
+    const numericId = chatId.replace(/^tg:/, '');
+    const truncatedCaption = caption && caption.length > 1024 ? caption.slice(0, 1021) + '...' : caption;
+    await api.sendVoice(numericId, new InputFile(filePath), {
+      caption: truncatedCaption,
+      parse_mode: 'HTML',
+    });
+    logger.info({ chatId, sender, poolIndex: idx }, 'Pool voice message sent');
+  } catch (err) {
+    logger.error({ chatId, sender, err }, 'Failed to send pool voice message');
+  }
+}
+
+/**
  * Send a message via a pool bot assigned to the given sender name.
  * Assigns bots round-robin on first use; subsequent messages from the
  * same sender in the same group always use the same bot.
@@ -538,10 +579,95 @@ export class TelegramChannel implements Channel {
       });
     });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const msgId = ctx.message.message_id.toString();
+
+      let placeholder = '[Voice message]';
+      try {
+        const voice = ctx.message.voice!;
+        const file = await ctx.api.getFile(voice.file_id);
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+        fs.mkdirSync(mediaDir, { recursive: true });
+        const filePath = path.join(mediaDir, `${msgId}.ogg`);
+        fs.writeFileSync(filePath, Buffer.from(await res.arrayBuffer()));
+        placeholder = `[Voice message: /workspace/group/media/${msgId}.ogg]`;
+        logger.info({ chatJid, msgId, filePath }, 'Telegram voice message downloaded');
+      } catch (err) {
+        logger.warn({ chatJid, msgId, err }, 'Failed to download Telegram voice message');
+      }
+
+      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content: `${placeholder}${caption}`,
+        timestamp,
+        is_from_me: false,
+      });
+    });
+    this.bot.on('message:audio', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const msgId = ctx.message.message_id.toString();
+
+      let placeholder = '[Audio]';
+      try {
+        const audio = ctx.message.audio!;
+        const ext = audio.file_name
+          ? path.extname(audio.file_name) || '.mp3'
+          : '.mp3';
+        const file = await ctx.api.getFile(audio.file_id);
+        const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const mediaDir = path.join(GROUPS_DIR, group.folder, 'media');
+        fs.mkdirSync(mediaDir, { recursive: true });
+        const filePath = path.join(mediaDir, `${msgId}${ext}`);
+        fs.writeFileSync(filePath, Buffer.from(await res.arrayBuffer()));
+        placeholder = `[Audio: /workspace/group/media/${msgId}${ext}]`;
+        logger.info({ chatJid, msgId, filePath }, 'Telegram audio downloaded');
+      } catch (err) {
+        logger.warn({ chatJid, msgId, err }, 'Failed to download Telegram audio');
+      }
+
+      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onMessage(chatJid, {
+        id: msgId,
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content: `${placeholder}${caption}`,
+        timestamp,
+        is_from_me: false,
+      });
+    });
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
       storeNonText(ctx, `[Document: ${name}]`);
@@ -594,6 +720,27 @@ export class TelegramChannel implements Channel {
       logger.info({ jid, filePath }, 'Telegram photo sent');
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send Telegram photo');
+    }
+  }
+
+  async sendVoice(jid: string, filePath: string, caption?: string): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    await this.clearThinking(jid);
+
+    try {
+      const numericId = jid.replace(/^tg:/, '');
+      const truncatedCaption = caption && caption.length > 1024 ? caption.slice(0, 1021) + '...' : caption;
+      await this.bot.api.sendVoice(numericId, new InputFile(filePath), {
+        caption: truncatedCaption,
+        parse_mode: 'HTML',
+      });
+      logger.info({ jid, filePath }, 'Telegram voice message sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Telegram voice message');
     }
   }
 

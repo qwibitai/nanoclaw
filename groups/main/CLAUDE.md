@@ -148,6 +148,14 @@ Formatting tips:
 - Use bold for section labels in longer messages (instead of headings)
 - Keep it natural — not every message needs formatting
 
+## Voice Messages
+
+When you see `[Voice message: <path>]`, immediately run:
+```bash
+bash /home/node/.claude/skills/speech-to-text/transcribe.sh <path>
+```
+Then respond to the transcribed content naturally. Do not ask the user — just transcribe and reply.
+
 ---
 
 ## Admin Context

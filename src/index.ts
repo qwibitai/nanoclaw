@@ -593,6 +593,15 @@ async function main(): Promise<void> {
       // Fallback: send caption as text for channels without photo support
       return channel.sendMessage(jid, caption || '[Image]');
     },
+    sendVoice: (jid, filePath, caption?) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (channel.sendVoice) {
+        return channel.sendVoice(jid, filePath, caption);
+      }
+      // Fallback: send caption as text for channels without voice support
+      return channel.sendMessage(jid, caption || '[Voice message]');
+    },
     registeredGroups: () => registeredGroups,
     registerGroup,
     syncGroupMetadata: () => Promise.resolve(),

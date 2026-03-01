@@ -12,7 +12,7 @@ import {
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
 } from './config.js';
-import { sendPoolMessage, sendPoolPhoto } from './channels/telegram.js';
+import { sendPoolMessage, sendPoolPhoto, sendPoolVoice } from './channels/telegram.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -22,6 +22,7 @@ import { RegisteredGroup } from './types.js';
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   sendPhoto: (jid: string, filePath: string, caption?: string) => Promise<void>;
+  sendVoice: (jid: string, filePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -147,6 +148,39 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC photo attempt blocked',
+                  );
+                }
+              } else if (data.type === 'voice' && data.chatJid && data.filePath) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  const hostPath = resolveContainerPath(data.filePath, sourceGroup);
+                  if (!fs.existsSync(hostPath)) {
+                    logger.warn(
+                      { filePath: data.filePath, hostPath, sourceGroup },
+                      'IPC voice file not found on host',
+                    );
+                  } else if (data.sender && data.chatJid.startsWith('tg:')) {
+                    await sendPoolVoice(
+                      data.chatJid,
+                      hostPath,
+                      data.sender,
+                      sourceGroup,
+                      data.caption,
+                    );
+                  } else {
+                    await deps.sendVoice(data.chatJid, hostPath, data.caption);
+                  }
+                  logger.info(
+                    { chatJid: data.chatJid, sourceGroup, filePath: hostPath },
+                    'IPC voice message sent',
+                  );
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC voice attempt blocked',
                   );
                 }
               }

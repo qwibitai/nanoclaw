@@ -113,6 +113,38 @@ server.tool(
 );
 
 server.tool(
+  'send_voice',
+  "Send a voice message to the user or group. Use after generating speech audio with the text-to-speech skill.",
+  {
+    file_path: z.string().describe('Absolute path to the OGG Opus audio file in the container (e.g., /workspace/group/media/generated/123.ogg)'),
+    caption: z.string().optional().describe('Optional caption text to display with the voice message'),
+    sender: z.string().optional().describe('Your role/identity name (e.g. "Assistant"). When set, voice message appears from a dedicated bot in Telegram.'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
+        isError: true,
+      };
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'voice',
+      chatJid,
+      filePath: args.file_path,
+      caption: args.caption || undefined,
+      sender: args.sender || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Voice message sent.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
