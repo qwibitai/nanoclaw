@@ -1,4 +1,39 @@
 ---
+## 2026-03-01 - Pre-Compact: SHIP GATE paused — user wants 7 differentiating features before deploy
+
+**SDLC Stage:** SHIP GATE (PAUSED) — v2.0 is REVIEW+CLEAN complete, user chose "Not yet"
+**Task:** User wants 7 new differentiating features built before deploying to VPS
+**Modified files (this session):** src/routine-engine.ts, src/routine-engine.test.ts, src/secrets-vault.ts, src/provider-chain.ts, src/embedding.ts, src/model-switching.ts, src/db.ts, STATE.md (all committed as 5084686)
+**Progress:**
+- DONE: All v2.0 P0/P1/P2 fixes applied and committed (5084686). 178/178 tests, tsc clean.
+- DONE: REVIEW EXIT deposited. CLEAN EXIT deposited. Loose-ends sweep clean.
+- DONE: Evidence freshness re-verified at HEAD (all 6 phases pass at 5084686).
+- DONE: SHIP GATE presented to user. User chose "Not yet."
+- DONE: User asked "what else is missing to differentiate." I presented 7 features in 2 tiers.
+- DONE: User said "build ALL of them, then deploy to VPS."
+- DONE: Explored codebase with 3 parallel agents — full understanding of:
+  - Memory stack: Observer/Reflector/Hindsight/Auto-learner (all exist, well-architected)
+  - Model routing: src/model-router.ts (keyword classifier, per-group config, DEFAULT_ROUTES)
+  - IPC: Relay (peer messaging), Delegation (spawn workers), Elicitation (structured questions)
+  - Voice skill: Scaffolded at .claude/skills/add-voice-transcription/ (full implementation ready)
+  - Skill system: Three-way merge via scripts/apply-skill.ts, manifest.yaml format
+  - Web infra: sentry-agent.ts has HTTP server pattern, no dashboard exists
+  - Container: Docker isolation, stdin/stdout protocol, volume mounts, 10 agent tools
+- IN PROGRESS: Plan mode entered, Plan agent spawned but rejected by user before completing.
+- NOT DONE: Plan for 7 features not yet written
+- NOT DONE: Implementation of 7 features
+- NOT DONE: VPS deployment
+**Test results:** 178/178 passing at 5084686 (v2.0 complete)
+**Key context:**
+- v2.0 commits: 7de60a2, 7591254, 1cd2afe, ab54415, e81101e, 5084686
+- Branch: feature/v2-six-features
+- v2.0 features (done): Provider chain, secrets vault, session pool, hybrid memory, model switching, routine engine
+- v2.5 features (to build): Semantic model routing, voice WhatsApp, proactive agent, self-improving memory, agent swarm, skill marketplace, web dashboard
+- Existing infra that supports v2.5: model-router.ts (keyword classifier to replace), embedding.ts (for semantic routing), observer.ts+hindsight.ts+auto-learner.ts (for proactive+self-improving), delegation-handler.ts+relay-handler.ts (for swarm), sentry-agent.ts (HTTP pattern for dashboard), voice skill scaffolded
+- User philosophy: small enough to understand, <35K lines, MIT, no SaaS infra
+- VPS: ssh hz (Hetzner, 4GB RAM), /root/nanoclaw-src/, systemd nanoclaw.service, Discord bot AdamLoveAI
+
+---
 ## 2026-03-01 - Pre-Compact: REVIEW — fixing P0/P1 from 6 reviewers
 
 **SDLC Stage:** REVIEW, mid-fix on P0/P1 findings

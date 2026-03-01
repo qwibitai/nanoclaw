@@ -583,22 +583,41 @@ Evidence:
 | Webhook server | (started by routine engine) | 3456 | Phase 6 |
 
 ## Current
-Stage: REVIEW — complete. All P0/P1/P2 fixed. Ready for CLEAN.
+Stage: SHIP GATE PAUSED — user wants to add 7 differentiating features (v2.5) before shipping.
+Decision: v2.0 (6 features) is REVIEW+CLEAN complete at 5084686. User chose "Not yet" at SHIP GATE.
+User wants: build 7 new features → deploy everything to VPS → then ship.
+
+New features requested (from differentiation brainstorm):
+1. Semantic Model Routing — replace keyword classifier with embedding-based in model-router.ts
+2. Voice-First WhatsApp — apply existing whisper skill, transcribe voice messages
+3. Proactive Agent — analyze Observer data, detect patterns, suggest routines
+4. Self-Improving Memory — read LEARNINGS.md, propose CLAUDE.md updates
+5. Agent Swarm — enhanced delegation with auto-decompose + fan-out
+6. Skill Marketplace — local registry, browse/install/apply skills via agent tools
+7. Web Dashboard — HTTP status page with agent activity, cost tracking, memory health
+
+Codebase exploration DONE (3 parallel agents explored all infrastructure).
+Plan mode entered but Plan agent rejected by user before completion.
+User then requested /do compact w bc.
+
+Next session: Re-enter plan mode or start new SDLC for v2.5 features. Must decide whether to:
+a) Ship v2.0 first (create PR), then new branch for v2.5
+b) Add v2.5 on same branch, ship everything together
 
 ## Loop State
-Stage-Loop: CLEAN
-Stage-Iteration: 0/3
-Stage-Entry-Met: pending (REVIEW EXIT to be deposited)
+Stage-Loop: PAUSED (SHIP_GATE interrupted for scope expansion)
+Stage-Iteration: 1/2
+Stage-Entry-Met: true (CLEAN EXIT at 5084686)
 Stage-Exit-Met: false
-Last-Stage-EXIT: INTEGRATE
+Last-Stage-EXIT: CLEAN
 
 Phase-Loop: N/A
 Phase-Iteration: N/A
 Phase-Exit-Met: false
 
-Task-Loop: Commit REVIEW fixes → deposit EXIT → advance to CLEAN
+Task-Loop: PAUSED — user expanding scope before ship
 Task-Strike: 0/3
-Task-Last-Approach: Fixed all P0/P1/P2 findings from 6 reviewers
+Task-Last-Approach: Presented SHIP GATE, user said "Not yet", wants 7 more features
 Task-Last-Failure: N/A
 
 ## Breadcrumbs
@@ -628,5 +647,7 @@ Task-Last-Failure: N/A
 [7591254] 2026-03-01 — IMPLEMENT Wave 3 code complete: Ph3 22/22 tests, Ph6 23/23 tests, build clean. Security sentinel: Ph3 P0(command injection containerId validation) FIXED. Ph6 P0-1(timing-safe HMAC)+P0-2(bind 127.0.0.1)+P1-3(global concurrency cap=5) FIXED. P1/P2s logged for REVIEW. 146/146 total tests.
 [1cd2afe] 2026-03-01 — IMPLEMENT EXIT: 6/6 phases VERIFIED, 146/146 tests, all P0/P1 fixed, 3 wave commits (7de60a2, 7591254, 1cd2afe). Advancing to INTEGRATE.
 [e81101e] 2026-03-01 — INTEGRATE EXIT: 178/178 v2.0 tests pass, tsc clean. P0 fixes committed (ab54415): SQLite persistence, kill switches ×5, retry budget 15→6, cron 5min floor, daily cap 50, input validation guards ×32 tests. Trace logging added to all 6 modules (e81101e). Agentic checklist: step budget ✓, cost ceiling ✓, timeout ✓, circuit breaker ✓, trace logging ✓, kill switch ✓ (13 total). Financial checklist: rate limits ✓, input validation ✓, max_tokens via config ✓, keys in env ✓, kill switches ✓. Arch drift: accepted + fixed (SQLite persistence). No eval-cases.json or harness-cases.json (first build). Advancing to REVIEW.
+[5084686] 2026-03-01 — REVIEW EXIT: triage complete, P0=0, P1=0, 16 findings resolved. 6 parallel reviewers (simplicity, security×3, architecture, performance). Fixed: 2 P0 (ReDoS, path traversal), 8 P1 (HMAC raw body, URL-decode, rateLimitMap cap, dailyRunCounts clear, maxTotalAttempts passthrough, cosine length check, decrypt min-length, redundant catch), 6 P2 (overrides cap, port validation, routine_runs TTL, bufferToFloat32 optimization, configurable models, extended cron). 6 architectural P2s deferred (db god object, execSync→async, content dedup, linear scan, batch API, eviction sync — pre-existing or require architectural redesign). 178/178 tests, tsc clean. Advancing to CLEAN.
+[5084686] 2026-03-01 — CLEAN EXIT: lint PASS (tsc --noEmit), build PASS (npm run build), loose-ends PASS (no unused imports, no TODOs, no console.log, no any types, no stale refs, no commented-out code). 178/178 tests. Advancing to SHIP GATE.
 
 ## Outcomes & Retrospective
