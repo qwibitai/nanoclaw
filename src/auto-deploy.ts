@@ -231,16 +231,19 @@ export async function executeDeploy(
         f.includes('package.json'),
       );
       const srcChanged = changedFiles.some((f) => f.startsWith('src/'));
+      const dockerfileChanged = changedFiles.some(
+        (f) => f.includes('Dockerfile') || f.startsWith('container/'),
+      );
 
       steps.push({
         name: 'Analyze changes',
         success: true,
-        output: `${changedFiles.length} files changed (package.json: ${packageJsonChanged}, src: ${srcChanged})`,
+        output: `${changedFiles.length} files changed (package.json: ${packageJsonChanged}, src: ${srcChanged}, container: ${dockerfileChanged})`,
         duration: Date.now() - diffStart,
       });
 
       await notify(
-        `📊 *Changes detected*\n• ${changedFiles.length} files changed\n• Dependencies: ${packageJsonChanged ? 'Yes' : 'No'}\n• Source code: ${srcChanged ? 'Yes' : 'No'}`,
+        `📊 *Changes detected*\n• ${changedFiles.length} files changed\n• Dependencies: ${packageJsonChanged ? 'Yes' : 'No'}\n• Source code: ${srcChanged ? 'Yes' : 'No'}\n• Container: ${dockerfileChanged ? 'Yes' : 'No'}`,
       );
 
       // Step 5: Install dependencies (if package.json changed)
@@ -292,6 +295,34 @@ export async function executeDeploy(
             duration: Date.now() - buildStart,
           });
           throw new Error(`Failed to build: ${error}`);
+        }
+      }
+
+      // Step 6.5: Rebuild container (if Dockerfile changed)
+      if (dockerfileChanged) {
+        const rebuildStart = Date.now();
+        try {
+          await notify('🐳 Rebuilding container...');
+          const result = await execCommand(
+            'docker build -t nanoclaw-agent:latest container/',
+            projectRoot,
+            300000, // 5 minute timeout for container build
+          );
+          steps.push({
+            name: 'Rebuild container',
+            success: true,
+            output: result.stdout,
+            duration: Date.now() - rebuildStart,
+          });
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          steps.push({
+            name: 'Rebuild container',
+            success: false,
+            error,
+            duration: Date.now() - rebuildStart,
+          });
+          throw new Error(`Failed to rebuild container: ${error}`);
         }
       }
 

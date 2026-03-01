@@ -70,16 +70,12 @@ The auto-deployment system handles:
 
 - ✅ Source code changes (`src/**/*.ts`)
 - ✅ Dependency updates (`package.json`, `package-lock.json`)
+- ✅ Container rebuilds (`Dockerfile`, `container/**`)
 - ✅ Configuration changes
 - ✅ Documentation updates
 - ✅ Any other changes to tracked files
 
-**Note:** Container rebuild (Dockerfile changes) is not yet automated. If the Dockerfile changes, you'll need to rebuild manually:
-
-```bash
-docker build -t nanoclaw-agent:latest container/
-systemctl --user restart nanoclaw
-```
+When the Dockerfile or any files in `container/` change, the system automatically rebuilds the container image before restarting the service.
 
 ## Git Configuration Requirements
 
