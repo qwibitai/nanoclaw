@@ -2,7 +2,7 @@
 
 All notable changes to NanoClaw will be documented in this file.
 
-## Pluggable Channel Architecture
+## 1.2.0 — Pluggable Channel Architecture
 
 **BREAKING CHANGE** — WhatsApp is no longer bundled in core.
 

@@ -159,7 +159,7 @@ Report final status:
 
 ## Known Migrations
 
-### 2.0.0 — WhatsApp moved from core to skill
+### 1.2.0 — WhatsApp moved from core to skill
 
 WhatsApp was the only channel ever bundled in core. From 2.0.0 it is a pluggable skill. After applying this update, if `store/auth/` exists (the user was running WhatsApp), apply the WhatsApp skill: `npx tsx skills-engine/apply.ts .claude/skills/add-whatsapp`. If it fails, tell the user to run `/add-whatsapp` manually.
 
