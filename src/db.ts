@@ -115,6 +115,34 @@ function createSchema(database: Database.Database): void {
   } catch {
     /* columns already exist */
   }
+
+  // Drop UNIQUE constraint on registered_groups.folder to allow multiple channels
+  // (e.g. WhatsApp + Telegram) to share the same agent folder.
+  // SQLite requires recreating the table to drop a constraint.
+  try {
+    const hasUnique = (database
+      .prepare(`SELECT sql FROM sqlite_master WHERE name='registered_groups'`)
+      .get() as { sql: string })
+      .sql.includes('UNIQUE');
+    if (hasUnique) {
+      database.exec(`
+        CREATE TABLE registered_groups_new (
+          jid TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          folder TEXT NOT NULL,
+          trigger_pattern TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          container_config TEXT,
+          requires_trigger INTEGER DEFAULT 1
+        );
+        INSERT INTO registered_groups_new SELECT * FROM registered_groups;
+        DROP TABLE registered_groups;
+        ALTER TABLE registered_groups_new RENAME TO registered_groups;
+      `);
+    }
+  } catch {
+    /* migration already applied or not needed */
+  }
 }
 
 export function initDatabase(): void {
