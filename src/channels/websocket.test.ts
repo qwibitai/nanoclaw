@@ -3,7 +3,10 @@ import { EventEmitter } from 'events';
 
 // --- Mocks ---
 
-vi.mock('../config.js', () => ({}));
+vi.mock('../config.js', () => ({
+  GROUPS_DIR: '/fake/groups',
+  WEBSOCKET_FILES_PORT: 3002,
+}));
 
 vi.mock('../logger.js', () => ({
   logger: {
@@ -13,6 +16,44 @@ vi.mock('../logger.js', () => ({
     error: vi.fn(),
   },
 }));
+
+// Mock node:fs — using vi.hoisted so the object is available before hoisting
+const { mockFs } = vi.hoisted(() => ({
+  mockFs: {
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    existsSync: vi.fn().mockReturnValue(false),
+    statSync: vi.fn().mockReturnValue({ isDirectory: () => false }),
+    createReadStream: vi.fn(),
+  },
+}));
+vi.mock('node:fs', () => ({ default: mockFs }));
+
+// Mock node:http — using vi.hoisted so the object is available before hoisting
+const { mockHttpServer } = vi.hoisted(() => ({
+  mockHttpServer: {
+    on: vi.fn(),
+    listen: vi.fn(),
+    close: vi.fn(),
+  },
+}));
+vi.mock('node:http', () => ({
+  default: {
+    createServer: vi.fn().mockReturnValue(mockHttpServer),
+  },
+}));
+
+// Mock node:path — use real implementation
+vi.mock('node:path', async () => {
+  const actual = await vi.importActual<typeof import('node:path')>('node:path');
+  return { default: actual };
+});
+
+// Mock node:crypto — use real implementation for randomBytes + randomUUID
+vi.mock('node:crypto', async () => {
+  const actual = await vi.importActual<typeof import('node:crypto')>('node:crypto');
+  return { default: actual };
+});
 
 // --- Fake WebSocket client ---
 
@@ -64,6 +105,11 @@ describe('WebSocketChannel', () => {
   beforeEach(() => {
     connectionHandler = null;
     vi.clearAllMocks();
+    // Reset fs mocks to safe defaults
+    mockFs.existsSync.mockReturnValue(false);
+    mockFs.mkdirSync.mockImplementation(() => undefined);
+    mockFs.writeFileSync.mockImplementation(() => undefined);
+    mockFs.statSync.mockReturnValue({ isDirectory: () => false });
   });
 
   afterEach(() => {
@@ -478,6 +524,237 @@ describe('WebSocketChannel', () => {
       client._emit('close');
 
       expect(channel.isConnected()).toBe(false);
+    });
+  });
+
+  // --- Inbound attachments (ATT-01) ---
+
+  describe('inbound attachments (ATT-01)', () => {
+    it('chat message with attachments saves files to disk and appends reference to content', async () => {
+      mockFs.mkdirSync.mockImplementation(() => undefined);
+      mockFs.writeFileSync.mockImplementation(() => undefined);
+
+      const onMessage = vi.fn();
+      const channel = new WebSocketChannel(3001, { onMessage, onChatMetadata: vi.fn() }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+
+      const attachment = {
+        name: 'report.pdf',
+        data: Buffer.from('fake pdf content').toString('base64'),
+        mime: 'application/pdf',
+        size: 16,
+      };
+
+      client._emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'chat', content: 'here is the file', attachments: [attachment] })),
+      );
+
+      expect(mockFs.writeFileSync).toHaveBeenCalled();
+      expect(onMessage).toHaveBeenCalledWith(
+        'ws:better-work',
+        expect.objectContaining({
+          content: expect.stringContaining('[Attachment:'),
+        }),
+      );
+      expect(onMessage).toHaveBeenCalledWith(
+        'ws:better-work',
+        expect.objectContaining({
+          content: expect.stringContaining('here is the file'),
+        }),
+      );
+    });
+
+    it('chat message with only attachments (no content text) is processed', async () => {
+      mockFs.mkdirSync.mockImplementation(() => undefined);
+      mockFs.writeFileSync.mockImplementation(() => undefined);
+
+      const onMessage = vi.fn();
+      const channel = new WebSocketChannel(3001, { onMessage, onChatMetadata: vi.fn() }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+
+      const attachment = {
+        name: 'photo.png',
+        data: Buffer.from('fake image').toString('base64'),
+        mime: 'image/png',
+        size: 10,
+      };
+
+      client._emit(
+        'message',
+        Buffer.from(JSON.stringify({ type: 'chat', content: '', attachments: [attachment] })),
+      );
+
+      // onMessage should be called because content is non-empty after appending attachment ref
+      expect(onMessage).toHaveBeenCalledWith(
+        'ws:better-work',
+        expect.objectContaining({
+          content: expect.stringContaining('[Attachment:'),
+        }),
+      );
+    });
+
+    it('multiple attachments use [Attachments:...] block format', async () => {
+      mockFs.mkdirSync.mockImplementation(() => undefined);
+      mockFs.writeFileSync.mockImplementation(() => undefined);
+
+      const onMessage = vi.fn();
+      const channel = new WebSocketChannel(3001, { onMessage, onChatMetadata: vi.fn() }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+
+      client._emit(
+        'message',
+        Buffer.from(JSON.stringify({
+          type: 'chat',
+          content: 'two files',
+          attachments: [
+            { name: 'a.pdf', data: Buffer.from('a').toString('base64'), mime: 'application/pdf', size: 1 },
+            { name: 'b.pdf', data: Buffer.from('b').toString('base64'), mime: 'application/pdf', size: 1 },
+          ],
+        })),
+      );
+
+      const call = onMessage.mock.calls[0][1];
+      expect(call.content).toContain('[Attachments:');
+      expect(call.content).toContain('- inbox/attachments/');
+    });
+
+    it('attachment save failure is caught and message continues with text', async () => {
+      mockFs.mkdirSync.mockImplementation(() => undefined);
+      mockFs.writeFileSync.mockImplementation(() => { throw new Error('disk full'); });
+
+      const onMessage = vi.fn();
+      const channel = new WebSocketChannel(3001, { onMessage, onChatMetadata: vi.fn() }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+
+      client._emit(
+        'message',
+        Buffer.from(JSON.stringify({
+          type: 'chat',
+          content: 'message with failed attachment',
+          attachments: [{ name: 'x.pdf', data: 'dGVzdA==', mime: 'application/pdf', size: 4 }],
+        })),
+      );
+
+      // Message should still be delivered with just the text (no attachment ref)
+      expect(onMessage).toHaveBeenCalledWith(
+        'ws:better-work',
+        expect.objectContaining({ content: 'message with failed attachment' }),
+      );
+    });
+  });
+
+  // --- HTTP file server (ATT-02) ---
+
+  describe('HTTP file server (ATT-02)', () => {
+    it('startFileServer is called in connect()', async () => {
+      const http = await import('node:http');
+      const mockHttp = vi.mocked(http.default);
+
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+
+      expect(mockHttp.createServer).toHaveBeenCalled();
+      expect(mockHttpServer.listen).toHaveBeenCalledWith(3002, '127.0.0.1');
+    });
+
+    it('fileServer.close() called on disconnect()', async () => {
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+      await channel.disconnect();
+
+      expect(mockHttpServer.close).toHaveBeenCalled();
+    });
+  });
+
+  // --- Outbound attachment detection (ATT-03) ---
+
+  describe('outbound attachment detection (ATT-03)', () => {
+    it('sendMessage includes attachments[] when text references files/ that exist', async () => {
+      // Simulate files/report.pdf exists
+      mockFs.existsSync.mockImplementation((p) =>
+        String(p).endsWith('report.pdf') ? true : false,
+      );
+
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+      client.send.mockClear();
+
+      await channel.sendMessage('ws:better-work', 'Here is your report: files/report.pdf');
+
+      const sentPayload = JSON.parse(client.send.mock.calls[0][0] as string);
+      expect(sentPayload.attachments).toEqual([
+        { name: 'report.pdf', url: '/files/report.pdf' },
+      ]);
+    });
+
+    it('sendMessage does NOT include attachments[] when referenced file does not exist', async () => {
+      mockFs.existsSync.mockReturnValue(false);
+
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+      client.send.mockClear();
+
+      await channel.sendMessage('ws:better-work', 'No file here: files/ghost.pdf');
+
+      const sentPayload = JSON.parse(client.send.mock.calls[0][0] as string);
+      expect(sentPayload.attachments).toBeUndefined();
+    });
+
+    it('sendMessage detects container path /workspace/group/files/ as well', async () => {
+      mockFs.existsSync.mockImplementation((p) =>
+        String(p).endsWith('output.csv') ? true : false,
+      );
+
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+      client.send.mockClear();
+
+      await channel.sendMessage('ws:better-work', 'Saved to /workspace/group/files/output.csv');
+
+      const sentPayload = JSON.parse(client.send.mock.calls[0][0] as string);
+      expect(sentPayload.attachments).toEqual([
+        { name: 'output.csv', url: '/files/output.csv' },
+      ]);
+    });
+
+    it('sendMessage deduplicates repeated file references', async () => {
+      mockFs.existsSync.mockReturnValue(true);
+
+      const channel = new WebSocketChannel(3001, {
+        onMessage: vi.fn(),
+        onChatMetadata: vi.fn(),
+      }, 3002);
+      await channel.connect();
+      const client = simulateClientConnect(channel);
+      client.send.mockClear();
+
+      await channel.sendMessage('ws:better-work', 'files/a.pdf and again files/a.pdf');
+
+      const sentPayload = JSON.parse(client.send.mock.calls[0][0] as string);
+      expect(sentPayload.attachments).toHaveLength(1);
     });
   });
 });
