@@ -26,8 +26,8 @@ cp .env.example .env
 Edit `.env` with your keys:
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...
-DISCORD_BOT_TOKEN=MTIz...
+ANTHROPIC_API_KEY=<your_anthropic_api_key>
+DISCORD_BOT_TOKEN=<your_discord_bot_token>
 ASSISTANT_NAME=Andy
 ```
 
@@ -35,7 +35,7 @@ For OpenRouter instead of direct Anthropic:
 
 ```
 ANTHROPIC_BASE_URL=https://openrouter.ai/api
-ANTHROPIC_AUTH_TOKEN=sk-or-...
+ANTHROPIC_AUTH_TOKEN=<your_openrouter_api_key>
 ANTHROPIC_API_KEY=
 ```
 

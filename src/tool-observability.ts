@@ -7,27 +7,14 @@
  *
  * Host-side module. No I/O in pure functions — file writing is caller's job.
  */
+import { scrubCredentialsGeneric } from './redaction.js';
 
 // ---------------------------------------------------------------------------
 // Credential scrubbing — shared pattern (also in observer, auto-learner, etc.)
 // ---------------------------------------------------------------------------
 
-const CREDENTIAL_PATTERNS = [
-  /\b(sk-[a-zA-Z0-9]{20,})\b/g,
-  /\b(ghp_[a-zA-Z0-9]{36,})\b/g,
-  /\b(AKIA[A-Z0-9]{12,})\b/g,
-  /\b(xoxb-[a-zA-Z0-9-]+)\b/g,
-  /\b(Bearer\s+[a-zA-Z0-9._-]{20,})\b/g,
-  /\b([a-f0-9]{64})\b/g, // hex private keys
-  /\b(0x[a-fA-F0-9]{40,})\b/g, // wallet addresses (partial match)
-];
-
 export function scrubCredentials(text: string): string {
-  let result = text;
-  for (const pattern of CREDENTIAL_PATTERNS) {
-    result = result.replace(pattern, '[REDACTED]');
-  }
-  return result;
+  return scrubCredentialsGeneric(text);
 }
 
 // ---------------------------------------------------------------------------

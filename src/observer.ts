@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import { ObservationOutputSchema, observationToMarkdown } from './schemas.js';
 import { validateLLMOutput } from './validate-llm.js';
 
@@ -32,49 +33,6 @@ const CIRCUIT_BREAKER_RESET_MS = 15 * 60 * 1000; // 15 min auto-reset (P1-2)
 
 /** Epoch ms when circuit breaker tripped (0 = never tripped). */
 let circuitBreakerTrippedAt = 0;
-
-// ---------------------------------------------------------------------------
-// Credential scrubbing (reused pattern from container-runner.ts + additions)
-// ---------------------------------------------------------------------------
-
-function scrubCredentials(text: string): string {
-  return (
-    text
-      // GitHub personal access tokens (before generic patterns)
-      .replace(/\bghp_[a-zA-Z0-9]+/g, 'ghp_***REDACTED***')
-      // AWS access key IDs
-      .replace(/\bAKIA[0-9A-Z]{16}/g, 'AKIA***REDACTED***')
-      // Slack bot tokens
-      .replace(/\bxoxb-[a-zA-Z0-9_-]+/g, 'xoxb-***REDACTED***')
-      // Google OAuth tokens
-      .replace(/\bya29\.[a-zA-Z0-9_-]+/g, 'ya29.***REDACTED***')
-      // Anthropic API keys (sk-ant-apiNN-...)
-      .replace(/\bsk-ant-api\d{2}-[a-zA-Z0-9_-]+/g, 'sk-ant-***REDACTED***')
-      // OpenRouter / Anthropic prefix keys (or-..., ant-...)
-      .replace(/\b(or-|ant-)[a-zA-Z0-9_-]{10,}/g, '$1***REDACTED***')
-      // sk- and pk- prefixed API keys (OpenAI, Stripe, etc.)
-      .replace(/\bsk-[a-zA-Z0-9_-]{10,}/g, 'sk-***REDACTED***')
-      .replace(/\bpk-[a-zA-Z0-9_-]{10,}/g, 'pk-***REDACTED***')
-      // API keys (xai-..., gsk-..., eyJ...)
-      .replace(/\b(xai|gsk|eyJ)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
-      // Bearer tokens
-      .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***REDACTED***')
-      // Discord bot tokens (base64.base64.base64)
-      .replace(
-        /[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g,
-        '***DISCORD_TOKEN_REDACTED***',
-      )
-      // Private keys (hex, 64 chars)
-      .replace(/\b0x[a-fA-F0-9]{64}\b/g, '0x***PRIVATE_KEY_REDACTED***')
-      // Generic long hex secrets (32+ chars)
-      .replace(/\b[a-fA-F0-9]{40,}\b/g, '***HEX_REDACTED***')
-      // Password patterns
-      .replace(
-        /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-        '$1=***REDACTED***',
-      )
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Output validation (prompt injection defense)
@@ -221,14 +179,8 @@ export async function observeConversation(
     ].join('\n');
 
     // Read secrets from .env file (P1-3: consistent with project security model)
-    const { readEnvFile } = await import('./env.js');
-    const secrets = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
-    const baseUrl =
-      secrets.ANTHROPIC_BASE_URL ||
-      process.env.ANTHROPIC_BASE_URL ||
-      'https://openrouter.ai/api';
-    const authToken =
-      secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '';
+    const { resolveAnthropicApiConfig } = await import('./env.js');
+    const { baseUrl, authToken } = resolveAnthropicApiConfig();
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);

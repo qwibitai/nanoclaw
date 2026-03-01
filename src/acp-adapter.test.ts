@@ -24,15 +24,18 @@ describe('extractPromptText', () => {
       { type: 'image' as const, data: 'abc', mimeType: 'image/png' },
       { type: 'text' as const, text: 'And this' },
     ];
-    // Cast to any to pass mixed types
-    expect(extractPromptText(blocks as any)).toBe('Keep this\nAnd this');
+    expect(extractPromptText(blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[])).toBe(
+      'Keep this\nAnd this',
+    );
   });
 
   it('returns empty string for no text blocks', () => {
     const blocks = [
       { type: 'image' as const, data: 'abc', mimeType: 'image/png' },
     ];
-    expect(extractPromptText(blocks as any)).toBe('');
+    expect(
+      extractPromptText(blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[]),
+    ).toBe('');
   });
 
   it('returns empty string for empty array', () => {

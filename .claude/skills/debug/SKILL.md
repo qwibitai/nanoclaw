@@ -70,8 +70,8 @@ Invalid API key · Please run /login
 **Fix:** Ensure `.env` file exists with either OAuth token or API key:
 ```bash
 cat .env  # Should show one of:
-# CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...  (subscription)
-# ANTHROPIC_API_KEY=sk-ant-api03-...        (pay-per-use)
+# CLAUDE_CODE_OAUTH_TOKEN=<your_claude_code_oauth_token>  (subscription)
+# ANTHROPIC_API_KEY=<your_anthropic_api_key>              (pay-per-use)
 ```
 
 #### Root User Restriction

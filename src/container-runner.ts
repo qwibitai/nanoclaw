@@ -18,6 +18,7 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { scrubCredentials } from './redaction.js';
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
@@ -26,37 +27,6 @@ import {
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 import { getRecentMessages } from './db.js';
-
-/**
- * Credential scrubbing — redact API keys, tokens, and passwords from text.
- * Inspired by IronClaw's leak detection. Prevents secrets from leaking
- * into logs, Discord messages, or agent context.
- */
-function scrubCredentials(text: string): string {
-  return (
-    text
-      // API keys (sk-..., pk-..., xai-..., etc.)
-      .replace(/\b(sk|pk|xai|gsk|eyJ)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
-      // Bearer tokens
-      .replace(/(Bearer\s+)[a-zA-Z0-9._-]{20,}/gi, '$1***REDACTED***')
-      // OpenRouter / Anthropic keys
-      .replace(/\b(or-|ant-|sk-ant-)[a-zA-Z0-9_-]{20,}/g, '$1***REDACTED***')
-      // Discord bot tokens (base64.base64.base64)
-      .replace(
-        /[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/g,
-        '***DISCORD_TOKEN_REDACTED***',
-      )
-      // Private keys (hex, 64 chars)
-      .replace(/\b0x[a-fA-F0-9]{64}\b/g, '0x***PRIVATE_KEY_REDACTED***')
-      // Generic long hex secrets (32+ chars)
-      .replace(/\b[a-fA-F0-9]{40,}\b/g, '***HEX_REDACTED***')
-      // Password patterns
-      .replace(
-        /(password|passwd|pwd|secret|token|apikey|api_key)\s*[=:]\s*\S+/gi,
-        '$1=***REDACTED***',
-      )
-  );
-}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---SOVEREIGN_OUTPUT_START---';

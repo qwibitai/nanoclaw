@@ -1,4 +1,172 @@
 ---
+## 2026-03-01 - Pre-Compact: SHIP GATE paused — user wants 7 differentiating features before deploy
+
+**SDLC Stage:** SHIP GATE (PAUSED) — v2.0 is REVIEW+CLEAN complete, user chose "Not yet"
+**Task:** User wants 7 new differentiating features built before deploying to VPS
+**Modified files (this session):** src/routine-engine.ts, src/routine-engine.test.ts, src/secrets-vault.ts, src/provider-chain.ts, src/embedding.ts, src/model-switching.ts, src/db.ts, STATE.md (all committed as 5084686)
+**Progress:**
+- DONE: All v2.0 P0/P1/P2 fixes applied and committed (5084686). 178/178 tests, tsc clean.
+- DONE: REVIEW EXIT deposited. CLEAN EXIT deposited. Loose-ends sweep clean.
+- DONE: Evidence freshness re-verified at HEAD (all 6 phases pass at 5084686).
+- DONE: SHIP GATE presented to user. User chose "Not yet."
+- DONE: User asked "what else is missing to differentiate." I presented 7 features in 2 tiers.
+- DONE: User said "build ALL of them, then deploy to VPS."
+- DONE: Explored codebase with 3 parallel agents — full understanding of:
+  - Memory stack: Observer/Reflector/Hindsight/Auto-learner (all exist, well-architected)
+  - Model routing: src/model-router.ts (keyword classifier, per-group config, DEFAULT_ROUTES)
+  - IPC: Relay (peer messaging), Delegation (spawn workers), Elicitation (structured questions)
+  - Voice skill: Scaffolded at .claude/skills/add-voice-transcription/ (full implementation ready)
+  - Skill system: Three-way merge via scripts/apply-skill.ts, manifest.yaml format
+  - Web infra: sentry-agent.ts has HTTP server pattern, no dashboard exists
+  - Container: Docker isolation, stdin/stdout protocol, volume mounts, 10 agent tools
+- IN PROGRESS: Plan mode entered, Plan agent spawned but rejected by user before completing.
+- NOT DONE: Plan for 7 features not yet written
+- NOT DONE: Implementation of 7 features
+- NOT DONE: VPS deployment
+**Test results:** 178/178 passing at 5084686 (v2.0 complete)
+**Key context:**
+- v2.0 commits: 7de60a2, 7591254, 1cd2afe, ab54415, e81101e, 5084686
+- Branch: feature/v2-six-features
+- v2.0 features (done): Provider chain, secrets vault, session pool, hybrid memory, model switching, routine engine
+- v2.5 features (to build): Semantic model routing, voice WhatsApp, proactive agent, self-improving memory, agent swarm, skill marketplace, web dashboard
+- Existing infra that supports v2.5: model-router.ts (keyword classifier to replace), embedding.ts (for semantic routing), observer.ts+hindsight.ts+auto-learner.ts (for proactive+self-improving), delegation-handler.ts+relay-handler.ts (for swarm), sentry-agent.ts (HTTP pattern for dashboard), voice skill scaffolded
+- User philosophy: small enough to understand, <35K lines, MIT, no SaaS infra
+- VPS: ssh hz (Hetzner, 4GB RAM), /root/nanoclaw-src/, systemd nanoclaw.service, Discord bot AdamLoveAI
+
+---
+## 2026-03-01 - Pre-Compact: REVIEW — fixing P0/P1 from 6 reviewers
+
+**SDLC Stage:** REVIEW, mid-fix on P0/P1 findings
+**Task:** Fix P0/P1 findings from 6 parallel review agents, then triage P2s
+**Modified files:** src/routine-engine.ts, src/secrets-vault.ts (uncommitted P0/P1 fixes), STATE.md
+**Progress:**
+- DONE: INTEGRATE complete (ab54415, e81101e). SQLite persistence, kill switches, cost safety, input validation, trace logging.
+- DONE: Generated branch diff (6834 lines). Spawned 6 parallel reviewers.
+- DONE: All 6 reviewers returned. Deduplicated findings: 2 P0, ~8 P1, 12+ P2.
+- DONE: Applied 3 fixes so far:
+  1. P0-1 ReDoS: Added regex length cap (200) + nested quantifier rejection in routine-engine addRoutine
+  2. P0-2 Path traversal: Added groupDir validation (rejects ..) in secrets-vault create()
+  3. P1 Decrypt: Added min blob length check (SALT+NONCE+TAG=60 bytes) in secrets-vault decrypt()
+- IN PROGRESS: Was mid-edit on handleWebhook when interrupted
+- NOT DONE: Webhook HMAC on raw body (pass bodyStr instead of re-serialized JSON)
+- NOT DONE: URL-decode + validate webhook path params (group, routineName)
+- NOT DONE: rateLimitMap max size cap (e.g., 1000 entries)
+- NOT DONE: dailyRunCounts.clear() in RoutineEngine.shutdown()
+- NOT DONE: ProviderChain pass maxTotalAttempts to FailoverProvider
+- NOT DONE: cosineSimilarity vector length check (return 0 if mismatch)
+- NOT DONE: chunkText dead code cleanup (3 identical branches, empty if-body, dead assignment)
+- NOT DONE: tryOldestCooled remove redundant catch(err){throw err}
+- NOT DONE: P2 triage with user (present findings for accept/reject)
+- NOT DONE: Run tests after all fixes
+- NOT DONE: Commit REVIEW fixes
+- NOT DONE: REVIEW EXIT deposit
+- NOT DONE: CLEAN → SHIP → PROVE → LEARN stages
+**Test results:** 178/178 v2.0 tests passing (before P0/P1 fixes — need re-run after)
+**Key context:**
+- Branch: feature/v2-six-features (5 commits ahead of main: 7de60a2, 7591254, 1cd2afe, ab54415, e81101e)
+- Review diff files in .claude/review-diff*.txt
+- All reviewer results are in the conversation summary — do NOT re-run reviewers
+- P0 findings CANNOT be rejected — must be fixed
+- P2 findings need user triage via AskUserQuestion
+- After fixes: re-run tests → commit → REVIEW EXIT → CLEAN → SHIP GATE → SHIP → PROVE → LEARN
+
+---
+## 2026-03-01 - Pre-Compact: INTEGRATE — P0 fixes in progress
+
+**SDLC Stage:** INTEGRATE, fixing P0 findings from Financial Safety + Agentic Security audits
+**Task:** Adding SQLite persistence + kill switches + cost safety fixes
+**Modified files:** src/db.ts, src/config.ts, src/embedding.ts, src/routine-engine.ts, src/provider-chain.ts, .env.example, STATE.md
+**Progress:**
+- DONE: Wave 3 committed (1cd2afe). IMPLEMENT EXIT deposited. Advanced to INTEGRATE.
+- DONE: Ran architecture drift check → DRIFTED. User chose "Add SQLite persistence."
+- DONE: Added SQLite tables (embedding_chunks, routines, routine_runs) + CRUD to db.ts
+- DONE: Added 5 kill switches to config.ts (PROVIDER_FALLBACK, SESSION_POOL, MODEL_SWITCHING, ROUTINE_ENGINE, WEBHOOK_SERVER)
+- DONE: Added EmbeddingPersistence adapter + write-through in embedding.ts
+- DONE: Added RoutinePersistence + loadFromPersistence in routine-engine.ts
+- DONE: Ran Financial Safety audit (P0-1: retry budget 15→6, P0-2: cron min cooldown 5min)
+- DONE: Ran Agentic Security audit (P0-1: embedding group validation, P0-2: routine prompt safety)
+- DONE: Applied fix — provider-chain maxTotalAttempts 15→6
+- DONE: Applied fix — routine-engine: MIN_CRON_COOLDOWN_MS=300000, MIN_EVENT_DEDUP_MS=60000, maxDailyRuns=50, daily run tracking
+- DONE: Defined assertValidGroupFolder + normalizeFilePath in embedding.ts
+- NOT DONE: Call assertValidGroupFolder/normalizeFilePath at indexFile, vectorSearch, hybridSearch, removeFileEmbeddings entry points
+- NOT DONE: Run tests after P0 fixes
+- NOT DONE: Commit INTEGRATE fixes
+- NOT DONE: Run remaining INTEGRATE checklists (agentic operational safeguards, seam contracts)
+- NOT DONE: INTEGRATE EXIT line in Evidence Log
+**Test results:** 146/146 passing (before P0 fixes — need re-run after)
+**Key context:**
+- Financial audit P0s: (1) retry budget too high — FIXED to 6, (2) cron no min interval — FIXED with 5min floor + 50/day cap
+- Agentic audit P0s: (1) embedding no group validation — PARTIALLY FIXED (functions defined, not yet called), (2) routine prompts agent-settable — noted for integration wiring (routines should be operator-only)
+- P1s deferred to REVIEW: retry-after hold (P1-1), event no global rate limit (P1-2), webhook per-group not global (P1-3), Opus in allowlist (P1-4), features default ON (P1-5), embedding rate limit (P1-1a), secrets key in memory (P1-2a), API keys in config objects (P1-3a), sequential cron blocks (P1-4a), event feedback loops (P1-5a)
+- User decision: Add SQLite persistence for both embeddings and routines (not just in-memory)
+- All 4 wave commits: c144c07 (base), 7de60a2 (W1), 7591254 (W2), 1cd2afe (W3)
+
+---
+## 2026-03-01 - Pre-Compact: Sovereign v2.0 ALL 6 PHASES IMPLEMENT COMPLETE
+
+**SDLC Stage:** IMPLEMENT complete → INTEGRATE next
+**Task:** All 6 phases VERIFIED. Need: IMPLEMENT EXIT check, Wave 3 checkpoint commit, then advance to INTEGRATE.
+**Modified files:** src/provider-chain.ts, src/provider-chain.test.ts, src/embedding.ts, src/embedding.test.ts, src/secrets-vault.ts, src/secrets-vault.test.ts, src/model-switching.ts, src/model-switching.test.ts, src/session-pool.ts, src/session-pool.test.ts, src/routine-engine.ts, src/routine-engine.test.ts, STATE.md, PLAN.md, .claude/risk-policy.json, tsconfig.json
+**Progress:**
+- DONE: All 3 waves implemented with TDD (separate Test Author + Implementer per phase):
+  - Wave 1: Ph1 Provider Fallback (28 tests) + Ph4 Hybrid Memory (34 tests) — committed 7de60a2
+  - Wave 2: Ph2 Secrets Vault (15 tests) + Ph5 Model Switching (24 tests) — committed 7591254
+  - Wave 3: Ph3 Session Pool (22 tests) + Ph6 Routine Engine (23 tests) — NOT YET COMMITTED
+- DONE: Security sentinel on all 6 modules. All P0/P1 fixed:
+  - Ph1: global call budget(15), retry-after clamp [1s,60s], cooldown auto-recovery
+  - Ph2: file perms 0o600, hex key validation, temp file cleanup
+  - Ph3: containerId regex validation (command injection P0)
+  - Ph4: store eviction 10K, input length 32K, SSRF protection, error sanitization
+  - Ph5: user input removed from error messages
+  - Ph6: timing-safe HMAC (crypto.timingSafeEqual), bind 127.0.0.1, global concurrency cap(5)
+- NOT DONE: Wave 3 checkpoint commit. IMPLEMENT EXIT line in Evidence Log. Advance to INTEGRATE stage.
+- P2 findings logged for REVIEW: error cast typing (Ph1), cosine length check (Ph4), master key Buffer zeroing (Ph2), decrypt min-length guard (Ph2), Map eviction (Ph5), /thinking word boundary (Ph5), groupFolder validation (Ph3), duplicate stopContainer (Ph3), ReDoS protection (Ph6), rate limiter ordering (Ph6), naive cron parser (Ph6), rateLimitMap growth (Ph6)
+**Test results:** 146/146 passing (28+34+15+24+22+23). tsc --noEmit clean. Pre-existing suite: 886 pass, 83 fail (7 unrelated test files, confirmed identical on main)
+**Key context:**
+- Branch: feature/v2-six-features (3 commits: c144c07 base, 7de60a2 Wave 1, 7591254 Wave 2)
+- After compact: re-invoke /do → reads STATE.md → checkpoint commit Wave 3 → IMPLEMENT EXIT → INTEGRATE stage
+- All HIGH QA Risk phases have USER_LIVE_TEST still NOT_TESTED (deferred to post-IMPLEMENT per protocol)
+- Phase 5 is LOW QA Risk — auto-verified, no user test needed
+
+---
+## 2026-03-01 - Pre-Compact: Sovereign v2.0 IMPLEMENT Wave 1 (receipts pending)
+
+**SDLC Stage:** IMPLEMENT, Wave 1 (Phase 1 + Phase 4 in parallel)
+**Task:** Fill proof receipts for Ph1+Ph4 tasks, checkpoint commit, then Wave 2
+**Modified files:** src/provider-chain.ts (NEW), src/provider-chain.test.ts (NEW), src/embedding.ts (NEW), src/embedding.test.ts (NEW), STATE.md, PLAN.md, .claude/risk-policy.json
+**Progress:**
+- DONE: PLAN.md overwritten with v2.0 content. risk-policy.json updated to v2 (12 high-risk files). APPROVE gate passed. Feature branch `feature/v2-six-features` created. Phase 1 Test Author (28 tests) + Phase 4 Test Author (34 tests) → Implementers made all 62 tests GREEN. Security sentinel ran on both files — all P0/P1 issues FIXED:
+  - Ph1: maxTotalAttempts=15 global call budget, retry-after clamped [1s,60s], cooldownMs wired for auto-recovery
+  - Ph4: MAX_STORE_SIZE=10K eviction, MAX_EMBEDDING_INPUT_CHARS=32K, SSRF protection (HTTPS-only base URL), error body sanitization (truncate+redact Bearer), input length validation
+- NOT DONE: Proof receipts not yet filled in STATE.md task checkboxes. Full regression check started (7 pre-existing failures in discord.test/db.test/setup tests — NOT from our changes, existed before branch). Need to: fill receipts, checkpoint commit Ph1+Ph4, then start Wave 2 (Ph2 Secrets Vault + Ph5 Model Switching). Waves 2 and 3 still ahead.
+- P2 findings logged for REVIEW: error cast typing (Ph1), cross-phase result envelope (Ph1), cosineSimilarity length check (Ph4), BM25 word-boundary matching (Ph4), chunk overlap edge cases (Ph4), degraded fallback warning (Ph4)
+**Test results:** 62/62 passing (28 provider-chain + 34 embedding). tsc --noEmit clean. Pre-existing suite: 886 pass, 83 fail (7 test files — all pre-existing, none from our code)
+**Key context:**
+- Branch: feature/v2-six-features (no commits yet — need checkpoint)
+- After compact: re-invoke /do → reads STATE.md → resumes IMPLEMENT → fill receipts → checkpoint commit → Wave 2
+- Wave execution: Wave 1 (Ph1||Ph4) DONE → Wave 2 (Ph2||Ph5) NEXT → Wave 3 (Ph3||Ph6) LAST
+- Pre-existing test failures: discord.test.ts, db.test.ts, setup/environment.test.ts, setup/register.test.ts — existed on main before our branch
+
+---
+## 2026-03-01 - Pre-Compact: Sovereign v2.0 PLAN stage (APPROVE pending)
+
+**SDLC Stage:** APPROVE (RECON→INTERVIEW→PLAN complete, DESTROY not yet run)
+**Task:** Write PLAN.md (stale — has Observer Agent content), present for user approval
+**Modified files:** STATE.md (written fresh with 6 phase specs), PLAN.md (needs overwrite)
+**Progress:**
+- DONE: RECON (architecture scan, domain detection agentic+paid-api, size=medium), INTERVIEW (4 questions answered: OpenAI embeddings, session-level model switch, yes webhooks, env var master key), PLAN research (4 parallel agents: ChaCha20→switched to AES-256-GCM, BM25+vector RRF k=60, session pool LRU, extension points mapped), IronClaw deep dive (read actual source: 3-layer provider fallback, RRF, routine engine types, secrets vault, sandbox), Pre-mortem (9 risks), Decompose (6 phases with full WHEN/THEN specs), Decisions (16 entries in STATE.md)
+- NOT DONE: PLAN.md needs rewriting with v2.0 content (currently stale Observer Agent plan). risk-policy.json needs updating. DESTROY stage. APPROVE gate. TaskList creation. Context break.
+**Test results:** N/A (planning stage, no code written)
+**Key context:**
+- 6 phases: (1) Provider Fallback Chain, (2) Encrypted Secrets Vault, (3) Warm-Start Session Pool, (4) Hybrid Memory BM25+Vector, (5) In-Chat Model Switching, (6) Routine Engine + Webhooks
+- Parallel waves: Wave 1: Ph1||Ph4, Wave 2: Ph2||Ph5, Wave 3: Ph3||Ph6
+- IronClaw insights adopted: AES-256-GCM+HKDF (not ChaCha20), 3-layer decorator (Retry→Failover→CircuitBreaker), Trigger/Action/Guardrails types, ROUTINE_OK sentinel, RRF k=60
+- Host-side provider fallback (no container changes needed for v2.0)
+- All phase specs written in STATE.md with Intent + WHEN/THEN + Test Cases + Operational Constraints
+- PLAN.md file on disk is STALE (Observer Agent v0.2.0 content) — must be overwritten
+- After compact: re-invoke /do → it reads STATE.md → resumes at APPROVE (write PLAN.md, then present)
+
+---
 ## 2026-03-01 - Session End: Sovereign v2.0 roadmap finalized
 
 **What we worked on:** Researched 8 claw competitors + open-core pricing models, wrote brainstorm doc for v2.0, rescoped from full SaaS platform to lean feature integration (6 features, ~1500 lines, stay under 35K total)

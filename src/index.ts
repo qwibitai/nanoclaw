@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ACP_ENABLED,
   ASSISTANT_NAME,
+  DASHBOARD_ENABLED,
   DISCORD_BOT_TOKEN,
   DISCORD_ONLY,
   IDLE_TIMEOUT,
@@ -660,6 +661,13 @@ async function main(): Promise<void> {
   if (ACP_ENABLED) {
     startAcpServer();
   }
+
+  // Start dashboard if enabled
+  if (DASHBOARD_ENABLED) {
+    const { startDashboard } = await import('./dashboard.js');
+    startDashboard();
+  }
+
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

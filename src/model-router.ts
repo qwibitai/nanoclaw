@@ -5,13 +5,15 @@
  * then looks up the best model from a configurable route map. Explicit
  * model overrides always win.
  *
- * Pure functions — no I/O, no side effects. Testable independently.
+ * selectModel is async — tries semantic (embedding-based) classification
+ * first, falls back to keyword matching. Testable independently.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { SEMANTIC_ROUTING_ENABLED } from './config.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 
@@ -170,18 +172,37 @@ export function classifyTask(prompt: string): TaskType {
 
 /**
  * Pick the optimal model for a prompt. Explicit override always wins.
+ * Tries semantic (embedding-based) classification first, falls back to keywords.
  */
-export function selectModel(
+export async function selectModel(
   prompt: string,
   config: ModelRoutingConfig,
   explicitModel?: string,
-): { model: string; taskType: TaskType; reason: string } {
+): Promise<{ model: string; taskType: TaskType; reason: string }> {
   if (explicitModel) {
     return {
       model: explicitModel,
       taskType: classifyTask(prompt),
       reason: 'explicit override',
     };
+  }
+
+  // Try semantic classification first (if enabled)
+  if (SEMANTIC_ROUTING_ENABLED) {
+    try {
+      const { semanticClassifyTask } = await import('./semantic-router.js');
+      const result = await semanticClassifyTask(prompt);
+      if (result) {
+        const model = config.routing[result.taskType] ?? config.default;
+        return {
+          model,
+          taskType: result.taskType,
+          reason: `semantic (similarity=${result.similarity.toFixed(3)})`,
+        };
+      }
+    } catch (err) {
+      logger.debug({ err }, 'Semantic classification failed, using keyword fallback');
+    }
   }
 
   const taskType = classifyTask(prompt);

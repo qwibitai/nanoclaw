@@ -20,6 +20,12 @@ const envConfig = readEnvFile([
   'AUTO_LEARNER_ENABLED',
   'HINDSIGHT_ENABLED',
   'ROUTER_ENABLED',
+  'SEMANTIC_ROUTING_ENABLED',
+  'DASHBOARD_ENABLED',
+  'DASHBOARD_ALLOW_UNAUTH',
+  'AGENT_SWARM_ENABLED',
+  'MEMORY_IMPROVER_ENABLED',
+  'PROACTIVE_AGENT_ENABLED',
 ]);
 
 export const ASSISTANT_NAME =
@@ -136,6 +142,71 @@ export const ROUTER_ENABLED =
 
 // ACP (Agent Client Protocol) — makes agents driveable from external tools
 export const ACP_ENABLED = (process.env.ACP_ENABLED || '') === 'true';
+
+// === v2.0 Feature Kill Switches ===
+// Set any to 'false' to disable the feature without code changes.
+export const PROVIDER_FALLBACK_ENABLED =
+  (process.env.PROVIDER_FALLBACK_ENABLED ?? 'true') !== 'false';
+export const SESSION_POOL_ENABLED =
+  (process.env.SESSION_POOL_ENABLED ?? 'true') !== 'false';
+export const MODEL_SWITCHING_ENABLED =
+  (process.env.MODEL_SWITCHING_ENABLED ?? 'true') !== 'false';
+export const ROUTINE_ENGINE_ENABLED =
+  (process.env.ROUTINE_ENGINE_ENABLED ?? 'true') !== 'false';
+export const WEBHOOK_SERVER_ENABLED =
+  (process.env.WEBHOOK_SERVER_ENABLED ?? 'true') !== 'false';
+
+// Secrets vault — requires SOVEREIGN_MASTER_KEY env var to function.
+// No separate kill switch needed — unset the key to disable.
+
+// Hybrid memory — kill switch already in embedding.ts via HYBRID_MEMORY_ENABLED
+
+// Webhook server port
+export const WEBHOOK_PORT = parseInt(
+  process.env.WEBHOOK_PORT || '3456',
+  10,
+);
+
+// Session pool settings
+export const MAX_POOL_SIZE = Math.max(
+  0,
+  parseInt(process.env.MAX_POOL_SIZE || '3', 10) || 3,
+);
+export const POOL_IDLE_TIMEOUT = Math.max(
+  60_000,
+  parseInt(process.env.POOL_IDLE_TIMEOUT || '600000', 10) || 600_000,
+);
+
+// === v2.5 Feature Kill Switches ===
+export const SEMANTIC_ROUTING_ENABLED =
+  (process.env.SEMANTIC_ROUTING_ENABLED ??
+    envConfig.SEMANTIC_ROUTING_ENABLED ??
+    'true') !== 'false';
+export const DASHBOARD_ENABLED =
+  (process.env.DASHBOARD_ENABLED ?? envConfig.DASHBOARD_ENABLED ?? 'false') !==
+  'false';
+export const DASHBOARD_ALLOW_UNAUTH =
+  (process.env.DASHBOARD_ALLOW_UNAUTH ??
+    envConfig.DASHBOARD_ALLOW_UNAUTH ??
+    'false') === 'true';
+export const DASHBOARD_PORT = parseInt(
+  process.env.DASHBOARD_PORT || '3457',
+  10,
+);
+export const DASHBOARD_AUTH_TOKEN =
+  process.env.DASHBOARD_AUTH_TOKEN || '';
+export const AGENT_SWARM_ENABLED =
+  (process.env.AGENT_SWARM_ENABLED ??
+    envConfig.AGENT_SWARM_ENABLED ??
+    'true') !== 'false';
+export const MEMORY_IMPROVER_ENABLED =
+  (process.env.MEMORY_IMPROVER_ENABLED ??
+    envConfig.MEMORY_IMPROVER_ENABLED ??
+    'true') !== 'false';
+export const PROACTIVE_AGENT_ENABLED =
+  (process.env.PROACTIVE_AGENT_ENABLED ??
+    envConfig.PROACTIVE_AGENT_ENABLED ??
+    'true') !== 'false';
 
 // Sentry Agent — automated incident triage
 export const SENTRY_AGENT_PORT = parseInt(

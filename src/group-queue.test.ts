@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import type { ChildProcess } from 'child_process';
 
 import { GroupQueue } from './group-queue.js';
 
@@ -263,12 +264,12 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register a process so closeStdin has a groupFolder
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+      queue.registerProcess(
+        'group1@g.us',
+        null as unknown as ChildProcess,
+        'container-1',
+        'test-group',
+      );
 
     // Enqueue a task while container is active but NOT idle
     const taskFn = vi.fn(async () => {});
@@ -303,12 +304,12 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     // Register process and mark idle
-    queue.registerProcess(
-      'group1@g.us',
-      {} as any,
-      'container-1',
-      'test-group',
-    );
+      queue.registerProcess(
+        'group1@g.us',
+        null as unknown as ChildProcess,
+        'container-1',
+        'test-group',
+      );
     queue.notifyIdle('group1@g.us');
 
     // Clear previous writes, then enqueue a task
@@ -344,7 +345,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      null as unknown as ChildProcess,
       'container-1',
       'test-group',
     );
@@ -385,7 +386,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      null as unknown as ChildProcess,
       'container-1',
       'test-group',
     );
@@ -418,7 +419,7 @@ describe('GroupQueue', () => {
     // Register process and enqueue a task (no idle yet — no preemption)
     queue.registerProcess(
       'group1@g.us',
-      {} as any,
+      null as unknown as ChildProcess,
       'container-1',
       'test-group',
     );

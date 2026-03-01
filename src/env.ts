@@ -42,3 +42,24 @@ export function readEnvFile(keys: string[]): Record<string, string> {
 
   return result;
 }
+
+export interface AnthropicApiConfig {
+  baseUrl: string;
+  authToken: string;
+}
+
+/**
+ * Resolve Anthropic/OpenRouter API config from .env first, then process.env.
+ * This keeps one canonical precedence order for all LLM-side modules.
+ */
+export function resolveAnthropicApiConfig(): AnthropicApiConfig {
+  const secrets = readEnvFile(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
+  return {
+    baseUrl:
+      secrets.ANTHROPIC_BASE_URL ||
+      process.env.ANTHROPIC_BASE_URL ||
+      'https://openrouter.ai/api',
+    authToken:
+      secrets.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN || '',
+  };
+}

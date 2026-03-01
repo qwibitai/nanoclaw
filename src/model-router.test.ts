@@ -14,6 +14,10 @@ vi.mock('./group-folder.js', () => ({
   resolveGroupFolderPath: vi.fn(() => '/tmp/test-group'),
 }));
 
+vi.mock('./config.js', () => ({
+  SEMANTIC_ROUTING_ENABLED: false,
+}));
+
 vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -91,33 +95,33 @@ describe('classifyTask', () => {
 // selectModel
 // ---------------------------------------------------------------------------
 describe('selectModel', () => {
-  it('returns default model for conversation', () => {
-    const result = selectModel('Hey there', DEFAULT_ROUTES);
+  it('returns default model for conversation', async () => {
+    const result = await selectModel('Hey there', DEFAULT_ROUTES);
     expect(result.model).toBe('claude-sonnet-4-6');
     expect(result.taskType).toBe('conversation');
     expect(result.reason).toContain('classified as');
   });
 
-  it('routes grunt work to cheap model', () => {
-    const result = selectModel('Format this as CSV', DEFAULT_ROUTES);
+  it('routes grunt work to cheap model', async () => {
+    const result = await selectModel('Format this as CSV', DEFAULT_ROUTES);
     expect(result.model).toBe('minimax/minimax-m2.5');
     expect(result.taskType).toBe('grunt');
   });
 
-  it('routes quick-check to cheap model', () => {
-    const result = selectModel('Check the status', DEFAULT_ROUTES);
+  it('routes quick-check to cheap model', async () => {
+    const result = await selectModel('Check the status', DEFAULT_ROUTES);
     expect(result.model).toBe('minimax/minimax-m2.5');
     expect(result.taskType).toBe('quick-check');
   });
 
-  it('routes research to smart model', () => {
-    const result = selectModel('Research competitor pricing', DEFAULT_ROUTES);
+  it('routes research to smart model', async () => {
+    const result = await selectModel('Research competitor pricing', DEFAULT_ROUTES);
     expect(result.model).toBe('claude-sonnet-4-6');
     expect(result.taskType).toBe('research');
   });
 
-  it('explicit model override wins', () => {
-    const result = selectModel(
+  it('explicit model override wins', async () => {
+    const result = await selectModel(
       'Format as CSV',
       DEFAULT_ROUTES,
       'google/gemini-2.5-flash',
@@ -126,7 +130,7 @@ describe('selectModel', () => {
     expect(result.reason).toBe('explicit override');
   });
 
-  it('uses custom config routes', () => {
+  it('uses custom config routes', async () => {
     const custom: ModelRoutingConfig = {
       ...DEFAULT_ROUTES,
       routing: {
@@ -134,7 +138,7 @@ describe('selectModel', () => {
         grunt: 'google/gemini-2.5-flash',
       },
     };
-    const result = selectModel('Format this list', custom);
+    const result = await selectModel('Format this list', custom);
     expect(result.model).toBe('google/gemini-2.5-flash');
   });
 });

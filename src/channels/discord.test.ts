@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  ALLOWED_USERS: new Set<string>(),
 }));
 
 // Mock logger
@@ -20,9 +21,10 @@ vi.mock('../logger.js', () => ({
 
 // --- discord.js mock ---
 
-type Handler = (...args: any[]) => any;
+type Handler = (...args: unknown[]) => unknown;
+type ClientLike = { eventHandlers: Map<string, Handler[]> };
 
-const clientRef = vi.hoisted(() => ({ current: null as any }));
+const clientRef = vi.hoisted(() => ({ current: null as ClientLike | null }));
 
 vi.mock('discord.js', () => {
   const Events = {
@@ -40,10 +42,10 @@ vi.mock('discord.js', () => {
 
   class MockClient {
     eventHandlers = new Map<string, Handler[]>();
-    user: any = { id: '999888777', tag: 'Andy#1234' };
+    user: { id: string; tag: string } = { id: '999888777', tag: 'Andy#1234' };
     private _ready = false;
 
-    constructor(_opts: any) {
+    constructor(_opts: unknown) {
       clientRef.current = this;
     }
 
@@ -128,7 +130,7 @@ function createMessage(overrides: {
   channelName?: string;
   messageId?: string;
   createdAt?: Date;
-  attachments?: Map<string, any>;
+  attachments?: Map<string, unknown>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
 }) {
@@ -145,7 +147,7 @@ function createMessage(overrides: {
     channelId,
     id: overrides.messageId ?? 'msg_001',
     content: overrides.content ?? 'Hello everyone',
-    createdAt: overrides.createdAt ?? new Date('2024-01-01T00:00:00.000Z'),
+    createdAt: overrides.createdAt ?? new Date(),
     author: {
       id: authorId,
       username: overrides.authorUsername ?? 'alice',
@@ -173,11 +175,11 @@ function createMessage(overrides: {
   };
 }
 
-function currentClient() {
-  return clientRef.current;
+function currentClient(): ClientLike {
+  return clientRef.current as ClientLike;
 }
 
-async function triggerMessage(message: any) {
+async function triggerMessage(message: unknown) {
   const handlers = currentClient().eventHandlers.get('messageCreate') || [];
   for (const h of handlers) await h(message);
 }

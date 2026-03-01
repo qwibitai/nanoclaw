@@ -6,7 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR } from './config.js';
+import { DATA_DIR, AGENT_SWARM_ENABLED } from './config.js';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import { logger } from './logger.js';
 import { selectModel, loadModelRoutingConfig } from './model-router.js';
@@ -23,6 +23,15 @@ interface DelegateRequest {
   source_chat_jid: string;
   timestamp: string;
   repo?: string; // Optional: path to git repo — worker gets its own worktree
+}
+
+interface SwarmRequest {
+  id: string;
+  subtasks: Array<{ prompt: string; model?: string }>;
+  timeout_seconds: number;
+  source_group: string;
+  source_chat_jid: string;
+  timestamp: string;
 }
 
 // Track active delegations to prevent duplicate processing
@@ -55,65 +64,107 @@ export function startDelegationHandler(
     }
 
     for (const sourceGroup of groupFolders) {
+      // --- Delegate requests ---
       const requestsDir = path.join(
         ipcBaseDir,
         sourceGroup,
         'delegate-requests',
       );
-      if (!fs.existsSync(requestsDir)) continue;
-
-      let requestFiles: string[];
-      try {
-        requestFiles = fs
-          .readdirSync(requestsDir)
-          .filter((f) => f.endsWith('.json'));
-      } catch {
-        continue;
-      }
-
-      for (const file of requestFiles) {
-        if (activeDelegations.size >= MAX_CONCURRENT_WORKERS) {
-          logger.debug(
-            { active: activeDelegations.size },
-            'Max concurrent workers reached, deferring',
-          );
-          break;
+      if (fs.existsSync(requestsDir)) {
+        let requestFiles: string[];
+        try {
+          requestFiles = fs
+            .readdirSync(requestsDir)
+            .filter((f) => f.endsWith('.json'));
+        } catch {
+          requestFiles = [];
         }
 
-        const filePath = path.join(requestsDir, file);
-        let request: DelegateRequest;
+        for (const file of requestFiles) {
+          if (activeDelegations.size >= MAX_CONCURRENT_WORKERS) {
+            logger.debug(
+              { active: activeDelegations.size },
+              'Max concurrent workers reached, deferring',
+            );
+            break;
+          }
 
-        try {
-          request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        } catch (err) {
-          logger.error({ file, err }, 'Failed to parse delegate request');
+          const filePath = path.join(requestsDir, file);
+          let request: DelegateRequest;
+
+          try {
+            request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+          } catch (err) {
+            logger.error({ file, err }, 'Failed to parse delegate request');
+            try {
+              fs.unlinkSync(filePath);
+            } catch {}
+            continue;
+          }
+
+          // Skip if already processing
+          if (activeDelegations.has(request.id)) continue;
+
+          // Remove request file immediately to prevent re-processing
           try {
             fs.unlinkSync(filePath);
           } catch {}
-          continue;
+
+          activeDelegations.add(request.id);
+
+          logger.info(
+            { delegateId: request.id, sourceGroup, model: request.model },
+            'Processing delegation request',
+          );
+
+          // Spawn worker in background (don't block the poll loop)
+          spawnWorker(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
+            () => {
+              activeDelegations.delete(request.id);
+            },
+          );
         }
+      }
 
-        // Skip if already processing
-        if (activeDelegations.has(request.id)) continue;
+      // --- Swarm requests (v2.5) ---
+      if (AGENT_SWARM_ENABLED) {
+        const swarmDir = path.join(ipcBaseDir, sourceGroup, 'swarm-requests');
+        if (fs.existsSync(swarmDir)) {
+          let swarmFiles: string[];
+          try {
+            swarmFiles = fs.readdirSync(swarmDir).filter((f) => f.endsWith('.json'));
+          } catch {
+            swarmFiles = [];
+          }
 
-        // Remove request file immediately to prevent re-processing
-        try {
-          fs.unlinkSync(filePath);
-        } catch {}
+          for (const file of swarmFiles) {
+            if (activeDelegations.size >= MAX_CONCURRENT_WORKERS) break;
 
-        activeDelegations.add(request.id);
+            const filePath = path.join(swarmDir, file);
+            let request: SwarmRequest;
+            try {
+              request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+            } catch (err) {
+              logger.error({ file, err }, 'Failed to parse swarm request');
+              try { fs.unlinkSync(filePath); } catch {}
+              continue;
+            }
 
-        logger.info(
-          { delegateId: request.id, sourceGroup, model: request.model },
-          'Processing delegation request',
-        );
+            if (activeDelegations.has(request.id)) continue;
 
-        // Spawn worker in background (don't block the poll loop)
-        spawnWorker(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
-          () => {
-            activeDelegations.delete(request.id);
-          },
-        );
+            try { fs.unlinkSync(filePath); } catch {}
+            activeDelegations.add(request.id);
+
+            logger.info(
+              { swarmId: request.id, sourceGroup, subtaskCount: request.subtasks.length },
+              'Processing swarm request',
+            );
+
+            processSwarmRequest(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
+              () => { activeDelegations.delete(request.id); },
+            );
+          }
+        }
       }
     }
 
@@ -203,7 +254,7 @@ async function spawnWorker(
         assistantName: 'Worker',
         model:
           request.model ||
-          selectModel(request.prompt, loadModelRoutingConfig(sourceGroup))
+          (await selectModel(request.prompt, loadModelRoutingConfig(sourceGroup)))
             .model,
       },
       (_proc, _name) => {
@@ -257,6 +308,154 @@ async function spawnWorker(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Swarm processing — fan-out subtasks, collect results, synthesize
+// ---------------------------------------------------------------------------
+
+async function processSwarmRequest(
+  request: SwarmRequest,
+  sourceGroup: string,
+  ipcBaseDir: string,
+  registeredGroups: () => Record<string, RegisteredGroup>,
+): Promise<void> {
+  const resultsDir = path.join(ipcBaseDir, sourceGroup, 'swarm-results');
+  fs.mkdirSync(resultsDir, { recursive: true });
+  const resultPath = path.join(resultsDir, `${request.id}.json`);
+
+  // Find the registered group
+  const groups = registeredGroups();
+  let group: RegisteredGroup | undefined;
+  for (const [_jid, g] of Object.entries(groups)) {
+    if (g.folder === sourceGroup) {
+      group = g;
+      break;
+    }
+  }
+
+  if (!group) {
+    writeResponse(resultPath, {
+      error: `Source group '${sourceGroup}' not registered`,
+      model: null,
+    });
+    return;
+  }
+
+  // Fan-out: spawn workers for each subtask
+  interface WorkerResult {
+    result?: string;
+    error?: string;
+  }
+
+  const workerPromises: Promise<WorkerResult>[] = request.subtasks.map(
+    async (subtask, index) => {
+      const { enhancedPrompt } = applyTemplate(subtask.prompt, sourceGroup);
+      const workerPrompt = [
+        `You are worker ${index + 1} of ${request.subtasks.length} in a swarm.`,
+        `Complete your subtask and output your findings.`,
+        `Do NOT use send_message — your output goes directly back to the coordinator.`,
+        `Be concise and focused.`,
+        ``,
+        `## Task`,
+        enhancedPrompt,
+      ].join('\n');
+
+      try {
+        let lastResult: string | null = null;
+
+        const output = await runContainerAgent(
+          group!,
+          {
+            prompt: workerPrompt,
+            groupFolder: sourceGroup,
+            chatJid: request.source_chat_jid,
+            isMain: false,
+            isScheduledTask: true,
+            assistantName: `Worker-${index + 1}`,
+            model:
+              subtask.model ||
+              (await selectModel(subtask.prompt, loadModelRoutingConfig(sourceGroup))).model,
+          },
+          (_proc, _name) => {},
+          async (streamOutput: ContainerOutput) => {
+            if (streamOutput.result) {
+              lastResult = streamOutput.result;
+            }
+          },
+        );
+
+        const finalResult = lastResult || output.result;
+        if (output.status === 'success' || finalResult) {
+          return { result: finalResult || '(worker completed with no output)' };
+        }
+        return { error: output.error || 'Worker failed' };
+      } catch (err) {
+        return { error: `Worker error: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    },
+  );
+
+  // Collect results (with overall timeout)
+  const timeoutMs = request.timeout_seconds * 1000;
+  let workerResults: WorkerResult[];
+  try {
+    workerResults = await Promise.race([
+      Promise.all(workerPromises),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Swarm timeout')), timeoutMs),
+      ),
+    ]);
+  } catch {
+    workerResults = await Promise.allSettled(workerPromises).then((settled) =>
+      settled.map((s) =>
+        s.status === 'fulfilled'
+          ? s.value
+          : { error: `Worker failed: ${s.reason}` },
+      ),
+    );
+  }
+
+  const completedCount = workerResults.filter((r) => r.result).length;
+
+  // Synthesize results if we have a synthesis prompt or multiple results
+  let synthesis: string | null = null;
+  if (completedCount > 0) {
+    const combinedResults = workerResults
+      .map((r, i) =>
+        r.result
+          ? `## Subtask ${i + 1} Result:\n${r.result}`
+          : `## Subtask ${i + 1}: FAILED (${r.error})`,
+      )
+      .join('\n\n');
+
+    // For now, synthesis is just the combined results
+    // A future enhancement could pass this through an LLM with synthesis_prompt
+    synthesis = combinedResults;
+  }
+
+  // Write swarm result
+  const tempPath = `${resultPath}.tmp`;
+  fs.writeFileSync(
+    tempPath,
+    JSON.stringify(
+      {
+        completed_count: completedCount,
+        total_count: request.subtasks.length,
+        synthesis,
+        worker_results: workerResults,
+        timestamp: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+  );
+  fs.renameSync(tempPath, resultPath);
+
+  logger.info(
+    { swarmId: request.id, completedCount, totalCount: request.subtasks.length },
+    'Swarm completed',
+  );
 }
 
 function writeResponse(
