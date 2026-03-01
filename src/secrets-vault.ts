@@ -66,6 +66,11 @@ function encrypt(masterKey: string, plaintext: string): string {
 function decrypt(masterKey: string, base64Blob: string): string {
   const buf = Buffer.from(base64Blob, 'base64');
 
+  const MIN_BLOB_LEN = SALT_LEN + NONCE_LEN + TAG_LEN;
+  if (buf.length < MIN_BLOB_LEN) {
+    throw new Error('Encrypted blob is too short — data may be corrupted');
+  }
+
   const salt = buf.subarray(0, SALT_LEN);
   const nonce = buf.subarray(SALT_LEN, SALT_LEN + NONCE_LEN);
   const authTag = buf.subarray(buf.length - TAG_LEN);
@@ -118,6 +123,13 @@ export class SecretsVault {
     groupDir: string,
   ): Promise<SecretsVault> {
     validateMasterKey(masterKey);
+
+    // Path traversal guard: reject suspicious directory paths
+    const resolved = path.resolve(groupDir);
+    if (groupDir.includes('..') || resolved.includes('..')) {
+      throw new Error('groupDir must not contain path traversal segments');
+    }
+
     const vault = new SecretsVault(masterKey, groupDir);
 
     // Create empty secrets file if none exists

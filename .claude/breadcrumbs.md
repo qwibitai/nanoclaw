@@ -1,4 +1,72 @@
 ---
+## 2026-03-01 - Pre-Compact: REVIEW — fixing P0/P1 from 6 reviewers
+
+**SDLC Stage:** REVIEW, mid-fix on P0/P1 findings
+**Task:** Fix P0/P1 findings from 6 parallel review agents, then triage P2s
+**Modified files:** src/routine-engine.ts, src/secrets-vault.ts (uncommitted P0/P1 fixes), STATE.md
+**Progress:**
+- DONE: INTEGRATE complete (ab54415, e81101e). SQLite persistence, kill switches, cost safety, input validation, trace logging.
+- DONE: Generated branch diff (6834 lines). Spawned 6 parallel reviewers.
+- DONE: All 6 reviewers returned. Deduplicated findings: 2 P0, ~8 P1, 12+ P2.
+- DONE: Applied 3 fixes so far:
+  1. P0-1 ReDoS: Added regex length cap (200) + nested quantifier rejection in routine-engine addRoutine
+  2. P0-2 Path traversal: Added groupDir validation (rejects ..) in secrets-vault create()
+  3. P1 Decrypt: Added min blob length check (SALT+NONCE+TAG=60 bytes) in secrets-vault decrypt()
+- IN PROGRESS: Was mid-edit on handleWebhook when interrupted
+- NOT DONE: Webhook HMAC on raw body (pass bodyStr instead of re-serialized JSON)
+- NOT DONE: URL-decode + validate webhook path params (group, routineName)
+- NOT DONE: rateLimitMap max size cap (e.g., 1000 entries)
+- NOT DONE: dailyRunCounts.clear() in RoutineEngine.shutdown()
+- NOT DONE: ProviderChain pass maxTotalAttempts to FailoverProvider
+- NOT DONE: cosineSimilarity vector length check (return 0 if mismatch)
+- NOT DONE: chunkText dead code cleanup (3 identical branches, empty if-body, dead assignment)
+- NOT DONE: tryOldestCooled remove redundant catch(err){throw err}
+- NOT DONE: P2 triage with user (present findings for accept/reject)
+- NOT DONE: Run tests after all fixes
+- NOT DONE: Commit REVIEW fixes
+- NOT DONE: REVIEW EXIT deposit
+- NOT DONE: CLEAN → SHIP → PROVE → LEARN stages
+**Test results:** 178/178 v2.0 tests passing (before P0/P1 fixes — need re-run after)
+**Key context:**
+- Branch: feature/v2-six-features (5 commits ahead of main: 7de60a2, 7591254, 1cd2afe, ab54415, e81101e)
+- Review diff files in .claude/review-diff*.txt
+- All reviewer results are in the conversation summary — do NOT re-run reviewers
+- P0 findings CANNOT be rejected — must be fixed
+- P2 findings need user triage via AskUserQuestion
+- After fixes: re-run tests → commit → REVIEW EXIT → CLEAN → SHIP GATE → SHIP → PROVE → LEARN
+
+---
+## 2026-03-01 - Pre-Compact: INTEGRATE — P0 fixes in progress
+
+**SDLC Stage:** INTEGRATE, fixing P0 findings from Financial Safety + Agentic Security audits
+**Task:** Adding SQLite persistence + kill switches + cost safety fixes
+**Modified files:** src/db.ts, src/config.ts, src/embedding.ts, src/routine-engine.ts, src/provider-chain.ts, .env.example, STATE.md
+**Progress:**
+- DONE: Wave 3 committed (1cd2afe). IMPLEMENT EXIT deposited. Advanced to INTEGRATE.
+- DONE: Ran architecture drift check → DRIFTED. User chose "Add SQLite persistence."
+- DONE: Added SQLite tables (embedding_chunks, routines, routine_runs) + CRUD to db.ts
+- DONE: Added 5 kill switches to config.ts (PROVIDER_FALLBACK, SESSION_POOL, MODEL_SWITCHING, ROUTINE_ENGINE, WEBHOOK_SERVER)
+- DONE: Added EmbeddingPersistence adapter + write-through in embedding.ts
+- DONE: Added RoutinePersistence + loadFromPersistence in routine-engine.ts
+- DONE: Ran Financial Safety audit (P0-1: retry budget 15→6, P0-2: cron min cooldown 5min)
+- DONE: Ran Agentic Security audit (P0-1: embedding group validation, P0-2: routine prompt safety)
+- DONE: Applied fix — provider-chain maxTotalAttempts 15→6
+- DONE: Applied fix — routine-engine: MIN_CRON_COOLDOWN_MS=300000, MIN_EVENT_DEDUP_MS=60000, maxDailyRuns=50, daily run tracking
+- DONE: Defined assertValidGroupFolder + normalizeFilePath in embedding.ts
+- NOT DONE: Call assertValidGroupFolder/normalizeFilePath at indexFile, vectorSearch, hybridSearch, removeFileEmbeddings entry points
+- NOT DONE: Run tests after P0 fixes
+- NOT DONE: Commit INTEGRATE fixes
+- NOT DONE: Run remaining INTEGRATE checklists (agentic operational safeguards, seam contracts)
+- NOT DONE: INTEGRATE EXIT line in Evidence Log
+**Test results:** 146/146 passing (before P0 fixes — need re-run after)
+**Key context:**
+- Financial audit P0s: (1) retry budget too high — FIXED to 6, (2) cron no min interval — FIXED with 5min floor + 50/day cap
+- Agentic audit P0s: (1) embedding no group validation — PARTIALLY FIXED (functions defined, not yet called), (2) routine prompts agent-settable — noted for integration wiring (routines should be operator-only)
+- P1s deferred to REVIEW: retry-after hold (P1-1), event no global rate limit (P1-2), webhook per-group not global (P1-3), Opus in allowlist (P1-4), features default ON (P1-5), embedding rate limit (P1-1a), secrets key in memory (P1-2a), API keys in config objects (P1-3a), sequential cron blocks (P1-4a), event feedback loops (P1-5a)
+- User decision: Add SQLite persistence for both embeddings and routines (not just in-memory)
+- All 4 wave commits: c144c07 (base), 7de60a2 (W1), 7591254 (W2), 1cd2afe (W3)
+
+---
 ## 2026-03-01 - Pre-Compact: Sovereign v2.0 ALL 6 PHASES IMPLEMENT COMPLETE
 
 **SDLC Stage:** IMPLEMENT complete → INTEGRATE next

@@ -28,10 +28,10 @@ function makeRoutine(overrides: Partial<Routine> = {}): Routine {
   };
 }
 
-function hmacSign(payload: unknown, secret: string): string {
+function hmacSign(rawBody: string, secret: string): string {
   return crypto
     .createHmac('sha256', secret)
-    .update(JSON.stringify(payload))
+    .update(rawBody)
     .digest('hex');
 }
 
@@ -135,8 +135,8 @@ describe('RoutineEngine', () => {
 
   it('should fire webhook routine on valid signed POST', async () => {
     const secret = 'webhook-secret-123';
-    const payload = { action: 'push', ref: 'refs/heads/main' };
-    const signature = hmacSign(payload, secret);
+    const rawBody = JSON.stringify({ action: 'push', ref: 'refs/heads/main' });
+    const signature = hmacSign(rawBody, secret);
 
     const routine = makeRoutine({
       name: 'github-push',
@@ -146,7 +146,7 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'github-push', payload, signature);
+    const result = await engine.handleWebhook('main', 'github-push', rawBody, signature);
 
     expect(result.status).toBe(200);
     expect(onLightweightAction).toHaveBeenCalled();
@@ -154,7 +154,7 @@ describe('RoutineEngine', () => {
 
   it('should reject webhook with invalid signature (401)', async () => {
     const secret = 'webhook-secret-123';
-    const payload = { action: 'push' };
+    const rawBody = JSON.stringify({ action: 'push' });
     const badSignature = 'deadbeef';
 
     const routine = makeRoutine({
@@ -164,7 +164,7 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'github-push', payload, badSignature);
+    const result = await engine.handleWebhook('main', 'github-push', rawBody, badSignature);
 
     expect(result.status).toBe(401);
     expect(onLightweightAction).not.toHaveBeenCalled();
@@ -420,8 +420,8 @@ describe('RoutineEngine', () => {
 
   it('should reject webhook payloads > 1MB', async () => {
     const secret = 'test-secret';
-    const largePayload = { data: 'x'.repeat(1_100_000) }; // > 1MB
-    const signature = hmacSign(largePayload, secret);
+    const rawBody = JSON.stringify({ data: 'x'.repeat(1_100_000) }); // > 1MB
+    const signature = hmacSign(rawBody, secret);
 
     const routine = makeRoutine({
       name: 'large-webhook',
@@ -430,7 +430,7 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'large-webhook', largePayload, signature);
+    const result = await engine.handleWebhook('main', 'large-webhook', rawBody, signature);
 
     // Should reject with an appropriate error status
     expect(result.status).toBeGreaterThanOrEqual(400);
@@ -539,9 +539,9 @@ describe('WebhookServer', () => {
     // Simulate 11 requests — the 11th should be rate-limited
     const results: { status: number }[] = [];
     for (let i = 0; i < 11; i++) {
-      const payload = { seq: i };
-      const signature = hmacSign(payload, secret);
-      const result = await engine.handleWebhook('test', 'rate-limited', payload, signature);
+      const rawBody = JSON.stringify({ seq: i });
+      const signature = hmacSign(rawBody, secret);
+      const result = await engine.handleWebhook('test', 'rate-limited', rawBody, signature);
       results.push(result);
     }
 

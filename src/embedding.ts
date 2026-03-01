@@ -209,7 +209,6 @@ export function chunkText(
           const overlapStart = Math.max(0, prevChunkWords.length - overlapWords);
           const overlapContent = prevChunkWords.slice(overlapStart);
           // Start new chunk with overlap from previous
-          start = 0;
           const firstChunkWords = [...overlapContent, ...words.slice(0, maxWords - overlapContent.length)];
           chunks[chunks.length] = firstChunkWords.join(' ');
           start = maxWords - overlapContent.length;
@@ -218,18 +217,8 @@ export function chunkText(
         while (start < words.length) {
           const overlapStart = Math.max(0, start - overlapWords);
           const chunkWords = words.slice(overlapStart, overlapStart + maxWords);
-          if (start === 0 && chunks.length === 0) {
-            chunks.push(chunkWords.join(' '));
-          } else if (overlapStart === start) {
-            // No overlap case (first chunk of large para when no previous chunks)
-            chunks.push(chunkWords.join(' '));
-          } else {
-            chunks.push(chunkWords.join(' '));
-          }
+          chunks.push(chunkWords.join(' '));
           start = overlapStart + maxWords;
-          if (overlapStart === 0 && start === maxWords) {
-            // First iteration, advance properly
-          }
         }
         currentParagraphs = [];
         currentWordCount = 0;
@@ -382,6 +371,8 @@ function deterministicEmbedding(text: string): Float32Array {
  * Returns dot(a,b) / (|a| * |b|), a value between -1 and 1.
  */
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  if (a.length !== b.length) return 0;
+
   let dot = 0;
   let magA = 0;
   let magB = 0;
@@ -742,11 +733,8 @@ function float32ArrayToBuffer(arr: Float32Array): Buffer {
 }
 
 function bufferToFloat32Array(buf: Buffer): Float32Array {
-  // Ensure proper alignment by copying into a new ArrayBuffer
+  // Copy into aligned ArrayBuffer using set() instead of byte loop
   const ab = new ArrayBuffer(buf.length);
-  const view = new Uint8Array(ab);
-  for (let i = 0; i < buf.length; i++) {
-    view[i] = buf[i];
-  }
+  new Uint8Array(ab).set(buf);
   return new Float32Array(ab);
 }

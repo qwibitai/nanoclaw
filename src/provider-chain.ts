@@ -242,14 +242,10 @@ export class FailoverProvider {
     }
 
     const state = this.state.get(oldest.name)!;
-    try {
-      const result = await oldest.execute();
-      state.failureCount = 0;
-      state.cooldownStartedAt = null;
-      return result;
-    } catch (err) {
-      throw err;
-    }
+    const result = await oldest.execute();
+    state.failureCount = 0;
+    state.cooldownStartedAt = null;
+    return result;
   }
 
   private getAvailableProviders(): FailoverProviderEntry[] {
@@ -376,6 +372,7 @@ export interface ProviderChainEntry {
 export interface ProviderChainOptions {
   providers: ProviderChainEntry[];
   maxRetries?: number;
+  maxTotalAttempts?: number;
   failureThreshold?: number;
   circuitBreakerThreshold?: number;
   circuitBreakerRecoveryTimeout?: number;
@@ -422,6 +419,7 @@ export class ProviderChain {
     this.failover = new FailoverProvider({
       providers: failoverEntries,
       failureThreshold,
+      maxTotalAttempts: opts.maxTotalAttempts,
     });
   }
 

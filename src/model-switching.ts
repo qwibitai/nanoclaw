@@ -3,11 +3,15 @@
 
 import { logger } from './logger.js';
 
-export const ALLOWED_MODELS: string[] = [
+const DEFAULT_MODELS = [
   'claude-sonnet-4-20250514',
   'claude-haiku-4-5-20251001',
   'claude-opus-4-20250115',
 ];
+
+export const ALLOWED_MODELS: string[] = process.env.ALLOWED_MODELS
+  ? process.env.ALLOWED_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
+  : DEFAULT_MODELS;
 
 interface Override {
   model?: string;
@@ -27,6 +31,7 @@ interface ParsedCommand {
   reset?: boolean;
 }
 
+const MAX_OVERRIDES = 100;
 const overrides = new Map<string, Override>();
 
 export function setModel(groupFolder: string, modelName: string): SetModelResult {
@@ -36,6 +41,12 @@ export function setModel(groupFolder: string, modelName: string): SetModelResult
       error: `Invalid model. Available models: ${ALLOWED_MODELS.join(', ')}`,
       availableModels: [...ALLOWED_MODELS],
     };
+  }
+
+  // Evict oldest entry if at capacity (prevents unbounded growth)
+  if (!overrides.has(groupFolder) && overrides.size >= MAX_OVERRIDES) {
+    const firstKey = overrides.keys().next().value;
+    if (firstKey !== undefined) overrides.delete(firstKey);
   }
 
   const existing = overrides.get(groupFolder) ?? {};

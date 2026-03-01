@@ -583,23 +583,22 @@ Evidence:
 | Webhook server | (started by routine engine) | 3456 | Phase 6 |
 
 ## Current
-Phase: ALL 6 PHASES IMPLEMENT COMPLETE — ready for IMPLEMENT EXIT → INTEGRATE
-Task: All 6 phases VERIFIED. 146/146 tests passing. 21 tasks receipted. Next: IMPLEMENT EXIT check, then advance to INTEGRATE stage.
+Stage: REVIEW — complete. All P0/P1/P2 fixed. Ready for CLEAN.
 
 ## Loop State
-Stage-Loop: IMPLEMENT
-Stage-Iteration: 6/6
-Stage-Entry-Met: true
-Stage-Exit-Met: false (need IMPLEMENT EXIT check + checkpoint commit Wave 3)
-Last-Stage-EXIT: APPROVE
+Stage-Loop: CLEAN
+Stage-Iteration: 0/3
+Stage-Entry-Met: pending (REVIEW EXIT to be deposited)
+Stage-Exit-Met: false
+Last-Stage-EXIT: INTEGRATE
 
-Phase-Loop: All 6 phases VERIFIED
-Phase-Iteration: complete
-Phase-Exit-Met: true
+Phase-Loop: N/A
+Phase-Iteration: N/A
+Phase-Exit-Met: false
 
-Task-Loop: IMPLEMENT EXIT check → checkpoint commit → advance to INTEGRATE
+Task-Loop: Commit REVIEW fixes → deposit EXIT → advance to CLEAN
 Task-Strike: 0/3
-Task-Last-Approach: Wave 3 complete (parallel TDD + security sentinel)
+Task-Last-Approach: Fixed all P0/P1/P2 findings from 6 reviewers
 Task-Last-Failure: N/A
 
 ## Breadcrumbs
@@ -627,5 +626,7 @@ Task-Last-Failure: N/A
 [7de60a2] 2026-03-01 — IMPLEMENT Wave 2 code complete: Ph2 15/15 tests, Ph5 24/24 tests, build clean. Security sentinel: Ph2 P1-1(file perms 0o600)+P1-2(temp cleanup)+P1-3(hex validation) FIXED. Ph5 P1-1(input reflection removed) FIXED. P2s logged for REVIEW. 101/101 total tests.
 [7591254] 2026-03-01 — IMPLEMENT Wave 2 checkpoint: Ph2+Ph5 all 5 tasks receipted, committed.
 [7591254] 2026-03-01 — IMPLEMENT Wave 3 code complete: Ph3 22/22 tests, Ph6 23/23 tests, build clean. Security sentinel: Ph3 P0(command injection containerId validation) FIXED. Ph6 P0-1(timing-safe HMAC)+P0-2(bind 127.0.0.1)+P1-3(global concurrency cap=5) FIXED. P1/P2s logged for REVIEW. 146/146 total tests.
+[1cd2afe] 2026-03-01 — IMPLEMENT EXIT: 6/6 phases VERIFIED, 146/146 tests, all P0/P1 fixed, 3 wave commits (7de60a2, 7591254, 1cd2afe). Advancing to INTEGRATE.
+[e81101e] 2026-03-01 — INTEGRATE EXIT: 178/178 v2.0 tests pass, tsc clean. P0 fixes committed (ab54415): SQLite persistence, kill switches ×5, retry budget 15→6, cron 5min floor, daily cap 50, input validation guards ×32 tests. Trace logging added to all 6 modules (e81101e). Agentic checklist: step budget ✓, cost ceiling ✓, timeout ✓, circuit breaker ✓, trace logging ✓, kill switch ✓ (13 total). Financial checklist: rate limits ✓, input validation ✓, max_tokens via config ✓, keys in env ✓, kill switches ✓. Arch drift: accepted + fixed (SQLite persistence). No eval-cases.json or harness-cases.json (first build). Advancing to REVIEW.
 
 ## Outcomes & Retrospective

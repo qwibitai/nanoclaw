@@ -67,13 +67,44 @@ export interface RoutineRun {
 // Cron helpers
 // ---------------------------------------------------------------------------
 
-/** Validate a cron expression (5-field). Throws on invalid. */
+/** Validate a single cron field element against min/max range. */
+function validateCronElement(value: string, min: number, max: number, field: string): void {
+  // Handle step syntax: */N or N-M/S
+  const stepParts = value.split('/');
+  if (stepParts.length > 2) throw new Error(`Invalid cron field: ${field}`);
+
+  const base = stepParts[0];
+  if (stepParts.length === 2) {
+    const step = parseInt(stepParts[1], 10);
+    if (isNaN(step) || step < 1 || step > max) {
+      throw new Error(`Invalid cron step value: ${field}`);
+    }
+  }
+
+  if (base === '*') return;
+
+  // Handle range: N-M
+  if (base.includes('-')) {
+    const [lo, hi] = base.split('-').map((n) => parseInt(n, 10));
+    if (isNaN(lo) || isNaN(hi) || lo < min || hi > max || lo > hi) {
+      throw new Error(`Invalid cron range: ${field}`);
+    }
+    return;
+  }
+
+  // Plain number
+  const num = parseInt(base, 10);
+  if (isNaN(num) || num < min || num > max) {
+    throw new Error(`Invalid cron field value: ${field}`);
+  }
+}
+
+/** Validate a cron expression (5-field). Supports *, lists (,), ranges (-), steps (/). */
 function validateCron(expr: string): void {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) {
     throw new Error(`Invalid cron expression: expected 5 fields, got ${parts.length} in "${expr}"`);
   }
-  // Basic field validation
   const ranges = [
     { min: 0, max: 59 }, // minute
     { min: 0, max: 23 }, // hour
@@ -83,20 +114,10 @@ function validateCron(expr: string): void {
   ];
   for (let i = 0; i < 5; i++) {
     const field = parts[i];
-    if (field === '*') continue;
-    // Handle */N step syntax
-    const stepMatch = field.match(/^\*\/(\d+)$/);
-    if (stepMatch) {
-      const step = parseInt(stepMatch[1], 10);
-      if (step < 1 || step > ranges[i].max) {
-        throw new Error(`Invalid cron step value: ${field}`);
-      }
-      continue;
-    }
-    // Handle plain number
-    const num = parseInt(field, 10);
-    if (isNaN(num) || num < ranges[i].min || num > ranges[i].max) {
-      throw new Error(`Invalid cron field value: ${field}`);
+    // Handle comma-separated lists: 1,3,5 or 1-3,7-9
+    const elements = field.split(',');
+    for (const elem of elements) {
+      validateCronElement(elem, ranges[i].min, ranges[i].max, field);
     }
   }
 }
@@ -191,12 +212,20 @@ export class RoutineEngine {
     }
 
     if (routine.trigger.type === 'event') {
+      const pattern = routine.trigger.pattern!;
+      // ReDoS guard: reject patterns with nested quantifiers or excessive length
+      if (pattern.length > 200) {
+        throw new Error(`Routine "${routine.name}" regex pattern exceeds 200 chars`);
+      }
+      if (/(\+|\*|\{)\)?(\+|\*|\{)/.test(pattern)) {
+        throw new Error(`Routine "${routine.name}" regex pattern contains nested quantifiers (ReDoS risk)`);
+      }
       try {
-        const re = new RegExp(routine.trigger.pattern!);
+        const re = new RegExp(pattern);
         this.regexCache.set(routine.name, re);
       } catch {
         throw new Error(
-          `Routine "${routine.name}" has invalid regex pattern: ${routine.trigger.pattern}`,
+          `Routine "${routine.name}" has invalid regex pattern: ${pattern}`,
         );
       }
       // Enforce minimum dedup window for event routines (cost safety)
@@ -243,6 +272,7 @@ export class RoutineEngine {
     this.runningCounts.clear();
     this.lastEventFireAt.clear();
     this.rateLimitMap.clear();
+    this.dailyRunCounts.clear();
   }
 
   // ---- Cron ----
@@ -311,11 +341,16 @@ export class RoutineEngine {
   async handleWebhook(
     group: string,
     routineName: string,
-    payload: unknown,
+    rawBody: string,
     signature: string,
   ): Promise<{ status: number; body?: string }> {
-    // Rate limiting: 10 req/60s per group
+    // Rate limiting: 10 req/60s per group (with map size cap — Fix #6)
     const now = Date.now();
+    if (this.rateLimitMap.size > 1000) {
+      // Evict oldest entries to prevent unbounded growth
+      const firstKey = this.rateLimitMap.keys().next().value;
+      if (firstKey !== undefined) this.rateLimitMap.delete(firstKey);
+    }
     if (!this.rateLimitMap.has(group)) {
       this.rateLimitMap.set(group, []);
     }
@@ -330,9 +365,8 @@ export class RoutineEngine {
     }
     timestamps.push(now);
 
-    // Payload size check (> 1MB)
-    const payloadStr = JSON.stringify(payload);
-    if (payloadStr.length > 1_000_000) {
+    // Payload size check on raw body (> 1MB)
+    if (rawBody.length > 1_000_000) {
       return { status: 413, body: 'Payload too large' };
     }
 
@@ -346,12 +380,12 @@ export class RoutineEngine {
       return { status: 404, body: 'Routine disabled' };
     }
 
-    // HMAC verification
+    // HMAC verification — computed on raw body bytes, not re-serialized JSON
     const secret = routine.trigger.secret;
     if (!secret) {
       return { status: 500, body: 'No webhook secret configured' };
     }
-    const expected = crypto.createHmac('sha256', secret).update(payloadStr).digest('hex');
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
     // Timing-safe comparison to prevent byte-by-byte signature oracle (P0 fix)
     const expectedBuf = Buffer.from(expected, 'hex');
     const signatureBuf = Buffer.from(signature, 'hex');
@@ -507,7 +541,11 @@ export class WebhookServer {
   private server: http.Server | null = null;
 
   constructor(options: WebhookServerOptions) {
-    this.port = options.port ?? 3456;
+    const port = options.port ?? 3456;
+    if (port !== 0 && (port < 1024 || port > 65535)) {
+      throw new Error(`Webhook port must be 0 (OS-assigned) or between 1024 and 65535, got ${port}`);
+    }
+    this.port = port;
     this.engine = options.engine;
   }
 
@@ -528,7 +566,22 @@ export class WebhookServer {
           return;
         }
 
-        const [, group, routineName] = match;
+        // URL-decode and validate path params (Fix #5 — prevent encoded traversal)
+        let group: string;
+        let routineName: string;
+        try {
+          group = decodeURIComponent(match[1]);
+          routineName = decodeURIComponent(match[2]);
+        } catch {
+          res.writeHead(400);
+          res.end('Invalid URL encoding');
+          return;
+        }
+        if (!/^[A-Za-z0-9_-]+$/.test(group) || !/^[A-Za-z0-9_-]+$/.test(routineName)) {
+          res.writeHead(400);
+          res.end('Invalid group or routine name');
+          return;
+        }
 
         // Read body
         const chunks: Buffer[] = [];
@@ -545,10 +598,10 @@ export class WebhookServer {
 
         try {
           const bodyStr = Buffer.concat(chunks).toString('utf-8');
-          const payload = JSON.parse(bodyStr);
+          JSON.parse(bodyStr); // Validate JSON — reject garbage early
           const signature = (req.headers['x-signature'] as string) ?? '';
 
-          const result = await this.engine.handleWebhook(group, routineName, payload, signature);
+          const result = await this.engine.handleWebhook(group, routineName, bodyStr, signature);
           res.writeHead(result.status);
           res.end(result.body ?? '');
         } catch {
