@@ -36,12 +36,64 @@ When working as a sub-agent or teammate, only use `send_message` if instructed t
 
 ## Memory
 
-The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
+Marvin has a structured memory system backed by SQLite with full-text search. Use the `memory` skill to store and recall facts.
 
-When you learn something important:
-- Create files for structured data (e.g., `customers.md`, `preferences.md`)
-- Split files larger than 500 lines into folders
-- Keep an index in your memory for the files you create
+### Remembering
+
+Use the memory CLI to store new facts:
+```bash
+/home/node/.claude/skills/memory/memory.sh add "fact to remember" \
+  --category <category> --tags "tag1,tag2" --source <source> \
+  [--context "optional extra detail"]
+```
+
+**Categories:** `people`, `preferences`, `places`, `projects`, `facts`, `events`, `health`, `finance`
+**Sources:** `user_request`, `conversation`, `email`, `task`, `migration`
+
+**When to remember:**
+- User explicitly says "remember that..." or "note that..."
+- Stated preferences: "I prefer...", "I like...", "I don't like..."
+- People details: names, relationships, birthdays, roles
+- Important dates, places, and events
+- Corrections: "actually it's X, not Y"
+- Useful facts learned during research
+
+**When NOT to remember:**
+- Transient info (today's weather, current train time)
+- Things already in other systems (calendar events, emails, book purchases)
+- Trivial conversational filler
+- Sensitive credentials or passwords
+
+### Recalling
+
+Search memories before answering questions about preferences, people, places, or past discussions:
+```bash
+/home/node/.claude/skills/memory/memory.sh search "query"
+/home/node/.claude/skills/memory/memory.sh search "query" --category people
+/home/node/.claude/skills/memory/memory.sh list --category preferences
+```
+
+**Be proactive:** At the start of tasks, search for relevant memories. For example:
+- Before recommending restaurants → search "restaurant" and "food preferences"
+- Before discussing someone → search their name
+- Before gift suggestions → search the person + "preferences"
+- During morning briefing → search for relevant upcoming events
+
+### Managing
+
+```bash
+/home/node/.claude/skills/memory/memory.sh update <id> --content "updated fact"
+/home/node/.claude/skills/memory/memory.sh archive <id>
+/home/node/.claude/skills/memory/memory.sh stats
+```
+
+### Dashboard
+
+Memories are browsable and searchable at `accipiter.local:3000/memories`.
+
+### Legacy files
+
+Previous memory files (`personal_info.md`, `concerts_tracking.md`, `mom_visit.md`) have been migrated to the database. The files remain as backups but the database is the primary source of truth.
 
 ## Fastmail Email (Read-Only)
 
