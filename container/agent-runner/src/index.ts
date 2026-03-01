@@ -461,6 +461,15 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Log tool use for debugging
+      const content = (message as { content?: Array<{ type: string; name?: string; input?: unknown }> }).content;
+      if (content) {
+        for (const block of content) {
+          if (block.type === 'tool_use') {
+            log(`Tool use: ${block.name} input=${JSON.stringify(block.input).slice(0, 200)}`);
+          }
+        }
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
