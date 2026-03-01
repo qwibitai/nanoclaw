@@ -6,7 +6,7 @@ Dos fases para añadir el canal WebSocket a NanoClaw: primero el canal completam
 
 ## Phases
 
-- [ ] **Phase 1: WebSocket Channel** - Canal WS funcional con protocolo de mensajes, buffer offline e integración en main()
+- [x] **Phase 1: WebSocket Channel** - Canal WS funcional con protocolo de mensajes, buffer offline e integración en main()
 - [ ] **Phase 2: Attachments** - Adjuntos entrantes (base64) y salientes (HTTP estático)
 
 ## Phase Details
@@ -24,9 +24,9 @@ Dos fases para añadir el canal WebSocket a NanoClaw: primero el canal completam
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Dependencias ws + constantes config (WEBSOCKET_ENABLED, WEBSOCKET_PORT)
-- [ ] 01-02-PLAN.md — WebSocketChannel completo + tests de comportamiento
-- [ ] 01-03-PLAN.md — Integración en main() y auto-provisión del grupo better-work
+- [x] 01-01-PLAN.md — Dependencias ws + constantes config (WEBSOCKET_ENABLED, WEBSOCKET_PORT)
+- [x] 01-02-PLAN.md — WebSocketChannel completo + tests de comportamiento
+- [x] 01-03-PLAN.md — Integración en main() y auto-provisión del grupo better-work
 
 ### Phase 2: Attachments
 **Goal**: El panel web puede enviar archivos al agente y el agente puede compartir archivos de vuelta al panel via HTTP
@@ -45,5 +45,5 @@ Phases execute in numeric order: 1 → 2
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. WebSocket Channel | 1/3 | In Progress|  |
+| 1. WebSocket Channel | 3/3 | Complete | 2026-03-01 |
 | 2. Attachments | 0/? | Not started | - |

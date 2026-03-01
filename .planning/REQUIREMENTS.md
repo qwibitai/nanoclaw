@@ -38,9 +38,9 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 ### Integration
 
-- [ ] **INTG-01**: El canal WebSocket se registra en `src/index.ts` `main()` condicionado a `WEBSOCKET_ENABLED`
-- [ ] **INTG-02**: El grupo `better-work` se auto-registra en la DB al arrancar si no existe, con `requiresTrigger: false`
-- [ ] **INTG-03**: La estructura de directorios `groups/better-work/` se crea con `CLAUDE.md` inicial
+- [x] **INTG-01**: El canal WebSocket se registra en `src/index.ts` `main()` condicionado a `WEBSOCKET_ENABLED`
+- [x] **INTG-02**: El grupo `better-work` se auto-registra en la DB al arrancar si no existe, con `requiresTrigger: false`
+- [x] **INTG-03**: La estructura de directorios `groups/better-work/` se crea con `CLAUDE.md` inicial
 
 ## v2 Requirements
 
@@ -90,9 +90,9 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 | CONF-01 | Phase 1 | Complete |
 | CONF-02 | Phase 1 | Complete |
 | CONF-03 | Phase 2 | Pending |
-| INTG-01 | Phase 1 | Pending |
-| INTG-02 | Phase 1 | Pending |
-| INTG-03 | Phase 1 | Pending |
+| INTG-01 | Phase 1 | Complete |
+| INTG-02 | Phase 1 | Complete |
+| INTG-03 | Phase 1 | Complete |
 
 **Coverage:**
 - v1 requirements: 20 total
@@ -101,4 +101,4 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 ---
 *Requirements defined: 2026-02-28*
-*Last updated: 2026-02-28 after initial definition*
+*Last updated: 2026-03-01 after Plan 03 completion (INTG-01, INTG-02, INTG-03 complete)*
