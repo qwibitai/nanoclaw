@@ -32,8 +32,8 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 ### Configuration
 
-- [ ] **CONF-01**: `WEBSOCKET_ENABLED` (env var, default `true`) controla si el canal se registra en `main()`
-- [ ] **CONF-02**: `WEBSOCKET_PORT` (env var, default `3001`) configura el puerto del servidor WS
+- [x] **CONF-01**: `WEBSOCKET_ENABLED` (env var, default `true`) controla si el canal se registra en `main()`
+- [x] **CONF-02**: `WEBSOCKET_PORT` (env var, default `3001`) configura el puerto del servidor WS
 - [ ] **CONF-03**: `WEBSOCKET_FILES_PORT` (env var, default `3002`) configura el puerto del servidor HTTP estático
 
 ### Integration
@@ -87,8 +87,8 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 | ATT-01 | Phase 2 | Pending |
 | ATT-02 | Phase 2 | Pending |
 | ATT-03 | Phase 2 | Pending |
-| CONF-01 | Phase 1 | Pending |
-| CONF-02 | Phase 1 | Pending |
+| CONF-01 | Phase 1 | Complete |
+| CONF-02 | Phase 1 | Complete |
 | CONF-03 | Phase 2 | Pending |
 | INTG-01 | Phase 1 | Pending |
 | INTG-02 | Phase 1 | Pending |

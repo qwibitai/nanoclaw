@@ -45,5 +45,5 @@ Phases execute in numeric order: 1 → 2
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. WebSocket Channel | 0/3 | Planned | - |
+| 1. WebSocket Channel | 1/3 | In Progress|  |
 | 2. Attachments | 0/? | Not started | - |
