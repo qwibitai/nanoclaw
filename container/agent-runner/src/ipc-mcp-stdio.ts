@@ -280,6 +280,156 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'email_list',
+  'List recent emails from the inbox. Optionally filter with an IMAP search query.',
+  {
+    limit: z.number().default(10).describe('Maximum number of emails to return'),
+    search: z.string().optional().describe('Optional IMAP search query (e.g., "UNSEEN" or "FROM example@mail.com")'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_list',
+      limit: args.limit,
+      search: args.search,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Listing up to ${args.limit} emails.` }] };
+  },
+);
+
+server.tool(
+  'email_read',
+  'Read a specific email by its message ID. Returns the full email content including headers and body.',
+  {
+    message_id: z.string().describe('The message ID of the email to read'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_read',
+      messageId: args.message_id,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Reading email ${args.message_id}.` }] };
+  },
+);
+
+server.tool(
+  'email_reply',
+  'Reply to an email. Threading is handled automatically based on the original message ID.',
+  {
+    message_id: z.string().describe('The message ID of the email to reply to'),
+    text: z.string().describe('The reply text'),
+    attachments: z.array(z.object({
+      filename: z.string().describe('Name of the attachment file'),
+      path: z.string().describe('Path to the file to attach'),
+    })).optional().describe('Optional file attachments'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_reply',
+      messageId: args.message_id,
+      text: args.text,
+      attachments: args.attachments,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Reply to ${args.message_id} queued.` }] };
+  },
+);
+
+server.tool(
+  'email_forward',
+  'Forward an email to another recipient. Optionally add a comment above the forwarded content.',
+  {
+    message_id: z.string().describe('The message ID of the email to forward'),
+    to: z.string().describe('Recipient email address'),
+    comment: z.string().optional().describe('Optional comment to include above the forwarded email'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_forward',
+      messageId: args.message_id,
+      to: args.to,
+      comment: args.comment,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Forwarding email ${args.message_id} to ${args.to}.` }] };
+  },
+);
+
+server.tool(
+  'email_send',
+  'Compose and send a new email. Supports CC and file attachments.',
+  {
+    to: z.string().describe('Recipient email address'),
+    subject: z.string().describe('Email subject line'),
+    text: z.string().describe('Email body text'),
+    cc: z.string().optional().describe('Optional CC email address'),
+    attachments: z.array(z.object({
+      filename: z.string().describe('Name of the attachment file'),
+      path: z.string().describe('Path to the file to attach'),
+    })).optional().describe('Optional file attachments'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_send',
+      to: args.to,
+      subject: args.subject,
+      text: args.text,
+      cc: args.cc,
+      attachments: args.attachments,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Email to ${args.to} queued for sending.` }] };
+  },
+);
+
+server.tool(
+  'email_search',
+  'Search emails by sender, subject, or date. Returns matching emails sorted by date.',
+  {
+    from: z.string().optional().describe('Filter by sender email address'),
+    subject: z.string().optional().describe('Filter by subject (substring match)'),
+    since: z.string().optional().describe('Only return emails since this date (ISO format, e.g., "2026-01-15")'),
+    limit: z.number().default(20).describe('Maximum number of results to return'),
+  },
+  async (args) => {
+    const data = {
+      type: 'email_search',
+      from: args.from,
+      subject: args.subject,
+      since: args.since,
+      limit: args.limit,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `Searching emails (limit: ${args.limit}).` }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

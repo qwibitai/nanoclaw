@@ -6,7 +6,22 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
+  'IMAP_HOST',
+  'IMAP_PORT',
+  'IMAP_USER',
+  'IMAP_PASS',
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_USER',
+  'SMTP_PASS',
+  'EMAIL_POLL_INTERVAL',
+  'EMAIL_FROM_NAME',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -62,3 +77,31 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+// Email (IMAP/SMTP) configuration
+export const IMAP_HOST = process.env.IMAP_HOST || envConfig.IMAP_HOST || '';
+export const IMAP_PORT = parseInt(
+  process.env.IMAP_PORT || envConfig.IMAP_PORT || '993',
+  10,
+);
+export const IMAP_USER = process.env.IMAP_USER || envConfig.IMAP_USER || '';
+export const IMAP_PASS = process.env.IMAP_PASS || envConfig.IMAP_PASS || '';
+export const SMTP_HOST = process.env.SMTP_HOST || envConfig.SMTP_HOST || '';
+export const SMTP_PORT = parseInt(
+  process.env.SMTP_PORT || envConfig.SMTP_PORT || '587',
+  10,
+);
+export const SMTP_USER = process.env.SMTP_USER || envConfig.SMTP_USER || '';
+export const SMTP_PASS = process.env.SMTP_PASS || envConfig.SMTP_PASS || '';
+export const EMAIL_POLL_INTERVAL = parseInt(
+  process.env.EMAIL_POLL_INTERVAL || envConfig.EMAIL_POLL_INTERVAL || '900000',
+  10,
+);
+export const EMAIL_FROM_NAME =
+  process.env.EMAIL_FROM_NAME || envConfig.EMAIL_FROM_NAME || ASSISTANT_NAME;

@@ -5,10 +5,13 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  EMAIL_FROM_NAME,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
+  SMTP_USER,
   TIMEZONE,
 } from './config.js';
+import { EmailChannel } from './channels/email.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -27,6 +30,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  emailChannel?: EmailChannel;
 }
 
 let ipcWatcherRunning = false;
@@ -170,6 +174,15 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For email actions
+    to?: string;
+    cc?: string;
+    subject?: string;
+    text?: string;
+    comment?: string;
+    messageId?: string;
+    query?: string;
+    attachments?: Array<{ filename: string; path: string }>;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -381,7 +394,231 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'email_send': {
+      const transporter = deps.emailChannel?.getTransporter();
+      if (!transporter) {
+        logger.warn('email_send: no email transporter available');
+        break;
+      }
+      if (!data.to || !data.subject || !data.text) {
+        logger.warn({ data }, 'email_send: missing required fields (to, subject, text)');
+        break;
+      }
+      try {
+        await transporter.sendMail({
+          from: `${EMAIL_FROM_NAME} <${SMTP_USER}>`,
+          to: data.to,
+          subject: data.subject,
+          text: data.text,
+          cc: data.cc || undefined,
+          attachments: data.attachments?.map((a) => ({
+            filename: a.filename,
+            path: containerToHostPath(a.path, sourceGroup),
+          })),
+        });
+        logger.info({ to: data.to, subject: data.subject }, 'Email sent via IPC');
+        // Send confirmation to the source group's chat
+        const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+        if (chatJid) {
+          await deps.sendMessage(chatJid, `Email an ${data.to} gesendet.`);
+        }
+      } catch (err) {
+        logger.error({ err, to: data.to }, 'Failed to send email via IPC');
+      }
+      break;
+    }
+
+    case 'email_reply': {
+      const transporter = deps.emailChannel?.getTransporter();
+      if (!transporter) {
+        logger.warn('email_reply: no email transporter available');
+        break;
+      }
+      if (!data.messageId || !data.text) {
+        logger.warn({ data }, 'email_reply: missing required fields (messageId, text)');
+        break;
+      }
+      const replyMeta = deps.emailChannel?.getThreadMetadata('email:' + data.messageId);
+      if (!replyMeta) {
+        logger.warn({ messageId: data.messageId }, 'email_reply: thread metadata not found');
+        break;
+      }
+      try {
+        const refs = replyMeta.references
+          ? replyMeta.references + ' ' + replyMeta.messageId
+          : replyMeta.messageId;
+        await transporter.sendMail({
+          from: `${EMAIL_FROM_NAME} <${SMTP_USER}>`,
+          to: replyMeta.from,
+          subject: 'Re: ' + replyMeta.subject,
+          inReplyTo: replyMeta.messageId,
+          references: refs,
+          text: data.text,
+          attachments: data.attachments?.map((a) => ({
+            filename: a.filename,
+            path: containerToHostPath(a.path, sourceGroup),
+          })),
+        });
+        logger.info(
+          { to: replyMeta.from, subject: replyMeta.subject },
+          'Email reply sent via IPC',
+        );
+        const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+        if (chatJid) {
+          await deps.sendMessage(chatJid, `Antwort an ${replyMeta.from} gesendet.`);
+        }
+      } catch (err) {
+        logger.error({ err, messageId: data.messageId }, 'Failed to send email reply via IPC');
+      }
+      break;
+    }
+
+    case 'email_forward': {
+      const transporter = deps.emailChannel?.getTransporter();
+      if (!transporter) {
+        logger.warn('email_forward: no email transporter available');
+        break;
+      }
+      if (!data.messageId || !data.to) {
+        logger.warn({ data }, 'email_forward: missing required fields (messageId, to)');
+        break;
+      }
+      const fwdMeta = deps.emailChannel?.getThreadMetadata('email:' + data.messageId);
+      if (!fwdMeta) {
+        logger.warn({ messageId: data.messageId }, 'email_forward: thread metadata not found');
+        break;
+      }
+      try {
+        const fwdBody =
+          (data.comment ? data.comment + '\n\n---\n\n' : '') +
+          'Weitergeleitet von: ' +
+          fwdMeta.fromName +
+          ' <' +
+          fwdMeta.from +
+          '>\n' +
+          'Betreff: ' +
+          fwdMeta.subject +
+          (fwdMeta.body ? '\n\n' + fwdMeta.body : '');
+        await transporter.sendMail({
+          from: `${EMAIL_FROM_NAME} <${SMTP_USER}>`,
+          to: data.to,
+          subject: 'Fwd: ' + fwdMeta.subject,
+          text: fwdBody,
+          attachments: data.attachments?.map((a) => ({
+            filename: a.filename,
+            path: containerToHostPath(a.path, sourceGroup),
+          })),
+        });
+        logger.info(
+          { to: data.to, subject: fwdMeta.subject },
+          'Email forwarded via IPC',
+        );
+        const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+        if (chatJid) {
+          await deps.sendMessage(chatJid, `Email an ${data.to} weitergeleitet.`);
+        }
+      } catch (err) {
+        logger.error({ err, messageId: data.messageId }, 'Failed to forward email via IPC');
+      }
+      break;
+    }
+
+    case 'email_list': {
+      if (!deps.emailChannel) {
+        logger.warn('email_list: no email channel available');
+        break;
+      }
+      const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+      if (chatJid) {
+        await deps.sendMessage(chatJid, 'E-Mail-Postfach wird geprüft...');
+      }
+      try {
+        await deps.emailChannel.pollOnce();
+        logger.info({ sourceGroup }, 'Email list triggered via IPC');
+      } catch (err) {
+        logger.error({ err }, 'Failed to poll emails via IPC');
+      }
+      break;
+    }
+
+    case 'email_search': {
+      if (!deps.emailChannel) {
+        logger.warn('email_search: no email channel available');
+        break;
+      }
+      const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+      if (chatJid) {
+        await deps.sendMessage(chatJid, 'E-Mail-Suche wird durchgeführt...');
+      }
+      try {
+        await deps.emailChannel.pollOnce();
+        logger.info({ sourceGroup, query: data.query }, 'Email search triggered via IPC');
+      } catch (err) {
+        logger.error({ err }, 'Failed to search emails via IPC');
+      }
+      break;
+    }
+
+    case 'email_read': {
+      if (!deps.emailChannel) {
+        logger.warn('email_read: no email channel available');
+        break;
+      }
+      if (!data.messageId) {
+        logger.warn({ data }, 'email_read: missing messageId');
+        break;
+      }
+      const readMeta = deps.emailChannel.getThreadMetadata('email:' + data.messageId);
+      if (readMeta) {
+        const chatJid = resolveChatJid(sourceGroup, registeredGroups);
+        if (chatJid) {
+          const info = [
+            `Von: ${readMeta.fromName} <${readMeta.from}>`,
+            `Betreff: ${readMeta.subject}`,
+            `Message-ID: ${readMeta.messageId}`,
+          ];
+          if (readMeta.inReplyTo) info.push(`In-Reply-To: ${readMeta.inReplyTo}`);
+          if (readMeta.body) {
+            info.push('', readMeta.body);
+          }
+          await deps.sendMessage(chatJid, info.join('\n'));
+        }
+        logger.info({ messageId: data.messageId }, 'Email metadata read via IPC');
+      } else {
+        logger.warn({ messageId: data.messageId }, 'email_read: thread metadata not found');
+      }
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
+}
+
+/** Translate container paths to host paths for attachments. */
+function containerToHostPath(containerPath: string, sourceGroup: string): string {
+  // /workspace/group/... -> groups/{sourceGroup}/...
+  if (containerPath.startsWith('/workspace/group/')) {
+    return path.join('groups', sourceGroup, containerPath.slice('/workspace/group/'.length));
+  }
+  // /workspace/extra/... -> groups/{sourceGroup}/extra/...
+  if (containerPath.startsWith('/workspace/extra/')) {
+    return path.join('groups', sourceGroup, 'extra', containerPath.slice('/workspace/extra/'.length));
+  }
+  // /workspace/ipc/... or other workspace paths
+  if (containerPath.startsWith('/workspace/')) {
+    return path.join('groups', sourceGroup, containerPath.slice('/workspace/'.length));
+  }
+  return containerPath;
+}
+
+/** Resolve the chat JID for a given source group folder. */
+function resolveChatJid(
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): string | undefined {
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (group.folder === sourceGroup) return jid;
+  }
+  return undefined;
 }
