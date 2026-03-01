@@ -171,6 +171,15 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
+        logger.debug(
+          {
+            rawJid: msg.key.remoteJid,
+            fromMe: msg.key.fromMe,
+            hasMessage: !!msg.message,
+            msgType: msg.message ? Object.keys(msg.message).join(',') : 'none',
+          },
+          'messages.upsert entry',
+        );
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
         if (!rawJid || rawJid === 'status@broadcast') continue;
