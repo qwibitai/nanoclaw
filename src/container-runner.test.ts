@@ -41,6 +41,7 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -85,7 +86,12 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  buildVolumeMounts,
+  ContainerOutput,
+} from './container-runner.js';
+import fs from 'fs';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -205,5 +211,98 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+describe('buildVolumeMounts agent-runner source sync', () => {
+  const mockedFs = vi.mocked(fs);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: existsSync returns false for everything
+    mockedFs.existsSync.mockReturnValue(false);
+    mockedFs.mkdirSync.mockReturnValue(undefined);
+    mockedFs.writeFileSync.mockReturnValue(undefined);
+    mockedFs.readFileSync.mockReturnValue('');
+    mockedFs.readdirSync.mockReturnValue([]);
+    mockedFs.statSync.mockReturnValue({ isDirectory: () => false } as fs.Stats);
+    mockedFs.cpSync.mockReturnValue(undefined);
+  });
+
+  it('always copies core source even if destination exists', () => {
+    // agent-runner/src exists, destination already exists too
+    mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
+      const s = String(p);
+      if (s.includes('agent-runner/src') || s.includes('agent-runner-src')) {
+        return true;
+      }
+      return false;
+    });
+
+    buildVolumeMounts(testGroup, false);
+
+    // cpSync should be called for agent-runner source
+    const cpSyncCalls = mockedFs.cpSync.mock.calls.filter(
+      (call) =>
+        String(call[0]).includes('agent-runner') &&
+        String(call[0]).includes('src'),
+    );
+    expect(cpSyncCalls.length).toBeGreaterThanOrEqual(1);
+    expect(cpSyncCalls[0][2]).toEqual({ recursive: true });
+  });
+
+  it('creates extensions directory if it does not exist', () => {
+    mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
+      const s = String(p);
+      // agent-runner source exists
+      if (s.includes('agent-runner/src')) return true;
+      // extensions dir does NOT exist
+      if (s.includes('agent-runner-extensions')) return false;
+      return false;
+    });
+
+    buildVolumeMounts(testGroup, false);
+
+    const mkdirCalls = mockedFs.mkdirSync.mock.calls.filter((call) =>
+      String(call[0]).includes('agent-runner-extensions'),
+    );
+    expect(mkdirCalls.length).toBe(1);
+    expect(mkdirCalls[0][1]).toEqual({ recursive: true });
+  });
+
+  it('does not recreate extensions directory if it already exists', () => {
+    mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
+      const s = String(p);
+      if (s.includes('agent-runner/src')) return true;
+      if (s.includes('agent-runner-extensions')) return true;
+      return false;
+    });
+
+    buildVolumeMounts(testGroup, false);
+
+    const mkdirCalls = mockedFs.mkdirSync.mock.calls.filter((call) =>
+      String(call[0]).includes('agent-runner-extensions'),
+    );
+    expect(mkdirCalls.length).toBe(0);
+  });
+
+  it('mounts both agent-runner-src and extensions directories', () => {
+    mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
+      const s = String(p);
+      if (s.includes('agent-runner/src')) return true;
+      return false;
+    });
+
+    const mounts = buildVolumeMounts(testGroup, false);
+
+    const srcMount = mounts.find((m) => m.containerPath === '/app/src');
+    expect(srcMount).toBeDefined();
+    expect(srcMount!.hostPath).toContain('agent-runner-src');
+    expect(srcMount!.readonly).toBe(false);
+
+    const extMount = mounts.find((m) => m.containerPath === '/app/extensions');
+    expect(extMount).toBeDefined();
+    expect(extMount!.hostPath).toContain('agent-runner-extensions');
+    expect(extMount!.readonly).toBe(false);
   });
 });
