@@ -38,6 +38,8 @@ export class WhatsAppChannel implements Channel {
 
   private sock!: WASocket;
   private connected = false;
+  private authRequired = false;
+  private reconnectDelay = 5000;
   private lidToPhoneMap: Record<string, string> = {};
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -89,7 +91,9 @@ export class WhatsAppChannel implements Channel {
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
         );
-        setTimeout(() => process.exit(1), 1000);
+        // Mark auth as required but do not exit — the service can continue
+        // serving other channels while waiting for re-authentication.
+        this.authRequired = true;
       }
 
       if (connection === 'close') {
@@ -97,7 +101,8 @@ export class WhatsAppChannel implements Channel {
         const reason = (
           lastDisconnect?.error as { output?: { statusCode?: number } }
         )?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const shouldReconnect =
+          reason !== DisconnectReason.loggedOut && !this.authRequired;
         logger.info(
           {
             reason,
@@ -107,8 +112,33 @@ export class WhatsAppChannel implements Channel {
           'Connection closed',
         );
 
-        if (shouldReconnect) {
+        if (!shouldReconnect) {
+          if (reason === DisconnectReason.loggedOut) {
+            logger.info('Logged out. Run /setup to re-authenticate.');
+            process.exit(0);
+          }
+          // authRequired — wait for manual re-auth, do not reconnect
+          return;
+        }
+
+        const delay =
+          reason === 405
+            ? (this.reconnectDelay = Math.min(
+                this.reconnectDelay * 2,
+                5 * 60 * 1000,
+              ))
+            : 0;
+
+        if (delay > 0) {
+          logger.warn(
+            { reason, delay },
+            'Rate-limited by WhatsApp (405), backing off before reconnect',
+          );
+        } else {
           logger.info('Reconnecting...');
+        }
+
+        setTimeout(() => {
           this.connectInternal().catch((err) => {
             logger.error({ err }, 'Failed to reconnect, retrying in 5s');
             setTimeout(() => {
@@ -117,12 +147,10 @@ export class WhatsAppChannel implements Channel {
               });
             }, 5000);
           });
-        } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
-        }
+        }, delay);
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectDelay = 5000;
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
