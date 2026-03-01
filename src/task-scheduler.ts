@@ -67,6 +67,21 @@ async function runTask(
   }
   fs.mkdirSync(groupDir, { recursive: true });
 
+  // Advance next_run immediately so the next scheduler poll won't
+  // pick up the same task while it's still running.
+  let nextRun: string | null = null;
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    nextRun = interval.next().toISOString();
+  } else if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    nextRun = new Date(Date.now() + ms).toISOString();
+  }
+  // 'once' tasks: set next_run to null so getDueTasks won't match
+  updateTask(task.id, { next_run: nextRun });
+
   logger.info(
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
@@ -192,17 +207,12 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
+  // next_run was already advanced at task start; for interval tasks
+  // re-compute from completion time so drift doesn't accumulate.
+  if (task.schedule_type === 'interval') {
     const ms = parseInt(task.schedule_value, 10);
     nextRun = new Date(Date.now() + ms).toISOString();
   }
-  // 'once' tasks have no next run
 
   const resultSummary = error
     ? `Error: ${error}`
