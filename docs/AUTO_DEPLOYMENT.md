@@ -4,7 +4,7 @@ NanoClaw can automatically detect when the `main` branch is updated on GitHub an
 
 ## How It Works
 
-1. **Polling Loop**: NanoClaw polls the `origin/main` branch every minute (configurable) to check for new commits
+1. **Polling Loop**: NanoClaw polls the `origin/main` branch every 2 minutes (configurable) to check for new commits
 2. **Change Detection**: When a new commit is detected, the deployment process starts automatically
 3. **Deployment Steps**: Executes the same steps from the manual deployment guide:
    - Record current state (for rollback)
@@ -27,8 +27,8 @@ Auto-deployment is **enabled by default**. Configure it via environment variable
 # Disable auto-deployment
 AUTO_DEPLOY_ENABLED=false
 
-# Change polling interval (default: 60 seconds = 1 minute)
-AUTO_DEPLOY_POLL_INTERVAL_SECONDS=120  # Check every 2 minutes
+# Change polling interval (default: 120 seconds = 2 minutes)
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=60  # Check every minute (uses more API rate limit)
 ```
 
 Add these to your `.env` file or set them as environment variables.
@@ -336,9 +336,9 @@ GitHub API has rate limits for fetching:
 - **Authenticated**: 5,000 requests/hour
 - **Unauthenticated**: 60 requests/hour
 
-With 1-minute polling, you'll make 60 requests/hour, which is fine for authenticated access.
+With the default 2-minute polling, you'll make 30 requests/hour, which provides a safety margin even for unauthenticated access. If authentication fails, you won't exhaust the rate limit.
 
-**Solution**: Ensure git credentials are configured for authenticated access.
+**Recommendation**: Configure git credentials for authenticated access to have plenty of headroom.
 
 ## Advanced Configuration
 
@@ -364,11 +364,14 @@ try {
 ### Different polling interval per environment
 
 ```bash
-# Production: check every 5 minutes
+# Production: check every 5 minutes (very conservative)
 AUTO_DEPLOY_POLL_INTERVAL_SECONDS=300
 
-# Development: check every 30 seconds
-AUTO_DEPLOY_POLL_INTERVAL_SECONDS=30
+# Default: check every 2 minutes (balanced)
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=120
+
+# Development: check every minute (faster feedback, uses more API calls)
+AUTO_DEPLOY_POLL_INTERVAL_SECONDS=60
 ```
 
 ### Send notifications to multiple chats

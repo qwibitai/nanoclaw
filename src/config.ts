@@ -76,6 +76,6 @@ export const SLACK_ONLY =
 // Auto-deployment configuration
 export const AUTO_DEPLOY_ENABLED = process.env.AUTO_DEPLOY_ENABLED !== 'false'; // Enabled by default
 export const AUTO_DEPLOY_POLL_INTERVAL_SECONDS = parseInt(
-  process.env.AUTO_DEPLOY_POLL_INTERVAL_SECONDS || '60',
+  process.env.AUTO_DEPLOY_POLL_INTERVAL_SECONDS || '120',
   10,
-); // 60 seconds (1 minute) default
+); // 120 seconds (2 minutes) default - conservative rate to avoid GitHub API limits
