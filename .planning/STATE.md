@@ -5,10 +5,10 @@ milestone_name: milestone
 status: unknown
 last_updated: "2026-03-01T19:02:19.403Z"
 progress:
-  total_phases: 1
+  total_phases: 2
   completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
+  total_plans: 4
+  completed_plans: 4
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** El agente de trabajo responde al panel web en tiempo real via WebSocket, siguiendo el mismo patrón de canal que Telegram y WhatsApp.
-**Current focus:** Phase 1 — WebSocket Channel
+**Current focus:** Phase 2 — Attachments
 
 ## Current Position
 
-Phase: 1 of 2 (WebSocket Channel)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-03-01 — Plan 03 complete (WebSocketChannel integration in main() + better-work group)
+Phase: 2 of 2 (Attachments)
+Plan: 1 of 1 in current phase
+Status: Plan complete
+Last activity: 2026-03-01 — Plan 02-01 complete (Bidirectional attachment support in WebSocketChannel)
 
-Progress: [██████████] ~50%
+Progress: [████████████████████] ~75%
 
 ## Performance Metrics
 
@@ -41,6 +41,7 @@ Progress: [██████████] ~50%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-websocket-channel | 3 | 17min | 5.7min |
+| 02-attachments | 1 | 5min | 5min |
 
 **Recent Trend:**
 - Last 5 plans: 2min, 10min, 5min
@@ -61,10 +62,13 @@ Recent decisions affecting current work:
 - onChatMetadata called in connect() (not on first message) to prevent SQLite FK constraint failures — Plan 01-02
 - ws.terminate() for zombie connections (not ws.close()) — Plan 01-02
 - sendMessage silently buffers when no client (no throw) — Plan 01-02
-- Puerto separado para HTTP estático (WEBSOCKET_FILES_PORT=3002) — Pending resolution
+- Puerto separado para HTTP estático (WEBSOCKET_FILES_PORT=3002) — Plan 02-01
 - JID ws:better-work para diferenciar grupos WS de grupos WhatsApp — Plan 01-03
 - requiresTrigger: false para better-work (responde a todos los mensajes) — Plan 01-03
 - ensureBetterWorkGroup() idempotente: CLAUDE.md no se sobreescribe si ya existe — Plan 01-03
+- vi.hoisted() requerido para mocks en vi.mock() factories (hoisting order) — Plan 02-01
+- Attachment save failures son warn, no error — mensaje se entrega igualmente — Plan 02-01
+- extractOutboundAttachments verifica fs.existsSync — solo archivos reales pasan — Plan 02-01
 
 ### Pending Todos
 
@@ -77,5 +81,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-01
-Stopped at: Completed 01-03-PLAN.md (WebSocketChannel integration in main() + better-work auto-provisioning) — Phase 01 complete
+Stopped at: Completed 02-01-PLAN.md (Bidirectional attachment support in WebSocketChannel + HTTP file server)
 Resume file: None

@@ -7,7 +7,7 @@ Dos fases para añadir el canal WebSocket a NanoClaw: primero el canal completam
 ## Phases
 
 - [x] **Phase 1: WebSocket Channel** - Canal WS funcional con protocolo de mensajes, buffer offline e integración en main()
-- [ ] **Phase 2: Attachments** - Adjuntos entrantes (base64) y salientes (HTTP estático)
+- [x] **Phase 2: Attachments** - Adjuntos entrantes (base64) y salientes (HTTP estático) (completed 2026-03-01)
 
 ## Phase Details
 
@@ -49,4 +49,4 @@ Phases execute in numeric order: 1 → 2
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. WebSocket Channel | 3/3 | Complete | 2026-03-01 |
-| 2. Attachments | 0/1 | Not started | - |
+| 2. Attachments | 1/1 | Complete   | 2026-03-01 |

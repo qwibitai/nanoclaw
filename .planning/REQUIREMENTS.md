@@ -26,15 +26,15 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 
 ### Attachments
 
-- [ ] **ATT-01**: Adjuntos entrantes (`attachments[].data` en base64) se guardan en `groups/better-work/inbox/attachments/` y se añade referencia al content del mensaje
-- [ ] **ATT-02**: Un servidor HTTP estático sirve `groups/better-work/files/` en `WEBSOCKET_FILES_PORT` (default 3002)
-- [ ] **ATT-03**: Archivos salientes se copian a `groups/better-work/files/` y la URL `/files/...` se incluye en el mensaje `chat` con `attachments`
+- [x] **ATT-01**: Adjuntos entrantes (`attachments[].data` en base64) se guardan en `groups/better-work/inbox/attachments/` y se añade referencia al content del mensaje
+- [x] **ATT-02**: Un servidor HTTP estático sirve `groups/better-work/files/` en `WEBSOCKET_FILES_PORT` (default 3002)
+- [x] **ATT-03**: Archivos salientes se copian a `groups/better-work/files/` y la URL `/files/...` se incluye en el mensaje `chat` con `attachments`
 
 ### Configuration
 
 - [x] **CONF-01**: `WEBSOCKET_ENABLED` (env var, default `true`) controla si el canal se registra en `main()`
 - [x] **CONF-02**: `WEBSOCKET_PORT` (env var, default `3001`) configura el puerto del servidor WS
-- [ ] **CONF-03**: `WEBSOCKET_FILES_PORT` (env var, default `3002`) configura el puerto del servidor HTTP estático
+- [x] **CONF-03**: `WEBSOCKET_FILES_PORT` (env var, default `3002`) configura el puerto del servidor HTTP estático
 
 ### Integration
 
@@ -84,12 +84,12 @@ Requirements para implementar el canal WebSocket completo en NanoClaw.
 | PROTO-03 | Phase 1 | Complete |
 | PROTO-04 | Phase 1 | Complete |
 | PROTO-05 | Phase 1 | Complete |
-| ATT-01 | Phase 2 | Pending |
-| ATT-02 | Phase 2 | Pending |
-| ATT-03 | Phase 2 | Pending |
+| ATT-01 | Phase 2 | Complete |
+| ATT-02 | Phase 2 | Complete |
+| ATT-03 | Phase 2 | Complete |
 | CONF-01 | Phase 1 | Complete |
 | CONF-02 | Phase 1 | Complete |
-| CONF-03 | Phase 2 | Pending |
+| CONF-03 | Phase 2 | Complete |
 | INTG-01 | Phase 1 | Complete |
 | INTG-02 | Phase 1 | Complete |
 | INTG-03 | Phase 1 | Complete |
