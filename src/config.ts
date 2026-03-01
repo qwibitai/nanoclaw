@@ -13,6 +13,7 @@ const envConfig = readEnvFile([
   'TELEGRAM_ONLY',
   'WEBSOCKET_ENABLED',
   'WEBSOCKET_PORT',
+  'WEBSOCKET_FILES_PORT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -84,5 +85,9 @@ export const WEBSOCKET_ENABLED =
   (process.env.WEBSOCKET_ENABLED ?? envConfig.WEBSOCKET_ENABLED ?? 'true') !== 'false';
 export const WEBSOCKET_PORT = parseInt(
   process.env.WEBSOCKET_PORT || envConfig.WEBSOCKET_PORT || '3001',
+  10,
+);
+export const WEBSOCKET_FILES_PORT = parseInt(
+  process.env.WEBSOCKET_FILES_PORT || envConfig.WEBSOCKET_FILES_PORT || '3002',
   10,
 );
