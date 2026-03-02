@@ -14,8 +14,8 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  claimDueTasks,
   getAllTasks,
-  getDueTasks,
   getTaskById,
   logTaskRun,
   updateTask,
@@ -25,6 +25,44 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+/**
+ * Compute the next run time for a recurring task, anchored to the
+ * task's scheduled time rather than Date.now() to prevent cumulative
+ * drift on interval-based tasks.
+ *
+ * Co-authored-by: @community-pr-601
+ */
+export function computeNextRun(task: ScheduledTask): string | null {
+  if (task.schedule_type === 'once') return null;
+
+  const now = Date.now();
+
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    return interval.next().toISOString();
+  }
+
+  if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    if (!ms || ms <= 0) {
+      // Guard against malformed interval that would cause an infinite loop
+      logger.warn({ taskId: task.id, value: task.schedule_value }, 'Invalid interval value');
+      return new Date(now + 60_000).toISOString();
+    }
+    // Anchor to the scheduled time, not now, to prevent drift.
+    // Skip past any missed intervals so we always land in the future.
+    let next = new Date(task.next_run!).getTime() + ms;
+    while (next <= now) {
+      next += ms;
+    }
+    return new Date(next).toISOString();
+  }
+
+  return null;
+}
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -192,24 +230,14 @@ async function runTask(
     error,
   });
 
-  let nextRun: string | null = null;
-  if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    nextRun = interval.next().toISOString();
-  } else if (task.schedule_type === 'interval') {
-    const ms = parseInt(task.schedule_value, 10);
-    nextRun = new Date(Date.now() + ms).toISOString();
-  }
-  // 'once' tasks have no next run
-
+  // next_run was already advanced by claimDueTasks() before execution started.
+  // We only record the execution result and let the DB complete once-tasks.
   const resultSummary = error
     ? `Error: ${error}`
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, nextRun, resultSummary);
+  updateTaskAfterRun(task.id, resultSummary);
 }
 
 let schedulerRunning = false;
@@ -224,13 +252,17 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 
   const loop = async () => {
     try {
-      const dueTasks = getDueTasks();
-      if (dueTasks.length > 0) {
-        logger.info({ count: dueTasks.length }, 'Found due tasks');
+      // Atomic claim: select due tasks AND advance their next_run in a
+      // single SQLite transaction. This prevents the next poll from
+      // re-discovering the same tasks while they're still running.
+      const claimedTasks = claimDueTasks(computeNextRun);
+      if (claimedTasks.length > 0) {
+        logger.info({ count: claimedTasks.length }, 'Claimed due tasks');
       }
 
-      for (const task of dueTasks) {
-        // Re-check task status in case it was paused/cancelled
+      for (const task of claimedTasks) {
+        // Re-check task status in case it was paused/cancelled between
+        // claim and dispatch (e.g. user paused via API).
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;

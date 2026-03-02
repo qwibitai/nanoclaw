@@ -442,19 +442,71 @@ export function getDueTasks(): ScheduledTask[] {
     .all(now) as ScheduledTask[];
 }
 
+/**
+ * Atomically claim due tasks in a single transaction: select them and
+ * immediately advance next_run (recurring) or clear it (once), so the
+ * next scheduler poll cannot re-discover the same tasks.
+ *
+ * Returns a snapshot of each task as it was *before* the claim update,
+ * so callers still see the original next_run for logging / drift checks.
+ *
+ * Co-authored-by: @community-pr-601
+ */
+export function claimDueTasks(
+  advanceNextRun: (task: ScheduledTask) => string | null,
+): ScheduledTask[] {
+  const claim = db.transaction(() => {
+    const now = new Date().toISOString();
+    const tasks = db
+      .prepare(
+        `
+      SELECT * FROM scheduled_tasks
+      WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= ?
+      ORDER BY next_run
+    `,
+      )
+      .all(now) as ScheduledTask[];
+
+    for (const task of tasks) {
+      const nextRun = advanceNextRun(task);
+      if (nextRun === null) {
+        // Once-task: clear next_run so it won't be re-claimed.
+        // Status stays 'active' until execution completes.
+        db.prepare(
+          `UPDATE scheduled_tasks SET next_run = NULL WHERE id = ?`,
+        ).run(task.id);
+      } else {
+        // Recurring: advance next_run into the future
+        db.prepare(
+          `UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`,
+        ).run(nextRun, task.id);
+      }
+    }
+
+    return tasks;
+  });
+
+  return claim();
+}
+
+/**
+ * Record execution results after a task run.
+ * next_run is already advanced by claimDueTasks(), so this only sets
+ * last_run, last_result, and completes once-tasks (next_run IS NULL).
+ */
 export function updateTaskAfterRun(
   id: string,
-  nextRun: string | null,
   lastResult: string,
 ): void {
   const now = new Date().toISOString();
   db.prepare(
     `
     UPDATE scheduled_tasks
-    SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
+    SET last_run = ?, last_result = ?,
+        status = CASE WHEN next_run IS NULL THEN 'completed' ELSE status END
     WHERE id = ?
   `,
-  ).run(nextRun, now, lastResult, nextRun, id);
+  ).run(now, lastResult, id);
 }
 
 export function logTaskRun(log: TaskRunLog): void {
