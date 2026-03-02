@@ -13,10 +13,22 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/investing/
 groups/main/*
 groups/global/*
+groups/investing/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/investing/CLAUDE.md
+!groups/investing/portfolio.json
+!groups/investing/watchlist.json
+!groups/investing/intrinsic-values.json
+!groups/investing/price-state.json
+!groups/investing/research/
+groups/investing/research/*
+!groups/investing/research/.gitkeep
+# Never commit API keys
+groups/investing/secrets/*.key
 
 # Secrets
 *.keys.json
