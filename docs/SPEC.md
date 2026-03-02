@@ -1,13 +1,13 @@
 # NanoClaw Specification
 
-A personal Claude assistant with pluggable channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
+A personal Claude assistant with multi-channel support, persistent memory per conversation, scheduled tasks, and container-isolated agent execution.
 
 ---
 
 ## Table of Contents
 
 1. [Architecture](#architecture)
-2. [Architecture: Pluggable Channels](#architecture-pluggable-channels)
+2. [Architecture: Channel System](#architecture-channel-system)
 3. [Folder Structure](#folder-structure)
 4. [Configuration](#configuration)
 5. [Memory System](#memory-system)
@@ -30,9 +30,9 @@ A personal Claude assistant with pluggable channel support, persistent memory pe
 ├──────────────────────────────────────────────────────────────────────┤
 │                                                                       │
 │  ┌──────────────────┐                  ┌────────────────────┐        │
-│  │ Pluggable        │─────────────────▶│   SQLite Database  │        │
-│  │ Channels         │◀────────────────│   (messages.db)    │        │
-│  │ (self-register)  │  store/send      └─────────┬──────────┘        │
+│  │ Channels         │─────────────────▶│   SQLite Database  │        │
+│  │ (self-register   │◀────────────────│   (messages.db)    │        │
+│  │  at startup)     │  store/send      └─────────┬──────────┘        │
 │  └──────────────────┘                            │                   │
 │                                                   │                   │
 │         ┌─────────────────────────────────────────┘                   │
@@ -75,7 +75,7 @@ A personal Claude assistant with pluggable channel support, persistent memory pe
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| Channel System | Pluggable registry (`src/channels/registry.ts`) | Self-registering channel architecture |
+| Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
 | Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
@@ -84,15 +84,15 @@ A personal Claude assistant with pluggable channel support, persistent memory pe
 
 ---
 
-## Architecture: Pluggable Channels
+## Architecture: Channel System
 
-NanoClaw uses a pluggable channel architecture. The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a [Claude Code skill](https://code.claude.com/docs/en/skills) that adds the channel code to your fork. Channels self-register at startup; unconfigured channels are silently skipped.
+The core ships with no channels built in — each channel (WhatsApp, Telegram, Slack, Discord, Gmail) is installed as a [Claude Code skill](https://code.claude.com/docs/en/skills) that adds the channel code to your fork. Channels self-register at startup; unconfigured channels are silently skipped.
 
 ### System Diagram
 
 ```mermaid
 graph LR
-    subgraph Channels["Pluggable Channels"]
+    subgraph Channels["Channels"]
         WA[WhatsApp]
         TG[Telegram]
         SL[Slack]
@@ -217,7 +217,7 @@ Channels self-register using a barrel-import pattern:
 
 | File | Purpose |
 |------|---------|
-| `src/channels/registry.ts` | Channel factory registry — the core of the pluggable system |
+| `src/channels/registry.ts` | Channel factory registry |
 | `src/channels/index.ts` | Barrel imports that trigger channel self-registration |
 | `src/types.ts` | `Channel` interface, `ChannelOpts`, message types |
 | `src/index.ts` | Orchestrator — instantiates channels, runs message loop |
@@ -254,7 +254,7 @@ nanoclaw/
 ├── src/
 │   ├── index.ts                   # Orchestrator: state, message loop, agent invocation
 │   ├── channels/
-│   │   ├── registry.ts            # Channel factory registry (pluggable channel system)
+│   │   ├── registry.ts            # Channel factory registry
 │   │   └── index.ts               # Barrel imports for channel self-registration
 │   ├── ipc.ts                     # IPC watcher and task processing
 │   ├── router.ts                  # Message formatting and outbound routing
@@ -642,7 +642,7 @@ When NanoClaw starts, it:
 1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
 2. Initializes the SQLite database (migrates from JSON files if they exist)
 3. Loads state from SQLite (registered groups, sessions, router state)
-4. **Connects pluggable channels** - Loops through registered channels, instantiates those with credentials, calls `connect()` on each
+4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
 5. Once at least one channel is connected:
    - Starts the scheduler loop
    - Starts the IPC watcher for container messages

@@ -2,20 +2,19 @@
 
 All notable changes to NanoClaw will be documented in this file.
 
-## 1.2.0 — Pluggable Channel Architecture
+## 1.2.0 — Multi-Channel Support
 
 **BREAKING CHANGE** — WhatsApp is no longer bundled in core.
 
-NanoClaw now uses a pluggable channel architecture. The core ships with no
-channels built in. Each channel (WhatsApp, Telegram, Slack, Discord, Gmail)
-is a self-contained skill that registers itself at startup via a factory
-pattern. Unconfigured channels are silently skipped.
+The core no longer ships with any channels built in. Each channel (WhatsApp,
+Telegram, Slack, Discord, Gmail) is a self-contained skill that registers
+itself at startup. Unconfigured channels are silently skipped.
 
 ### Migration for existing WhatsApp users
 
 If you are upgrading from a previous version, open Claude Code in your
 NanoClaw directory and run `/add-whatsapp` to re-install WhatsApp as a
-pluggable channel. Your existing auth credentials, groups, and scheduled
+skill. Your existing auth credentials, groups, and scheduled
 tasks are preserved — no re-authentication needed.
 
 ### What changed
@@ -40,7 +39,7 @@ tasks are preserved — no re-authentication needed.
 - `npm run auth` script removed
 
 **Refactored: All channel skills simplified**
-- Discord, Slack, Telegram, Gmail skills converted to the pluggable pattern
+- Discord, Slack, Telegram, Gmail skills converted to the self-registering pattern
 - Each skill's `modify/` directory reduced from ~3-4 large files (index.ts,
   config.ts, routing.test.ts) to a single small barrel import
   (`src/channels/index.ts`)
