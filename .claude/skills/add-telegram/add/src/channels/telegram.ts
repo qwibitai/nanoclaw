@@ -19,6 +19,7 @@ export class TelegramChannel implements Channel {
   name = 'telegram';
 
   private bot: Bot | null = null;
+  private botConnected = false; // Bug #1 fix: track actual connection state
   private opts: TelegramChannelOpts;
   private botToken: string;
 
@@ -136,8 +137,14 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
+      // Bug #4 fix: Calculate chatName for non-text messages (same logic as text messages)
+      const chatName =
+        ctx.chat.type === 'private'
+          ? senderName
+          : (ctx.chat as any).title || chatJid;
+
       const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
@@ -156,8 +163,12 @@ export class TelegramChannel implements Channel {
     );
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+      // Bug #3 fix: Sanitize filename to prevent XML injection
+      const rawName = ctx.message.document?.file_name || 'file';
+      const sanitizedName = rawName
+        .replace(/[<>&"]/g, '') // Remove XML special characters
+        .slice(0, 64); // Limit length
+      storeNonText(ctx, `[Document: ${sanitizedName}]`);
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';
@@ -171,10 +182,11 @@ export class TelegramChannel implements Channel {
       logger.error({ err: err.message }, 'Telegram bot error');
     });
 
-    // Start polling — returns a Promise that resolves when started
-    return new Promise<void>((resolve) => {
+    // Bug #2 fix: Start polling with proper rejection handling
+    return new Promise<void>((resolve, reject) => {
       this.bot!.start({
         onStart: (botInfo) => {
+          this.botConnected = true; // Bug #1 fix: set flag when actually connected
           logger.info(
             { username: botInfo.username, id: botInfo.id },
             'Telegram bot connected',
@@ -185,6 +197,11 @@ export class TelegramChannel implements Channel {
           );
           resolve();
         },
+      }).catch((err) => {
+        // Bug #2 fix: Prevent hanging on failure
+        this.botConnected = false;
+        logger.error({ err }, 'Telegram bot failed to start');
+        reject(err);
       });
     });
   }
@@ -217,7 +234,7 @@ export class TelegramChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.bot !== null;
+    return this.botConnected; // Bug #1 fix: use connection state flag instead of bot !== null
   }
 
   ownsJid(jid: string): boolean {
@@ -228,6 +245,7 @@ export class TelegramChannel implements Channel {
     if (this.bot) {
       this.bot.stop();
       this.bot = null;
+      this.botConnected = false; // Bug #1 fix: reset flag on disconnect
       logger.info('Telegram bot stopped');
     }
   }
