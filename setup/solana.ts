@@ -11,29 +11,53 @@ import bs58 from 'bs58';
 import chalk from 'chalk';
 import { emitStatus } from './status.js';
 
+/**
+ * Parse CLI args into a key-value map.
+ * Supports: --signing standard --key-source generate --network mainnet --slippage 50
+ *           --private-key <key> --key-path <path> --rpc-url <url>
+ *           --crossmint-key <key> --crossmint-env production --public-key <key>
+ *           --dflow-key <key> --jupiter-key <key> --breeze-key <key> --helius-key <key>
+ */
+function parseArgs(args: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--') && i + 1 < args.length && !args[i + 1].startsWith('--')) {
+      result[args[i].slice(2)] = args[i + 1];
+      i++;
+    }
+  }
+  return result;
+}
+
 export async function run(args: string[]): Promise<void> {
   console.log(chalk.cyan.bold('\n🦀 Solana Configuration\n'));
   console.log('Configure wallet and enable Solana protocol operations.\n');
 
   emitStatus('SOLANA_SETUP', { STATUS: 'starting' });
 
+  // Parse CLI args for non-interactive mode
+  const cliArgs = parseArgs(args);
+  const nonInteractive = !!cliArgs.signing;
+
   try {
     // Step 1: Signing Method
     console.log(chalk.yellow('Step 1: Signing Method'));
 
-    const signingMethod = await select({
-      message: 'How should transactions be signed?',
-      choices: [
-        {
-          name: 'Standard (local keypair) — recommended',
-          value: 'standard' as const,
-        },
-        {
-          name: 'Crossmint (custodial API)',
-          value: 'crossmint' as const,
-        },
-      ],
-    });
+    const signingMethod: 'standard' | 'crossmint' = cliArgs.signing
+      ? (cliArgs.signing as 'standard' | 'crossmint')
+      : await select({
+          message: 'How should transactions be signed?',
+          choices: [
+            {
+              name: 'Standard (local keypair) — recommended',
+              value: 'standard' as const,
+            },
+            {
+              name: 'Crossmint (custodial API)',
+              value: 'crossmint' as const,
+            },
+          ],
+        });
 
     let publicKey: string;
     let privateKey: string | undefined;
@@ -44,36 +68,48 @@ export async function run(args: string[]): Promise<void> {
       // Standard path: local keypair
       console.log(chalk.yellow('\nStep 2: Wallet Configuration'));
 
-      const keySource = await select({
-        message: 'How would you like to provide the private key?',
-        choices: [
-          {
-            name: 'Paste base58 private key (recommended)',
-            value: 'base58',
-          },
-          {
-            name: 'Load from keypair JSON file',
-            value: 'file',
-          },
-          {
-            name: 'Generate new keypair',
-            value: 'generate',
-          },
-        ],
-      });
+      const keySource = cliArgs['key-source']
+        ? cliArgs['key-source']
+        : await select({
+            message: 'How would you like to provide the private key?',
+            choices: [
+              {
+                name: 'Paste base58 private key (recommended)',
+                value: 'base58',
+              },
+              {
+                name: 'Load from keypair JSON file',
+                value: 'file',
+              },
+              {
+                name: 'Generate new keypair',
+                value: 'generate',
+              },
+            ],
+          });
 
       if (keySource === 'base58') {
-        privateKey = await password({
-          message: 'Paste base58 private key:',
-          validate: (value) => {
-            try {
-              const decoded = bs58.decode(value);
-              return decoded.length === 64 ? true : 'Invalid key length (expected 64 bytes)';
-            } catch {
-              return 'Invalid base58 format';
-            }
-          },
-        });
+        privateKey = cliArgs['private-key']
+          ? cliArgs['private-key']
+          : await password({
+              message: 'Paste base58 private key:',
+              validate: (value) => {
+                try {
+                  const decoded = bs58.decode(value);
+                  return decoded.length === 64 ? true : 'Invalid key length (expected 64 bytes)';
+                } catch {
+                  return 'Invalid base58 format';
+                }
+              },
+            });
+
+        // Validate the key
+        try {
+          const decoded = bs58.decode(privateKey);
+          if (decoded.length !== 64) throw new Error('Invalid key length (expected 64 bytes)');
+        } catch (e) {
+          throw new Error(`Invalid base58 private key: ${e instanceof Error ? e.message : String(e)}`);
+        }
 
         const secretKey = bs58.decode(privateKey);
         const keypair = Keypair.fromSecretKey(secretKey);
@@ -82,10 +118,12 @@ export async function run(args: string[]): Promise<void> {
         console.log(chalk.green('\n✓ Keypair validated'));
         console.log(chalk.white(`  Public Key: ${publicKey}\n`));
       } else if (keySource === 'file') {
-        const keypath = await input({
-          message: 'Path to keypair JSON file:',
-          default: '~/.config/solana/id.json',
-        });
+        const keypath = cliArgs['key-path']
+          ? cliArgs['key-path']
+          : await input({
+              message: 'Path to keypair JSON file:',
+              default: '~/.config/solana/id.json',
+            });
 
         const expandedPath = keypath.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
         const keypairData = JSON.parse(await fs.readFile(expandedPath, 'utf-8'));
@@ -111,23 +149,29 @@ export async function run(args: string[]): Promise<void> {
       // Crossmint path
       console.log(chalk.yellow('\nStep 2: Crossmint Configuration'));
 
-      crossmintApiKey = await password({
-        message: 'Crossmint API key:',
-        validate: (value) => value.length > 0 ? true : 'API key is required',
-      });
+      crossmintApiKey = cliArgs['crossmint-key']
+        ? cliArgs['crossmint-key']
+        : await password({
+            message: 'Crossmint API key:',
+            validate: (value) => value.length > 0 ? true : 'API key is required',
+          });
 
-      crossmintEnvironment = await select({
-        message: 'Crossmint environment:',
-        choices: [
-          { name: 'Production', value: 'production' },
-          { name: 'Staging', value: 'staging' },
-        ],
-      });
+      crossmintEnvironment = cliArgs['crossmint-env']
+        ? cliArgs['crossmint-env']
+        : await select({
+            message: 'Crossmint environment:',
+            choices: [
+              { name: 'Production', value: 'production' },
+              { name: 'Staging', value: 'staging' },
+            ],
+          });
 
-      publicKey = await input({
-        message: 'Wallet public key (or leave blank to create via Crossmint):',
-        default: '',
-      });
+      publicKey = cliArgs['public-key']
+        ? cliArgs['public-key']
+        : await input({
+            message: 'Wallet public key (or leave blank to create via Crossmint):',
+            default: '',
+          });
 
       if (!publicKey) {
         console.log(chalk.yellow('\nNote: A wallet will be created via Crossmint on first use.'));
@@ -138,15 +182,17 @@ export async function run(args: string[]): Promise<void> {
     // Step 3: RPC Configuration
     console.log(chalk.yellow('\nStep 3: RPC Configuration'));
 
-    const networkChoice = await select({
-      message: 'Select Solana network:',
-      choices: [
-        { name: 'Mainnet (Production - real SOL)', value: 'mainnet' },
-        { name: 'Devnet (Testing - free airdrops available)', value: 'devnet' },
-        { name: 'Testnet', value: 'testnet' },
-        { name: 'Custom RPC URL', value: 'custom' },
-      ],
-    });
+    const networkChoice = cliArgs.network
+      ? cliArgs.network
+      : await select({
+          message: 'Select Solana network:',
+          choices: [
+            { name: 'Mainnet (Production - real SOL)', value: 'mainnet' },
+            { name: 'Devnet (Testing - free airdrops available)', value: 'devnet' },
+            { name: 'Testnet', value: 'testnet' },
+            { name: 'Custom RPC URL', value: 'custom' },
+          ],
+        });
 
     let rpcUrl: string;
 
@@ -162,6 +208,8 @@ export async function run(args: string[]): Promise<void> {
     } else if (networkChoice === 'testnet') {
       rpcUrl = 'https://api.testnet.solana.com';
       console.log(chalk.cyan('Using Testnet'));
+    } else if (cliArgs['rpc-url']) {
+      rpcUrl = cliArgs['rpc-url'];
     } else {
       rpcUrl = await input({
         message: 'Enter custom RPC URL:',
@@ -172,14 +220,18 @@ export async function run(args: string[]): Promise<void> {
       });
     }
 
-    const defaultSlippage = await input({
-      message: 'Default slippage (basis points):',
-      default: '50',
-      validate: (value) => {
-        const num = parseInt(value);
-        return num >= 0 && num <= 1000 ? true : 'Must be between 0 and 1000';
-      },
-    });
+    const defaultSlippage = cliArgs.slippage
+      ? cliArgs.slippage
+      : nonInteractive
+        ? '50'
+        : await input({
+            message: 'Default slippage (basis points):',
+            default: '50',
+            validate: (value) => {
+              const num = parseInt(value);
+              return num >= 0 && num <= 1000 ? true : 'Must be between 0 and 1000';
+            },
+          });
 
     // Step 4: Optional Protocol API Keys
     console.log(chalk.yellow('\nStep 4: Optional Protocol API Keys'));
@@ -187,28 +239,44 @@ export async function run(args: string[]): Promise<void> {
 
     const protocolKeys: Record<string, string> = {};
 
-    const wantsDflow = await confirm({ message: 'Do you have a DFlow API key?', default: false });
-    if (wantsDflow) {
-      const key = await password({ message: 'DFlow API key:' });
-      if (key) protocolKeys.DFLOW_API_KEY = key;
+    if (cliArgs['dflow-key']) {
+      protocolKeys.DFLOW_API_KEY = cliArgs['dflow-key'];
+    } else if (!nonInteractive) {
+      const wantsDflow = await confirm({ message: 'Do you have a DFlow API key?', default: false });
+      if (wantsDflow) {
+        const key = await password({ message: 'DFlow API key:' });
+        if (key) protocolKeys.DFLOW_API_KEY = key;
+      }
     }
 
-    const wantsJupiter = await confirm({ message: 'Do you have a Jupiter API key?', default: false });
-    if (wantsJupiter) {
-      const key = await password({ message: 'Jupiter API key:' });
-      if (key) protocolKeys.JUPITER_API_KEY = key;
+    if (cliArgs['jupiter-key']) {
+      protocolKeys.JUPITER_API_KEY = cliArgs['jupiter-key'];
+    } else if (!nonInteractive) {
+      const wantsJupiter = await confirm({ message: 'Do you have a Jupiter API key?', default: false });
+      if (wantsJupiter) {
+        const key = await password({ message: 'Jupiter API key:' });
+        if (key) protocolKeys.JUPITER_API_KEY = key;
+      }
     }
 
-    const wantsBreeze = await confirm({ message: 'Do you have a Breeze API key?', default: false });
-    if (wantsBreeze) {
-      const key = await password({ message: 'Breeze API key:' });
-      if (key) protocolKeys.BREEZE_API_KEY = key;
+    if (cliArgs['breeze-key']) {
+      protocolKeys.BREEZE_API_KEY = cliArgs['breeze-key'];
+    } else if (!nonInteractive) {
+      const wantsBreeze = await confirm({ message: 'Do you have a Breeze API key?', default: false });
+      if (wantsBreeze) {
+        const key = await password({ message: 'Breeze API key:' });
+        if (key) protocolKeys.BREEZE_API_KEY = key;
+      }
     }
 
-    const wantsHelius = await confirm({ message: 'Do you have a Helius API key?', default: false });
-    if (wantsHelius) {
-      const key = await password({ message: 'Helius API key:' });
-      if (key) protocolKeys.HELIUS_API_KEY = key;
+    if (cliArgs['helius-key']) {
+      protocolKeys.HELIUS_API_KEY = cliArgs['helius-key'];
+    } else if (!nonInteractive) {
+      const wantsHelius = await confirm({ message: 'Do you have a Helius API key?', default: false });
+      if (wantsHelius) {
+        const key = await password({ message: 'Helius API key:' });
+        if (key) protocolKeys.HELIUS_API_KEY = key;
+      }
     }
 
     // Build config

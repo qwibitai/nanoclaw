@@ -29,6 +29,7 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
 - If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
+- If HAS_SOLANA_CONFIG=true → note existing Solana wallet (SOLANA_PUBLIC_KEY, SOLANA_NETWORK, SOLANA_SIGNING_METHOD), offer to skip step 10
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
 ## 3. Container Runtime
@@ -133,6 +134,8 @@ AskUserQuestion: Agent access to external directories?
 
 **SolClaw requires Solana wallet configuration to start.** This step is mandatory.
 
+**If HAS_SOLANA_CONFIG=true from step 2:** Solana is already configured. Show the user: public key (SOLANA_PUBLIC_KEY), network (SOLANA_NETWORK), signing method (SOLANA_SIGNING_METHOD). AskUserQuestion: Keep existing Solana config or reconfigure? If keeping, skip to step 11.
+
 ### 10a. Signing Method
 
 AskUserQuestion: How should Solana transactions be signed?
@@ -144,16 +147,14 @@ AskUserQuestion: How should Solana transactions be signed?
 
 AskUserQuestion: How would you like to configure your wallet?
 
-1. **Generate new wallet (Recommended for testing)** → Run `npx tsx setup/index.ts --step solana`. Select "Generate new keypair". IMPORTANT: The private key is displayed ONCE - user must save it.
-2. **Use existing private key** → Run `npx tsx setup/index.ts --step solana`. Select "Paste base58 private key". Do NOT log or display the private key in chat.
-3. **Load from keypair file** → Run `npx tsx setup/index.ts --step solana`. Select "Load from keypair JSON file". Default: `~/.config/solana/id.json`.
+1. **Generate new wallet (Recommended for testing)** → Run: `npx tsx setup/index.ts --step solana -- --signing standard --key-source generate --network <NETWORK>`. IMPORTANT: The private key is displayed ONCE in the output - tell the user to save it.
+2. **Use existing private key** → Collect the private key from the user. Run: `npx tsx setup/index.ts --step solana -- --signing standard --key-source base58 --private-key "<KEY>" --network <NETWORK>`. Do NOT log or display the private key in chat.
+3. **Load from keypair file** → Ask for path (default: `~/.config/solana/id.json`). Run: `npx tsx setup/index.ts --step solana -- --signing standard --key-source file --key-path "<PATH>" --network <NETWORK>`.
 
 ### 10b-alt. Crossmint Path (custodial)
 
-Run `npx tsx setup/index.ts --step solana`. Select "Crossmint (custodial API)". User provides:
-- Crossmint API key
-- Environment (production/staging)
-- Optionally, existing wallet public key
+Collect from user: Crossmint API key, environment (production/staging), optionally wallet public key. Run:
+`npx tsx setup/index.ts --step solana -- --signing crossmint --crossmint-key "<KEY>" --crossmint-env <ENV> --network <NETWORK>` (add `--public-key "<KEY>"` if provided)
 
 ### 10c. Network Selection
 
@@ -162,11 +163,11 @@ AskUserQuestion: Which Solana network?
 - **mainnet** - Production network with real SOL (default)
 - **devnet** - Testnet with free airdrops (recommended for testing). After setup, user can get free SOL: `solana airdrop 1 <PUBLIC_KEY> --url devnet`
 - **testnet** - Alternative testnet
-- **custom URL** - Custom RPC provider (e.g., `https://rpc.helius.xyz`)
+- **custom URL** - Custom RPC provider. Use `--network custom --rpc-url "<URL>"`
+
+Pass the chosen network as the `--network` flag in the commands above (mainnet/devnet/testnet/custom).
 
 ### 10d. Optional Protocol API Keys
-
-After network selection, the setup script asks about optional protocol API keys. These are saved to `.env` and passed to the container automatically.
 
 AskUserQuestion: Do you have API keys for any of these protocols? (each asked individually)
 - DFlow (trading/order flow) — contact hello@dflow.net
@@ -174,12 +175,17 @@ AskUserQuestion: Do you have API keys for any of these protocols? (each asked in
 - Breeze (yield/lending) — create org and API key at portal.breeze.baby
 - Helius (enhanced RPC/webhooks) — get key at helius.dev
 
-For each confirmed, the key is collected and appended to `.env`.
+For each confirmed, add the corresponding flag to the solana setup command: `--dflow-key "<KEY>"`, `--jupiter-key "<KEY>"`, `--breeze-key "<KEY>"`, `--helius-key "<KEY>"`. These are saved to `.env` and passed to the container automatically.
+
+**All flags can be combined in a single command.** Example:
+```
+npx tsx setup/index.ts --step solana -- --signing standard --key-source generate --network mainnet --jupiter-key "xxx" --helius-key "yyy"
+```
 
 **After configuration:**
 - Config is saved to `config/solana-config.json` and `.env.solana`
 - Protocol API keys (if any) are saved to `.env`
-- Verify with: `npx tsx tools/solana-balance.ts` (should show wallet balance)
+- Verify config is valid: `node -e "const c=require('./config/solana-config.json'); console.log('Public Key:', c.wallet.publicKey, '| RPC:', c.preferences.rpcUrl, '| Setup:', c.setupComplete)"`
 - Record the public key for the user
 
 **If step fails:**
@@ -234,11 +240,11 @@ Run `npx tsx setup/index.ts --step verify` and parse the status block.
 - REGISTERED_GROUPS=0 → re-run steps 7-8
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 - SOLANA_CONFIG=missing → re-run step 10 (Solana wallet configuration)
+- SOLANA_CONFIG=configured → Solana wallet is set up correctly
 
 **Additional Solana verification:**
 - Check Solana config exists: `ls -la config/solana-config.json .env.solana`
-- Test balance tool: `npx tsx tools/solana-balance.ts`
-- Test price tool: `npx tsx tools/solana-price.ts SOL`
+- Verify config is valid: `node -e "const c=require('./config/solana-config.json'); console.log('Public Key:', c.wallet.publicKey, '| RPC:', c.preferences.rpcUrl, '| Setup:', c.setupComplete)"`
 - If startup fails with "Solana not configured", ensure step 10 completed successfully
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/solclaw.log`

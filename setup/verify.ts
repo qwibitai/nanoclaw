@@ -120,7 +120,21 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  // 6. Check mount allowlist
+  // 6. Check Solana config
+  let solanaConfig = 'missing';
+  const solanaConfigPath = path.join(projectRoot, 'config', 'solana-config.json');
+  if (fs.existsSync(solanaConfigPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(solanaConfigPath, 'utf-8'));
+      if (config.setupComplete && config.wallet?.publicKey) {
+        solanaConfig = 'configured';
+      }
+    } catch {
+      // Invalid config
+    }
+  }
+
+  // 7. Check mount allowlist
   let mountAllowlist = 'missing';
   if (fs.existsSync(path.join(homeDir, '.config', 'nanoclaw', 'mount-allowlist.json'))) {
     mountAllowlist = 'configured';
@@ -131,7 +145,8 @@ export async function run(_args: string[]): Promise<void> {
     service === 'running' &&
     credentials !== 'missing' &&
     whatsappAuth !== 'not_found' &&
-    registeredGroups > 0
+    registeredGroups > 0 &&
+    solanaConfig !== 'missing'
       ? 'success'
       : 'failed';
 
@@ -144,6 +159,7 @@ export async function run(_args: string[]): Promise<void> {
     WHATSAPP_AUTH: whatsappAuth,
     REGISTERED_GROUPS: registeredGroups,
     MOUNT_ALLOWLIST: mountAllowlist,
+    SOLANA_CONFIG: solanaConfig,
     STATUS: status,
     LOG: 'logs/setup.log',
   });

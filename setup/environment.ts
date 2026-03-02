@@ -47,6 +47,26 @@ export async function run(_args: string[]): Promise<void> {
     fs.existsSync(authDir) &&
     fs.readdirSync(authDir).length > 0;
 
+  // Check Solana config
+  const solanaConfigPath = path.join(projectRoot, 'config', 'solana-config.json');
+  let hasSolanaConfig = false;
+  let solanaPublicKey = '';
+  let solanaNetwork = '';
+  let solanaSigningMethod = '';
+  if (fs.existsSync(solanaConfigPath)) {
+    try {
+      const solanaConfig = JSON.parse(fs.readFileSync(solanaConfigPath, 'utf-8'));
+      if (solanaConfig.setupComplete && solanaConfig.wallet?.publicKey) {
+        hasSolanaConfig = true;
+        solanaPublicKey = solanaConfig.wallet.publicKey;
+        solanaNetwork = solanaConfig.preferences?.rpcUrl || '';
+        solanaSigningMethod = solanaConfig.wallet?.signingMethod || '';
+      }
+    } catch {
+      // Invalid config, treat as not configured
+    }
+  }
+
   let hasRegisteredGroups = false;
   // Check JSON file first (pre-migration)
   if (fs.existsSync(path.join(projectRoot, 'data', 'registered_groups.json'))) {
@@ -68,7 +88,7 @@ export async function run(_args: string[]): Promise<void> {
     }
   }
 
-  logger.info({ platform, wsl, appleContainer, docker, hasEnv, hasAuth, hasRegisteredGroups },
+  logger.info({ platform, wsl, appleContainer, docker, hasEnv, hasAuth, hasRegisteredGroups, hasSolanaConfig },
     'Environment check complete');
 
   emitStatus('CHECK_ENVIRONMENT', {
@@ -80,6 +100,10 @@ export async function run(_args: string[]): Promise<void> {
     HAS_ENV: hasEnv,
     HAS_AUTH: hasAuth,
     HAS_REGISTERED_GROUPS: hasRegisteredGroups,
+    HAS_SOLANA_CONFIG: hasSolanaConfig,
+    SOLANA_PUBLIC_KEY: solanaPublicKey,
+    SOLANA_NETWORK: solanaNetwork,
+    SOLANA_SIGNING_METHOD: solanaSigningMethod,
     STATUS: 'success',
     LOG: 'logs/setup.log',
   });
