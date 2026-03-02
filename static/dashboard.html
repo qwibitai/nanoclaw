@@ -230,7 +230,7 @@ function escapeHtml(s) {
 
 function escapeAttr(s) {
   if (!s) return '';
-  return s.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return escapeHtml(s).replace(/'/g, '&#39;');
 }
 
 function relativeTime(iso) {
@@ -253,11 +253,13 @@ function formatJid(jid) {
   return jid;
 }
 
+let errorTimeout = null;
 function showError(msg) {
   const el = document.getElementById('error-banner');
   el.textContent = msg;
   el.classList.add('visible');
-  setTimeout(() => el.classList.remove('visible'), 5000);
+  if (errorTimeout) clearTimeout(errorTimeout);
+  errorTimeout = setTimeout(() => { el.classList.remove('visible'); errorTimeout = null; }, 5000);
 }
 
 // ===== 4. API LAYER =====
@@ -373,28 +375,36 @@ async function fetchMessages(jid) {
 
 async function loadOlderMessages() {
   if (msgPanelState !== 'idle' || !state.selectedChat || state.messages.length === 0) return;
+  const myGen = chatLoadGen;
+  const jid = state.selectedChat;
   msgPanelState = 'loading_older';
   pendingSSEMessages = [];
   const oldestTs = state.messages[0]?.timestamp;
   const msgList = document.getElementById('msg-list');
   const scrollHeightBefore = msgList.scrollHeight;
   try {
-    const data = await api('/chats/' + encodeURIComponent(state.selectedChat) + '/messages?limit=50&before=' + encodeURIComponent(oldestTs));
+    const data = await api('/chats/' + encodeURIComponent(jid) + '/messages?limit=50&before=' + encodeURIComponent(oldestTs), chatLoadAbort?.signal);
+    if (myGen !== chatLoadGen) return;
     if (data.messages.length > 0) {
       state.messages = [...data.messages, ...state.messages];
       renderMessages();
       msgList.scrollTop += msgList.scrollHeight - scrollHeightBefore;
     }
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    if (myGen !== chatLoadGen) return;
+  }
   finally {
+    if (myGen !== chatLoadGen) return;
     msgPanelState = 'idle';
+    let flushed = false;
     for (const m of pendingSSEMessages) {
       if (m.chatJid === state.selectedChat) {
         state.messages.push(m);
+        flushed = true;
       }
     }
     pendingSSEMessages = [];
-    if (pendingSSEMessages.length > 0) renderMessages();
+    if (flushed) renderMessages();
   }
 }
 
@@ -568,6 +578,7 @@ function renderGroups() {
 let sseAbort = null;
 let sseRetryMs = 1000;
 let sseRetryTimer = null;
+let sseLastEventId = null;
 
 function updateConnStatus(status) {
   state.sse.status = status;
@@ -584,11 +595,10 @@ async function connectSSE() {
 
   updateConnStatus('connecting');
   sseAbort = new AbortController();
-  let lastEventId = null;
 
   try {
     const headers = { 'Authorization': 'Bearer ' + state.token, 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' };
-    if (lastEventId) headers['Last-Event-ID'] = lastEventId;
+    if (sseLastEventId) headers['Last-Event-ID'] = sseLastEventId;
     const res = await fetch(API_BASE + '/events', { headers, signal: sseAbort.signal });
 
     if (res.status === 401) {
@@ -618,7 +628,7 @@ async function connectSSE() {
         if (!frame.trim()) continue;
         const evt = parseSSEFrame(frame);
         if (!evt) continue;
-        if (evt.id) lastEventId = evt.id;
+        if (evt.id) sseLastEventId = evt.id;
         handleSSEEvent(evt);
       }
     }
@@ -748,9 +758,13 @@ document.getElementById('chat-list').addEventListener('click', (e) => {
 document.getElementById('overview-content').addEventListener('click', (e) => {
   const item = e.target.closest('[data-jid]');
   if (!item) return;
-  // Switch to messages tab and load this chat
-  document.querySelector('[data-tab="messages"]').click();
-  setTimeout(() => fetchMessages(item.dataset.jid), 100);
+  const jid = item.dataset.jid;
+  // Switch tab visually
+  state.activeTab = 'messages';
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'messages'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === 'messages'));
+  fetchChats();
+  fetchMessages(jid);
 });
 
 // Chat filter / search
@@ -822,21 +836,13 @@ async function init() {
     showAuthModal();
     return;
   }
-  // Test token validity
   try {
-    const res = await fetch(API_BASE + '/overview', { headers: { 'Authorization': 'Bearer ' + state.token } });
-    if (res.status === 401) {
-      localStorage.removeItem(TOKEN_KEY);
-      state.token = null;
-      showAuthModal();
-      return;
-    }
-    state.overview = await res.json();
-    renderOverview();
+    await fetchOverview();
   } catch {
     showError('Failed to connect to dashboard API');
     return;
   }
+  if (!state.token) return; // api() showed auth modal on 401
   connectSSE();
 }
 

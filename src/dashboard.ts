@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type Database from 'better-sqlite3';
 
 import { getDatabase, getMessageHistory } from './db.js';
@@ -89,9 +90,7 @@ function prepareStatements(db: Database.Database) {
     totalGroups: db.prepare(`SELECT COUNT(*) FROM registered_groups`).pluck(),
 
     activeTasks: db
-      .prepare(
-        `SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'active'`,
-      )
+      .prepare(`SELECT COUNT(*) FROM scheduled_tasks WHERE status = 'active'`)
       .pluck(),
 
     messagesByChannel: db.prepare(`
@@ -134,9 +133,7 @@ function prepareStatements(db: Database.Database) {
       ORDER BY c.last_message_time DESC
     `),
 
-    chatExists: db
-      .prepare(`SELECT 1 FROM chats WHERE jid = ?`)
-      .pluck(),
+    chatExists: db.prepare(`SELECT 1 FROM chats WHERE jid = ?`).pluck(),
 
     allGroups: db.prepare(`
       SELECT jid, name, folder, trigger_pattern, added_at, requires_trigger
@@ -260,8 +257,13 @@ function deriveChannel(jid: string): string {
 // Error helper
 // ---------------------------------------------------------------------------
 
-function errorResponse(c: Context, status: number, code: string, message: string) {
-  return c.json({ error: { code, message } }, status as any);
+function errorResponse(
+  c: Context,
+  status: ContentfulStatusCode,
+  code: string,
+  message: string,
+) {
+  return c.json({ error: { code, message } }, status);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,7 +318,12 @@ dashboardApp.get('/chats/:jid/messages', (c) => {
 
   // Verify chat exists
   if (!stmts.chatExists.get(jid)) {
-    return errorResponse(c, 404, 'CHAT_NOT_FOUND', `Chat ${jid} does not exist`);
+    return errorResponse(
+      c,
+      404,
+      'CHAT_NOT_FOUND',
+      `Chat ${jid} does not exist`,
+    );
   }
 
   try {
@@ -328,7 +335,7 @@ dashboardApp.get('/chats/:jid/messages', (c) => {
       content: m.content,
       timestamp: m.timestamp,
       isBotMessage: m.is_bot_message === 1,
-      threadTs: (m as any).thread_ts ?? null,
+      threadTs: m.thread_ts ?? null,
     }));
     return c.json({ messages });
   } catch (err) {
@@ -348,7 +355,8 @@ dashboardApp.get('/groups', (c) => {
       trigger: r.trigger_pattern,
       channel: deriveChannel(r.jid),
       addedAt: r.added_at,
-      requiresTrigger: r.requires_trigger === null ? true : r.requires_trigger === 1,
+      requiresTrigger:
+        r.requires_trigger === null ? true : r.requires_trigger === 1,
     }));
     return c.json({ groups });
   } catch (err) {
@@ -389,7 +397,12 @@ dashboardApp.get('/tasks/:id/runs', (c) => {
   const limit = Math.min(Math.max(parseInt(limitStr, 10) || 20, 1), 100);
 
   if (!stmts.taskExists.get(taskId)) {
-    return errorResponse(c, 404, 'TASK_NOT_FOUND', `Task ${taskId} does not exist`);
+    return errorResponse(
+      c,
+      404,
+      'TASK_NOT_FOUND',
+      `Task ${taskId} does not exist`,
+    );
   }
 
   try {
@@ -412,67 +425,79 @@ dashboardApp.get('/tasks/:id/runs', (c) => {
 // --- GET /events (SSE) ---
 dashboardApp.get('/events', (c) => {
   if (sseConnectionCount >= MAX_SSE_CONNECTIONS) {
-    return errorResponse(c, 429, 'TOO_MANY_CONNECTIONS', 'Max SSE connections reached');
+    return errorResponse(
+      c,
+      429,
+      'TOO_MANY_CONNECTIONS',
+      'Max SSE connections reached',
+    );
   }
 
   return streamSSE(c, async (stream) => {
     sseConnectionCount++;
-    let running = true;
-    let lastMessageTs = new Date().toISOString();
-    let lastRunTs = new Date().toISOString();
+    try {
+      let running = true;
+      let lastMessageTs = new Date().toISOString();
+      let lastRunTs = new Date().toISOString();
 
-    stream.onAbort(() => {
-      running = false;
-      sseConnectionCount--;
-    });
+      stream.onAbort(() => {
+        running = false;
+      });
 
-    while (running) {
-      try {
-        const newMessages = stmts.newMessagesSince.all(lastMessageTs) as MessageRow[];
-        for (const msg of newMessages) {
-          await stream.writeSSE({
-            event: 'message',
-            data: JSON.stringify({
-              chatJid: msg.chat_jid,
-              senderName: msg.sender_name,
-              content: msg.content,
-              timestamp: msg.timestamp,
-              isBotMessage: msg.is_bot_message === 1,
-            }),
-            id: String(++globalEventId),
-          });
-          if (msg.timestamp > lastMessageTs) lastMessageTs = msg.timestamp;
+      while (running) {
+        try {
+          const newMessages = stmts.newMessagesSince.all(
+            lastMessageTs,
+          ) as MessageRow[];
+          for (const msg of newMessages) {
+            await stream.writeSSE({
+              event: 'message',
+              data: JSON.stringify({
+                chatJid: msg.chat_jid,
+                senderName: msg.sender_name,
+                content: msg.content,
+                timestamp: msg.timestamp,
+                isBotMessage: msg.is_bot_message === 1,
+              }),
+              id: String(++globalEventId),
+            });
+            if (msg.timestamp > lastMessageTs) lastMessageTs = msg.timestamp;
+          }
+
+          const newRuns = stmts.newTaskRunsSince.all(
+            lastRunTs,
+          ) as TaskRunRow[];
+          for (const run of newRuns) {
+            await stream.writeSSE({
+              event: 'taskRun',
+              data: JSON.stringify({
+                taskId: run.task_id,
+                status: run.status,
+                runAt: run.run_at,
+                durationMs: run.duration_ms,
+                error: run.error,
+              }),
+              id: String(++globalEventId),
+            });
+            if (run.run_at > lastRunTs) lastRunTs = run.run_at;
+          }
+
+          // Heartbeat if nothing new
+          if (newMessages.length === 0 && newRuns.length === 0) {
+            await stream.writeSSE({
+              event: 'heartbeat',
+              data: '',
+              id: String(++globalEventId),
+            });
+          }
+        } catch (err) {
+          logger.error({ err }, 'SSE poll error');
         }
 
-        const newRuns = stmts.newTaskRunsSince.all(lastRunTs) as TaskRunRow[];
-        for (const run of newRuns) {
-          await stream.writeSSE({
-            event: 'taskRun',
-            data: JSON.stringify({
-              taskId: run.task_id,
-              status: run.status,
-              runAt: run.run_at,
-              durationMs: run.duration_ms,
-              error: run.error,
-            }),
-            id: String(++globalEventId),
-          });
-          if (run.run_at > lastRunTs) lastRunTs = run.run_at;
-        }
-
-        // Heartbeat if nothing new
-        if (newMessages.length === 0 && newRuns.length === 0) {
-          await stream.writeSSE({
-            event: 'heartbeat',
-            data: '',
-            id: String(++globalEventId),
-          });
-        }
-      } catch (err) {
-        logger.error({ err }, 'SSE poll error');
+        await stream.sleep(3000);
       }
-
-      await stream.sleep(3000);
+    } finally {
+      sseConnectionCount--;
     }
   });
 });
