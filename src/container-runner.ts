@@ -65,6 +65,10 @@ function buildVolumeMounts(
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
 
+  // Ensure group directory is writable by container's node user (UID 1000)
+  fs.mkdirSync(groupDir, { recursive: true });
+  fs.chmodSync(groupDir, 0o777);
+
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
     // (group folder, IPC, .claude/) are mounted separately below.
@@ -112,6 +116,7 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  fs.chmodSync(groupSessionsDir, 0o777);
   const debugDir = path.join(groupSessionsDir, 'debug');
   fs.mkdirSync(debugDir, { recursive: true });
   fs.chmodSync(debugDir, 0o777);
@@ -159,15 +164,11 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'delegate-requests'), {
-    recursive: true,
-  });
-  fs.mkdirSync(path.join(groupIpcDir, 'delegate-responses'), {
-    recursive: true,
-  });
+  for (const sub of ['messages', 'tasks', 'input', 'delegate-requests', 'delegate-responses']) {
+    const dir = path.join(groupIpcDir, sub);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o777);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
