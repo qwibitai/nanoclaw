@@ -12,6 +12,7 @@ import {
   TRIGGER_PATTERN,
   WEBSOCKET_ENABLED,
   WEBSOCKET_PORT,
+  WEBSOCKET_FILES_PORT,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import { TelegramChannel, initBotPool } from './channels/telegram.js';
@@ -530,7 +531,7 @@ async function main(): Promise<void> {
     const wsChannel = new WebSocketChannel(WEBSOCKET_PORT, {
       onMessage: channelOpts.onMessage,
       onChatMetadata: channelOpts.onChatMetadata,
-    });
+    }, WEBSOCKET_FILES_PORT);
     channels.push(wsChannel);
     await wsChannel.connect();
     ensureBetterWorkGroup();

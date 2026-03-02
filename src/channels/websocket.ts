@@ -157,7 +157,7 @@ export class WebSocketChannel implements Channel {
     // Start HTTP file server first (independent of WS)
     this.startFileServer();
 
-    this.wss = new WebSocketServer({ port: this.port });
+    this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port });
 
     // CRITICAL: register chat metadata immediately so SQLite FK constraint is satisfied
     this.opts.onChatMetadata(

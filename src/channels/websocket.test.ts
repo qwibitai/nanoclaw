@@ -155,7 +155,7 @@ describe('WebSocketChannel', () => {
       await channel.connect();
 
       const { WebSocketServer } = await import('ws');
-      expect(WebSocketServer).toHaveBeenCalledWith({ port: 3001 });
+      expect(WebSocketServer).toHaveBeenCalledWith({ host: '127.0.0.1', port: 3001 });
     });
 
     it('isConnected() returns false before client connects', async () => {
