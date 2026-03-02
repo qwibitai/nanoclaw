@@ -1,4 +1,66 @@
 ---
+## 2026-03-02 - Pre-Compact: Agent autonomy features + security review fixes in progress
+
+**SDLC Stage:** REVIEW (security + simplicity review complete, fixes in progress)
+**Task:** Implement 5 agent autonomy features, then review/fix security issues
+**Modified files:** container/agent-runner/src/tools/skills.ts (NEW), container/agent-runner/src/tools/memory.ts, container/agent-runner/src/tools/index.ts, container/Dockerfile, src/channels/telegram.ts (NEW), src/config.ts, src/index.ts, src/container-runner.ts, .env.example, package.json
+**Progress:**
+- DONE: All 5 features implemented and committed (032c1c3, pushed to origin/main)
+  - Feature 1: update_identity + read_identity tools in memory.ts (immutable sections, audit log)
+  - Feature 2: NODE_PATH extended for agent npm packages in Dockerfile
+  - Feature 3: skills.ts with list_skills + create_skill MCP tools
+  - Feature 4: Telegram channel (grammy, full Channel interface)
+  - Feature 5: Container memory limits (--memory 1536m, configurable)
+- DONE: 15/15 functional verification tests pass
+- DONE: Security review found 3 HIGH issues, simplicity review found 3 removals
+- IN PROGRESS: Fixing security issues (partially applied, NOT committed yet):
+  - FIXED: NODE_PATH reversed (trusted first) in Dockerfile
+  - FIXED: npm_config_ignore_scripts moved after build-time installs in Dockerfile
+  - FIXED: ALLOWED_USERS check added to telegram.ts
+  - NOT DONE: Block immutable heading injection in update_identity content
+  - NOT DONE: Remove read_identity (redundant), BLOCKED_PATTERNS (security theater), dead code
+  - NOT DONE: Sanitize YAML newlines in skills.ts description
+  - NOT DONE: Add content size limit to create_skill
+- NOT DONE: Amend commit with fixes, push, deploy to VPS
+**Test results:** Host build clean, 1109/1129 tests pass (16 pre-existing failures in dashboard + container-runner). Docker not running locally.
+**Key context:**
+- User is non-technical, wants proper security + simplicity
+- Cron jobs already work via schedule_task MCP tool (user didn't realize)
+- Container OOM was the core stability issue — memory limits fix it
+- Model routing confirmed working: grunt/quick-check → free MiniMax, everything else → Sonnet 4.6
+
+---
+## 2026-03-02 - Pre-Compact: Upstream merge complete + README rewrite + wizard test on VPS
+
+**SDLC Stage:** N/A (ops/polish/marketing session)
+**Task:** Complete upstream NanoClaw merge, fact-check README marketing, set up wizard test on VPS
+**Modified files:** package.json, package-lock.json, src/container-runner.ts, CLAUDE.md, README.md (merge conflicts resolved), src/index.ts (wizard-mode early return), README.md (marketing rewrite)
+**Progress:**
+- DONE: Upstream NanoClaw merge — all 5 conflicts resolved, committed 0658f1d, pushed
+  - package.json: kept Sovereign name/version 1.0.0
+  - package-lock.json: regenerated
+  - src/container-runner.ts: kept our SignalWire/wallet secret keys
+  - CLAUDE.md: kept /update-nanoclaw + /updatebot
+  - README.md: kept Mac commands
+- DONE: Prettier formatting pass (e666c5f)
+- DONE: Wizard-mode fix — early return in main() skips all channel connections (3994a1d). New users without .env get wizard immediately instead of crashing on WhatsApp/Discord auth
+- DONE: Fact-checked OpenClaw comparison with web research agent — found 7/10 claims were false or misleading
+- DONE: Rewrote README comparison to be honest (def3fc9). Real differentiators: security by default, self-improving memory, codebase simplicity, revenue tools. Added FAQ section.
+- DONE: VPS wizard test set up — .env hidden, wizard-state cleared, server running in wizard mode, SSH tunnel open at localhost:3457
+- IN PROGRESS: User considering recording demo video (Cmd+Shift+5 screen recording → YouTube)
+- NOT DONE: User hasn't walked through wizard yet
+- NOT DONE: Restore VPS to production after testing (mv .env.hidden .env, restart service)
+- NOT DONE: Update HANDOFF.md
+**Test results:** tsc clean, 1109/1129 tests pass (16 failures pre-existing in container-runner.test.ts + dashboard.test.ts)
+**Key context:**
+- VPS install dir is /root/sovereign (NOT /root/nanoclaw-src — that no longer exists)
+- SSH tunnel active: localhost:3457 → VPS:3457 (wizard accessible from user's browser)
+- .env backed up as .env.hidden on VPS — must restore after wizard testing
+- Actual codebase is ~20K lines (not 5K as previously claimed). README corrected.
+- OpenClaw is a real, well-funded project with 243K lines, 20+ channels, Docker sandbox (opt-in). Our edge: security ON by default, self-improving memory, simplicity, revenue tools built-in.
+- Pre-existing test failures: container-runner (chmod ENOENT in temp dir), dashboard (test infrastructure issue) — not caused by any recent changes
+
+---
 ## 2026-03-01 - Pre-Compact: SHIP GATE paused — user wants 7 differentiating features before deploy
 
 **SDLC Stage:** SHIP GATE (PAUSED) — v2.0 is REVIEW+CLEAN complete, user chose "Not yet"

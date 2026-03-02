@@ -1,6 +1,6 @@
 import { Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ALLOWED_USERS, ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -54,6 +54,17 @@ export class TelegramChannel implements Channel {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
 
+      const sender = ctx.from?.id.toString() || '';
+
+      // DM allowlist — if configured, only allow listed user IDs
+      if (ALLOWED_USERS.size > 0 && !ALLOWED_USERS.has(sender)) {
+        logger.debug(
+          { sender, name: ctx.from?.first_name },
+          'Message from non-allowed Telegram user, ignoring',
+        );
+        return;
+      }
+
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
@@ -62,7 +73,6 @@ export class TelegramChannel implements Channel {
         ctx.from?.username ||
         ctx.from?.id.toString() ||
         'Unknown';
-      const sender = ctx.from?.id.toString() || '';
       const msgId = ctx.message.message_id.toString();
 
       // Determine chat name

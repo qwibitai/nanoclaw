@@ -379,15 +379,6 @@ Choose the right file:
     'Global Memory',
   ];
 
-  const BLOCKED_PATTERNS = [
-    /ignore\s+(previous|all|prior)\s+(instructions?|prompts?)/i,
-    /bypass\s+safety/i,
-    /disable\s+tool[\s-]?guard/i,
-    /override\s+(security|safety|restrictions?)/i,
-    /you\s+are\s+now/i,
-    /forget\s+(everything|all|your)\s+(instructions?|rules?)/i,
-  ];
-
   const IDENTITY_LOG_PATH = '/workspace/group/logs/identity-changes.log';
 
   function logIdentityChange(action: string, section: string, reason: string): void {
@@ -397,32 +388,11 @@ Choose the right file:
   }
 
   server.tool(
-    'read_identity',
-    'Read your current CLAUDE.md instructions. Use this before modifying to understand the current state.',
-    {},
-    async () => {
-      try {
-        if (!fs.existsSync(CLAUDE_MD_PATH)) {
-          return { content: [{ type: 'text' as const, text: 'No CLAUDE.md found. You have no custom identity instructions yet.' }] };
-        }
-        const content = fs.readFileSync(CLAUDE_MD_PATH, 'utf-8');
-        return { content: [{ type: 'text' as const, text: content }] };
-      } catch (err) {
-        return {
-          content: [{ type: 'text' as const, text: `Error reading CLAUDE.md: ${err instanceof Error ? err.message : String(err)}` }],
-          isError: true,
-        };
-      }
-    },
-  );
-
-  server.tool(
     'update_identity',
     `Modify your own CLAUDE.md instructions. Use this to evolve your behavior based on user feedback or your own learnings.
 
 IMPORTANT GUARDRAILS:
 • Cannot modify immutable sections: ${IMMUTABLE_SECTIONS.join(', ')}
-• Prompt injection patterns are blocked
 • Every change is logged with a reason for audit
 
 Actions:
@@ -444,14 +414,16 @@ Actions:
         };
       }
 
-      // Check for prompt injection in content
-      const textToCheck = `${args.section} ${args.content || ''} ${args.reason}`;
-      for (const pattern of BLOCKED_PATTERNS) {
-        if (pattern.test(textToCheck)) {
-          return {
-            content: [{ type: 'text' as const, text: 'Blocked: content contains a disallowed pattern.' }],
-            isError: true,
-          };
+      // Block immutable heading injection inside content body
+      if (args.content) {
+        for (const heading of IMMUTABLE_SECTIONS) {
+          const pattern = new RegExp(`^##\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'im');
+          if (pattern.test(args.content)) {
+            return {
+              content: [{ type: 'text' as const, text: `Blocked: content contains immutable heading "## ${heading}".` }],
+              isError: true,
+            };
+          }
         }
       }
 
@@ -516,7 +488,6 @@ Actions:
           return { content: [{ type: 'text' as const, text: `Removed section "## ${args.section}" from CLAUDE.md.` }] };
         }
 
-        return { content: [{ type: 'text' as const, text: 'Unknown action.' }], isError: true };
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error updating CLAUDE.md: ${err instanceof Error ? err.message : String(err)}` }],

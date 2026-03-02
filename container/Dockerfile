@@ -51,10 +51,8 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Make pre-installed packages available from any working directory
-# Agent-installed packages go to /workspace/group/.packages/ (persists across sessions)
-ENV NODE_PATH=/workspace/group/.packages/node_modules:/app/node_modules
-# Block postinstall scripts by default — prevents supply chain attacks from typosquatted packages
-ENV npm_config_ignore_scripts=true
+# Trusted packages first — agent-installed packages cannot shadow built-in ones
+ENV NODE_PATH=/app/node_modules:/workspace/group/.packages/node_modules
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code \
@@ -106,6 +104,10 @@ RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\
 
 # Set ownership to node user (non-root) for writable directories
 RUN mkdir -p /home/node/.claude/debug && chown -R node:node /workspace /home/node/.claude && chmod 777 /home/node
+
+# Block postinstall scripts for runtime agent installs (supply chain safety)
+# Placed AFTER build-time installs so sharp/native packages build correctly
+ENV npm_config_ignore_scripts=true
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

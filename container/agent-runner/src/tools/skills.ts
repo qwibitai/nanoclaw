@@ -61,7 +61,7 @@ The skill will be saved and available starting from the next session (each messa
     {
       name: z.string().regex(/^[a-z0-9-]+$/, 'Skill name must be lowercase alphanumeric with hyphens only (e.g. "data-fetcher", "weekly-report")').describe('Skill name (lowercase, hyphens allowed)'),
       description: z.string().max(200).describe('Short description of what the skill does (shown in list_skills)'),
-      content: z.string().describe('The skill content — instructions, templates, workflows. Written as the body of a SKILL.md file.'),
+      content: z.string().max(50000).describe('The skill content — instructions, templates, workflows. Written as the body of a SKILL.md file.'),
       allowed_tools: z.array(z.string()).optional().describe('Optional list of tool names this skill is allowed to use (e.g. ["Bash", "Read", "Write"]). Omit for no restrictions.'),
     },
     async (args) => {
@@ -76,8 +76,9 @@ The skill will be saved and available starting from the next session (each messa
         const skillDir = path.join(SKILLS_DIR, args.name);
         fs.mkdirSync(skillDir, { recursive: true });
 
-        // Build YAML frontmatter
-        let frontmatter = `---\nname: ${args.name}\ndescription: ${args.description}\n`;
+        // Build YAML frontmatter — sanitize description to prevent YAML injection
+        const safeDesc = args.description.replace(/[\n\r]/g, ' ').trim();
+        let frontmatter = `---\nname: ${args.name}\ndescription: ${safeDesc}\n`;
         if (args.allowed_tools && args.allowed_tools.length > 0) {
           frontmatter += `allowed_tools:\n${args.allowed_tools.map(t => `  - ${t}`).join('\n')}\n`;
         }
