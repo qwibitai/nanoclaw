@@ -74,7 +74,7 @@ If the test passes, call `setup-schedules` and confirm to the user.
 
 ### `setup-schedules`
 
-Register two recurring tasks (only if not already scheduled):
+Register three recurring tasks (only if not already scheduled):
 
 1. **Price monitor** — every 30 min during market hours, weekdays:
    ```
@@ -90,7 +90,14 @@ Register two recurring tasks (only if not already scheduled):
    prompt: "SCHEDULED: Send morning summary"
    ```
 
-If the user asks to check/reset schedules, reschedule both.
+3. **Quarterly earnings review** — 10 AM ET on the 2nd of Jan, Apr, Jul, Oct:
+   ```
+   schedule_type: "cron"
+   schedule_value: "0 15 2 1,4,7,10 *"
+   prompt: "SCHEDULED: Quarterly earnings review"
+   ```
+
+If the user asks to check/reset schedules, reschedule all three.
 
 ---
 
@@ -177,6 +184,28 @@ node /workspace/group/scripts/morning-summary.js
 ```
 
 Parse the JSON output and send `result.message` via `mcp__nanoclaw__send_message`.
+
+### SCHEDULED: Quarterly earnings review
+
+When prompt = "SCHEDULED: Quarterly earnings review":
+
+1. Read `portfolio.json` and list every holding.
+2. For each ticker, check `research/TICKER.md` — find the "Watch For" section.
+3. Send a message reminding the user to validate each thesis:
+
+```
+*Quarterly Earnings Check-In* 📋
+
+Earnings season is here. Time to validate your theses:
+
+[For each holding:]
+• *TICKER* — [one-line thesis reminder from research file, or "no research on file"]
+  Watch for: [items from "Watch For" section, or "run `research TICKER` to add"]
+
+Reply with any updates, or `research TICKER` to do a fresh deep-dive.
+```
+
+4. If `portfolio.json` is empty, send: "No holdings to review. Use `buy TICKER SHARES at PRICE` to start tracking a position."
 
 ---
 

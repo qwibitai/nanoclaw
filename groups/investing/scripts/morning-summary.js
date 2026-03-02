@@ -51,10 +51,12 @@ function fetchQuote(ticker, key) {
 
 function stateEmoji(margin) {
   if (margin === null) return '⚪';
-  if (margin >= 0.25) return '🟢';
-  if (margin >= 0.05) return '🟡';
-  if (margin >= 0.00) return '🟠';
-  return '🔴';
+  if (margin >= 0.35) return '🟢'; // opportunity
+  if (margin >= 0.25) return '🟢'; // buy_zone
+  if (margin >= 0.15) return '🟡'; // comfortable
+  if (margin >= 0.05) return '🟡'; // watch
+  if (margin >= 0.00) return '🟠'; // thin
+  return '🔴';                     // overvalued
 }
 
 function pct(n, showPlus = false) {
