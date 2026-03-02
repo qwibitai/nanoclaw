@@ -3,7 +3,7 @@
  * Single-dispatch: stdin JSON → opencode run → OUTPUT_START/END markers
  * No Claude Agent SDK dependency — uses OpenCode CLI with free models.
  */
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 
 import {
@@ -19,6 +19,10 @@ import {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+// Must match AGENT_RUNNER_LOG_PREFIX in src/container-runner.ts.
+const AGENT_RUNNER_LOG_PREFIX = '[agent-runner]';
+const OPENCODE_MAX_OUTPUT_SIZE = 10 * 1024 * 1024; // 10MB
+const HEARTBEAT_INTERVAL_MS = 60_000;
 
 interface ContainerInput {
   prompt: string;
@@ -45,10 +49,21 @@ interface ContainerOutput {
   };
 }
 
+interface OpencodeRunResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error?: Error;
+}
+
 function writeOutput(output: ContainerOutput): void {
   process.stdout.write(OUTPUT_START_MARKER + '\n');
   process.stdout.write(JSON.stringify(output) + '\n');
   process.stdout.write(OUTPUT_END_MARKER + '\n');
+}
+
+function log(message: string): void {
+  process.stderr.write(`${AGENT_RUNNER_LOG_PREFIX} ${message}\n`);
 }
 
 function readStdin(): string {
@@ -76,13 +91,45 @@ function configureGitIdentity(): void {
   }
 }
 
-function runOpencode(prompt: string, model: string) {
+function appendLimited(existing: string, chunk: string): string {
+  if (existing.length + chunk.length <= OPENCODE_MAX_OUTPUT_SIZE) {
+    return existing + chunk;
+  }
+  const combined = existing + chunk;
+  return combined.slice(-OPENCODE_MAX_OUTPUT_SIZE);
+}
+
+async function runOpencode(prompt: string, model: string): Promise<OpencodeRunResult> {
   const args = ['run', '--model', model, '--format', 'json', prompt];
-  return spawnSync('opencode', args, {
-    cwd: '/workspace/group',
-    encoding: 'utf8',
-    maxBuffer: 10 * 1024 * 1024, // 10MB
-    env: { ...process.env },
+  return new Promise((resolve) => {
+    const child = spawn('opencode', args, {
+      cwd: '/workspace/group',
+      env: { ...process.env },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const heartbeat = setInterval(() => {
+      log(`heartbeat worker-opencode-active model=${model}`);
+    }, HEARTBEAT_INTERVAL_MS);
+
+    child.stdout.on('data', (data: Buffer) => {
+      stdout = appendLimited(stdout, data.toString());
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      stderr = appendLimited(stderr, data.toString());
+    });
+
+    child.on('error', (error) => {
+      clearInterval(heartbeat);
+      resolve({ status: null, stdout, stderr, error });
+    });
+
+    child.on('close', (status) => {
+      clearInterval(heartbeat);
+      resolve({ status, stdout, stderr });
+    });
   });
 }
 
@@ -147,14 +194,13 @@ async function main(): Promise<void> {
     }
   }
 
-  const duration_ms = Date.now() - startTime;
-  const peak_rss_mb = getPeakRss();
   const candidates = buildModelCandidates(input.model, process.env.WORKER_MODEL);
   let lastError = '';
   let extracted: string | null = null;
 
   for (const model of candidates) {
-    const result = runOpencode(prompt, model);
+    log(`Starting OpenCode execution with model=${model}`);
+    const result = await runOpencode(prompt, model);
     if (result.error) {
       lastError = `Failed to spawn opencode: ${result.error.message}`;
       break;
@@ -194,7 +240,8 @@ async function main(): Promise<void> {
         const runId = typeof dispatchMeta?.run_id === 'string' ? dispatchMeta.run_id : 'unknown';
         const branch = typeof dispatchMeta?.branch === 'string' ? dispatchMeta.branch : 'unknown';
         const reworkPrompt = buildReworkPrompt(extracted, runId, branch, missing);
-        const retryResult = runOpencode(reworkPrompt, model);
+        log(`Completion contract invalid for run_id=${runId}; requesting one retry`);
+        const retryResult = await runOpencode(reworkPrompt, model);
         if (retryResult.status === 0 && retryResult.stdout) {
           const retryEvents = parseEventLines(retryResult.stdout);
           const retryPayload = retryEvents.length > 0
@@ -212,6 +259,8 @@ async function main(): Promise<void> {
   }
 
   if (!extracted) {
+    const duration_ms = Date.now() - startTime;
+    const peak_rss_mb = getPeakRss();
     writeOutput({
       status: 'error',
       result: null,
@@ -221,6 +270,8 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
+  const duration_ms = Date.now() - startTime;
+  const peak_rss_mb = getPeakRss();
   writeOutput({
     status: 'success',
     result: extracted,

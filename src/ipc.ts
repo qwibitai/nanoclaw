@@ -347,6 +347,7 @@ export function queueAndyWorkerDispatchRun(
     dispatch_repo: parsed.repo,
     dispatch_branch: parsed.branch,
     context_intent: parsed.context_intent,
+    dispatch_payload: JSON.stringify(parsed),
     parent_run_id: parsed.parent_run_id,
     dispatch_session_id: parsed.session_id,
     selected_session_id: parsed.session_id,

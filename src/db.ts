@@ -93,6 +93,7 @@ function createSchema(database: Database.Database): void {
       dispatch_repo TEXT,
       dispatch_branch TEXT,
       context_intent TEXT,
+      dispatch_payload TEXT,
       parent_run_id TEXT,
       dispatch_session_id TEXT,
       selected_session_id TEXT,
@@ -153,6 +154,7 @@ function createSchema(database: Database.Database): void {
     `ALTER TABLE worker_runs ADD COLUMN dispatch_repo TEXT`,
     `ALTER TABLE worker_runs ADD COLUMN dispatch_branch TEXT`,
     `ALTER TABLE worker_runs ADD COLUMN context_intent TEXT`,
+    `ALTER TABLE worker_runs ADD COLUMN dispatch_payload TEXT`,
     `ALTER TABLE worker_runs ADD COLUMN parent_run_id TEXT`,
     `ALTER TABLE worker_runs ADD COLUMN dispatch_session_id TEXT`,
     `ALTER TABLE worker_runs ADD COLUMN selected_session_id TEXT`,
@@ -783,6 +785,7 @@ export interface WorkerRunRecord {
   dispatch_repo: string | null;
   dispatch_branch: string | null;
   context_intent: string | null;
+  dispatch_payload: string | null;
   parent_run_id: string | null;
   dispatch_session_id: string | null;
   selected_session_id: string | null;
@@ -804,6 +807,7 @@ export interface WorkerRunDispatchMetadata {
   dispatch_repo?: string;
   dispatch_branch?: string;
   context_intent?: 'continue' | 'fresh';
+  dispatch_payload?: string;
   parent_run_id?: string;
   dispatch_session_id?: string;
   selected_session_id?: string;
@@ -907,6 +911,7 @@ export function insertWorkerRun(
              dispatch_repo = NULL,
              dispatch_branch = NULL,
              context_intent = NULL,
+             dispatch_payload = NULL,
              parent_run_id = NULL,
              dispatch_session_id = NULL,
              selected_session_id = NULL,
@@ -948,6 +953,7 @@ export function updateWorkerRunDispatchMetadata(
      SET dispatch_repo = ?,
          dispatch_branch = ?,
          context_intent = ?,
+         dispatch_payload = ?,
          parent_run_id = ?,
          dispatch_session_id = ?,
          selected_session_id = ?,
@@ -957,6 +963,7 @@ export function updateWorkerRunDispatchMetadata(
     metadata.dispatch_repo ?? null,
     metadata.dispatch_branch ?? null,
     metadata.context_intent ?? null,
+    metadata.dispatch_payload ?? null,
     metadata.parent_run_id ?? null,
     metadata.dispatch_session_id ?? null,
     metadata.selected_session_id ?? null,
@@ -1152,6 +1159,31 @@ export function updateWorkerRunStatus(runId: string, status: WorkerRunStatus): v
   }
 }
 
+export function requeueWorkerRunForReplay(runId: string, reason: string): boolean {
+  const run = getWorkerRun(runId);
+  if (!run) return false;
+  if (isTerminalWorkerRunStatus(run.status as WorkerRunStatus)) return false;
+
+  db.prepare(
+    `UPDATE worker_runs
+     SET status = 'queued',
+         phase = 'queued',
+         completed_at = NULL,
+         active_container_name = NULL,
+         no_container_since = NULL,
+         expects_followup_container = 0,
+         supervisor_owner = NULL,
+         lease_expires_at = NULL,
+         recovered_from_reason = ?,
+         error_details = NULL,
+         result_summary = NULL,
+         last_heartbeat_at = ?,
+         retry_count = retry_count + 1
+     WHERE run_id = ?`,
+  ).run(reason, new Date().toISOString(), runId);
+  return true;
+}
+
 export function updateWorkerRunCompletion(
   runId: string,
   data: {
@@ -1261,6 +1293,7 @@ export function getWorkerRun(runId: string): {
   dispatch_repo: string | null;
   dispatch_branch: string | null;
   context_intent: string | null;
+  dispatch_payload: string | null;
   parent_run_id: string | null;
   dispatch_session_id: string | null;
   selected_session_id: string | null;
@@ -1279,7 +1312,7 @@ export function getWorkerRun(runId: string): {
 } | undefined {
   return db
     .prepare(
-      `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+      `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
        FROM worker_runs
        WHERE run_id = ?`,
     )
@@ -1315,7 +1348,7 @@ export function getWorkerRuns(options?: {
 
   return db
     .prepare(
-      `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+      `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
        FROM worker_runs
        ${where}
        ORDER BY started_at DESC
@@ -1330,7 +1363,7 @@ export function getLatestReusableWorkerSession(
   branch: string,
 ): WorkerRunRecord | undefined {
   return db.prepare(
-    `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+    `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
      FROM worker_runs
      WHERE group_folder = ?
        AND dispatch_repo = ?
@@ -1344,7 +1377,7 @@ export function getLatestReusableWorkerSession(
 
 export function findWorkerRunByEffectiveSessionId(sessionId: string): WorkerRunRecord | undefined {
   return db.prepare(
-    `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+    `SELECT run_id, group_folder, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
      FROM worker_runs
      WHERE effective_session_id = ?
      ORDER BY started_at DESC

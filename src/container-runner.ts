@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  WORKER_MIN_NO_OUTPUT_TIMEOUT_MS,
   TIMEZONE,
   WORKER_CONTAINER_IMAGE,
 } from './config.js';
@@ -592,8 +593,23 @@ export async function runContainerAgent(
     let hadStreamingOutput = false;
     let timeoutReason: 'no_output_timeout' | 'hard_timeout' | null = null;
     const configuredIdleTimeout = group.containerConfig?.idleTimeout || IDLE_TIMEOUT;
-    const configuredNoOutputTimeout = group.containerConfig?.noOutputTimeout || CONTAINER_NO_OUTPUT_TIMEOUT;
+    const requestedNoOutputTimeout = group.containerConfig?.noOutputTimeout || CONTAINER_NO_OUTPUT_TIMEOUT;
+    const configuredNoOutputTimeout = isJarvisWorkerFolder(group.folder)
+      ? Math.max(requestedNoOutputTimeout, WORKER_MIN_NO_OUTPUT_TIMEOUT_MS)
+      : requestedNoOutputTimeout;
     const configuredHardTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    if (configuredNoOutputTimeout !== requestedNoOutputTimeout) {
+      logger.info(
+        {
+          group: group.name,
+          folder: group.folder,
+          requestedNoOutputTimeout,
+          effectiveNoOutputTimeout: configuredNoOutputTimeout,
+          minWorkerNoOutputTimeout: WORKER_MIN_NO_OUTPUT_TIMEOUT_MS,
+        },
+        'Raised worker no-output timeout to minimum safety floor',
+      );
+    }
     // Grace period: hard timeout must be at least idle timeout + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
     const hardTimeoutMs = Math.max(configuredHardTimeout, configuredIdleTimeout + 30_000);

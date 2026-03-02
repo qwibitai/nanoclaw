@@ -15,6 +15,7 @@ vi.mock('./config.js', () => ({
   WORKER_CONTAINER_IMAGE: 'nanoclaw-worker:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_NO_OUTPUT_TIMEOUT: 720000, // 12min
+  WORKER_MIN_NO_OUTPUT_TIMEOUT_MS: 900000, // 15min minimum for worker lanes
   CONTAINER_PARSE_BUFFER_LIMIT: 1048576,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
@@ -411,6 +412,10 @@ describe('container-runner timeout behavior', () => {
       async () => {},
     );
 
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;
@@ -429,6 +434,10 @@ describe('container-runner timeout behavior', () => {
       async () => {},
     );
 
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'ok',
+    });
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await resultPromise;

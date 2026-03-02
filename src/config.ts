@@ -44,6 +44,10 @@ export const CONTAINER_NO_OUTPUT_TIMEOUT = parseInt(
   process.env.CONTAINER_NO_OUTPUT_TIMEOUT || '720000',
   10,
 );
+export const WORKER_MIN_NO_OUTPUT_TIMEOUT_MS = parseInt(
+  process.env.WORKER_MIN_NO_OUTPUT_TIMEOUT_MS || '900000',
+  10,
+);
 export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
@@ -86,6 +90,10 @@ export const WA_RECONNECT_BURST_THRESHOLD = parseInt(
 );
 export const WA_RECONNECT_COOLDOWN_MS = parseInt(
   process.env.WA_RECONNECT_COOLDOWN_MS || '60000',
+  10,
+);
+export const SHUTDOWN_DRAIN_MS = parseInt(
+  process.env.SHUTDOWN_DRAIN_MS || '600000',
   10,
 );
 

@@ -7,6 +7,7 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SHUTDOWN_DRAIN_MS,
   TRIGGER_PATTERN,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -41,6 +42,7 @@ import {
   isNonRetryableWorkerStatus,
   markMessagesProcessed,
   recoverWorkerRunForCompletionAccept,
+  requeueWorkerRunForReplay,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -842,6 +844,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         dispatch_repo: workerRun.dispatchPayload.repo,
         dispatch_branch: workerRun.dispatchPayload.branch,
         context_intent: workerRun.dispatchPayload.context_intent,
+        dispatch_payload: JSON.stringify(workerRun.dispatchPayload),
         parent_run_id: workerRun.dispatchPayload.parent_run_id,
         dispatch_session_id: workerRun.dispatchPayload.session_id,
       });
@@ -878,6 +881,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       dispatch_repo: workerRun.dispatchPayload.repo,
       dispatch_branch: workerRun.dispatchPayload.branch,
       context_intent: workerRun.dispatchPayload.context_intent,
+      dispatch_payload: JSON.stringify(workerRun.dispatchPayload),
       parent_run_id: workerRun.dispatchPayload.parent_run_id,
       dispatch_session_id: workerRun.dispatchPayload.session_id,
       selected_session_id: workerSessionSelection.selectedSessionId,
@@ -1533,6 +1537,71 @@ function recoverPendingMessages(): void {
   }
 }
 
+function recoverInterruptedWorkerDispatches(): void {
+  const activeRuns = getWorkerRuns({
+    groupFolderLike: 'jarvis-worker-%',
+    statuses: ['queued', 'running'],
+    limit: 200,
+  });
+
+  if (activeRuns.length === 0) return;
+
+  let replayed = 0;
+  let skipped = 0;
+  for (const run of activeRuns) {
+    const chatJid = findChatJidByGroupFolder(run.group_folder);
+    if (!chatJid) {
+      skipped += 1;
+      logger.warn(
+        { runId: run.run_id, groupFolder: run.group_folder },
+        'Startup replay skipped: worker chat JID not registered',
+      );
+      continue;
+    }
+
+    const payloadText = run.dispatch_payload || '';
+    const parsed = parseDispatchPayload(payloadText);
+    if (!parsed) {
+      skipped += 1;
+      logger.warn(
+        { runId: run.run_id, groupFolder: run.group_folder },
+        'Startup replay skipped: missing or invalid dispatch payload',
+      );
+      continue;
+    }
+
+    if (run.status === 'running') {
+      requeueWorkerRunForReplay(run.run_id, 'startup_replay_after_restart');
+    }
+
+    const replayTimestamp = new Date().toISOString();
+    storeChatMetadata(
+      chatJid,
+      replayTimestamp,
+      registeredGroups[chatJid]?.name || run.group_folder,
+      'nanoclaw',
+      true,
+    );
+    storeMessage({
+      id: `replay-${run.run_id}-${Date.now()}`,
+      chat_jid: chatJid,
+      sender: 'nanoclaw-replay@nanoclaw',
+      sender_name: 'nanoclaw-replay',
+      content: JSON.stringify(parsed),
+      timestamp: replayTimestamp,
+      is_from_me: false,
+      is_bot_message: false,
+    });
+    queue.enqueueMessageCheck(chatJid);
+    replayed += 1;
+  }
+
+  logger.info(
+    { activeRuns: activeRuns.length, replayed, skipped },
+    'Startup worker dispatch replay complete',
+  );
+}
+
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
@@ -1547,8 +1616,8 @@ async function main(): Promise<void> {
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, 'Shutdown signal received');
-    await queue.shutdown(10000);
+    logger.info({ signal, shutdownDrainMs: SHUTDOWN_DRAIN_MS }, 'Shutdown signal received');
+    await queue.shutdown(SHUTDOWN_DRAIN_MS);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
   };
@@ -1614,6 +1683,7 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  recoverInterruptedWorkerDispatches();
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
