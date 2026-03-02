@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-03-01T19:57:04.185Z"
+status: complete
+last_updated: "2026-03-02T10:32:44Z"
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -18,16 +18,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-02-28)
 
 **Core value:** El agente de trabajo responde al panel web en tiempo real via WebSocket, siguiendo el mismo patrón de canal que Telegram y WhatsApp.
-**Current focus:** Phase 2 — Attachments
+**Current focus:** Phase 3 — Tech Debt Fixes (COMPLETE)
 
 ## Current Position
 
-Phase: 2 of 2 (Attachments)
+Phase: 3 of 3 (Tech Debt Fixes)
 Plan: 1 of 1 in current phase
-Status: Plan complete
-Last activity: 2026-03-01 — Plan 02-01 complete (Bidirectional attachment support in WebSocketChannel)
+Status: All phases complete
+Last activity: 2026-03-02 — Plan 03-01 complete (4 audit findings closed: localhost binding, filesPort wiring, agent docs)
 
-Progress: [████████████████████] ~75%
+Progress: [████████████████████] 100%
 
 ## Performance Metrics
 
@@ -42,6 +42,7 @@ Progress: [████████████████████] ~75%
 |-------|-------|-------|----------|
 | 01-websocket-channel | 3 | 17min | 5.7min |
 | 02-attachments | 1 | 5min | 5min |
+| 03-tech-debt | 1 | 3min | 3min |
 
 **Recent Trend:**
 - Last 5 plans: 2min, 10min, 5min
@@ -69,6 +70,14 @@ Recent decisions affecting current work:
 - vi.hoisted() requerido para mocks en vi.mock() factories (hoisting order) — Plan 02-01
 - Attachment save failures son warn, no error — mensaje se entrega igualmente — Plan 02-01
 - extractOutboundAttachments verifica fs.existsSync — solo archivos reales pasan — Plan 02-01
+- groups/better-work/CLAUDE.md es datos de runtime (gitignored) — cambios persisten en disco, no en VCS — Plan 03-01
+- Test assertions deben coincidir con el objeto completo de opciones del constructor, no parcialmente — Plan 03-01
+
+### Roadmap Evolution
+
+- Phase 1 (01-websocket-channel): Completed 2026-03-01
+- Phase 2 (02-attachments): Completed 2026-03-01
+- Phase 3 (03-tech-debt-fixes-documentation-and-network-binding): Added 2026-03-01 (audit identified 4 non-blocking issues)
 
 ### Pending Todos
 
@@ -80,6 +89,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-01
-Stopped at: Completed 02-01-PLAN.md (Bidirectional attachment support in WebSocketChannel + HTTP file server)
+Last session: 2026-03-02
+Stopped at: Completed 03-01-PLAN.md (4 audit findings closed — localhost binding, filesPort wiring, agent attachment docs)
 Resume file: None

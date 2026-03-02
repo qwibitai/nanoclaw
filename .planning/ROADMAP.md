@@ -61,7 +61,7 @@ Phases execute in numeric order: 1 → 2
   2. `WEBSOCKET_FILES_PORT` se pasa explícitamente en la llamada al constructor de `WebSocketChannel` en `main()`
   3. `groups/better-work/CLAUDE.md` documenta las rutas `inbox/attachments/` y `files/`
   4. `groups/better-work/CLAUDE.md` documenta la convención de escribir archivos antes de referenciarlos
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 - [ ] 03-01-PLAN.md — Localhost binding, explicit filesPort, agent CLAUDE.md documentation
