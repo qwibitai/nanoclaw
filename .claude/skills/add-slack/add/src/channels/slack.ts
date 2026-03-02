@@ -38,6 +38,8 @@ export class SlackChannel implements Channel {
   private userNameCache = new Map<string, string>();
   // Track latest user message ts per channel for assistant.threads.setStatus
   private lastUserMessageTs = new Map<string, string>();
+  // Track the thread_ts used for the active typing indicator per channel
+  private activeTypingTs = new Map<string, string>();
 
   private opts: SlackChannelOpts;
 
@@ -119,9 +121,11 @@ export class SlackChannel implements Channel {
         }
       }
 
-      // Track last user message ts for typing indicator (assistant.threads.setStatus)
+      // Track last user message ts for typing indicator (assistant.threads.setStatus).
+      // For threaded replies, use thread_ts (the thread root) since the API targets threads.
       if (!isBotMessage) {
-        this.lastUserMessageTs.set(jid, msg.ts);
+        const threadRoot = (msg as { thread_ts?: string }).thread_ts ?? msg.ts;
+        this.lastUserMessageTs.set(jid, threadRoot);
       }
 
       this.opts.onMessage(jid, {
@@ -215,7 +219,17 @@ export class SlackChannel implements Channel {
   // Only works in DM threads; silently ignored elsewhere.
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     const channelId = jid.replace(/^slack:/, '');
-    const threadTs = this.lastUserMessageTs.get(jid);
+
+    let threadTs: string | undefined;
+    if (isTyping) {
+      // Pin the thread_ts at start so a new message arriving mid-processing
+      // won't cause setTyping(false) to clear a different thread.
+      threadTs = this.lastUserMessageTs.get(jid);
+      if (threadTs) this.activeTypingTs.set(jid, threadTs);
+    } else {
+      threadTs = this.activeTypingTs.get(jid);
+      this.activeTypingTs.delete(jid);
+    }
     if (!threadTs) return;
 
     try {

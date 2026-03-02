@@ -792,6 +792,8 @@ describe('SlackChannel', () => {
         ts: '1704067200.000000',
       }));
 
+      // Must first pin via setTyping(true) so setTyping(false) has a thread to clear
+      await channel.setTyping('slack:C0123456789', true);
       await channel.setTyping('slack:C0123456789', false);
 
       expect(currentApp().client.assistant.threads.setStatus).toHaveBeenCalledWith({
@@ -848,6 +850,61 @@ describe('SlackChannel', () => {
       await channel.setTyping('slack:C0123456789', true);
 
       expect(currentApp().client.assistant.threads.setStatus).not.toHaveBeenCalled();
+    });
+
+    it('pins thread_ts at setTyping(true) so new messages do not shift the clear target', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(createMessageEvent({
+        user: 'U_USER_456',
+        text: 'Hello',
+        ts: '1704067200.000000',
+      }));
+
+      await channel.setTyping('slack:C0123456789', true);
+
+      // New message arrives while processing
+      await triggerMessageEvent(createMessageEvent({
+        user: 'U_USER_456',
+        text: 'Follow up',
+        ts: '1704067201.000000',
+      }));
+
+      await channel.setTyping('slack:C0123456789', false);
+
+      expect(currentApp().client.assistant.threads.setStatus).toHaveBeenNthCalledWith(1, {
+        channel_id: 'C0123456789',
+        thread_ts: '1704067200.000000',
+        status: 'is thinking...',
+      });
+      expect(currentApp().client.assistant.threads.setStatus).toHaveBeenNthCalledWith(2, {
+        channel_id: 'C0123456789',
+        thread_ts: '1704067200.000000',
+        status: '',
+      });
+    });
+
+    it('uses thread_ts for threaded replies instead of msg.ts', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await triggerMessageEvent(createMessageEvent({
+        user: 'U_USER_456',
+        text: 'Thread reply',
+        ts: '1704067201.000000',
+        threadTs: '1704067200.000000',
+      }));
+
+      await channel.setTyping('slack:C0123456789', true);
+
+      expect(currentApp().client.assistant.threads.setStatus).toHaveBeenCalledWith({
+        channel_id: 'C0123456789',
+        thread_ts: '1704067200.000000',
+        status: 'is thinking...',
+      });
     });
   });
 
