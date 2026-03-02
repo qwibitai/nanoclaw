@@ -1,13 +1,22 @@
-import { Bot } from 'grammy';
+import fs from 'fs';
+import path from 'path';
 
-import { ALLOWED_USERS, ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { Bot, InputFile } from 'grammy';
+
+import { ALLOWED_USERS, ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
+import { transcribeAudio } from '../transcription.js';
 import {
   Channel,
+  FileAttachment,
+  MessageAttachment,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+const IMAGE_MAX_SIZE = 5 * 1024 * 1024; // 5MB
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
@@ -140,7 +149,7 @@ export class TelegramChannel implements Channel {
     });
 
     // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    const storeNonText = (ctx: any, placeholder: string, attachments?: MessageAttachment[]) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -170,13 +179,91 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
+        attachments,
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    // Photos — download for vision
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      let attachments: MessageAttachment[] | undefined;
+      try {
+        // Telegram provides multiple sizes — grab the largest
+        const photos = ctx.message.photo;
+        const largest = photos[photos.length - 1];
+        if (largest.file_size && largest.file_size <= IMAGE_MAX_SIZE) {
+          const file = await this.bot!.api.getFile(largest.file_id);
+          const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+          const response = await fetch(fileUrl);
+          if (response.ok) {
+            const buffer = Buffer.from(await response.arrayBuffer());
+            const ext = file.file_path?.split('.').pop() || 'jpg';
+            const filename = `img-${Date.now()}.${ext}`;
+            const attachDir = path.join(GROUPS_DIR, group.folder, '.attachments');
+            fs.mkdirSync(attachDir, { recursive: true });
+            const savePath = path.join(attachDir, filename);
+            fs.writeFileSync(savePath, buffer);
+            attachments = [{ path: `.attachments/${filename}`, mimeType: `image/${ext === 'jpg' ? 'jpeg' : ext}` }];
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to download Telegram photo for vision');
+      }
+      storeNonText(ctx, '[Photo]', attachments);
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
+
+    // Voice messages — download and transcribe
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      let placeholder = '[Voice message]';
+      try {
+        const file = await ctx.getFile();
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        if (response.ok) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const transcript = await transcribeAudio(buffer, 'audio/ogg');
+          if (transcript) {
+            placeholder = `[Voice transcript] ${transcript}`;
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to download/transcribe Telegram voice');
+      }
+      storeNonText(ctx, placeholder);
+    });
+
+    // Audio files — download and transcribe
+    this.bot.on('message:audio', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      let placeholder = '[Audio]';
+      try {
+        const file = await ctx.getFile();
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        if (response.ok) {
+          const mimeType = ctx.message.audio?.mime_type || 'audio/mpeg';
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const transcript = await transcribeAudio(buffer, mimeType);
+          if (transcript) {
+            placeholder = `[Audio transcript] ${transcript}`;
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to download/transcribe Telegram audio');
+      }
+      storeNonText(ctx, placeholder);
+    });
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
       storeNonText(ctx, `[Document: ${name}]`);
@@ -211,7 +298,7 @@ export class TelegramChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, file?: FileAttachment): Promise<void> {
     if (!this.bot) {
       logger.warn('Telegram bot not initialized');
       return;
@@ -219,6 +306,24 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+
+      if (file) {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        const imageExts = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp']);
+        const inputFile = new InputFile(file.path, file.name);
+
+        if (imageExts.has(ext)) {
+          await this.bot.api.sendPhoto(numericId, inputFile, {
+            caption: text || undefined,
+          });
+        } else {
+          await this.bot.api.sendDocument(numericId, inputFile, {
+            caption: text || undefined,
+          });
+        }
+        logger.info({ jid, file: file.name }, 'Telegram file sent');
+        return;
+      }
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;

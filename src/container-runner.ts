@@ -32,6 +32,11 @@ import { getRecentMessages } from './db.js';
 const OUTPUT_START_MARKER = '---SOVEREIGN_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---SOVEREIGN_OUTPUT_END---';
 
+export interface ContainerInputAttachment {
+  path: string;
+  mimeType: string;
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -42,6 +47,7 @@ export interface ContainerInput {
   assistantName?: string;
   model?: string;
   secrets?: Record<string, string>;
+  attachments?: ContainerInputAttachment[];
 }
 
 export interface ContainerOutput {

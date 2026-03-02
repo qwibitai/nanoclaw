@@ -19,6 +19,11 @@ import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
+interface ContainerInputAttachment {
+  path: string;
+  mimeType: string;
+}
+
 interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -29,6 +34,7 @@ interface ContainerInput {
   assistantName?: string;
   model?: string;
   secrets?: Record<string, string>;
+  attachments?: ContainerInputAttachment[];
 }
 
 interface ContainerOutput {
@@ -49,9 +55,13 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -69,10 +79,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -93,6 +103,68 @@ class MessageStream {
       await new Promise<void>(r => { this.waiting = r; });
       this.waiting = null;
     }
+  }
+}
+
+/**
+ * Build multi-part content blocks from text + image attachments.
+ * Reads images from /workspace/group/ and converts to base64.
+ */
+function buildContentWithImages(text: string, attachments: ContainerInputAttachment[]): string | ContentBlock[] {
+  const imageBlocks: ContentBlock[] = [];
+  for (const att of attachments) {
+    const fullPath = path.join('/workspace/group', att.path);
+    try {
+      if (!fs.existsSync(fullPath)) {
+        log(`Attachment not found: ${fullPath}`);
+        continue;
+      }
+      const data = fs.readFileSync(fullPath);
+      // Skip files larger than 5MB
+      if (data.length > 5 * 1024 * 1024) {
+        log(`Attachment too large (${data.length} bytes), skipping: ${fullPath}`);
+        continue;
+      }
+      imageBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: att.mimeType,
+          data: data.toString('base64'),
+        },
+      });
+      log(`Loaded image attachment: ${att.path} (${data.length} bytes)`);
+    } catch (err) {
+      log(`Failed to read attachment ${att.path}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  if (imageBlocks.length === 0) return text;
+
+  return [
+    ...imageBlocks,
+    { type: 'text' as const, text },
+  ];
+}
+
+/**
+ * Clean up old attachment files (older than 24h).
+ */
+function cleanupOldAttachments(): void {
+  const attachDir = '/workspace/group/.attachments';
+  if (!fs.existsSync(attachDir)) return;
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  try {
+    for (const file of fs.readdirSync(attachDir)) {
+      const filePath = path.join(attachDir, file);
+      const stat = fs.statSync(filePath);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(filePath);
+        log(`Cleaned up old attachment: ${file}`);
+      }
+    }
+  } catch (err) {
+    log(`Attachment cleanup error: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -385,7 +457,7 @@ function waitForIpcMessage(): Promise<string | null> {
  * Also pipes IPC messages into the stream during the query.
  */
 async function runQuery(
-  prompt: string,
+  prompt: string | ContentBlock[],
   sessionId: string | undefined,
   mcpServerPath: string,
   containerInput: ContainerInput,
@@ -582,15 +654,25 @@ async function main(): Promise<void> {
   // Clean up stale _close sentinel from previous container runs
   try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
 
+  // Clean up old attachment files on container start
+  cleanupOldAttachments();
+
   // Build initial prompt (drain any pending IPC messages too)
-  let prompt = containerInput.prompt;
+  let promptText = containerInput.prompt;
   if (containerInput.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+    promptText = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${promptText}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
+    promptText += '\n' + pending.join('\n');
+  }
+
+  // Build initial content — multi-part if images are attached
+  let initialContent: string | ContentBlock[] = promptText;
+  if (containerInput.attachments && containerInput.attachments.length > 0) {
+    log(`Building multi-part content with ${containerInput.attachments.length} image(s)`);
+    initialContent = buildContentWithImages(promptText, containerInput.attachments);
   }
 
   // Query loop: run query → wait for IPC message → run new query → repeat
@@ -599,7 +681,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(initialContent, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -634,7 +716,7 @@ async function main(): Promise<void> {
       }
 
       log(`Got new message (${nextMessage.length} chars), starting new query`);
-      prompt = nextMessage;
+      initialContent = nextMessage;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);

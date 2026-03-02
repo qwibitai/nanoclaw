@@ -1,4 +1,8 @@
+import fs from 'fs';
+import path from 'path';
+
 import {
+  AttachmentBuilder,
   Client,
   Events,
   GatewayIntentBits,
@@ -6,14 +10,20 @@ import {
   TextChannel,
 } from 'discord.js';
 
-import { ALLOWED_USERS, ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ALLOWED_USERS, ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
+import { transcribeAudio } from '../transcription.js';
 import {
   Channel,
+  FileAttachment,
+  MessageAttachment,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
 } from '../types.js';
+
+const IMAGE_MAX_SIZE = 5 * 1024 * 1024; // 5MB
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
@@ -112,22 +122,57 @@ export class DiscordChannel implements Channel {
         }
       }
 
-      // Handle attachments — store placeholders so the agent knows something was sent
+      // Handle attachments — store placeholders (with transcription for audio, download for images)
+      const group = this.opts.registeredGroups()[chatJid];
+      const imageAttachments: MessageAttachment[] = [];
       if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map(
-          (att) => {
-            const contentType = att.contentType || '';
-            if (contentType.startsWith('image/')) {
-              return `[Image: ${att.name || 'image'}]`;
-            } else if (contentType.startsWith('video/')) {
-              return `[Video: ${att.name || 'video'}]`;
-            } else if (contentType.startsWith('audio/')) {
-              return `[Audio: ${att.name || 'audio'}]`;
-            } else {
-              return `[File: ${att.name || 'file'}]`;
+        const attachmentDescriptions: string[] = [];
+        for (const att of message.attachments.values()) {
+          const contentType = att.contentType || '';
+          if (contentType.startsWith('image/') && SUPPORTED_IMAGE_TYPES.has(contentType)) {
+            attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
+            // Download image for vision (only if registered group and within size limit)
+            if (group && att.size <= IMAGE_MAX_SIZE) {
+              try {
+                const response = await fetch(att.url);
+                if (response.ok) {
+                  const buffer = Buffer.from(await response.arrayBuffer());
+                  const ext = att.name?.split('.').pop() || 'jpg';
+                  const filename = `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.${ext}`;
+                  const attachDir = path.join(GROUPS_DIR, group.folder, '.attachments');
+                  fs.mkdirSync(attachDir, { recursive: true });
+                  const savePath = path.join(attachDir, filename);
+                  fs.writeFileSync(savePath, buffer);
+                  imageAttachments.push({ path: `.attachments/${filename}`, mimeType: contentType });
+                }
+              } catch (err) {
+                logger.warn({ err }, 'Failed to download Discord image for vision');
+              }
             }
-          },
-        );
+          } else if (contentType.startsWith('image/')) {
+            attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
+          } else if (contentType.startsWith('video/')) {
+            attachmentDescriptions.push(`[Video: ${att.name || 'video'}]`);
+          } else if (contentType.startsWith('audio/')) {
+            // Attempt transcription for audio attachments
+            let desc = `[Audio: ${att.name || 'audio'}]`;
+            try {
+              const response = await fetch(att.url);
+              if (response.ok) {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                const transcript = await transcribeAudio(buffer, contentType);
+                if (transcript) {
+                  desc = `[Audio transcript] ${transcript}`;
+                }
+              }
+            } catch (err) {
+              logger.warn({ err }, 'Failed to download/transcribe Discord audio');
+            }
+            attachmentDescriptions.push(desc);
+          } else {
+            attachmentDescriptions.push(`[File: ${att.name || 'file'}]`);
+          }
+        }
         if (content) {
           content = `${content}\n${attachmentDescriptions.join('\n')}`;
         } else {
@@ -155,7 +200,6 @@ export class DiscordChannel implements Channel {
       this.opts.onChatMetadata(chatJid, timestamp, chatName);
 
       // Only deliver full message for registered groups
-      const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
         logger.debug(
           { chatJid, chatName },
@@ -173,6 +217,7 @@ export class DiscordChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
+        attachments: imageAttachments.length > 0 ? imageAttachments : undefined,
       });
 
       logger.info(
@@ -203,7 +248,7 @@ export class DiscordChannel implements Channel {
     });
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(jid: string, text: string, file?: FileAttachment): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
       return;
@@ -219,6 +264,16 @@ export class DiscordChannel implements Channel {
       }
 
       const textChannel = channel as TextChannel;
+
+      if (file) {
+        const attachment = new AttachmentBuilder(file.path, { name: file.name });
+        await textChannel.send({
+          content: text || undefined,
+          files: [attachment],
+        });
+        logger.info({ jid, file: file.name }, 'Discord message+file sent');
+        return;
+      }
 
       // Discord has a 2000 character limit per message — split if needed
       const MAX_LENGTH = 2000;

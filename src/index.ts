@@ -20,6 +20,7 @@ import {
 import { DiscordChannel } from './channels/discord.js';
 import { TelegramChannel } from './channels/telegram.js';
 import {
+  ContainerInputAttachment,
   ContainerOutput,
   runContainerAgent,
   writeGroupsSnapshot,
@@ -176,6 +177,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages);
 
+  // Collect image attachments from messages for vision
+  const attachments: ContainerInputAttachment[] = [];
+  for (const msg of missedMessages) {
+    if (msg.attachments) {
+      for (const att of msg.attachments) {
+        attachments.push({ path: att.path, mimeType: att.mimeType });
+      }
+    }
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -184,7 +195,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   logger.info(
-    { group: group.name, messageCount: missedMessages.length },
+    { group: group.name, messageCount: missedMessages.length, imageCount: attachments.length },
     'Processing messages',
   );
 
@@ -207,7 +218,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   const botResponses: string[] = [];
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, attachments.length > 0 ? attachments : undefined, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -291,6 +302,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  attachments?: ContainerInputAttachment[],
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
@@ -342,6 +354,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        attachments,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -562,10 +575,10 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, file) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, file);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

@@ -5,6 +5,7 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   TIMEZONE,
@@ -13,10 +14,10 @@ import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { FileAttachment, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, file?: FileAttachment) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata: (force: boolean) => Promise<void>;
@@ -79,9 +80,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Resolve optional file attachment
+                  let file: FileAttachment | undefined;
+                  if (data.filePath && typeof data.filePath === 'string') {
+                    const groupDir = path.join(GROUPS_DIR, sourceGroup);
+                    const resolvedPath = path.resolve(groupDir, data.filePath);
+                    // Security: ensure path doesn't escape group directory
+                    const rel = path.relative(groupDir, resolvedPath);
+                    if (!rel.startsWith('..') && !path.isAbsolute(rel) && fs.existsSync(resolvedPath)) {
+                      file = { path: resolvedPath, name: path.basename(resolvedPath) };
+                    } else {
+                      logger.warn(
+                        { filePath: data.filePath, sourceGroup },
+                        'IPC file path rejected (traversal or missing)',
+                      );
+                    }
+                  }
+                  await deps.sendMessage(data.chatJid, data.text, file);
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
+                    { chatJid: data.chatJid, sourceGroup, hasFile: !!file },
                     'IPC message sent',
                   );
                 } else {

@@ -41,6 +41,12 @@ export interface RegisteredGroup {
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
 }
 
+export interface MessageAttachment {
+  /** Path relative to group directory (e.g. ".attachments/img-123.jpg") */
+  path: string;
+  mimeType: string;
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -50,6 +56,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  attachments?: MessageAttachment[];
 }
 
 export interface ScheduledTask {
@@ -79,10 +86,15 @@ export interface TaskRunLog {
 
 // --- Channel abstraction ---
 
+export interface FileAttachment {
+  path: string;
+  name: string;
+}
+
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(jid: string, text: string, file?: FileAttachment): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
