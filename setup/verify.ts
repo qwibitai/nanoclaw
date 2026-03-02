@@ -68,9 +68,10 @@ export async function run(_args: string[]): Promise<void> {
     const pidFile = path.join(projectRoot, 'nanoclaw.pid');
     if (fs.existsSync(pidFile)) {
       try {
-        const pid = fs.readFileSync(pidFile, 'utf-8').trim();
-        if (pid) {
-          execSync(`kill -0 ${pid}`, { stdio: 'ignore' });
+        const raw = fs.readFileSync(pidFile, 'utf-8').trim();
+        const pid = Number(raw);
+        if (raw && Number.isInteger(pid) && pid > 0) {
+          process.kill(pid, 0);
           service = 'running';
         }
       } catch {
