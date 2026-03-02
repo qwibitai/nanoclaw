@@ -745,11 +745,12 @@ export function getMessageHistory(
   content: string;
   timestamp: string;
   is_bot_message: number;
+  thread_ts: string | null;
 }> {
   if (before) {
     return db
       .prepare(
-        `SELECT id, sender_name, content, timestamp, is_bot_message
+        `SELECT id, sender_name, content, timestamp, is_bot_message, thread_ts
          FROM messages
          WHERE chat_jid = ? AND timestamp < ?
          ORDER BY timestamp DESC
@@ -761,11 +762,12 @@ export function getMessageHistory(
       content: string;
       timestamp: string;
       is_bot_message: number;
+      thread_ts: string | null;
     }>;
   }
   return db
     .prepare(
-      `SELECT id, sender_name, content, timestamp, is_bot_message
+      `SELECT id, sender_name, content, timestamp, is_bot_message, thread_ts
        FROM messages
        WHERE chat_jid = ?
        ORDER BY timestamp DESC
@@ -777,6 +779,7 @@ export function getMessageHistory(
     content: string;
     timestamp: string;
     is_bot_message: number;
+    thread_ts: string | null;
   }>;
 }
 

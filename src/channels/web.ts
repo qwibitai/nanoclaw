@@ -3,6 +3,8 @@
  * Hono HTTP server with streaming text responses for useChat + TextStreamChatTransport.
  */
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { Hono } from 'hono';
 import { bearerAuth } from 'hono/bearer-auth';
 import { serve } from '@hono/node-server';
@@ -14,6 +16,7 @@ import {
   MAIN_GROUP_FOLDER,
   WEB_CHANNEL_PORT,
 } from '../config.js';
+import { dashboardApp, initDashboardQueries } from '../dashboard.js';
 import {
   getDatabase,
   getAllWebSessions,
@@ -90,7 +93,36 @@ export class WebChannel implements Channel {
     app.get('/api/health', (c) => c.json({ status: 'ok' }));
 
     // Auth middleware for all other /api routes
+    // NOTE: This must be registered BEFORE app.route() calls below so
+    // sub-app routes under /api/* inherit bearer auth automatically.
     app.use('/api/*', bearerAuth({ token: this.opts.authToken }));
+
+    // --- Dashboard (read-only visibility) ---
+    initDashboardQueries();
+    app.route('/api/dashboard', dashboardApp);
+
+    // Serve dashboard SPA (no auth — the page is public, API calls require auth)
+    let cachedDashboardHtml: string | null = null;
+    app.get('/dashboard', (c) => {
+      if (!cachedDashboardHtml) {
+        try {
+          cachedDashboardHtml = fs.readFileSync(
+            path.resolve(process.cwd(), 'static', 'dashboard.html'),
+            'utf-8',
+          );
+        } catch {
+          return c.text('Dashboard not found', 404);
+        }
+      }
+      c.header('X-Content-Type-Options', 'nosniff');
+      c.header('X-Frame-Options', 'DENY');
+      c.header('Referrer-Policy', 'no-referrer');
+      c.header(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; object-src 'none'",
+      );
+      return c.html(cachedDashboardHtml);
+    });
 
     // --- Session CRUD ---
 

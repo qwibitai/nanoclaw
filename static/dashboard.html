@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NanoClaw Dashboard</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #242736;
+  --border: #2e3140;
+  --text: #e1e4ec;
+  --text2: #8b8fa3;
+  --accent: #6366f1;
+  --accent-dim: #4f46e5;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; height: 100vh; display: flex; flex-direction: column; }
+a { color: var(--accent); }
+
+/* Header */
+.header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+.header h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+.header h1 span { color: var(--accent); }
+.conn-status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.conn-dot.connected { background: var(--green); }
+.conn-dot.connecting { background: var(--yellow); }
+
+/* Tabs */
+.tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; padding: 0 20px; }
+.tabs button { background: none; border: none; color: var(--text2); padding: 10px 16px; font-size: 13px; font-weight: 500; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+.tabs button:hover { color: var(--text); }
+.tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Panels */
+.panel { flex: 1; overflow: hidden; display: none; }
+.panel.active { display: flex; flex-direction: column; }
+
+/* Overview */
+.overview { padding: 20px; overflow-y: auto; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.stat-card .label { font-size: 12px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.stat-card .value { font-size: 24px; font-weight: 700; font-family: var(--mono); }
+.section-title { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 8px; }
+.channel-bar { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.channel-bar .name { width: 80px; font-size: 12px; color: var(--text2); text-align: right; }
+.channel-bar .bar { height: 20px; background: var(--accent); border-radius: 3px; min-width: 2px; transition: width 0.3s; }
+.channel-bar .count { font-size: 12px; color: var(--text2); font-family: var(--mono); }
+.activity-list { list-style: none; }
+.activity-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-radius: 6px; cursor: pointer; }
+.activity-item:hover { background: var(--surface2); }
+.activity-item .name { font-weight: 500; }
+.activity-item .meta { font-size: 12px; color: var(--text2); display: flex; gap: 8px; }
+
+/* Messages */
+.messages-layout { display: flex; flex: 1; overflow: hidden; }
+.chat-sidebar { width: 280px; border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+.chat-filters { padding: 8px; display: flex; gap: 6px; border-bottom: 1px solid var(--border); }
+.chat-filters select, .chat-filters input { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 6px 8px; border-radius: 4px; font-size: 12px; outline: none; }
+.chat-filters select { width: 90px; }
+.chat-filters input { flex: 1; min-width: 0; }
+.chat-list { flex: 1; overflow-y: auto; }
+.chat-item { padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.chat-item:hover { background: var(--surface2); }
+.chat-item.selected { background: var(--accent-dim); border-left: 3px solid var(--accent); }
+.chat-item .chat-name { font-weight: 500; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .chat-meta { font-size: 11px; color: var(--text2); display: flex; justify-content: space-between; }
+.msg-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.msg-panel-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text2); }
+.msg-list { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.msg { padding: 6px 10px; border-radius: 6px; max-width: 85%; }
+.msg.bot { background: var(--surface2); align-self: flex-start; }
+.msg.user { background: var(--accent-dim); align-self: flex-end; }
+.msg .sender { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+.msg.bot .sender { color: var(--green); }
+.msg .text { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.4; }
+.msg .time { font-size: 10px; color: var(--text2); margin-top: 2px; text-align: right; }
+.msg .thread-badge { font-size: 10px; color: var(--yellow); margin-left: 6px; }
+
+/* Tables */
+.table-wrap { padding: 20px; overflow-y: auto; flex: 1; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 11px; text-transform: uppercase; color: var(--text2); padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 600; letter-spacing: 0.05em; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: top; }
+tr:hover td { background: var(--surface); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge.active { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge.paused { background: rgba(234,179,8,0.15); color: var(--yellow); }
+.badge.completed, .badge.success { background: rgba(34,197,94,0.15); color: var(--green); }
+.badge.error { background: rgba(239,68,68,0.15); color: var(--red); }
+.expand-btn { cursor: pointer; color: var(--accent); font-size: 12px; }
+.run-history { padding: 8px 12px 8px 32px; background: var(--surface); }
+.run-history table { font-size: 12px; }
+.task-prompt { max-width: 300px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); font-size: 12px; }
+.bool-yes { color: var(--green); }
+.bool-no { color: var(--text2); }
+
+/* States */
+.loading { padding: 40px; text-align: center; color: var(--text2); }
+.empty { padding: 40px; text-align: center; color: var(--text2); }
+.error-banner { background: rgba(239,68,68,0.1); color: var(--red); padding: 8px 16px; font-size: 12px; text-align: center; display: none; }
+.error-banner.visible { display: block; }
+
+/* Auth modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 360px; }
+.modal h2 { font-size: 16px; margin-bottom: 12px; }
+.modal p { font-size: 13px; color: var(--text2); margin-bottom: 16px; }
+.modal input { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 6px; font-size: 14px; outline: none; margin-bottom: 12px; }
+.modal input:focus { border-color: var(--accent); }
+.modal button { width: 100%; background: var(--accent); color: white; border: none; padding: 10px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }
+.modal button:hover { background: var(--accent-dim); }
+.modal .error { color: var(--red); font-size: 12px; margin-bottom: 8px; display: none; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+/* Loading dots */
+@keyframes dots { 0%, 20% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+.loading-dots span { animation: dots 1.4s infinite; }
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>Nano</span>Claw Dashboard</h1>
+  <div class="conn-status">
+    <div class="conn-dot" id="conn-dot"></div>
+    <span id="conn-text">Disconnected</span>
+  </div>
+</div>
+
+<div class="error-banner" id="error-banner"></div>
+
+<div class="tabs" id="tab-bar">
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="messages">Messages</button>
+  <button data-tab="tasks">Tasks</button>
+  <button data-tab="groups">Groups</button>
+</div>
+
+<div class="panel active" data-panel="overview" id="panel-overview">
+  <div class="overview" id="overview-content"><div class="loading">Loading<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div></div>
+</div>
+
+<div class="panel" data-panel="messages" id="panel-messages">
+  <div class="messages-layout">
+    <div class="chat-sidebar">
+      <div class="chat-filters">
+        <select id="channel-filter"><option value="">All</option></select>
+        <input type="text" id="chat-search" placeholder="Search chats...">
+      </div>
+      <div class="chat-list" id="chat-list"><div class="loading">Loading<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div></div>
+    </div>
+    <div class="msg-panel">
+      <div class="msg-panel-empty" id="msg-empty">Select a chat to view messages</div>
+      <div class="msg-list" id="msg-list" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" data-panel="tasks" id="panel-tasks">
+  <div class="table-wrap" id="tasks-content"><div class="loading">Loading<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div></div>
+</div>
+
+<div class="panel" data-panel="groups" id="panel-groups">
+  <div class="table-wrap" id="groups-content"><div class="loading">Loading<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div></div>
+</div>
+
+<div class="modal-overlay" id="auth-modal" style="display:none">
+  <div class="modal">
+    <h2>Dashboard Authentication</h2>
+    <p>Enter your WEB_AUTH_TOKEN to access the dashboard.</p>
+    <div class="error" id="auth-error">Invalid token. Please try again.</div>
+    <input type="password" id="auth-input" placeholder="Bearer token" autocomplete="off">
+    <button id="auth-submit">Connect</button>
+  </div>
+</div>
+
+<script>
+// ===== 1. CONSTANTS =====
+const TOKEN_KEY = 'nanoclaw_dashboard_token';
+const API_BASE = '/api/dashboard';
+
+// ===== 2. STATE =====
+const state = {
+  activeTab: 'overview',
+  token: localStorage.getItem(TOKEN_KEY),
+  overview: null,
+  chats: [],
+  selectedChat: null,
+  messages: [],
+  tasks: [],
+  groups: [],
+  expandedTask: null,
+  taskRuns: [],
+  sse: { status: 'disconnected' }, // disconnected | connecting | connected | auth_failed
+};
+
+// Race condition guards
+let tabAbort = null;
+let chatListGen = 0;
+let chatListAbort = null;
+let chatLoadGen = 0;
+let chatLoadAbort = null;
+let msgPanelState = 'idle'; // idle | loading_initial | loading_older
+let pendingSSEMessages = [];
+let searchTimeout = null;
+
+// ===== 3. HELPERS =====
+function escapeHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function escapeAttr(s) {
+  if (!s) return '';
+  return escapeHtml(s).replace(/'/g, '&#39;');
+}
+
+function relativeTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = Date.now();
+  const diff = now - d.getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function formatJid(jid) {
+  if (!jid) return '';
+  // Show readable abbreviation for raw JIDs
+  if (jid.includes('@g.us')) return jid.split('@')[0].slice(-6) + '...';
+  if (jid.includes('@s.whatsapp.net')) return '+' + jid.split('@')[0];
+  return jid;
+}
+
+let errorTimeout = null;
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.classList.add('visible');
+  if (errorTimeout) clearTimeout(errorTimeout);
+  errorTimeout = setTimeout(() => { el.classList.remove('visible'); errorTimeout = null; }, 5000);
+}
+
+// ===== 4. API LAYER =====
+let authModalVisible = false;
+
+function showAuthModal() {
+  if (authModalVisible) return;
+  authModalVisible = true;
+  document.getElementById('auth-modal').style.display = 'flex';
+  document.getElementById('auth-input').focus();
+}
+
+function hideAuthModal() {
+  authModalVisible = false;
+  document.getElementById('auth-modal').style.display = 'none';
+  document.getElementById('auth-error').style.display = 'none';
+}
+
+async function api(path, signal) {
+  if (!state.token) { showAuthModal(); throw new Error('No token'); }
+  const res = await fetch(API_BASE + path, {
+    headers: { 'Authorization': 'Bearer ' + state.token },
+    signal,
+  });
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    state.token = null;
+    disconnectSSE();
+    showAuthModal();
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error?.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ===== 5. DATA FETCHING =====
+async function fetchOverview() {
+  try {
+    state.overview = await api('/overview');
+    renderOverview();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    document.getElementById('overview-content').innerHTML = '<div class="empty">Failed to load overview</div>';
+  }
+}
+
+async function fetchChats() {
+  const myGen = ++chatListGen;
+  if (chatListAbort) chatListAbort.abort();
+  chatListAbort = new AbortController();
+  const channel = document.getElementById('channel-filter').value;
+  const search = document.getElementById('chat-search').value;
+  const params = new URLSearchParams();
+  if (channel) params.set('channel', channel);
+  if (search) params.set('search', search);
+  const qs = params.toString();
+  try {
+    const data = await api('/chats' + (qs ? '?' + qs : ''), chatListAbort.signal);
+    if (myGen !== chatListGen) return;
+    state.chats = data.chats;
+    renderChatList();
+    // Populate channel filter options
+    const channels = [...new Set(data.chats.map(c => c.channel))].sort();
+    const sel = document.getElementById('channel-filter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All</option>' + channels.map(ch =>
+      `<option value="${escapeAttr(ch)}"${ch === current ? ' selected' : ''}>${escapeHtml(ch)}</option>`
+    ).join('');
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (myGen !== chatListGen) return;
+  }
+}
+
+async function fetchMessages(jid) {
+  const myGen = ++chatLoadGen;
+  if (chatLoadAbort) chatLoadAbort.abort();
+  chatLoadAbort = new AbortController();
+  state.selectedChat = jid;
+  state.messages = [];
+  msgPanelState = 'loading_initial';
+  pendingSSEMessages = [];
+  renderChatList();
+  document.getElementById('msg-empty').style.display = 'none';
+  const msgList = document.getElementById('msg-list');
+  msgList.style.display = 'flex';
+  msgList.innerHTML = '<div class="loading">Loading<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></div>';
+  try {
+    const data = await api('/chats/' + encodeURIComponent(jid) + '/messages?limit=50', chatLoadAbort.signal);
+    if (myGen !== chatLoadGen) return;
+    state.messages = data.messages;
+    renderMessages();
+    msgList.scrollTop = msgList.scrollHeight;
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    if (myGen !== chatLoadGen) return;
+    msgList.innerHTML = '<div class="empty">Failed to load messages</div>';
+  } finally {
+    msgPanelState = 'idle';
+    // Flush buffered SSE messages
+    for (const m of pendingSSEMessages) {
+      if (m.chatJid === state.selectedChat) {
+        state.messages.push(m);
+      }
+    }
+    pendingSSEMessages = [];
+    if (state.messages.length > 0) renderMessages();
+  }
+}
+
+async function loadOlderMessages() {
+  if (msgPanelState !== 'idle' || !state.selectedChat || state.messages.length === 0) return;
+  const myGen = chatLoadGen;
+  const jid = state.selectedChat;
+  msgPanelState = 'loading_older';
+  pendingSSEMessages = [];
+  const oldestTs = state.messages[0]?.timestamp;
+  const msgList = document.getElementById('msg-list');
+  const scrollHeightBefore = msgList.scrollHeight;
+  try {
+    const data = await api('/chats/' + encodeURIComponent(jid) + '/messages?limit=50&before=' + encodeURIComponent(oldestTs), chatLoadAbort?.signal);
+    if (myGen !== chatLoadGen) return;
+    if (data.messages.length > 0) {
+      state.messages = [...data.messages, ...state.messages];
+      renderMessages();
+      msgList.scrollTop += msgList.scrollHeight - scrollHeightBefore;
+    }
+  } catch (e) {
+    if (myGen !== chatLoadGen) return;
+  }
+  finally {
+    if (myGen !== chatLoadGen) return;
+    msgPanelState = 'idle';
+    let flushed = false;
+    for (const m of pendingSSEMessages) {
+      if (m.chatJid === state.selectedChat) {
+        state.messages.push(m);
+        flushed = true;
+      }
+    }
+    pendingSSEMessages = [];
+    if (flushed) renderMessages();
+  }
+}
+
+async function fetchTasks() {
+  try {
+    const data = await api('/tasks', tabAbort?.signal);
+    state.tasks = data.tasks;
+    renderTasks();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    document.getElementById('tasks-content').innerHTML = '<div class="empty">Failed to load tasks</div>';
+  }
+}
+
+async function fetchTaskRuns(taskId) {
+  try {
+    const data = await api('/tasks/' + encodeURIComponent(taskId) + '/runs?limit=20');
+    state.taskRuns = data.runs;
+    state.expandedTask = taskId;
+    renderTasks();
+  } catch (e) { /* ignore */ }
+}
+
+async function fetchGroups() {
+  try {
+    const data = await api('/groups', tabAbort?.signal);
+    state.groups = data.groups;
+    renderGroups();
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    document.getElementById('groups-content').innerHTML = '<div class="empty">Failed to load groups</div>';
+  }
+}
+
+// ===== 6. RENDER FUNCTIONS =====
+function renderOverview() {
+  const o = state.overview;
+  if (!o) return;
+  const maxCount = Math.max(...Object.values(o.messagesByChannel).map(Number), 1);
+  const el = document.getElementById('overview-content');
+  el.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">Messages</div><div class="value">${o.totalMessages.toLocaleString()}</div></div>
+      <div class="stat-card"><div class="label">Chats</div><div class="value">${o.totalChats}</div></div>
+      <div class="stat-card"><div class="label">Groups</div><div class="value">${o.totalGroups}</div></div>
+      <div class="stat-card"><div class="label">Active Tasks</div><div class="value">${o.activeTasks}</div></div>
+    </div>
+    <div class="section-title">Messages by Channel</div>
+    ${Object.entries(o.messagesByChannel).map(([ch, count]) => `
+      <div class="channel-bar">
+        <span class="name">${escapeHtml(ch)}</span>
+        <div class="bar" style="width: ${Math.max((count / maxCount) * 200, 2)}px"></div>
+        <span class="count">${Number(count).toLocaleString()}</span>
+      </div>
+    `).join('')}
+    <div class="section-title">Recent Activity</div>
+    <ul class="activity-list">
+      ${o.recentActivity.map(a => `
+        <li class="activity-item" data-jid="${escapeAttr(a.chatJid)}">
+          <span class="name">${escapeHtml(a.chatName || formatJid(a.chatJid))}</span>
+          <span class="meta">
+            <span>${escapeHtml(a.channel)}</span>
+            <span title="${escapeAttr(a.lastMessageTime)}">${relativeTime(a.lastMessageTime)}</span>
+          </span>
+        </li>
+      `).join('')}
+      ${o.recentActivity.length === 0 ? '<li class="empty">No recent activity</li>' : ''}
+    </ul>
+  `;
+}
+
+function renderChatList() {
+  const el = document.getElementById('chat-list');
+  if (state.chats.length === 0) {
+    el.innerHTML = '<div class="empty">No chats found</div>';
+    return;
+  }
+  el.innerHTML = state.chats.map(c => `
+    <div class="chat-item${c.jid === state.selectedChat ? ' selected' : ''}" data-jid="${escapeAttr(c.jid)}">
+      <div class="chat-name">${escapeHtml(c.name || formatJid(c.jid))}</div>
+      <div class="chat-meta">
+        <span>${escapeHtml(c.channel)} &middot; ${c.messageCount} msgs</span>
+        <span title="${escapeAttr(c.lastMessageTime)}">${relativeTime(c.lastMessageTime)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderMessages() {
+  const el = document.getElementById('msg-list');
+  if (state.messages.length === 0) {
+    el.innerHTML = '<div class="empty">No messages</div>';
+    return;
+  }
+  el.innerHTML = state.messages.map(m => `
+    <div class="msg ${m.isBotMessage ? 'bot' : 'user'}">
+      <div class="sender">${escapeHtml(m.senderName)}${m.threadTs ? '<span class="thread-badge">thread</span>' : ''}</div>
+      <div class="text">${escapeHtml(m.content)}</div>
+      <div class="time" title="${escapeAttr(m.timestamp)}">${relativeTime(m.timestamp)}</div>
+    </div>
+  `).join('');
+}
+
+function renderTasks() {
+  const el = document.getElementById('tasks-content');
+  if (state.tasks.length === 0) {
+    el.innerHTML = '<div class="empty">No scheduled tasks</div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr>
+      <th></th><th>ID</th><th>Group</th><th>Schedule</th><th>Next Run</th><th>Last Run</th><th>Status</th>
+    </tr></thead>
+    <tbody>
+    ${state.tasks.map(t => {
+      const expanded = state.expandedTask === t.id;
+      return `
+        <tr>
+          <td><span class="expand-btn" data-task="${escapeAttr(t.id)}">${expanded ? '&#9660;' : '&#9654;'}</span></td>
+          <td style="font-family:var(--mono);font-size:11px">${escapeHtml(t.id.slice(0, 16))}...</td>
+          <td>${escapeHtml(t.groupFolder)}</td>
+          <td><code>${escapeHtml(t.scheduleType)}: ${escapeHtml(t.scheduleValue)}</code></td>
+          <td title="${escapeAttr(t.nextRun || '')}">${t.nextRun ? relativeTime(t.nextRun) : '-'}</td>
+          <td title="${escapeAttr(t.lastRun || '')}">${t.lastRun ? relativeTime(t.lastRun) : '-'}</td>
+          <td><span class="badge ${t.status}">${escapeHtml(t.status)}</span></td>
+        </tr>
+        ${t.prompt ? `<tr><td></td><td colspan="6" class="task-prompt" title="${escapeAttr(t.prompt)}">${escapeHtml(t.prompt)}</td></tr>` : ''}
+        ${expanded ? `<tr><td></td><td colspan="6"><div class="run-history">
+          ${state.taskRuns.length === 0 ? '<div class="empty">No runs yet</div>' : `
+            <table><thead><tr><th>Run At</th><th>Duration</th><th>Status</th><th>Result / Error</th></tr></thead>
+            <tbody>${state.taskRuns.map(r => `
+              <tr>
+                <td title="${escapeAttr(r.runAt)}">${relativeTime(r.runAt)}</td>
+                <td>${r.durationMs ? (r.durationMs / 1000).toFixed(1) + 's' : '-'}</td>
+                <td><span class="badge ${r.status}">${escapeHtml(r.status)}</span></td>
+                <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeAttr(r.error || r.result || '')}">${escapeHtml(r.error || r.result || '-')}</td>
+              </tr>
+            `).join('')}</tbody></table>
+          `}
+        </div></td></tr>` : ''}
+      `;
+    }).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderGroups() {
+  const el = document.getElementById('groups-content');
+  if (state.groups.length === 0) {
+    el.innerHTML = '<div class="empty">No registered groups</div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>Name</th><th>Folder</th><th>Trigger</th><th>Channel</th><th>Added</th><th>Requires Trigger</th></tr></thead>
+    <tbody>
+    ${state.groups.map(g => `
+      <tr>
+        <td>${escapeHtml(g.name)}</td>
+        <td><code>${escapeHtml(g.folder)}</code></td>
+        <td><code>${escapeHtml(g.trigger)}</code></td>
+        <td>${escapeHtml(g.channel)}</td>
+        <td title="${escapeAttr(g.addedAt)}">${relativeTime(g.addedAt)}</td>
+        <td>${g.requiresTrigger ? '<span class="bool-yes">Yes</span>' : '<span class="bool-no">No</span>'}</td>
+      </tr>
+    `).join('')}
+    </tbody>
+  </table>`;
+}
+
+// ===== 7. SSE / REALTIME =====
+let sseAbort = null;
+let sseRetryMs = 1000;
+let sseRetryTimer = null;
+let sseLastEventId = null;
+
+function updateConnStatus(status) {
+  state.sse.status = status;
+  const dot = document.getElementById('conn-dot');
+  const text = document.getElementById('conn-text');
+  dot.className = 'conn-dot ' + (status === 'connected' ? 'connected' : status === 'connecting' ? 'connecting' : '');
+  text.textContent = status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+}
+
+async function connectSSE() {
+  if (state.sse.status === 'connecting' || state.sse.status === 'connected') return;
+  if (state.sse.status === 'auth_failed') return;
+  if (!state.token) return;
+
+  updateConnStatus('connecting');
+  sseAbort = new AbortController();
+
+  try {
+    const headers = { 'Authorization': 'Bearer ' + state.token, 'Accept': 'text/event-stream', 'Cache-Control': 'no-cache' };
+    if (sseLastEventId) headers['Last-Event-ID'] = sseLastEventId;
+    const res = await fetch(API_BASE + '/events', { headers, signal: sseAbort.signal });
+
+    if (res.status === 401) {
+      state.sse.status = 'auth_failed';
+      localStorage.removeItem(TOKEN_KEY);
+      state.token = null;
+      updateConnStatus('disconnected');
+      showAuthModal();
+      return;
+    }
+    if (!res.ok) throw new Error(`SSE HTTP ${res.status}`);
+
+    sseRetryMs = 1000;
+    updateConnStatus('connected');
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop();
+      for (const frame of frames) {
+        if (!frame.trim()) continue;
+        const evt = parseSSEFrame(frame);
+        if (!evt) continue;
+        if (evt.id) sseLastEventId = evt.id;
+        handleSSEEvent(evt);
+      }
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+  }
+
+  if (state.sse.status !== 'auth_failed') {
+    updateConnStatus('disconnected');
+    scheduleSSEReconnect();
+  }
+}
+
+function parseSSEFrame(frame) {
+  let event = null, data = [], id = null;
+  for (const line of frame.split('\n')) {
+    if (line.startsWith(':')) continue;
+    const ci = line.indexOf(':');
+    let field, value;
+    if (ci === -1) { field = line; value = ''; }
+    else { field = line.slice(0, ci); value = line.slice(ci + 1); if (value.startsWith(' ')) value = value.slice(1); }
+    switch (field) {
+      case 'event': event = value; break;
+      case 'data': data.push(value); break;
+      case 'id': id = value; break;
+      case 'retry': { const ms = parseInt(value, 10); if (!isNaN(ms)) sseRetryMs = ms; break; }
+    }
+  }
+  if (data.length === 0) return null;
+  return { event, data: data.join('\n'), id };
+}
+
+function handleSSEEvent(evt) {
+  if (evt.event === 'heartbeat') return;
+  if (evt.event === 'message') {
+    try {
+      const msg = JSON.parse(evt.data);
+      // Buffer if message panel is loading
+      if (msgPanelState !== 'idle') {
+        pendingSSEMessages.push(msg);
+        return;
+      }
+      if (msg.chatJid === state.selectedChat) {
+        state.messages.push(msg);
+        renderMessages();
+        const msgList = document.getElementById('msg-list');
+        // Auto-scroll if near bottom
+        if (msgList.scrollHeight - msgList.scrollTop - msgList.clientHeight < 100) {
+          msgList.scrollTop = msgList.scrollHeight;
+        }
+      }
+      // Update chat list ordering (move to top)
+      const idx = state.chats.findIndex(c => c.jid === msg.chatJid);
+      if (idx > 0) {
+        const [chat] = state.chats.splice(idx, 1);
+        chat.messageCount++;
+        chat.lastMessageTime = msg.timestamp;
+        state.chats.unshift(chat);
+        renderChatList();
+      }
+    } catch { /* ignore parse errors */ }
+  }
+  if (evt.event === 'taskRun') {
+    try {
+      const run = JSON.parse(evt.data);
+      // Update task in list
+      const task = state.tasks.find(t => t.id === run.taskId);
+      if (task) {
+        task.lastRun = run.runAt;
+        if (run.status === 'error') task.status = 'active'; // still active
+      }
+      // If viewing this task's runs, prepend
+      if (state.expandedTask === run.taskId) {
+        state.taskRuns.unshift(run);
+      }
+      if (state.activeTab === 'tasks') renderTasks();
+    } catch { /* ignore */ }
+  }
+}
+
+function disconnectSSE() {
+  if (sseAbort) sseAbort.abort();
+  if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+  sseRetryMs = 1000;
+  updateConnStatus('disconnected');
+}
+
+function scheduleSSEReconnect() {
+  if (state.sse.status === 'auth_failed') return;
+  sseRetryTimer = setTimeout(() => { sseRetryTimer = null; connectSSE(); }, sseRetryMs);
+  sseRetryMs = Math.min(sseRetryMs * 2, 30000);
+}
+
+// ===== 8. EVENT HANDLERS =====
+
+// Tab navigation
+document.getElementById('tab-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-tab]');
+  if (!btn) return;
+  const tab = btn.dataset.tab;
+  if (tab === state.activeTab) return;
+
+  if (tabAbort) tabAbort.abort();
+  tabAbort = new AbortController();
+
+  state.activeTab = tab;
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.panel').forEach(p => {
+    p.classList.toggle('active', p.dataset.panel === tab);
+  });
+
+  // Load data for the new tab
+  if (tab === 'overview') fetchOverview();
+  else if (tab === 'messages') fetchChats();
+  else if (tab === 'tasks') fetchTasks();
+  else if (tab === 'groups') fetchGroups();
+});
+
+// Chat list click
+document.getElementById('chat-list').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-jid]');
+  if (!item) return;
+  fetchMessages(item.dataset.jid);
+});
+
+// Overview recent activity click -> navigate to messages
+document.getElementById('overview-content').addEventListener('click', (e) => {
+  const item = e.target.closest('[data-jid]');
+  if (!item) return;
+  const jid = item.dataset.jid;
+  // Switch tab visually
+  state.activeTab = 'messages';
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.toggle('active', b.dataset.tab === 'messages'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.dataset.panel === 'messages'));
+  fetchChats();
+  fetchMessages(jid);
+});
+
+// Chat filter / search
+document.getElementById('channel-filter').addEventListener('change', () => {
+  if (searchTimeout) clearTimeout(searchTimeout);
+  fetchChats();
+});
+document.getElementById('chat-search').addEventListener('input', () => {
+  if (searchTimeout) clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(fetchChats, 250);
+});
+
+// Message scroll-up pagination
+document.getElementById('msg-list').addEventListener('scroll', (e) => {
+  if (e.target.scrollTop === 0 && state.messages.length > 0) {
+    loadOlderMessages();
+  }
+});
+
+// Task expand/collapse
+document.getElementById('tasks-content').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-task]');
+  if (!btn) return;
+  const taskId = btn.dataset.task;
+  if (state.expandedTask === taskId) {
+    state.expandedTask = null;
+    state.taskRuns = [];
+    renderTasks();
+  } else {
+    fetchTaskRuns(taskId);
+  }
+});
+
+// Auth submit
+document.getElementById('auth-submit').addEventListener('click', submitAuth);
+document.getElementById('auth-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') submitAuth();
+});
+
+async function submitAuth() {
+  const input = document.getElementById('auth-input');
+  const token = input.value.trim();
+  if (!token) return;
+
+  // Test the token
+  try {
+    const res = await fetch(API_BASE + '/overview', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 401) {
+      document.getElementById('auth-error').style.display = 'block';
+      input.value = '';
+      input.focus();
+      return;
+    }
+  } catch {
+    document.getElementById('auth-error').style.display = 'block';
+    return;
+  }
+
+  state.token = token;
+  localStorage.setItem(TOKEN_KEY, token);
+  state.sse.status = 'disconnected';
+  hideAuthModal();
+  init();
+}
+
+// ===== 9. INIT =====
+async function init() {
+  if (!state.token) {
+    showAuthModal();
+    return;
+  }
+  try {
+    await fetchOverview();
+  } catch {
+    showError('Failed to connect to dashboard API');
+    return;
+  }
+  if (!state.token) return; // api() showed auth modal on 401
+  connectSSE();
+}
+
+init();
+</script>
+</body>
+</html>
