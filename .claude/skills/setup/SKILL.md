@@ -27,28 +27,9 @@ Run `bash setup.sh` and parse the status block.
 
 Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-- If HAS_AUTH=true → WhatsApp is already configured, offer to skip step 5
+- If HAS_AUTH=true → WhatsApp is already configured, note for step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 - Record APPLE_CONTAINER and DOCKER values for step 3
-
-## 2b. Select Channels
-
-AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
-- WhatsApp (authenticates via QR code or pairing code)
-- Telegram (authenticates via bot token from @BotFather)
-- Slack (authenticates via Slack app with Socket Mode)
-- Discord (authenticates via Discord bot token)
-
-For each selected channel, apply its skill to install the channel code:
-
-```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-<channel>
-```
-
-Channels auto-enable when their credentials are present. The selected channels determine which later steps run:
-- Token-based channels (Telegram, Slack, Discord) → collect tokens in step 4b
-- WhatsApp → authenticate in step 5, configure trigger in step 6, sync groups in step 7
-- Channels not selected → their corresponding steps are skipped automatically
 
 ## 3. Container Runtime
 
@@ -57,12 +38,12 @@ Channels auto-enable when their credentials are present. The selected channels d
 Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
 - PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
+- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 4c.
 - PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
 
 ### 3a-docker. Install Docker
 
-- DOCKER=running → continue to 3b
+- DOCKER=running → continue to 4b
 - DOCKER=installed_not_running → start Docker: `open -a Docker` (macOS) or `sudo systemctl start docker` (Linux). Wait 15s, re-check with `docker info`.
 - DOCKER=not_found → Use `AskUserQuestion: Docker is required for running agents. Would you like me to install it?` If confirmed:
   - macOS: install via `brew install --cask docker`, then `open -a Docker` and wait for it to start. If brew not available, direct to Docker Desktop download at https://docker.com/products/docker-desktop
@@ -78,9 +59,9 @@ grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "
 
 **If NEEDS_CONVERSION**, the source code still uses Docker as the runtime. You MUST run the `/convert-to-apple-container` skill NOW, before proceeding to the build step.
 
-**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
+**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 4c.
 
-**If the chosen runtime is Docker**, no conversion is needed. Continue to 3c.
+**If the chosen runtime is Docker**, no conversion is needed. Continue to 4c.
 
 ### 3c. Build and test
 
@@ -102,118 +83,40 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 4b. Channel Tokens
+## 5. Set Up Channels
 
-**Skip this step if no token-based channels are enabled.** WhatsApp uses interactive auth (step 5) rather than tokens.
+AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
+- WhatsApp (authenticates via QR code or pairing code)
+- Telegram (authenticates via bot token from @BotFather)
+- Slack (authenticates via Slack app with Socket Mode)
+- Discord (authenticates via Discord bot token)
 
-For each enabled token-based channel, collect the required credentials and write them to `.env`:
+**Delegate to each selected channel's own skill.** Each channel skill handles its own code installation, authentication, registration, and JID resolution. This avoids duplicating channel-specific logic and ensures JIDs are always correct.
 
-- **Telegram:** `AskUserQuestion: Paste your Telegram bot token (from @BotFather)`. Write `TELEGRAM_BOT_TOKEN=<token>` to `.env`.
-- **Slack:** `AskUserQuestion: Paste your Slack Bot Token (xoxb-...)`. Write `SLACK_BOT_TOKEN=<token>` to `.env`. Then `AskUserQuestion: Paste your Slack App Token (xapp-...)`. Write `SLACK_APP_TOKEN=<token>` to `.env`.
-- **Discord:** `AskUserQuestion: Paste your Discord bot token`. Write `DISCORD_BOT_TOKEN=<token>` to `.env`.
+For each selected channel, invoke its skill:
 
-If the token already exists in `.env`, show it (masked) and ask: keep or replace?
+- **WhatsApp:** Invoke `/add-whatsapp`
+- **Telegram:** Invoke `/add-telegram`
+- **Slack:** Invoke `/add-slack`
+- **Discord:** Invoke `/add-discord`
 
-## 5. WhatsApp Authentication (conditional)
+Each skill will:
+1. Install the channel code (via `apply-skill`)
+2. Collect credentials/tokens and write to `.env`
+3. Authenticate (WhatsApp QR/pairing, or verify token-based connection)
+4. Register the chat with the correct JID format
+5. Build and verify
 
-**Only runs when WhatsApp was selected in step 2b.**
+**After all channel skills complete**, continue to step 6.
 
-If HAS_AUTH=true, confirm: keep or re-authenticate?
-
-**Choose auth method based on environment (from step 2):**
-
-If IS_HEADLESS=true AND IS_WSL=false → AskUserQuestion: Pairing code (recommended) vs QR code in terminal?
-Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
-
-- **QR browser:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser` (Bash timeout: 150000ms)
-- **Pairing code:** Ask for phone number first. `npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone NUMBER` (Bash timeout: 150000ms). Display PAIRING_CODE.
-- **QR terminal:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal`. Tell user to run `npm run auth` in another terminal.
-
-**If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
-
-## 6. Configure Trigger and Channel Type (conditional)
-
-**Only runs when WhatsApp was selected in step 2b.** Other channels configure their trigger word and channel type during registration (step 8).
-
-Get the bot's phone number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
-
-AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? → AskUserQuestion: Main channel type?
-
-**Shared number:** Self-chat (recommended) or Solo group
-**Dedicated number:** DM with bot (recommended) or Solo group with bot
-
-## 7. Sync and Select Group (conditional)
-
-**Only runs when WhatsApp was selected in step 2b.** The groups step auto-skips when WhatsApp auth credentials are not present. Telegram, Slack, and Discord discover groups at runtime — no upfront sync needed.
-
-**Personal chat:** JID = `NUMBER@s.whatsapp.net`
-**DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
-
-**Group:**
-1. `npx tsx setup/index.ts --step groups` (Bash timeout: 60000ms)
-2. BUILD=failed → fix TypeScript, re-run. GROUPS_IN_DB=0 → check logs.
-3. `npx tsx setup/index.ts --step groups -- --list` for pipe-separated JID|name lines.
-4. Present candidates as AskUserQuestion (names only, not JIDs).
-
-## 8. Register Channel
-
-Register the main channel with its identifier, trigger word, and channel type.
-
-AskUserQuestion for trigger word and assistant name (if not already determined in step 6).
-
-**Per-channel identifiers:**
-- **WhatsApp:** Use the JID from step 7 (e.g. `NUMBER@s.whatsapp.net` or `ID@g.us`). Add `--channel whatsapp`. Add `--no-trigger-required` for personal/DM/solo chats.
-- **Telegram:** Resolve the real chat ID first (see 8a below), then use `--jid "tg:CHAT_ID" --channel telegram`.
-- **Slack:** Resolve the real channel ID first (see 8a below), then use `--jid "slack:CHANNEL_ID" --channel slack`.
-- **Discord:** Resolve the real channel ID first (see 8a below), then use `--jid "discord:CHANNEL_ID" --channel discord`.
-
-### 8a. Resolve Chat ID for Token-Based Channels
-
-**Skip this step for WhatsApp** (WhatsApp JIDs come from step 7).
-
-For Telegram, Slack, and Discord the bot needs the real chat/channel ID before registration. Run the appropriate inline script below (Bash timeout: 150000ms). Tell the user to send `/chatid` to their bot while it's running.
-
-**Telegram:**
-```bash
-npx tsx -e "
-import { Bot } from 'grammy';
-import { readFileSync } from 'fs';
-const lines = readFileSync('.env','utf8').split('\n');
-const tokenLine = lines.find(l => l.startsWith('TELEGRAM_BOT_TOKEN='));
-if (!tokenLine) { console.error('TELEGRAM_BOT_TOKEN not found in .env'); process.exit(1); }
-const token = tokenLine.split('=').slice(1).join('=').trim();
-const bot = new Bot(token);
-const timer = setTimeout(() => { console.error('Timed out waiting for /chatid'); bot.stop(); process.exit(1); }, 120000);
-bot.command('chatid', async (ctx) => {
-  const jid = 'tg:' + ctx.chat.id;
-  await ctx.reply('Got it! Chat ID: ' + jid);
-  console.log('RESOLVED_JID: ' + jid);
-  clearTimeout(timer);
-  setTimeout(() => bot.stop(), 500);
-});
-bot.start({ onStart: (info) => console.log('Bot @' + info.username + ' is listening. Send /chatid to the chat you want to register.') });
-"
-```
-
-Parse the `RESOLVED_JID: tg:XXXXX` line from stdout and use that as the `--jid` value in the register command.
-
-If the script times out or fails, ask the user to verify their bot token and retry.
-
-```
-npx tsx setup/index.ts --step register -- \
-  --jid "IDENTIFIER" --name "main" --trigger "@TriggerWord" \
-  --folder "main" --channel CHANNEL_NAME \
-  [--no-trigger-required] [--assistant-name "Name"]
-```
-
-## 9. Mount Allowlist
+## 6. Mount Allowlist
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
-## 10. Start Service
+## 7. Start Service
 
 If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
@@ -243,23 +146,23 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 11. Verify
+## 8. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
-- SERVICE=not_found → re-run step 10
+- SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4
-- CHANNEL_AUTH shows `not_found` for any channel → re-run its auth step (step 5 for WhatsApp, step 4b for token-based channels)
-- REGISTERED_GROUPS=0 → re-run steps 7-8
+- CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
+- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing channel credentials (steps 4b/5).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 

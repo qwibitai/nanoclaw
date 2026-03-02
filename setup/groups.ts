@@ -106,7 +106,7 @@ async function syncGroups(projectRoot: string): Promise<void> {
     process.exit(1);
   }
 
-  // Run inline sync script via node
+  // Run sync script via a temp file to avoid shell escaping issues with node -e
   logger.info('Fetching group metadata');
   let syncOk = false;
   try {
@@ -179,17 +179,20 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const output = execSync(
-      `node --input-type=module -e ${JSON.stringify(syncScript)}`,
-      {
+    const tmpScript = path.join(projectRoot, '.tmp-group-sync.mjs');
+    fs.writeFileSync(tmpScript, syncScript, 'utf-8');
+    try {
+      const output = execSync(`node ${tmpScript}`, {
         cwd: projectRoot,
         encoding: 'utf-8',
         timeout: 45000,
         stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
-    syncOk = output.includes('SYNCED:');
-    logger.info({ output: output.trim() }, 'Sync output');
+      });
+      syncOk = output.includes('SYNCED:');
+      logger.info({ output: output.trim() }, 'Sync output');
+    } finally {
+      try { fs.unlinkSync(tmpScript); } catch { /* ignore cleanup errors */ }
+    }
   } catch (err) {
     logger.error({ err }, 'Sync failed');
   }
