@@ -480,7 +480,10 @@ async function main(): Promise<void> {
   }
 
   if (TELEGRAM_BOT_TOKEN) {
-    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
+      ...channelOpts,
+      registerGroup,
+    });
     channels.push(telegram);
     await telegram.connect();
   }

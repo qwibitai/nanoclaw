@@ -1,6 +1,11 @@
 import { Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+
+/** Sanitize a string for use as a folder name segment */
+function sanitize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+}
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -13,6 +18,7 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  registerGroup: (jid: string, group: RegisteredGroup) => void;
 }
 
 export class TelegramChannel implements Channel {
@@ -34,13 +40,15 @@ export class TelegramChannel implements Channel {
     this.bot.command('chatid', (ctx) => {
       const chatId = ctx.chat.id;
       const chatType = ctx.chat.type;
+      const topicId = (ctx.message as any)?.message_thread_id;
+      const chatJid = topicId ? `tg:${chatId}:${topicId}` : `tg:${chatId}`;
       const chatName =
         chatType === 'private'
           ? ctx.from?.first_name || 'Private'
           : (ctx.chat as any).title || 'Unknown';
 
       ctx.reply(
-        `Chat ID: \`tg:${chatId}\`\nName: ${chatName}\nType: ${chatType}`,
+        `Chat ID: \`${chatJid}\`\nName: ${chatName}\nType: ${chatType}`,
         { parse_mode: 'Markdown' },
       );
     });
@@ -54,7 +62,8 @@ export class TelegramChannel implements Channel {
       // Skip commands
       if (ctx.message.text.startsWith('/')) return;
 
-      const chatJid = `tg:${ctx.chat.id}`;
+      const topicId = ctx.message.message_thread_id;
+      const chatJid = topicId ? `tg:${ctx.chat.id}:${topicId}` : `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
@@ -91,6 +100,20 @@ export class TelegramChannel implements Channel {
         }
       }
 
+      // Auto-register topic groups on first trigger message
+      const groups = this.opts.registeredGroups();
+      if (topicId && !groups[chatJid] && TRIGGER_PATTERN.test(content)) {
+        const topicName = (ctx.message.reply_to_message as any)?.forum_topic_created?.name || `topic-${topicId}`;
+        const folderName = `tg-${sanitize(chatName)}-${sanitize(topicName)}`;
+        this.opts.registerGroup(chatJid, {
+          name: `${chatName} / ${topicName}`,
+          folder: folderName,
+          trigger: `@${ASSISTANT_NAME}`,
+          added_at: new Date().toISOString(),
+          requiresTrigger: false,
+        });
+      }
+
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, chatName);
 
@@ -123,7 +146,8 @@ export class TelegramChannel implements Channel {
 
     // Handle non-text messages with placeholders so the agent knows something was sent
     const storeNonText = (ctx: any, placeholder: string) => {
-      const chatJid = `tg:${ctx.chat.id}`;
+      const topicId = ctx.message?.message_thread_id;
+      const chatJid = topicId ? `tg:${ctx.chat.id}:${topicId}` : `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
 
@@ -194,17 +218,24 @@ export class TelegramChannel implements Channel {
     }
 
     try {
-      const numericId = jid.replace(/^tg:/, '');
+      const match = jid.match(/^tg:(-?\d+)(?::(\d+))?$/);
+      if (!match) {
+        logger.error({ jid }, 'Invalid Telegram JID format');
+        return;
+      }
+      const [, chatId, topicId] = match;
+      const threadOpts = topicId ? { message_thread_id: parseInt(topicId, 10) } : {};
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
       if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+        await this.bot.api.sendMessage(chatId, text, threadOpts);
       } else {
         for (let i = 0; i < text.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
-            numericId,
+            chatId,
             text.slice(i, i + MAX_LENGTH),
+            threadOpts,
           );
         }
       }
@@ -233,8 +264,10 @@ export class TelegramChannel implements Channel {
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.bot || !isTyping) return;
     try {
-      const numericId = jid.replace(/^tg:/, '');
-      await this.bot.api.sendChatAction(numericId, 'typing');
+      const match = jid.match(/^tg:(-?\d+)(?::(\d+))?$/);
+      if (!match) return;
+      const [, chatId, topicId] = match;
+      await this.bot.api.sendChatAction(chatId, 'typing', topicId ? { message_thread_id: parseInt(topicId, 10) } : undefined);
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
