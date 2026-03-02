@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const MEMORY_DIR = path.join(IPC_DIR, 'memory');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -277,6 +278,140 @@ Use available_groups.json to find the JID for a group. The folder name should be
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+// --- Memory Tools ---
+
+/**
+ * Wait for a response file from the host IPC processor.
+ * The host writes res-{requestId}.json after processing the request.
+ */
+async function waitForIpcResponse(requestId: string, timeoutMs = 5000): Promise<string> {
+  const resFile = path.join(MEMORY_DIR, `res-${requestId}.json`);
+  const start = Date.now();
+  const pollMs = 200;
+
+  while (Date.now() - start < timeoutMs) {
+    if (fs.existsSync(resFile)) {
+      const data = JSON.parse(fs.readFileSync(resFile, 'utf-8'));
+      try { fs.unlinkSync(resFile); } catch { /* ignore */ }
+      return data.results || data.id || 'Done.';
+    }
+    await new Promise(r => setTimeout(r, pollMs));
+  }
+
+  return 'Memory operation timed out. The host may still process it.';
+}
+
+function memoryRequestId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+server.tool(
+  'memory_search',
+  `Search your memory for relevant past conversations, stored facts, and session archives.
+Use this when you need to recall something from a previous conversation or check what you know about a topic.
+Results include stored facts (preferences, instructions, contacts) and past conversation snippets.`,
+  {
+    query: z.string().describe('What to search for (e.g., "user preferences about coffee", "last discussion about project X")'),
+    scope: z.enum(['all', 'conversations', 'facts']).default('all')
+      .describe('Where to search: all=everything, conversations=past messages only, facts=stored facts only'),
+    limit: z.number().default(10).describe('Maximum number of results'),
+  },
+  async (args) => {
+    const requestId = memoryRequestId();
+    writeIpcFile(MEMORY_DIR, {
+      type: 'memory_search',
+      requestId,
+      query: args.query,
+      scope: args.scope,
+      limit: args.limit,
+      groupFolder,
+    });
+
+    const results = await waitForIpcResponse(requestId);
+    return { content: [{ type: 'text' as const, text: results }] };
+  },
+);
+
+server.tool(
+  'memory_add',
+  `Store a fact, preference, or instruction that should be remembered across conversations.
+
+WHEN TO USE:
+- User states a preference ("I like short responses", "My timezone is EST")
+- User shares important personal info (name, contacts, projects)
+- User gives a standing instruction ("Always use metric units")
+- You learn something important that would be useful in future conversations
+
+DO NOT store:
+- Trivial or temporary information
+- Things already in the conversation context
+- Duplicate information (search first if unsure)
+
+Categories: preference, fact, instruction, contact, project`,
+  {
+    content: z.string().describe('The fact/preference/instruction to remember'),
+    category: z.enum(['preference', 'fact', 'instruction', 'contact', 'project'])
+      .describe('Category of the memory'),
+  },
+  async (args) => {
+    const requestId = memoryRequestId();
+    writeIpcFile(MEMORY_DIR, {
+      type: 'memory_add',
+      requestId,
+      content: args.content,
+      category: args.category,
+      groupFolder,
+    });
+
+    const result = await waitForIpcResponse(requestId);
+    return { content: [{ type: 'text' as const, text: `Memory stored: ${args.content.slice(0, 80)}...` }] };
+  },
+);
+
+server.tool(
+  'memory_update',
+  `Update an existing memory. Check the memory context provided in your prompt or read /workspace/ipc/memory_snapshot.json to find memory IDs.
+Use when a fact has changed or needs to be corrected.`,
+  {
+    memory_id: z.string().describe('The ID of the memory to update (from memory context or snapshot)'),
+    content: z.string().describe('The updated content'),
+  },
+  async (args) => {
+    const requestId = memoryRequestId();
+    writeIpcFile(MEMORY_DIR, {
+      type: 'memory_update',
+      requestId,
+      memoryId: args.memory_id,
+      content: args.content,
+      groupFolder,
+    });
+
+    const result = await waitForIpcResponse(requestId);
+    return { content: [{ type: 'text' as const, text: `Memory updated.` }] };
+  },
+);
+
+server.tool(
+  'memory_remove',
+  `Remove a memory that is no longer relevant or accurate.
+Check the memory context provided in your prompt or read /workspace/ipc/memory_snapshot.json to find memory IDs.`,
+  {
+    memory_id: z.string().describe('The ID of the memory to remove'),
+  },
+  async (args) => {
+    const requestId = memoryRequestId();
+    writeIpcFile(MEMORY_DIR, {
+      type: 'memory_remove',
+      requestId,
+      memoryId: args.memory_id,
+      groupFolder,
+    });
+
+    const result = await waitForIpcResponse(requestId);
+    return { content: [{ type: 'text' as const, text: `Memory removed.` }] };
   },
 );
 

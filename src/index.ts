@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -19,6 +20,12 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
+import {
+  buildMemorySnapshot,
+  embedConversationMessages,
+  initMemorySchema,
+  retrieveMemoryContext,
+} from './memory.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -159,7 +166,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  const prompt = formatMessages(missedMessages);
+  // Retrieve relevant memory context (RAG) to prepend to the prompt
+  let memoryContext = '';
+  try {
+    memoryContext = await retrieveMemoryContext(group.folder, missedMessages);
+  } catch (err) {
+    logger.warn(
+      { group: group.name, err },
+      'Memory retrieval failed, continuing without',
+    );
+  }
+
+  const prompt = memoryContext + formatMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -190,6 +208,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let messagesEmbedded = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -207,6 +226,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
+
+      // Embed conversation messages on first successful output (don't wait for container exit)
+      if (!messagesEmbedded) {
+        messagesEmbedded = true;
+        embedConversationMessages(
+          group.folder,
+          chatJid,
+          missedMessages,
+        ).catch((err) =>
+          logger.warn(
+            { group: group.name, err },
+            'Failed to embed conversation messages',
+          ),
+        );
+      }
     }
 
     if (result.status === 'success') {
@@ -268,6 +302,19 @@ async function runAgent(
       next_run: t.next_run,
     })),
   );
+
+  // Write memory snapshot for the agent (so it can see existing memory IDs)
+  try {
+    const snapshot = buildMemorySnapshot(group.folder);
+    const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+    fs.mkdirSync(groupIpcDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(groupIpcDir, 'memory_snapshot.json'),
+      JSON.stringify(snapshot, null, 2),
+    );
+  } catch (err) {
+    logger.warn({ group: group.name, err }, 'Failed to write memory snapshot');
+  }
 
   // Update available groups snapshot (main group only can see all groups)
   const availableGroups = getAvailableGroups();
@@ -448,6 +495,7 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
+  initMemorySchema();
   logger.info('Database initialized');
   loadState();
 
