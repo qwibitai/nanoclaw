@@ -9,7 +9,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { GmailChannel } from './channels/gmail.js';
-import { GoogleChatChannel } from './channels/googlechat.js';
+import { GoogleChatChannel, SpaceInfo } from './channels/googlechat.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -494,22 +494,25 @@ async function main(): Promise<void> {
     );
   }
 
-  const googlechat = new GoogleChatChannel(channelOpts);
-  channels.push(googlechat);
-  try {
-    await googlechat.connect();
-    // Auto-register the Google Chat DM as a group pointing to main folder
-    // so messages route bidirectionally (replies go back to Chat, not WhatsApp)
-    const gchatJid = googlechat.getChatJid();
-    if (googlechat.isConnected() && gchatJid && !registeredGroups[gchatJid]) {
-      registerGroup(gchatJid, {
-        name: 'Google Chat DM',
+  const googlechat = new GoogleChatChannel({
+    ...channelOpts,
+    getState: getRouterState,
+    setState: setRouterState,
+    onSpaceDiscovered: (jid: string, space: SpaceInfo) => {
+      if (registeredGroups[jid]) return;
+      const isDm = space.spaceType === 'DIRECT_MESSAGE';
+      registerGroup(jid, {
+        name: space.displayName,
         folder: MAIN_GROUP_FOLDER,
         trigger: `@${ASSISTANT_NAME}`,
         added_at: new Date().toISOString(),
-        requiresTrigger: false,
+        requiresTrigger: !isDm,
       });
-    }
+    },
+  });
+  channels.push(googlechat);
+  try {
+    await googlechat.connect();
   } catch (err) {
     logger.warn(
       { err },

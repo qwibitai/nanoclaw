@@ -18,6 +18,16 @@ export interface GoogleChatChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onSpaceDiscovered?: (jid: string, space: SpaceInfo) => void;
+  getState?: (key: string) => string | undefined;
+  setState?: (key: string, value: string) => void;
+}
+
+export interface SpaceInfo {
+  spaceId: string;
+  displayName: string;
+  spaceType: string; // DIRECT_MESSAGE, SPACE, GROUP_CHAT
+  lastPollTime: string | null;
 }
 
 export class GoogleChatChannel implements Channel {
@@ -28,15 +38,18 @@ export class GoogleChatChannel implements Channel {
   private opts: GoogleChatChannelOpts;
   private pollIntervalMs: number;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastPollTime: string | null = null;
-  private spaceId: string;
+  private spaces: Map<string, SpaceInfo> = new Map();
   private consecutiveErrors = 0;
+  private filterSpaceId: string;
+  private botUserId: string | null = null;
+  private discoveryCounter = 0;
+  private readonly DISCOVERY_INTERVAL = 10; // re-discover every N poll cycles
 
   constructor(opts: GoogleChatChannelOpts, pollIntervalMs = 15000) {
     this.opts = opts;
     this.pollIntervalMs = pollIntervalMs;
     const envConfig = readEnvFile(['GOOGLE_CHAT_SPACE_ID']);
-    this.spaceId =
+    this.filterSpaceId =
       process.env.GOOGLE_CHAT_SPACE_ID || envConfig.GOOGLE_CHAT_SPACE_ID || '';
   }
 
@@ -48,13 +61,6 @@ export class GoogleChatChannel implements Channel {
     if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
       logger.warn(
         'Google Chat credentials not found in ~/.google-chat-mcp/. Skipping Google Chat channel. Run /add-google-chat to set up.',
-      );
-      return;
-    }
-
-    if (!this.spaceId) {
-      logger.warn(
-        'GOOGLE_CHAT_SPACE_ID not set. Skipping Google Chat channel. Set it in .env.',
       );
       return;
     }
@@ -85,7 +91,17 @@ export class GoogleChatChannel implements Channel {
 
     this.chat = google.chat({ version: 'v1', auth: this.oauth2Client });
 
-    logger.info({ spaceId: this.spaceId }, 'Google Chat channel connected');
+    // Discover spaces the bot belongs to
+    await this.discoverSpaces();
+
+    if (this.spaces.size === 0) {
+      logger.warn('Google Chat: no spaces discovered, channel idle');
+    } else {
+      logger.info(
+        { spaceCount: this.spaces.size },
+        'Google Chat channel connected',
+      );
+    }
 
     // Start polling with error backoff
     const schedulePoll = () => {
@@ -133,9 +149,9 @@ export class GoogleChatChannel implements Channel {
     return this.chat !== null;
   }
 
-  /** Returns the gchat: JID for the configured space, or empty if not configured. */
-  getChatJid(): string {
-    return this.spaceId ? `gchat:${this.spaceId}` : '';
+  /** Returns all discovered spaces with their JIDs and metadata. */
+  getDiscoveredSpaces(): SpaceInfo[] {
+    return Array.from(this.spaces.values());
   }
 
   ownsJid(jid: string): boolean {
@@ -154,36 +170,88 @@ export class GoogleChatChannel implements Channel {
 
   // --- Private ---
 
-  private async pollForMessages(): Promise<void> {
+  private async discoverSpaces(): Promise<void> {
     if (!this.chat) return;
 
     try {
-      const filterParts: string[] = [];
-      if (this.lastPollTime) {
-        filterParts.push(`createTime > "${this.lastPollTime}"`);
+      let pageToken: string | undefined;
+      const discovered: chat_v1.Schema$Space[] = [];
+
+      do {
+        const res = await this.chat.spaces.list({
+          pageSize: 100,
+          pageToken,
+        });
+        if (res.data.spaces) {
+          discovered.push(...res.data.spaces);
+        }
+        pageToken = res.data.nextPageToken || undefined;
+      } while (pageToken);
+
+      for (const space of discovered) {
+        const spaceId = space.name?.replace(/^spaces\//, '');
+        if (!spaceId) continue;
+
+        // If a filter is set, only include that specific space
+        if (this.filterSpaceId && spaceId !== this.filterSpaceId) continue;
+
+        const existing = this.spaces.get(spaceId);
+        if (!existing) {
+          const spaceType = space.spaceType || space.type || 'SPACE';
+          const isDm = spaceType === 'DIRECT_MESSAGE';
+          const displayName = isDm
+            ? 'Google Chat DM'
+            : space.displayName || `Space ${spaceId}`;
+
+          const savedPollTime =
+            this.opts.getState?.(`gchat:poll:${spaceId}`) ?? null;
+
+          this.spaces.set(spaceId, {
+            spaceId,
+            displayName,
+            spaceType,
+            lastPollTime: savedPollTime,
+          });
+
+          const chatJid = `gchat:${spaceId}`;
+
+          // Notify metadata callback so the space is tracked in the DB
+          this.opts.onChatMetadata(
+            chatJid,
+            new Date().toISOString(),
+            displayName,
+            'googlechat',
+            !isDm,
+          );
+
+          logger.info(
+            { spaceId, displayName, spaceType },
+            'Discovered new Google Chat space',
+          );
+
+          // Notify index.ts to register this space as a group
+          this.opts.onSpaceDiscovered?.(chatJid, this.spaces.get(spaceId)!);
+        }
       }
-      const filter =
-        filterParts.length > 0 ? filterParts.join(' AND ') : undefined;
+    } catch (err) {
+      logger.error({ err }, 'Failed to discover Google Chat spaces');
+    }
+  }
 
-      const res = await this.chat.spaces.messages.list({
-        parent: `spaces/${this.spaceId}`,
-        filter: filter || undefined,
-        orderBy: 'createTime',
-        pageSize: 25,
-      });
+  private async pollForMessages(): Promise<void> {
+    if (!this.chat) return;
 
-      const messages = res.data.messages || [];
+    // Periodically re-discover spaces to pick up new rooms
+    this.discoveryCounter++;
+    if (this.discoveryCounter >= this.DISCOVERY_INTERVAL) {
+      this.discoveryCounter = 0;
+      await this.discoverSpaces();
+    }
 
-      for (const msg of messages) {
-        // Skip bot messages (our own replies)
-        if (msg.sender?.type === 'BOT') continue;
-
-        await this.processMessage(msg);
+    try {
+      for (const [spaceId, spaceInfo] of this.spaces) {
+        await this.pollSpace(spaceId, spaceInfo);
       }
-
-      // Update the last poll timestamp to now
-      this.lastPollTime = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
-
       this.consecutiveErrors = 0;
     } catch (err) {
       this.consecutiveErrors++;
@@ -202,29 +270,98 @@ export class GoogleChatChannel implements Channel {
     }
   }
 
-  private async processMessage(msg: chat_v1.Schema$Message): Promise<void> {
-    const text = msg.text || '';
+  private async pollSpace(
+    spaceId: string,
+    spaceInfo: SpaceInfo,
+  ): Promise<void> {
+    if (!this.chat) return;
+
+    try {
+      const filterParts: string[] = [];
+      if (spaceInfo.lastPollTime) {
+        filterParts.push(`createTime > "${spaceInfo.lastPollTime}"`);
+      }
+      const filter =
+        filterParts.length > 0 ? filterParts.join(' AND ') : undefined;
+
+      const res = await this.chat.spaces.messages.list({
+        parent: `spaces/${spaceId}`,
+        filter: filter || undefined,
+        orderBy: 'createTime',
+        pageSize: 25,
+      });
+
+      const messages = res.data.messages || [];
+
+      for (const msg of messages) {
+        // Skip bot messages (our own replies)
+        if (msg.sender?.type === 'BOT') continue;
+
+        // Track the bot's user ID from message annotations so we can strip self-mentions
+        if (!this.botUserId && msg.annotations) {
+          for (const ann of msg.annotations) {
+            if (
+              ann.type === 'USER_MENTION' &&
+              ann.userMention?.user?.type === 'BOT'
+            ) {
+              this.botUserId = ann.userMention.user.name || null;
+            }
+          }
+        }
+
+        await this.processMessage(msg, spaceId, spaceInfo);
+      }
+
+      // Update the last poll timestamp for this space
+      const pollTime = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+      spaceInfo.lastPollTime = pollTime;
+      this.opts.setState?.(`gchat:poll:${spaceId}`, pollTime);
+    } catch (err) {
+      logger.error({ spaceId, err }, 'Failed to poll Google Chat space');
+    }
+  }
+
+  private async processMessage(
+    msg: chat_v1.Schema$Message,
+    spaceId: string,
+    spaceInfo: SpaceInfo,
+  ): Promise<void> {
+    let text = msg.text || '';
+    if (!text) return;
+
+    // Strip raw Google Chat mention markup (e.g. `<users/123456>`) but keep
+    // the human-readable `@Name` so the trigger pattern still matches.
+    if (this.botUserId) {
+      text = text
+        .replace(new RegExp(`<${this.botUserId}>\\s*`, 'g'), '')
+        .trim();
+    }
+
     if (!text) return;
 
     const senderName = msg.sender?.displayName || 'Unknown';
+    if (!msg.sender?.displayName) {
+      logger.debug(
+        { sender: msg.sender, messageName: msg.name },
+        'Google Chat message has no sender displayName',
+      );
+    }
     const createTime = msg.createTime || new Date().toISOString();
     const messageName = msg.name || ''; // e.g. "spaces/xxx/messages/yyy"
     const messageId = messageName.split('/').pop() || messageName;
 
-    const chatJid = `gchat:${this.spaceId}`;
+    const chatJid = `gchat:${spaceId}`;
+    const isDm = spaceInfo.spaceType === 'DIRECT_MESSAGE';
 
     // Store chat metadata
     this.opts.onChatMetadata(
       chatJid,
       createTime,
-      `Google Chat DM`,
+      spaceInfo.displayName,
       'googlechat',
-      false,
+      !isDm,
     );
 
-    // Deliver under the gchat: JID so replies route back through Google Chat.
-    // The gchat: JID must be registered (pointing to the main folder) for
-    // the message loop to pick it up.
     this.opts.onMessage(chatJid, {
       id: messageId,
       chat_jid: chatJid,
@@ -235,6 +372,9 @@ export class GoogleChatChannel implements Channel {
       is_from_me: false,
     });
 
-    logger.info({ chatJid, from: senderName }, 'Google Chat message delivered');
+    logger.info(
+      { chatJid, from: senderName, spaceType: spaceInfo.spaceType },
+      'Google Chat message delivered',
+    );
   }
 }

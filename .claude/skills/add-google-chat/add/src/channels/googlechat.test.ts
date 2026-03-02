@@ -7,6 +7,9 @@ function makeOpts(overrides?: Partial<GoogleChatChannelOpts>): GoogleChatChannel
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
     registeredGroups: () => ({}),
+    onSpaceDiscovered: vi.fn(),
+    getState: vi.fn(),
+    setState: vi.fn(),
     ...overrides,
   };
 }

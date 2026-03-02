@@ -2,26 +2,44 @@
 
 ## What changed
 
-Added Google Chat as a channel.
+Added Google Chat as a multi-space channel with automatic space discovery, state persistence, and dynamic group registration.
 
 ## Key sections
 
 ### Imports (top of file)
 
-- Added: `GoogleChatChannel` from `./channels/googlechat.js`
+- Added: `GoogleChatChannel, SpaceInfo` from `./channels/googlechat.js`
 
 ### main()
 
-- Added Google Chat channel creation after Gmail:
+- Added Google Chat channel creation after Gmail with `onSpaceDiscovered` callback:
   ```
-  const googlechat = new GoogleChatChannel(channelOpts);
+  const googlechat = new GoogleChatChannel({
+    ...channelOpts,
+    getState: getRouterState,
+    setState: setRouterState,
+    onSpaceDiscovered: (jid: string, space: SpaceInfo) => {
+      if (registeredGroups[jid]) return;
+      const isDm = space.spaceType === 'DIRECT_MESSAGE';
+      registerGroup(jid, {
+        name: space.displayName,
+        folder: MAIN_GROUP_FOLDER,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+        requiresTrigger: !isDm,
+      });
+    },
+  });
   channels.push(googlechat);
   try { await googlechat.connect(); } catch (err) {
     logger.warn({ err }, 'Google Chat channel failed to connect, continuing without it');
   }
   ```
-- Google Chat uses the same `channelOpts` callbacks as other channels
-- Incoming messages are delivered to the main group (agent decides how to respond)
+- `getState`/`setState` callbacks use the existing `getRouterState`/`setRouterState` from db.ts to persist poll timestamps across restarts
+- `onSpaceDiscovered` callback auto-registers each discovered space as a group:
+  - DMs: `requiresTrigger: false` (no @mention needed)
+  - Rooms: `requiresTrigger: true` (needs @mention)
+  - All spaces route to `MAIN_GROUP_FOLDER`
 
 ## Invariants
 

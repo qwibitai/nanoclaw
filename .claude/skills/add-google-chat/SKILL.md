@@ -1,11 +1,13 @@
 ---
 name: add-google-chat
-description: Add Google Chat as a channel to NanoClaw. Polls a DM space for messages and delivers them to the main group. Replies are sent back via the Chat API.
+description: Add Google Chat as a multi-space channel to NanoClaw. Automatically discovers all DMs and rooms the authenticated user belongs to. DMs route directly, rooms require @mention trigger.
 ---
 
 # Add Google Chat Channel
 
-This skill adds Google Chat as a messaging channel. The bot polls a configured DM space for human messages and delivers them to the main WhatsApp group. Agent replies are sent back to the Chat space.
+This skill adds Google Chat as a messaging channel with multi-space support. The bot automatically discovers all spaces (DMs and rooms) the authenticated user belongs to. DM messages are delivered directly; room messages require an @mention trigger. Replies are sent back to the originating space.
+
+> **Note:** The Google Chat API historically required a Google Workspace account. Personal @gmail.com accounts may now work — if space discovery returns zero results, a Workspace account may still be needed.
 
 ## Phase 1: Pre-flight
 
@@ -33,7 +35,7 @@ This deterministically:
 
 - Adds `src/channels/googlechat.ts` (GoogleChatChannel class implementing Channel interface)
 - Adds `src/channels/googlechat.test.ts` (unit tests)
-- Three-way merges Google Chat channel wiring into `src/index.ts` (GoogleChatChannel creation)
+- Three-way merges Google Chat channel wiring into `src/index.ts` (GoogleChatChannel creation with `onSpaceDiscovered` callback)
 - Three-way merges Google Chat credentials mount into `src/container-runner.ts` (~/.google-chat-mcp -> /home/node/.google-chat-mcp)
 - Three-way merges Google Chat JID tests into `src/routing.test.ts`
 - Records the application in `.nanoclaw/state.yaml`
@@ -70,7 +72,7 @@ All tests must pass (including the new googlechat tests) and build must be clean
 ls -la ~/.google-chat-mcp/ 2>/dev/null || echo "No Google Chat config found"
 ```
 
-If `credentials.json` already exists, skip to "Set space ID" below.
+If `credentials.json` already exists, skip to "Build and restart" below.
 
 ### GCP Project Setup
 
@@ -142,7 +144,7 @@ const server = http.createServer(async (req, res) => {
 
 Tell the user:
 
-> A URL will be printed. Open it in your browser, sign in with the bot account (e.g., `cseeker@sowbug.com`), and grant access. If you see an "app isn't verified" warning, click "Advanced" then "Go to [app name] (unsafe)".
+> A URL will be printed. Open it in your browser, sign in with your Google Workspace account, and grant access. If you see an "app isn't verified" warning, click "Advanced" then "Go to [app name] (unsafe)".
 
 Verify credentials were saved:
 
@@ -150,47 +152,9 @@ Verify credentials were saved:
 ls ~/.google-chat-mcp/credentials.json
 ```
 
-### Find DM Space ID
-
-Run the following to list spaces:
-
-```bash
-node -e "
-const fs = require('fs');
-const path = require('path');
-const { google } = require('googleapis');
-const os = require('os');
-
-const credDir = path.join(os.homedir(), '.google-chat-mcp');
-const keys = JSON.parse(fs.readFileSync(path.join(credDir, 'gcp-oauth.keys.json'), 'utf-8'));
-const tokens = JSON.parse(fs.readFileSync(path.join(credDir, 'credentials.json'), 'utf-8'));
-const config = keys.installed || keys.web || keys;
-
-const oauth2Client = new google.auth.OAuth2(config.client_id, config.client_secret, config.redirect_uris?.[0]);
-oauth2Client.setCredentials(tokens);
-
-const chat = google.chat({ version: 'v1', auth: oauth2Client });
-chat.spaces.list({ pageSize: 100 }).then(res => {
-  const spaces = res.data.spaces || [];
-  console.log('Available spaces:');
-  for (const s of spaces) {
-    const id = s.name?.split('/').pop() || s.name;
-    console.log('  ' + (s.displayName || '(DM)') + '  ->  ' + id + '  type: ' + s.type);
-  }
-  console.log('\nSet GOOGLE_CHAT_SPACE_ID=<space-id> in your .env file.');
-});
-"
-```
-
-### Set Space ID
-
-Tell the user to add the space ID to `.env`:
-
-```
-GOOGLE_CHAT_SPACE_ID=<the-space-id>
-```
-
 ### Build and restart
+
+Spaces are discovered automatically — all DMs and rooms the authenticated user belongs to will be found. If you want to limit the bot to a single space, set `GOOGLE_CHAT_SPACE_ID=<space-id>` in `.env` (optional).
 
 ```bash
 npm run build
@@ -202,12 +166,16 @@ systemctl --user restart nanoclaw  # Linux
 
 Tell the user:
 
-> Google Chat is connected! Send a message in the configured DM space. It should appear in your main WhatsApp group within ~15 seconds.
+> Google Chat is connected! The bot automatically discovers all your DMs and rooms:
+> - **DMs**: Send a message directly — no trigger needed
+> - **Rooms**: @mention the bot to trigger a response
+>
+> Messages should appear within ~15 seconds.
 
 Monitor:
 
 ```bash
-tail -f logs/nanoclaw.log | grep -iE "(google.chat|gchat)"
+tail -f logs/nanoclaw.log | grep -iE "(google.chat|gchat|discover)"
 ```
 
 ## Troubleshooting
@@ -215,8 +183,8 @@ tail -f logs/nanoclaw.log | grep -iE "(google.chat|gchat)"
 ### Google Chat connection not responding
 
 - Verify credentials exist: `ls ~/.google-chat-mcp/`
-- Verify `GOOGLE_CHAT_SPACE_ID` is set in `.env`
 - Check logs: `grep -i "google chat" logs/nanoclaw.log | tail -20`
+- If using a personal @gmail.com account and it doesn't work, try a Google Workspace account
 
 ### OAuth token expired
 
@@ -229,9 +197,15 @@ rm ~/.google-chat-mcp/credentials.json
 
 ### Messages not being detected
 
-- Check the space ID is correct (re-run the space listing script)
-- Ensure the bot account can see messages in the DM space
+- Ensure the authenticated user can see messages in the space
 - The channel polls every 15 seconds by default
+- Last poll timestamps are persisted across restarts — old messages won't replay
+
+### No spaces discovered
+
+- If using a personal Gmail account, try a Workspace account — some API features may still require it
+- Check that the Chat API is enabled in your GCP project
+- Verify the OAuth scopes include `chat.spaces.readonly`
 
 ## Removal
 

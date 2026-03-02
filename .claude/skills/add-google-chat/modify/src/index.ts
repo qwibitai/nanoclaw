@@ -9,7 +9,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { GmailChannel } from './channels/gmail.js';
-import { GoogleChatChannel } from './channels/googlechat.js';
+import { GoogleChatChannel, SpaceInfo } from './channels/googlechat.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -459,7 +459,22 @@ async function main(): Promise<void> {
     logger.warn({ err }, 'Gmail channel failed to connect, continuing without it');
   }
 
-  const googlechat = new GoogleChatChannel(channelOpts);
+  const googlechat = new GoogleChatChannel({
+    ...channelOpts,
+    getState: getRouterState,
+    setState: setRouterState,
+    onSpaceDiscovered: (jid: string, space: SpaceInfo) => {
+      if (registeredGroups[jid]) return;
+      const isDm = space.spaceType === 'DIRECT_MESSAGE';
+      registerGroup(jid, {
+        name: space.displayName,
+        folder: MAIN_GROUP_FOLDER,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+        requiresTrigger: !isDm,
+      });
+    },
+  });
   channels.push(googlechat);
   try {
     await googlechat.connect();
