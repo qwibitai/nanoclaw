@@ -163,9 +163,41 @@ AskUserQuestion for trigger word and assistant name (if not already determined i
 
 **Per-channel identifiers:**
 - **WhatsApp:** Use the JID from step 7 (e.g. `NUMBER@s.whatsapp.net` or `ID@g.us`). Add `--channel whatsapp`. Add `--no-trigger-required` for personal/DM/solo chats.
-- **Telegram:** `--jid "pending@telegram" --channel telegram`. The actual chat ID is resolved at runtime.
-- **Slack:** `--jid "pending@slack" --channel slack`. The actual channel ID is resolved at runtime.
-- **Discord:** `--jid "pending@discord" --channel discord`. The actual channel ID is resolved at runtime.
+- **Telegram:** Resolve the real chat ID first (see 8a below), then use `--jid "tg:CHAT_ID" --channel telegram`.
+- **Slack:** Resolve the real channel ID first (see 8a below), then use `--jid "slack:CHANNEL_ID" --channel slack`.
+- **Discord:** Resolve the real channel ID first (see 8a below), then use `--jid "discord:CHANNEL_ID" --channel discord`.
+
+### 8a. Resolve Chat ID for Token-Based Channels
+
+**Skip this step for WhatsApp** (WhatsApp JIDs come from step 7).
+
+For Telegram, Slack, and Discord the bot needs the real chat/channel ID before registration. Run the appropriate inline script below (Bash timeout: 150000ms). Tell the user to send `/chatid` to their bot while it's running.
+
+**Telegram:**
+```bash
+npx tsx -e "
+import { Bot } from 'grammy';
+import { readFileSync } from 'fs';
+const lines = readFileSync('.env','utf8').split('\n');
+const tokenLine = lines.find(l => l.startsWith('TELEGRAM_BOT_TOKEN='));
+if (!tokenLine) { console.error('TELEGRAM_BOT_TOKEN not found in .env'); process.exit(1); }
+const token = tokenLine.split('=').slice(1).join('=').trim();
+const bot = new Bot(token);
+const timer = setTimeout(() => { console.error('Timed out waiting for /chatid'); bot.stop(); process.exit(1); }, 120000);
+bot.command('chatid', async (ctx) => {
+  const jid = 'tg:' + ctx.chat.id;
+  await ctx.reply('Got it! Chat ID: ' + jid);
+  console.log('RESOLVED_JID: ' + jid);
+  clearTimeout(timer);
+  setTimeout(() => bot.stop(), 500);
+});
+bot.start({ onStart: (info) => console.log('Bot @' + info.username + ' is listening. Send /chatid to the chat you want to register.') });
+"
+```
+
+Parse the `RESOLVED_JID: tg:XXXXX` line from stdout and use that as the `--jid` value in the register command.
+
+If the script times out or fails, ask the user to verify their bot token and retry.
 
 ```
 npx tsx setup/index.ts --step register -- \
