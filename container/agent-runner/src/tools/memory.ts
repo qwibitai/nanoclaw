@@ -488,6 +488,8 @@ Actions:
           return { content: [{ type: 'text' as const, text: `Removed section "## ${args.section}" from CLAUDE.md.` }] };
         }
 
+        // Unreachable — Zod enum validates action
+        throw new Error(`Unexpected action: ${args.action}`);
       } catch (err) {
         return {
           content: [{ type: 'text' as const, text: `Error updating CLAUDE.md: ${err instanceof Error ? err.message : String(err)}` }],
