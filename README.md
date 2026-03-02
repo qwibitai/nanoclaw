@@ -14,12 +14,12 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/yourusername/solclaw.git
+git clone https://github.com/anagrambuild/solclaw.git
 cd solclaw
 claude
 ```
 
-and after claude code has been started -> ```bash /setup ```
+and after claude code has been started run ```/setup ``` in the claude code itself
 
 ## Example Commands
 
