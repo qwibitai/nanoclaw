@@ -14,12 +14,13 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  MAX_DAILY_SPEND_USD,
   IDLE_TIMEOUT,
 } from './config.js';
 
 // Use 'docker' on Linux, 'container' (Apple Container) on macOS
 const CONTAINER_CMD = os.platform() === 'linux' ? 'docker' : 'container';
-import { getRecentMessages, logUsage } from './db.js';
+import { getDailySpendUsd, getRecentMessages, logUsage } from './db.js';
 import { readEnvFile } from './env.js';
 import { audit, logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
@@ -392,6 +393,23 @@ export async function runContainerAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
+
+  // Enforce daily spend cap before spawning a container
+  if (MAX_DAILY_SPEND_USD > 0) {
+    const todaySpend = getDailySpendUsd();
+    if (todaySpend >= MAX_DAILY_SPEND_USD) {
+      logger.warn(
+        { todaySpend: todaySpend.toFixed(2), cap: MAX_DAILY_SPEND_USD },
+        'Daily spend cap reached, refusing to spawn container',
+      );
+      return {
+        status: 'error',
+        error: `Daily spend cap reached ($${todaySpend.toFixed(2)} / $${MAX_DAILY_SPEND_USD}). No more containers will be spawned today.`,
+        result: null,
+        newSessionId: undefined,
+      };
+    }
+  }
 
   // Validate group folder to prevent path traversal in mount paths
   validateGroupFolder(group.folder);

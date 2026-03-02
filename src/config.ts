@@ -110,6 +110,12 @@ export const BUDGET_INTERACTIVE = parseFloat(
   process.env.BUDGET_INTERACTIVE || '0.50',
 );
 
+// Daily spend cap — total estimated API cost across all containers per day.
+// 0 = no cap. Read from .env MAX_DAILY_SPEND_USD.
+export const MAX_DAILY_SPEND_USD = parseFloat(
+  process.env.MAX_DAILY_SPEND_USD || '0',
+);
+
 // --- Web Channel (Socket.IO chat widget) ---
 export const WEB_CHANNEL_PORT = parseInt(
   process.env.WEB_CHANNEL_PORT || '3200',

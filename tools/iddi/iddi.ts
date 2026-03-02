@@ -25,8 +25,11 @@ const BASE_URL = process.env.IDDI_BASE_URL;
 const EMAIL = process.env.IDDI_EMAIL;
 const PASSWORD = process.env.IDDI_PASSWORD;
 
-// Token cached per-group in workspace
-const TOKEN_FILE = path.join(process.cwd(), 'groups', 'snak-group', 'iddi-token.json');
+// Token cache location — works both on host and inside containers.
+// Container: /workspace/group/ exists. Host: cwd/groups/snak-group/ exists.
+const TOKEN_FILE = fs.existsSync('/workspace/group')
+  ? '/workspace/group/iddi-token.json'
+  : path.join(process.cwd(), 'groups', 'snak-group', 'iddi-token.json');
 
 interface TokenCache {
   token: string;

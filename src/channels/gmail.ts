@@ -45,8 +45,8 @@ export class GmailChannel implements Channel {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private transporter: nodemailer.Transporter | null = null;
 
-  /** Map email JID -> last sender address for reply routing. */
-  private lastSenderByJid = new Map<string, string>();
+  /** Map email JID -> last inbound email context for reply routing. */
+  private lastInboundByJid = new Map<string, { email: string; subject: string }>();
 
   constructor(opts: GmailChannelOpts) {
     this.opts = opts;
@@ -110,29 +110,32 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    let customerEmail = this.lastSenderByJid.get(jid);
-    if (!customerEmail) {
+    let replyContext = this.lastInboundByJid.get(jid);
+    if (!replyContext) {
       // Fallback: look up last sender from DB
-      customerEmail = getLastSender(jid) ?? undefined;
-      if (customerEmail) {
-        this.lastSenderByJid.set(jid, customerEmail);
+      const dbSender = getLastSender(jid);
+      if (dbSender) {
+        replyContext = { email: dbSender, subject: 'Your inquiry' };
       }
     }
-    if (!customerEmail) {
+    if (!replyContext) {
       logger.warn({ jid }, 'No customer email known for Gmail reply');
       return;
     }
 
     const fromAddress = EMAIL_SNAK_ADDRESS || IMAP_USER;
+    const replySubject = replyContext.subject.startsWith('Re: ')
+      ? replyContext.subject
+      : `Re: ${replyContext.subject}`;
 
     try {
       await this.transporter.sendMail({
         from: `${ASSISTANT_NAME} - Snak Group <${fromAddress}>`,
-        to: customerEmail,
-        subject: 'Re: Your inquiry',
+        to: replyContext.email,
+        subject: replySubject,
         text,
       });
-      logger.info({ jid, to: customerEmail, length: text.length }, 'Gmail reply sent');
+      logger.info({ jid, to: replyContext.email, subject: replySubject, length: text.length }, 'Gmail reply sent');
     } catch (err) {
       logger.error({ jid, err }, 'Gmail send error');
     }
@@ -290,8 +293,8 @@ export class GmailChannel implements Channel {
             // Determine the JID
             const jid = `email:${EMAIL_SNAK_ADDRESS || IMAP_USER}`;
 
-            // Track sender for reply routing
-            this.lastSenderByJid.set(jid, senderEmail);
+            // Track sender + subject for reply routing
+            this.lastInboundByJid.set(jid, { email: senderEmail, subject });
 
             processedUids.add(uid);
 

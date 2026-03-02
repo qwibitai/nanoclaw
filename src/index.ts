@@ -416,10 +416,10 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
+            // DO NOT advance lastAgentTimestamp here — the active container's
+            // processGroupMessages() advances the cursor only after successful
+            // processing. Advancing here would lose messages if the container
+            // crashes before it processes the piped input.
             findChannel(chatJid)?.setTyping?.(chatJid, true);
           } else {
             // No active container — enqueue for a new one
