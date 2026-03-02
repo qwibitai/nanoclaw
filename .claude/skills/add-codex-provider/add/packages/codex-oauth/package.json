@@ -1,0 +1,43 @@
+{
+  "name": "codex-oauth",
+  "version": "0.1.0",
+  "description": "OAuth PKCE authentication and API client for OpenAI Codex via ChatGPT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "codex-oauth": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "codex",
+    "openai",
+    "oauth",
+    "chatgpt",
+    "api",
+    "pkce"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicepkg/nanoclaw",
+    "directory": "packages/codex-oauth"
+  }
+}
