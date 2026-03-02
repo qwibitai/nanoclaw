@@ -50,3 +50,18 @@ Phases execute in numeric order: 1 → 2
 |-------|----------------|--------|-----------|
 | 1. WebSocket Channel | 3/3 | Complete | 2026-03-01 |
 | 2. Attachments | 1/1 | Complete   | 2026-03-01 |
+
+### Phase 3: Tech Debt Fixes: Documentation and Network Binding
+
+**Goal:** Cerrar las 4 issues de tech debt del audit v1.0 — binding a localhost, filesPort explícito, documentación de adjuntos y timing en CLAUDE.md del agente
+**Depends on:** Phase 2
+**Requirements**: TD-01, TD-02, TD-03, TD-04
+**Success Criteria** (what must be TRUE):
+  1. WebSocketServer escucha solo en `127.0.0.1`, no en `0.0.0.0`
+  2. `WEBSOCKET_FILES_PORT` se pasa explícitamente en la llamada al constructor de `WebSocketChannel` en `main()`
+  3. `groups/better-work/CLAUDE.md` documenta las rutas `inbox/attachments/` y `files/`
+  4. `groups/better-work/CLAUDE.md` documenta la convención de escribir archivos antes de referenciarlos
+**Plans:** 1 plan
+
+Plans:
+- [ ] 03-01-PLAN.md — Localhost binding, explicit filesPort, agent CLAUDE.md documentation
