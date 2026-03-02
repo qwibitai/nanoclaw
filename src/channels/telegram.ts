@@ -96,13 +96,25 @@ const telegramRenderer: MarkedExtension = {
     },
 
     table({ header, rows }) {
-      // Degrade to text: header row + data rows separated by " | "
-      const headerCells = header.map((cell: any) => this.parser.parseInline(cell.tokens));
-      const lines = [headerCells.join(' | ')];
+      // Render as monospaced pre block with aligned columns
+      const headerCells = header.map((cell: any) => cell.text);
+      const allRows = [headerCells];
       for (const row of rows) {
-        lines.push(row.map((cell: any) => this.parser.parseInline(cell.tokens)).join(' | '));
+        allRows.push(row.map((cell: any) => cell.text));
       }
-      return lines.join('\n') + '\n\n';
+      // Calculate max width per column
+      const colWidths = allRows[0].map((_: any, col: number) =>
+        Math.max(...allRows.map((r) => (r[col] ?? '').length)),
+      );
+      const pad = (text: string, width: number) =>
+        text + ' '.repeat(Math.max(0, width - text.length));
+      const formatRow = (cells: string[]) =>
+        cells.map((c, i) => pad(c, colWidths[i])).join(' | ');
+      const headerLine = formatRow(allRows[0]);
+      const separator = colWidths.map((w: number) => '-'.repeat(w)).join('-+-');
+      const dataLines = allRows.slice(1).map(formatRow);
+      const tableText = [headerLine, separator, ...dataLines].join('\n');
+      return `<pre>${escapeHtml(tableText)}</pre>\n\n`;
     },
 
     br() {

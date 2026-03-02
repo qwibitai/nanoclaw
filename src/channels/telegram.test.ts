@@ -1067,11 +1067,17 @@ describe('markdownToTelegramHtml', () => {
       expect(result).toContain('alt text');
     });
 
-    it('degrades tables to text', () => {
-      const result = markdownToTelegramHtml('| A | B |\n|---|---|\n| 1 | 2 |');
-      expect(result).toContain('A');
-      expect(result).toContain('B');
+    it('renders tables in a pre block with aligned columns', () => {
+      const result = markdownToTelegramHtml('| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 7 |');
+      expect(result).toContain('<pre>');
+      expect(result).toContain('</pre>');
       expect(result).not.toContain('<table');
+      // Columns should be padded to align
+      expect(result).toContain('Name  | Age');
+      expect(result).toContain('Alice | 30');
+      expect(result).toContain('Bob   | 7');
+      // Should have a separator line
+      expect(result).toContain('------+----');
     });
   });
 
