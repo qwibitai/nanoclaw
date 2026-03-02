@@ -42,10 +42,10 @@ AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 For each selected channel, apply its skill to install the channel code:
 
 ```bash
-npx tsx skills-engine/apply.ts .claude/skills/add-<channel>
+npx tsx scripts/apply-skill.ts .claude/skills/add-<channel>
 ```
 
-Channels auto-enable when their credentials are present — no `ENABLED_CHANNELS` variable needed. The selected channels determine which later steps run:
+Channels auto-enable when their credentials are present. The selected channels determine which later steps run:
 - Token-based channels (Telegram, Slack, Discord) → collect tokens in step 4b
 - WhatsApp → authenticate in step 5, configure trigger in step 6, sync groups in step 7
 - Channels not selected → their corresponding steps are skipped automatically

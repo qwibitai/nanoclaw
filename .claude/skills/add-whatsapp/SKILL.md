@@ -35,7 +35,7 @@ AskUserQuestion: What is your phone number? (Include country code without +, e.g
 Apply the skill to install the WhatsApp channel code and dependencies:
 
 ```bash
-npx tsx skills-engine/apply.ts .claude/skills/add-whatsapp
+npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp
 ```
 
 Verify the code was placed correctly:
