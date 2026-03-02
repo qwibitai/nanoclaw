@@ -51,9 +51,21 @@ export class WhatsAppChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+    const connectionPromise = new Promise<void>((resolve, reject) => {
       this.connectInternal(resolve).catch(reject);
     });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              'WhatsApp connection timed out after 30s — check auth or delete store/auth/ and re-authenticate',
+            ),
+          ),
+        30000,
+      ),
+    );
+    return Promise.race([connectionPromise, timeoutPromise]);
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {

@@ -1,8 +1,10 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CONTAINER_IMAGE,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -16,6 +18,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
+  CONTAINER_RUNTIME_BIN,
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
@@ -445,7 +448,38 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function validateEnvironment(): void {
+  // Check that an API key is available for the agent
+  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+    logger.error(
+      'Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set. ' +
+        'Set one in your .env file before starting NanoClaw.',
+    );
+    throw new Error('Missing API credentials');
+  }
+
+  // Check that the agent container image exists
+  try {
+    const imageId = execSync(
+      `${CONTAINER_RUNTIME_BIN} images -q ${CONTAINER_IMAGE}`,
+      { encoding: 'utf-8', timeout: 10000 },
+    ).trim();
+    if (!imageId) {
+      logger.error(
+        `Container image "${CONTAINER_IMAGE}" not found. ` +
+          'Run ./container/build.sh to build it before starting NanoClaw.',
+      );
+      throw new Error(`Container image "${CONTAINER_IMAGE}" not found`);
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('not found')) throw err;
+    // If we can't query images (Docker not running yet), let ensureContainerSystemRunning handle it
+    logger.warn({ err }, 'Could not verify container image — continuing');
+  }
+}
+
 async function main(): Promise<void> {
+  validateEnvironment();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');

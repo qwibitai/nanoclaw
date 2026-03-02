@@ -43,7 +43,11 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   10,
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+// IDLE_TIMEOUT must be significantly less than CONTAINER_TIMEOUT so the
+// graceful _close sentinel fires first. container-runner.ts sets the hard
+// kill deadline to Math.max(CONTAINER_TIMEOUT, IDLE_TIMEOUT + 30_000), so
+// IDLE_TIMEOUT < CONTAINER_TIMEOUT is required for graceful shutdown to work.
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '300000', 10); // 5min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
