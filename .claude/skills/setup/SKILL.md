@@ -68,6 +68,7 @@ grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "
 Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse the status block.
 
 **If BUILD_OK=false:** Read `logs/setup.log` tail for the build error.
+
 - Cache issue (stale layers): `docker builder prune -f` (Docker) or `container builder stop && container builder rm && container builder start` (Apple Container). Retry.
 - Dockerfile syntax or missing files: diagnose from the log and fix, then retry.
 
@@ -77,11 +78,28 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+AskUserQuestion: 选择模型提供方式？
+选项：
+
+- Claude 订阅（Pro/Max）
+- Anthropic API Key
+- 通用 LLM（DeepSeek / GLM）
 
 **Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+
+**通用 LLM（DeepSeek/GLM）：** 不依赖 Claude 工具套件，仅文本生成。引导用户：
+
+1. 应用技能：`npx tsx scripts/apply-skill.ts .claude/skills/add-generic-llm`
+2. 在 `.env` 设置：
+   ```
+   LLM_PROVIDER=generic
+   LLM_API_BASE=https://api.deepseek.com/v1   # 或 GLM: https://open.bigmodel.cn/api/paas/v4
+   LLM_MODEL=deepseek-chat                    # 或 GLM 模型名
+   LLM_API_KEY=sk-xxxxxx
+   ```
+3. 重启服务。此模式不需要 `/login`。若需恢复 Claude 全能力，移除上述 LLM\_\* 环境变量。
 
 ## 5. WhatsApp Authentication
 
@@ -113,6 +131,7 @@ AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? 
 **DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
 
 **Group:**
+
 1. `npx tsx setup/index.ts --step groups` (Bash timeout: 60000ms)
 2. BUILD=failed → fix TypeScript, re-run. GROUPS_IN_DB=0 → check logs.
 3. `npx tsx setup/index.ts --step groups -- --list` for pipe-separated JID|name lines.
@@ -132,6 +151,7 @@ AskUserQuestion: Agent access to external directories?
 ## 10. Start Service
 
 If service already running: unload first.
+
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
 - Linux: `systemctl --user stop nanoclaw` (or `systemctl stop nanoclaw` if root)
 
@@ -143,6 +163,7 @@ Run `npx tsx setup/index.ts --step service` and parse the status block.
 
 1. Immediate fix: `sudo setfacl -m u:$(whoami):rw /var/run/docker.sock`
 2. Persistent fix (re-applies after every Docker restart):
+
 ```bash
 sudo mkdir -p /etc/systemd/system/docker.service.d
 sudo tee /etc/systemd/system/docker.service.d/socket-acl.conf << 'EOF'
@@ -151,9 +172,11 @@ ExecStartPost=/usr/bin/setfacl -m u:USERNAME:rw /var/run/docker.sock
 EOF
 sudo systemctl daemon-reload
 ```
+
 Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` commands separately — the `tee` heredoc first, then `daemon-reload`. After user confirms setfacl ran, re-run the service step.
 
 **If SERVICE_LOADED=false:**
+
 - Read `logs/setup.log` for the error.
 - macOS: check `launchctl list | grep nanoclaw`. If PID=`-` and status non-zero, read `logs/nanoclaw.error.log`.
 - Linux: check `systemctl --user status nanoclaw`.
@@ -164,6 +187,7 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
+
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
 - SERVICE=not_found → re-run step 10
 - CREDENTIALS=missing → re-run step 4
