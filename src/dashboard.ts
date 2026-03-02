@@ -464,9 +464,7 @@ dashboardApp.get('/events', (c) => {
             if (msg.timestamp > lastMessageTs) lastMessageTs = msg.timestamp;
           }
 
-          const newRuns = stmts.newTaskRunsSince.all(
-            lastRunTs,
-          ) as TaskRunRow[];
+          const newRuns = stmts.newTaskRunsSince.all(lastRunTs) as TaskRunRow[];
           for (const run of newRuns) {
             await stream.writeSSE({
               event: 'taskRun',
