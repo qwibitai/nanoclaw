@@ -81,9 +81,17 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **Subscription:** Authenticate inside the container and persist credentials. Tell the user to run the following in another terminal:
 
+**Docker:**
 ```bash
 docker run -it --entrypoint bash \
   -v $(pwd)/data/claude-auth:/home/node/.claude \
+  nanoclaw-agent:latest
+```
+
+**Apple Container:**
+```bash
+container run --interactive --entrypoint bash \
+  --mount "src=$(pwd)/data/claude-auth,dst=/home/node/.claude,readOnly=false" \
   nanoclaw-agent:latest
 ```
 
