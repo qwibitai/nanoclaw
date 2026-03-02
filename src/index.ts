@@ -21,10 +21,6 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  cleanupOrphans,
-  ensureContainerRuntimeRunning,
-} from './container-runtime.js';
-import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
