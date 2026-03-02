@@ -497,11 +497,16 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   // Skip Docker check during wizard mode — wizard has its own Docker detection
   const { isWizardComplete: wizardDone } = await import('./wizard-state.js');
-  if (wizardDone()) {
-    ensureContainerSystemRunning();
-  } else {
-    logger.info('Wizard mode: skipping container runtime check');
+  if (!wizardDone()) {
+    // Wizard mode: only start dashboard with wizard, skip everything else
+    logger.info('Wizard mode: starting setup wizard only');
+    initDatabase();
+    const { startDashboard } = await import('./dashboard.js');
+    await startDashboard();
+    return;
   }
+
+  ensureContainerSystemRunning();
 
   initDatabase();
   logger.info('Database initialized');
