@@ -1,0 +1,18 @@
+skill: signal
+version: 1.0.0
+description: "Signal channel via signal-cli jsonRpc"
+core_version: 0.1.0
+adds:
+  - src/channels/signal.ts
+  - src/channels/signal.test.ts
+modifies:
+  - src/config.ts
+  - src/index.ts
+structured:
+  env_additions:
+    - SIGNAL_PHONE_NUMBER
+    - SIGNAL_CLI_PATH
+    - SIGNAL_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/signal.test.ts"
