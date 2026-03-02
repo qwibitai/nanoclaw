@@ -60,6 +60,27 @@ export function ensureContainerRuntimeRunning(): void {
   }
 }
 
+/** Detect if Docker is running in rootless mode (user namespace remapping). */
+let _rootlessCache: boolean | null = null;
+export function isRootlessDocker(): boolean {
+  if (_rootlessCache != null) return _rootlessCache;
+  if (CONTAINER_RUNTIME_BIN !== 'docker') {
+    _rootlessCache = false;
+    return false;
+  }
+  try {
+    const info = execSync('docker info --format "{{.SecurityOptions}}"', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    _rootlessCache = info.includes('rootless');
+  } catch {
+    _rootlessCache = false;
+  }
+  return _rootlessCache;
+}
+
 /** Kill orphaned NanoClaw containers from previous runs. */
 export function cleanupOrphans(): void {
   try {

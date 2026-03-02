@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -20,6 +20,7 @@ import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
+  isRootlessDocker,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
@@ -207,7 +208,42 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Rootless Docker remaps UIDs so the container's node user can't access
+  // host-owned bind mounts. Make all writable mounts world-accessible.
+  if (isRootlessDocker()) {
+    for (const mount of mounts) {
+      if (!mount.readonly) ensureWorldWritable(mount.hostPath);
+    }
+  }
+
   return mounts;
+}
+
+/**
+ * Recursively make a directory world-accessible for rootless Docker.
+ * Falls back to docker run for files already owned by remapped UIDs.
+ */
+function ensureWorldWritable(dir: string): void {
+  if (!fs.existsSync(dir)) return;
+  try {
+    execSync(`chmod -R a+rwX ${JSON.stringify(dir)}`, {
+      stdio: 'pipe',
+      timeout: 5000,
+    });
+  } catch {
+    // Host can't chmod (files owned by remapped UID). Use a container to fix.
+    try {
+      execSync(
+        `${CONTAINER_RUNTIME_BIN} run --rm -v ${JSON.stringify(dir)}:/mnt/fix node:22-slim chmod -R a+rwX /mnt/fix`,
+        { stdio: 'pipe', timeout: 15000 },
+      );
+    } catch (e) {
+      logger.warn(
+        { dir, err: e },
+        'Failed to fix permissions for rootless Docker',
+      );
+    }
+  }
 }
 
 /**
@@ -220,6 +256,8 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'GH_TOKEN',
+    'LINEAR_API_KEY',
   ]);
 }
 
@@ -241,6 +279,12 @@ function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
+
+  // Rootless Docker: the container's node user (UID 1000) maps to a
+  // subordinate UID on the host that can't access host-owned bind mounts.
+  // We can't run as root either (Claude Code blocks --dangerously-skip-permissions
+  // as root). Instead, we use --security-opt no-new-privileges and ensure
+  // writable mount points are world-accessible (handled in buildVolumeMounts).
 
   for (const mount of mounts) {
     if (mount.readonly) {
