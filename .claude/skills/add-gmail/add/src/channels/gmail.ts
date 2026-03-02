@@ -345,6 +345,7 @@ registerChannel('gmail', (opts: ChannelOpts) => {
     !fs.existsSync(path.join(credDir, 'gcp-oauth.keys.json')) ||
     !fs.existsSync(path.join(credDir, 'credentials.json'))
   ) {
+    logger.warn('Gmail: credentials not found in ~/.gmail-mcp/');
     return null;
   }
   return new GmailChannel(opts);

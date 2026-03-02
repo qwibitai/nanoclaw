@@ -242,6 +242,9 @@ registerChannel('discord', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
   const token =
     process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
-  if (!token) return null;
+  if (!token) {
+    logger.warn('Discord: DISCORD_BOT_TOKEN not set');
+    return null;
+  }
   return new DiscordChannel(token, opts);
 });

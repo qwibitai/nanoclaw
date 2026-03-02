@@ -249,6 +249,9 @@ registerChannel('telegram', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
-  if (!token) return null;
+  if (!token) {
+    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
+    return null;
+  }
   return new TelegramChannel(token, opts);
 });
