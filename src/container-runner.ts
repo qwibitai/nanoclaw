@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -20,6 +21,7 @@ import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
+  fileMountArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
@@ -28,6 +30,34 @@ import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
+
+/**
+ * Resolve the SSH auth socket path.
+ * Checks SSH_AUTH_SOCK env var first, then falls back to the macOS
+ * launchd-managed socket (which has a dynamic path that changes per reboot).
+ * Returns undefined if no socket is found.
+ */
+function resolveSshAuthSock(): string | undefined {
+  const sock = process.env.SSH_AUTH_SOCK;
+  if (sock && fs.existsSync(sock)) return sock;
+
+  // macOS fallback: launchd manages the SSH agent at a dynamic path under /private/tmp
+  if (process.platform === 'darwin') {
+    const tmpDir = '/private/tmp';
+    try {
+      for (const entry of fs.readdirSync(tmpDir)) {
+        if (entry.startsWith('com.apple.launchd.')) {
+          const candidate = path.join(tmpDir, entry, 'Listeners');
+          if (fs.existsSync(candidate)) return candidate;
+        }
+      }
+    } catch {
+      // /private/tmp inaccessible or no agent running
+    }
+  }
+
+  return undefined;
+}
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 export interface ContainerInput {
@@ -204,7 +234,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
 }
 
 function buildContainerArgs(
@@ -232,6 +262,28 @@ function buildContainerArgs(
     } else {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
+  }
+
+  // SSH agent forwarding: proxy auth requests back to the host keychain.
+  // Keys never enter the container — the socket just tunnels signing operations.
+  // Only works on Linux where Docker runs natively; on macOS the Docker VM
+  // cannot bind-mount macOS host sockets into containers.
+  const sshAuthSock = process.platform !== 'darwin' ? resolveSshAuthSock() : undefined;
+  if (sshAuthSock) {
+    args.push(...fileMountArgs(sshAuthSock, '/tmp/ssh-auth.sock'));
+    args.push('-e', 'SSH_AUTH_SOCK=/tmp/ssh-auth.sock');
+  }
+
+  // Git identity: name, email, signing config (read-only — agent can't modify host config)
+  const gitconfig = path.join(os.homedir(), '.gitconfig');
+  if (fs.existsSync(gitconfig)) {
+    args.push(...readonlyMountArgs(gitconfig, '/home/node/.gitconfig'));
+  }
+
+  // Known hosts: needed for SSH host key verification without private keys
+  const knownHosts = path.join(os.homedir(), '.ssh', 'known_hosts');
+  if (fs.existsSync(knownHosts)) {
+    args.push(...readonlyMountArgs(knownHosts, '/home/node/.ssh/known_hosts'));
   }
 
   args.push(CONTAINER_IMAGE);

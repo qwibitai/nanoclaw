@@ -1,4 +1,6 @@
+import { execSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
@@ -170,6 +172,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For run_host_command
+    // (name and chatJid reused from above)
+    // For update_mount_allowlist
+    paths?: Array<{ path: string; allowReadWrite?: boolean; description?: string }>;
+    replyJid?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -381,7 +388,190 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'run_host_command': {
+      const commandName = data.name;
+      const replyJid = data.chatJid;
+
+      if (!commandName || !replyJid) {
+        logger.warn({ data }, 'run_host_command missing name or chatJid');
+        break;
+      }
+
+      // Allowlist lives outside the project — tamper-proof from containers
+      const allowlistPath = path.join(
+        os.homedir(),
+        '.config',
+        'nanoclaw',
+        'host-commands.json',
+      );
+      let allowlist: HostCommandsAllowlist;
+      try {
+        allowlist = JSON.parse(
+          fs.readFileSync(allowlistPath, 'utf-8'),
+        ) as HostCommandsAllowlist;
+      } catch (err) {
+        logger.warn({ err }, 'Failed to load host-commands.json');
+        await deps.sendMessage(
+          replyJid,
+          `⚠️ Host commands not configured (host-commands.json not found).`,
+        );
+        break;
+      }
+
+      const entry = allowlist.commands?.[commandName];
+      if (!entry) {
+        const available =
+          Object.keys(allowlist.commands || {}).join(', ') || 'none';
+        logger.warn({ commandName, sourceGroup }, 'Unknown host command');
+        await deps.sendMessage(
+          replyJid,
+          `Unknown command: \`${commandName}\`\nAvailable: ${available}`,
+        );
+        break;
+      }
+
+      const cmdStr = typeof entry === 'string' ? entry : entry.command;
+      const timeout =
+        typeof entry === 'object' ? (entry.timeout ?? 120000) : 120000;
+
+      logger.info({ commandName, sourceGroup }, 'Running host command');
+      try {
+        const output = execSync(cmdStr, {
+          encoding: 'utf-8',
+          timeout,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: '/bin/bash',
+        });
+        const trimmed = output.trim().slice(0, 3000);
+        await deps.sendMessage(
+          replyJid,
+          trimmed
+            ? `✅ \`${commandName}\`\n\`\`\`\n${trimmed}\n\`\`\``
+            : `✅ \`${commandName}\` completed.`,
+        );
+      } catch (err: unknown) {
+        const e = err as { stdout?: string; stderr?: string; message?: string };
+        const combined = [e.stdout?.trim(), e.stderr?.trim()]
+          .filter(Boolean)
+          .join('\n')
+          .slice(0, 3000);
+        logger.error(
+          { commandName, err: e.message },
+          'Host command failed',
+        );
+        await deps.sendMessage(
+          replyJid,
+          combined
+            ? `❌ \`${commandName}\` failed\n\`\`\`\n${combined}\n\`\`\``
+            : `❌ \`${commandName}\` failed.`,
+        );
+      }
+      break;
+    }
+
+    case 'update_mount_allowlist': {
+      // Only main group can update the allowlist
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized update_mount_allowlist attempt blocked',
+        );
+        break;
+      }
+
+      const { paths: newPaths, replyJid: allowlistReplyJid } = data as {
+        paths?: Array<{ path: string; allowReadWrite?: boolean; description?: string }>;
+        replyJid?: string;
+      };
+
+      if (!newPaths || !Array.isArray(newPaths) || newPaths.length === 0) {
+        logger.warn({ data }, 'update_mount_allowlist missing paths');
+        break;
+      }
+
+      const allowlistFilePath = path.join(
+        os.homedir(),
+        '.config',
+        'nanoclaw',
+        'mount-allowlist.json',
+      );
+
+      try {
+        let allowlist: {
+          allowedRoots: Array<{ path: string; allowReadWrite: boolean; description?: string }>;
+          blockedPatterns: string[];
+          nonMainReadOnly: boolean;
+        };
+        try {
+          allowlist = JSON.parse(fs.readFileSync(allowlistFilePath, 'utf-8'));
+        } catch {
+          allowlist = { allowedRoots: [], blockedPatterns: [], nonMainReadOnly: false };
+        }
+
+        const added: string[] = [];
+        for (const entry of newPaths) {
+          const expandedPath = entry.path.startsWith('~/')
+            ? path.join(os.homedir(), entry.path.slice(2))
+            : entry.path;
+          const alreadyExists = allowlist.allowedRoots.some(
+            (r) => {
+              const rExpanded = r.path.startsWith('~/')
+                ? path.join(os.homedir(), r.path.slice(2))
+                : r.path;
+              return rExpanded === expandedPath;
+            },
+          );
+          if (!alreadyExists) {
+            allowlist.allowedRoots.push({
+              path: entry.path,
+              allowReadWrite: entry.allowReadWrite ?? true,
+              ...(entry.description ? { description: entry.description } : {}),
+            });
+            added.push(entry.path);
+          }
+        }
+
+        fs.writeFileSync(
+          allowlistFilePath,
+          JSON.stringify(allowlist, null, 2) + '\n',
+        );
+
+        logger.info(
+          { added, sourceGroup },
+          'Mount allowlist updated via IPC',
+        );
+
+        if (allowlistReplyJid) {
+          await deps.sendMessage(
+            allowlistReplyJid,
+            added.length > 0
+              ? `Mount allowlist updated: added ${added.join(', ')}`
+              : `Mount allowlist unchanged (all paths already present).`,
+          );
+        }
+      } catch (err) {
+        logger.error({ err }, 'Failed to update mount allowlist');
+        if (allowlistReplyJid) {
+          await deps.sendMessage(
+            allowlistReplyJid,
+            `Failed to update mount allowlist: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      break;
+    }
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
+}
+
+interface HostCommandEntry {
+  command: string;
+  description?: string;
+  timeout?: number;
+}
+
+interface HostCommandsAllowlist {
+  commands: Record<string, string | HostCommandEntry>;
 }

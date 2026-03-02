@@ -23,7 +23,26 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install meal-planning Python dependencies
+RUN pip3 install --no-cache-dir --break-system-packages \
+    click \
+    python-dotenv \
+    recipe-scrapers \
+    pdfplumber \
+    requests
+
+# meal-plan wrapper: delegates to mounted source at /workspace/extra/meal-planning-agent
+# Auto-bootstraps symlinks so the CLI works without a manual setup step
+RUN printf '#!/bin/bash\n\
+[ -L ~/.meal-planning ] || [ -e ~/.meal-planning ] || ln -s /workspace/extra/meal-planning-config ~/.meal-planning\n\
+mkdir -p ~/.config\n\
+[ -L ~/.config/todoist-cli ] || [ -e ~/.config/todoist-cli ] || ln -s /workspace/extra/todoist-cli-config ~/.config/todoist-cli\n\
+cd /workspace/extra/meal-planning-agent && exec python3 -m meal_planning.cli "$@"\n' \
+    > /usr/local/bin/meal-plan && chmod +x /usr/local/bin/meal-plan
 
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium

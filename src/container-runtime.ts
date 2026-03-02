@@ -9,6 +9,11 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'docker';
 
+/** Returns CLI args for a read-write bind mount of a single file (not a directory). */
+export function fileMountArgs(hostPath: string, containerPath: string): string[] {
+  return ['-v', `${hostPath}:${containerPath}`];
+}
+
 /** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(
   hostPath: string,

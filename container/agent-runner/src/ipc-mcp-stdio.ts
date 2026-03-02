@@ -280,6 +280,73 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'run_host_command',
+  `Run a pre-approved command on the host machine. Use this to trigger operations that require host access (Docker builds, system services, etc.) that cannot run inside the container.
+
+Commands must be pre-configured in ~/.config/nanoclaw/host-commands.json on the host. The result is sent back to the current chat as a follow-up message.
+
+If you request an unknown command name, the host will reply with the list of available commands.`,
+  {
+    name: z.string().describe('Name of the pre-approved command to run (e.g., "deploy-live-odds-lab")'),
+  },
+  async (args) => {
+    const data = {
+      type: 'run_host_command',
+      name: args.name,
+      chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Host command "${args.name}" requested. Result will be sent to the chat.` }],
+    };
+  },
+);
+
+server.tool(
+  'update_mount_allowlist',
+  `(Main group only) Add new paths to the host's mount allowlist. Must be called before registering a group that uses those mounts, otherwise the mounts will be rejected.
+
+After updating the allowlist, call register_group with the containerConfig mounts.`,
+  {
+    paths: z.array(z.object({
+      path: z.string().describe('Absolute or ~/... path to allow (e.g., "~/projects/my-app")'),
+      allow_read_write: z.boolean().default(true).describe('Whether the container can write to this path'),
+      description: z.string().optional().describe('Human-readable description of what this path is'),
+    })).describe('Paths to add to the allowlist'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can update the mount allowlist.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'update_mount_allowlist',
+      paths: args.paths.map((p) => ({
+        path: p.path,
+        allowReadWrite: p.allow_read_write,
+        description: p.description,
+      })),
+      replyJid: chatJid,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Mount allowlist update requested for: ${args.paths.map((p) => p.path).join(', ')}` }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
