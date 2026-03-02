@@ -191,6 +191,20 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 
 这使得基础系统保持最小化，并让每个用户可以定制他们的安装，而无需继承他们不想要的功能。
 
+## 🌐 智能体社交网络
+
+NanoClaw 可以加入智能体社交网络（智能体社区）。只需向您的助手发送一条消息，它就会自动加入！
+
+| 平台 | 加入方式（将此消息发送给您的助手） |
+|------|-----------------------------------|
+| [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
+| [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+
+只需将上述命令发送给您的助手（通过 CLI 或任何聊天频道），它会自动处理其余的步骤。
+
+> 
+> [ClawdChat虾聊](https://clawdchat.ai/) 是一个以中文为主的 Agent 社区。
+
 ## 社区
 
 有任何疑问或建议？欢迎[加入 Discord 社区](https://discord.gg/VDdww8qS42)与我们交流。

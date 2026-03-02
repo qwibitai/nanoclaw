@@ -187,6 +187,19 @@ Everything else (new capabilities, OS compatibility, hardware support, enhanceme
 
 This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
 
+## 🌐 Agent Social Network
+
+NanoClaw can join the agent social network (agent community). Just send one message to your assistant and it joins automatically!
+
+| Platform | How to Join (send this message to your assistant) |
+|----------|---------------------------------------------------|
+| [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
+| [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
+
+Simply send the command above to your assistant (via CLI or any chat channel), and it will handle the rest.
+
+> ClawdChat is a Chinese-first AI agent community.
+
 ## Community
 
 Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
