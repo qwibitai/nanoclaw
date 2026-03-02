@@ -6,7 +6,6 @@ import {
   ASSISTANT_NAME,
   DASHBOARD_ENABLED,
   DISCORD_BOT_TOKEN,
-  DISCORD_ONLY,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   MIN_OBSERVER_MESSAGES,
@@ -15,16 +14,11 @@ import {
   SENTRY_AGENT_CHANNEL,
   SENTRY_AGENT_PORT,
   SENTRY_WEBHOOK_SECRET,
-  SLACK_APP_TOKEN,
-  SLACK_BOT_TOKEN,
   TELEGRAM_BOT_TOKEN,
-  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
-import { SlackChannel } from './channels/slack.js';
 import { TelegramChannel } from './channels/telegram.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -73,7 +67,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -545,26 +538,10 @@ async function main(): Promise<void> {
     await discord.connect();
   }
 
-  if (SLACK_BOT_TOKEN && SLACK_APP_TOKEN) {
-    const slack = new SlackChannel(
-      SLACK_BOT_TOKEN,
-      SLACK_APP_TOKEN,
-      channelOpts,
-    );
-    channels.push(slack);
-    await slack.connect();
-  }
-
   if (TELEGRAM_BOT_TOKEN) {
     const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
     channels.push(telegram);
     await telegram.connect();
-  }
-
-  if (!DISCORD_ONLY && !TELEGRAM_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
   }
 
   // Start subsystems (independently of connection handler)
@@ -592,8 +569,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
