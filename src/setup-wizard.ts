@@ -103,7 +103,6 @@ function runBuildPhase(
   return new Promise((resolve, reject) => {
     const proc: ChildProcess = spawn(command, args, {
       cwd,
-      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
