@@ -12,23 +12,30 @@ Sovereign is for builders who want their AI agent to **do real work**: launch pr
   <em>Guided setup wizard — name your agent, paste API keys, connect a channel, and go.</em>
 </p>
 
-## Why Sovereign Over OpenClaw?
+## Why Sovereign?
+
+Sovereign is purpose-built for one thing: **autonomous agents that run businesses.** Not a general-purpose assistant. Not a chatbot framework. A self-sustaining AI that earns money, pays for its own compute, and gets smarter every day.
+
+### Compared to OpenClaw
+
+Both are open-source agent frameworks. OpenClaw is a much larger project (~243K line monorepo, 62+ dependencies, 20+ channel integrations) with a big community. If you want maximum flexibility and don't mind complexity, OpenClaw is great.
+
+Sovereign makes different trade-offs:
 
 | | Sovereign | OpenClaw |
 |---|---|---|
-| **Codebase** | ~5K lines of TypeScript. Read the whole thing in an afternoon. | ~500K lines, 53 config files, 70+ dependencies. Good luck auditing that. |
-| **Security** | Real OS-level container isolation. Each agent runs in its own Linux VM. Secrets never enter containers. | Application-level permission checks. One bug = full system access. |
-| **Agent Engine** | Claude Agent SDK (Claude Code). The most capable coding agent, running directly. | Custom wrapper around multiple LLMs. More abstraction = more bugs. |
-| **Multi-Agent** | First-class delegation. Agents spawn sub-agents in isolated containers for parallel work. Agent swarms with peer-to-peer relay. | Single-threaded. One task at a time. |
-| **Model Routing** | Auto-routes tasks to the right model. Grunt work goes to free models. Complex reasoning goes to Claude. Saves 60-80% on API costs. | One model for everything. Expensive. |
-| **Memory** | BM25 search + observer compression + auto-learning from corrections + hindsight post-mortems. Memory that actually improves over time. | Basic memory.md. Forgets constantly. Users report having to remind it of basic things. |
-| **Payments** | x402 protocol. Agent can pay for web services and handle Stripe. Private keys never touch containers. | No native payment support. |
-| **Deploy** | One script: `bash scripts/deploy.sh`. Auto-detects Mac (launchd) or Linux (systemd). Production-ready in 30 seconds. | Manual setup, no service management out of the box. |
-| **Run anywhere** | Mac Mini, Mac Studio, or $4/month Linux VPS. Same script, same experience. | Primarily designed for Mac. VPS deployment is DIY. |
-| **Cost** | $4/month VPS or free on existing Mac + API keys. Model routing minimizes token spend. | Runs on your Mac (free compute, but ties up your machine). |
-| **Channels** | Discord, Slack, WhatsApp, Telegram | WhatsApp, Telegram, Discord, Slack, Signal, iMessage |
+| **Philosophy** | Purpose-built for autonomous business agents. Felix Craft playbook. | General-purpose AI assistant framework. |
+| **Codebase** | ~20K lines. One person can read and understand the entire system. | ~243K line monorepo. Powerful but complex. |
+| **Security default** | Containers are **always on**. Every agent runs in an isolated Docker container. Secrets never enter containers — passed via stdin, scrubbed from logs. | Containers are opt-in ([sandbox off by default](https://github.com/openclaw/openclaw/issues/7139)). Default install gives agents unrestricted filesystem access. API keys stored in plaintext JSON. |
+| **Agent engine** | Claude Agent SDK (Claude Code) running directly in containers. | Pi agent SDK (`@mariozechner/pi-coding-agent`). |
+| **Memory** | BM25 search + observer compression + auto-learning from corrections + hindsight post-mortems. Memory actively improves from failures. | Markdown files + hybrid BM25/vector search. Solid retrieval but no self-improving feedback loop. |
+| **Revenue tools** | x402 protocol + Stripe built-in. Private keys isolated on host. Agent can pay for services and sell products out of the box. | Payment via installable skills. |
+| **Cost model** | $4/month VPS. Model routing sends grunt work to free models automatically. | Similar model routing. More infrastructure options but higher minimum complexity. |
+| **Channels** | Discord, Slack, WhatsApp | 20+ channels (WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Teams, Matrix, and more). OpenClaw wins here. |
 
-**Bottom line:** OpenClaw is a Swiss Army knife with 100 blades. Sovereign is a scalpel. If you want an agent that can actually run a business autonomously and securely, Sovereign is built for that.
+**Sovereign's edge:** Security by default, self-improving memory, built-in revenue tools, and a codebase small enough to fork and customize in a weekend. If you want an agent that runs a business autonomously on a $4/month VPS, this is purpose-built for that.
+
+**OpenClaw's edge:** Massive community, 20+ channels, mobile apps, plugin ecosystem, and the backing of a large open-source foundation. If you need maximum flexibility and integrations, OpenClaw is the bigger platform.
 
 ## What It Does
 
@@ -220,6 +227,27 @@ Plus bash access with Python, curl, jq, ffmpeg, imagemagick, and pre-installed n
 | Conversation quality tracker | Done |
 | Task templates | Done |
 | Tool guard (pre-execution security) | Done |
+
+## FAQ
+
+**Can I use third-party or open-source models?**
+
+Yes. Set these in your `.env`:
+
+```bash
+ANTHROPIC_BASE_URL=https://your-api-endpoint.com
+ANTHROPIC_AUTH_TOKEN=your-token-here
+```
+
+Works with [OpenRouter](https://openrouter.ai), [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), or any Anthropic-compatible API.
+
+**How much does it cost to run?**
+
+$4/month for a VPS (Hetzner, DigitalOcean) + API keys. Model routing sends simple tasks to free models — most users spend $5-15/month on API calls. Or run free on an existing Mac.
+
+**Is it safe to give an AI agent tools?**
+
+Every agent runs in an isolated Docker container. It can only see its own workspace. API keys are passed via stdin and scrubbed from all logs. The host process validates every IPC request. See [Security](docs/SECURITY.md) for the full threat model.
 
 ## Documentation
 
