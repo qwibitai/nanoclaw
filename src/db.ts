@@ -477,9 +477,10 @@ export function claimDueTasks(
         ).run(task.id);
       } else {
         // Recurring: advance next_run into the future
-        db.prepare(
-          `UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`,
-        ).run(nextRun, task.id);
+        db.prepare(`UPDATE scheduled_tasks SET next_run = ? WHERE id = ?`).run(
+          nextRun,
+          task.id,
+        );
       }
     }
 
@@ -494,10 +495,7 @@ export function claimDueTasks(
  * next_run is already advanced by claimDueTasks(), so this only sets
  * last_run, last_result, and completes once-tasks (next_run IS NULL).
  */
-export function updateTaskAfterRun(
-  id: string,
-  lastResult: string,
-): void {
+export function updateTaskAfterRun(id: string, lastResult: string): void {
   const now = new Date().toISOString();
   db.prepare(
     `

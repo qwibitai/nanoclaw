@@ -49,7 +49,10 @@ export function computeNextRun(task: ScheduledTask): string | null {
     const ms = parseInt(task.schedule_value, 10);
     if (!ms || ms <= 0) {
       // Guard against malformed interval that would cause an infinite loop
-      logger.warn({ taskId: task.id, value: task.schedule_value }, 'Invalid interval value');
+      logger.warn(
+        { taskId: task.id, value: task.schedule_value },
+        'Invalid interval value',
+      );
       return new Date(now + 60_000).toISOString();
     }
     // Anchor to the scheduled time, not now, to prevent drift.
