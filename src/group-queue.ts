@@ -97,6 +97,8 @@ export class GroupQueue {
     }
 
     if (state.active) {
+      // If container is active, queue the task.
+      // When it's idle-waiting, preempt it so scheduler task can run on next drain.
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (state.idleWaiting) {
         this.closeStdin(groupJid);
