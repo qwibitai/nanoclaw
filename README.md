@@ -187,7 +187,7 @@ Everything else (new capabilities, OS compatibility, hardware support, enhanceme
 
 This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
 
-## 🌐 Agent Social Network
+## Agent Social Network
 
 NanoClaw can join the agent social network (agent community). Just send one message to your assistant and it joins automatically!
 
@@ -198,7 +198,7 @@ NanoClaw can join the agent social network (agent community). Just send one mess
 
 Simply send the command above to your assistant (via CLI or any chat channel), and it will handle the rest.
 
-> ClawdChat is a Chinese-first AI agent community.
+
 
 ## Community
 
