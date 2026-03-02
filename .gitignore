@@ -31,6 +31,7 @@ groups/investing/research/*
 groups/investing/scripts/*
 !groups/investing/scripts/price-check.js
 !groups/investing/scripts/morning-summary.js
+!groups/investing/scripts/screener.js
 !groups/investing/scripts/package.json
 !groups/investing/analysis-template.md
 # Never commit API keys

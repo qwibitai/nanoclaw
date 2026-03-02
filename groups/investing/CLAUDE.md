@@ -25,6 +25,8 @@ All files live in `/workspace/group/`:
 | `secrets/finnhub.key` | Finnhub API key (plain text, one line) |
 | `scripts/price-check.js` | Scheduled price check — runs every 30 min during market hours |
 | `scripts/morning-summary.js` | Daily morning portfolio snapshot |
+| `scripts/screener.js` | Weekly S&P 500 Buffett-style screen |
+| `screener-results.json` | Last screener output (written by screener.js) |
 
 ---
 
@@ -74,7 +76,7 @@ If the test passes, call `setup-schedules` and confirm to the user.
 
 ### `setup-schedules`
 
-Register three recurring tasks (only if not already scheduled):
+Register four recurring tasks (only if not already scheduled):
 
 1. **Price monitor** — every 30 min during market hours, weekdays:
    ```
@@ -97,7 +99,14 @@ Register three recurring tasks (only if not already scheduled):
    prompt: "SCHEDULED: Quarterly earnings review"
    ```
 
-If the user asks to check/reset schedules, reschedule all three.
+4. **Weekly S&P 500 screen** — Sunday 7 PM ET:
+   ```
+   schedule_type: "cron"
+   schedule_value: "0 23 * * 0"
+   prompt: "SCHEDULED: Run S&P 500 screen"
+   ```
+
+If the user asks to check/reset schedules, reschedule all four.
 
 ---
 
@@ -158,6 +167,21 @@ Parse JSON output. For each alert in `result.alerts`, send it via `send_message`
 
 ---
 
+### Screener Commands
+
+**`screen s&p`** or **`screen`** — Run the S&P 500 Buffett screen now.
+```bash
+node /workspace/group/scripts/screener.js
+```
+Takes ~10 minutes (batched to avoid rate limits). Send `result.message` when done.
+
+After sending the results, offer: "Say `research TICKER` to deep-dive any of these."
+
+**`screener results`** — Show the last saved screen without re-running.
+Read `screener-results.json` and format the candidates list as above.
+
+---
+
 ## Scheduled Tasks
 
 ### SCHEDULED: Run price check
@@ -184,6 +208,18 @@ node /workspace/group/scripts/morning-summary.js
 ```
 
 Parse the JSON output and send `result.message` via `mcp__nanoclaw__send_message`.
+
+### SCHEDULED: Run S&P 500 screen
+
+When prompt = "SCHEDULED: Run S&P 500 screen":
+
+```bash
+node /workspace/group/scripts/screener.js
+```
+
+Parse the JSON output and send `result.message` via `mcp__nanoclaw__send_message`.
+
+---
 
 ### SCHEDULED: Quarterly earnings review
 
