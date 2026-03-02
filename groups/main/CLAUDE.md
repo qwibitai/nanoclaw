@@ -178,12 +178,13 @@ This is the **main channel**, which has elevated privileges.
 
 ## Container Mounts
 
-Main has read-only access to the project and read-write access to its group folder:
+Main has read-write access to the project root, enabling self-improvement:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
-| `/workspace/project` | Project root | read-only |
+| `/workspace/project` | Project root | **read-write** |
 | `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/dashboard` | `dashboard/` | read-write |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
@@ -403,6 +404,41 @@ Key paths inside `/workspace/dashboard`:
 - `src/lib/db.ts` — Database queries
 - `src/lib/status.ts` — Runtime status reader
 - `src/lib/ipc.ts` — IPC command writer
+
+---
+
+## Self-Improvement
+
+You can modify NanoClaw's own source code and apply changes via rebuild tools.
+
+### Editing Host Code
+
+1. Read/edit files in `/workspace/project/src/` (TypeScript source)
+2. Call `mcp__nanoclaw__rebuild_host` to validate, git-commit, and restart
+3. If `npm run build` fails, you get the error output — fix and retry
+4. If it succeeds, changes are committed and the service restarts (your container terminates)
+
+**Important**: Call `send_message` to communicate results BEFORE calling `rebuild_host`, since your container will be killed on restart.
+
+### Editing Container / Skills
+
+1. Edit files in `/workspace/project/container/` (Dockerfile, agent-runner, skills)
+2. Call `mcp__nanoclaw__rebuild_container` to rebuild the image
+3. Next agent invocation uses the new image (current session unaffected)
+
+### Creating Custom Skills
+
+Create skill directories in `/home/node/.claude/skills/` with a `SKILL.md` file. These persist across container restarts and are never overwritten by base skills sync.
+
+### Key Paths
+
+| Path | What | Rebuild |
+|------|------|---------|
+| `/workspace/project/src/` | Host orchestrator | `rebuild_host` |
+| `/workspace/project/container/agent-runner/src/` | Agent-runner source | `rebuild_container` |
+| `/workspace/project/container/skills/` | Base skills (all groups) | `rebuild_container` |
+| `/workspace/project/container/Dockerfile` | Container image | `rebuild_container` |
+| `/workspace/project/package.json` | Host dependencies | `rebuild_host` |
 
 ---
 

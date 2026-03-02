@@ -373,6 +373,148 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'rebuild_host',
+  `Rebuild and restart the NanoClaw host process after editing source files.
+
+WORKFLOW:
+1. Edit files in /workspace/project/ (host source code, config, etc.)
+2. Call this tool to validate, commit, and restart
+3. The host runs \`npm run build\` to compile TypeScript
+4. If build succeeds: changes are git-committed and the service restarts
+5. If build fails: error output is returned, no restart occurs
+
+IMPORTANT: After a successful rebuild, the host process restarts and your
+container is terminated. Send any messages to the user via send_message
+BEFORE calling this tool. Only available to the main group.`,
+  {
+    commit_message: z.string().optional().describe(
+      'Git commit message for the changes (default: "agent: self-improvement")',
+    ),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can rebuild the host.' }],
+        isError: true,
+      };
+    }
+
+    const requestId = `host-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const data: Record<string, string> = {
+      type: 'rebuild_host',
+      requestId,
+      timestamp: new Date().toISOString(),
+    };
+    if (args.commit_message) {
+      data.commitMessage = args.commit_message;
+    }
+
+    writeIpcFile(TASKS_DIR, data);
+
+    // Poll for response (host writes to responses dir after build)
+    const responseFile = path.join(IPC_DIR, 'responses', `${requestId}.json`);
+
+    for (let elapsed = 0; elapsed < 180; elapsed++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      if (fs.existsSync(responseFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+          fs.unlinkSync(responseFile);
+
+          if (result.success) {
+            return {
+              content: [{ type: 'text' as const, text: `Host rebuilt successfully. Service is restarting.\n${result.output || ''}` }],
+            };
+          } else {
+            return {
+              content: [{ type: 'text' as const, text: `Host build FAILED (no restart). Fix errors and try again:\n${result.output || '(no output)'}` }],
+              isError: true,
+            };
+          }
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to parse rebuild response: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true,
+          };
+        }
+      }
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: 'Timeout waiting for host rebuild response (180s). The build may still be running.' }],
+      isError: true,
+    };
+  },
+);
+
+server.tool(
+  'rebuild_container',
+  `Rebuild the NanoClaw agent container image after editing container files.
+
+WORKFLOW:
+1. Edit files in /workspace/project/container/ (Dockerfile, agent-runner, skills, etc.)
+2. Call this tool to rebuild the container image
+3. The next agent invocation will use the updated image
+
+This does NOT restart the host or terminate your current session.
+Container builds can take several minutes. Only available to the main group.`,
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can rebuild the container.' }],
+        isError: true,
+      };
+    }
+
+    const requestId = `container-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    writeIpcFile(TASKS_DIR, {
+      type: 'rebuild_container',
+      requestId,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Poll for response (container builds can take up to 10 minutes)
+    const responseFile = path.join(IPC_DIR, 'responses', `${requestId}.json`);
+
+    for (let elapsed = 0; elapsed < 660; elapsed += 2) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      if (fs.existsSync(responseFile)) {
+        try {
+          const result = JSON.parse(fs.readFileSync(responseFile, 'utf-8'));
+          fs.unlinkSync(responseFile);
+
+          if (result.success) {
+            return {
+              content: [{ type: 'text' as const, text: `Container image rebuilt successfully. Next invocation will use the new image.\n${result.output || ''}` }],
+            };
+          } else {
+            return {
+              content: [{ type: 'text' as const, text: `Container build FAILED:\n${result.output || '(no output)'}` }],
+              isError: true,
+            };
+          }
+        } catch (err) {
+          return {
+            content: [{ type: 'text' as const, text: `Failed to parse rebuild response: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true,
+          };
+        }
+      }
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: 'Timeout waiting for container rebuild (11 min). The build may still be running.' }],
+      isError: true,
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

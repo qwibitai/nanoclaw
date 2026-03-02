@@ -65,15 +65,15 @@ function buildVolumeMounts(
   const groupDir = resolveGroupFolderPath(group.folder);
 
   if (isMain) {
-    // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
-    // Read-only prevents the agent from modifying host application code
-    // (src/, dist/, package.json, etc.) which would bypass the sandbox
-    // entirely on next restart.
+    // Main gets the project root read-write so the agent can self-improve
+    // by editing host code, skills, and container config. Changes require
+    // an explicit rebuild via IPC (rebuild_host / rebuild_container), and
+    // npm run build must pass before restart. Git auto-commits provide
+    // rollback. Non-main groups never see the project root at all.
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
-      readonly: true,
+      readonly: false,
     });
 
     // Main also gets its group folder as the working directory
@@ -146,6 +146,9 @@ function buildVolumeMounts(
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
+  // Additive: only copy base skills that don't already exist in destination.
+  // This lets agents create custom skills that persist, and modify base skills
+  // without being overwritten on every container startup.
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
@@ -153,7 +156,9 @@ function buildVolumeMounts(
       const srcDir = path.join(skillsSrc, skillDir);
       if (!fs.statSync(srcDir).isDirectory()) continue;
       const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
+      if (!fs.existsSync(dstDir)) {
+        fs.cpSync(srcDir, dstDir, { recursive: true });
+      }
     }
   }
   mounts.push({

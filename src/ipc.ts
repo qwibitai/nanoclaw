@@ -274,8 +274,9 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-    // For rebuild_dashboard
+    // For rebuild_dashboard / rebuild_host / rebuild_container
     requestId?: string;
+    commitMessage?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -575,6 +576,194 @@ export async function processTaskIpc(
         logger.info(
           { requestId: data.requestId, success: buildSuccess },
           'Dashboard rebuild completed',
+        );
+      }
+      break;
+
+    case 'rebuild_host':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized rebuild_host attempt blocked',
+        );
+        break;
+      }
+      if (!data.requestId) {
+        logger.warn('rebuild_host missing requestId');
+        break;
+      }
+      {
+        const projectRoot = process.cwd();
+        const responsesDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'responses',
+        );
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(
+          responsesDir,
+          `${data.requestId}.json`,
+        );
+
+        let buildOutput = '';
+        let buildSuccess = false;
+
+        const nodeBinDir = path.dirname(process.execPath);
+        const execEnv = {
+          ...process.env,
+          PATH: `${nodeBinDir}:${process.env.PATH || ''}`,
+        };
+
+        // Step 1: Build to validate changes
+        try {
+          buildOutput = execSync('npm run build', {
+            cwd: projectRoot,
+            stdio: 'pipe',
+            timeout: 120_000,
+            env: execEnv,
+          }).toString();
+          buildSuccess = true;
+        } catch (err: unknown) {
+          const execErr = err as { stdout?: Buffer; stderr?: Buffer };
+          buildOutput = [
+            execErr.stdout?.toString() || '',
+            execErr.stderr?.toString() || '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+        }
+
+        if (buildSuccess) {
+          // Step 2: Auto-commit changes to git for audit trail / rollback
+          const commitMsg = data.commitMessage || 'agent: self-improvement';
+          try {
+            execSync(
+              `git add -A && git diff --cached --quiet || git commit -m ${JSON.stringify(commitMsg)}`,
+              {
+                cwd: projectRoot,
+                stdio: 'pipe',
+                timeout: 30_000,
+                env: execEnv,
+              },
+            );
+          } catch (gitErr) {
+            logger.warn(
+              { err: gitErr },
+              'Git commit failed (build succeeded, continuing with restart)',
+            );
+            buildOutput += '\n[Warning: git commit failed]';
+          }
+
+          // Step 3: Write response BEFORE restarting so the agent can read it
+          fs.writeFileSync(
+            responseFile,
+            JSON.stringify({ success: true, output: buildOutput }),
+          );
+          logger.info(
+            { requestId: data.requestId },
+            'Host rebuild succeeded, restarting service',
+          );
+
+          // Step 4: Restart the host service after a short delay
+          setTimeout(() => {
+            try {
+              if (os.platform() === 'darwin') {
+                const uid = os.userInfo().uid;
+                execSync(
+                  `launchctl kickstart -k gui/${uid}/com.nanoclaw`,
+                  { stdio: 'pipe', timeout: 10_000 },
+                );
+              } else {
+                execSync('systemctl --user restart nanoclaw', {
+                  stdio: 'pipe',
+                  timeout: 10_000,
+                });
+              }
+            } catch (restartErr) {
+              logger.warn(
+                { err: restartErr },
+                'Service restart command failed, exiting for service manager to restart',
+              );
+              process.exit(0);
+            }
+          }, 1000);
+        } else {
+          // Build failed — write error response, do NOT restart
+          fs.writeFileSync(
+            responseFile,
+            JSON.stringify({ success: false, output: buildOutput }),
+          );
+          logger.info(
+            { requestId: data.requestId, success: false },
+            'Host rebuild failed (build error)',
+          );
+        }
+      }
+      break;
+
+    case 'rebuild_container':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized rebuild_container attempt blocked',
+        );
+        break;
+      }
+      if (!data.requestId) {
+        logger.warn('rebuild_container missing requestId');
+        break;
+      }
+      {
+        const projectRoot = process.cwd();
+        const responsesDir = path.join(
+          DATA_DIR,
+          'ipc',
+          sourceGroup,
+          'responses',
+        );
+        fs.mkdirSync(responsesDir, { recursive: true });
+        const responseFile = path.join(
+          responsesDir,
+          `${data.requestId}.json`,
+        );
+
+        let buildOutput = '';
+        let buildSuccess = false;
+
+        const nodeBinDir = path.dirname(process.execPath);
+        const execEnv = {
+          ...process.env,
+          PATH: `${nodeBinDir}:${process.env.PATH || ''}`,
+        };
+
+        const buildScript = path.join(projectRoot, 'container', 'build.sh');
+
+        try {
+          buildOutput = execSync(`bash ${buildScript}`, {
+            cwd: path.join(projectRoot, 'container'),
+            stdio: 'pipe',
+            timeout: 600_000, // 10 min — container builds can be slow
+            env: execEnv,
+          }).toString();
+          buildSuccess = true;
+        } catch (err: unknown) {
+          const execErr = err as { stdout?: Buffer; stderr?: Buffer };
+          buildOutput = [
+            execErr.stdout?.toString() || '',
+            execErr.stderr?.toString() || '',
+          ]
+            .filter(Boolean)
+            .join('\n');
+        }
+
+        fs.writeFileSync(
+          responseFile,
+          JSON.stringify({ success: buildSuccess, output: buildOutput }),
+        );
+        logger.info(
+          { requestId: data.requestId, success: buildSuccess },
+          'Container rebuild completed',
         );
       }
       break;
