@@ -1,0 +1,41 @@
+name: Feature Request
+description: Suggest a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Sovereign? We'd love to hear it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the use case or frustration
+      placeholder: "I want my agent to be able to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? (optional)
+      placeholder: "Add a new MCP tool that..."
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Agent behavior / intelligence
+        - Channels (Discord, Slack, WhatsApp, Telegram)
+        - Memory / knowledge
+        - Tools / MCP
+        - Container / security
+        - Dashboard / wizard
+        - Deployment / infrastructure
+        - Documentation
+        - Other
+    validations:
+      required: true

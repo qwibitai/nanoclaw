@@ -1,0 +1,76 @@
+name: Bug Report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please fill in the details below so we can reproduce and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly. What did you expect vs what actually happened?
+      placeholder: "When I send a message in Discord, the agent doesn't respond..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: How can we make this happen?
+      placeholder: |
+        1. Start Sovereign with `node dist/index.js`
+        2. Send "@Adam hello" in Discord
+        3. Wait 60 seconds — no response
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any error output from the terminal or log files. Redact any API keys.
+      render: shell
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (VPS)
+        - Linux (Desktop)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - Discord
+        - Slack
+        - WhatsApp
+        - Telegram
+        - N/A
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Run `node --version`
+      placeholder: "v20.20.0"
+
+  - type: input
+    id: docker-version
+    attributes:
+      label: Docker version
+      description: Run `docker --version`
+      placeholder: "Docker version 28.2.2"
