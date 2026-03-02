@@ -1,0 +1,20 @@
+skill: add-image-vision
+version: 1.0.0
+description: "Add image vision to NanoClaw agents via WhatsApp image attachments"
+core_version: 1.1.2
+adds:
+  - src/image.ts
+  - src/image.test.ts
+modifies:
+  - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
+  - src/container-runner.ts
+  - src/index.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies:
+    sharp: "^0.34.5"
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-image-vision/tests/image-vision.test.ts"
