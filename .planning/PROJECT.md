@@ -23,23 +23,29 @@ El agente de trabajo responde al panel web en tiempo real, con soporte para mens
 - ✓ Schedulers de tareas con cron/interval/once — existing
 - ✓ SQLite para persistencia de mensajes, sesiones, grupos, tareas — existing
 
+<!-- v1.0 WebSocket Channel — shipped 2026-03-02 -->
+
+- ✓ Canal WebSocket implementa interfaz `Channel` (`src/channels/websocket.ts`) — v1.0
+- ✓ Servidor WS acepta mensajes `chat` y `system` en JSON — v1.0
+- ✓ Mensajes `chat` entrantes se convierten a `NewMessage` y enrutan al agente — v1.0
+- ✓ Mensajes `system` entrantes se convierten a `NewMessage` con prefijo `[SYSTEM]` — v1.0
+- ✓ `sendMessage()` envía mensajes `chat` al cliente WS conectado — v1.0
+- ✓ `setTyping()` envía evento `system/typing` al panel — v1.0
+- ✓ Soporte de adjuntos entrantes (base64 → guardado en `groups/better-work/inbox/attachments/`) — v1.0
+- ✓ Soporte de adjuntos salientes (archivo → HTTP estático en `groups/better-work/files/`) — v1.0
+- ✓ Buffer de mensajes offline (mensajes enviados sin cliente conectado se almacenan temporalmente) — v1.0
+- ✓ Canal registrado en `src/index.ts` main() condicionado a `WEBSOCKET_ENABLED` — v1.0
+- ✓ Grupo `better-work` auto-registrado al arrancar si no existe — v1.0
+- ✓ Estructura de directorios `groups/better-work/` con CLAUDE.md — v1.0
+- ✓ Variables de entorno: `WEBSOCKET_ENABLED`, `WEBSOCKET_PORT`, `WEBSOCKET_FILES_PORT` — v1.0
+- ✓ WebSocketServer bound a 127.0.0.1 (localhost only) — v1.0
+- ✓ `WEBSOCKET_FILES_PORT` wired explícitamente en constructor call — v1.0
+- ✓ Documentación de rutas de adjuntos (`inbox/attachments/`, `files/`) en agent CLAUDE.md — v1.0
+- ✓ Documentación de write-before-respond timing en agent CLAUDE.md — v1.0
+
 ### Active
 
-<!-- Scope de este milestone: WebSocket channel -->
-
-- [ ] Canal WebSocket implementa interfaz `Channel` (`src/channels/websocket.ts`)
-- [ ] Servidor WS acepta mensajes `chat` y `system` en JSON
-- [ ] Mensajes `chat` entrantes se convierten a `NewMessage` y enrutan al agente
-- [ ] Mensajes `system` entrantes se convierten a `NewMessage` con prefijo `[SYSTEM]`
-- [ ] `sendMessage()` envía mensajes `chat` al cliente WS conectado
-- [ ] `setTyping()` envía evento `system/typing` al panel
-- [ ] Soporte de adjuntos entrantes (base64 → guardado en `groups/better-work/inbox/attachments/`)
-- [ ] Soporte de adjuntos salientes (archivo → HTTP estático en `groups/better-work/files/`)
-- [ ] Buffer de mensajes offline (mensajes enviados sin cliente conectado se almacenan temporalmente)
-- [ ] Canal registrado en `src/index.ts` main() condicionado a `WEBSOCKET_ENABLED`
-- [ ] Grupo `better-work` auto-registrado al arrancar si no existe
-- [ ] Estructura de directorios `groups/better-work/` con CLAUDE.md
-- [ ] Variables de entorno: `WEBSOCKET_ENABLED`, `WEBSOCKET_PORT`, `WEBSOCKET_FILES_PORT`
+(Next milestone requirements TBD)
 
 ### Out of Scope
 
@@ -48,11 +54,27 @@ El agente de trabajo responde al panel web en tiempo real, con soporte para mens
 - Split de mensajes largos — el panel gestiona el renderizado
 - Multi-cliente WS simultáneo — una conexión a la vez en v1
 
-## Context
+## Current State (v1.0 shipped 2026-03-02)
 
-NanoClaw ya tiene una abstracción `Channel` bien definida. El nuevo canal sigue exactamente el mismo patrón que `src/channels/telegram.ts`. Los JIDs usan prefijo `ws:` (e.g., `ws:better-work`). El grupo `better-work` es el contexto laboral de Daniel en Better Consultants (proyectos Java Legacy sobre WebLogic, comunicación frecuente en catalán, cliente Mossos d'Esquadra).
+**WebSocket channel fully operational** — 3 fases ejecutadas, 5 planes completados, todas las requirements validated.
 
-El servidor HTTP estático para archivos salientes puede compartir proceso con el WS server (http.createServer + ws.Server) o usar express mínimo. El PRD sugiere puerto separado (`WEBSOCKET_FILES_PORT=3002`) pero puede simplificarse a un path `/files/` en el mismo puerto.
+**Codebase:**
+- `src/channels/websocket.ts` — WebSocketChannel class, ~250 LOC, con soporte para mensajes chat/system, adjuntos, buffer offline
+- `src/channels/websocket.test.ts` — 35+ tests, full coverage de behavior
+- `src/index.ts` — WebSocketChannel instanciada condicionalmente con `WEBSOCKET_ENABLED`
+- `groups/better-work/` — Directorio preconfigurado con `CLAUDE.md` documentando rutas y operaciones
+- `.planning/phases/01-03/` — Fases 1-3 con SUMMARY.md y VERIFICATION.md documentando decisiones y tech debt
+
+**Tech Stack:**
+- `ws` package v8.x para WebSocket server
+- HTTP estático vía http.createServer para archivos (puerto `WEBSOCKET_FILES_PORT=3002`)
+- JIDs prefijados con `ws:` (e.g., `ws:better-work`)
+- Localhost binding (127.0.0.1) — no internet exposure en v1
+
+**Known Limitations:**
+- Single concurrent WebSocket connection per group (v1 design)
+- No authentication (localhost trust model)
+- Panel web not yet built (separate milestone)
 
 ## Constraints
 
@@ -65,10 +87,19 @@ El servidor HTTP estático para archivos salientes puede compartir proceso con e
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Puerto separado para HTTP estático | PRD sugiere 3002 para archivos; permite CORS independiente del WS | — Pending |
-| Auto-registro de `better-work` en main() | Más robusto que registro manual vía Telegram; evita dependencia operacional | — Pending |
-| Mensajes `system` como `NewMessage` con `[SYSTEM]` prefix | Reutiliza el pipeline de mensajes existente sin cambios en el orquestador | — Pending |
-| `requiresTrigger: false` para better-work | Todo mensaje del panel va al agente sin necesidad de @mention | — Pending |
+| Puerto separado para HTTP estático | PRD sugiere 3002 para archivos; permite CORS independiente del WS | ✓ Implemented — `WEBSOCKET_FILES_PORT=3002` |
+| Auto-registro de `better-work` en main() | Más robusto que registro manual vía Telegram; evita dependencia operacional | ✓ Working — grupo auto-registrado en startup |
+| Mensajes `system` como `NewMessage` con `[SYSTEM]` prefix | Reutiliza el pipeline de mensajes existente sin cambios en el orquestador | ✓ Verified — system messages arrive prefixed |
+| `requiresTrigger: false` para better-work | Todo mensaje del panel va al agente sin necesidad de @mention | ✓ Implemented — all panel messages trigger agent |
+| Localhost binding (127.0.0.1) | Seguridad v1 — no exponerse a internet, confianza en host | ✓ Implemented — WebSocketServer y HTTP static bound to 127.0.0.1 |
+| Wiring explícito de `WEBSOCKET_FILES_PORT` en constructor | Evita coupling silencioso a defaults de config | ✓ Implemented — port passed explicitly en main() |
 
 ---
-*Last updated: 2026-02-28 after initialization*
+
+## Next Milestone
+
+TBD — new requirements cycle pending.
+
+---
+
+*Last updated: 2026-03-02 after v1.0 completion*

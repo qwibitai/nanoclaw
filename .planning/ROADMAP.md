@@ -1,17 +1,22 @@
-# Roadmap: NanoClaw — Better Copilot (WebSocket Channel)
+# Roadmap: NanoClaw — Better Copilot
 
-## Overview
+## Milestones
 
-Dos fases para añadir el canal WebSocket a NanoClaw: primero el canal completamente funcional con protocolo de mensajes e integración en el orquestador, luego el soporte de adjuntos con servidor HTTP estático. Al terminar, el panel web puede comunicarse con el agente better-work en tiempo real.
+- ✅ **v1.0 WebSocket Channel** — Fases 1-2 (shipped 2026-03-02)
 
 ## Phases
 
-- [x] **Phase 1: WebSocket Channel** - Canal WS funcional con protocolo de mensajes, buffer offline e integración en main()
-- [x] **Phase 2: Attachments** - Adjuntos entrantes (base64) y salientes (HTTP estático) (completed 2026-03-01)
+<details>
+<summary>✅ v1.0 WebSocket Channel (Phases 1-2) — SHIPPED 2026-03-02</summary>
+
+- [x] Phase 1: WebSocket Channel (3/3 plans) — completed 2026-03-01
+- [x] Phase 2: Attachments (1/1 plan) — completed 2026-03-01
+
+</details>
 
 ## Phase Details
 
-### Phase 1: WebSocket Channel
+### Phase 1: WebSocket Channel (v1.0)
 **Goal**: El canal WebSocket está operativo — el panel web puede enviar y recibir mensajes al agente better-work en tiempo real
 **Depends on**: Nothing (first phase)
 **Requirements**: CHAN-01, CHAN-02, CHAN-03, CHAN-04, CHAN-05, CHAN-06, PROTO-01, PROTO-02, PROTO-03, PROTO-04, PROTO-05, CONF-01, CONF-02, INTG-01, INTG-02, INTG-03
@@ -28,7 +33,7 @@ Plans:
 - [x] 01-02-PLAN.md — WebSocketChannel completo + tests de comportamiento
 - [x] 01-03-PLAN.md — Integración en main() y auto-provisión del grupo better-work
 
-### Phase 2: Attachments
+### Phase 2: Attachments (v1.0)
 **Goal**: El panel web puede enviar archivos al agente y el agente puede compartir archivos de vuelta al panel via HTTP
 **Depends on**: Phase 1
 **Requirements**: ATT-01, ATT-02, ATT-03, CONF-03
@@ -36,32 +41,25 @@ Plans:
   1. Un adjunto enviado desde el panel (base64) se guarda en `groups/better-work/inbox/attachments/` y el agente recibe la referencia en el mensaje
   2. Un archivo generado por el agente en `groups/better-work/files/` es accesible via HTTP en el puerto configurado (default 3002)
   3. El mensaje de respuesta del agente incluye la URL `/files/...` cuando hay adjuntos salientes
-**Plans**: 1 plan
+**Plans**: 1/1 plan
 
 Plans:
-- [ ] 02-01-PLAN.md — WEBSOCKET_FILES_PORT config + adjuntos entrantes + HTTP estático + adjuntos salientes
+- [x] 02-01-PLAN.md — WEBSOCKET_FILES_PORT config + adjuntos entrantes + HTTP estático + adjuntos salientes
 
 ## Progress
 
-**Execution Order:**
-Phases execute in numeric order: 1 → 2
+**Milestone Phases:**
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. WebSocket Channel | 3/3 | Complete | 2026-03-01 |
-| 2. Attachments | 1/1 | Complete   | 2026-03-01 |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. WebSocket Channel | v1.0 | 3/3 | Complete | 2026-03-01 |
+| 2. Attachments | v1.0 | 1/1 | Complete | 2026-03-01 |
+| 3. Tech Debt Fixes | Gap Closure | 1/1 | Complete | 2026-03-02 |
 
-### Phase 3: Tech Debt Fixes: Documentation and Network Binding
+---
 
-**Goal:** Cerrar las 4 issues de tech debt del audit v1.0 — binding a localhost, filesPort explícito, documentación de adjuntos y timing en CLAUDE.md del agente
-**Depends on:** Phase 2
-**Requirements**: TD-01, TD-02, TD-03, TD-04
-**Success Criteria** (what must be TRUE):
-  1. WebSocketServer escucha solo en `127.0.0.1`, no en `0.0.0.0`
-  2. `WEBSOCKET_FILES_PORT` se pasa explícitamente en la llamada al constructor de `WebSocketChannel` en `main()`
-  3. `groups/better-work/CLAUDE.md` documenta las rutas `inbox/attachments/` y `files/`
-  4. `groups/better-work/CLAUDE.md` documenta la convención de escribir archivos antes de referenciarlos
-**Plans:** 1/1 plans complete
+## Future Phases
 
-Plans:
-- [ ] 03-01-PLAN.md — Localhost binding, explicit filesPort, agent CLAUDE.md documentation
+(To be planned in next milestone cycle)
+
+---
