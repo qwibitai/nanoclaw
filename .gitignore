@@ -27,6 +27,10 @@ groups/investing/*
 !groups/investing/research/
 groups/investing/research/*
 !groups/investing/research/.gitkeep
+!groups/investing/scripts/
+groups/investing/scripts/*
+!groups/investing/scripts/price-check.js
+!groups/investing/scripts/morning-summary.js
 # Never commit API keys
 groups/investing/secrets/*.key
 
