@@ -36,6 +36,8 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
+  // Track latest user message ts per channel for assistant.threads.setStatus
+  private lastUserMessageTs = new Map<string, string>();
 
   private opts: SlackChannelOpts;
 
@@ -115,6 +117,11 @@ export class SlackChannel implements Channel {
         if (content.includes(mentionPattern) && !TRIGGER_PATTERN.test(content)) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
+      }
+
+      // Track last user message ts for typing indicator (assistant.threads.setStatus)
+      if (!isBotMessage) {
+        this.lastUserMessageTs.set(jid, msg.ts);
       }
 
       this.opts.onMessage(jid, {
@@ -203,11 +210,23 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
-  // Slack does not expose a typing indicator API for bots.
-  // This no-op satisfies the Channel interface so the orchestrator
-  // doesn't need channel-specific branching.
-  async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
-    // no-op: Slack Bot API has no typing indicator endpoint
+  // Use Slack's Agents & Assistants API to show a shimmer/typing indicator.
+  // Requires the assistant:write scope (enable "Agents & AI Apps" in app settings).
+  // Only works in DM threads; silently ignored elsewhere.
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    const threadTs = this.lastUserMessageTs.get(jid);
+    if (!threadTs) return;
+
+    try {
+      await this.app.client.assistant.threads.setStatus({
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: isTyping ? 'is thinking...' : '',
+      });
+    } catch {
+      // Silently ignore — requires assistant:write scope and only works in DM threads
+    }
   }
 
   /**
