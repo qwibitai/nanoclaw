@@ -682,7 +682,10 @@ describe('register_group success', () => {
 describe('parseLocalTimestamp', () => {
   it('parses a winter timestamp in UTC-offset timezone correctly', () => {
     // America/New_York is UTC-5 in February (EST)
-    const result = parseLocalTimestamp('2026-02-01T15:30:00', 'America/New_York');
+    const result = parseLocalTimestamp(
+      '2026-02-01T15:30:00',
+      'America/New_York',
+    );
     // 15:30 New York (EST = UTC-5) → 20:30 UTC
     expect(result.toISOString()).toBe('2026-02-01T20:30:00.000Z');
   });
@@ -696,7 +699,10 @@ describe('parseLocalTimestamp', () => {
 
   it('parses midnight correctly', () => {
     // America/Los_Angeles is UTC-8 in January (PST)
-    const result = parseLocalTimestamp('2026-01-20T00:00:00', 'America/Los_Angeles');
+    const result = parseLocalTimestamp(
+      '2026-01-20T00:00:00',
+      'America/Los_Angeles',
+    );
     // 00:00 LA (PST = UTC-8) → 08:00 UTC
     expect(result.toISOString()).toBe('2026-01-20T08:00:00.000Z');
   });
@@ -709,7 +715,10 @@ describe('parseLocalTimestamp', () => {
   it('returns NaN for UTC-suffixed timestamp', () => {
     // Z-suffixed timestamps should not reach this function (rejected earlier),
     // but parseLocalTimestamp correctly rejects them via the regex.
-    const result = parseLocalTimestamp('2026-02-01T15:30:00Z', 'America/New_York');
+    const result = parseLocalTimestamp(
+      '2026-02-01T15:30:00Z',
+      'America/New_York',
+    );
     expect(isNaN(result.getTime())).toBe(true);
   });
 

@@ -24,7 +24,10 @@ import { RegisteredGroup } from './types.js';
  * then adjust by that offset.  One Newton step is enough for non-ambiguous
  * times; DST gaps/folds resolve to the post-transition side.
  */
-export function parseLocalTimestamp(localTimestamp: string, timezone: string): Date {
+export function parseLocalTimestamp(
+  localTimestamp: string,
+  timezone: string,
+): Date {
   const match = localTimestamp.match(
     /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/,
   );
