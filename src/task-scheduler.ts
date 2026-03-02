@@ -21,6 +21,7 @@ import {
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
+import { EventBus } from './event-bus.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -37,6 +38,7 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  bus?: EventBus;
 }
 
 async function runTask(
@@ -190,6 +192,14 @@ async function runTask(
     status: error ? 'error' : 'success',
     result,
     error,
+  });
+
+  deps.bus?.emit('task:executed', {
+    timestamp: new Date().toISOString(),
+    taskId: task.id,
+    status: error ? 'error' : 'success',
+    durationMs,
+    result,
   });
 
   let nextRun: string | null = null;

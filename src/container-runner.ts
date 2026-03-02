@@ -16,6 +16,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
+import { EventBus } from './event-bus.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -260,6 +261,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  bus?: EventBus,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -303,6 +305,14 @@ export async function runContainerAgent(
     });
 
     onProcess(container, containerName);
+
+    bus?.emit('container:spawned', {
+      timestamp: new Date().toISOString(),
+      groupFolder: group.folder,
+      containerName,
+      isMain: input.isMain,
+      isScheduledTask: !!input.isScheduledTask,
+    });
 
     let stdout = '';
     let stderr = '';
@@ -360,6 +370,14 @@ export async function runContainerAgent(
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
+            bus?.emit('container:output', {
+              timestamp: new Date().toISOString(),
+              groupFolder: group.folder,
+              chatJid: input.chatJid,
+              result: typeof parsed.result === 'string' ? parsed.result : null,
+              status: parsed.status,
+              newSessionId: parsed.newSessionId,
+            });
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
@@ -430,6 +448,16 @@ export async function runContainerAgent(
     container.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      bus?.emit('container:closed', {
+        timestamp: new Date().toISOString(),
+        groupFolder: group.folder,
+        containerName,
+        exitCode: code,
+        durationMs: duration,
+        timedOut,
+        hadOutput: hadStreamingOutput,
+      });
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');

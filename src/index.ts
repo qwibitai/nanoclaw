@@ -3,7 +3,6 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
-  IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
@@ -20,6 +19,7 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -34,6 +34,8 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
+import { EventBus } from './event-bus.js';
+import { registerEventListeners } from './event-listeners.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
@@ -53,7 +55,8 @@ let messageLoopRunning = false;
 
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
-const queue = new GroupQueue();
+let bus: EventBus;
+let queue: GroupQueue;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -94,6 +97,13 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 
   // Create group folder
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+
+  bus?.emit('group:registered', {
+    timestamp: new Date().toISOString(),
+    jid,
+    name: group.name,
+    folder: group.folder,
+  });
 
   logger.info(
     { jid, name: group.name, folder: group.folder },
@@ -173,21 +183,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
-  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  bus?.emit('agent:invoked', {
+    timestamp: new Date().toISOString(),
+    groupFolder: group.folder,
+    chatJid,
+    messageCount: missedMessages.length,
+    hasSession: !!sessions[group.folder],
+  });
 
-  const resetIdleTimer = () => {
-    if (idleTimer) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      logger.debug(
-        { group: group.name },
-        'Idle timeout, closing container stdin',
-      );
-      queue.closeStdin(chatJid);
-    }, IDLE_TIMEOUT);
-  };
+  // Typing indicator and idle timeout are handled by event listeners
+  // in event-listeners.ts (agent:invoked → typing on, agent:completed → typing off,
+  // container:output → idle timer reset, agent:completed → idle timer cleanup).
 
-  await channel.setTyping?.(chatJid, true);
+  const agentStartTime = Date.now();
   let hadError = false;
   let outputSentToUser = false;
 
@@ -205,8 +213,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
     }
 
     if (result.status === 'success') {
@@ -218,10 +224,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
-  if (idleTimer) clearTimeout(idleTimer);
+  const agentDurationMs = Date.now() - agentStartTime;
 
   if (output === 'error' || hadError) {
+    bus?.emit('agent:completed', {
+      timestamp: new Date().toISOString(),
+      groupFolder: group.folder,
+      chatJid,
+      status: 'error',
+      durationMs: agentDurationMs,
+    });
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -241,6 +253,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  bus?.emit('agent:completed', {
+    timestamp: new Date().toISOString(),
+    groupFolder: group.folder,
+    chatJid,
+    status: 'success',
+    durationMs: agentDurationMs,
+  });
   return true;
 }
 
@@ -303,6 +322,7 @@ async function runAgent(
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      bus,
     );
 
     if (output.newSessionId) {
@@ -311,6 +331,8 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Session clearing is handled by the agent:completed event listener
+      // in event-listeners.ts (registerSessionClearingOnError).
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -449,11 +471,29 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
+
+  bus = new EventBus();
+  queue = new GroupQueue(bus);
+
   loadState();
+
+  registerEventListeners({
+    bus,
+    queue,
+    channels,
+    findChannel,
+    sessions,
+    deleteSession,
+  });
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    bus.emit('system:shutdown', {
+      timestamp: new Date().toISOString(),
+      signal,
+      activeContainers: 0, // filled after queue.shutdown
+    });
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -495,6 +535,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
+    bus,
   });
   startIpcWatcher({
     sendMessage: (jid, text) => {
@@ -509,6 +550,7 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    bus,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { EventBus } from './event-bus.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -33,6 +34,11 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private bus?: EventBus;
+
+  constructor(bus?: EventBus) {
+    this.bus = bus;
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -142,6 +148,11 @@ export class GroupQueue {
   notifyIdle(groupJid: string): void {
     const state = this.getGroup(groupJid);
     state.idleWaiting = true;
+    this.bus?.emit('container:idle', {
+      timestamp: new Date().toISOString(),
+      groupFolder: state.groupFolder || '',
+      chatJid: groupJid,
+    });
     if (state.pendingTasks.length > 0) {
       this.closeStdin(groupJid);
     }
@@ -259,6 +270,11 @@ export class GroupQueue {
         { groupJid, retryCount: state.retryCount },
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
+      this.bus?.emit('queue:max-retries', {
+        timestamp: new Date().toISOString(),
+        groupJid,
+        retryCount: state.retryCount,
+      });
       state.retryCount = 0;
       return;
     }
@@ -268,6 +284,12 @@ export class GroupQueue {
       { groupJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
+    this.bus?.emit('queue:retry-scheduled', {
+      timestamp: new Date().toISOString(),
+      groupJid,
+      retryCount: state.retryCount,
+      delayMs,
+    });
     setTimeout(() => {
       if (!this.shuttingDown) {
         this.enqueueMessageCheck(groupJid);

@@ -11,6 +11,7 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { EventBus } from './event-bus.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -27,6 +28,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  bus?: EventBus;
 }
 
 let ipcWatcherRunning = false;
@@ -84,11 +86,23 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
                   );
+                  deps.bus?.emit('ipc:processed', {
+                    timestamp: new Date().toISOString(),
+                    sourceGroup,
+                    type: 'message',
+                    authorized: true,
+                  });
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                  deps.bus?.emit('ipc:processed', {
+                    timestamp: new Date().toISOString(),
+                    sourceGroup,
+                    type: 'message',
+                    authorized: false,
+                  });
                 }
               }
               fs.unlinkSync(filePath);
@@ -125,6 +139,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
               await processTaskIpc(data, sourceGroup, isMain, deps);
+              deps.bus?.emit('ipc:processed', {
+                timestamp: new Date().toISOString(),
+                sourceGroup,
+                type: data.type || 'task',
+                authorized: true,
+              });
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
