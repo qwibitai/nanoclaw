@@ -67,7 +67,9 @@ interface ObserverFileContent {
  * Read the last 7 days of observer files for a group.
  * Returns files that exist and are under the size cap.
  */
-export function readRecentObserverFiles(groupPath: string): ObserverFileContent[] {
+export function readRecentObserverFiles(
+  groupPath: string,
+): ObserverFileContent[] {
   const observerDir = path.join(groupPath, 'daily', 'observer');
   if (!fs.existsSync(observerDir)) return [];
 
@@ -150,7 +152,9 @@ export function buildTopicFrequencyMap(
 // Suggestion formatting
 // ---------------------------------------------------------------------------
 
-export function formatSuggestionMessage(suggestions: ProactiveSuggestion[]): string {
+export function formatSuggestionMessage(
+  suggestions: ProactiveSuggestion[],
+): string {
   const lines = [
     '**Proactive Suggestions** — Based on recurring patterns in your conversations:',
     '',
@@ -163,7 +167,9 @@ export function formatSuggestionMessage(suggestions: ProactiveSuggestion[]): str
     lines.push('');
   }
 
-  lines.push('_These are suggestions only — no routines were created. Reply if you want to act on any._');
+  lines.push(
+    '_These are suggestions only — no routines were created. Reply if you want to act on any._',
+  );
   return lines.join('\n');
 }
 
@@ -222,7 +228,10 @@ export async function detectProactiveOpportunities(
     const frequencyMap = buildTopicFrequencyMap(files);
 
     if (frequencyMap.size === 0) {
-      logger.debug({ groupFolder }, 'No recurring topics found in observer files');
+      logger.debug(
+        { groupFolder },
+        'No recurring topics found in observer files',
+      );
       return;
     }
 
@@ -306,7 +315,10 @@ export async function detectProactiveOpportunities(
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
         circuitBreakerTrippedAt = Date.now();
-      logger.warn({ err, consecutiveFailures }, 'Proactive agent LLM call failed');
+      logger.warn(
+        { err, consecutiveFailures },
+        'Proactive agent LLM call failed',
+      );
       return;
     } finally {
       clearTimeout(timeout);
@@ -345,7 +357,10 @@ export async function detectProactiveOpportunities(
     });
 
     if (!validated || validated.suggestions.length === 0) {
-      logger.info({ groupFolder }, 'Proactive agent: no actionable suggestions');
+      logger.info(
+        { groupFolder },
+        'Proactive agent: no actionable suggestions',
+      );
       // Still count as success for cooldown purposes
       cooldowns.set(groupFolder, Date.now());
       consecutiveFailures = 0;
@@ -354,7 +369,12 @@ export async function detectProactiveOpportunities(
 
     // Write suggestion to IPC for the agent to pick up
     const { DATA_DIR } = await import('./config.js');
-    const ipcDir = path.join(DATA_DIR, 'ipc', groupFolder, 'proactive-suggestions');
+    const ipcDir = path.join(
+      DATA_DIR,
+      'ipc',
+      groupFolder,
+      'proactive-suggestions',
+    );
     fs.mkdirSync(ipcDir, { recursive: true });
 
     const suggestionFile = path.join(ipcDir, `${Date.now()}.json`);

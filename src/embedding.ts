@@ -74,7 +74,10 @@ export function loadGroupFromPersistence(groupFolder: string): number {
   if (!persistence) return 0;
   const chunks = persistence.loadChunksForGroup(groupFolder);
   for (const chunk of chunks) {
-    store.set(storeKey(chunk.groupFolder, chunk.filePath, chunk.chunkIndex), chunk);
+    store.set(
+      storeKey(chunk.groupFolder, chunk.filePath, chunk.chunkIndex),
+      chunk,
+    );
   }
   return chunks.length;
 }
@@ -85,11 +88,18 @@ export function loadGroupFromPersistence(groupFolder: string): number {
 
 const store: Map<string, StoredChunk> = new Map();
 
-function storeKey(groupFolder: string, filePath: string, chunkIndex: number): string {
+function storeKey(
+  groupFolder: string,
+  filePath: string,
+  chunkIndex: number,
+): string {
   return `${groupFolder}::${filePath}::${chunkIndex}`;
 }
 
-function getChunksForFile(groupFolder: string, filePath: string): StoredChunk[] {
+function getChunksForFile(
+  groupFolder: string,
+  filePath: string,
+): StoredChunk[] {
   const results: StoredChunk[] = [];
   const prefix = `${groupFolder}::${filePath}::`;
   for (const [key, chunk] of store) {
@@ -141,7 +151,12 @@ const EMBEDDING_MODEL = 'text-embedding-3-small';
 const GROUP_FOLDER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 function assertValidGroupFolder(folder: string): void {
-  if (!folder || !GROUP_FOLDER_PATTERN.test(folder) || folder.includes('..') || folder.includes('/')) {
+  if (
+    !folder ||
+    !GROUP_FOLDER_PATTERN.test(folder) ||
+    folder.includes('..') ||
+    folder.includes('/')
+  ) {
     throw new Error(`Invalid group folder: ${folder}`);
   }
 }
@@ -205,11 +220,19 @@ export function chunkText(
         let start = 0;
         // If we had previous content, carry overlap
         if (chunks.length > 0) {
-          const prevChunkWords = chunks[chunks.length - 1].split(/\s+/).filter(Boolean);
-          const overlapStart = Math.max(0, prevChunkWords.length - overlapWords);
+          const prevChunkWords = chunks[chunks.length - 1]
+            .split(/\s+/)
+            .filter(Boolean);
+          const overlapStart = Math.max(
+            0,
+            prevChunkWords.length - overlapWords,
+          );
           const overlapContent = prevChunkWords.slice(overlapStart);
           // Start new chunk with overlap from previous
-          const firstChunkWords = [...overlapContent, ...words.slice(0, maxWords - overlapContent.length)];
+          const firstChunkWords = [
+            ...overlapContent,
+            ...words.slice(0, maxWords - overlapContent.length),
+          ];
           chunks[chunks.length] = firstChunkWords.join(' ');
           start = maxWords - overlapContent.length;
         }
@@ -225,8 +248,13 @@ export function chunkText(
       } else {
         // Start new chunk with overlap from previous chunk
         if (chunks.length > 0 && overlapWords > 0) {
-          const prevChunkWords = chunks[chunks.length - 1].split(/\s+/).filter(Boolean);
-          const overlapStart = Math.max(0, prevChunkWords.length - overlapWords);
+          const prevChunkWords = chunks[chunks.length - 1]
+            .split(/\s+/)
+            .filter(Boolean);
+          const overlapStart = Math.max(
+            0,
+            prevChunkWords.length - overlapWords,
+          );
           const overlapContent = prevChunkWords.slice(overlapStart).join(' ');
           currentParagraphs = [overlapContent, para];
           currentWordCount = overlapWords + paraWordCount;
@@ -262,7 +290,10 @@ export async function generateEmbeddings(text: string): Promise<Float32Array> {
 
   // P1-2: Input length validation — prevent oversized inputs to paid API
   if (text.length > MAX_EMBEDDING_INPUT_CHARS) {
-    logger.warn({ length: text.length, max: MAX_EMBEDDING_INPUT_CHARS }, 'Embedding input too large, truncating');
+    logger.warn(
+      { length: text.length, max: MAX_EMBEDDING_INPUT_CHARS },
+      'Embedding input too large, truncating',
+    );
     text = text.slice(0, MAX_EMBEDDING_INPUT_CHARS);
   }
 
@@ -274,11 +305,17 @@ export async function generateEmbeddings(text: string): Promise<Float32Array> {
     try {
       const parsed = new URL(baseUrl);
       if (parsed.protocol !== 'https:') {
-        logger.warn({ baseUrl }, 'Embedding API base URL must use HTTPS, using fallback');
+        logger.warn(
+          { baseUrl },
+          'Embedding API base URL must use HTTPS, using fallback',
+        );
         return deterministicEmbedding(text);
       }
     } catch {
-      logger.warn({ baseUrl }, 'Invalid embedding API base URL, using fallback');
+      logger.warn(
+        { baseUrl },
+        'Invalid embedding API base URL, using fallback',
+      );
       return deterministicEmbedding(text);
     }
   }
@@ -301,7 +338,9 @@ export async function generateEmbeddings(text: string): Promise<Float32Array> {
       if (!response.ok) {
         // P1-1: Sanitize error body — truncate and strip potential secrets
         const rawBody = await response.text().catch(() => 'unknown');
-        const sanitized = rawBody.slice(0, 500).replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
+        const sanitized = rawBody
+          .slice(0, 500)
+          .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
         throw new Error(`Embedding API error ${response.status}: ${sanitized}`);
       }
 
@@ -348,7 +387,7 @@ function deterministicEmbedding(text: string): Float32Array {
   // Convert bytes to float32 values between -1 and 1
   for (let i = 0; i < EMBEDDING_DIMENSIONS; i++) {
     const byte = allBytes[i];
-    result[i] = (byte / 127.5) - 1;
+    result[i] = byte / 127.5 - 1;
   }
 
   // Normalize to unit vector
@@ -474,7 +513,10 @@ export async function vectorSearch(
   try {
     queryEmbedding = await generateEmbeddings(query);
   } catch (err) {
-    logger.warn({ err }, 'Failed to generate query embedding for vector search');
+    logger.warn(
+      { err },
+      'Failed to generate query embedding for vector search',
+    );
     return [];
   }
 
@@ -610,7 +652,10 @@ export async function indexFile(
   // Check file size (>1MB = skip)
   const contentBytes = Buffer.byteLength(content, 'utf-8');
   if (contentBytes > MAX_FILE_SIZE) {
-    logger.warn({ filePath, size: contentBytes }, 'File exceeds 1MB, skipping embedding');
+    logger.warn(
+      { filePath, size: contentBytes },
+      'File exceeds 1MB, skipping embedding',
+    );
     return {
       chunksIndexed: 0,
       embeddingsGenerated: 0,
@@ -664,7 +709,10 @@ export async function indexFile(
         embedding = float32ArrayToBuffer(embeddingArray);
         embeddingsGenerated++;
       } catch (err) {
-        logger.warn({ err, filePath, chunkIndex: i }, 'Failed to generate embedding for chunk');
+        logger.warn(
+          { err, filePath, chunkIndex: i },
+          'Failed to generate embedding for chunk',
+        );
         // Store with NULL embedding — will be re-embedded later
         embedding = null;
       }
@@ -696,7 +744,10 @@ export async function indexFile(
       const key = keys.next().value;
       if (key) store.delete(key);
     }
-    logger.warn({ storeSize: store.size, evicted: excess }, 'Embedding store exceeded max size, evicted oldest chunks');
+    logger.warn(
+      { storeSize: store.size, evicted: excess },
+      'Embedding store exceeded max size, evicted oldest chunks',
+    );
   }
 
   return {

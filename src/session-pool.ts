@@ -29,7 +29,11 @@ const MIN_IDLE_TIMEOUT_MS = 60_000; // safety floor
 
 function stopContainer(containerId: string): void {
   // Validate containerId to prevent command injection (P0 fix)
-  if (!containerId || containerId.length > 128 || !CONTAINER_ID_PATTERN.test(containerId)) {
+  if (
+    !containerId ||
+    containerId.length > 128 ||
+    !CONTAINER_ID_PATTERN.test(containerId)
+  ) {
     throw new Error(`Invalid container ID: ${containerId}`);
   }
   execSync(`docker stop ${containerId} && docker rm ${containerId}`, {
@@ -47,7 +51,8 @@ export class SessionPool {
   constructor(opts?: SessionPoolOptions) {
     this.maxPoolSize = opts?.maxPoolSize ?? DEFAULT_MAX_POOL_SIZE;
     this.idleTimeoutMs = opts?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-    this.reaperIntervalMs = opts?.reaperIntervalMs ?? DEFAULT_REAPER_INTERVAL_MS;
+    this.reaperIntervalMs =
+      opts?.reaperIntervalMs ?? DEFAULT_REAPER_INTERVAL_MS;
 
     if (this.maxPoolSize < 0) {
       throw new Error(`maxPoolSize must be >= 0, got ${this.maxPoolSize}`);
@@ -69,7 +74,10 @@ export class SessionPool {
 
     this.pool.delete(groupFolder);
     entry.lastUsed = Date.now();
-    logger.debug({ groupFolder, containerId: entry.containerId }, 'Session pool hit');
+    logger.debug(
+      { groupFolder, containerId: entry.containerId },
+      'Session pool hit',
+    );
     return entry;
   }
 
@@ -100,7 +108,10 @@ export class SessionPool {
       groupFolder,
       lastUsed: Date.now(),
     });
-    logger.debug({ groupFolder, containerId, poolSize: this.pool.size }, 'Session released to pool');
+    logger.debug(
+      { groupFolder, containerId, poolSize: this.pool.size },
+      'Session released to pool',
+    );
   }
 
   /**
@@ -112,7 +123,10 @@ export class SessionPool {
     if (!entry) return;
 
     this.pool.delete(groupFolder);
-    logger.debug({ groupFolder, containerId: entry.containerId }, 'Session evicted from pool');
+    logger.debug(
+      { groupFolder, containerId: entry.containerId },
+      'Session evicted from pool',
+    );
     try {
       stopContainer(entry.containerId);
     } catch {

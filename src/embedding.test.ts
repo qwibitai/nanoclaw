@@ -141,7 +141,9 @@ describe('generateEmbeddings', () => {
   it('should generate embeddings for new file chunks', async () => {
     // Mock the OpenAI embedding API at the module level
     // The function should call OpenAI text-embedding-3-small and return 512 dims
-    const result = await generateEmbeddings('The quick brown fox jumps over the lazy dog');
+    const result = await generateEmbeddings(
+      'The quick brown fox jumps over the lazy dog',
+    );
 
     expect(result).toBeInstanceOf(Float32Array);
     expect(result.length).toBe(512);
@@ -228,9 +230,9 @@ describe('rrfFuse', () => {
 
   const vectorResults: SearchResult[] = [
     { chunkId: 'b', content: 'chunk b', score: 0.95 },
-    { chunkId: 'e', content: 'chunk e', score: 0.90 },
+    { chunkId: 'e', content: 'chunk e', score: 0.9 },
     { chunkId: 'a', content: 'chunk a', score: 0.85 },
-    { chunkId: 'f', content: 'chunk f', score: 0.80 },
+    { chunkId: 'f', content: 'chunk f', score: 0.8 },
   ];
 
   it('should compute RRF fusion from BM25 + vector results', () => {
@@ -312,10 +314,18 @@ describe('rrfFuse', () => {
     const bigBm25: SearchResult[] = [];
     const bigVector: SearchResult[] = [];
     for (let i = 0; i < 50; i++) {
-      bigBm25.push({ chunkId: `bm25_${i}`, content: `bm25 chunk ${i}`, score: 50 - i });
+      bigBm25.push({
+        chunkId: `bm25_${i}`,
+        content: `bm25 chunk ${i}`,
+        score: 50 - i,
+      });
     }
     for (let i = 0; i < 50; i++) {
-      bigVector.push({ chunkId: `vec_${i}`, content: `vec chunk ${i}`, score: 1 - i * 0.01 });
+      bigVector.push({
+        chunkId: `vec_${i}`,
+        content: `vec chunk ${i}`,
+        score: 1 - i * 0.01,
+      });
     }
     // Add some overlap
     bigBm25[0].chunkId = 'shared_0';
@@ -416,7 +426,11 @@ describe('hybridSearch', () => {
 describe('indexFile', () => {
   it('should generate embeddings for new file chunks', async () => {
     // Indexing a new file should chunk it and generate embeddings for each chunk
-    const result = await indexFile('test-group', 'notes.md', 'Hello world. This is a test file.');
+    const result = await indexFile(
+      'test-group',
+      'notes.md',
+      'Hello world. This is a test file.',
+    );
 
     expect(result).toBeDefined();
     // The function should have processed the file without error
@@ -450,7 +464,11 @@ describe('indexFile', () => {
   it('should store chunk without embedding when API unavailable', async () => {
     // When embedding API fails at index time, store chunk with NULL embedding
     // Test that the function does not throw — it stores chunks and logs warning
-    const result = await indexFile('test-group', 'notes.md', 'Some content to embed.');
+    const result = await indexFile(
+      'test-group',
+      'notes.md',
+      'Some content to embed.',
+    );
 
     // Should complete without throwing, even if embeddings are NULL
     expect(result).toBeDefined();
@@ -460,7 +478,11 @@ describe('indexFile', () => {
   it('should use SHA-256 content hash for change detection', async () => {
     // Different content should produce different hashes and trigger re-embedding
     await indexFile('test-group', 'notes.md', 'Version 1 content');
-    const result2 = await indexFile('test-group', 'notes.md', 'Version 2 content');
+    const result2 = await indexFile(
+      'test-group',
+      'notes.md',
+      'Version 2 content',
+    );
 
     // Second call has different content, so it should re-embed
     expect(result2.embeddingsGenerated).toBeGreaterThan(0);
@@ -514,7 +536,9 @@ describe('input validation guards', () => {
   describe('indexFile rejects invalid group folders', () => {
     for (const bad of badGroupFolders) {
       it(`rejects groupFolder "${bad}"`, async () => {
-        await expect(indexFile(bad, 'file.md', 'content')).rejects.toThrow('Invalid group folder');
+        await expect(indexFile(bad, 'file.md', 'content')).rejects.toThrow(
+          'Invalid group folder',
+        );
       });
     }
   });
@@ -522,7 +546,9 @@ describe('input validation guards', () => {
   describe('indexFile rejects invalid file paths', () => {
     for (const bad of badFilePaths) {
       it(`rejects filePath "${bad}"`, async () => {
-        await expect(indexFile('valid-group', bad, 'content')).rejects.toThrow('Invalid file path');
+        await expect(indexFile('valid-group', bad, 'content')).rejects.toThrow(
+          'Invalid file path',
+        );
       });
     }
   });
@@ -530,7 +556,9 @@ describe('input validation guards', () => {
   describe('vectorSearch rejects invalid group folders', () => {
     for (const bad of badGroupFolders) {
       it(`rejects groupFolder "${bad}"`, async () => {
-        await expect(vectorSearch('query', bad)).rejects.toThrow('Invalid group folder');
+        await expect(vectorSearch('query', bad)).rejects.toThrow(
+          'Invalid group folder',
+        );
       });
     }
   });
@@ -538,7 +566,9 @@ describe('input validation guards', () => {
   describe('hybridSearch rejects invalid group folders', () => {
     for (const bad of badGroupFolders) {
       it(`rejects groupFolder "${bad}"`, async () => {
-        await expect(hybridSearch('query', bad)).rejects.toThrow('Invalid group folder');
+        await expect(hybridSearch('query', bad)).rejects.toThrow(
+          'Invalid group folder',
+        );
       });
     }
   });
@@ -546,7 +576,9 @@ describe('input validation guards', () => {
   describe('removeFileEmbeddings rejects invalid group folders', () => {
     for (const bad of badGroupFolders) {
       it(`rejects groupFolder "${bad}"`, async () => {
-        await expect(removeFileEmbeddings(bad, 'file.md')).rejects.toThrow('Invalid group folder');
+        await expect(removeFileEmbeddings(bad, 'file.md')).rejects.toThrow(
+          'Invalid group folder',
+        );
       });
     }
   });
@@ -554,7 +586,9 @@ describe('input validation guards', () => {
   describe('removeFileEmbeddings rejects invalid file paths', () => {
     for (const bad of badFilePaths) {
       it(`rejects filePath "${bad}"`, async () => {
-        await expect(removeFileEmbeddings('valid-group', bad)).rejects.toThrow('Invalid file path');
+        await expect(removeFileEmbeddings('valid-group', bad)).rejects.toThrow(
+          'Invalid file path',
+        );
       });
     }
   });

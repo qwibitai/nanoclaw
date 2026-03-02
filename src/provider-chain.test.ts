@@ -67,7 +67,10 @@ describe('classifyError', () => {
       const result = classifyError(httpError(status));
       expect(result.retryable, `HTTP ${status} should be retryable`).toBe(true);
       expect(result.transient, `HTTP ${status} should be transient`).toBe(true);
-      expect(result.contextLength, `HTTP ${status} should not be context_length`).toBe(false);
+      expect(
+        result.contextLength,
+        `HTTP ${status} should not be context_length`,
+      ).toBe(false);
     }
 
     // Network timeout should also be transient
@@ -79,15 +82,25 @@ describe('classifyError', () => {
     const nonRetryableCodes = [401, 400, 422];
     for (const status of nonRetryableCodes) {
       const result = classifyError(httpError(status));
-      expect(result.retryable, `HTTP ${status} should NOT be retryable`).toBe(false);
-      expect(result.transient, `HTTP ${status} should NOT be transient`).toBe(false);
+      expect(result.retryable, `HTTP ${status} should NOT be retryable`).toBe(
+        false,
+      );
+      expect(result.transient, `HTTP ${status} should NOT be transient`).toBe(
+        false,
+      );
     }
 
     // context_length_exceeded is a special case — not retryable on same provider,
     // but triggers skip to next provider
     const ctx = classifyError(contextLengthError());
-    expect(ctx.contextLength, 'context_length_exceeded should flag contextLength').toBe(true);
-    expect(ctx.retryable, 'context_length_exceeded should NOT be retryable').toBe(false);
+    expect(
+      ctx.contextLength,
+      'context_length_exceeded should flag contextLength',
+    ).toBe(true);
+    expect(
+      ctx.retryable,
+      'context_length_exceeded should NOT be retryable',
+    ).toBe(false);
   });
 });
 
@@ -134,8 +147,9 @@ describe('RetryProvider', () => {
     const fn = vi.fn<() => Promise<string>>();
 
     // Server says retry after 5 seconds
-    fn.mockRejectedValueOnce(httpError(429, { retryAfter: 5 }))
-      .mockResolvedValueOnce('ok');
+    fn.mockRejectedValueOnce(
+      httpError(429, { retryAfter: 5 }),
+    ).mockResolvedValueOnce('ok');
 
     const retry = new RetryProvider({ maxRetries: 3 });
     const resultPromise = retry.execute(fn);
@@ -207,8 +221,7 @@ describe('RetryProvider', () => {
   it('should apply 25% jitter to backoff duration', async () => {
     const fn = vi.fn<() => Promise<string>>();
 
-    fn.mockRejectedValueOnce(httpError(502))
-      .mockResolvedValueOnce('ok');
+    fn.mockRejectedValueOnce(httpError(502)).mockResolvedValueOnce('ok');
 
     const retry = new RetryProvider({ maxRetries: 3 });
 
@@ -702,7 +715,9 @@ describe('ProviderChain', () => {
     expect(
       () =>
         new ProviderChain({
-          providers: [{ name: 'nokey', model: 'some-model', apiKey: undefined }],
+          providers: [
+            { name: 'nokey', model: 'some-model', apiKey: undefined },
+          ],
         }),
     ).toThrow();
   });
@@ -765,10 +780,16 @@ describe('selectModelChain', () => {
     expect(chain).toHaveLength(3);
 
     expect(chain[0]).toEqual(
-      expect.objectContaining({ provider: 'openrouter', model: 'claude-opus-4' }),
+      expect.objectContaining({
+        provider: 'openrouter',
+        model: 'claude-opus-4',
+      }),
     );
     expect(chain[1]).toEqual(
-      expect.objectContaining({ provider: 'anthropic', model: 'claude-sonnet-4' }),
+      expect.objectContaining({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4',
+      }),
     );
     expect(chain[2]).toEqual(
       expect.objectContaining({ provider: 'bedrock', model: 'claude-haiku' }),
@@ -776,7 +797,9 @@ describe('selectModelChain', () => {
   });
 
   it('should reject empty provider configuration', () => {
-    expect(() => selectModelChain({ providers: [] })).toThrow(/empty|no providers/i);
+    expect(() => selectModelChain({ providers: [] })).toThrow(
+      /empty|no providers/i,
+    );
   });
 
   it('should reject provider with missing API key', () => {

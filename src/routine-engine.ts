@@ -68,7 +68,12 @@ export interface RoutineRun {
 // ---------------------------------------------------------------------------
 
 /** Validate a single cron field element against min/max range. */
-function validateCronElement(value: string, min: number, max: number, field: string): void {
+function validateCronElement(
+  value: string,
+  min: number,
+  max: number,
+  field: string,
+): void {
   // Handle step syntax: */N or N-M/S
   const stepParts = value.split('/');
   if (stepParts.length > 2) throw new Error(`Invalid cron field: ${field}`);
@@ -103,7 +108,9 @@ function validateCronElement(value: string, min: number, max: number, field: str
 function validateCron(expr: string): void {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) {
-    throw new Error(`Invalid cron expression: expected 5 fields, got ${parts.length} in "${expr}"`);
+    throw new Error(
+      `Invalid cron expression: expected 5 fields, got ${parts.length} in "${expr}"`,
+    );
   }
   const ranges = [
     { min: 0, max: 59 }, // minute
@@ -154,7 +161,11 @@ export interface RoutinePersistence {
 interface RoutineEngineCallbacks {
   onLightweightAction: (action: RoutineAction) => Promise<string>;
   onFullJobAction: (action: RoutineAction) => Promise<unknown>;
-  onNotify: (info: { routineName: string; group: string; message: string }) => void;
+  onNotify: (info: {
+    routineName: string;
+    group: string;
+    message: string;
+  }) => void;
   persistence?: RoutinePersistence;
 }
 
@@ -184,7 +195,10 @@ export class RoutineEngine {
       // Rebuild regex cache for event-type routines
       if (routine.trigger.type === 'event' && routine.trigger.pattern) {
         try {
-          this.regexCache.set(routine.name, new RegExp(routine.trigger.pattern));
+          this.regexCache.set(
+            routine.name,
+            new RegExp(routine.trigger.pattern),
+          );
         } catch {
           // Invalid regex in DB — disable routine
           routine.enabled = false;
@@ -206,7 +220,10 @@ export class RoutineEngine {
     if (routine.trigger.type === 'cron') {
       validateCron(routine.trigger.cron!);
       // Enforce minimum cooldown for cron routines (cost safety)
-      if (!routine.guardrails.cooldownMs || routine.guardrails.cooldownMs < MIN_CRON_COOLDOWN_MS) {
+      if (
+        !routine.guardrails.cooldownMs ||
+        routine.guardrails.cooldownMs < MIN_CRON_COOLDOWN_MS
+      ) {
         routine.guardrails.cooldownMs = MIN_CRON_COOLDOWN_MS;
       }
     }
@@ -215,10 +232,14 @@ export class RoutineEngine {
       const pattern = routine.trigger.pattern!;
       // ReDoS guard: reject patterns with nested quantifiers or excessive length
       if (pattern.length > 200) {
-        throw new Error(`Routine "${routine.name}" regex pattern exceeds 200 chars`);
+        throw new Error(
+          `Routine "${routine.name}" regex pattern exceeds 200 chars`,
+        );
       }
       if (/(\+|\*|\{)\)?(\+|\*|\{)/.test(pattern)) {
-        throw new Error(`Routine "${routine.name}" regex pattern contains nested quantifiers (ReDoS risk)`);
+        throw new Error(
+          `Routine "${routine.name}" regex pattern contains nested quantifiers (ReDoS risk)`,
+        );
       }
       try {
         const re = new RegExp(pattern);
@@ -229,7 +250,10 @@ export class RoutineEngine {
         );
       }
       // Enforce minimum dedup window for event routines (cost safety)
-      if (!routine.guardrails.dedupWindowMs || routine.guardrails.dedupWindowMs < MIN_EVENT_DEDUP_MS) {
+      if (
+        !routine.guardrails.dedupWindowMs ||
+        routine.guardrails.dedupWindowMs < MIN_EVENT_DEDUP_MS
+      ) {
         routine.guardrails.dedupWindowMs = MIN_EVENT_DEDUP_MS;
       }
     }
@@ -241,7 +265,14 @@ export class RoutineEngine {
 
     const stored = { ...routine };
     this.routines.set(routine.name, stored);
-    logger.debug({ routine: routine.name, group: routine.group, trigger: routine.trigger.type }, 'Routine added');
+    logger.debug(
+      {
+        routine: routine.name,
+        group: routine.group,
+        trigger: routine.trigger.type,
+      },
+      'Routine added',
+    );
 
     // Persist to DB
     if (this.callbacks.persistence) {
@@ -283,7 +314,8 @@ export class RoutineEngine {
     for (const [, routine] of this.routines) {
       if (!routine.enabled) continue;
       if (routine.trigger.type !== 'cron') continue;
-      if (routine.nextFireAt === undefined || routine.nextFireAt > now) continue;
+      if (routine.nextFireAt === undefined || routine.nextFireAt > now)
+        continue;
 
       // Guardrails
       if (!this.passGuardrails(routine, now)) {
@@ -313,7 +345,8 @@ export class RoutineEngine {
       if (routine.trigger.type !== 'event') continue;
 
       // Channel filter
-      if (routine.trigger.channel && channel !== routine.trigger.channel) continue;
+      if (routine.trigger.channel && channel !== routine.trigger.channel)
+        continue;
 
       // Regex match
       const re = this.regexCache.get(name);
@@ -322,7 +355,10 @@ export class RoutineEngine {
       // Dedup window guardrail
       if (routine.guardrails.dedupWindowMs) {
         const lastFire = this.lastEventFireAt.get(name);
-        if (lastFire !== undefined && now - lastFire < routine.guardrails.dedupWindowMs) {
+        if (
+          lastFire !== undefined &&
+          now - lastFire < routine.guardrails.dedupWindowMs
+        ) {
           continue;
         }
       }
@@ -372,7 +408,11 @@ export class RoutineEngine {
 
     // Find routine
     const routine = this.routines.get(routineName);
-    if (!routine || routine.group !== group || routine.trigger.type !== 'webhook') {
+    if (
+      !routine ||
+      routine.group !== group ||
+      routine.trigger.type !== 'webhook'
+    ) {
       return { status: 404, body: 'Routine not found' };
     }
 
@@ -385,11 +425,17 @@ export class RoutineEngine {
     if (!secret) {
       return { status: 500, body: 'No webhook secret configured' };
     }
-    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    const expected = crypto
+      .createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
     // Timing-safe comparison to prevent byte-by-byte signature oracle (P0 fix)
     const expectedBuf = Buffer.from(expected, 'hex');
     const signatureBuf = Buffer.from(signature, 'hex');
-    if (expectedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(expectedBuf, signatureBuf)) {
+    if (
+      expectedBuf.length !== signatureBuf.length ||
+      !crypto.timingSafeEqual(expectedBuf, signatureBuf)
+    ) {
       return { status: 401, body: 'Invalid signature' };
     }
 
@@ -423,7 +469,11 @@ export class RoutineEngine {
     if (g.maxDailyRuns !== undefined) {
       const today = new Date(now).toISOString().slice(0, 10);
       const dailyEntry = this.dailyRunCounts.get(routine.name);
-      if (dailyEntry && dailyEntry.date === today && dailyEntry.count >= g.maxDailyRuns) {
+      if (
+        dailyEntry &&
+        dailyEntry.date === today &&
+        dailyEntry.count >= g.maxDailyRuns
+      ) {
         return false;
       }
     }
@@ -431,7 +481,10 @@ export class RoutineEngine {
     return true;
   }
 
-  private async executeRoutine(routine: Routine, now: number): Promise<RoutineRun> {
+  private async executeRoutine(
+    routine: Routine,
+    now: number,
+  ): Promise<RoutineRun> {
     const run: RoutineRun = {
       routineName: routine.name,
       group: routine.group,
@@ -441,7 +494,10 @@ export class RoutineEngine {
     // Global concurrency cap (P1 fix — prevents cost spiral from many routines)
     if (this.globalRunning >= this.MAX_GLOBAL_CONCURRENT) {
       run.error = 'Global concurrency limit reached';
-      logger.warn({ routine: routine.name, globalRunning: this.globalRunning }, 'Routine skipped — global concurrency limit');
+      logger.warn(
+        { routine: routine.name, globalRunning: this.globalRunning },
+        'Routine skipped — global concurrency limit',
+      );
       return run;
     }
     this.globalRunning++;
@@ -503,7 +559,10 @@ export class RoutineEngine {
       // Auto-pause after 5 consecutive failures
       if (routine.consecutiveFailures >= 5) {
         routine.enabled = false;
-        logger.warn({ routine: routine.name, failures: routine.consecutiveFailures }, 'Routine auto-paused');
+        logger.warn(
+          { routine: routine.name, failures: routine.consecutiveFailures },
+          'Routine auto-paused',
+        );
         this.callbacks.onNotify({
           routineName: routine.name,
           group: routine.group,
@@ -543,7 +602,9 @@ export class WebhookServer {
   constructor(options: WebhookServerOptions) {
     const port = options.port ?? 3456;
     if (port !== 0 && (port < 1024 || port > 65535)) {
-      throw new Error(`Webhook port must be 0 (OS-assigned) or between 1024 and 65535, got ${port}`);
+      throw new Error(
+        `Webhook port must be 0 (OS-assigned) or between 1024 and 65535, got ${port}`,
+      );
     }
     this.port = port;
     this.engine = options.engine;
@@ -577,7 +638,10 @@ export class WebhookServer {
           res.end('Invalid URL encoding');
           return;
         }
-        if (!/^[A-Za-z0-9_-]+$/.test(group) || !/^[A-Za-z0-9_-]+$/.test(routineName)) {
+        if (
+          !/^[A-Za-z0-9_-]+$/.test(group) ||
+          !/^[A-Za-z0-9_-]+$/.test(routineName)
+        ) {
           res.writeHead(400);
           res.end('Invalid group or routine name');
           return;
@@ -601,7 +665,12 @@ export class WebhookServer {
           JSON.parse(bodyStr); // Validate JSON — reject garbage early
           const signature = (req.headers['x-signature'] as string) ?? '';
 
-          const result = await this.engine.handleWebhook(group, routineName, bodyStr, signature);
+          const result = await this.engine.handleWebhook(
+            group,
+            routineName,
+            bodyStr,
+            signature,
+          );
           res.writeHead(result.status);
           res.end(result.body ?? '');
         } catch {

@@ -232,8 +232,9 @@ describe('WhatsAppChannel', () => {
 
       // Reconnect
       (channel as unknown as { connected: boolean }).connected = true;
-      await (channel as unknown as { flushOutgoingQueue: () => Promise<void> })
-        .flushOutgoingQueue();
+      await (
+        channel as unknown as { flushOutgoingQueue: () => Promise<void> }
+      ).flushOutgoingQueue();
 
       // Group messages get prefixed when flushed
       expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {

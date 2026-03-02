@@ -102,7 +102,10 @@ async function initCentroids(): Promise<void> {
           const embedding = await generateEmbeddings(example);
           embeddings.push(embedding);
         } catch (err) {
-          logger.warn({ taskType, err }, 'Failed to generate example embedding, skipping');
+          logger.warn(
+            { taskType, err },
+            'Failed to generate example embedding, skipping',
+          );
         }
       }
 
@@ -166,7 +169,10 @@ export async function semanticClassifyTask(
   try {
     promptEmbedding = await generateEmbeddings(prompt);
   } catch (err) {
-    logger.warn({ err }, 'Failed to generate prompt embedding for semantic classification');
+    logger.warn(
+      { err },
+      'Failed to generate prompt embedding for semantic classification',
+    );
     return null;
   }
 

@@ -23,7 +23,9 @@ import {
 
 const MAX_BODY = 64 * 1024; // 64KB
 
-function parseBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+function parseBody(
+  req: http.IncomingMessage,
+): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -134,9 +136,21 @@ async function startBuild(agentName: string): Promise<void> {
   buildJob.rawLog = [];
   buildJob.error = undefined;
   buildJob.phases = [
-    { name: 'validate', label: 'Validating configuration...', status: 'pending' },
-    { name: 'compile', label: `Compiling ${agentName}'s brain...`, status: 'pending' },
-    { name: 'container', label: `Building ${agentName}'s home...`, status: 'pending' },
+    {
+      name: 'validate',
+      label: 'Validating configuration...',
+      status: 'pending',
+    },
+    {
+      name: 'compile',
+      label: `Compiling ${agentName}'s brain...`,
+      status: 'pending',
+    },
+    {
+      name: 'container',
+      label: `Building ${agentName}'s home...`,
+      status: 'pending',
+    },
     { name: 'start', label: `Starting ${agentName}...`, status: 'pending' },
   ];
 
@@ -168,11 +182,14 @@ async function startBuild(agentName: string): Promise<void> {
       const rawErr = err instanceof Error ? err.message : 'Build phase failed';
       const phase = buildJob.phases[i];
       if (phase.name === 'validate' && rawErr.includes('code 2')) {
-        buildJob.error = "Couldn't connect to Docker. Is Docker Desktop running? Look for the whale icon in your taskbar.";
+        buildJob.error =
+          "Couldn't connect to Docker. Is Docker Desktop running? Look for the whale icon in your taskbar.";
       } else if (phase.name === 'compile') {
-        buildJob.error = "Something went wrong compiling. Click 'Show Details' for the technical log, or try again.";
+        buildJob.error =
+          "Something went wrong compiling. Click 'Show Details' for the technical log, or try again.";
       } else if (phase.name === 'container' && rawErr.includes('code')) {
-        buildJob.error = "Docker build failed. Make sure Docker Desktop is running and has enough disk space.";
+        buildJob.error =
+          'Docker build failed. Make sure Docker Desktop is running and has enough disk space.';
       } else {
         buildJob.error = rawErr;
       }
@@ -187,7 +204,9 @@ async function startBuild(agentName: string): Promise<void> {
 
 // ── API Key Validation ──────────────────────────────────────────────
 
-async function validateAnthropicKey(key: string): Promise<{ ok: boolean; error?: string }> {
+async function validateAnthropicKey(
+  key: string,
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -205,47 +224,87 @@ async function validateAnthropicKey(key: string): Promise<{ ok: boolean; error?:
     if (res.ok || res.status === 200) return { ok: true };
     const body = await res.json().catch(() => ({}));
     if (res.status === 401) {
-      return { ok: false, error: "This API key wasn't recognized. Double-check you copied the full key from console.anthropic.com" };
+      return {
+        ok: false,
+        error:
+          "This API key wasn't recognized. Double-check you copied the full key from console.anthropic.com",
+      };
     }
     if (res.status === 403) {
-      return { ok: false, error: "This key doesn't have permission to use the API. Check your Anthropic account settings." };
+      return {
+        ok: false,
+        error:
+          "This key doesn't have permission to use the API. Check your Anthropic account settings.",
+      };
     }
-    return { ok: false, error: (body as Record<string, unknown>).error?.toString() || `Validation failed (status ${res.status})` };
+    return {
+      ok: false,
+      error:
+        (body as Record<string, unknown>).error?.toString() ||
+        `Validation failed (status ${res.status})`,
+    };
   } catch {
-    return { ok: false, error: "Couldn't reach Anthropic's API. Check your internet connection." };
+    return {
+      ok: false,
+      error: "Couldn't reach Anthropic's API. Check your internet connection.",
+    };
   }
 }
 
-async function validateOpenRouterKey(key: string): Promise<{ ok: boolean; error?: string }> {
+async function validateOpenRouterKey(
+  key: string,
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch('https://openrouter.ai/api/v1/auth/key', {
       headers: { Authorization: `Bearer ${key}` },
     });
     if (res.ok) return { ok: true };
     if (res.status === 401) {
-      return { ok: false, error: "This OpenRouter key wasn't recognized. Copy it from openrouter.ai/settings/keys" };
+      return {
+        ok: false,
+        error:
+          "This OpenRouter key wasn't recognized. Copy it from openrouter.ai/settings/keys",
+      };
     }
-    return { ok: false, error: `OpenRouter validation failed (status ${res.status})` };
+    return {
+      ok: false,
+      error: `OpenRouter validation failed (status ${res.status})`,
+    };
   } catch {
-    return { ok: false, error: "Couldn't reach OpenRouter. Check your internet connection." };
+    return {
+      ok: false,
+      error: "Couldn't reach OpenRouter. Check your internet connection.",
+    };
   }
 }
 
-async function validateDiscordToken(token: string): Promise<{ ok: boolean; error?: string; botName?: string }> {
+async function validateDiscordToken(
+  token: string,
+): Promise<{ ok: boolean; error?: string; botName?: string }> {
   try {
     const res = await fetch('https://discord.com/api/v10/users/@me', {
       headers: { Authorization: `Bot ${token}` },
     });
     if (res.ok) {
-      const data = await res.json() as Record<string, unknown>;
+      const data = (await res.json()) as Record<string, unknown>;
       return { ok: true, botName: data.username as string };
     }
     if (res.status === 401) {
-      return { ok: false, error: "This bot token was rejected by Discord. Make sure you copied the Token (not the Client ID) from the Bot tab." };
+      return {
+        ok: false,
+        error:
+          'This bot token was rejected by Discord. Make sure you copied the Token (not the Client ID) from the Bot tab.',
+      };
     }
-    return { ok: false, error: `Discord validation failed (status ${res.status})` };
+    return {
+      ok: false,
+      error: `Discord validation failed (status ${res.status})`,
+    };
   } catch {
-    return { ok: false, error: "Couldn't reach Discord's API. Check your internet connection." };
+    return {
+      ok: false,
+      error: "Couldn't reach Discord's API. Check your internet connection.",
+    };
   }
 }
 
@@ -260,17 +319,28 @@ async function validateSlackToken(
     if (!res.ok) {
       return { ok: false, error: `Slack API returned status ${res.status}` };
     }
-    const data = await res.json() as Record<string, unknown>;
+    const data = (await res.json()) as Record<string, unknown>;
     if (!data.ok) {
-      return { ok: false, error: "This Slack Bot Token wasn't recognized. Copy the Bot User OAuth Token from your app's OAuth page." };
+      return {
+        ok: false,
+        error:
+          "This Slack Bot Token wasn't recognized. Copy the Bot User OAuth Token from your app's OAuth page.",
+      };
     }
     // Validate app token format
     if (!appToken.startsWith('xapp-')) {
-      return { ok: false, error: "The App-Level Token should start with 'xapp-'. Find it in your Slack app's Basic Information page." };
+      return {
+        ok: false,
+        error:
+          "The App-Level Token should start with 'xapp-'. Find it in your Slack app's Basic Information page.",
+      };
     }
     return { ok: true, botName: data.user as string };
   } catch {
-    return { ok: false, error: "Couldn't reach Slack's API. Check your internet connection." };
+    return {
+      ok: false,
+      error: "Couldn't reach Slack's API. Check your internet connection.",
+    };
   }
 }
 
@@ -307,7 +377,11 @@ const BUDGET_TIERS: Record<string, Record<string, string>> = {
 
 // ── Route Handler ───────────────────────────────────────────────────
 
-function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
+function sendJson(
+  res: http.ServerResponse,
+  status: number,
+  data: unknown,
+): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
 }
@@ -325,7 +399,9 @@ export function handleWizardRequest(
 
   // Localhost guard
   if (!isLocalhost(req)) {
-    sendJson(res, 403, { error: 'Setup wizard is only available from localhost' });
+    sendJson(res, 403, {
+      error: 'Setup wizard is only available from localhost',
+    });
     return true;
   }
 
@@ -417,20 +493,28 @@ async function handleCheckEndpoint(
   let dockerRunning = false;
   let dockerError = '';
   try {
-    const proc = spawn('docker', ['info'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawn('docker', ['info'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     dockerRunning = await new Promise<boolean>((resolve) => {
       proc.on('close', (code) => resolve(code === 0));
       proc.on('error', () => resolve(false));
     });
     if (!dockerRunning) {
-      dockerError = "Can't connect to Docker. Is Docker Desktop running? Look for the whale icon in your taskbar.";
+      dockerError =
+        "Can't connect to Docker. Is Docker Desktop running? Look for the whale icon in your taskbar.";
     }
   } catch {
     dockerError = "Docker doesn't seem to be installed.";
   }
 
   // Check platform
-  const platform = process.platform === 'darwin' ? 'macOS' : process.platform === 'linux' ? 'Linux' : process.platform;
+  const platform =
+    process.platform === 'darwin'
+      ? 'macOS'
+      : process.platform === 'linux'
+        ? 'Linux'
+        : process.platform;
 
   sendJson(res, 200, {
     nodeVersion,
@@ -447,9 +531,9 @@ async function handleIdentityEndpoint(
 ): Promise<void> {
   try {
     const body = await parseBody(req);
-    const name = (body.name as string || '').trim();
-    const personality = (body.personality as string || '').trim();
-    const customPersonality = (body.customPersonality as string || '').trim();
+    const name = ((body.name as string) || '').trim();
+    const personality = ((body.personality as string) || '').trim();
+    const customPersonality = ((body.customPersonality as string) || '').trim();
 
     if (!name) {
       sendJson(res, 400, { error: 'Please enter a name for your agent.' });
@@ -482,9 +566,9 @@ async function handleProviderEndpoint(
 ): Promise<void> {
   try {
     const body = await parseBody(req);
-    const provider = (body.provider as string || '').trim();
-    const apiKey = (body.apiKey as string || '').trim();
-    const budgetTier = (body.budgetTier as string || 'balanced').trim();
+    const provider = ((body.provider as string) || '').trim();
+    const apiKey = ((body.apiKey as string) || '').trim();
+    const budgetTier = ((body.budgetTier as string) || 'balanced').trim();
 
     if (!provider || !['anthropic', 'openrouter'].includes(provider)) {
       sendJson(res, 400, { error: 'Please choose a provider.' });
@@ -496,9 +580,10 @@ async function handleProviderEndpoint(
     }
 
     // Validate key
-    const validation = provider === 'anthropic'
-      ? await validateAnthropicKey(apiKey)
-      : await validateOpenRouterKey(apiKey);
+    const validation =
+      provider === 'anthropic'
+        ? await validateAnthropicKey(apiKey)
+        : await validateOpenRouterKey(apiKey);
 
     if (!validation.ok) {
       sendJson(res, 400, { error: validation.error });
@@ -537,9 +622,9 @@ async function handleChannelEndpoint(
 ): Promise<void> {
   try {
     const body = await parseBody(req);
-    const channel = (body.channel as string || '').trim();
-    const token = (body.token as string || '').trim();
-    const appToken = (body.appToken as string || '').trim();
+    const channel = ((body.channel as string) || '').trim();
+    const token = ((body.token as string) || '').trim();
+    const appToken = ((body.appToken as string) || '').trim();
 
     if (!channel || !['discord', 'slack', 'whatsapp'].includes(channel)) {
       sendJson(res, 400, { error: 'Please choose a channel.' });
@@ -553,7 +638,10 @@ async function handleChannelEndpoint(
       state.channel = channel;
       writeWizardState(state);
       markStepComplete('channel');
-      sendJson(res, 200, { ok: true, note: "WhatsApp will show a QR code when the service starts." });
+      sendJson(res, 200, {
+        ok: true,
+        note: 'WhatsApp will show a QR code when the service starts.',
+      });
       return;
     }
 
@@ -585,7 +673,9 @@ async function handleChannelEndpoint(
         return;
       }
       if (!appToken) {
-        sendJson(res, 400, { error: 'Please paste your Slack App-Level Token.' });
+        sendJson(res, 400, {
+          error: 'Please paste your Slack App-Level Token.',
+        });
         return;
       }
       const validation = await validateSlackToken(token, appToken);

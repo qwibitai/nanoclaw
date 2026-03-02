@@ -24,10 +24,7 @@ function makeRoutine(overrides: Partial<Routine> = {}): Routine {
 }
 
 function hmacSign(rawBody: string, secret: string): string {
-  return crypto
-    .createHmac('sha256', secret)
-    .update(rawBody)
-    .digest('hex');
+  return crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +138,12 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'github-push', rawBody, signature);
+    const result = await engine.handleWebhook(
+      'main',
+      'github-push',
+      rawBody,
+      signature,
+    );
 
     expect(result.status).toBe(200);
     expect(onLightweightAction).toHaveBeenCalled();
@@ -159,7 +161,12 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'github-push', rawBody, badSignature);
+    const result = await engine.handleWebhook(
+      'main',
+      'github-push',
+      rawBody,
+      badSignature,
+    );
 
     expect(result.status).toBe(401);
     expect(onLightweightAction).not.toHaveBeenCalled();
@@ -425,7 +432,12 @@ describe('RoutineEngine', () => {
     });
 
     engine.addRoutine(routine);
-    const result = await engine.handleWebhook('main', 'large-webhook', rawBody, signature);
+    const result = await engine.handleWebhook(
+      'main',
+      'large-webhook',
+      rawBody,
+      signature,
+    );
 
     // Should reject with an appropriate error status
     expect(result.status).toBeGreaterThanOrEqual(400);
@@ -536,7 +548,12 @@ describe('WebhookServer', () => {
     for (let i = 0; i < 11; i++) {
       const rawBody = JSON.stringify({ seq: i });
       const signature = hmacSign(rawBody, secret);
-      const result = await engine.handleWebhook('test', 'rate-limited', rawBody, signature);
+      const result = await engine.handleWebhook(
+        'test',
+        'rate-limited',
+        rawBody,
+        signature,
+      );
       results.push(result);
     }
 

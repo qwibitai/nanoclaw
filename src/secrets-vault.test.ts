@@ -125,18 +125,18 @@ describe('SecretsVault', () => {
     const SecretsVault = await loadVault();
     const tooShort = shortMasterKey(); // 16 bytes = 32 hex chars
 
-    await expect(
-      SecretsVault.create(tooShort, secretsDir)
-    ).rejects.toThrow('SOVEREIGN_MASTER_KEY must be at least 32 bytes (64 hex characters)');
+    await expect(SecretsVault.create(tooShort, secretsDir)).rejects.toThrow(
+      'SOVEREIGN_MASTER_KEY must be at least 32 bytes (64 hex characters)',
+    );
   });
 
   // --- Test Case 4b: empty master key variant ---
   it('should reject empty master key', async () => {
     const SecretsVault = await loadVault();
 
-    await expect(
-      SecretsVault.create('', secretsDir)
-    ).rejects.toThrow('SOVEREIGN_MASTER_KEY must be at least 32 bytes (64 hex characters)');
+    await expect(SecretsVault.create('', secretsDir)).rejects.toThrow(
+      'SOVEREIGN_MASTER_KEY must be at least 32 bytes (64 hex characters)',
+    );
   });
 
   // --- Test Case 5: "should list secret names without exposing values" ---

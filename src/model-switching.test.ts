@@ -264,7 +264,9 @@ describe('model-switching', () => {
 
     it('should return null for non-command messages', () => {
       expect(parseModelCommand('hello world')).toBeNull();
-      expect(parseModelCommand('I want to use /model in a sentence')).toBeNull();
+      expect(
+        parseModelCommand('I want to use /model in a sentence'),
+      ).toBeNull();
     });
 
     it('should return null for empty string', () => {
@@ -273,7 +275,9 @@ describe('model-switching', () => {
 
     it('should not treat /model commands embedded mid-message as commands', () => {
       // Only messages that START with /model or /thinking should be parsed
-      const cmd = parseModelCommand('please run /model claude-sonnet-4-20250514');
+      const cmd = parseModelCommand(
+        'please run /model claude-sonnet-4-20250514',
+      );
       expect(cmd).toBeNull();
     });
   });

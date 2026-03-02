@@ -47,7 +47,8 @@ function setSecurityHeaders(
   res: http.ServerResponse,
 ): void {
   const origin = req.headers.origin || '';
-  const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+  const localhostOriginPattern =
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
   const allowedOrigin = localhostOriginPattern.test(origin)
     ? origin
     : `http://127.0.0.1:${DASHBOARD_PORT}`;
@@ -440,7 +441,9 @@ export async function startDashboard(): Promise<http.Server> {
       logger.error(msg);
       throw new Error(msg);
     }
-    logger.info('Dashboard starting in wizard mode (no auth required — localhost only)');
+    logger.info(
+      'Dashboard starting in wizard mode (no auth required — localhost only)',
+    );
   }
 
   if (!DASHBOARD_AUTH_TOKEN && DASHBOARD_ALLOW_UNAUTH) {
@@ -450,7 +453,10 @@ export async function startDashboard(): Promise<http.Server> {
   }
 
   server.listen(DASHBOARD_PORT, '127.0.0.1', () => {
-    logger.info({ port: DASHBOARD_PORT, host: '127.0.0.1' }, 'Dashboard server started');
+    logger.info(
+      { port: DASHBOARD_PORT, host: '127.0.0.1' },
+      'Dashboard server started',
+    );
   });
 
   return server;

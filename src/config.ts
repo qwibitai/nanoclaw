@@ -164,10 +164,7 @@ export const WEBHOOK_SERVER_ENABLED =
 // Hybrid memory — kill switch already in embedding.ts via HYBRID_MEMORY_ENABLED
 
 // Webhook server port
-export const WEBHOOK_PORT = parseInt(
-  process.env.WEBHOOK_PORT || '3456',
-  10,
-);
+export const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3456', 10);
 
 // Session pool settings
 export const MAX_POOL_SIZE = Math.max(

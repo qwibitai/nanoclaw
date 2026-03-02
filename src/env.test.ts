@@ -35,7 +35,8 @@ describe('env', () => {
     vi.restoreAllMocks();
     if (originalBaseUrl === undefined) delete process.env.ANTHROPIC_BASE_URL;
     else process.env.ANTHROPIC_BASE_URL = originalBaseUrl;
-    if (originalAuthToken === undefined) delete process.env.ANTHROPIC_AUTH_TOKEN;
+    if (originalAuthToken === undefined)
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
     else process.env.ANTHROPIC_AUTH_TOKEN = originalAuthToken;
   });
 

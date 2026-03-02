@@ -41,7 +41,11 @@ describe('task scheduler', () => {
       registeredGroups: () => ({}),
       getSessions: () => ({}),
       queue: { enqueueTask } as unknown as {
-        enqueueTask: (jid: string, taskId: string, fn: () => Promise<void>) => void;
+        enqueueTask: (
+          jid: string,
+          taskId: string,
+          fn: () => Promise<void>,
+        ) => void;
       },
       onProcess: () => {},
       sendMessage: async () => {},

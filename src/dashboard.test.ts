@@ -31,7 +31,12 @@ vi.mock('./db.js', () => ({
 function fetch(
   url: string,
   options?: { headers?: Record<string, string> },
-): Promise<{ status: number; headers: http.IncomingHttpHeaders; json: () => Promise<unknown>; text: () => Promise<string> }> {
+): Promise<{
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+}> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const reqOptions: http.RequestOptions = {
@@ -194,7 +199,12 @@ describe('Dashboard', () => {
   });
 
   it('JSON endpoints return proper Content-Type', async () => {
-    const endpoints = ['/api/health', '/api/status', '/api/groups', '/api/memory'];
+    const endpoints = [
+      '/api/health',
+      '/api/status',
+      '/api/groups',
+      '/api/memory',
+    ];
     for (const endpoint of endpoints) {
       const res = await fetch(`${baseUrl}${endpoint}`);
       expect(res.headers['content-type']).toBe('application/json');
@@ -227,9 +237,7 @@ describe('Dashboard', () => {
 
   it('CORS headers are set on API responses', async () => {
     const res = await fetch(`${baseUrl}/api/status`);
-    expect(res.headers['access-control-allow-origin']).toContain(
-      '127.0.0.1',
-    );
+    expect(res.headers['access-control-allow-origin']).toContain('127.0.0.1');
     expect(res.headers['access-control-allow-methods']).toContain('GET');
   });
 

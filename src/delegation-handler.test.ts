@@ -20,7 +20,10 @@ vi.mock('./container-runner.js', () => ({
   runContainerAgent: vi.fn(async (_group, _opts, _onProcess, onOutput) => {
     // Simulate a successful container run
     if (onOutput) {
-      await onOutput({ result: 'Worker completed successfully', status: 'success' });
+      await onOutput({
+        result: 'Worker completed successfully',
+        status: 'success',
+      });
     }
     return { status: 'success', result: 'Worker completed successfully' };
   }),
@@ -122,7 +125,9 @@ describe('startDelegationHandler', () => {
     await new Promise((r) => setTimeout(r, 1500));
 
     // Request file should be consumed
-    expect(fs.existsSync(path.join(requestDir, `${request.id}.json`))).toBe(false);
+    expect(fs.existsSync(path.join(requestDir, `${request.id}.json`))).toBe(
+      false,
+    );
   });
 });
 
@@ -139,10 +144,7 @@ describe('swarm requests', () => {
   it('swarm request file has correct schema', () => {
     const request = {
       id: 'swarm-test-1',
-      subtasks: [
-        { prompt: 'Research task A' },
-        { prompt: 'Research task B' },
-      ],
+      subtasks: [{ prompt: 'Research task A' }, { prompt: 'Research task B' }],
 
       timeout_seconds: 600,
       source_group: 'test',
@@ -161,10 +163,7 @@ describe('swarm requests', () => {
 
     const request = {
       id: 'swarm-test-2',
-      subtasks: [
-        { prompt: 'Research task A' },
-        { prompt: 'Research task B' },
-      ],
+      subtasks: [{ prompt: 'Research task A' }, { prompt: 'Research task B' }],
 
       timeout_seconds: 60,
       source_group: 'test',
@@ -187,10 +186,7 @@ describe('swarm requests', () => {
       completed_count: 2,
       total_count: 2,
       synthesis: '## Subtask 1:\nResult A\n\n## Subtask 2:\nResult B',
-      worker_results: [
-        { result: 'Result A' },
-        { result: 'Result B' },
-      ],
+      worker_results: [{ result: 'Result A' }, { result: 'Result B' }],
       timestamp: new Date().toISOString(),
     };
 
@@ -227,7 +223,11 @@ describe('response writing', () => {
     // Simulate a response write using the same pattern as delegation-handler
     const responsePath = path.join(responsesDir, 'test-response.json');
     const tempPath = `${responsePath}.tmp`;
-    const data = { result: 'done', model: null, timestamp: new Date().toISOString() };
+    const data = {
+      result: 'done',
+      model: null,
+      timestamp: new Date().toISOString(),
+    };
     fs.writeFileSync(tempPath, JSON.stringify(data));
     fs.renameSync(tempPath, responsePath);
 

@@ -115,7 +115,10 @@ describe('selectModel', () => {
   });
 
   it('routes research to smart model', async () => {
-    const result = await selectModel('Research competitor pricing', DEFAULT_ROUTES);
+    const result = await selectModel(
+      'Research competitor pricing',
+      DEFAULT_ROUTES,
+    );
     expect(result.model).toBe('claude-sonnet-4-6');
     expect(result.taskType).toBe('research');
   });

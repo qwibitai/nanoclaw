@@ -25,8 +25,7 @@ const NETWORK_TIMEOUT_CODES = new Set([
 
 export function classifyError(err: unknown): ErrorClassification {
   const error = err as Record<string, unknown>;
-  const status =
-    typeof error?.status === 'number' ? error.status : undefined;
+  const status = typeof error?.status === 'number' ? error.status : undefined;
   const code = typeof error?.code === 'string' ? error.code : undefined;
 
   // context_length_exceeded — skip to next provider, don't retry
@@ -183,7 +182,9 @@ export class FailoverProvider {
 
       for (const provider of available) {
         if (++totalAttempts > this.maxTotalAttempts) {
-          throw new Error('Provider chain budget exhausted — too many total attempts');
+          throw new Error(
+            'Provider chain budget exhausted — too many total attempts',
+          );
         }
         const state = this.state.get(provider.name)!;
         try {
@@ -397,24 +398,22 @@ export class ProviderChain {
     const failureThreshold = opts.failureThreshold ?? 3;
 
     // Build failover entries: wrap each provider's execute with retry + circuit breaker
-    const failoverEntries: FailoverProviderEntry[] = opts.providers.map(
-      (p) => {
-        const retry = new RetryProvider({ maxRetries });
-        const cb = new CircuitBreakerProvider({
-          failureThreshold: opts.circuitBreakerThreshold ?? 5,
-          recoveryTimeout: opts.circuitBreakerRecoveryTimeout ?? 30_000,
-        });
+    const failoverEntries: FailoverProviderEntry[] = opts.providers.map((p) => {
+      const retry = new RetryProvider({ maxRetries });
+      const cb = new CircuitBreakerProvider({
+        failureThreshold: opts.circuitBreakerThreshold ?? 5,
+        recoveryTimeout: opts.circuitBreakerRecoveryTimeout ?? 30_000,
+      });
 
-        const executeFn =
-          p.execute ??
-          (() => Promise.reject(new Error(`No execute function for ${p.name}`)));
+      const executeFn =
+        p.execute ??
+        (() => Promise.reject(new Error(`No execute function for ${p.name}`)));
 
-        return {
-          name: p.name,
-          execute: () => cb.execute(() => retry.execute(executeFn)),
-        };
-      },
-    );
+      return {
+        name: p.name,
+        execute: () => cb.execute(() => retry.execute(executeFn)),
+      };
+    });
 
     this.failover = new FailoverProvider({
       providers: failoverEntries,

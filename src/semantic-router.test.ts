@@ -12,29 +12,85 @@ const { mockGenerateEmbeddings, mockCosineSimilarity } = vi.hoisted(() => {
   // Category keywords mapped to embedding dimension indices.
   const categoryKeywords: Record<string, number> = {
     // research (dim 0)
-    research: 0, investigate: 0, 'find out': 0, 'deep dive': 0, compare: 0,
-    alternatives: 0, 'pros and cons': 0, 'look into': 0, explore: 0, trends: 0,
+    research: 0,
+    investigate: 0,
+    'find out': 0,
+    'deep dive': 0,
+    compare: 0,
+    alternatives: 0,
+    'pros and cons': 0,
+    'look into': 0,
+    explore: 0,
+    trends: 0,
     // grunt (dim 1)
-    format: 1, convert: 1, csv: 1, json: 1, markdown: 1, clean: 1,
-    deduplicate: 1, summarize: 1, extract: 1, parse: 1, sort: 1,
+    format: 1,
+    convert: 1,
+    csv: 1,
+    json: 1,
+    markdown: 1,
+    clean: 1,
+    deduplicate: 1,
+    summarize: 1,
+    extract: 1,
+    parse: 1,
+    sort: 1,
     // conversation (dim 2)
-    hey: 2, hello: 2, thanks: 2, 'good morning': 2, joke: 2,
-    'how are you': 2, remind: 2, 'what do you think': 2,
+    hey: 2,
+    hello: 2,
+    thanks: 2,
+    'good morning': 2,
+    joke: 2,
+    'how are you': 2,
+    remind: 2,
+    'what do you think': 2,
     // analysis (dim 3)
-    analyze: 3, evaluate: 3, audit: 3, review: 3, assess: 3,
-    diagnose: 3, metrics: 3, revenue: 3, roi: 3, churn: 3, 'break down': 3,
+    analyze: 3,
+    evaluate: 3,
+    audit: 3,
+    review: 3,
+    assess: 3,
+    diagnose: 3,
+    metrics: 3,
+    revenue: 3,
+    roi: 3,
+    churn: 3,
+    'break down': 3,
     // content (dim 4)
-    write: 4, draft: 4, compose: 4, 'blog post': 4, email: 4,
-    newsletter: 4, tweet: 4, 'press release': 4, linkedin: 4,
+    write: 4,
+    draft: 4,
+    compose: 4,
+    'blog post': 4,
+    email: 4,
+    newsletter: 4,
+    tweet: 4,
+    'press release': 4,
+    linkedin: 4,
     // code (dim 5)
-    implement: 5, debug: 5, fix: 5, refactor: 5, 'unit test': 5,
-    api: 5, endpoint: 5, deploy: 5, typescript: 5, bug: 5,
+    implement: 5,
+    debug: 5,
+    fix: 5,
+    refactor: 5,
+    'unit test': 5,
+    api: 5,
+    endpoint: 5,
+    deploy: 5,
+    typescript: 5,
+    bug: 5,
     // quick-check (dim 6)
-    check: 6, weather: 6, 'what time': 6, status: 6, verify: 6,
-    price: 6, running: 6, pipeline: 6, certificate: 6,
+    check: 6,
+    weather: 6,
+    'what time': 6,
+    status: 6,
+    verify: 6,
+    price: 6,
+    running: 6,
+    pipeline: 6,
+    certificate: 6,
   };
 
-  const mockGenerateEmbeddings = async (text: string): Promise<Float32Array> => {
+  const mockGenerateEmbeddings = async (
+    text: string,
+  ): Promise<Float32Array> => {
     const arr = new Float32Array(512);
     const lower = text.toLowerCase();
 
@@ -95,7 +151,9 @@ import { generateEmbeddings } from './embedding.js';
 beforeEach(() => {
   _resetCentroidsForTests();
   // Restore the mock implementation (in case a test overrode it via mockRejectedValue)
-  (generateEmbeddings as ReturnType<typeof vi.fn>).mockImplementation(mockGenerateEmbeddings);
+  (generateEmbeddings as ReturnType<typeof vi.fn>).mockImplementation(
+    mockGenerateEmbeddings,
+  );
   vi.clearAllMocks();
 });
 
@@ -145,16 +203,19 @@ describe('SIMILARITY_THRESHOLD', () => {
 describe('_resetCentroidsForTests', () => {
   it('clears cached centroids so next call re-initializes', async () => {
     // First call initializes centroids
-    await semanticClassifyTask('Research new AI trends and investigate options');
-    const callCountAfterFirst = (
-      generateEmbeddings as ReturnType<typeof vi.fn>
-    ).mock.calls.length;
+    await semanticClassifyTask(
+      'Research new AI trends and investigate options',
+    );
+    const callCountAfterFirst = (generateEmbeddings as ReturnType<typeof vi.fn>)
+      .mock.calls.length;
 
     // Reset centroids
     _resetCentroidsForTests();
 
     // Second call should re-initialize (generating new embeddings)
-    await semanticClassifyTask('Investigate competitor strategies and explore alternatives');
+    await semanticClassifyTask(
+      'Investigate competitor strategies and explore alternatives',
+    );
     const callCountAfterSecond = (
       generateEmbeddings as ReturnType<typeof vi.fn>
     ).mock.calls.length;
@@ -225,13 +286,16 @@ describe('semanticClassifyTask', () => {
 
   it('re-initialization reuses cached centroids (does not re-compute)', async () => {
     // First call initializes centroids + generates prompt embedding
-    await semanticClassifyTask('Research new AI trends and investigate options');
-    const callCountAfterFirst = (
-      generateEmbeddings as ReturnType<typeof vi.fn>
-    ).mock.calls.length;
+    await semanticClassifyTask(
+      'Research new AI trends and investigate options',
+    );
+    const callCountAfterFirst = (generateEmbeddings as ReturnType<typeof vi.fn>)
+      .mock.calls.length;
 
     // Second call should NOT re-compute centroids — only 1 new embedding for prompt
-    await semanticClassifyTask('Investigate competitor strategies and explore alternatives');
+    await semanticClassifyTask(
+      'Investigate competitor strategies and explore alternatives',
+    );
     const callCountAfterSecond = (
       generateEmbeddings as ReturnType<typeof vi.fn>
     ).mock.calls.length;
@@ -258,9 +322,8 @@ describe('semanticClassifyTask', () => {
 
     // Count total example embeddings generated — should only be ~49 (7 types x 7 examples)
     // plus the 3 prompt embeddings = ~52, NOT 3x the centroid embeddings
-    const totalCalls = (
-      generateEmbeddings as ReturnType<typeof vi.fn>
-    ).mock.calls.length;
+    const totalCalls = (generateEmbeddings as ReturnType<typeof vi.fn>).mock
+      .calls.length;
     const exampleCount = Object.values(TASK_EXAMPLES).reduce(
       (sum, arr) => sum + arr.length,
       0,

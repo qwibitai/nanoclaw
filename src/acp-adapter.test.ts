@@ -24,9 +24,11 @@ describe('extractPromptText', () => {
       { type: 'image' as const, data: 'abc', mimeType: 'image/png' },
       { type: 'text' as const, text: 'And this' },
     ];
-    expect(extractPromptText(blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[])).toBe(
-      'Keep this\nAnd this',
-    );
+    expect(
+      extractPromptText(
+        blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[],
+      ),
+    ).toBe('Keep this\nAnd this');
   });
 
   it('returns empty string for no text blocks', () => {
@@ -34,7 +36,9 @@ describe('extractPromptText', () => {
       { type: 'image' as const, data: 'abc', mimeType: 'image/png' },
     ];
     expect(
-      extractPromptText(blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[]),
+      extractPromptText(
+        blocks as unknown as import('@agentclientprotocol/sdk').ContentBlock[],
+      ),
     ).toBe('');
   });
 

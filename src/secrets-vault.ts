@@ -104,7 +104,11 @@ function writeSecretsAtomic(filePath: string, data: SecretsData): void {
     fs.writeFileSync(tmpPath, JSON.stringify(data), { mode: 0o600 });
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch { /* best effort cleanup */ }
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* best effort cleanup */
+    }
     throw err;
   }
 }
@@ -186,6 +190,9 @@ export class SecretsVault {
 
     // Update in-memory master key
     this.masterKey = newMasterKey;
-    logger.info({ secretCount: Object.keys(reEncrypted).length }, 'Secrets vault rotated');
+    logger.info(
+      { secretCount: Object.keys(reEncrypted).length },
+      'Secrets vault rotated',
+    );
   }
 }

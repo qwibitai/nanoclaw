@@ -201,7 +201,10 @@ export async function selectModel(
         };
       }
     } catch (err) {
-      logger.debug({ err }, 'Semantic classification failed, using keyword fallback');
+      logger.debug(
+        { err },
+        'Semantic classification failed, using keyword fallback',
+      );
     }
   }
 

@@ -807,9 +807,9 @@ export function storeDbRoutine(routine: DbRoutine): void {
 }
 
 export function getDbRoutine(name: string): DbRoutine | undefined {
-  return db
-    .prepare('SELECT * FROM routines WHERE name = ?')
-    .get(name) as DbRoutine | undefined;
+  return db.prepare('SELECT * FROM routines WHERE name = ?').get(name) as
+    | DbRoutine
+    | undefined;
 }
 
 export function getAllDbRoutines(): DbRoutine[] {
@@ -843,7 +843,9 @@ export function logDbRoutineRun(run: {
 /** Prune routine_runs older than the given number of days (default 30). */
 export function pruneOldRoutineRuns(maxAgeDays: number = 30): number {
   const cutoff = new Date(Date.now() - maxAgeDays * 86_400_000).toISOString();
-  const result = db.prepare('DELETE FROM routine_runs WHERE started_at < ?').run(cutoff);
+  const result = db
+    .prepare('DELETE FROM routine_runs WHERE started_at < ?')
+    .run(cutoff);
   return result.changes;
 }
 

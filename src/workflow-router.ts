@@ -320,7 +320,8 @@ async function executeAction(
       break;
     }
     case 'proactiveAgent': {
-      const { detectProactiveOpportunities } = await import('./proactive-agent.js');
+      const { detectProactiveOpportunities } =
+        await import('./proactive-agent.js');
       await detectProactiveOpportunities(ctx.groupFolder);
       break;
     }

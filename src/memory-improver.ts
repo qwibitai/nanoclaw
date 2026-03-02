@@ -66,7 +66,10 @@ export function readRecentLearnings(groupPath: string): string {
   try {
     const stat = fs.statSync(learningsPath);
     if (stat.size > MAX_FILE_SIZE) {
-      logger.warn({ path: learningsPath, size: stat.size }, 'LEARNINGS.md too large');
+      logger.warn(
+        { path: learningsPath, size: stat.size },
+        'LEARNINGS.md too large',
+      );
       return '';
     }
 
@@ -268,7 +271,10 @@ export async function improveMemory(groupFolder: string): Promise<void> {
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
         circuitBreakerTrippedAt = Date.now();
-      logger.warn({ err, consecutiveFailures }, 'Memory improver LLM call failed');
+      logger.warn(
+        { err, consecutiveFailures },
+        'Memory improver LLM call failed',
+      );
       return;
     } finally {
       clearTimeout(timeout);

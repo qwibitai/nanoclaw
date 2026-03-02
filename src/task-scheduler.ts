@@ -147,8 +147,12 @@ async function runTask(
         assistantName: ASSISTANT_NAME,
         model:
           task.model ||
-          (await selectModel(task.prompt, loadModelRoutingConfig(task.group_folder)))
-            .model,
+          (
+            await selectModel(
+              task.prompt,
+              loadModelRoutingConfig(task.group_folder),
+            )
+          ).model,
       },
       (proc, containerName) =>
         deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),

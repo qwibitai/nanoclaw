@@ -118,11 +118,14 @@ export function startDelegationHandler(
           );
 
           // Spawn worker in background (don't block the poll loop)
-          spawnWorker(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
-            () => {
-              activeDelegations.delete(request.id);
-            },
-          );
+          spawnWorker(
+            request,
+            sourceGroup,
+            ipcBaseDir,
+            registeredGroups,
+          ).finally(() => {
+            activeDelegations.delete(request.id);
+          });
         }
       }
 
@@ -132,7 +135,9 @@ export function startDelegationHandler(
         if (fs.existsSync(swarmDir)) {
           let swarmFiles: string[];
           try {
-            swarmFiles = fs.readdirSync(swarmDir).filter((f) => f.endsWith('.json'));
+            swarmFiles = fs
+              .readdirSync(swarmDir)
+              .filter((f) => f.endsWith('.json'));
           } catch {
             swarmFiles = [];
           }
@@ -146,23 +151,36 @@ export function startDelegationHandler(
               request = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
             } catch (err) {
               logger.error({ file, err }, 'Failed to parse swarm request');
-              try { fs.unlinkSync(filePath); } catch {}
+              try {
+                fs.unlinkSync(filePath);
+              } catch {}
               continue;
             }
 
             if (activeDelegations.has(request.id)) continue;
 
-            try { fs.unlinkSync(filePath); } catch {}
+            try {
+              fs.unlinkSync(filePath);
+            } catch {}
             activeDelegations.add(request.id);
 
             logger.info(
-              { swarmId: request.id, sourceGroup, subtaskCount: request.subtasks.length },
+              {
+                swarmId: request.id,
+                sourceGroup,
+                subtaskCount: request.subtasks.length,
+              },
               'Processing swarm request',
             );
 
-            processSwarmRequest(request, sourceGroup, ipcBaseDir, registeredGroups).finally(
-              () => { activeDelegations.delete(request.id); },
-            );
+            processSwarmRequest(
+              request,
+              sourceGroup,
+              ipcBaseDir,
+              registeredGroups,
+            ).finally(() => {
+              activeDelegations.delete(request.id);
+            });
           }
         }
       }
@@ -254,8 +272,12 @@ async function spawnWorker(
         assistantName: 'Worker',
         model:
           request.model ||
-          (await selectModel(request.prompt, loadModelRoutingConfig(sourceGroup)))
-            .model,
+          (
+            await selectModel(
+              request.prompt,
+              loadModelRoutingConfig(sourceGroup),
+            )
+          ).model,
       },
       (_proc, _name) => {
         // We don't track the process — container-runner handles cleanup
@@ -375,7 +397,12 @@ async function processSwarmRequest(
             assistantName: `Worker-${index + 1}`,
             model:
               subtask.model ||
-              (await selectModel(subtask.prompt, loadModelRoutingConfig(sourceGroup))).model,
+              (
+                await selectModel(
+                  subtask.prompt,
+                  loadModelRoutingConfig(sourceGroup),
+                )
+              ).model,
           },
           (_proc, _name) => {},
           async (streamOutput: ContainerOutput) => {
@@ -391,7 +418,9 @@ async function processSwarmRequest(
         }
         return { error: output.error || 'Worker failed' };
       } catch (err) {
-        return { error: `Worker error: ${err instanceof Error ? err.message : String(err)}` };
+        return {
+          error: `Worker error: ${err instanceof Error ? err.message : String(err)}`,
+        };
       }
     },
   );
@@ -453,7 +482,11 @@ async function processSwarmRequest(
   fs.renameSync(tempPath, resultPath);
 
   logger.info(
-    { swarmId: request.id, completedCount, totalCount: request.subtasks.length },
+    {
+      swarmId: request.id,
+      completedCount,
+      totalCount: request.subtasks.length,
+    },
     'Swarm completed',
   );
 }

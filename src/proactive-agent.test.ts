@@ -65,8 +65,14 @@ describe('readRecentObserverFiles', () => {
 describe('buildTopicFrequencyMap', () => {
   it('returns empty map when no topics recur across 3+ days', () => {
     const files = [
-      { date: '2026-03-01', content: '## **Meeting notes**\nDiscussed project.' },
-      { date: '2026-02-28', content: '## **Different topic**\nSomething else.' },
+      {
+        date: '2026-03-01',
+        content: '## **Meeting notes**\nDiscussed project.',
+      },
+      {
+        date: '2026-02-28',
+        content: '## **Different topic**\nSomething else.',
+      },
     ];
     const map = buildTopicFrequencyMap(files);
     expect(map.size).toBe(0);
@@ -150,7 +156,11 @@ describe('ProactiveOutputSchema', () => {
 describe('formatSuggestionMessage', () => {
   it('formats suggestions as readable message', () => {
     const msg = formatSuggestionMessage([
-      { pattern: 'Daily standup', suggestion: 'Auto-generate summary', frequency: 'daily' },
+      {
+        pattern: 'Daily standup',
+        suggestion: 'Auto-generate summary',
+        frequency: 'daily',
+      },
     ]);
     expect(msg).toContain('Proactive Suggestions');
     expect(msg).toContain('Daily standup');

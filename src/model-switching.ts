@@ -10,7 +10,9 @@ const DEFAULT_MODELS = [
 ];
 
 export const ALLOWED_MODELS: string[] = process.env.ALLOWED_MODELS
-  ? process.env.ALLOWED_MODELS.split(',').map((m) => m.trim()).filter(Boolean)
+  ? process.env.ALLOWED_MODELS.split(',')
+      .map((m) => m.trim())
+      .filter(Boolean)
   : DEFAULT_MODELS;
 
 interface Override {
@@ -34,7 +36,10 @@ interface ParsedCommand {
 const MAX_OVERRIDES = 100;
 const overrides = new Map<string, Override>();
 
-export function setModel(groupFolder: string, modelName: string): SetModelResult {
+export function setModel(
+  groupFolder: string,
+  modelName: string,
+): SetModelResult {
   if (!modelName || !ALLOWED_MODELS.includes(modelName)) {
     return {
       success: false,
