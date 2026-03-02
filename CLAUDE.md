@@ -29,7 +29,7 @@ Single Node.js process that connects to Discord/WhatsApp, routes messages to Cla
 | `/setup` | First-time installation, authentication, service configuration |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
-| `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
+| `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
 | `/updatebot` | Check 3am update, apply new configs, health check bots |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |

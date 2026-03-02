@@ -301,7 +301,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       }
     }
 
-    // Store structured outcomes including the test command so applyUpdate() can run them
+    // Store structured outcomes including the test command
     const outcomes: Record<string, unknown> = manifest.structured
       ? { ...manifest.structured }
       : {};
