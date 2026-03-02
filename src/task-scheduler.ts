@@ -236,6 +236,23 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
           continue;
         }
 
+        // Update next_run BEFORE enqueueing to prevent duplicate runs
+        // (scheduler may poll again before task completes)
+        let nextRun: string | null = null;
+        if (currentTask.schedule_type === 'cron') {
+          const interval = CronExpressionParser.parse(currentTask.schedule_value, {
+            tz: TIMEZONE,
+          });
+          nextRun = interval.next().toISOString();
+        } else if (currentTask.schedule_type === 'interval') {
+          const ms = parseInt(currentTask.schedule_value, 10);
+          nextRun = new Date(Date.now() + ms).toISOString();
+        }
+        // 'once' tasks: nextRun stays null
+        if (nextRun) {
+          updateTask(currentTask.id, { next_run: nextRun });
+        }
+
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>
           runTask(currentTask, deps),
         );
