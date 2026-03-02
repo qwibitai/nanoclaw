@@ -1,7 +1,7 @@
 ---
 title: Add Read-Only Visibility Dashboard
 type: feat
-status: active
+status: completed
 date: 2026-03-01
 origin: docs/plans/2026-01-01-nanoclaw-dashboard.md
 deepened: 2026-03-01
