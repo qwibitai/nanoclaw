@@ -1,0 +1,30 @@
+# Custom layer on top of base NanoClaw agent image.
+# Adds dev tools (jq, ripgrep, gh, linear-cli) without modifying upstream Dockerfile.
+#
+# Build:  docker build -f Dockerfile.custom -t nanoclaw-agent:custom .
+# Requires: docker build -t nanoclaw-agent:latest ./container  (base image)
+
+FROM nanoclaw-agent:latest
+
+USER root
+
+# Install jq and ripgrep
+RUN apt-get update && apt-get install -y \
+    jq \
+    ripgrep \
+    xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install linear-cli (Rust binary, NOT the npm @linear/cli package)
+RUN curl -fsSL https://github.com/schpet/linear-cli/releases/download/v1.10.0/linear-x86_64-unknown-linux-gnu.tar.xz \
+    | tar -xJ --strip-components=1 -C /usr/local/bin/ --wildcards '*/linear'
+
+USER node
