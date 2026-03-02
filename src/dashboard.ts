@@ -12,6 +12,7 @@ import {
   DASHBOARD_PORT,
 } from './config.js';
 import { logger } from './logger.js';
+import { handleWizardRequest } from './setup-wizard.js';
 import {
   getAllRegisteredGroups,
   getAllTasks,
@@ -53,7 +54,7 @@ function setSecurityHeaders(
 
   res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
   res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -384,8 +385,11 @@ function formatUptime(seconds: number): string {
  * Start the dashboard HTTP server.
  * Returns the http.Server instance for lifecycle management.
  */
-export function startDashboard(): http.Server {
+export async function startDashboard(): Promise<http.Server> {
   const server = http.createServer((req, res) => {
+    // Setup wizard — intercept before auth
+    if (handleWizardRequest(req, res)) return;
+
     // Handle CORS preflight
     if (req.method === 'OPTIONS') {
       setSecurityHeaders(req, res);
@@ -428,10 +432,15 @@ export function startDashboard(): http.Server {
   server.maxConnections = 20;
 
   if (!DASHBOARD_AUTH_TOKEN && !DASHBOARD_ALLOW_UNAUTH) {
-    const msg =
-      'Dashboard requires DASHBOARD_AUTH_TOKEN (or set DASHBOARD_ALLOW_UNAUTH=true for local-only development)';
-    logger.error(msg);
-    throw new Error(msg);
+    // Allow starting without auth during wizard mode (wizard has its own localhost-only security)
+    const { isWizardComplete } = await import('./wizard-state.js');
+    if (isWizardComplete()) {
+      const msg =
+        'Dashboard requires DASHBOARD_AUTH_TOKEN (or set DASHBOARD_ALLOW_UNAUTH=true for local-only development)';
+      logger.error(msg);
+      throw new Error(msg);
+    }
+    logger.info('Dashboard starting in wizard mode (no auth required — localhost only)');
   }
 
   if (!DASHBOARD_AUTH_TOKEN && DASHBOARD_ALLOW_UNAUTH) {

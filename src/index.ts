@@ -662,10 +662,11 @@ async function main(): Promise<void> {
     startAcpServer();
   }
 
-  // Start dashboard if enabled
-  if (DASHBOARD_ENABLED) {
+  // Start dashboard if enabled or during setup wizard
+  const { isWizardComplete } = await import('./wizard-state.js');
+  if (DASHBOARD_ENABLED || !isWizardComplete()) {
     const { startDashboard } = await import('./dashboard.js');
-    startDashboard();
+    await startDashboard();
   }
 
   queue.setProcessMessagesFn(processGroupMessages);

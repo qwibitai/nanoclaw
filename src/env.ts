@@ -61,6 +61,49 @@ export function readEnvFile(keys: string[]): Record<string, string> {
   return result;
 }
 
+/**
+ * Write or update keys in the .env file.
+ * For each key: replaces the existing line if found, or appends.
+ * Values containing spaces are wrapped in double quotes.
+ */
+export function writeEnvFile(updates: Record<string, string>): void {
+  const envFile = path.join(process.cwd(), '.env');
+  let lines: string[] = [];
+  try {
+    lines = fs.readFileSync(envFile, 'utf-8').split('\n');
+  } catch {
+    // .env doesn't exist yet — start fresh
+  }
+
+  const remaining = new Map(Object.entries(updates));
+
+  // Replace existing lines
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const normalized = trimmed.startsWith('export ')
+      ? trimmed.slice('export '.length).trim()
+      : trimmed;
+    const eqIdx = normalized.indexOf('=');
+    if (eqIdx === -1) continue;
+    const key = normalized.slice(0, eqIdx).trim();
+    if (remaining.has(key)) {
+      const val = remaining.get(key)!;
+      lines[i] = `${key}=${val.includes(' ') ? `"${val}"` : val}`;
+      remaining.delete(key);
+    }
+  }
+
+  // Append any keys not found in existing file
+  for (const [key, val] of remaining) {
+    lines.push(`${key}=${val.includes(' ') ? `"${val}"` : val}`);
+  }
+
+  // Ensure trailing newline
+  const content = lines.join('\n').replace(/\n*$/, '\n');
+  fs.writeFileSync(envFile, content);
+}
+
 export interface AnthropicApiConfig {
   baseUrl: string;
   authToken: string;
