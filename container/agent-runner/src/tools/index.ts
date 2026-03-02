@@ -16,6 +16,7 @@ import * as delegation from './delegation.js';
 import * as elicitation from './elicitation.js';
 import * as selfKnowledge from './self-knowledge.js';
 import * as relay from './relay.js';
+import * as skills from './skills.js';
 
 const plugins = [
   messaging,
@@ -28,6 +29,7 @@ const plugins = [
   elicitation,
   selfKnowledge,
   relay,
+  skills,
 ];
 
 export function registerAllTools(server: McpServer, ctx: ToolContext): void {

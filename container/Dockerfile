@@ -51,7 +51,10 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Make pre-installed packages available from any working directory
-ENV NODE_PATH=/app/node_modules
+# Agent-installed packages go to /workspace/group/.packages/ (persists across sessions)
+ENV NODE_PATH=/workspace/group/.packages/node_modules:/app/node_modules
+# Block postinstall scripts by default — prevents supply chain attacks from typosquatted packages
+ENV npm_config_ignore_scripts=true
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code \

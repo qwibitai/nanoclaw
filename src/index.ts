@@ -17,10 +17,13 @@ import {
   SENTRY_WEBHOOK_SECRET,
   SLACK_APP_TOKEN,
   SLACK_BOT_TOKEN,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_ONLY,
   TRIGGER_PATTERN,
 } from './config.js';
 import { DiscordChannel } from './channels/discord.js';
 import { SlackChannel } from './channels/slack.js';
+import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
   ContainerOutput,
@@ -552,7 +555,13 @@ async function main(): Promise<void> {
     await slack.connect();
   }
 
-  if (!DISCORD_ONLY) {
+  if (TELEGRAM_BOT_TOKEN) {
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    channels.push(telegram);
+    await telegram.connect();
+  }
+
+  if (!DISCORD_ONLY && !TELEGRAM_ONLY) {
     whatsapp = new WhatsAppChannel(channelOpts);
     channels.push(whatsapp);
     await whatsapp.connect();

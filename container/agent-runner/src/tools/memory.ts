@@ -368,6 +368,164 @@ Choose the right file:
     },
   );
 
+  // --- Identity tools (agent can read/modify its own CLAUDE.md) ---
+
+  const CLAUDE_MD_PATH = '/workspace/group/CLAUDE.md';
+
+  const IMMUTABLE_SECTIONS = [
+    'Admin Context',
+    'Container Mounts',
+    'Managing Groups',
+    'Global Memory',
+  ];
+
+  const BLOCKED_PATTERNS = [
+    /ignore\s+(previous|all|prior)\s+(instructions?|prompts?)/i,
+    /bypass\s+safety/i,
+    /disable\s+tool[\s-]?guard/i,
+    /override\s+(security|safety|restrictions?)/i,
+    /you\s+are\s+now/i,
+    /forget\s+(everything|all|your)\s+(instructions?|rules?)/i,
+  ];
+
+  const IDENTITY_LOG_PATH = '/workspace/group/logs/identity-changes.log';
+
+  function logIdentityChange(action: string, section: string, reason: string): void {
+    const entry = `[${new Date().toISOString()}] ${action} section="${section}" reason="${reason}"\n`;
+    fs.mkdirSync(path.dirname(IDENTITY_LOG_PATH), { recursive: true });
+    fs.appendFileSync(IDENTITY_LOG_PATH, entry);
+  }
+
+  server.tool(
+    'read_identity',
+    'Read your current CLAUDE.md instructions. Use this before modifying to understand the current state.',
+    {},
+    async () => {
+      try {
+        if (!fs.existsSync(CLAUDE_MD_PATH)) {
+          return { content: [{ type: 'text' as const, text: 'No CLAUDE.md found. You have no custom identity instructions yet.' }] };
+        }
+        const content = fs.readFileSync(CLAUDE_MD_PATH, 'utf-8');
+        return { content: [{ type: 'text' as const, text: content }] };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error reading CLAUDE.md: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'update_identity',
+    `Modify your own CLAUDE.md instructions. Use this to evolve your behavior based on user feedback or your own learnings.
+
+IMPORTANT GUARDRAILS:
+• Cannot modify immutable sections: ${IMMUTABLE_SECTIONS.join(', ')}
+• Prompt injection patterns are blocked
+• Every change is logged with a reason for audit
+
+Actions:
+• "append_section" — Add a new section at the end
+• "replace_section" — Replace an existing section's content (by heading)
+• "remove_section" — Remove a section entirely (cannot remove immutable sections)`,
+    {
+      action: z.enum(['append_section', 'replace_section', 'remove_section']).describe('What to do'),
+      section: z.string().describe('Section heading (e.g. "Communication Style", "Daily Routine"). For append_section, this becomes the new heading.'),
+      content: z.string().optional().describe('New content for the section (required for append/replace, ignored for remove)'),
+      reason: z.string().describe('Why you are making this change — logged for audit trail'),
+    },
+    async (args) => {
+      // Check for immutable sections
+      if (IMMUTABLE_SECTIONS.some(s => s.toLowerCase() === args.section.toLowerCase())) {
+        return {
+          content: [{ type: 'text' as const, text: `Cannot modify immutable section "${args.section}". Protected sections: ${IMMUTABLE_SECTIONS.join(', ')}` }],
+          isError: true,
+        };
+      }
+
+      // Check for prompt injection in content
+      const textToCheck = `${args.section} ${args.content || ''} ${args.reason}`;
+      for (const pattern of BLOCKED_PATTERNS) {
+        if (pattern.test(textToCheck)) {
+          return {
+            content: [{ type: 'text' as const, text: 'Blocked: content contains a disallowed pattern.' }],
+            isError: true,
+          };
+        }
+      }
+
+      try {
+        let existing = '';
+        if (fs.existsSync(CLAUDE_MD_PATH)) {
+          existing = fs.readFileSync(CLAUDE_MD_PATH, 'utf-8');
+        }
+
+        // Split into sections by ## headings
+        const sectionRegex = /^## .+$/gm;
+        const sectionHeadings: { heading: string; start: number; end: number }[] = [];
+        let match;
+        while ((match = sectionRegex.exec(existing)) !== null) {
+          if (sectionHeadings.length > 0) {
+            sectionHeadings[sectionHeadings.length - 1].end = match.index;
+          }
+          sectionHeadings.push({
+            heading: match[0].replace(/^## /, '').trim(),
+            start: match.index,
+            end: existing.length,
+          });
+        }
+
+        if (args.action === 'append_section') {
+          if (!args.content) {
+            return { content: [{ type: 'text' as const, text: 'Content is required for append_section.' }], isError: true };
+          }
+          const newSection = `\n\n## ${args.section}\n\n${args.content}\n`;
+          fs.writeFileSync(CLAUDE_MD_PATH, existing + newSection);
+          logIdentityChange('append_section', args.section, args.reason);
+          return { content: [{ type: 'text' as const, text: `Added new section "## ${args.section}" to CLAUDE.md.` }] };
+        }
+
+        const targetSection = sectionHeadings.find(
+          s => s.heading.toLowerCase() === args.section.toLowerCase()
+        );
+
+        if (args.action === 'replace_section') {
+          if (!args.content) {
+            return { content: [{ type: 'text' as const, text: 'Content is required for replace_section.' }], isError: true };
+          }
+          if (!targetSection) {
+            return { content: [{ type: 'text' as const, text: `Section "## ${args.section}" not found. Use append_section to add a new one.` }], isError: true };
+          }
+          const before = existing.slice(0, targetSection.start);
+          const after = existing.slice(targetSection.end);
+          const replacement = `## ${args.section}\n\n${args.content}\n`;
+          fs.writeFileSync(CLAUDE_MD_PATH, before + replacement + after);
+          logIdentityChange('replace_section', args.section, args.reason);
+          return { content: [{ type: 'text' as const, text: `Replaced section "## ${args.section}" in CLAUDE.md.` }] };
+        }
+
+        if (args.action === 'remove_section') {
+          if (!targetSection) {
+            return { content: [{ type: 'text' as const, text: `Section "## ${args.section}" not found.` }], isError: true };
+          }
+          const before = existing.slice(0, targetSection.start);
+          const after = existing.slice(targetSection.end);
+          fs.writeFileSync(CLAUDE_MD_PATH, (before + after).replace(/\n{3,}/g, '\n\n'));
+          logIdentityChange('remove_section', args.section, args.reason);
+          return { content: [{ type: 'text' as const, text: `Removed section "## ${args.section}" from CLAUDE.md.` }] };
+        }
+
+        return { content: [{ type: 'text' as const, text: 'Unknown action.' }], isError: true };
+      } catch (err) {
+        return {
+          content: [{ type: 'text' as const, text: `Error updating CLAUDE.md: ${err instanceof Error ? err.message : String(err)}` }],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // --- Self-Improving Memory tools (v2.5) ---
 
   server.tool(

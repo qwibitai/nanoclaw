@@ -28,6 +28,8 @@ const envConfig = readEnvFile([
   'AGENT_SWARM_ENABLED',
   'MEMORY_IMPROVER_ENABLED',
   'PROACTIVE_AGENT_ENABLED',
+  'TELEGRAM_BOT_TOKEN',
+  'TELEGRAM_ONLY',
 ]);
 
 export const ASSISTANT_NAME =
@@ -97,6 +99,12 @@ export const SLACK_BOT_TOKEN =
   process.env.SLACK_BOT_TOKEN || envConfig.SLACK_BOT_TOKEN || '';
 export const SLACK_APP_TOKEN =
   process.env.SLACK_APP_TOKEN || envConfig.SLACK_APP_TOKEN || '';
+
+// Telegram configuration
+export const TELEGRAM_BOT_TOKEN =
+  process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
+export const TELEGRAM_ONLY =
+  (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
 
 // DM allowlist — comma-separated Discord user IDs. Empty = allow all.
 const allowedUsersRaw =

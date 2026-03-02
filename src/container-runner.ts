@@ -242,6 +242,10 @@ function buildContainerArgs(
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
+  // Memory limit — prevents OOM from crashing the host
+  const memLimit = process.env.CONTAINER_MEMORY_LIMIT || '1536m';
+  args.push('--memory', memLimit, '--memory-swap', memLimit);
+
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
