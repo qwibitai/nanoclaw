@@ -1,0 +1,223 @@
+name: Upstream Sync
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC (2pm SGT)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_check:
+        description: 'Force check even if no changes detected'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync-nanoclaw:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/qwibitai/nanoclaw.git 2>/dev/null || true
+          git fetch upstream main
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          # Find the merge-base between our main and upstream/main
+          MERGE_BASE=$(git merge-base HEAD upstream/main 2>/dev/null || echo "")
+
+          if [ -z "$MERGE_BASE" ]; then
+            echo "No common ancestor found — repos may have diverged completely"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Count new upstream commits since last sync
+          NEW_COMMITS=$(git rev-list --count "$MERGE_BASE..upstream/main")
+          echo "New upstream commits: $NEW_COMMITS"
+
+          if [ "$NEW_COMMITS" -gt 0 ] || [ "${{ inputs.force_check }}" = "true" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "new_commits=$NEW_COMMITS" >> "$GITHUB_OUTPUT"
+
+            # Get commit summaries for PR description
+            git log --oneline "$MERGE_BASE..upstream/main" | head -20 > /tmp/upstream-commits.txt
+            echo "commit_log<<EOF" >> "$GITHUB_OUTPUT"
+            cat /tmp/upstream-commits.txt >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create sync branch and merge
+        if: steps.check.outputs.has_changes == 'true'
+        id: merge
+        run: |
+          BRANCH="auto/upstream-sync-$(date +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+
+          # Attempt merge — allow conflicts (we'll flag them in the PR)
+          if git merge upstream/main --no-edit; then
+            echo "merge_clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge_clean=false" >> "$GITHUB_OUTPUT"
+            # Stage conflict markers so the PR shows what needs manual resolution
+            git add -A
+            git commit -m "chore: upstream sync with conflicts (needs manual resolution)"
+          fi
+
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CLEAN="${{ steps.merge.outputs.merge_clean }}"
+          COMMITS="${{ steps.check.outputs.new_commits }}"
+
+          if [ "$CLEAN" = "true" ]; then
+            TITLE="chore: sync $COMMITS upstream NanoClaw commits"
+            LABEL="auto-merge"
+          else
+            TITLE="chore: sync upstream NanoClaw (conflicts need resolution)"
+            LABEL="needs-attention"
+          fi
+
+          BODY="$(cat <<'PREOF'
+          ## Upstream Sync
+
+          **$COMMITS new commits** from [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
+
+          ### Upstream commits
+          ```
+          ${{ steps.check.outputs.commit_log }}
+          ```
+
+          ### Merge status
+          PREOF
+          )"
+
+          if [ "$CLEAN" = "true" ]; then
+            BODY="$BODY"$'\n'"Clean merge — no conflicts."
+          else
+            BODY="$BODY"$'\n'"**Conflicts detected** — needs manual resolution. Search for `<<<<<<<` markers."
+          fi
+
+          gh pr create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --base main \
+            --head "${{ steps.merge.outputs.branch }}" \
+            --label "$LABEL" 2>/dev/null || \
+          gh pr create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --base main \
+            --head "${{ steps.merge.outputs.branch }}"
+
+  check-sdk-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Check Claude Code SDK version
+        id: sdk
+        run: |
+          # Get currently pinned version from Dockerfile
+          CURRENT=$(grep '@anthropic-ai/claude-code' container/Dockerfile | grep -oP '@\K[0-9]+\.[0-9]+\.[0-9]+' || echo "latest")
+          echo "Current container SDK: $CURRENT"
+
+          # Check npm for latest version
+          LATEST=$(npm view @anthropic-ai/claude-code version 2>/dev/null || echo "unknown")
+          echo "Latest SDK on npm: $LATEST"
+
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ] && [ "$CURRENT" != "latest" ]; then
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check host dependencies
+        id: deps
+        run: |
+          # Check for outdated dependencies
+          npm outdated --json > /tmp/outdated.json 2>/dev/null || true
+          OUTDATED_COUNT=$(python3 -c "import json; d=json.load(open('/tmp/outdated.json')); print(len(d))" 2>/dev/null || echo "0")
+          echo "outdated_count=$OUTDATED_COUNT" >> "$GITHUB_OUTPUT"
+
+          if [ "$OUTDATED_COUNT" -gt 0 ]; then
+            echo "Outdated packages:"
+            cat /tmp/outdated.json | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          for pkg, info in d.items():
+            print(f'  {pkg}: {info.get(\"current\",\"?\")} → {info.get(\"latest\",\"?\")}')
+          " 2>/dev/null || true
+          fi
+
+      - name: Create SDK update PR
+        if: steps.sdk.outputs.needs_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          CURRENT="${{ steps.sdk.outputs.current }}"
+          LATEST="${{ steps.sdk.outputs.latest }}"
+          BRANCH="auto/sdk-update-${LATEST}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          # Update Dockerfile to pin new version
+          sed -i "s/@anthropic-ai\/claude-code@[0-9.]*/@anthropic-ai\/claude-code@${LATEST}/" container/Dockerfile
+          # If no version was pinned, add it
+          sed -i "s/@anthropic-ai\/claude-code\b/@anthropic-ai\/claude-code@${LATEST}/" container/Dockerfile
+
+          git add container/Dockerfile
+          git diff --cached --quiet && exit 0
+
+          git commit -m "chore: bump Claude Code SDK to ${LATEST}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "chore: bump Claude Code SDK ${CURRENT} → ${LATEST}" \
+            --body "$(cat <<EOF
+          ## Claude Code SDK Update
+
+          Updates \`@anthropic-ai/claude-code\` in the agent container.
+
+          | | Version |
+          |---|---|
+          | Current | \`${CURRENT}\` |
+          | Latest | \`${LATEST}\` |
+
+          **Action needed:** After merging, rebuild the agent container on VPS:
+          \`\`\`bash
+          cd /root/sovereign/container && ./build.sh
+          \`\`\`
+
+          [Release notes](https://www.npmjs.com/package/@anthropic-ai/claude-code?activeTab=versions)
+          EOF
+          )" \
+            --base main \
+            --head "$BRANCH"
