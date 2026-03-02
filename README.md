@@ -55,9 +55,10 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 ## What It Supports
 
 - **Messenger I/O** - Message NanoClaw from your phone. Supports WhatsApp, Telegram, Discord, Slack, Signal and headless operation.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
+- **Semantic memory (RAG)** - Three-layer memory with vector search: core facts, conversation RAG, and session archives. Agents recall relevant context automatically and store new knowledge via MCP tools. Powered by local embeddings (no API costs).
+- **Isolated group context** - Each group has its own memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
+- **Scheduled tasks** - Recurring jobs that run Claude with full memory context and can message you back
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
@@ -121,21 +122,24 @@ Skills we'd like to see:
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+WhatsApp (baileys) --> SQLite --> Memory retrieval (RAG) --> Container (Claude Agent SDK) --> Response
+                                                                      |
+                                                              Embed messages (async)
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
+Single Node.js process. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem. Semantic memory via sqlite-vec (vector search) and local embeddings.
 
 Key files:
 - `src/index.ts` - Orchestrator: state, message loop, agent invocation
+- `src/memory.ts` - Three-layer memory: core facts, conversation RAG, session archives
 - `src/channels/whatsapp.ts` - WhatsApp connection, auth, send/receive
 - `src/ipc.ts` - IPC watcher and task processing
 - `src/router.ts` - Message formatting and outbound routing
 - `src/group-queue.ts` - Per-group queue with global concurrency limit
 - `src/container-runner.ts` - Spawns streaming agent containers
 - `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
+- `src/db.ts` - SQLite + sqlite-vec operations (messages, groups, sessions, memory)
+- `groups/*/CLAUDE.md` - Per-group instructions
 
 ## FAQ
 
