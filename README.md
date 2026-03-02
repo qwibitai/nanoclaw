@@ -155,6 +155,22 @@ Agents run in containers, not behind application-level permission checks. They c
 
 We don't want configuration sprawl. Every user should customize NanoClaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
 
+**Can I use third-party or open-source models?**
+
+Yes. NanoClaw supports any API-compatible model endpoint. Set these environment variables in your `.env` file:
+
+```bash
+ANTHROPIC_BASE_URL=https://your-api-endpoint.com
+ANTHROPIC_AUTH_TOKEN=your-token-here
+```
+
+This allows you to use:
+- Local models via [Ollama](https://ollama.ai) with an API proxy
+- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
+- Custom model deployments with Anthropic-compatible APIs
+
+Note: The model must support the Anthropic API format for best compatibility.
+
 **How do I debug issues?**
 
 Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.
