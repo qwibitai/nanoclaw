@@ -45,6 +45,7 @@ import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { readEnvFile } from './env.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -479,8 +480,19 @@ function acquirePidLock(): void {
 }
 
 function validateEnvironment(): void {
-  // Check that an API key is available for the agent
-  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN && !process.env.ANTHROPIC_API_KEY) {
+  // Check that an API key is available for the agent.
+  // NanoClaw intentionally does NOT load .env into process.env (security: secrets
+  // must not leak to child processes). Check both process.env and the .env file.
+  const envFileValues = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+  ]);
+  const hasKey =
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ||
+    process.env.ANTHROPIC_API_KEY ||
+    envFileValues.CLAUDE_CODE_OAUTH_TOKEN ||
+    envFileValues.ANTHROPIC_API_KEY;
+  if (!hasKey) {
     logger.error(
       'Neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set. ' +
         'Set one in your .env file before starting NanoClaw.',
