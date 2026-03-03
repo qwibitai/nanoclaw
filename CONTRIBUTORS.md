@@ -7,3 +7,5 @@ Thanks to everyone who has contributed to NanoClaw!
 - [pottertech](https://github.com/pottertech) — Skip Potter
 - [rgarcia](https://github.com/rgarcia) — Rafael
 - [AmaxGuan](https://github.com/AmaxGuan) — Lingfeng Guan
+- [happydog-intj](https://github.com/happydog-intj) — happy dog
+- [bindoon](https://github.com/bindoon) — 潕量
