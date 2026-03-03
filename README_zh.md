@@ -162,6 +162,7 @@ Docker 提供跨平台支持（macOS 和 Linux）和成熟的生态系统。在 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
+ANTHROPIC_MODEL=your-model-here
 ```
 
 这使您能够使用：

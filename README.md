@@ -165,6 +165,7 @@ Yes. NanoClaw supports any API-compatible model endpoint. Set these environment 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
 ANTHROPIC_AUTH_TOKEN=your-token-here
+ANTHROPIC_MODEL=your-modle-here
 ```
 
 This allows you to use:
