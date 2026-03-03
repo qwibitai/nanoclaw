@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nanoclaw
+  # Change namespace to match K8S_NAMESPACE if not 'default'
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nanoclaw-orchestrator
+  template:
+    metadata:
+      labels:
+        app: nanoclaw-orchestrator
+    spec:
+      serviceAccountName: nanoclaw
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: nanoclaw-data
+      containers:
+        - name: nanoclaw
+          image: your-registry/nanoclaw:latest  # replace with your image
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          env:
+            # PVC layout
+            - name: DATA_DIR
+              value: /data
+            - name: GROUPS_DIR
+              value: /data/groups
+            - name: STORE_DIR
+              value: /data/store
+            # K8s agent job configuration
+            - name: K8S_AGENT_IMAGE
+              value: your-registry/nanoclaw-agent:latest  # replace with your image
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_PVC_NAME
+              value: nanoclaw-data
+            - name: K8S_SECRET_NAME
+              value: nanoclaw-secrets
+            - name: K8S_SERVICE_ACCOUNT
+              value: nanoclaw
+          # Secrets: ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN
+          envFrom:
+            - secretRef:
+                name: nanoclaw-secrets

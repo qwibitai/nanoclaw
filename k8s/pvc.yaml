@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nanoclaw-data
+  # Change namespace to match K8S_NAMESPACE if not 'default'
+spec:
+  accessModes:
+    - ReadWriteMany   # Required: orchestrator pod + agent Job pods share this PVC
+  resources:
+    requests:
+      storage: 10Gi
+  # Set storageClassName to a ReadWriteMany-capable class (e.g. nfs, longhorn, efs)
+  # Leave empty to use the cluster default (only works if it supports RWX)
+  storageClassName: ""
