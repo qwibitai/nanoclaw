@@ -27,6 +27,13 @@ export interface AllowedRoot {
   description?: string;
 }
 
+/** Minimal process interface compatible with Bun.spawn's Subprocess */
+export interface ContainerProcess {
+  readonly killed: boolean;
+  kill(signal?: number | string): void;
+  readonly pid: number;
+}
+
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)

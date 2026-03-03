@@ -1,9 +1,9 @@
-import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
 import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+import { ContainerProcess } from './types.js';
 
 interface QueuedTask {
   id: string;
@@ -20,7 +20,7 @@ interface GroupState {
   isTaskContainer: boolean;
   pendingMessages: boolean;
   pendingTasks: QueuedTask[];
-  process: ChildProcess | null;
+  process: ContainerProcess | null;
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
@@ -125,7 +125,7 @@ export class GroupQueue {
 
   registerProcess(
     groupJid: string,
-    proc: ChildProcess,
+    proc: ContainerProcess,
     containerName: string,
     groupFolder?: string,
   ): void {

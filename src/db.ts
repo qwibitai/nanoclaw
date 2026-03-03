@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,9 +12,9 @@ import {
   TaskRunLog,
 } from './types.js';
 
-let db: Database.Database;
+let db: Database;
 
-function createSchema(database: Database.Database): void {
+function createSchema(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS chats (
       jid TEXT PRIMARY KEY,
@@ -100,7 +100,7 @@ function createSchema(database: Database.Database): void {
     );
     // Backfill: mark existing bot messages that used the content prefix pattern
     database
-      .prepare(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
+      .query(`UPDATE messages SET is_bot_message = 1 WHERE content LIKE ?`)
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
@@ -145,7 +145,7 @@ export function initDatabase(): void {
   const dbPath = path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-  db = new Database(dbPath);
+  db = new Database(dbPath, { create: true });
   createSchema(db);
 
   // Migrate from JSON files if they exist
@@ -154,7 +154,7 @@ export function initDatabase(): void {
 
 /** @internal - for tests only. Creates a fresh in-memory database. */
 export function _initTestDatabase(): void {
-  db = new Database(':memory:');
+  db = new Database(':memory:', { create: true });
   createSchema(db);
 }
 
@@ -174,7 +174,7 @@ export function storeChatMetadata(
 
   if (name) {
     // Update with name, preserving existing timestamp if newer
-    db.prepare(
+    db.query(
       `
       INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
@@ -186,7 +186,7 @@ export function storeChatMetadata(
     ).run(chatJid, name, timestamp, ch, group);
   } else {
     // Update timestamp only, preserve existing name if any
-    db.prepare(
+    db.query(
       `
       INSERT INTO chats (jid, name, last_message_time, channel, is_group) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(jid) DO UPDATE SET
@@ -204,7 +204,7 @@ export function storeChatMetadata(
  * Used during group metadata sync.
  */
 export function updateChatName(chatJid: string, name: string): void {
-  db.prepare(
+  db.query(
     `
     INSERT INTO chats (jid, name, last_message_time) VALUES (?, ?, ?)
     ON CONFLICT(jid) DO UPDATE SET name = excluded.name
@@ -225,7 +225,7 @@ export interface ChatInfo {
  */
 export function getAllChats(): ChatInfo[] {
   return db
-    .prepare(
+    .query(
       `
     SELECT jid, name, last_message_time, channel, is_group
     FROM chats
@@ -241,7 +241,7 @@ export function getAllChats(): ChatInfo[] {
 export function getLastGroupSync(): string | null {
   // Store sync time in a special chat entry
   const row = db
-    .prepare(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
+    .query(`SELECT last_message_time FROM chats WHERE jid = '__group_sync__'`)
     .get() as { last_message_time: string } | undefined;
   return row?.last_message_time || null;
 }
@@ -251,7 +251,7 @@ export function getLastGroupSync(): string | null {
  */
 export function setLastGroupSync(): void {
   const now = new Date().toISOString();
-  db.prepare(
+  db.query(
     `INSERT OR REPLACE INTO chats (jid, name, last_message_time) VALUES ('__group_sync__', '__group_sync__', ?)`,
   ).run(now);
 }
@@ -261,7 +261,7 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
-  db.prepare(
+  db.query(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
@@ -288,7 +288,7 @@ export function storeMessageDirect(msg: {
   is_from_me: boolean;
   is_bot_message?: boolean;
 }): void {
-  db.prepare(
+  db.query(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
@@ -322,7 +322,7 @@ export function getNewMessages(
   `;
 
   const rows = db
-    .prepare(sql)
+    .query(sql)
     .all(lastTimestamp, ...jids, `${botPrefix}:%`) as NewMessage[];
 
   let newTimestamp = lastTimestamp;
@@ -349,14 +349,14 @@ export function getMessagesSince(
     ORDER BY timestamp
   `;
   return db
-    .prepare(sql)
+    .query(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
-  db.prepare(
+  db.query(
     `
     INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -376,14 +376,14 @@ export function createTask(
 }
 
 export function getTaskById(id: string): ScheduledTask | undefined {
-  return db.prepare('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
+  return db.query('SELECT * FROM scheduled_tasks WHERE id = ?').get(id) as
     | ScheduledTask
     | undefined;
 }
 
 export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
   return db
-    .prepare(
+    .query(
       'SELECT * FROM scheduled_tasks WHERE group_folder = ? ORDER BY created_at DESC',
     )
     .all(groupFolder) as ScheduledTask[];
@@ -391,7 +391,7 @@ export function getTasksForGroup(groupFolder: string): ScheduledTask[] {
 
 export function getAllTasks(): ScheduledTask[] {
   return db
-    .prepare('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
+    .query('SELECT * FROM scheduled_tasks ORDER BY created_at DESC')
     .all() as ScheduledTask[];
 }
 
@@ -405,7 +405,7 @@ export function updateTask(
   >,
 ): void {
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: (string | null)[] = [];
 
   if (updates.prompt !== undefined) {
     fields.push('prompt = ?');
@@ -431,21 +431,21 @@ export function updateTask(
   if (fields.length === 0) return;
 
   values.push(id);
-  db.prepare(
-    `UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`,
-  ).run(...values);
+  db.query(`UPDATE scheduled_tasks SET ${fields.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
 }
 
 export function deleteTask(id: string): void {
   // Delete child records first (FK constraint)
-  db.prepare('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
-  db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
+  db.query('DELETE FROM task_run_logs WHERE task_id = ?').run(id);
+  db.query('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
 }
 
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
   return db
-    .prepare(
+    .query(
       `
     SELECT * FROM scheduled_tasks
     WHERE status = 'active' AND next_run IS NOT NULL AND next_run <= ?
@@ -461,7 +461,7 @@ export function updateTaskAfterRun(
   lastResult: string,
 ): void {
   const now = new Date().toISOString();
-  db.prepare(
+  db.query(
     `
     UPDATE scheduled_tasks
     SET next_run = ?, last_run = ?, last_result = ?, status = CASE WHEN ? IS NULL THEN 'completed' ELSE status END
@@ -471,7 +471,7 @@ export function updateTaskAfterRun(
 }
 
 export function logTaskRun(log: TaskRunLog): void {
-  db.prepare(
+  db.query(
     `
     INSERT INTO task_run_logs (task_id, run_at, duration_ms, status, result, error)
     VALUES (?, ?, ?, ?, ?, ?)
@@ -490,13 +490,13 @@ export function logTaskRun(log: TaskRunLog): void {
 
 export function getRouterState(key: string): string | undefined {
   const row = db
-    .prepare('SELECT value FROM router_state WHERE key = ?')
+    .query('SELECT value FROM router_state WHERE key = ?')
     .get(key) as { value: string } | undefined;
   return row?.value;
 }
 
 export function setRouterState(key: string, value: string): void {
-  db.prepare(
+  db.query(
     'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
   ).run(key, value);
 }
@@ -505,20 +505,20 @@ export function setRouterState(key: string, value: string): void {
 
 export function getSession(groupFolder: string): string | undefined {
   const row = db
-    .prepare('SELECT session_id FROM sessions WHERE group_folder = ?')
+    .query('SELECT session_id FROM sessions WHERE group_folder = ?')
     .get(groupFolder) as { session_id: string } | undefined;
   return row?.session_id;
 }
 
 export function setSession(groupFolder: string, sessionId: string): void {
-  db.prepare(
+  db.query(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
 }
 
 export function getAllSessions(): Record<string, string> {
   const rows = db
-    .prepare('SELECT group_folder, session_id FROM sessions')
+    .query('SELECT group_folder, session_id FROM sessions')
     .all() as Array<{ group_folder: string; session_id: string }>;
   const result: Record<string, string> = {};
   for (const row of rows) {
@@ -533,7 +533,7 @@ export function getRegisteredGroup(
   jid: string,
 ): (RegisteredGroup & { jid: string }) | undefined {
   const row = db
-    .prepare('SELECT * FROM registered_groups WHERE jid = ?')
+    .query('SELECT * FROM registered_groups WHERE jid = ?')
     .get(jid) as
     | {
         jid: string;
@@ -573,7 +573,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
   if (!isValidGroupFolder(group.folder)) {
     throw new Error(`Invalid group folder "${group.folder}" for JID ${jid}`);
   }
-  db.prepare(
+  db.query(
     `INSERT OR REPLACE INTO registered_groups (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -589,7 +589,7 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
-  const rows = db.prepare('SELECT * FROM registered_groups').all() as Array<{
+  const rows = db.query('SELECT * FROM registered_groups').all() as Array<{
     jid: string;
     name: string;
     folder: string;

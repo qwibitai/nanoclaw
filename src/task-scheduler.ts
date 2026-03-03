@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
@@ -19,7 +18,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup, ScheduledTask } from './types.js';
+import { ContainerProcess, RegisteredGroup, ScheduledTask } from './types.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -27,7 +26,7 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
-    proc: ChildProcess,
+    proc: ContainerProcess,
     containerName: string,
     groupFolder: string,
   ) => void;
