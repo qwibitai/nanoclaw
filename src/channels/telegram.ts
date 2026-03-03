@@ -1,12 +1,9 @@
 import { Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-
-/** Sanitize a string for use as a folder name segment */
-function sanitize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
-}
+import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -14,11 +11,16 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+/** Sanitize a string for use as a folder name segment */
+function sanitize(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
-  registerGroup: (jid: string, group: RegisteredGroup) => void;
+  registerGroup?: (jid: string, group: RegisteredGroup) => void;
 }
 
 export class TelegramChannel implements Channel {
@@ -102,7 +104,7 @@ export class TelegramChannel implements Channel {
 
       // Auto-register topic groups on first trigger message
       const groups = this.opts.registeredGroups();
-      if (topicId && !groups[chatJid] && TRIGGER_PATTERN.test(content)) {
+      if (topicId && !groups[chatJid] && TRIGGER_PATTERN.test(content) && this.opts.registerGroup) {
         const topicName = (ctx.message.reply_to_message as any)?.forum_topic_created?.name || `topic-${topicId}`;
         const folderName = `tg-${sanitize(chatName)}-${sanitize(topicName)}`;
         this.opts.registerGroup(chatJid, {
@@ -273,3 +275,17 @@ export class TelegramChannel implements Channel {
     }
   }
 }
+
+registerChannel('telegram', (opts: ChannelOpts) => {
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const token =
+    process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
+  if (!token) {
+    logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
+    return null;
+  }
+  return new TelegramChannel(token, {
+    ...opts,
+    registerGroup: opts.registerGroup,
+  });
+});
