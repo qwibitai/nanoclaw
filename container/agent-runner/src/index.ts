@@ -528,6 +528,8 @@ async function main(): Promise<void> {
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
+  } else if (containerInput.isMain) {
+    prompt = `[Antworte auf Deutsch. Duze den Nutzer (du/dir/dich). Du heißt ${containerInput.assistantName || 'SuKI'}.]\n\n${prompt}`;
   }
   const pending = drainIpcInput();
   if (pending.length > 0) {
