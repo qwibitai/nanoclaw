@@ -27,6 +27,15 @@ import {
 } from '../types.js';
 import { readEnvFile } from '../env.js';
 
+/**
+ * Map recipient domain -> email JID override.
+ * When an inbound email's To/Delivered-To header matches a domain here,
+ * route it to the corresponding JID instead of the default.
+ */
+const EMAIL_ALIAS_ROUTING: Record<string, string> = {
+  'sheridantrailerrentals.us': 'email:info@sheridantrailerrentals.us',
+};
+
 export interface GmailChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -123,14 +132,18 @@ export class GmailChannel implements Channel {
       return;
     }
 
-    const fromAddress = EMAIL_SNAK_ADDRESS || IMAP_USER;
+    // Use the alias address if the JID maps to one, otherwise default
+    const jidAddress = jid.replace('email:', '');
+    const isAlias = Object.values(EMAIL_ALIAS_ROUTING).includes(jid);
+    const fromAddress = isAlias ? jidAddress : (EMAIL_SNAK_ADDRESS || IMAP_USER);
+    const fromLabel = jid.includes('sheridantrailerrentals') ? 'Sheridan Trailer Rentals' : `${ASSISTANT_NAME} - Snak Group`;
     const replySubject = replyContext.subject.startsWith('Re: ')
       ? replyContext.subject
       : `Re: ${replyContext.subject}`;
 
     try {
       await this.transporter.sendMail({
-        from: `${ASSISTANT_NAME} - Snak Group <${fromAddress}>`,
+        from: `${fromLabel} <${fromAddress}>`,
         to: replyContext.email,
         subject: replySubject,
         text,
@@ -265,6 +278,7 @@ export class GmailChannel implements Channel {
             const selfAddresses = [
               IMAP_USER.toLowerCase(),
               EMAIL_SNAK_ADDRESS.toLowerCase(),
+              ...Object.values(EMAIL_ALIAS_ROUTING).map(j => j.replace('email:', '')),
             ].filter(Boolean);
             if (selfAddresses.some(a => senderEmail === a)) {
               processedUids.add(uid);
@@ -290,8 +304,19 @@ export class GmailChannel implements Channel {
               body = extractTextFromSource(message.source);
             }
 
-            // Determine the JID
-            const jid = `email:${EMAIL_SNAK_ADDRESS || IMAP_USER}`;
+            // Determine the JID based on recipient address
+            // Check To/Delivered-To for alias domain routing
+            const toAddresses = [
+              ...(envelope.to || []).map((a: any) => (a.address || '').toLowerCase()),
+              ...(envelope.cc || []).map((a: any) => (a.address || '').toLowerCase()),
+            ];
+            let jid = `email:${EMAIL_SNAK_ADDRESS || IMAP_USER}`; // default
+            for (const [domain, aliasJid] of Object.entries(EMAIL_ALIAS_ROUTING)) {
+              if (toAddresses.some(a => a.endsWith('@' + domain))) {
+                jid = aliasJid;
+                break;
+              }
+            }
 
             // Track sender + subject for reply routing
             this.lastInboundByJid.set(jid, { email: senderEmail, subject });
