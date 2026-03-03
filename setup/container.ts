@@ -3,6 +3,7 @@
  * Replaces 03-setup-container.sh
  */
 import { execSync } from 'child_process';
+import os from 'os';
 import path from 'path';
 
 import { logger } from '../src/logger.js';
@@ -23,7 +24,7 @@ function parseArgs(args: string[]): { runtime: string } {
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
   const { runtime } = parseArgs(args);
-  const image = 'nanoclaw-agent:latest';
+  const image = `nanoclaw-agent-${os.userInfo().username}:latest`;
   const logFile = path.join(projectRoot, 'logs', 'setup.log');
 
   if (!runtime) {
