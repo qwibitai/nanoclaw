@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-03-03T06:08:45.474Z",
+  "items": [
+    {
+      "id": "work-jarvis-worker-lifecycle-1772518124323",
+      "title": "Dry run: dispatch retry",
+      "feature_id": "jarvis-worker-lifecycle",
+      "status": "done",
+      "request": "validate skill flow",
+      "notes": [
+        "2026-03-03T06:08:44.721Z: mapped via feature-tracking",
+        "2026-03-03T06:08:45.094Z: running nanoclaw-testing",
+        "2026-03-03T06:08:45.473Z: typecheck + mapped tests passed"
+      ],
+      "created_at": "2026-03-03T06:08:44.323Z",
+      "updated_at": "2026-03-03T06:08:45.473Z"
+    }
+  ]
+}

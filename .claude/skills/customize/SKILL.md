@@ -10,9 +10,21 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 ## Workflow
 
 1. **Understand the request** - Ask clarifying questions
-2. **Plan the changes** - Identify files to modify
-3. **Implement** - Make changes directly to the code
-4. **Test guidance** - Tell user how to verify
+2. **Feature map preflight** - Resolve owning files/tests via `feature-tracking`
+3. **Plan the changes** - Identify files to modify
+4. **Implement** - Make changes directly to the code
+5. **Test guidance** - Tell user how to verify
+
+### Feature map preflight (required for feature changes)
+
+Run before coding:
+
+```bash
+npx tsx .claude/skills/feature-tracking/scripts/build-feature-catalog.ts
+npx tsx .claude/skills/feature-tracking/scripts/locate-feature.ts "<request>"
+```
+
+Use `selected_feature.files` as the default touch set and `selected_feature.tests` for verification.
 
 ## Key Files
 

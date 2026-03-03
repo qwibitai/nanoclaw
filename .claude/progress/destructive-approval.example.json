@@ -1,0 +1,7 @@
+{
+  "approved_by": "<your-name>",
+  "approval_scope": "validate-all-skills-reset",
+  "approved_at": "2026-03-03T00:00:00.000Z",
+  "expires_at": "2026-03-03T23:59:59.000Z",
+  "reason": "Run isolated skill validation on a clean working tree"
+}

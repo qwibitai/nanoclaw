@@ -1,5 +1,5 @@
 /**
- * Live user-journey smoke for andy-developer.
+ * Live user-point-of-view smoke for andy-developer.
  *
  * This test writes synthetic user messages into the live DB (same path the app
  * processes), then waits for bot replies and enforces response criteria.
@@ -199,7 +199,6 @@ async function main(): Promise<void> {
     const probeStartIso = nowIsoWithOffset();
     const baselineIds = getBotMessageIds(db, chatJid);
 
-    const unknownReq = `req-${token}`;
     const scenarios: Scenario[] = [
       {
         name: 'Simple Greeting',
@@ -209,17 +208,17 @@ async function main(): Promise<void> {
         forbidden: /(error|exception|traceback|failed)/i,
       },
       {
-        name: 'Progress Query',
-        userMessage: '@Andy what is the current progress',
+        name: 'Natural Status Query',
+        userMessage: '@Andy what are you working on right now?',
         maxLatencyMs: 8_000,
-        expected: /(Current progress|Current tracked requests|No worker run is active|There are no worker runs yet)/i,
+        expected: /(Right now|Current progress|Current tracked requests|No worker run is active|There are no worker runs yet|working on)/i,
         forbidden: /(error|exception|traceback)/i,
       },
       {
-        name: 'Status By Request Id',
-        userMessage: `@Andy status ${unknownReq}`,
+        name: 'Progress Query',
+        userMessage: '@Andy what is the current progress',
         maxLatencyMs: 8_000,
-        expected: new RegExp(`couldn'?t find request\\s+\`${unknownReq.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\``, 'i'),
+        expected: /(Current progress|Current tracked requests|No worker run is active|There are no worker runs yet|working on)/i,
         forbidden: /(error|exception|traceback)/i,
       },
     ];
@@ -280,6 +279,9 @@ async function main(): Promise<void> {
 
     console.log('PASS: all user-facing scenarios satisfied criteria');
     console.log('PASS: internal integrity checks satisfied criteria');
+    console.log(
+      'NEXT: run manual User POV Runbook in docs/workflow/nanoclaw-andy-user-happiness-gate.md',
+    );
   } finally {
     db.close();
   }

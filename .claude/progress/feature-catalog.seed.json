@@ -1,0 +1,403 @@
+{
+  "schema_version": 1,
+  "project": "nanoclaw",
+  "maintainer": "andy-developer",
+  "features": [
+    {
+      "id": "core-message-loop",
+      "name": "Core Message Loop",
+      "summary": "Ingress-to-response orchestration for group messages and agent runs.",
+      "risk": "high",
+      "keywords": [
+        "message loop",
+        "group queue",
+        "orchestrator",
+        "trigger"
+      ],
+      "files": [
+        "src/index.ts",
+        "src/group-queue.ts",
+        "src/group-folder.ts",
+        "src/router.ts",
+        "src/config.ts"
+      ],
+      "tests": [
+        "src/group-queue.test.ts",
+        "src/group-folder.test.ts",
+        "src/routing.test.ts"
+      ]
+    },
+    {
+      "id": "whatsapp-channel",
+      "name": "WhatsApp Channel",
+      "summary": "WhatsApp transport, auth lifecycle, and incoming message normalization.",
+      "risk": "high",
+      "keywords": [
+        "whatsapp",
+        "baileys",
+        "auth",
+        "channel"
+      ],
+      "files": [
+        "src/channels/whatsapp.ts",
+        "src/whatsapp-auth.ts",
+        "src/types.ts",
+        "src/config.ts"
+      ],
+      "tests": [
+        "src/channels/whatsapp.test.ts"
+      ]
+    },
+    {
+      "id": "ipc-dispatch-contract",
+      "name": "IPC Dispatch Contract",
+      "summary": "Task dispatch, approval boundaries, and worker contract validation.",
+      "risk": "high",
+      "keywords": [
+        "ipc",
+        "dispatch",
+        "contract",
+        "worker"
+      ],
+      "files": [
+        "src/ipc.ts",
+        "src/dispatch-validator.ts",
+        "src/event-bridge.ts",
+        "groups/andy-developer/docs/jarvis-dispatch.md"
+      ],
+      "tests": [
+        "src/ipc-auth.test.ts",
+        "src/jarvis-worker-dispatch.test.ts"
+      ]
+    },
+    {
+      "id": "container-runtime",
+      "name": "Container Runtime",
+      "summary": "Container launch, mount safety, runtime policies, and process supervision.",
+      "risk": "high",
+      "keywords": [
+        "container",
+        "runtime",
+        "mount",
+        "supervisor"
+      ],
+      "files": [
+        "src/container-runner.ts",
+        "src/container-runtime.ts",
+        "src/mount-security.ts",
+        "src/worker-run-supervisor.ts"
+      ],
+      "tests": [
+        "src/container-runner.test.ts",
+        "src/container-runtime.test.ts",
+        "src/worker-run-supervisor.test.ts"
+      ]
+    },
+    {
+      "id": "task-scheduling",
+      "name": "Task Scheduling",
+      "summary": "Time-based task definitions and execution pipeline.",
+      "risk": "medium",
+      "keywords": [
+        "schedule",
+        "cron",
+        "tasks"
+      ],
+      "files": [
+        "src/task-scheduler.ts",
+        "src/index.ts"
+      ],
+      "tests": [
+        "src/task-scheduler.test.ts"
+      ]
+    },
+    {
+      "id": "database-state",
+      "name": "Database State",
+      "summary": "SQLite persistence for tasks, sessions, and metadata.",
+      "risk": "medium",
+      "keywords": [
+        "database",
+        "sqlite",
+        "state"
+      ],
+      "files": [
+        "src/db.ts",
+        "src/index.ts"
+      ],
+      "tests": [
+        "src/db.test.ts"
+      ]
+    },
+    {
+      "id": "config-env",
+      "name": "Config and Environment",
+      "summary": "Runtime config resolution and environment variable handling.",
+      "risk": "medium",
+      "keywords": [
+        "config",
+        "env",
+        "settings"
+      ],
+      "files": [
+        "src/config.ts",
+        "src/env.ts"
+      ],
+      "tests": []
+    },
+    {
+      "id": "routing-formatting",
+      "name": "Routing and Formatting",
+      "summary": "Outbound message formatting, mention behavior, and routing logic.",
+      "risk": "medium",
+      "keywords": [
+        "routing",
+        "formatting",
+        "mentions"
+      ],
+      "files": [
+        "src/router.ts",
+        "src/types.ts"
+      ],
+      "tests": [
+        "src/formatting.test.ts",
+        "src/routing.test.ts"
+      ]
+    },
+    {
+      "id": "jarvis-worker-lifecycle",
+      "name": "Jarvis Worker Lifecycle",
+      "summary": "Worker status transitions, retry loops, and dispatch handoff behavior.",
+      "risk": "high",
+      "keywords": [
+        "jarvis",
+        "worker",
+        "lifecycle",
+        "handoff",
+        "timeout",
+        "no-output",
+        "retry"
+      ],
+      "files": [
+        "src/ipc.ts",
+        "src/worker-run-supervisor.ts",
+        "src/dispatch-validator.ts",
+        "groups/andy-developer/CLAUDE.md"
+      ],
+      "tests": [
+        "src/jarvis-worker-dispatch.test.ts",
+        "src/worker-run-supervisor.test.ts"
+      ]
+    },
+    {
+      "id": "reliability-e2e",
+      "name": "Reliability E2E Harness",
+      "summary": "End-to-end reliability scripts for Andy and worker lanes.",
+      "risk": "medium",
+      "keywords": [
+        "reliability",
+        "e2e",
+        "smoke",
+        "journey"
+      ],
+      "files": [
+        "scripts/test-andy-user-e2e.ts",
+        "scripts/test-andy-full-user-journey-e2e.ts",
+        "scripts/test-worker-e2e.ts"
+      ],
+      "tests": []
+    },
+    {
+      "id": "observability-logging",
+      "name": "Observability and Logging",
+      "summary": "Structured logging and timeline/status tooling for debugging runtime behavior.",
+      "risk": "medium",
+      "keywords": [
+        "logger",
+        "timeline",
+        "status",
+        "trace",
+        "watch"
+      ],
+      "files": [
+        "src/logger.ts",
+        "scripts/jarvis-watch.sh",
+        "scripts/jarvis-status.sh",
+        "scripts/jarvis-trace.sh",
+        "scripts/jarvis-message-timeline.sh",
+        "scripts/jarvis-hi-timeline.sh"
+      ],
+      "tests": []
+    },
+    {
+      "id": "ops-reliability-tooling",
+      "name": "Ops and Reliability Tooling",
+      "summary": "Operational scripts for preflight checks, incident lifecycle, reliability probes, and recovery.",
+      "risk": "high",
+      "keywords": [
+        "ops",
+        "reliability",
+        "incident",
+        "preflight",
+        "recover",
+        "smoke",
+        "timeout",
+        "not-responding",
+        "andy"
+      ],
+      "files": [
+        "scripts/jarvis-ops.sh",
+        "scripts/jarvis-preflight.sh",
+        "scripts/jarvis-reliability.sh",
+        "scripts/jarvis-smoke.sh",
+        "scripts/jarvis-recover.sh",
+        "scripts/jarvis-hotspots.sh",
+        "scripts/jarvis-incident.sh",
+        "scripts/jarvis-incident-bundle.sh",
+        "scripts/jarvis-verify-worker-connectivity.sh",
+        "scripts/jarvis-dispatch-lint.sh",
+        "scripts/jarvis-db-doctor.sh",
+        "scripts/jarvis-worker-probe.sh",
+        "scripts/jarvis-happiness-gate.sh"
+      ],
+      "tests": []
+    },
+    {
+      "id": "skills-engine-lifecycle",
+      "name": "Skills Engine Lifecycle",
+      "summary": "Deterministic apply/rebase/update/uninstall pipeline for skill-based customization.",
+      "risk": "high",
+      "keywords": [
+        "skills",
+        "apply",
+        "rebase",
+        "update",
+        "drift",
+        "manifest"
+      ],
+      "files": [
+        "scripts/apply-skill.ts",
+        "scripts/fix-skill-drift.ts",
+        "scripts/validate-all-skills.ts",
+        "scripts/update-core.ts",
+        "scripts/rebase.ts",
+        "scripts/run-migrations.ts",
+        "scripts/uninstall-skill.ts",
+        "scripts/post-update.ts",
+        "skills-engine/index.ts",
+        "skills-engine/apply.ts",
+        "skills-engine/update.ts",
+        "skills-engine/rebase.ts",
+        "skills-engine/uninstall.ts",
+        "skills-engine/state.ts",
+        "skills-engine/manifest.ts",
+        "skills-engine/types.ts"
+      ],
+      "tests": [
+        "skills-engine/__tests__/apply.test.ts",
+        "skills-engine/__tests__/update.test.ts",
+        "skills-engine/__tests__/rebase.test.ts",
+        "skills-engine/__tests__/uninstall.test.ts"
+      ]
+    },
+    {
+      "id": "agent-runner-mcp",
+      "name": "Agent Runner and MCP Bridge",
+      "summary": "In-container Claude runner and nanoclaw MCP bridge for IPC tools, streaming, and task calls.",
+      "risk": "high",
+      "keywords": [
+        "agent-runner",
+        "mcp",
+        "ipc",
+        "container",
+        "tools"
+      ],
+      "files": [
+        "container/agent-runner/src/index.ts",
+        "container/agent-runner/src/ipc-mcp-stdio.ts",
+        "container/Dockerfile",
+        "container/build.sh"
+      ],
+      "tests": []
+    },
+    {
+      "id": "worker-runtime-lane",
+      "name": "Worker Runtime Lane",
+      "summary": "Worker container runtime and runner logic for jarvis worker execution lane.",
+      "risk": "high",
+      "keywords": [
+        "worker",
+        "container",
+        "runner",
+        "jarvis-worker"
+      ],
+      "files": [
+        "container/worker/Dockerfile",
+        "container/worker/build.sh",
+        "container/worker/runner/src/index.ts",
+        "container/worker/runner/src/lib.ts"
+      ],
+      "tests": [
+        "container/worker/runner/src/lib.test.ts"
+      ]
+    },
+    {
+      "id": "core-skill-workflows",
+      "name": "Core Skill Workflows",
+      "summary": "Primary local skills that drive setup, customization, debugging, updates, and incident workflows.",
+      "risk": "medium",
+      "keywords": [
+        "skills",
+        "setup",
+        "customize",
+        "debug",
+        "update",
+        "incident"
+      ],
+      "files": [
+        ".claude/skills/setup/SKILL.md",
+        ".claude/skills/customize/SKILL.md",
+        ".claude/skills/debug/SKILL.md",
+        ".claude/skills/update/SKILL.md",
+        ".claude/skills/incident-debugger/SKILL.md",
+        ".claude/skills/convert-to-apple-container/SKILL.md",
+        ".claude/skills/get-qodo-rules/SKILL.md",
+        ".claude/skills/qodo-pr-resolver/SKILL.md"
+      ],
+      "tests": []
+    },
+    {
+      "id": "channel-extension-skills",
+      "name": "Channel and Integration Extension Skills",
+      "summary": "Optional upstream capabilities delivered as skills (Telegram, Slack, Discord, Gmail, X, voice, parallel).",
+      "risk": "medium",
+      "keywords": [
+        "telegram",
+        "slack",
+        "discord",
+        "gmail",
+        "x",
+        "voice",
+        "parallel",
+        "skills"
+      ],
+      "files": [
+        ".claude/skills/add-telegram/SKILL.md",
+        ".claude/skills/add-telegram-swarm/SKILL.md",
+        ".claude/skills/add-slack/SKILL.md",
+        ".claude/skills/add-discord/SKILL.md",
+        ".claude/skills/add-gmail/SKILL.md",
+        ".claude/skills/add-voice-transcription/SKILL.md",
+        ".claude/skills/x-integration/SKILL.md",
+        ".claude/skills/add-parallel/SKILL.md"
+      ],
+      "tests": [
+        ".claude/skills/add-telegram/tests/telegram.test.ts",
+        ".claude/skills/add-slack/tests/slack.test.ts",
+        ".claude/skills/add-discord/tests/discord.test.ts",
+        ".claude/skills/add-gmail/tests/gmail.test.ts",
+        ".claude/skills/add-voice-transcription/tests/voice-transcription.test.ts"
+      ]
+    }
+  ]
+}

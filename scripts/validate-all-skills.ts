@@ -19,6 +19,7 @@
  * Usage:
  *   npx tsx scripts/validate-all-skills.ts              # validate all
  *   npx tsx scripts/validate-all-skills.ts add-telegram  # validate one
+ *   npx tsx scripts/validate-all-skills.ts --allow-destructive-reset --approval-file .claude/progress/destructive-approval.json
  */
 import { execSync } from 'child_process';
 import fs from 'fs';
@@ -32,6 +33,20 @@ interface SkillValidationResult {
   success: boolean;
   failedStep?: 'apply' | 'typecheck' | 'test';
   error?: string;
+}
+
+interface CliOptions {
+  allowDestructiveReset: boolean;
+  approvalFile: string;
+  filterSkills: string[];
+}
+
+interface DestructiveApproval {
+  approved_by: string;
+  approval_scope: string;
+  approved_at: string;
+  expires_at?: string;
+  reason?: string;
 }
 
 function discoverSkills(
@@ -55,6 +70,96 @@ function discoverSkills(
   }
 
   return results;
+}
+
+function parseCliOptions(argv: string[]): CliOptions {
+  const allowDestructiveReset = argv.includes('--allow-destructive-reset');
+  const approvalFlagIndex = argv.indexOf('--approval-file');
+  const approvalFile =
+    approvalFlagIndex >= 0 && argv[approvalFlagIndex + 1]
+      ? argv[approvalFlagIndex + 1]
+      : '.claude/progress/destructive-approval.json';
+  const skipIndexes = new Set<number>([
+    approvalFlagIndex,
+    approvalFlagIndex + 1,
+  ]);
+  const filterSkills = argv.filter(
+    (arg, index) => !arg.startsWith('--') && !skipIndexes.has(index),
+  );
+  return { allowDestructiveReset, approvalFile, filterSkills };
+}
+
+function isWorkingTreeClean(): boolean {
+  const status = execSync('git status --porcelain', {
+    encoding: 'utf-8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  return status.trim().length === 0;
+}
+
+function validateApprovalFile(approvalFile: string): void {
+  const absApprovalPath = path.resolve(approvalFile);
+  if (!fs.existsSync(absApprovalPath)) {
+    throw new Error(
+      `Missing approval file: ${absApprovalPath}. Create it before running destructive validation.`,
+    );
+  }
+
+  let approval: DestructiveApproval;
+  try {
+    approval = JSON.parse(
+      fs.readFileSync(absApprovalPath, 'utf8'),
+    ) as DestructiveApproval;
+  } catch (error: any) {
+    throw new Error(
+      `Invalid approval file JSON at ${absApprovalPath}: ${error.message}`,
+    );
+  }
+
+  if (!approval.approved_by || !approval.approved_at) {
+    throw new Error(
+      `Approval file ${absApprovalPath} must include approved_by and approved_at.`,
+    );
+  }
+
+  if (approval.approval_scope !== 'validate-all-skills-reset') {
+    throw new Error(
+      `Approval scope mismatch in ${absApprovalPath}. Expected approval_scope=validate-all-skills-reset.`,
+    );
+  }
+
+  if (approval.expires_at) {
+    const expiry = Date.parse(approval.expires_at);
+    if (!Number.isFinite(expiry)) {
+      throw new Error(
+        `Invalid expires_at in ${absApprovalPath}. Use ISO timestamp.`,
+      );
+    }
+    if (expiry < Date.now()) {
+      throw new Error(`Approval in ${absApprovalPath} is expired.`);
+    }
+  }
+}
+
+function assertSafeToReset(
+  allowDestructiveReset: boolean,
+  approvalFile: string,
+): void {
+  if (!allowDestructiveReset && process.env.CI !== 'true') {
+    throw new Error(
+      'Refusing to run destructive reset locally without --allow-destructive-reset and --approval-file.',
+    );
+  }
+
+  if (process.env.CI !== 'true') {
+    validateApprovalFile(approvalFile);
+  }
+
+  if (!isWorkingTreeClean()) {
+    throw new Error(
+      'Working tree is dirty. Commit or stash changes before running validate-all-skills.',
+    );
+  }
 }
 
 /** Restore tracked files and remove untracked skill artifacts. */
@@ -100,8 +205,10 @@ async function main(): Promise<void> {
   const projectRoot = process.cwd();
   const skillsDir = path.join(projectRoot, '.claude', 'skills');
 
-  // Allow filtering to specific skills via CLI args
-  const filterSkills = process.argv.slice(2);
+  const { allowDestructiveReset, approvalFile, filterSkills } = parseCliOptions(
+    process.argv.slice(2),
+  );
+  assertSafeToReset(allowDestructiveReset, approvalFile);
 
   let skills = discoverSkills(skillsDir);
   if (filterSkills.length > 0) {
