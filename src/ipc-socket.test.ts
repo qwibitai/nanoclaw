@@ -2,9 +2,10 @@ import fs from 'fs';
 import net from 'net';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NdjsonParser } from './ipc-socket.js';
+import { logger } from './logger.js';
 
 // --- NdjsonParser unit tests ---
 
@@ -31,11 +32,15 @@ describe('NdjsonParser', () => {
     expect(results[2]).toEqual({ c: 3 });
   });
 
-  it('skips invalid JSON lines', () => {
+  it('skips invalid JSON lines and logs a warning', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const parser = new NdjsonParser();
     const results = parser.feed('not json\n{"valid":true}\n');
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ valid: true });
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy.mock.calls[0][0]).toMatchObject({ line: 'not json' });
+    warnSpy.mockRestore();
   });
 
   it('skips empty lines', () => {
@@ -70,6 +75,7 @@ describe('NdjsonParser', () => {
   });
 
   it('handles mixed valid and invalid lines', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     const parser = new NdjsonParser();
     const results = parser.feed(
       '{"a":1}\ngarbage\n{"b":2}\n{broken\n{"c":3}\n',
@@ -80,6 +86,10 @@ describe('NdjsonParser', () => {
       'b',
       'c',
     ]);
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy.mock.calls[0][0]).toMatchObject({ line: 'garbage' });
+    expect(warnSpy.mock.calls[1][0]).toMatchObject({ line: '{broken' });
+    warnSpy.mockRestore();
   });
 });
 
