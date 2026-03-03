@@ -14,8 +14,8 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  claimDueTasks,
   getAllTasks,
+  getDueTasks,
   getTaskById,
   logTaskRun,
   updateTask,
@@ -233,14 +233,13 @@ async function runTask(
     error,
   });
 
-  // next_run was already advanced by claimDueTasks() before execution started.
-  // We only record the execution result and let the DB complete once-tasks.
+  const nextRun = computeNextRun(task);
   const resultSummary = error
     ? `Error: ${error}`
     : result
       ? result.slice(0, 200)
       : 'Completed';
-  updateTaskAfterRun(task.id, resultSummary);
+  updateTaskAfterRun(task.id, nextRun, resultSummary);
 }
 
 let schedulerRunning = false;
@@ -255,17 +254,13 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
 
   const loop = async () => {
     try {
-      // Atomic claim: select due tasks AND advance their next_run in a
-      // single SQLite transaction. This prevents the next poll from
-      // re-discovering the same tasks while they're still running.
-      const claimedTasks = claimDueTasks(computeNextRun);
-      if (claimedTasks.length > 0) {
-        logger.info({ count: claimedTasks.length }, 'Claimed due tasks');
+      const dueTasks = getDueTasks();
+      if (dueTasks.length > 0) {
+        logger.info({ count: dueTasks.length }, 'Found due tasks');
       }
 
-      for (const task of claimedTasks) {
-        // Re-check task status in case it was paused/cancelled between
-        // claim and dispatch (e.g. user paused via API).
+      for (const task of dueTasks) {
+        // Re-check task status in case it was paused/cancelled
         const currentTask = getTaskById(task.id);
         if (!currentTask || currentTask.status !== 'active') {
           continue;
