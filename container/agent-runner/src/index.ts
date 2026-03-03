@@ -421,6 +421,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      model: sdkEnv.MODEL || 'claude-sonnet-4-6',
+      fallbackModel: sdkEnv.FALLBACK_MODEL || 'claude-opus-4-6',
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -510,9 +512,12 @@ async function main(): Promise<void> {
 
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
+  // Only set keys that have actual values to allow default values to work.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
-    sdkEnv[key] = value;
+    if (value) {
+      sdkEnv[key] = value;
+    }
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

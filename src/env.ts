@@ -29,6 +29,17 @@ export function readEnvFile(keys: string[]): Record<string, string> {
     const key = trimmed.slice(0, eqIdx).trim();
     if (!wanted.has(key)) continue;
     let value = trimmed.slice(eqIdx + 1).trim();
+
+    // Remove inline comments (everything after # that's not inside quotes)
+    const commentIdx = value.indexOf('#');
+    if (commentIdx !== -1) {
+      // Simple check: if # appears and we're not in quotes, strip from there
+      const beforeComment = value.slice(0, commentIdx);
+      if (!beforeComment.includes('"') && !beforeComment.includes("'")) {
+        value = beforeComment.trim();
+      }
+    }
+
     if (
       (value.startsWith('"') && value.endsWith('"')) ||
       (value.startsWith("'") && value.endsWith("'"))

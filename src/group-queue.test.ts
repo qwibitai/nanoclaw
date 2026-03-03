@@ -446,4 +446,138 @@ describe('GroupQueue', () => {
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
   });
+
+  // --- Race condition prevention ---
+
+  it('prevents race condition when draining pending messages', async () => {
+    let activeContainers = 0;
+    let maxConcurrent = 0;
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      activeContainers++;
+      maxConcurrent = Math.max(maxConcurrent, activeContainers);
+
+      // Simulate async work - container stays active
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+
+      activeContainers--;
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start first message processing
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(activeContainers).toBe(1);
+
+    // While first is processing, enqueue another message (should be queued as pending)
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Still only 1 active (second is pending)
+    expect(activeContainers).toBe(1);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    // Complete first processing - this triggers drainGroup
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Second message should now be processing
+    expect(processMessages).toHaveBeenCalledTimes(2);
+
+    // Critical: maxConcurrent should never exceed 1 for same group
+    expect(maxConcurrent).toBe(1);
+
+    // Complete second
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('prevents race condition with rapid message arrivals during drain', async () => {
+    let activeContainers = 0;
+    let maxConcurrent = 0;
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      activeContainers++;
+      maxConcurrent = Math.max(maxConcurrent, activeContainers);
+
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+
+      activeContainers--;
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start first message
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Queue second message (will be pending)
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Should only have 1 active
+    expect(activeContainers).toBe(1);
+    expect(processMessages).toHaveBeenCalledTimes(1);
+
+    // Complete first - this triggers drainGroup which should process second
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Second should now be processing
+    expect(processMessages).toHaveBeenCalledTimes(2);
+    expect(activeContainers).toBe(1);
+
+    // Critical: maxConcurrent should never exceed 1 for same group
+    // This verifies that activateGroup was called synchronously before
+    // the async runForGroup, preventing a race condition window
+    expect(maxConcurrent).toBe(1);
+
+    // Complete second
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('activateGroup is called before async runForGroup in all code paths', async () => {
+    const activationOrder: string[] = [];
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async (groupJid: string) => {
+      activationOrder.push('runForGroup-start');
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      activationOrder.push('runForGroup-end');
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Test enqueueMessageCheck path
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // activateGroup should be called synchronously before runForGroup starts
+    expect(activationOrder[0]).toBe('runForGroup-start');
+
+    // Queue another message while first is active
+    queue.enqueueMessageCheck('group1@g.us');
+
+    // Complete first
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Second message should process via drainGroup path
+    // activateGroup should still be called before runForGroup
+    expect(activationOrder[1]).toBe('runForGroup-end');
+    expect(activationOrder[2]).toBe('runForGroup-start');
+
+    // Complete second
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
 });

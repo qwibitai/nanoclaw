@@ -221,6 +221,14 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Disable Docker daemon proxy for Claude API connections
+  // Docker Desktop may have global proxy (http.docker.internal:3128) that breaks Claude API
+  args.push('-e', 'NO_PROXY=*');
+  args.push('-e', 'no_proxy=*');
+
+  // Disable Claude Code telemetry to prevent 127.0.0.1:443 connection errors
+  args.push('-e', 'CLAUDE_CODE_DISABLE_TELEMETRY=1');
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).

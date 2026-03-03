@@ -1,13 +1,13 @@
 ---
 name: setup
-description: Run initial NanoClaw setup. Use when user wants to install dependencies, authenticate WhatsApp, register their main channel, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
+description: Run initial NanoClaw setup for Feishu. Use when user wants to install dependencies, configure Feishu, or start the background services. Triggers on "setup", "install", "configure nanoclaw", or first-time setup requests.
 ---
 
-# NanoClaw Setup
+# NanoClaw Setup (Feishu)
 
-Run setup steps automatically. Only pause when user action is required (WhatsApp authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
+Run setup steps automatically. Only pause when user action is required (Feishu app configuration, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
 
-**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. scanning a QR code, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
+**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
 
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
@@ -27,8 +27,7 @@ Run `bash setup.sh` and parse the status block.
 
 Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-- If HAS_AUTH=true → note that WhatsApp auth exists, offer to skip step 5
-- If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
+- If HAS_ENV=true → note existing .env file
 - Record APPLE_CONTAINER and DOCKER values for step 3
 
 ## 3. Container Runtime
@@ -73,63 +72,71 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 **If TEST_OK=false but BUILD_OK=true:** The image built but won't run. Check logs — common cause is runtime not fully started. Wait a moment and retry the test.
 
-## 4. Claude Authentication (No Script)
+## 4. Claude Authentication
 
-If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
+If HAS_ENV=true from step 2, read `.env` and check for `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+AskUserQuestion: Do you have an Anthropic API key?
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+**Yes:** Tell user to add these to `.env`:
+```
+ANTHROPIC_API_KEY=sk-xxx
+ANTHROPIC_BASE_URL=https://api.anthropic.com  # or your proxy URL
+MODEL=claude-sonnet-4-6
+FALLBACK_MODEL=claude-opus-4-6
+```
 
-**API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
+**No:** Direct user to https://console.anthropic.com/ to get an API key.
 
-## 5. WhatsApp Authentication
+## 5. Feishu Configuration
 
-If HAS_AUTH=true, confirm: keep or re-authenticate?
+### 5a. Create Feishu App
 
-**Choose auth method based on environment (from step 2):**
+Guide user through Feishu app creation:
 
-If IS_HEADLESS=true AND IS_WSL=false → AskUserQuestion: Pairing code (recommended) vs QR code in terminal?
-Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: QR code in browser (recommended) vs pairing code vs QR code in terminal?
+1. **Create app:**
+   - Go to https://open.feishu.cn/app
+   - Click "创建企业自建应用" (Create Enterprise App)
+   - Fill in app name and description
+   - Get App ID (cli_xxx) and App Secret
 
-- **QR browser:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser` (Bash timeout: 150000ms)
-- **Pairing code:** Ask for phone number first. `npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone NUMBER` (Bash timeout: 150000ms). Display PAIRING_CODE.
-- **QR terminal:** `npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal`. Tell user to run `npm run auth` in another terminal.
+2. **Configure Event Subscription:**
+   - In Developer Console (开发者后台)
+   - Navigate to: Events and Callbacks (事件与回调)
+   - Choose: "使用长连接接收事件/回调" (Receive events through persistent connection)
+   - Subscribe to event: `im.message.receive_v1`
 
-**If failed:** qr_timeout → re-run. logged_out → delete `store/auth/` and re-run. 515 → re-run. timeout → ask user, offer retry.
+3. **Set Permissions:**
+   - In app settings, enable these permissions:
+     - 获取与发送单聊、群组消息 (Read and send messages)
+     - 获取用户信息 (Get user information)  
+     - 获取群组信息 (Get group information)
 
-## 6. Configure Trigger and Channel Type
+4. **Publish App:**
+   - Click "创建版本" (Create Version)
+   - Submit for approval or publish directly (depends on org settings)
+   - Add the bot to a Feishu group
 
-Get bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
+### 5b. Add to .env
 
-AskUserQuestion: Shared number or dedicated? → AskUserQuestion: Trigger word? → AskUserQuestion: Main channel type?
+Tell user to add these to `.env`:
+```
+FEISHU_APP_ID=cli_xxxxx
+FEISHU_APP_SECRET=xxxxx
+ASSISTANT_NAME=huan
+```
 
-**Shared number:** Self-chat (recommended) or Solo group
-**Dedicated number:** DM with bot (recommended) or Solo group with bot
+The `ASSISTANT_NAME` is the trigger word (without @). Users will trigger with `@huan` in Feishu.
 
-## 7. Sync and Select Group (If Group Channel)
+## 6. Mount Allowlist
 
-**Personal chat:** JID = `NUMBER@s.whatsapp.net`
-**DM with bot:** Ask for bot's number, JID = `NUMBER@s.whatsapp.net`
+AskUserQuestion: Should the agent have access to external directories?
 
-**Group:**
-1. `npx tsx setup/index.ts --step groups` (Bash timeout: 60000ms)
-2. BUILD=failed → fix TypeScript, re-run. GROUPS_IN_DB=0 → check logs.
-3. `npx tsx setup/index.ts --step groups -- --list` for pipe-separated JID|name lines.
-4. Present candidates as AskUserQuestion (names only, not JIDs).
+**No (Recommended):** `npx tsx setup/index.ts --step mounts -- --empty`
 
-## 8. Register Channel
+**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...], "blockedPatterns":[], "nonMainReadOnly":true}'`
 
-Run `npx tsx setup/index.ts --step register -- --jid "JID" --name "main" --trigger "@TriggerWord" --folder "main"` plus `--no-trigger-required` if personal/DM/solo, `--assistant-name "Name"` if not Andy.
-
-## 9. Mount Allowlist
-
-AskUserQuestion: Agent access to external directories?
-
-**No:** `npx tsx setup/index.ts --step mounts -- --empty`
-**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
-
-## 10. Start Service
+## 7. Start Service
 
 If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
@@ -159,28 +166,76 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 11. Verify
+## 8. First Message & Registration
 
-Run `npx tsx setup/index.ts --step verify` and parse the status block.
+**Important:** Groups are automatically registered when they send a message with the trigger word.
 
-**If STATUS=failed, fix each:**
-- SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
-- SERVICE=not_found → re-run step 10
-- CREDENTIALS=missing → re-run step 4
-- WHATSAPP_AUTH=not_found → re-run step 5
-- REGISTERED_GROUPS=0 → re-run steps 7-8
-- MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
+**First Group (Main Group):**
+1. Go to the Feishu group where you added the bot (can be private chat or group chat)
+2. Send: `@huan 你好` (or whatever ASSISTANT_NAME you configured)
+3. The system will automatically register this group as **Main Group**
+4. Main Group has full admin privileges and doesn't require trigger word for subsequent messages
 
-Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
+**Additional Groups:**
+1. Add the bot to another Feishu group
+2. In that group, send: `@huan 你好`
+3. The system will automatically register this group
+4. This group will require `@huan` trigger word for all messages
+
+**Key Differences:**
+- **Main Group** (first registered): No trigger required, full admin privileges
+- **Regular Groups** (subsequently registered): Trigger required, limited privileges
+
+No manual registration needed - just send a message with the trigger word!
+
+Monitor logs: `tail -f logs/nanoclaw.log`
+
+You should see:
+- Feishu long connection established
+- NanoClaw running with trigger
+- Received Feishu message
+- Auto-registering first group as Main Group
+- Container starting and agent responding
+
+## 9. Verify
+
+Check service status:
+- macOS: `launchctl list | grep nanoclaw`
+- Linux: `systemctl --user status nanoclaw`
+
+Check logs: `tail -20 logs/nanoclaw.log`
+
+Expected output:
+- Database initialized
+- Feishu long connection established
+- NanoClaw running with configured trigger
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 10), missing `.env` (step 4), missing auth (step 5).
+**Service not starting:**
+- Check `logs/nanoclaw.error.log`
+- Common issues:
+  - Wrong Node path (re-run step 7)
+  - Missing `.env` (step 4)
+  - Missing Feishu credentials (step 5)
 
-**Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
+**Container agent fails:**
+- Ensure container runtime is running:
+  - Docker: `docker info` should work
+  - Apple Container: `container system start`
+- Check container logs: `groups/main/logs/container-*.log`
 
-**No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
+**No response to messages:**
+- Check trigger pattern in logs
+- Verify Feishu app has correct permissions
+- Check Feishu event subscription is using long connection mode
+- Check logs: `tail -f logs/nanoclaw.log`
 
-**WhatsApp disconnected:** `npm run auth` then rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux).
+**Feishu connection issues:**
+- Verify App ID and App Secret in `.env`
+- Check app is published and added to group
+- Restart service: `systemctl --user restart nanoclaw` (Linux) or `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS)
 
-**Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
+**Unload service:**
+- macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
+- Linux: `systemctl --user stop nanoclaw`

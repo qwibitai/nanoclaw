@@ -3,12 +3,14 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  FEISHU_APP_ID,
+  FEISHU_APP_SECRET,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { FeishuChannel } from './channels/feishu.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -51,7 +53,6 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -463,7 +464,48 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (_chatJid: string, msg: NewMessage) => {
+      storeMessage(msg);
+
+      // Auto-register groups when they send messages with trigger word
+      if (!registeredGroups[msg.chat_jid]) {
+        // Check if message contains trigger pattern
+        if (TRIGGER_PATTERN.test(msg.content.trim())) {
+          const isFirstGroup = Object.keys(registeredGroups).length === 0;
+
+          if (isFirstGroup) {
+            // First group becomes Main Group
+            logger.info(
+              { chatJid: msg.chat_jid },
+              'Auto-registering first group as Main Group',
+            );
+            registerGroup(msg.chat_jid, {
+              name: 'Main Group',
+              folder: MAIN_GROUP_FOLDER,
+              trigger: `@${ASSISTANT_NAME}`,
+              added_at: new Date().toISOString(),
+              requiresTrigger: false, // Main Group doesn't require trigger
+            });
+          } else {
+            // Subsequent groups are registered as regular groups
+            // Generate folder name from chat_jid (use last part as identifier)
+            const folderName = `group-${msg.chat_jid.split('_').pop()?.substring(0, 8) || Date.now()}`;
+
+            logger.info(
+              { chatJid: msg.chat_jid, folder: folderName },
+              'Auto-registering new group',
+            );
+            registerGroup(msg.chat_jid, {
+              name: `Group ${msg.chat_jid.substring(0, 12)}`,
+              folder: folderName,
+              trigger: `@${ASSISTANT_NAME}`,
+              added_at: new Date().toISOString(),
+              requiresTrigger: true, // Regular groups require trigger
+            });
+          }
+        }
+      }
+    },
     onChatMetadata: (
       chatJid: string,
       timestamp: string,
@@ -474,10 +516,14 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
   };
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  // Create and connect Feishu channel
+  const feishu = new FeishuChannel({
+    appId: FEISHU_APP_ID,
+    appSecret: FEISHU_APP_SECRET,
+    ...channelOpts,
+  });
+  channels.push(feishu);
+  await feishu.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -504,8 +550,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(), // Not needed for Feishu
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),

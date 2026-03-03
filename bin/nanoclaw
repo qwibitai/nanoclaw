@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# NanoClaw CLI - systemctl wrapper
+
+set -euo pipefail
+
+# Resolve symlink to get real script path
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+PROJECT_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
+LOGS_DIR="$PROJECT_ROOT/logs"
+
+cmd="${1:-help}"
+
+case "$cmd" in
+  start)
+    systemctl --user start nanoclaw
+    ;;
+  stop)
+    systemctl --user stop nanoclaw
+    ;;
+  restart)
+    systemctl --user restart nanoclaw
+    ;;
+  status)
+    systemctl --user status nanoclaw
+    ;;
+  logs)
+    if [[ "${2:-}" == "-f" ]] || [[ "${2:-}" == "--follow" ]]; then
+      tail -f "$LOGS_DIR/nanoclaw.log"
+    else
+      tail -n "${2:-50}" "$LOGS_DIR/nanoclaw.log"
+    fi
+    ;;
+  ps)
+    echo "=== NanoClaw Processes ==="
+    ps aux | grep "node.*workspace/nanoclaw/dist/index.js" | grep -v grep || echo "No processes running"
+    echo ""
+    count=$(ps aux | grep "node.*workspace/nanoclaw/dist/index.js" | grep -v grep | wc -l)
+    echo "Process count: $count"
+    [[ $count -gt 1 ]] && echo "⚠️  WARNING: Multiple processes detected!"
+    ;;
+  help|--help|-h)
+    cat <<EOF
+NanoClaw CLI - Service Management Tool
+
+Usage: nanoclaw <command> [options]
+
+Commands:
+  start              Start the service
+  stop               Stop the service
+  restart            Restart the service
+  status             Show service status
+  logs [N]           Show last N lines of logs (default: 50)
+  logs -f            Follow logs in real-time
+  ps                 Show running processes
+  help               Show this help message
+
+Examples:
+  nanoclaw start
+  nanoclaw logs 100
+  nanoclaw logs -f
+  nanoclaw ps
+EOF
+    ;;
+  *)
+    echo "Unknown command: $cmd"
+    echo "Run 'nanoclaw help' for usage information"
+    exit 1
+    ;;
+esac
