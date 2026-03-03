@@ -88,7 +88,7 @@ export function previewUpdate(newCorePath: string): UpdatePreview {
   for (const relPath of filesChanged) {
     // Check applied skills
     for (const skill of state.applied_skills) {
-      if (skill.file_hashes[relPath]) {
+      if (skill.file_hashes && skill.file_hashes[relPath]) {
         conflictRisk.push(relPath);
         break;
       }
