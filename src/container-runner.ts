@@ -203,17 +203,29 @@ function buildVolumeMounts(
   const homeDir = process.env.HOME || '/home/admin';
   const npmGlobal = path.join(homeDir, '.npm-global');
   if (fs.existsSync(npmGlobal)) {
-    mounts.push({ hostPath: npmGlobal, containerPath: '/host/.npm-global', readonly: true });
+    mounts.push({
+      hostPath: npmGlobal,
+      containerPath: '/host/.npm-global',
+      readonly: true,
+    });
   }
   // nanoclaw/config/ contains mcporter.json (copied, not symlinked to openclaw)
   const nanoclaConfigDir = path.join(projectRoot, 'config');
   if (fs.existsSync(nanoclaConfigDir)) {
-    mounts.push({ hostPath: nanoclaConfigDir, containerPath: '/workspace/nanoclaw-config', readonly: true });
+    mounts.push({
+      hostPath: nanoclaConfigDir,
+      containerPath: '/workspace/nanoclaw-config',
+      readonly: true,
+    });
   }
   // MCP server projects (weather-mcp, ms-mcp, email-mcp, etc.) live under ~/projects
   const projectsDir = path.join(homeDir, 'projects');
   if (fs.existsSync(projectsDir)) {
-    mounts.push({ hostPath: projectsDir, containerPath: path.join(homeDir, 'projects'), readonly: true });
+    mounts.push({
+      hostPath: projectsDir,
+      containerPath: path.join(homeDir, 'projects'),
+      readonly: true,
+    });
   }
 
   return mounts;
@@ -450,7 +462,10 @@ export async function runContainerAgent(
           fs.rmSync(mediaDir, { recursive: true, force: true });
           logger.debug({ group: group.name }, 'Session media cleaned up');
         } catch (err) {
-          logger.warn({ group: group.name, err }, 'Failed to clean up session media');
+          logger.warn(
+            { group: group.name, err },
+            'Failed to clean up session media',
+          );
         }
       }
 

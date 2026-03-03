@@ -34,7 +34,10 @@ const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:8083';
  * Transcribe an audio buffer via the local Whisper STT service.
  * Returns the transcribed text, or null on failure.
  */
-async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string | null> {
+async function transcribeAudio(
+  audioBuffer: Buffer,
+  mimeType: string,
+): Promise<string | null> {
   try {
     const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
     const boundary = `----NanoclawSTT${Date.now()}`;
@@ -74,7 +77,7 @@ async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<s
       return null;
     }
 
-    const data = await res.json() as { text?: string };
+    const data = (await res.json()) as { text?: string };
     return data.text?.trim() || null;
   } catch (err) {
     logger.warn({ err }, 'Whisper STT error');
@@ -266,19 +269,32 @@ export class WhatsAppChannel implements Channel {
           if (!content && normalized.audioMessage) {
             const audioMsg = normalized.audioMessage;
             const isPtt = (audioMsg as Record<string, unknown>)?.ptt === true;
-            logger.info({ chatJid, isPtt }, 'Received audio message, transcribing...');
+            logger.info(
+              { chatJid, isPtt },
+              'Received audio message, transcribing...',
+            );
             try {
-              const audioBuffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+              const audioBuffer = (await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+              )) as Buffer;
               const mimeType = audioMsg?.mimetype || 'audio/ogg; codecs=opus';
               const transcribed = await transcribeAudio(audioBuffer, mimeType);
               if (transcribed) {
                 content = transcribed;
                 logger.info({ chatJid, transcribed }, 'Audio transcribed');
               } else {
-                logger.warn({ chatJid }, 'Audio transcription returned empty result');
+                logger.warn(
+                  { chatJid },
+                  'Audio transcription returned empty result',
+                );
               }
             } catch (err) {
-              logger.warn({ err, chatJid }, 'Failed to download/transcribe audio');
+              logger.warn(
+                { err, chatJid },
+                'Failed to download/transcribe audio',
+              );
             }
           }
 
@@ -287,9 +303,21 @@ export class WhatsAppChannel implements Channel {
             const imgMsg = normalized.imageMessage || normalized.stickerMessage;
             const group = groups[chatJid];
             try {
-              const imgBuffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
-              const ext = (imgMsg?.mimetype || 'image/jpeg').includes('webp') ? 'webp' : 'jpg';
-              const mediaDir = path.join(STORE_DIR, '..', 'groups', group.folder, 'media');
+              const imgBuffer = (await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+              )) as Buffer;
+              const ext = (imgMsg?.mimetype || 'image/jpeg').includes('webp')
+                ? 'webp'
+                : 'jpg';
+              const mediaDir = path.join(
+                STORE_DIR,
+                '..',
+                'groups',
+                group.folder,
+                'media',
+              );
               fs.mkdirSync(mediaDir, { recursive: true });
               const filename = `img-${Date.now()}.${ext}`;
               const hostPath = path.join(mediaDir, filename);
