@@ -19,7 +19,7 @@ This skill adds Agent Teams (Swarm) support to an existing Telegram channel. Eac
 ```
 Subagent calls send_message(text: "Found 3 results", sender: "Researcher")
   → MCP writes IPC file with sender field
-  → Host IPC watcher picks it up
+  → Host IPC socket server receives it
   → Assigns pool bot #2 to "Researcher" (round-robin, stable per-group)
   → Renames pool bot #2 to "Researcher" via setMyName
   → Sends message via pool bot #2's Api instance
@@ -196,7 +196,7 @@ async (args) => {
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(MESSAGES_DIR, data);
+    sendIpcMessage(data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
   },
@@ -208,7 +208,7 @@ Read `src/ipc.ts` and make these changes:
 
 1. **Add imports** — add `sendPoolMessage` and `initBotPool` from the Telegram swarm module, and `TELEGRAM_BOT_POOL` from config.
 
-2. **Update IPC message routing** — in `src/ipc.ts`, find where the `sendMessage` dependency is called to deliver IPC messages (inside `processIpcFiles`). The `sendMessage` is passed in via the `IpcDeps` parameter. Wrap it to route Telegram swarm messages through the bot pool:
+2. **Update IPC message routing** — in `src/ipc-socket.ts`, find where the `sendMessage` dependency is called to deliver IPC messages (inside `handleIncomingMessage`). The `sendMessage` is passed in via the `IpcDeps` parameter. Wrap it to route Telegram swarm messages through the bot pool:
 
 ```typescript
 if (data.sender && data.chatJid.startsWith('tg:')) {

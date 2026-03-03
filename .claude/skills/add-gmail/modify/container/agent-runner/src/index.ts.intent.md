@@ -28,5 +28,5 @@ Added Gmail MCP server to the agent's available tools so it can read and send em
 - The `nanoclaw` MCP server with its environment variables
 - All existing allowedTools entries
 - The hook system (PreCompact, PreToolUse sanitize)
-- The IPC input/close sentinel handling
+- The IPC socket client (IpcClient class, connectIpcSocket, waitForMessage)
 - The MessageStream class and query loop

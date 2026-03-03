@@ -62,15 +62,12 @@ interface SDKUserMessage {
  * and queues messages for the agent runner.
  */
 class IpcClient {
-  private socket: net.Socket;
   private buffer = '';
   private messageQueue: string[] = [];
   private closeReceived = false;
   private waitResolve: (() => void) | null = null;
 
   constructor(socket: net.Socket) {
-    this.socket = socket;
-
     socket.on('data', (raw) => {
       this.buffer += raw.toString();
       let idx: number;

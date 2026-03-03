@@ -2,7 +2,7 @@ import fs from 'fs';
 import net from 'net';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { NdjsonParser } from './ipc-socket.js';
 
@@ -87,32 +87,11 @@ describe('NdjsonParser', () => {
 // These test the NDJSON-over-socket pattern used by IpcSocketServer.
 // They use raw net.Server/net.Socket to avoid mocking resolveGroupIpcPath.
 
-// Socket tests are skipped when Unix socket creation is blocked (e.g., sandbox).
-// Detection runs as the first test in the suite.
-let socketAvailable: boolean | null = null;
-
 describe('Socket integration', () => {
   let tmpDir: string;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipc-sock-'));
-
-    // Detect socket support once
-    if (socketAvailable === null) {
-      const sockPath = path.join(tmpDir, 'check.sock');
-      try {
-        const server = net.createServer();
-        await new Promise<void>((resolve, reject) => {
-          server.on('error', reject);
-          server.listen(sockPath, resolve);
-        });
-        server.close();
-        try { fs.unlinkSync(sockPath); } catch {}
-        socketAvailable = true;
-      } catch {
-        socketAvailable = false;
-      }
-    }
   });
 
   afterEach(() => {
@@ -120,7 +99,6 @@ describe('Socket integration', () => {
   });
 
   it('sends and receives NDJSON over socket', async () => {
-    if (!socketAvailable) return;
     const socketPath = path.join(tmpDir, 'test.sock');
     const receivedMessages: object[] = [];
 
@@ -152,7 +130,6 @@ describe('Socket integration', () => {
   });
 
   it('broadcasts to multiple clients', async () => {
-    if (!socketAvailable) return;
     const socketPath = path.join(tmpDir, 'broadcast.sock');
     const connections = new Set<net.Socket>();
 
@@ -193,7 +170,6 @@ describe('Socket integration', () => {
   });
 
   it('handles client disconnect', async () => {
-    if (!socketAvailable) return;
     const socketPath = path.join(tmpDir, 'disc.sock');
     const connections = new Set<net.Socket>();
 

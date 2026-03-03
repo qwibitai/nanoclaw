@@ -12,21 +12,28 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 
-// IPC directories (inside container)
+// IPC socket (inside container)
 const IPC_DIR = '/workspace/ipc';
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const SOCKET_PATH = path.join(IPC_DIR, 'nc.sock');
 const RESULTS_DIR = path.join(IPC_DIR, 'x_results');
 
-function writeIpcFile(dir: string, data: object): string {
-  fs.mkdirSync(dir, { recursive: true });
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  const filepath = path.join(dir, filename);
-  const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tempPath, filepath);
-  return filename;
+// Lazy socket connection
+let socket: net.Socket | null = null;
+
+function getSocket(): net.Socket {
+  if (socket && !socket.destroyed) return socket;
+  socket = net.createConnection(SOCKET_PATH);
+  socket.on('data', () => {}); // drain inbound
+  socket.on('error', () => { socket = null; });
+  socket.on('close', () => { socket = null; });
+  return socket;
+}
+
+function sendIpcMessage(data: object): void {
+  getSocket().write(JSON.stringify(data) + '\n');
 }
 
 async function waitForResult(requestId: string, maxWait = 60000): Promise<{ success: boolean; message: string }> {
@@ -88,7 +95,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         }
 
         const requestId = `xpost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
+        sendIpcMessage({
           type: 'x_post',
           requestId,
           content: args.content,
@@ -121,7 +128,7 @@ Provide the tweet URL or tweet ID to like.`,
         }
 
         const requestId = `xlike-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
+        sendIpcMessage({
           type: 'x_like',
           requestId,
           tweetUrl: args.tweet_url,
@@ -155,7 +162,7 @@ Provide the tweet URL and your reply content.`,
         }
 
         const requestId = `xreply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
+        sendIpcMessage({
           type: 'x_reply',
           requestId,
           tweetUrl: args.tweet_url,
@@ -189,7 +196,7 @@ Provide the tweet URL to retweet.`,
         }
 
         const requestId = `xretweet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
+        sendIpcMessage({
           type: 'x_retweet',
           requestId,
           tweetUrl: args.tweet_url,
@@ -223,7 +230,7 @@ Retweet with your own comment added.`,
         }
 
         const requestId = `xquote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
+        sendIpcMessage({
           type: 'x_quote',
           requestId,
           tweetUrl: args.tweet_url,

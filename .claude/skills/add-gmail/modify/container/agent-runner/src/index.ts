@@ -4,9 +4,8 @@
  *
  * Input protocol:
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ *   IPC:   Follow-up messages and close signals arrive via Unix socket
+ *          at /workspace/ipc/nc.sock (NDJSON framing)
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
@@ -15,9 +14,12 @@
  */
 
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+
+const IPC_SOCKET_PATH = '/workspace/ipc/nc.sock';
 
 interface ContainerInput {
   prompt: string;
@@ -55,9 +57,93 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const IPC_POLL_MS = 500;
+/**
+ * IPC client: connects to the host's Unix socket, parses NDJSON,
+ * and queues messages for the agent runner.
+ */
+class IpcClient {
+  private socket: net.Socket;
+  private buffer = '';
+  private messageQueue: string[] = [];
+  private closeReceived = false;
+  private waitResolve: (() => void) | null = null;
+
+  constructor(socket: net.Socket) {
+    this.socket = socket;
+
+    socket.on('data', (raw) => {
+      this.buffer += raw.toString();
+      let idx: number;
+      while ((idx = this.buffer.indexOf('\n')) !== -1) {
+        const line = this.buffer.slice(0, idx).trim();
+        this.buffer = this.buffer.slice(idx + 1);
+        if (!line) continue;
+        try {
+          const msg = JSON.parse(line);
+          if (msg.type === 'close') {
+            this.closeReceived = true;
+          } else if (msg.type === 'message' && msg.text) {
+            this.messageQueue.push(msg.text);
+          }
+        } catch {
+          log(`Invalid JSON from IPC socket: ${line.slice(0, 100)}`);
+        }
+        // Wake up anyone waiting
+        this.waitResolve?.();
+      }
+    });
+
+    socket.on('error', (err) => {
+      log(`IPC socket error: ${err.message}`);
+      this.closeReceived = true;
+      this.waitResolve?.();
+    });
+
+    socket.on('close', () => {
+      log('IPC socket closed');
+      this.closeReceived = true;
+      this.waitResolve?.();
+    });
+  }
+
+  /** Drain all queued message texts. */
+  drainMessages(): string[] {
+    const msgs = this.messageQueue.splice(0);
+    return msgs;
+  }
+
+  /** Whether a close signal has been received. */
+  shouldClose(): boolean {
+    return this.closeReceived;
+  }
+
+  /** Wait for the next message or close signal. Returns the combined text, or null if close. */
+  waitForMessage(): Promise<string | null> {
+    // Check immediately
+    if (this.closeReceived) return Promise.resolve(null);
+    const msgs = this.drainMessages();
+    if (msgs.length > 0) return Promise.resolve(msgs.join('\n'));
+
+    return new Promise<string | null>((resolve) => {
+      this.waitResolve = () => {
+        this.waitResolve = null;
+        if (this.closeReceived) {
+          resolve(null);
+        } else {
+          const drained = this.drainMessages();
+          if (drained.length > 0) {
+            resolve(drained.join('\n'));
+          }
+          // If neither close nor messages, keep waiting — re-register
+          // (edge case: spurious wake from partial data)
+          else {
+            this.waitForMessage().then(resolve);
+          }
+        }
+      };
+    });
+  }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -284,75 +370,10 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Check for _close sentinel.
- */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
-    return true;
-  }
-  return false;
-}
-
-/**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
- */
-function drainIpcInput(): string[] {
-  try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
-      .sort();
-
-    const messages: string[] = [];
-    for (const file of files) {
-      const filePath = path.join(IPC_INPUT_DIR, file);
-      try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
-        }
-      } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-      }
-    }
-    return messages;
-  } catch (err) {
-    log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-
-/**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
- */
-function waitForIpcMessage(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
-      const messages = drainIpcInput();
-      if (messages.length > 0) {
-        resolve(messages.join('\n'));
-        return;
-      }
-      setTimeout(poll, IPC_POLL_MS);
-    };
-    poll();
-  });
-}
-
-/**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
+ * Also pipes IPC messages into the stream during the query via socket.
  */
 async function runQuery(
   prompt: string,
@@ -360,31 +381,34 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  ipcClient: IpcClient,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
-  let ipcPolling = true;
+  // Drain IPC socket for follow-up messages and close signals during the query
+  let ipcDraining = true;
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
+  const drainIpcDuringQuery = () => {
+    if (!ipcDraining) return;
+    if (ipcClient.shouldClose()) {
+      log('Close signal received during query, ending stream');
       closedDuringQuery = true;
       stream.end();
-      ipcPolling = false;
+      ipcDraining = false;
       return;
     }
-    const messages = drainIpcInput();
+    const messages = ipcClient.drainMessages();
     for (const text of messages) {
       log(`Piping IPC message into active query (${text.length} chars)`);
       stream.push(text);
     }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+    // Messages arrive instantly via socket, but we still need a short
+    // drain interval since the SDK processes messages asynchronously
+    setTimeout(drainIpcDuringQuery, 50);
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  setTimeout(drainIpcDuringQuery, 50);
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -490,9 +514,32 @@ async function runQuery(
     }
   }
 
-  ipcPolling = false;
+  ipcDraining = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
+}
+
+/**
+ * Connect to the host IPC socket with retry backoff.
+ */
+async function connectIpcSocket(): Promise<net.Socket> {
+  const delays = [100, 500, 1000];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    try {
+      const socket = await new Promise<net.Socket>((resolve, reject) => {
+        const sock = net.createConnection(IPC_SOCKET_PATH, () => resolve(sock));
+        sock.on('error', reject);
+      });
+      log(`Connected to IPC socket (attempt ${attempt + 1})`);
+      return socket;
+    } catch (err) {
+      log(`IPC socket connection attempt ${attempt + 1} failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (attempt < delays.length - 1) {
+        await new Promise(r => setTimeout(r, delays[attempt]));
+      }
+    }
+  }
+  throw new Error(`Failed to connect to IPC socket at ${IPC_SOCKET_PATH} after ${delays.length} attempts`);
 }
 
 async function main(): Promise<void> {
@@ -524,17 +571,17 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  // Connect to host IPC socket
+  const ipcSocket = await connectIpcSocket();
+  const ipcClient = new IpcClient(ipcSocket);
 
   // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
-  const pending = drainIpcInput();
+  const pending = ipcClient.drainMessages();
   if (pending.length > 0) {
     log(`Draining ${pending.length} pending IPC messages into initial prompt`);
     prompt += '\n' + pending.join('\n');
@@ -546,7 +593,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, ipcClient, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -554,11 +601,11 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
-      // If _close was consumed during the query, exit immediately.
+      // If close was received during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
+      // idle timer and cause a 30-min delay before the next close).
       if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log('Close signal consumed during query, exiting');
         break;
       }
 
@@ -567,10 +614,10 @@ async function main(): Promise<void> {
 
       log('Query ended, waiting for next IPC message...');
 
-      // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
+      // Wait for the next message or close signal
+      const nextMessage = await ipcClient.waitForMessage();
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log('Close signal received, exiting');
         break;
       }
 
