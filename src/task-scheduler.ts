@@ -240,9 +240,12 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
         // (scheduler may poll again before task completes)
         let nextRun: string | null = null;
         if (currentTask.schedule_type === 'cron') {
-          const interval = CronExpressionParser.parse(currentTask.schedule_value, {
-            tz: TIMEZONE,
-          });
+          const interval = CronExpressionParser.parse(
+            currentTask.schedule_value,
+            {
+              tz: TIMEZONE,
+            },
+          );
           nextRun = interval.next().toISOString();
         } else if (currentTask.schedule_type === 'interval') {
           const ms = parseInt(currentTask.schedule_value, 10);

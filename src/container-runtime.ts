@@ -96,7 +96,9 @@ export function ensureContainerRuntimeRunning(): void {
         console.error(
           '╚════════════════════════════════════════════════════════════════╝\n',
         );
-        throw new Error('Apple Container system is required but failed to start');
+        throw new Error(
+          'Apple Container system is required but failed to start',
+        );
       }
     }
   }
@@ -121,7 +123,11 @@ export function cleanupOrphans(): void {
       const containers = JSON.parse(output || '[]');
       orphans = containers
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .filter((c: any) => c.status === 'running' && c.configuration?.id?.startsWith('nanoclaw-'))
+        .filter(
+          (c: any) =>
+            c.status === 'running' &&
+            c.configuration?.id?.startsWith('nanoclaw-'),
+        )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .map((c: any) => c.configuration.id);
     }
@@ -134,7 +140,10 @@ export function cleanupOrphans(): void {
       }
     }
     if (orphans.length > 0) {
-      logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+      logger.info(
+        { count: orphans.length, names: orphans },
+        'Stopped orphaned containers',
+      );
     }
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
