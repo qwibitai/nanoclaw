@@ -5,6 +5,14 @@ import path from 'path';
 
 type WorkStatus = 'planned' | 'implementing' | 'testing' | 'done' | 'blocked';
 
+const ALLOWED_TRANSITIONS: Record<WorkStatus, WorkStatus[]> = {
+  planned: ['implementing', 'blocked'],
+  implementing: ['testing', 'blocked'],
+  testing: ['done', 'blocked', 'implementing'],
+  blocked: ['planned', 'implementing'],
+  done: [],
+};
+
 interface WorkItem {
   id: string;
   title: string;
@@ -12,6 +20,7 @@ interface WorkItem {
   status: WorkStatus;
   request?: string;
   notes: string[];
+  evidence: string[];
   created_at: string;
   updated_at: string;
 }
@@ -34,16 +43,24 @@ function loadStore(repoRoot: string): WorkStore {
   const storePath = getStorePath(repoRoot);
   if (!fs.existsSync(storePath)) {
     return {
-      schema_version: 1,
+      schema_version: 2,
       updated_at: nowIso(),
       items: [],
     };
   }
-  return JSON.parse(fs.readFileSync(storePath, 'utf8')) as WorkStore;
+
+  const raw = JSON.parse(fs.readFileSync(storePath, 'utf8')) as WorkStore;
+  raw.schema_version = Math.max(raw.schema_version || 1, 2);
+  raw.items = raw.items.map((item) => ({
+    ...item,
+    evidence: item.evidence || [],
+  }));
+  return raw;
 }
 
 function saveStore(repoRoot: string, store: WorkStore): void {
   store.updated_at = nowIso();
+  store.schema_version = 2;
   const storePath = getStorePath(repoRoot);
   fs.mkdirSync(path.dirname(storePath), { recursive: true });
   fs.writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
@@ -55,6 +72,42 @@ function readFlag(args: string[], name: string): string | undefined {
   return args[idx + 1];
 }
 
+function readFlags(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === name && args[i + 1]) {
+      values.push(args[i + 1]);
+      i += 1;
+    }
+  }
+  return values;
+}
+
+function validateEvidence(repoRoot: string, entries: string[]): void {
+  for (const entry of entries) {
+    if (entry.startsWith('http://') || entry.startsWith('https://')) {
+      continue;
+    }
+    const abs = path.join(repoRoot, entry);
+    if (!fs.existsSync(abs)) {
+      console.error(`evidence file not found: ${entry}`);
+      process.exit(1);
+    }
+  }
+}
+
+function ensureStatus(value: string | undefined): WorkStatus {
+  if (!value) {
+    console.error('update requires --status');
+    process.exit(1);
+  }
+  if (!['planned', 'implementing', 'testing', 'done', 'blocked'].includes(value)) {
+    console.error(`invalid status: ${value}`);
+    process.exit(1);
+  }
+  return value as WorkStatus;
+}
+
 function main(): void {
   const args = process.argv.slice(2);
   const command = args[0];
@@ -64,7 +117,7 @@ function main(): void {
   if (!command || command === 'help') {
     console.log('Usage:');
     console.log('  create --feature <feature-id> --title <title> [--request <text>]');
-    console.log('  update --id <work-id> --status <planned|implementing|testing|done|blocked> [--note <text>]');
+    console.log('  update --id <work-id> --status <planned|implementing|testing|done|blocked> [--note <text>] [--evidence <path-or-url> ...]');
     console.log('  list [--status <status>]');
     console.log('  show --id <work-id>');
     process.exit(0);
@@ -88,6 +141,7 @@ function main(): void {
       status: 'planned',
       request,
       notes: [],
+      evidence: [],
       created_at: nowIso(),
       updated_at: nowIso(),
     };
@@ -101,22 +155,48 @@ function main(): void {
 
   if (command === 'update') {
     const id = readFlag(args, '--id');
-    const status = readFlag(args, '--status') as WorkStatus | undefined;
+    const status = ensureStatus(readFlag(args, '--status'));
     const note = readFlag(args, '--note');
+    const evidence = readFlags(args, '--evidence');
 
-    if (!id || !status) {
-      console.error('update requires --id and --status');
-      process.exit(1);
-    }
-
-    if (!['planned', 'implementing', 'testing', 'done', 'blocked'].includes(status)) {
-      console.error(`invalid status: ${status}`);
+    if (!id) {
+      console.error('update requires --id');
       process.exit(1);
     }
 
     const item = store.items.find((entry) => entry.id === id);
     if (!item) {
       console.error(`work item not found: ${id}`);
+      process.exit(1);
+    }
+
+    item.evidence = item.evidence || [];
+
+    if (item.status !== status) {
+      const allowed = ALLOWED_TRANSITIONS[item.status] || [];
+      if (!allowed.includes(status)) {
+        console.error(`invalid transition: ${item.status} -> ${status}`);
+        console.error(`allowed from ${item.status}: ${allowed.join(', ') || 'none'}`);
+        process.exit(1);
+      }
+    }
+
+    if ((status === 'blocked' || status === 'done') && !note) {
+      console.error(`status ${status} requires --note`);
+      process.exit(1);
+    }
+
+    if (evidence.length > 0) {
+      validateEvidence(repoRoot, evidence);
+      for (const entry of evidence) {
+        if (!item.evidence.includes(entry)) {
+          item.evidence.push(entry);
+        }
+      }
+    }
+
+    if (status === 'done' && item.evidence.length === 0) {
+      console.error('status done requires at least one --evidence entry');
       process.exit(1);
     }
 

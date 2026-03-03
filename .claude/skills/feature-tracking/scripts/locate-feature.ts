@@ -182,6 +182,7 @@ function main(): void {
         success: true,
         query,
         selected_feature: best,
+        touch_set_guard_command: `npx tsx .claude/skills/feature-tracking/scripts/check-touch-set.ts "${best.id}"`,
         related_features: ranked.slice(1, 4).map((item) => ({
           id: item.feature.id,
           name: item.feature.name,

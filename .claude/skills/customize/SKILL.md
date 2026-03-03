@@ -22,6 +22,7 @@ Run before coding:
 ```bash
 npx tsx .claude/skills/feature-tracking/scripts/build-feature-catalog.ts
 npx tsx .claude/skills/feature-tracking/scripts/locate-feature.ts "<request>"
+npx tsx .claude/skills/feature-tracking/scripts/check-touch-set.ts "<feature-id-or-query>"
 ```
 
 Use `selected_feature.files` as the default touch set and `selected_feature.tests` for verification.

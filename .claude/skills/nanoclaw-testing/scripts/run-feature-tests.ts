@@ -8,7 +8,9 @@ interface CatalogFeature {
   id: string;
   name: string;
   summary: string;
+  risk?: 'low' | 'medium' | 'high';
   keywords: string[];
+  files: string[];
   tests: string[];
 }
 
@@ -20,7 +22,55 @@ interface CmdResult {
   name: string;
   command: string;
   success: boolean;
+  duration_ms: number;
   error?: string;
+}
+
+interface ParsedArgs {
+  query: string;
+  full: boolean;
+  live: boolean;
+  jsonOut?: string;
+}
+
+function readFlagValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx === -1) return undefined;
+  return args[idx + 1];
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const full = argv.includes('--full');
+  const live = argv.includes('--live');
+  const jsonOut = readFlagValue(argv, '--json-out');
+
+  const queryParts: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === '--full' || arg === '--live') {
+      continue;
+    }
+    if (arg === '--json-out') {
+      i += 1;
+      continue;
+    }
+    queryParts.push(arg);
+  }
+
+  const query = queryParts.join(' ').trim();
+  if (!query) {
+    console.error(
+      'Usage: npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" [--live] [--full] [--json-out <path>]',
+    );
+    process.exit(1);
+  }
+
+  return {
+    query,
+    full,
+    live,
+    jsonOut,
+  };
 }
 
 function scoreFeature(feature: CatalogFeature, query: string): number {
@@ -109,33 +159,74 @@ function resolveFeature(catalog: Catalog, query: string): CatalogFeature | null 
 }
 
 function runCommand(name: string, command: string): CmdResult {
+  const start = Date.now();
   try {
     execSync(command, {
       stdio: 'inherit',
       cwd: process.cwd(),
-      timeout: 300_000,
+      timeout: 600_000,
     });
-    return { name, command, success: true };
+    return { name, command, success: true, duration_ms: Date.now() - start };
   } catch (error: any) {
     return {
       name,
       command,
       success: false,
+      duration_ms: Date.now() - start,
       error: error?.message || 'command failed',
     };
   }
 }
 
-function main(): void {
-  const args = process.argv.slice(2);
-  const full = args.includes('--full');
-  const query = args.filter((arg) => !arg.startsWith('--')).join(' ').trim();
+function normalizedFeatureText(feature: CatalogFeature): string {
+  return [
+    feature.id,
+    feature.name,
+    feature.summary,
+    ...feature.keywords,
+    ...feature.files,
+  ]
+    .join(' ')
+    .toLowerCase();
+}
 
-  if (!query) {
-    console.error('Usage: npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" [--full]');
-    process.exit(1);
+function shouldRunWorkerConnectivity(feature: CatalogFeature): boolean {
+  const text = normalizedFeatureText(feature);
+  const tokens = [
+    'worker',
+    'dispatch',
+    'container',
+    'lifecycle',
+    'timeout',
+    'no-output',
+    'handoff',
+    'ipc',
+    'reliability',
+  ];
+  return tokens.some((token) => text.includes(token));
+}
+
+function shouldRunHappinessGate(feature: CatalogFeature): boolean {
+  const text = normalizedFeatureText(feature);
+  const tokens = [
+    'andy',
+    'user',
+    'progress',
+    'greeting',
+    'status',
+    'chat',
+    'no-output',
+  ];
+  if (tokens.some((token) => text.includes(token))) {
+    return true;
   }
+  return feature.files.some((file) =>
+    ['scripts/test-andy-user-e2e.ts', 'scripts/jarvis-happiness-gate.sh'].includes(file),
+  );
+}
 
+function main(): void {
+  const args = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
   const catalogPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.json');
 
@@ -146,10 +237,10 @@ function main(): void {
   }
 
   const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as Catalog;
-  const feature = resolveFeature(catalog, query);
+  const feature = resolveFeature(catalog, args.query);
 
   if (!feature) {
-    console.error(`No matching feature found for query: ${query}`);
+    console.error(`No matching feature found for query: ${args.query}`);
     process.exit(1);
   }
 
@@ -163,8 +254,38 @@ function main(): void {
     commands.push({ name: 'feature-tests', command: `npx vitest run ${quoted}` });
   }
 
-  if (full) {
+  if (args.full) {
     commands.push({ name: 'full-test-suite', command: 'npm test' });
+  }
+
+  const manualChecks: string[] = [];
+  if (args.live) {
+    commands.push({ name: 'ops-preflight', command: 'bash scripts/jarvis-ops.sh preflight' });
+    commands.push({ name: 'ops-status', command: 'bash scripts/jarvis-ops.sh status' });
+
+    if (shouldRunWorkerConnectivity(feature)) {
+      commands.push({
+        name: 'ops-worker-connectivity',
+        command: 'bash scripts/jarvis-ops.sh verify-worker-connectivity',
+      });
+    }
+
+    if (shouldRunHappinessGate(feature)) {
+      commands.push({
+        name: 'ops-happiness-gate',
+        command: 'bash scripts/jarvis-ops.sh happiness-gate',
+      });
+      manualChecks.push(
+        'Complete docs/workflow/nanoclaw-andy-user-happiness-gate.md User POV Runbook and confirm human satisfaction.',
+      );
+    }
+  }
+
+  const warnings: string[] = [];
+  if ((feature.risk || 'medium') === 'high' && testFiles.length === 0) {
+    warnings.push(
+      `High-risk feature "${feature.id}" has no mapped tests in catalog; rely on --live and manual evidence.`,
+    );
   }
 
   const results: CmdResult[] = [];
@@ -179,23 +300,33 @@ function main(): void {
 
   const success = results.every((result) => result.success);
 
-  console.log(
-    `\n${JSON.stringify(
-      {
-        success,
-        query,
-        feature: {
-          id: feature.id,
-          name: feature.name,
-          tests: testFiles,
-        },
-        results,
-      },
-      null,
-      2,
-    )}`,
-  );
+  const report = {
+    success,
+    query: args.query,
+    options: {
+      live: args.live,
+      full: args.full,
+      json_out: args.jsonOut || null,
+    },
+    feature: {
+      id: feature.id,
+      name: feature.name,
+      risk: feature.risk || 'medium',
+      tests: testFiles,
+    },
+    commands_executed: results.length,
+    results,
+    warnings,
+    manual_checks_required: manualChecks,
+  };
 
+  if (args.jsonOut) {
+    const outPath = path.resolve(repoRoot, args.jsonOut);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  }
+
+  console.log(`\n${JSON.stringify(report, null, 2)}`);
   process.exit(success ? 0 : 1);
 }
 

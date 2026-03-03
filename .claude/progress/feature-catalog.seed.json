@@ -367,6 +367,55 @@
       "tests": []
     },
     {
+      "id": "feature-tracking-pipeline",
+      "name": "Feature Tracking Pipeline",
+      "summary": "Feature ownership catalog build/validation/query scripts that prevent duplicate implementation paths.",
+      "risk": "high",
+      "keywords": [
+        "feature tracking",
+        "ownership",
+        "touch set",
+        "catalog",
+        "duplication",
+        "scope"
+      ],
+      "files": [
+        ".claude/skills/feature-tracking/SKILL.md",
+        ".claude/skills/feature-tracking/scripts/build-feature-catalog.ts",
+        ".claude/skills/feature-tracking/scripts/validate-feature-catalog.ts",
+        ".claude/skills/feature-tracking/scripts/locate-feature.ts",
+        ".claude/skills/feature-tracking/scripts/audit-feature-coverage.ts",
+        ".claude/skills/feature-tracking/scripts/check-touch-set.ts",
+        ".claude/progress/feature-catalog.seed.json"
+      ],
+      "tests": []
+    },
+    {
+      "id": "project-skill-delivery-pipeline",
+      "name": "Project Skill Delivery Pipeline",
+      "summary": "Project-specific orchestrator, implementation, and testing skills with auditable work-item and validation flow.",
+      "risk": "high",
+      "keywords": [
+        "orchestrator",
+        "implementation",
+        "testing",
+        "workflow",
+        "happiness gate",
+        "evidence"
+      ],
+      "files": [
+        ".claude/skills/nanoclaw-orchestrator/SKILL.md",
+        ".claude/skills/nanoclaw-orchestrator/scripts/work-item.ts",
+        ".claude/skills/nanoclaw-implementation/SKILL.md",
+        ".claude/skills/nanoclaw-testing/SKILL.md",
+        ".claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts",
+        "scripts/jarvis-happiness-gate.sh",
+        "scripts/test-andy-user-e2e.ts",
+        "docs/workflow/nanoclaw-andy-user-happiness-gate.md"
+      ],
+      "tests": []
+    },
+    {
       "id": "channel-extension-skills",
       "name": "Channel and Integration Extension Skills",
       "summary": "Optional upstream capabilities delivered as skills (Telegram, Slack, Discord, Gmail, X, voice, parallel).",

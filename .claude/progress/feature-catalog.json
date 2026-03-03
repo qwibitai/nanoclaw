@@ -2,12 +2,12 @@
   "schema_version": 1,
   "project": "nanoclaw",
   "maintainer": "andy-developer",
-  "generated_at": "2026-03-03T06:12:40.951Z",
+  "generated_at": "2026-03-03T06:22:31.190Z",
   "source_seed": ".claude/progress/feature-catalog.seed.json",
   "stats": {
-    "feature_count": 17,
-    "high_risk_count": 9,
-    "shared_file_count": 7,
+    "feature_count": 19,
+    "high_risk_count": 11,
+    "shared_file_count": 9,
     "missing_ref_count": 0
   },
   "file_owners": {
@@ -84,7 +84,8 @@
       "reliability-e2e"
     ],
     "scripts/test-andy-user-e2e.ts": [
-      "reliability-e2e"
+      "reliability-e2e",
+      "project-skill-delivery-pipeline"
     ],
     "scripts/test-worker-e2e.ts": [
       "reliability-e2e"
@@ -114,7 +115,8 @@
       "ops-reliability-tooling"
     ],
     "scripts/jarvis-happiness-gate.sh": [
-      "ops-reliability-tooling"
+      "ops-reliability-tooling",
+      "project-skill-delivery-pipeline"
     ],
     "scripts/jarvis-hotspots.sh": [
       "ops-reliability-tooling"
@@ -242,6 +244,45 @@
     ".claude/skills/update/SKILL.md": [
       "core-skill-workflows"
     ],
+    ".claude/progress/feature-catalog.seed.json": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/scripts/audit-feature-coverage.ts": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/scripts/build-feature-catalog.ts": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/scripts/check-touch-set.ts": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/scripts/locate-feature.ts": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/scripts/validate-feature-catalog.ts": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/feature-tracking/SKILL.md": [
+      "feature-tracking-pipeline"
+    ],
+    ".claude/skills/nanoclaw-implementation/SKILL.md": [
+      "project-skill-delivery-pipeline"
+    ],
+    ".claude/skills/nanoclaw-orchestrator/scripts/work-item.ts": [
+      "project-skill-delivery-pipeline"
+    ],
+    ".claude/skills/nanoclaw-orchestrator/SKILL.md": [
+      "project-skill-delivery-pipeline"
+    ],
+    ".claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts": [
+      "project-skill-delivery-pipeline"
+    ],
+    ".claude/skills/nanoclaw-testing/SKILL.md": [
+      "project-skill-delivery-pipeline"
+    ],
+    "docs/workflow/nanoclaw-andy-user-happiness-gate.md": [
+      "project-skill-delivery-pipeline"
+    ],
     ".claude/skills/add-discord/SKILL.md": [
       "channel-extension-skills"
     ],
@@ -302,7 +343,7 @@
         "npm run typecheck",
         "npx vitest run src/group-folder.test.ts src/group-queue.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "whatsapp-channel",
@@ -334,7 +375,7 @@
         "npm run typecheck",
         "npx vitest run src/channels/whatsapp.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "ipc-dispatch-contract",
@@ -367,7 +408,7 @@
         "npm run typecheck",
         "npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "container-runtime",
@@ -400,7 +441,7 @@
         "npm run typecheck",
         "npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "task-scheduling",
@@ -428,7 +469,7 @@
         "npm run typecheck",
         "npx vitest run src/task-scheduler.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "database-state",
@@ -456,7 +497,7 @@
         "npm run typecheck",
         "npx vitest run src/db.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "config-env",
@@ -481,7 +522,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "routing-formatting",
@@ -511,7 +552,7 @@
         "npm run typecheck",
         "npx vitest run src/formatting.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "jarvis-worker-lifecycle",
@@ -548,7 +589,7 @@
         "npm run typecheck",
         "npx vitest run src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "reliability-e2e",
@@ -569,11 +610,13 @@
       "tests": [],
       "missing_files": [],
       "missing_tests": [],
-      "shared_files": [],
+      "shared_files": [
+        "scripts/test-andy-user-e2e.ts"
+      ],
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "observability-logging",
@@ -602,7 +645,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "ops-reliability-tooling",
@@ -638,11 +681,13 @@
       "tests": [],
       "missing_files": [],
       "missing_tests": [],
-      "shared_files": [],
+      "shared_files": [
+        "scripts/jarvis-happiness-gate.sh"
+      ],
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "skills-engine-lifecycle",
@@ -688,7 +733,7 @@
         "npm run typecheck",
         "npx vitest run skills-engine/__tests__/apply.test.ts skills-engine/__tests__/rebase.test.ts skills-engine/__tests__/uninstall.test.ts skills-engine/__tests__/update.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "agent-runner-mcp",
@@ -715,7 +760,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "worker-runtime-lane",
@@ -744,7 +789,7 @@
         "npm run typecheck",
         "npx vitest run container/worker/runner/src/lib.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "core-skill-workflows",
@@ -776,7 +821,73 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
+    },
+    {
+      "id": "feature-tracking-pipeline",
+      "name": "Feature Tracking Pipeline",
+      "summary": "Feature ownership catalog build/validation/query scripts that prevent duplicate implementation paths.",
+      "risk": "high",
+      "keywords": [
+        "feature tracking",
+        "ownership",
+        "touch set",
+        "catalog",
+        "duplication",
+        "scope"
+      ],
+      "files": [
+        ".claude/progress/feature-catalog.seed.json",
+        ".claude/skills/feature-tracking/scripts/audit-feature-coverage.ts",
+        ".claude/skills/feature-tracking/scripts/build-feature-catalog.ts",
+        ".claude/skills/feature-tracking/scripts/check-touch-set.ts",
+        ".claude/skills/feature-tracking/scripts/locate-feature.ts",
+        ".claude/skills/feature-tracking/scripts/validate-feature-catalog.ts",
+        ".claude/skills/feature-tracking/SKILL.md"
+      ],
+      "tests": [],
+      "missing_files": [],
+      "missing_tests": [],
+      "shared_files": [],
+      "suggested_verify_commands": [
+        "npm run typecheck"
+      ],
+      "generated_at": "2026-03-03T06:22:31.190Z"
+    },
+    {
+      "id": "project-skill-delivery-pipeline",
+      "name": "Project Skill Delivery Pipeline",
+      "summary": "Project-specific orchestrator, implementation, and testing skills with auditable work-item and validation flow.",
+      "risk": "high",
+      "keywords": [
+        "orchestrator",
+        "implementation",
+        "testing",
+        "workflow",
+        "happiness gate",
+        "evidence"
+      ],
+      "files": [
+        ".claude/skills/nanoclaw-implementation/SKILL.md",
+        ".claude/skills/nanoclaw-orchestrator/scripts/work-item.ts",
+        ".claude/skills/nanoclaw-orchestrator/SKILL.md",
+        ".claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts",
+        ".claude/skills/nanoclaw-testing/SKILL.md",
+        "docs/workflow/nanoclaw-andy-user-happiness-gate.md",
+        "scripts/jarvis-happiness-gate.sh",
+        "scripts/test-andy-user-e2e.ts"
+      ],
+      "tests": [],
+      "missing_files": [],
+      "missing_tests": [],
+      "shared_files": [
+        "scripts/jarvis-happiness-gate.sh",
+        "scripts/test-andy-user-e2e.ts"
+      ],
+      "suggested_verify_commands": [
+        "npm run typecheck"
+      ],
+      "generated_at": "2026-03-03T06:22:31.190Z"
     },
     {
       "id": "channel-extension-skills",
@@ -817,7 +928,7 @@
         "npm run typecheck",
         "npx vitest run .claude/skills/add-discord/tests/discord.test.ts .claude/skills/add-gmail/tests/gmail.test.ts .claude/skills/add-slack/tests/slack.test.ts .claude/skills/add-telegram/tests/telegram.test.ts .claude/skills/add-voice-transcription/tests/voice-transcription.test.ts"
       ],
-      "generated_at": "2026-03-03T06:12:40.951Z"
+      "generated_at": "2026-03-03T06:22:31.190Z"
     }
   ]
 }

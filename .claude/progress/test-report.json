@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "query": "project-skill-delivery-pipeline",
+  "options": {
+    "live": false,
+    "full": false,
+    "json_out": ".claude/progress/test-report.json"
+  },
+  "feature": {
+    "id": "project-skill-delivery-pipeline",
+    "name": "Project Skill Delivery Pipeline",
+    "risk": "high",
+    "tests": []
+  },
+  "commands_executed": 1,
+  "results": [
+    {
+      "name": "typecheck",
+      "command": "npm run typecheck",
+      "success": true,
+      "duration_ms": 968
+    }
+  ],
+  "warnings": [
+    "High-risk feature \"project-skill-delivery-pipeline\" has no mapped tests in catalog; rely on --live and manual evidence."
+  ],
+  "manual_checks_required": []
+}

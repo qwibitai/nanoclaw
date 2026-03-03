@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-03T06:12:40.951Z
+Generated: 2026-03-03T06:22:31.190Z
 Project: nanoclaw
 
 ## Features
@@ -174,6 +174,8 @@ Project: nanoclaw
   - scripts/test-worker-e2e.ts
 - Tests (0):
   - none
+- Shared Files:
+  - scripts/test-andy-user-e2e.ts
 - Suggested Verify:
   - npm run typecheck
 
@@ -213,6 +215,8 @@ Project: nanoclaw
   - scripts/jarvis-worker-probe.sh
 - Tests (0):
   - none
+- Shared Files:
+  - scripts/jarvis-happiness-gate.sh
 - Suggested Verify:
   - npm run typecheck
 
@@ -290,6 +294,44 @@ Project: nanoclaw
   - .claude/skills/update/SKILL.md
 - Tests (0):
   - none
+- Suggested Verify:
+  - npm run typecheck
+
+### feature-tracking-pipeline - Feature Tracking Pipeline
+- Risk: high
+- Summary: Feature ownership catalog build/validation/query scripts that prevent duplicate implementation paths.
+- Keywords: feature tracking, ownership, touch set, catalog, duplication, scope
+- Files (7):
+  - .claude/progress/feature-catalog.seed.json
+  - .claude/skills/feature-tracking/scripts/audit-feature-coverage.ts
+  - .claude/skills/feature-tracking/scripts/build-feature-catalog.ts
+  - .claude/skills/feature-tracking/scripts/check-touch-set.ts
+  - .claude/skills/feature-tracking/scripts/locate-feature.ts
+  - .claude/skills/feature-tracking/scripts/validate-feature-catalog.ts
+  - .claude/skills/feature-tracking/SKILL.md
+- Tests (0):
+  - none
+- Suggested Verify:
+  - npm run typecheck
+
+### project-skill-delivery-pipeline - Project Skill Delivery Pipeline
+- Risk: high
+- Summary: Project-specific orchestrator, implementation, and testing skills with auditable work-item and validation flow.
+- Keywords: orchestrator, implementation, testing, workflow, happiness gate, evidence
+- Files (8):
+  - .claude/skills/nanoclaw-implementation/SKILL.md
+  - .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts
+  - .claude/skills/nanoclaw-orchestrator/SKILL.md
+  - .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts
+  - .claude/skills/nanoclaw-testing/SKILL.md
+  - docs/workflow/nanoclaw-andy-user-happiness-gate.md
+  - scripts/jarvis-happiness-gate.sh
+  - scripts/test-andy-user-e2e.ts
+- Tests (0):
+  - none
+- Shared Files:
+  - scripts/jarvis-happiness-gate.sh
+  - scripts/test-andy-user-e2e.ts
 - Suggested Verify:
   - npm run typecheck
 
