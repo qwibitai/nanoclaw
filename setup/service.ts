@@ -15,10 +15,22 @@ import {
   getNodePath,
   getServiceManager,
   hasSystemd,
+  isNixManaged,
   isRoot,
   isWSL,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+/** Build PATH for service units, auto-detecting Nix-managed system paths. */
+function servicePath(homeDir: string): string {
+  const parts = ['/usr/local/bin', '/usr/bin', '/bin', `${homeDir}/.local/bin`];
+  if (isNixManaged()) {
+    const user = os.userInfo().username;
+    parts.unshift('/run/current-system/sw/bin', '/run/wrappers/bin');
+    parts.push(`/etc/profiles/per-user/${user}/bin`, `${homeDir}/.nix-profile/bin`);
+  }
+  return parts.join(':');
+}
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -101,7 +113,7 @@ function setupLaunchd(
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
+        <string>${servicePath(homeDir)}</string>
         <key>HOME</key>
         <string>${homeDir}</string>
     </dict>
@@ -244,7 +256,7 @@ WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
 Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+Environment=PATH=${servicePath(homeDir)}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
