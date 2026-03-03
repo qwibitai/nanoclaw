@@ -151,7 +151,9 @@ function resolveFeature(catalog: Catalog, query: string): CatalogFeature | null 
 
 function parseStatusLine(line: string): string | null {
   if (!line.trim()) return null;
-  const payload = line.slice(3).trim();
+  const match = line.match(/^[ MARCUD?!]{2}\s+(.*)$/);
+  if (!match) return null;
+  const payload = (match[1] || '').trim();
   if (!payload) return null;
   if (payload.includes(' -> ')) {
     const [, next] = payload.split(' -> ');
@@ -161,7 +163,9 @@ function parseStatusLine(line: string): string | null {
 }
 
 function getChangedFiles(stagedOnly: boolean): string[] {
-  const cmd = stagedOnly ? 'git diff --name-only --cached' : 'git status --porcelain';
+  const cmd = stagedOnly
+    ? 'git -c color.ui=false diff --name-only --cached'
+    : 'git -c color.status=false -c color.ui=false status --porcelain';
   const raw = execSync(cmd, { encoding: 'utf8' }).trim();
   if (!raw) return [];
 
