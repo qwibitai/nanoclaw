@@ -35,6 +35,7 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  rateLimitResetAt?: string; // ISO date when rate limit resets
 }
 
 interface SessionEntry {
@@ -477,17 +478,195 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+
+      // Check if Claude's output contains a rate limit notice
+      const rateLimitResetAt = textResult ? parseRateLimitResetFromText(textResult) : undefined;
+      if (rateLimitResetAt) {
+        log(`Rate limit detected in result text, reset at ${rateLimitResetAt.toISOString()}`);
+        // Emit as error so the host rolls back the cursor and retries at reset time.
+        // result is still populated so the rate-limit message reaches the user via WhatsApp.
+        writeOutput({
+          status: 'error',
+          result: textResult || null,
+          newSessionId,
+          rateLimitResetAt: rateLimitResetAt.toISOString(),
+        });
+      } else {
+        writeOutput({
+          status: 'success',
+          result: textResult || null,
+          newSessionId,
+        });
+      }
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
+}
+
+/**
+ * Convert a wall-clock time in a named IANA timezone to a UTC Date.
+ * Uses the "naive UTC + offset correction" trick: construct a UTC instant with
+ * the given numbers, measure how far off it is from the desired wall-clock in
+ * the target timezone, then add that delta.
+ */
+function zonedToUtc(year: number, month: number, day: number, hour24: number, minute: number, timezone: string): Date {
+  const naiveUtc = new Date(Date.UTC(year, month - 1, day, hour24, minute, 0));
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+  }).formatToParts(naiveUtc);
+
+  const get = (type: string): number => {
+    const v = parts.find(p => p.type === type)?.value;
+    return v ? parseInt(v, 10) : 0;
+  };
+
+  const tzYear = get('year');
+  const tzMonth = get('month');
+  const tzDay = get('day');
+  const tzHour = get('hour') % 24; // some locales emit 24 for midnight
+  const tzMinute = get('minute');
+  const tzSecond = get('second');
+
+  const actualTzMs = Date.UTC(tzYear, tzMonth - 1, tzDay, tzHour, tzMinute, tzSecond);
+  const wantedTzMs = Date.UTC(year, month - 1, day, hour24, minute, 0);
+  const offsetMs = wantedTzMs - actualTzMs;
+
+  return new Date(naiveUtc.getTime() + offsetMs);
+}
+
+/**
+ * Parse a rate limit reset time from Claude's output text.
+ *
+ * Claude emits messages like:
+ *   "You've hit your usage limit · resets 2am (America/Los_Angeles)"
+ *   "resets at 2:30pm (America/New_York)"
+ *
+ * Returns the next UTC Date on which that wall-clock time occurs in the stated
+ * timezone (today if still in the future, tomorrow otherwise).
+ * Returns undefined if no recognisable pattern is found.
+ *
+ * Exported for unit testing.
+ */
+export function parseRateLimitResetFromText(text: string): Date | undefined {
+  // Require the trailing 's' ("resets") to avoid false positives from ordinary
+  // sentences like "reset at 8am" that have nothing to do with rate limiting.
+  // Claude Code's rate-limit notice always uses "resets Xam (Timezone)".
+  const match = text.match(
+    /resets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*(?:\(([^)]+)\))?/i,
+  );
+  if (!match) return undefined;
+
+  const hour12 = parseInt(match[1], 10);
+  const minutes = match[2] ? parseInt(match[2], 10) : 0;
+  const isPm = match[3].toLowerCase() === 'pm';
+  const rawTz = match[4]; // e.g. "America/Los_Angeles", may be undefined
+
+  // Convert 12-hour to 24-hour
+  let hour24 = hour12;
+  if (isPm && hour12 !== 12) hour24 += 12;
+  if (!isPm && hour12 === 12) hour24 = 0;
+
+  // Validate and normalise timezone — fall back to UTC for unknown abbreviations
+  let timezone = 'UTC';
+  if (rawTz) {
+    try {
+      Intl.DateTimeFormat('en-US', { timeZone: rawTz });
+      timezone = rawTz;
+    } catch {
+      // Invalid timezone string — stick with UTC
+    }
+  }
+
+  const now = new Date();
+  const todayInTZ = now.toLocaleDateString('en-CA', { timeZone: timezone }); // "YYYY-MM-DD"
+  const [year, month, day] = todayInTZ.split('-').map(Number);
+
+  for (let dayOffset = 0; dayOffset <= 1; dayOffset++) {
+    // Use Date.UTC to handle month/year overflow at month boundaries
+    const base = new Date(Date.UTC(year, month - 1, day + dayOffset));
+    const candidate = zonedToUtc(
+      base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(),
+      hour24, minutes, timezone,
+    );
+    if (candidate > now) {
+      return candidate;
+    }
+  }
+
+  // Shouldn't be reached in practice; return 2 days out as a safe fallback
+  const base = new Date(Date.UTC(year, month - 1, day + 2));
+  return zonedToUtc(
+    base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(),
+    hour24, minutes, timezone,
+  );
+}
+
+/**
+ * Extract the rate limit reset timestamp from an Anthropic SDK 429 error.
+ * The SDK exposes err.headers as a Web API Headers instance — must use .get(),
+ * not bracket notation. Returns an ISO date string, or undefined if not present.
+ *
+ * NOTE: This is a secondary defence layer. In practice, rate limit errors from
+ * the Anthropic API are handled inside the Claude Code CLI subprocess and never
+ * propagate here as thrown exceptions. The primary detection path is
+ * parseRateLimitResetFromText(), which parses the reset time from Claude's text
+ * output.
+ *
+ * Exported for unit testing.
+ */
+export function extractRateLimitResetAt(err: unknown): string | undefined {
+  if (
+    !err ||
+    typeof err !== 'object' ||
+    !('status' in err) ||
+    (err as { status: unknown }).status !== 429
+  ) {
+    return undefined;
+  }
+
+  const headers = (err as { headers?: Headers }).headers;
+  if (!headers || typeof headers.get !== 'function') return undefined;
+
+  const resetTimes = [
+    headers.get('anthropic-ratelimit-requests-reset'),
+    headers.get('anthropic-ratelimit-tokens-reset'),
+    headers.get('anthropic-ratelimit-input-tokens-reset'),
+    headers.get('anthropic-ratelimit-output-tokens-reset'),
+  ].filter(Boolean) as string[];
+
+  if (resetTimes.length > 0) {
+    // Use the latest reset time (most restrictive)
+    return resetTimes.sort().pop();
+  }
+
+  const retryAfter = headers.get('retry-after');
+  if (!retryAfter) return undefined;
+
+  // Only treat as seconds if the whole string is a non-negative integer.
+  // parseInt("2025-01-01T...", 10) would otherwise return 2025 and be
+  // misinterpreted as seconds rather than a date string.
+  const seconds = parseInt(retryAfter, 10);
+  if (!isNaN(seconds) && /^\d+$/.test(retryAfter.trim())) {
+    return new Date(Date.now() + seconds * 1000).toISOString();
+  }
+
+  const retryAfterDate = new Date(retryAfter);
+  if (!isNaN(retryAfterDate.getTime())) {
+    return retryAfterDate.toISOString();
+  }
+
+  return undefined;
 }
 
 async function main(): Promise<void> {
@@ -579,7 +758,8 @@ async function main(): Promise<void> {
       status: 'error',
       result: null,
       newSessionId: sessionId,
-      error: errorMessage
+      error: errorMessage,
+      rateLimitResetAt: extractRateLimitResetAt(err),
     });
     process.exit(1);
   }

@@ -46,6 +46,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  rateLimitResetAt?: string; // ISO date when rate limit resets
 }
 
 interface VolumeMount {
