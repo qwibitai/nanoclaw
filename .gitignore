@@ -69,3 +69,6 @@ agents-sdk-docs
 
 # Worker build artifacts
 container/worker/vendor/*.tgz
+
+# Session exports live in Obsidian vault
+Claude-Sessions/

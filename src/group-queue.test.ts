@@ -1,11 +1,21 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+const mockStopContainerWithVerification = vi.fn();
+const mockStopRunningContainersByPrefix = vi.fn();
+
 import { GroupQueue } from './group-queue.js';
 
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+}));
+
+vi.mock('./container-runtime.js', () => ({
+  stopContainerWithVerification: (...args: unknown[]) =>
+    mockStopContainerWithVerification(...args),
+  stopRunningContainersByPrefix: (...args: unknown[]) =>
+    mockStopRunningContainersByPrefix(...args),
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -28,6 +38,17 @@ describe('GroupQueue', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     queue = new GroupQueue();
+    mockStopContainerWithVerification.mockReset();
+    mockStopRunningContainersByPrefix.mockReset();
+    mockStopContainerWithVerification.mockReturnValue({
+      stopped: false,
+      attempts: ['mock_stop_failed'],
+    });
+    mockStopRunningContainersByPrefix.mockReturnValue({
+      matched: [],
+      stopped: [],
+      failures: [],
+    });
   });
 
   afterEach(() => {
@@ -483,5 +504,54 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
+  });
+
+  it('aborts via runtime container fallback when lane is not active but container is known', () => {
+    mockStopContainerWithVerification.mockReturnValueOnce({
+      stopped: true,
+      attempts: ['ok: container stop nanoclaw-jarvis-worker-1-123'],
+    });
+
+    const result = queue.abortActiveRun(
+      'jarvis-worker-1@nanoclaw',
+      'probe-jarvis-worker-1-123',
+      'stale_probe_run_watchdog',
+      {
+        groupFolder: 'jarvis-worker-1',
+        activeContainerName: 'nanoclaw-jarvis-worker-1-123',
+      },
+    );
+
+    expect(mockStopContainerWithVerification).toHaveBeenCalledWith(
+      'nanoclaw-jarvis-worker-1-123',
+    );
+    expect(result.aborted).toBe(true);
+    expect(result.stopVerified).toBe(true);
+    expect(result.detail).toBe('runtime_container_stop_fallback');
+  });
+
+  it('aborts via runtime prefix fallback when container name is unavailable', () => {
+    mockStopRunningContainersByPrefix.mockReturnValueOnce({
+      matched: ['nanoclaw-jarvis-worker-2-abc'],
+      stopped: ['nanoclaw-jarvis-worker-2-abc'],
+      failures: [],
+    });
+
+    const result = queue.abortActiveRun(
+      'jarvis-worker-2@nanoclaw',
+      'probe-jarvis-worker-2-abc',
+      'stale_probe_run_watchdog',
+      {
+        groupFolder: 'jarvis-worker-2',
+        activeContainerName: null,
+      },
+    );
+
+    expect(mockStopRunningContainersByPrefix).toHaveBeenCalledWith(
+      'nanoclaw-jarvis-worker-2-',
+    );
+    expect(result.aborted).toBe(true);
+    expect(result.stopVerified).toBe(true);
+    expect(result.detail).toBe('runtime_prefix_stop_fallback');
   });
 });

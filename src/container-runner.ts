@@ -37,7 +37,9 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
 // Must match AGENT_RUNNER_LOG_PREFIX in container/agent-runner/src/index.ts
 const AGENT_RUNNER_LOG_PREFIX = '[agent-runner]';
-const PROBE_NO_OUTPUT_TIMEOUT_MS = 330_000;
+// Probe runs are liveness checks; they must fail fast so verify-worker-connectivity
+// can complete deterministically without leaving long-lived in-flight probes.
+const PROBE_NO_OUTPUT_TIMEOUT_MS = 115_000;
 
 
 export interface ContainerInput {

@@ -357,7 +357,7 @@ if resolved_chat and len(msg_rows) == 0:
     root_cause = "no_ingest"
 if blocks:
     root_cause = "dispatch_blocked"
-if any((r.get("status") == "failed" and "running_without_container" in (r.get("error_details") or "")) for r in run_rows):
+if any((r.get("status") == "failed_runtime" and "running_without_container" in (r.get("error_details") or "")) for r in run_rows):
     root_cause = "container_stale"
 if no_output_events:
     root_cause = "andy_no_output_timeout"

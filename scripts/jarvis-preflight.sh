@@ -321,6 +321,8 @@ if [ -f "$DB_PATH" ] && have_cmd sqlite3; then
     selected_session_id
     effective_session_id
     session_resume_status
+    run_generation
+    stop_reason
   )
   missing_cols=()
   for col in "${required_cols[@]}"; do
@@ -344,9 +346,9 @@ if [ -f "$DB_PATH" ] && have_cmd sqlite3; then
     warn "db.worker_runs.rows" "worker_runs table has no rows"
   fi
 
-  stale_queued_non_probe="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status='queued' AND run_id NOT LIKE 'probe-%' AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');" 2>/dev/null || echo 0)"
-  stale_queued_probe="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status='queued' AND run_id LIKE 'probe-%' AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');" 2>/dev/null || echo 0)"
-  stale_running="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status='running' AND julianday(started_at) < julianday('now', '-${STALE_RUNNING_MINUTES} minutes');" 2>/dev/null || echo 0)"
+  stale_queued_non_probe="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('queued','provisioning') AND run_id NOT LIKE 'probe-%' AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');" 2>/dev/null || echo 0)"
+  stale_queued_probe="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('queued','provisioning') AND run_id LIKE 'probe-%' AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');" 2>/dev/null || echo 0)"
+  stale_running="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('running','stopping') AND julianday(started_at) < julianday('now', '-${STALE_RUNNING_MINUTES} minutes');" 2>/dev/null || echo 0)"
 
   if [[ "$stale_queued_non_probe" =~ ^[0-9]+$ ]] && [ "$stale_queued_non_probe" -eq 0 ]; then
     pass "db.worker_runs.stale_queued" "no stale queued non-probe worker runs older than ${STALE_QUEUED_MINUTES}m"

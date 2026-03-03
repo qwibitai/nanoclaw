@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-03T10:12:56.729575+00:00",
+  "updated_at": "2026-03-03T11:27:36.231242+00:00",
   "incidents": [
     {
       "id": "incident-worker-connectivity-block-20260227",
@@ -8,7 +8,7 @@
       "status": "open",
       "severity": "high",
       "created_at": "2026-02-27T13:02:09.098285+00:00",
-      "updated_at": "2026-03-03T10:12:56.729511+00:00",
+      "updated_at": "2026-03-03T11:27:36.231173+00:00",
       "summary": {
         "symptom": "Workers are not connected and I don't have access to restart them. To restart the push task: start worker containers manually via deployment system, then I will dispatch push task. Alternative: push branches manually from local environment.",
         "suspected_cause": "unknown",
@@ -30,19 +30,100 @@
       },
       "notes": [
         {
-          "ts": "2026-03-03T08:33:28.963133+00:00",
+          "ts": "2026-03-03T11:03:38.587917+00:00",
           "author": "operator",
-          "text": "2026-03-03 current state: verify-worker-connectivity fails deterministically due existing in-flight probe backlog (jarvis-worker-1 running probe + jarvis-worker-2 queued probe) and stale queued probe count >0. No new duplicate probes are dispatched after guard; next step is drain/cleanup backlog then rerun connectivity gate."
+          "text": "2026-03-03 16:32 IST: Replay-loop fix active (log shows 'Agent error after worker run terminalized...'). However worker execution path still unstable: probe containers emit no completion/stdout and hit stale_probe_run_watchdog/exit 137; verify-worker-connectivity remains FAIL (jarvis-worker-2 probe run probe-jarvis-worker-2-1772535666-8018 timed out in 120s while still running)."
         },
         {
-          "ts": "2026-03-03T09:39:02.004233+00:00",
+          "ts": "2026-03-03T11:04:43.115313+00:00",
           "author": "operator",
-          "text": "2026-03-03 continued RCA/fix: (1) worker-lane trigger gate bypassed for synthetic worker groups in src/index.ts so IPC worker dispatch messages do not require @Andy trigger, (2) stale probe watchdogs added in supervisor (queued/running=5m) and reconcile now tolerates container liveness check errors instead of aborting, (3) startup replay now auto-fails stale probe runs instead of resurrecting old probe backlog. Current remaining failure: fresh probes still queue and do not reach review_requested within 120s; they transition to running and later fail by stale_probe_run_watchdog."
+          "text": "2026-03-03 health check: preflight PASS(12/12, main lane inactivity warning); reliability WARN on recent container errors (18) and one running worker probe; status shows top failure reasons stale_probe_queued_watchdog=9, stale_probe_run_watchdog=4, worker execution failed=4; running_without_container historical count=14."
         },
         {
-          "ts": "2026-03-03T10:12:56.729505+00:00",
+          "ts": "2026-03-03T11:27:36.231168+00:00",
           "author": "operator",
-          "text": "2026-03-03 architecture flaw identified: watchdog and runtime/queue control planes are decoupled. worker-run-supervisor marks probe runs failed after 5m (stale_probe_run_watchdog), but GroupQueue lane remains active until runContainerAgent exits; worker no-output timeout floor is 900000ms (15m), so stale containers keep running and hold per-lane lock. Fresh probe dispatches are queued (spawn_acknowledged_at null) and often timeout before execution, causing repeated verify-worker-connectivity FAIL despite valid dispatch."
+          "text": "2026-03-03 patch applied: coupled watchdog timeout path with runtime fallback stops (GroupQueue abort now supports activeContainerName/groupFolder fallback and supervisor passes run lifecycle metadata). Probe watchdog/no-output budgets tightened (110s/115s) to keep verify-worker-connectivity deterministic. Evidence after restart (pid 67118): probe runs now terminalize failed_timeout with timeout_ms=110000 and abort.detail=runtime_container_stop_fallback; stale queued/running counts remain 0; no in-flight probe backlog persists after probe/verify runs."
+        }
+      ]
+    },
+    {
+      "id": "incident-20260301T164404Z",
+      "title": "Andy greeting delayed after hi due to no-output run",
+      "status": "open",
+      "severity": "unknown",
+      "created_at": "2026-03-01T16:44:04.869450+00:00",
+      "updated_at": "2026-03-03T11:05:06.737324+00:00",
+      "summary": {
+        "symptom": "Andy greeting delayed after hi due to no-output run",
+        "suspected_cause": "andy_no_output_timeout",
+        "impact": "User pings in Andy-Developer can be consumed without timely reply; perceived responsiveness is poor and trust in lane health degrades.",
+        "next_action": "Add a fast-path greeting handler for simple salutations in andy-developer before heavy workflow logic, and add watchdog handling that aborts/stops no-output Andy runs earlier with immediate fallback reply."
+      },
+      "evidence": {
+        "bundle_count": 1,
+        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260301T164422Z",
+        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260301T164422Z/manifest.json",
+        "last_root_cause": "andy_no_output_timeout",
+        "last_status": "warn",
+        "last_checked_at": "2026-03-01T16:44:31.300694+00:00",
+        "non_zero_command_count": 3,
+        "debug_summary": "root_cause=andy_no_output_timeout; messages=8; worker_runs=0; dispatch_blocks=0; non_zero_commands=3"
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-03T07:04:37.924178+00:00",
+          "author": "operator",
+          "text": "2026-03-03 verification: happiness-gate still failing; script/test-andy-user-e2e.ts reports Simple Greeting latency 15963ms (limit 8000ms). Natural status text path also still emits req-tracking responses in chat history."
+        },
+        {
+          "ts": "2026-03-03T07:39:08.576263+00:00",
+          "author": "operator",
+          "text": "2026-03-03: post-fix happiness-gate PASS (greeting/status/progress latency <1s) with conversational frontdesk replies; keep open until manual User POV runbook + explicit user confirmation."
+        },
+        {
+          "ts": "2026-03-03T11:05:06.737321+00:00",
+          "author": "operator",
+          "text": "2026-03-03 watch/log check still shows no-output and stale probe watchdog patterns; andy responsiveness risk remains open pending fast-path greeting and watchdog behavior hardening."
+        }
+      ]
+    },
+    {
+      "id": "incident-20260303T072358Z",
+      "title": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
+      "status": "open",
+      "severity": "unknown",
+      "created_at": "2026-03-03T07:23:58.677764+00:00",
+      "updated_at": "2026-03-03T11:04:43.148427+00:00",
+      "summary": {
+        "symptom": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
+        "suspected_cause": "worker completion contract drift: first completion block used stale branch, causing branch mismatch validation",
+        "impact": "verify-worker-connectivity can fail even when worker runtime is healthy; creates false-negative reliability signal for mission gate",
+        "next_action": "tighten worker probe completion validation/retry path so stale first completion blocks do not leave failed_contract terminal state"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "jarvis-worker-1"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-03T07:43:32.945831+00:00",
+          "author": "operator",
+          "text": "2026-03-03: fixed completion parser to prefer latest valid <completion> block (src/dispatch-validator.ts). Added regression test in src/jarvis-worker-dispatch.test.ts. Focused probe run probe-jarvis-worker-1-1772523711-18103 PASS review_requested."
+        },
+        {
+          "ts": "2026-03-03T07:47:27.462052+00:00",
+          "author": "operator",
+          "text": "2026-03-03 post-fix validation: verify-worker-connectivity --skip-prechecks PASS with jarvis-worker-1 review_requested (probe-jarvis-worker-1-1772523843-18433) and jarvis-worker-2 review_requested (probe-jarvis-worker-2-1772523906-6470)."
+        },
+        {
+          "ts": "2026-03-03T11:04:43.148423+00:00",
+          "author": "operator",
+          "text": "2026-03-03 status confirms one dispatch-block artifact exists (request_id validation mismatch on probe run); branch/contract validation noise still impacts connectivity signal."
         }
       ]
     },
@@ -80,87 +161,6 @@
           "ts": "2026-03-03T08:33:25.193172+00:00",
           "author": "operator",
           "text": "2026-03-03 follow-up: preflight stale-queue check now distinguishes non-probe vs probe runs. Non-probe stale queue remains hard-fail; stale probe backlog is warning, preventing diagnostics deadlock while preserving signal."
-        }
-      ]
-    },
-    {
-      "id": "incident-20260303T072358Z",
-      "title": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
-      "status": "open",
-      "severity": "unknown",
-      "created_at": "2026-03-03T07:23:58.677764+00:00",
-      "updated_at": "2026-03-03T07:47:27.462054+00:00",
-      "summary": {
-        "symptom": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
-        "suspected_cause": "worker completion contract drift: first completion block used stale branch, causing branch mismatch validation",
-        "impact": "verify-worker-connectivity can fail even when worker runtime is healthy; creates false-negative reliability signal for mission gate",
-        "next_action": "tighten worker probe completion validation/retry path so stale first completion blocks do not leave failed_contract terminal state"
-      },
-      "evidence": {
-        "bundle_count": 0
-      },
-      "context": {
-        "lane": "jarvis-worker-1"
-      },
-      "notes": [
-        {
-          "ts": "2026-03-03T07:23:58.677764+00:00",
-          "author": "user",
-          "text": "reported: jarvis-worker-1 probe failed_contract due completion branch mismatch"
-        },
-        {
-          "ts": "2026-03-03T07:43:32.945831+00:00",
-          "author": "operator",
-          "text": "2026-03-03: fixed completion parser to prefer latest valid <completion> block (src/dispatch-validator.ts). Added regression test in src/jarvis-worker-dispatch.test.ts. Focused probe run probe-jarvis-worker-1-1772523711-18103 PASS review_requested."
-        },
-        {
-          "ts": "2026-03-03T07:47:27.462052+00:00",
-          "author": "operator",
-          "text": "2026-03-03 post-fix validation: verify-worker-connectivity --skip-prechecks PASS with jarvis-worker-1 review_requested (probe-jarvis-worker-1-1772523843-18433) and jarvis-worker-2 review_requested (probe-jarvis-worker-2-1772523906-6470)."
-        }
-      ]
-    },
-    {
-      "id": "incident-20260301T164404Z",
-      "title": "Andy greeting delayed after hi due to no-output run",
-      "status": "open",
-      "severity": "unknown",
-      "created_at": "2026-03-01T16:44:04.869450+00:00",
-      "updated_at": "2026-03-03T07:39:08.576267+00:00",
-      "summary": {
-        "symptom": "Andy greeting delayed after hi due to no-output run",
-        "suspected_cause": "andy_no_output_timeout",
-        "impact": "User pings in Andy-Developer can be consumed without timely reply; perceived responsiveness is poor and trust in lane health degrades.",
-        "next_action": "Add a fast-path greeting handler for simple salutations in andy-developer before heavy workflow logic, and add watchdog handling that aborts/stops no-output Andy runs earlier with immediate fallback reply."
-      },
-      "evidence": {
-        "bundle_count": 1,
-        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260301T164422Z",
-        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260301T164422Z/manifest.json",
-        "last_root_cause": "andy_no_output_timeout",
-        "last_status": "warn",
-        "last_checked_at": "2026-03-01T16:44:31.300694+00:00",
-        "non_zero_command_count": 3,
-        "debug_summary": "root_cause=andy_no_output_timeout; messages=8; worker_runs=0; dispatch_blocks=0; non_zero_commands=3"
-      },
-      "context": {
-        "lane": "andy-developer"
-      },
-      "notes": [
-        {
-          "ts": "2026-03-01T16:44:04.869450+00:00",
-          "author": "user",
-          "text": "reported: Andy greeting delayed after hi due to no-output run"
-        },
-        {
-          "ts": "2026-03-03T07:04:37.924178+00:00",
-          "author": "operator",
-          "text": "2026-03-03 verification: happiness-gate still failing; script/test-andy-user-e2e.ts reports Simple Greeting latency 15963ms (limit 8000ms). Natural status text path also still emits req-tracking responses in chat history."
-        },
-        {
-          "ts": "2026-03-03T07:39:08.576263+00:00",
-          "author": "operator",
-          "text": "2026-03-03: post-fix happiness-gate PASS (greeting/status/progress latency <1s) with conversational frontdesk replies; keep open until manual User POV runbook + explicit user confirmation."
         }
       ]
     }

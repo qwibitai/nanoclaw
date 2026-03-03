@@ -111,8 +111,10 @@ const MISSION_CORE_FOLDERS = new Set([
 ]);
 const ACTIVE_WORKER_RUN_STATUSES = ['queued', 'provisioning', 'running', 'stopping'] as const;
 const WORKER_RUN_STALE_MS = 2 * 60 * 60 * 1000;
-const WORKER_PROBE_QUEUED_STALE_MS = 5 * 60 * 1000;
-const WORKER_PROBE_RUNNING_STALE_MS = 5 * 60 * 1000;
+// Keep probe watchdog strictly below verify-worker-connectivity (120s) so
+// failed probes terminalize before gate timeout and do not leave in-flight locks.
+const WORKER_PROBE_QUEUED_STALE_MS = 110 * 1000;
+const WORKER_PROBE_RUNNING_STALE_MS = 110 * 1000;
 const WORKER_QUEUED_CURSOR_GRACE_MS = 10 * 60 * 1000; // Avoid false pre-spawn stale failures during normal queueing
 const WORKER_LEASE_TTL_MS = 90 * 1000;
 const WORKER_RESTART_SUPPRESSION_WINDOW_MS = 60 * 1000;
@@ -999,7 +1001,15 @@ function reconcileStaleWorkerRuns(): void {
         };
       }
 
-      const abort = queue.abortActiveRun(chatJid, run.run_id, reason);
+      const abort = queue.abortActiveRun(
+        chatJid,
+        run.run_id,
+        reason,
+        {
+          groupFolder: run.group_folder,
+          activeContainerName: run.active_container_name,
+        },
+      );
       return abort;
     },
   });
@@ -1376,6 +1386,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
   let outputAckCursor: string | undefined;
+  let workerRunTerminalized = false;
 
   const sessionOverride = workerSessionSelection
     ? (workerSessionSelection.selectedSessionId ?? null)
@@ -1481,6 +1492,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     details?: string,
   ): void => {
     if (!workerRun) return;
+    workerRunTerminalized = true;
     if (workerRunGeneration !== undefined) {
       const ok = markRunTerminal(workerRun.runId, workerRunGeneration, status, summary, details);
       if (ok) return;
@@ -1627,6 +1639,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           summary: `[${group.folder}] ✓ review: ${completion.branch}`,
           metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
         });
+        workerRunTerminalized = true;
         workerRunSupervisor.markTerminal(workerRun.runId);
         refreshWorkerRunSnapshotsForGroups();
         logger.info(
@@ -1801,6 +1814,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       commitCursor(chatJid, outputAckCursor || batchLastTimestamp);
       clearInFlightCursor(chatJid);
       logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      return true;
+    }
+    if (workerRun && workerRunTerminalized) {
+      markBatchProcessed(chatJid, messagesToProcess, workerRun.runId);
+      commitInFlightCursor(chatJid);
+      logger.warn(
+        { group: group.name, runId: workerRun.runId },
+        'Agent error after worker run terminalized, skipping cursor rollback to prevent duplicate replay',
+      );
       return true;
     }
     // Keep durable cursor unchanged so retries can re-process these messages.

@@ -179,15 +179,15 @@ else
   warn "db.data.worker_runs_nonempty" "worker_runs has no rows"
 fi
 
-active_with_completed="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('queued','running') AND completed_at IS NOT NULL;")"
+active_with_completed="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('queued','provisioning','running','stopping') AND completed_at IS NOT NULL;")"
 if [ "$active_with_completed" -eq 0 ]; then
   pass "db.consistency.active_completed" "no active worker runs with completed_at"
 else
   warn "db.consistency.active_completed" "active rows with completed_at found: $active_with_completed"
 fi
 
-stale_queued="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status='queued' AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');")"
-stale_running="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status='running' AND julianday(started_at) < julianday('now', '-${STALE_RUNNING_MINUTES} minutes');")"
+stale_queued="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('queued','provisioning') AND julianday(started_at) < julianday('now', '-${STALE_QUEUED_MINUTES} minutes');")"
+stale_running="$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM worker_runs WHERE status IN ('running','stopping') AND julianday(started_at) < julianday('now', '-${STALE_RUNNING_MINUTES} minutes');")"
 
 if [ "$stale_queued" -eq 0 ]; then
   pass "db.consistency.stale_queued" "no stale queued rows"

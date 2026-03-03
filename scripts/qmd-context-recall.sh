@@ -2,28 +2,28 @@
 set -euo pipefail
 
 # qmd-context-recall.sh
-# Syncs session exports when stale, updates QMD index, then runs context search.
+# Recall-only workflow: search QMD session context and manage handoff notes.
+# This script intentionally has no session export sync or git commit/push flow.
 #
 # Usage:
 #   scripts/qmd-context-recall.sh "worker connectivity dispatch"
-#   scripts/qmd-context-recall.sh --force-sync --top 10 --fetch 3 --lines 160 "mcp startup failed"
-#   scripts/qmd-context-recall.sh --no-get "branch-name issue"
+#   scripts/qmd-context-recall.sh --search-mode hybrid "dispatch contract mismatch"
+#   scripts/qmd-context-recall.sh --bootstrap
+#   scripts/qmd-context-recall.sh --close --next "run verify-worker-connectivity"
 #
 # Env overrides:
-#   QMD_BIN, SYNC_TOOL, SESSION_EXPORT_DIR, CODEX_DAYS, HANDOFF_FILE
+#   QMD_BIN, HANDOFF_FILE, QCTX_SEARCH_MODE, QMD_MODELS_DIR, QCTX_INCIDENT_FALLBACK
 
 QMD_BIN="${QMD_BIN:-qmd}"
-SYNC_TOOL="${SYNC_TOOL:-$HOME/.claude/skills/sync-claude-sessions/scripts/claude-sessions}"
-SESSION_EXPORT_DIR="${SESSION_EXPORT_DIR:-$HOME/Documents/remote-claude/Obsidian/Claude-Sessions}"
-CODEX_DAYS="${CODEX_DAYS:-21}"
 HANDOFF_FILE="${HANDOFF_FILE:-$(pwd)/.claude/progress/session-handoff.jsonl}"
+SEARCH_MODE="${QCTX_SEARCH_MODE:-auto}"
+QMD_MODELS_DIR="${QMD_MODELS_DIR:-$HOME/.cache/qmd/models}"
+QCTX_INCIDENT_FALLBACK="${QCTX_INCIDENT_FALLBACK:-1}"
 
 TOP=8
 FETCH=2
 LINES=140
 COLLECTION="sessions"
-FORCE_SYNC=0
-NO_SYNC=0
 MODE="search"
 ISSUE_ID=""
 DONE_TEXT=""
@@ -45,8 +45,9 @@ Options:
   --top N          Number of search hits (default: 8)
   --fetch N        Number of top hits to expand with qmd get (default: 2)
   --lines N        Lines to fetch per expanded hit (default: 140)
+  --search-mode M  Search strategy: auto|bm25|hybrid (default: auto)
   --collection C   QMD collection (default: sessions)
-  --bootstrap      Session-start mode: sync/search with handoff-aware query
+  --bootstrap      Session-start mode: handoff-aware query + search
   --close          Session-end mode: write structured handoff record
   --issue ID       Issue/ticket identifier (e.g., INC-123, GH-42)
   --done TEXT      What was completed in this session
@@ -54,10 +55,13 @@ Options:
   --blocker TEXT   Current blocker, if any
   --commands TEXT  Important commands run in this session
   --state STATE    active|done|blocked|handoff (default: handoff)
-  --force-sync     Force Claude/Codex export + qmd update before search
-  --no-sync        Skip sync/update checks
+  --no-incident-fallback
+                  Disable fallback query from latest open incident on no-hit search
   --no-get         Don't expand hits with qmd get
   -h, --help       Show this help
+
+Deprecated (moved to qmd-session-sync.sh):
+  --force-sync, --no-sync, --git-sync, --git-push, --no-git-sync
 EOF
 }
 
@@ -66,6 +70,152 @@ require_cmd() {
     echo "Missing required command: $1" >&2
     exit 1
   fi
+}
+
+has_doc_hits() {
+  local input="$1"
+  printf '%s\n' "$input" | awk '/^#/{found=1} END{exit !found}'
+}
+
+has_hybrid_model() {
+  [[ -d "$QMD_MODELS_DIR" ]] || return 1
+  find "$QMD_MODELS_DIR" -type f -name "*.gguf" -size +50M -print -quit 2>/dev/null | grep -q .
+}
+
+run_qmd_lookup() {
+  local mode="$1"
+  local query="$2"
+  if [[ "$mode" == "hybrid" ]]; then
+    "$QMD_BIN" query "$query" -c "$COLLECTION" -n "$TOP" --files
+  else
+    "$QMD_BIN" search "$query" -c "$COLLECTION" -n "$TOP" --files
+  fi
+}
+
+extract_latest_incident_query() {
+  local incident_file="$1"
+  python3 - "$incident_file" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1]).expanduser()
+if not path.exists():
+    print("")
+    raise SystemExit(0)
+
+try:
+    data = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+incidents = data.get("incidents") or []
+open_incidents = [i for i in incidents if str(i.get("status", "")).strip().lower() == "open"]
+if not open_incidents:
+    print("")
+    raise SystemExit(0)
+
+open_incidents.sort(key=lambda row: str(row.get("updated_at", "")), reverse=True)
+latest = open_incidents[0]
+summary = latest.get("summary") or {}
+text_parts = [
+    latest.get("title", ""),
+    summary.get("symptom", ""),
+    summary.get("suspected_cause", ""),
+    summary.get("next_action", ""),
+]
+raw = " ".join(str(p) for p in text_parts if p).strip().lower()
+if not raw:
+    print("")
+    raise SystemExit(0)
+
+tokens = re.findall(r"[a-z0-9][a-z0-9_-]{1,}", raw)
+stop = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "after",
+    "before", "while", "then", "than", "when", "where", "were", "been",
+    "have", "has", "had", "are", "was", "will", "can", "could", "should",
+    "must", "not", "but", "still", "issue", "incident", "lane", "open",
+    "worker", "workers", "run", "runs", "task", "tasks", "status", "next",
+    "action", "due", "via", "andy", "jarvis",
+}
+picked = []
+for tok in tokens:
+    if tok in stop:
+        continue
+    if tok not in picked:
+        picked.append(tok)
+    if len(picked) >= 14:
+        break
+
+print(" ".join(picked))
+PY
+}
+
+search_with_branch_fallback() {
+  local mode="$1"
+  local query="$2"
+  local label="BM25"
+  local output=""
+  local effective_query="$query"
+
+  if [[ "$mode" == "hybrid" ]]; then
+    label="Hybrid"
+  fi
+
+  output="$(run_qmd_lookup "$mode" "$query" 2>&1 || true)"
+  if [[ "$output" == *"No results found."* ]] && [[ -n "$BRANCH" ]] && [[ "$query" != *"$BRANCH"* ]] && [[ "$BRANCH" != "main" ]] && [[ "$BRANCH" != "master" ]] && [[ "$BRANCH" != "HEAD" ]]; then
+    effective_query="$query $BRANCH"
+    echo "No direct ${label} hits. Retrying with branch context: $effective_query"
+    output="$(run_qmd_lookup "$mode" "$effective_query" 2>&1 || true)"
+  fi
+
+  SEARCH_EFFECTIVE_QUERY="$effective_query"
+  SEARCH_EFFECTIVE_RESULTS="$output"
+}
+
+run_search_pipeline() {
+  local query="$1"
+  local results=""
+  local final_query="$query"
+  local final_mode="$SEARCH_MODE"
+
+  if [[ "$SEARCH_MODE" == "hybrid" ]]; then
+    search_with_branch_fallback "hybrid" "$query"
+    final_query="$SEARCH_EFFECTIVE_QUERY"
+    results="$SEARCH_EFFECTIVE_RESULTS"
+  elif [[ "$SEARCH_MODE" == "bm25" ]]; then
+    search_with_branch_fallback "bm25" "$query"
+    final_query="$SEARCH_EFFECTIVE_QUERY"
+    results="$SEARCH_EFFECTIVE_RESULTS"
+  else
+    search_with_branch_fallback "bm25" "$query"
+    local bm25_query="$SEARCH_EFFECTIVE_QUERY"
+    local bm25_results="$SEARCH_EFFECTIVE_RESULTS"
+    results="$bm25_results"
+    final_query="$bm25_query"
+    final_mode="bm25"
+
+    if has_hybrid_model; then
+      echo "Running hybrid rerank over the same query..."
+      search_with_branch_fallback "hybrid" "$bm25_query"
+      local hybrid_results="$SEARCH_EFFECTIVE_RESULTS"
+      if has_doc_hits "$hybrid_results"; then
+        results="$hybrid_results"
+        final_query="$SEARCH_EFFECTIVE_QUERY"
+        final_mode="hybrid"
+      else
+        echo "Hybrid returned no ranked hits. Using BM25 results."
+      fi
+    else
+      echo "Hybrid model not detected; using BM25 now. Run '--search-mode hybrid' once to warm cache."
+    fi
+  fi
+
+  PIPELINE_RESULTS="$results"
+  PIPELINE_FINAL_QUERY="$final_query"
+  PIPELINE_FINAL_MODE="$final_mode"
 }
 
 compact_words() {
@@ -82,44 +232,6 @@ compact_words() {
       }
       print out;
     }'
-}
-
-latest_mtime_for_ext() {
-  local dir="$1"
-  local ext="$2"
-  local latest=0
-  local file=""
-  [[ -d "$dir" ]] || {
-    echo 0
-    return
-  }
-  while IFS= read -r -d '' file; do
-    local m=0
-    m="$(stat -f '%m' "$file" 2>/dev/null || echo 0)"
-    if (( m > latest )); then
-      latest="$m"
-    fi
-  done < <(find "$dir" -type f -name "*.${ext}" -print0 2>/dev/null)
-  echo "$latest"
-}
-
-detect_claude_project_dir() {
-  local cwd encoded path
-  cwd="$(pwd)"
-  encoded="${cwd//\//-}"
-  path="$HOME/.claude/projects/${encoded}"
-  if [[ -d "$path" ]]; then
-    echo "$path"
-    return
-  fi
-  # Fallback: most recently modified Claude project directory.
-  local latest=""
-  latest="$(ls -td "$HOME"/.claude/projects/* 2>/dev/null | head -n 1 || true)"
-  if [[ -n "$latest" ]]; then
-    echo "$latest"
-    return
-  fi
-  echo ""
 }
 
 load_latest_handoff() {
@@ -172,7 +284,7 @@ save_handoff() {
 
   mkdir -p "$(dirname "$HANDOFF_FILE")"
   python3 - "$HANDOFF_FILE" "$ts" "$branch" "$issue" "$state" "$done" "$next" "$blocker" "$commands" "$files" <<'PY'
-import json, os, sys
+import json, sys
 path, ts, branch, issue, state, done, next_step, blocker, commands, files = sys.argv[1:]
 files_list = [f for f in files.split(",") if f.strip()]
 record = {
@@ -192,22 +304,6 @@ print(path)
 PY
 }
 
-run_sync() {
-  if [[ ! -f "$SYNC_TOOL" ]]; then
-    echo "Sync tool not found at: $SYNC_TOOL" >&2
-    echo "Skipping sync. Continuing with current QMD index." >&2
-    return 0
-  fi
-  local vault_dir=""
-  vault_dir="$(cd -- "$(dirname -- "$SESSION_EXPORT_DIR")" && pwd -P)"
-  echo "Syncing Claude sessions (today)..."
-  VAULT_DIR="$vault_dir" python3 "$SYNC_TOOL" export --today
-  echo "Syncing Codex sessions (last ${CODEX_DAYS} days)..."
-  VAULT_DIR="$vault_dir" python3 "$SYNC_TOOL" codex-export --days "$CODEX_DAYS" --output "$SESSION_EXPORT_DIR"
-  echo "Refreshing QMD index..."
-  "$QMD_BIN" update
-}
-
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --top)
@@ -222,6 +318,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --lines)
       LINES="${2:-}"
+      shift 2
+      ;;
+    --search-mode)
+      SEARCH_MODE="${2:-}"
       shift 2
       ;;
     --collection)
@@ -260,17 +360,19 @@ while [[ $# -gt 0 ]]; do
       SESSION_STATE="${2:-}"
       shift 2
       ;;
-    --force-sync)
-      FORCE_SYNC=1
-      shift
-      ;;
-    --no-sync)
-      NO_SYNC=1
+    --no-incident-fallback)
+      QCTX_INCIDENT_FALLBACK=0
       shift
       ;;
     --no-get)
       FETCH=0
+      USER_SET_FETCH=1
       shift
+      ;;
+    --force-sync|--no-sync|--git-sync|--git-push|--no-git-sync)
+      echo "Option '$1' moved out of qmd-context-recall.sh." >&2
+      echo "Run: bash scripts/qmd-session-sync.sh  # sync + qmd update + git add/commit" >&2
+      exit 2
       ;;
     -h|--help)
       usage
@@ -326,6 +428,11 @@ QUERY="${*:-}"
 require_cmd "$QMD_BIN"
 require_cmd python3
 
+if [[ "$SEARCH_MODE" != "auto" && "$SEARCH_MODE" != "bm25" && "$SEARCH_MODE" != "hybrid" ]]; then
+  echo "Invalid --search-mode: $SEARCH_MODE (expected auto|bm25|hybrid)" >&2
+  exit 2
+fi
+
 if [[ "$MODE" == "bootstrap" ]]; then
   if (( USER_SET_TOP == 0 )); then
     TOP=10
@@ -335,44 +442,14 @@ if [[ "$MODE" == "bootstrap" ]]; then
   fi
 fi
 
-if (( NO_SYNC == 0 )); then
-  CLAUDE_DIR="$(detect_claude_project_dir)"
-  CLAUDE_LATEST=0
-  CODEX_LATEST=0
-  EXPORT_LATEST=0
-
-  if [[ -n "$CLAUDE_DIR" ]]; then
-    CLAUDE_LATEST="$(latest_mtime_for_ext "$CLAUDE_DIR" "jsonl")"
-  fi
-  CODEX_LATEST="$(latest_mtime_for_ext "$HOME/.codex/sessions" "jsonl")"
-  EXPORT_LATEST="$(latest_mtime_for_ext "$SESSION_EXPORT_DIR" "md")"
-
-  SOURCE_LATEST="$CLAUDE_LATEST"
-  if (( CODEX_LATEST > SOURCE_LATEST )); then
-    SOURCE_LATEST="$CODEX_LATEST"
-  fi
-
-  NEED_SYNC=0
-  if (( FORCE_SYNC == 1 )) || (( SOURCE_LATEST > EXPORT_LATEST )); then
-    NEED_SYNC=1
-  fi
-
-  if (( NEED_SYNC == 1 )); then
-    run_sync
-  else
-    echo "Session exports are up to date. Skipping sync."
-  fi
-fi
-
 LAST_TS=""
-LAST_BRANCH=""
 LAST_ISSUE=""
 LAST_STATE=""
 LAST_DONE=""
 LAST_NEXT=""
 LAST_BLOCKER=""
 if [[ "$MODE" == "bootstrap" ]]; then
-  IFS=$'\t' read -r LAST_TS LAST_BRANCH LAST_ISSUE LAST_STATE LAST_DONE LAST_NEXT LAST_BLOCKER < <(load_latest_handoff "${BRANCH:-}")
+  IFS=$'\t' read -r LAST_TS _ LAST_ISSUE LAST_STATE LAST_DONE LAST_NEXT LAST_BLOCKER < <(load_latest_handoff "${BRANCH:-}")
   if [[ -z "$ISSUE_ID" && -n "$LAST_ISSUE" ]]; then
     ISSUE_ID="$LAST_ISSUE"
   fi
@@ -412,15 +489,28 @@ echo
 echo "Searching QMD context..."
 echo "  query:      $QUERY"
 echo "  collection: $COLLECTION"
+echo "  mode:       $SEARCH_MODE"
 echo
 
-SEARCH_CMD=("$QMD_BIN" search "$QUERY" -c "$COLLECTION" -n "$TOP" --files)
-RESULTS="$("${SEARCH_CMD[@]}" 2>&1 || true)"
+run_search_pipeline "$QUERY"
+RESULTS="$PIPELINE_RESULTS"
+FINAL_QUERY="$PIPELINE_FINAL_QUERY"
+FINAL_MODE="$PIPELINE_FINAL_MODE"
 
-if [[ "$RESULTS" == *"No results found."* ]] && [[ -n "$BRANCH" ]] && [[ "$QUERY" != *"$BRANCH"* ]] && [[ "$BRANCH" != "main" ]] && [[ "$BRANCH" != "master" ]] && [[ "$BRANCH" != "HEAD" ]]; then
-  ALT_QUERY="$QUERY $BRANCH"
-  echo "No direct hits. Retrying with branch context: $ALT_QUERY"
-  RESULTS="$("$QMD_BIN" search "$ALT_QUERY" -c "$COLLECTION" -n "$TOP" --files 2>&1 || true)"
+if [[ "$QCTX_INCIDENT_FALLBACK" == "1" ]] && ! has_doc_hits "$RESULTS"; then
+  INCIDENT_QUERY="$(extract_latest_incident_query "$(pwd)/.claude/progress/incident.json")"
+  if [[ -n "$INCIDENT_QUERY" && "$INCIDENT_QUERY" != "$QUERY" ]]; then
+    echo "No hits from primary query. Retrying with latest incident context..."
+    echo "  incident query: $INCIDENT_QUERY"
+    run_search_pipeline "$INCIDENT_QUERY"
+    if has_doc_hits "$PIPELINE_RESULTS"; then
+      RESULTS="$PIPELINE_RESULTS"
+      FINAL_QUERY="$PIPELINE_FINAL_QUERY"
+      FINAL_MODE="$PIPELINE_FINAL_MODE"
+    else
+      echo "Incident-context fallback returned no hits."
+    fi
+  fi
 fi
 
 echo "$RESULTS"
@@ -447,7 +537,7 @@ if (( ${#DOC_IDS[@]} == 0 )); then
 fi
 
 echo
-echo "Top context snippets:"
+echo "Top context snippets (${FINAL_MODE}, query: ${FINAL_QUERY}):"
 for docid in "${DOC_IDS[@]}"; do
   echo "--------------------------------------------------------------------------------"
   echo "$docid"

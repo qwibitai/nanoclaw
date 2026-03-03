@@ -202,6 +202,8 @@ if [ -f "$DB_PATH" ] && have_cmd sqlite3; then
     last_progress_summary
     last_progress_at
     steer_count
+    run_generation
+    stop_reason
   )
   missing_cols=()
   for col in "${required_cols[@]}"; do

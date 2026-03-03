@@ -33,6 +33,7 @@ Folder-level docs index: [`docs/README.md`](docs/README.md)
 ```text
 AT SESSION START or resuming interrupted work → read docs/workflow/session-recall.md
 BEFORE ending a session with in-progress work/blockers → read docs/workflow/session-recall.md
+BEFORE changing session recall/sync/export behavior → read docs/workflow/session-recall.md
 BEFORE editing root CLAUDE.md → read .claude/rules/nanoclaw-root-claude-compression.md
 BEFORE adding/removing/renaming docs → read .claude/rules/docs-pruning-loop.md
 BEFORE starting implementation/debug/setup/update work → read .claude/rules/skill-routing-preflight.md
@@ -105,6 +106,13 @@ Run commands directly—don't tell the user to run them.
 npm run dev          # Run with hot reload
 npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
+```
+
+Session recall/sync helpers:
+
+```bash
+bash scripts/qmd-context-recall.sh --bootstrap # Recall-only workflow (no sync/git)
+bash scripts/qmd-session-sync.sh               # Session export sync + qmd update + git add/commit
 ```
 
 Jarvis ops entrypoint:
