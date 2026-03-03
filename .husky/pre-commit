@@ -1,1 +1,1 @@
-npm run format:fix
+bun run format:fix
