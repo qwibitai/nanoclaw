@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
@@ -27,6 +28,59 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:8083';
+
+/**
+ * Transcribe an audio buffer via the local Whisper STT service.
+ * Returns the transcribed text, or null on failure.
+ */
+async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string | null> {
+  try {
+    const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
+    const boundary = `----NanoclawSTT${Date.now()}`;
+    const CRLF = '\r\n';
+
+    const header = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="file"; filename="audio.${ext}"`,
+      `Content-Type: ${mimeType}`,
+      '',
+      '',
+    ].join(CRLF);
+    const langField = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="language"`,
+      '',
+      'de',
+      '',
+    ].join(CRLF);
+    const footer = `--${boundary}--${CRLF}`;
+
+    const body = Buffer.concat([
+      Buffer.from(header),
+      audioBuffer,
+      Buffer.from(CRLF + langField + footer),
+    ]);
+
+    const res = await fetch(`${WHISPER_URL}/transcribe`, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) {
+      logger.warn({ status: res.status }, 'Whisper STT failed');
+      return null;
+    }
+
+    const data = await res.json() as { text?: string };
+    return data.text?.trim() || null;
+  } catch (err) {
+    logger.warn({ err }, 'Whisper STT error');
+    return null;
+  }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -201,12 +255,55 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
+          let content =
             normalized.conversation ||
             normalized.extendedTextMessage?.text ||
             normalized.imageMessage?.caption ||
             normalized.videoMessage?.caption ||
             '';
+
+          // Transcribe PTT/audio messages via Whisper STT
+          if (!content && normalized.audioMessage) {
+            const audioMsg = normalized.audioMessage;
+            const isPtt = (audioMsg as Record<string, unknown>)?.ptt === true;
+            logger.info({ chatJid, isPtt }, 'Received audio message, transcribing...');
+            try {
+              const audioBuffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+              const mimeType = audioMsg?.mimetype || 'audio/ogg; codecs=opus';
+              const transcribed = await transcribeAudio(audioBuffer, mimeType);
+              if (transcribed) {
+                content = transcribed;
+                logger.info({ chatJid, transcribed }, 'Audio transcribed');
+              } else {
+                logger.warn({ chatJid }, 'Audio transcription returned empty result');
+              }
+            } catch (err) {
+              logger.warn({ err, chatJid }, 'Failed to download/transcribe audio');
+            }
+          }
+
+          // Download images/stickers and save to group media folder for agent access
+          if (normalized.imageMessage || normalized.stickerMessage) {
+            const imgMsg = normalized.imageMessage || normalized.stickerMessage;
+            const group = groups[chatJid];
+            try {
+              const imgBuffer = await downloadMediaMessage(msg, 'buffer', {}) as Buffer;
+              const ext = (imgMsg?.mimetype || 'image/jpeg').includes('webp') ? 'webp' : 'jpg';
+              const mediaDir = path.join(STORE_DIR, '..', 'groups', group.folder, 'media');
+              fs.mkdirSync(mediaDir, { recursive: true });
+              const filename = `img-${Date.now()}.${ext}`;
+              const hostPath = path.join(mediaDir, filename);
+              fs.writeFileSync(hostPath, imgBuffer);
+              const containerPath = `/workspace/group/media/${filename}`;
+              const caption = normalized.imageMessage?.caption || '';
+              content = caption
+                ? `${caption}\n[Bild gespeichert unter: ${containerPath}]`
+                : `[Bild gespeichert unter: ${containerPath}]`;
+              logger.info({ chatJid, containerPath }, 'Image saved for agent');
+            } catch (err) {
+              logger.warn({ err, chatJid }, 'Failed to download image');
+            }
+          }
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           if (!content) continue;

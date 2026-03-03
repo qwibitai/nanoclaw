@@ -117,14 +117,16 @@ function buildVolumeMounts(
         {
           env: {
             // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
             CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
             // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
             CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
+            // Enable Claude's memory feature
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            // mcporter: npm-global package + config mounted from host
+            PATH: '/host/.npm-global/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+            MCPORTER_CONFIG: '/workspace/nanoclaw-config/mcporter.json',
+            // mcporter spawns MCP sub-processes — they need node_modules on host path
+            NODE_PATH: '/host/.npm-global/lib/node_modules',
           },
         },
         null,
@@ -196,6 +198,24 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Mount mcporter + MCP server projects from host (read-only)
+  // mcporter spawns MCP sub-processes that need access to their project dirs on the host.
+  const homeDir = process.env.HOME || '/home/admin';
+  const npmGlobal = path.join(homeDir, '.npm-global');
+  if (fs.existsSync(npmGlobal)) {
+    mounts.push({ hostPath: npmGlobal, containerPath: '/host/.npm-global', readonly: true });
+  }
+  // nanoclaw/config/ contains mcporter.json (copied, not symlinked to openclaw)
+  const nanoclaConfigDir = path.join(projectRoot, 'config');
+  if (fs.existsSync(nanoclaConfigDir)) {
+    mounts.push({ hostPath: nanoclaConfigDir, containerPath: '/workspace/nanoclaw-config', readonly: true });
+  }
+  // MCP server projects (weather-mcp, ms-mcp, email-mcp, etc.) live under ~/projects
+  const projectsDir = path.join(homeDir, 'projects');
+  if (fs.existsSync(projectsDir)) {
+    mounts.push({ hostPath: projectsDir, containerPath: path.join(homeDir, 'projects'), readonly: true });
+  }
+
   return mounts;
 }
 
@@ -209,6 +229,9 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   ]);
 }
 
@@ -419,6 +442,17 @@ export async function runContainerAgent(
     container.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      // Clean up session media files (images downloaded during this session)
+      const mediaDir = path.join(groupDir, 'media');
+      if (fs.existsSync(mediaDir)) {
+        try {
+          fs.rmSync(mediaDir, { recursive: true, force: true });
+          logger.debug({ group: group.name }, 'Session media cleaned up');
+        } catch (err) {
+          logger.warn({ group: group.name, err }, 'Failed to clean up session media');
+        }
+      }
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
