@@ -229,7 +229,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
     mockedFs.cpSync.mockReturnValue(undefined);
   });
 
-  it('always copies core source even if destination exists', () => {
+  it('always copies core source even if destination exists', async () => {
     // agent-runner/src exists, destination already exists too
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
@@ -239,7 +239,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
       return false;
     });
 
-    buildVolumeMounts(testGroup, false);
+    await buildVolumeMounts(testGroup, false);
 
     // cpSync should be called for agent-runner source
     const cpSyncCalls = mockedFs.cpSync.mock.calls.filter(
@@ -251,7 +251,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
     expect(cpSyncCalls[0][2]).toEqual({ recursive: true });
   });
 
-  it('creates extensions directory if it does not exist', () => {
+  it('creates extensions directory if it does not exist', async () => {
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
       // agent-runner source exists
@@ -261,7 +261,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
       return false;
     });
 
-    buildVolumeMounts(testGroup, false);
+    await buildVolumeMounts(testGroup, false);
 
     const mkdirCalls = mockedFs.mkdirSync.mock.calls.filter((call) =>
       String(call[0]).includes('agent-runner-extensions'),
@@ -270,7 +270,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
     expect(mkdirCalls[0][1]).toEqual({ recursive: true });
   });
 
-  it('does not recreate extensions directory if it already exists', () => {
+  it('does not recreate extensions directory if it already exists', async () => {
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
       if (s.includes('agent-runner/src')) return true;
@@ -278,7 +278,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
       return false;
     });
 
-    buildVolumeMounts(testGroup, false);
+    await buildVolumeMounts(testGroup, false);
 
     const mkdirCalls = mockedFs.mkdirSync.mock.calls.filter((call) =>
       String(call[0]).includes('agent-runner-extensions'),
@@ -286,14 +286,14 @@ describe('buildVolumeMounts agent-runner source sync', () => {
     expect(mkdirCalls.length).toBe(0);
   });
 
-  it('mounts both agent-runner-src and extensions directories', () => {
+  it('mounts both agent-runner-src and extensions directories', async () => {
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
       if (s.includes('agent-runner/src')) return true;
       return false;
     });
 
-    const mounts = buildVolumeMounts(testGroup, false);
+    const mounts = await buildVolumeMounts(testGroup, false);
 
     const srcMount = mounts.find((m) => m.containerPath === '/app/src');
     expect(srcMount).toBeDefined();
