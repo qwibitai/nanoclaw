@@ -37,18 +37,32 @@ LINEAR_API_KEY=lin_api_xxxx
 |------|--------------------------|
 | `container/Dockerfile` | Untouched — matches upstream exactly |
 | `Dockerfile.custom` | New file — not in upstream |
-| `src/container-runner.ts` | One-line change: 2 keys added to `readSecrets()` |
+| `src/config.ts` | Added `DEFAULT_MODEL` env var read |
+| `src/index.ts` | Added model state management, passes model to container |
+| `src/channels/telegram.ts` | Added `/model` command handler |
+| `src/container-runner.ts` | `model?` field added to `ContainerInput`; 2 keys added to `readSecrets()` |
+| `container/agent-runner/src/index.ts` | Passes `model` to SDK `query()` options |
 | `.env` / `data/env/env` | Local only (gitignored) |
 | `.env.example` | Minor addition (placeholder lines) |
 | `~/.config/systemd/user/nanoclaw.service` | Outside the repo |
+
+## Model selection
+
+The agent model can be configured two ways:
+
+1. **`.env` default:** Set `DEFAULT_MODEL=claude-sonnet-4-6` (or any model ID) in `.env`. Leave empty for SDK default.
+2. **Runtime override:** Send `/model sonnet` (or `/model opus`, `/model haiku`, `/model claude-sonnet-4-6`) via Telegram. Use `/model default` to reset. Use `/model` to view current.
+
+The model flows through: `config.ts` → orchestrator in-memory state (persisted to DB) → `ContainerInput.model` → agent-runner `query({ options: { model } })`.
 
 ## Updating from upstream
 
 When pulling upstream changes:
 
 1. **No conflict expected** on `container/Dockerfile` — it matches upstream
-2. **Possible trivial conflict** on `src/container-runner.ts` if upstream changes the `readSecrets()` line — just re-add `'GH_TOKEN', 'LINEAR_API_KEY'` to the array
+2. **Possible trivial conflict** on `src/container-runner.ts` if upstream changes the `readSecrets()` line or `ContainerInput` interface — just re-add `'GH_TOKEN', 'LINEAR_API_KEY'` to the array and `model?: string` to the interface
 3. **Possible trivial conflict** on `.env.example` if upstream adds lines at the end
+4. **Possible trivial conflict** on `src/config.ts`, `src/index.ts`, `src/channels/telegram.ts`, `container/agent-runner/src/index.ts` if upstream changes those files — re-add the model plumbing (same pattern as re-adding secret keys)
 
 After merging upstream:
 

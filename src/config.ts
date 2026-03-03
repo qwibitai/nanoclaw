@@ -11,6 +11,7 @@ const envConfig = readEnvFile([
   'ASSISTANT_HAS_OWN_NUMBER',
   'TELEGRAM_BOT_TOKEN',
   'TELEGRAM_ONLY',
+  'DEFAULT_MODEL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -73,3 +74,7 @@ export const TELEGRAM_BOT_TOKEN =
   process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || '';
 export const TELEGRAM_ONLY =
   (process.env.TELEGRAM_ONLY || envConfig.TELEGRAM_ONLY) === 'true';
+
+// Default model for agent SDK queries (undefined = SDK default)
+export const DEFAULT_MODEL: string | undefined =
+  process.env.DEFAULT_MODEL || envConfig.DEFAULT_MODEL || undefined;

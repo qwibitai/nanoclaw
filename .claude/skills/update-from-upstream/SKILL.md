@@ -45,6 +45,27 @@ test -f Dockerfile.custom && echo "EXISTS" || echo "MISSING"
 
 **If MISSING:** This should never happen (upstream doesn't touch this file). Alert the user and stop.
 
+### 2d. Check model configuration survived the merge
+
+```bash
+grep -n "DEFAULT_MODEL" src/config.ts
+grep -n "model\?" src/container-runner.ts
+grep -n "containerInput.model" container/agent-runner/src/index.ts
+grep -n "/model" src/channels/telegram.ts
+```
+
+**If any are missing:** The upstream merge overwrote model plumbing. Restore them:
+
+- `src/config.ts`: Add `'DEFAULT_MODEL'` to the `readEnvFile` array and export `DEFAULT_MODEL`:
+  ```typescript
+  export const DEFAULT_MODEL: string | undefined =
+    process.env.DEFAULT_MODEL || envConfig.DEFAULT_MODEL || undefined;
+  ```
+- `src/container-runner.ts`: Add `model?: string;` to the `ContainerInput` interface
+- `container/agent-runner/src/index.ts`: Add `model?: string;` to `ContainerInput`, and `model: containerInput.model,` in the `query()` options
+- `src/channels/telegram.ts`: The `/model` command handler — check git log for the full block
+- `src/index.ts`: Model state (`currentModel`, `getModel()`, `setModel()`), DB load in `loadState()`, `model: currentModel` in `runAgent()`
+
 ### 2c. Check `.env.example` has the token placeholders
 
 ```bash

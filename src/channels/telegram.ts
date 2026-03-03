@@ -1,6 +1,6 @@
 import { Bot } from 'grammy';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, DEFAULT_MODEL, TRIGGER_PATTERN } from '../config.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -9,10 +9,18 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+const MODEL_ALIASES: Record<string, string> = {
+  sonnet: 'claude-sonnet-4-6',
+  opus: 'claude-opus-4-6',
+  haiku: 'claude-haiku-4-5-20251001',
+};
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  getModel?: () => string | undefined;
+  setModel?: (model: string | undefined) => void;
 }
 
 export class TelegramChannel implements Channel {
@@ -48,6 +56,35 @@ export class TelegramChannel implements Channel {
     // Command to check bot status
     this.bot.command('ping', (ctx) => {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
+    });
+
+    // Command to view or change the agent model
+    this.bot.command('model', (ctx) => {
+      if (!this.opts.getModel || !this.opts.setModel) {
+        ctx.reply('Model selection not available.');
+        return;
+      }
+
+      const arg = ctx.match?.trim();
+
+      if (!arg) {
+        const current = this.opts.getModel();
+        const isDefault = !current || current === DEFAULT_MODEL;
+        const display = current || DEFAULT_MODEL || '(SDK default)';
+        ctx.reply(`Current model: ${display}${isDefault ? ' (default)' : ''}`);
+        return;
+      }
+
+      if (arg === 'default') {
+        this.opts.setModel(DEFAULT_MODEL);
+        const display = DEFAULT_MODEL || '(SDK default)';
+        ctx.reply(`Model reset to default (${display})`);
+        return;
+      }
+
+      const resolved = MODEL_ALIASES[arg.toLowerCase()] || arg;
+      this.opts.setModel(resolved);
+      ctx.reply(`Model set to ${resolved}`);
     });
 
     this.bot.on('message:text', async (ctx) => {

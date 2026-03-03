@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_MODEL,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -53,6 +54,26 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let currentModel: string | undefined;
+
+/** Get the active model (runtime override > DB override > .env default). */
+export function getModel(): string | undefined {
+  return currentModel;
+}
+
+/** Set the runtime model override. Pass undefined to reset to .env default. */
+export function setModel(model: string | undefined): void {
+  currentModel = model;
+  if (model) {
+    setRouterState('model', model);
+  } else {
+    setRouterState('model', '');
+  }
+  logger.info(
+    { model: model || DEFAULT_MODEL || '(SDK default)' },
+    'Model updated',
+  );
+}
 
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
@@ -67,10 +88,15 @@ function loadState(): void {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
   }
+  const dbModel = getRouterState('model');
+  currentModel = dbModel || DEFAULT_MODEL || undefined;
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
   logger.info(
-    { groupCount: Object.keys(registeredGroups).length },
+    {
+      groupCount: Object.keys(registeredGroups).length,
+      model: currentModel || '(SDK default)',
+    },
     'State loaded',
   );
 }
@@ -302,6 +328,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model: currentModel,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -481,7 +508,11 @@ async function main(): Promise<void> {
 
   // Create and connect channels
   if (TELEGRAM_BOT_TOKEN) {
-    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, channelOpts);
+    const telegram = new TelegramChannel(TELEGRAM_BOT_TOKEN, {
+      ...channelOpts,
+      getModel,
+      setModel,
+    });
     channels.push(telegram);
     await telegram.connect();
   }
