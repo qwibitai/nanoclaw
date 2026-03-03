@@ -24,11 +24,19 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { IpcSocketServer } from './ipc-socket.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+// Module-level IPC socket reference, set by index.ts at startup
+let ipcSocket: IpcSocketServer | null = null;
+
+export function setIpcSocket(socket: IpcSocketServer): void {
+  ipcSocket = socket;
+}
 
 export interface ContainerInput {
   prompt: string;
@@ -163,10 +171,9 @@ function buildVolumeMounts(
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
+  // The socket server creates nc.sock inside this directory before container start
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  fs.mkdirSync(groupIpcDir, { recursive: true });
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -296,6 +303,12 @@ export async function runContainerAgent(
 
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
+
+  // Create socket server for this group before spawning the container
+  // so it's ready when the container tries to connect
+  if (ipcSocket) {
+    ipcSocket.createGroupSocket(group.folder);
+  }
 
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
@@ -429,6 +442,7 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      ipcSocket?.destroyGroupSocket(group.folder);
       const duration = Date.now() - startTime;
 
       if (timedOut) {

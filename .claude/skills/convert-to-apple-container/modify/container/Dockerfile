@@ -47,12 +47,12 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
-# Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+# Create workspace directories (IPC socket is created at runtime by the host)
+RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc
 
 # Create entrypoint script
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it
-# Follow-up messages arrive via IPC files in /workspace/ipc/input/
+# Follow-up messages arrive via Unix socket at /workspace/ipc/nc.sock
 # Apple Container only supports directory mounts (VirtioFS), so .env cannot be
 # shadowed with a host-side /dev/null file mount. Instead the entrypoint starts
 # as root, uses mount --bind to shadow .env, then drops to the host user via setpriv.

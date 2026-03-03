@@ -38,10 +38,10 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 │         ┌─────────────────────────────────────────┘                   │
 │         │                                                             │
 │         ▼                                                             │
-│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐   │
-│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Watcher  │   │
-│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (file-based) │   │
-│  └────────┬─────────┘    └────────┬─────────┘    └───────────────┘   │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌────────────────┐  │
+│  │  Message Loop    │    │  Scheduler Loop  │    │  IPC Socket    │  │
+│  │  (polls SQLite)  │    │  (checks tasks)  │    │  (Unix socket) │  │
+│  └────────┬─────────┘    └────────┬─────────┘    └────────────────┘  │
 │           │                       │                                   │
 │           └───────────┬───────────┘                                   │
 │                       │ spawns container                              │
@@ -111,7 +111,7 @@ graph LR
     subgraph Execution["Container Execution"]
         CR[Container Runner]
         LC["Linux Container"]
-        IPC[IPC Watcher]
+        IPC[IPC Socket Server]
     end
 
     %% Flow
@@ -119,7 +119,7 @@ graph LR
     ML --> GQ
     GQ -->|concurrency| CR
     CR --> LC
-    LC -->|filesystem IPC| IPC
+    LC -->|Unix socket NDJSON| IPC
     IPC -->|tasks & messages| RT
     RT -->|Channel.sendMessage| Channels
     TS -->|due tasks| CR
@@ -256,7 +256,8 @@ nanoclaw/
 │   ├── channels/
 │   │   ├── registry.ts            # Channel factory registry
 │   │   └── index.ts               # Barrel imports for channel self-registration
-│   ├── ipc.ts                     # IPC watcher and task processing
+│   ├── ipc.ts                     # IPC types and task processing logic
+│   ├── ipc-socket.ts              # Unix socket IPC server (NDJSON over sockets)
 │   ├── router.ts                  # Message formatting and outbound routing
 │   ├── config.ts                  # Configuration constants
 │   ├── types.ts                   # TypeScript interfaces (includes Channel)
@@ -275,8 +276,8 @@ nanoclaw/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── src/
-│   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
-│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
+│   │       ├── index.ts           # Entry point (query loop, IPC socket client, session resume)
+│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server (sends via Unix socket)
 │   └── skills/
 │       └── agent-browser.md       # Browser automation skill
 │
@@ -311,7 +312,7 @@ nanoclaw/
 ├── data/                          # Application state (gitignored)
 │   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
 │   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
+│   └── ipc/                       # Per-group IPC (nc.sock Unix sockets, snapshot files)
 │
 ├── logs/                          # Runtime logs (gitignored)
 │   ├── nanoclaw.log               # Host stdout
@@ -344,7 +345,6 @@ export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Container configuration
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(process.env.CONTAINER_TIMEOUT || '1800000', 10); // 30min default
-export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min — keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(1, parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5);
 
@@ -646,8 +646,8 @@ When NanoClaw starts, it:
 3. Loads state from SQLite (registered groups, sessions, router state)
 4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
 5. Once at least one channel is connected:
+   - Starts the IPC socket server (Unix sockets for container communication)
    - Starts the scheduler loop
-   - Starts the IPC watcher for container messages
    - Sets up the per-group queue with `processGroupMessages`
    - Recovers any unprocessed messages from before shutdown
    - Starts the message polling loop

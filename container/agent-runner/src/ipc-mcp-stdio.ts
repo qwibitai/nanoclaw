@@ -1,7 +1,7 @@
 /**
  * Stdio MCP Server for NanoClaw
  * Standalone process that agent teams subagents can inherit.
- * Reads context from environment variables, writes IPC files for the host.
+ * Reads context from environment variables, sends IPC messages via Unix socket.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -9,29 +9,52 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import net from 'net';
 import { CronExpressionParser } from 'cron-parser';
 
 const IPC_DIR = '/workspace/ipc';
-const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const SOCKET_PATH = path.join(IPC_DIR, 'nc.sock');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
 
-function writeIpcFile(dir: string, data: object): string {
-  fs.mkdirSync(dir, { recursive: true });
+// Lazy socket connection with reconnect
+let socket: net.Socket | null = null;
+let socketConnecting = false;
 
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  const filepath = path.join(dir, filename);
+function getSocket(): net.Socket {
+  if (socket && !socket.destroyed) return socket;
+  if (socketConnecting) return socket!;
 
-  // Atomic write: temp file then rename
-  const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tempPath, filepath);
+  socketConnecting = true;
+  socket = net.createConnection(SOCKET_PATH);
 
-  return filename;
+  socket.on('connect', () => {
+    socketConnecting = false;
+  });
+
+  // Drain inbound data — MCP server only sends, never reads
+  socket.on('data', () => {});
+
+  socket.on('error', (err) => {
+    console.error(`[ipc-mcp] Socket error: ${err.message}`);
+    socketConnecting = false;
+    socket = null;
+  });
+
+  socket.on('close', () => {
+    socketConnecting = false;
+    socket = null;
+  });
+
+  return socket;
+}
+
+function sendIpcMessage(data: object): void {
+  const sock = getSocket();
+  sock.write(JSON.stringify(data) + '\n');
 }
 
 const server = new McpServer({
@@ -56,7 +79,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(MESSAGES_DIR, data);
+    sendIpcMessage(data);
 
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
   },
@@ -93,7 +116,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
   },
   async (args) => {
-    // Validate schedule_value before writing IPC
+    // Validate schedule_value before sending via IPC
     if (args.schedule_type === 'cron') {
       try {
         CronExpressionParser.parse(args.schedule_value);
@@ -141,10 +164,10 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       timestamp: new Date().toISOString(),
     };
 
-    const filename = writeIpcFile(TASKS_DIR, data);
+    sendIpcMessage(data);
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
     };
   },
 );
@@ -200,7 +223,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    sendIpcMessage(data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
   },
@@ -219,7 +242,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    sendIpcMessage(data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
   },
@@ -238,7 +261,7 @@ server.tool(
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    sendIpcMessage(data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
   },
@@ -272,7 +295,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       timestamp: new Date().toISOString(),
     };
 
-    writeIpcFile(TASKS_DIR, data);
+    sendIpcMessage(data);
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],

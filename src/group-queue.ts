@@ -1,8 +1,7 @@
 import { ChildProcess } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { IpcSocketServer } from './ipc-socket.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -33,6 +32,11 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private ipcSocket: IpcSocketServer | null = null;
+
+  setIpcSocket(socket: IpcSocketServer): void {
+    this.ipcSocket = socket;
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -148,43 +152,28 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Send a follow-up message to the active container via IPC socket.
+   * Returns true if the message was sent, false if no active container.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
+    if (!this.ipcSocket) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
-      fs.renameSync(tempPath, filepath);
-      return true;
-    } catch {
-      return false;
-    }
+    this.ipcSocket.sendToGroup(state.groupFolder, { type: 'message', text });
+    return true;
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal the active container to wind down via IPC socket.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
-    } catch {
-      // ignore
-    }
+    this.ipcSocket?.sendToGroup(state.groupFolder, { type: 'close' });
   }
 
   private async runForGroup(

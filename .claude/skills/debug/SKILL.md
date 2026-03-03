@@ -290,30 +290,26 @@ grep "Session initialized" logs/nanoclaw.log | tail -5
 
 ## IPC Debugging
 
-The container communicates back to the host via files in `/workspace/ipc/`:
+The container communicates with the host via Unix sockets at `data/ipc/{groupFolder}/nc.sock`:
 
 ```bash
-# Check pending messages
-ls -la data/ipc/messages/
+# Check that the socket exists for an active group
+ls -la data/ipc/{groupFolder}/nc.sock
 
-# Check pending task operations
-ls -la data/ipc/tasks/
+# Check IPC connection logs
+grep "IPC socket" logs/nanoclaw.log | tail -10
 
-# Read a specific IPC file
-cat data/ipc/messages/*.json
-
-# Check available groups (main channel only)
-cat data/ipc/main/available_groups.json
+# Check available groups snapshot (main channel only)
+cat data/ipc/{groupFolder}/available_groups.json
 
 # Check current tasks snapshot
 cat data/ipc/{groupFolder}/current_tasks.json
 ```
 
-**IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
-- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
-- `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
+**IPC architecture:**
+- `nc.sock` - Unix socket: bidirectional NDJSON communication between host and container
+- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks (file, not socket)
+- `available_groups.json` - Host writes: read-only list of available groups (file, not socket)
 
 ## Quick Diagnostic Script
 

@@ -97,13 +97,7 @@ Available groups are provided in `/workspace/ipc/available_groups.json`:
 
 Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
 
-If a group the user mentions isn't in the list, request a fresh sync:
-
-```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
-```
-
-Then wait a moment and re-read `available_groups.json`.
+If a group the user mentions isn't in the list, use the `refresh_groups` MCP tool to request a fresh sync, then re-read `available_groups.json`.
 
 **Fallback**: Query the SQLite database directly:
 
