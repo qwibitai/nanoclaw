@@ -38,35 +38,16 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-cli
 This adds:
 - `src/cli-send.ts` — The CLI tool (exportable `sendMessage()` function + CLI entry point)
 - `src/cli-send.test.ts` — Unit tests
+- `bin/send` — Executable wrapper script
 
 No existing files are modified. No new npm dependencies.
 
 ### Validate
 
 ```bash
+chmod +x bin/send
 npm test
 npm run build
-```
-
-### Create the bin/send wrapper
-
-Create `bin/send` with the following content and make it executable:
-
-```bash
-#!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-cd "$PROJECT_DIR"
-if [ -f dist/cli-send.js ]; then
-  exec node dist/cli-send.js "$@"
-else
-  exec npx tsx src/cli-send.ts "$@"
-fi
-```
-
-```bash
-mkdir -p bin
-chmod +x bin/send
 ```
 
 ## Phase 3: Verify
