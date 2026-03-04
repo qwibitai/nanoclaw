@@ -19,7 +19,6 @@ describe('getPlatform', () => {
     const result = getPlatform();
     expect(['macos', 'linux', 'unknown']).toContain(result);
   });
-
 });
 
 // --- isWSL ---

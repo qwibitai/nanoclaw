@@ -5,9 +5,10 @@ import os from 'os';
 import path from 'path';
 
 import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { NANOCLAW_DIR } from './constants.js';
+import { NANOCLAW_DIR, STATE_FILE } from './constants.js';
 import { copyDir } from './fs-utils.js';
 import { isCustomizeActive } from './customize.js';
+import { initNanoclawDir } from './init.js';
 import { executeFileOps } from './file-ops.js';
 import { acquireLock } from './lock.js';
 import {
@@ -19,7 +20,12 @@ import {
 } from './manifest.js';
 import { loadPathRemap, resolvePathRemap } from './path-remap.js';
 import { mergeFile } from './merge.js';
-import { computeFileHash, readState, recordSkillApplication, writeState } from './state.js';
+import {
+  computeFileHash,
+  readState,
+  recordSkillApplication,
+  writeState,
+} from './state.js';
 import {
   mergeDockerComposeServices,
   mergeEnvAdditions,
@@ -33,7 +39,12 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   const manifest = readManifest(skillDir);
 
   // --- Pre-flight checks ---
-  const currentState = readState(); // Validates state exists and version is compatible
+  // Auto-initialize skills system if state file doesn't exist
+  const statePath = path.join(projectRoot, NANOCLAW_DIR, STATE_FILE);
+  if (!fs.existsSync(statePath)) {
+    initNanoclawDir();
+  }
+  const currentState = readState();
 
   // Check skills system version compatibility
   const sysCheck = checkSystemVersion(manifest);
@@ -116,11 +127,17 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   try {
     // --- Backup ---
     const filesToBackup = [
-      ...manifest.modifies.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
-      ...manifest.adds.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
+      ...manifest.modifies.map((f) =>
+        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
+      ),
+      ...manifest.adds.map((f) =>
+        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
+      ),
       ...(manifest.file_ops || [])
         .filter((op) => op.from)
-        .map((op) => path.join(projectRoot, resolvePathRemap(op.from!, pathRemap))),
+        .map((op) =>
+          path.join(projectRoot, resolvePathRemap(op.from!, pathRemap)),
+        ),
       path.join(projectRoot, 'package.json'),
       path.join(projectRoot, 'package-lock.json'),
       path.join(projectRoot, '.env.example'),
@@ -167,7 +184,12 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const relPath of manifest.modifies) {
       const resolvedPath = resolvePathRemap(relPath, pathRemap);
       const currentPath = path.join(projectRoot, resolvedPath);
-      const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', resolvedPath);
+      const basePath = path.join(
+        projectRoot,
+        NANOCLAW_DIR,
+        'base',
+        resolvedPath,
+      );
       // skillPath uses original relPath — skill packages are never mutated
       const skillPath = path.join(skillDir, 'modify', relPath);
 
@@ -259,7 +281,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
           for (const f of addedFiles) {
             try {
               if (fs.existsSync(f)) fs.unlinkSync(f);
-            } catch { /* best effort */ }
+            } catch {
+              /* best effort */
+            }
           }
           restoreBackup();
           clearBackup();
@@ -283,7 +307,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       }
     }
 
-    // Store structured outcomes including the test command so applyUpdate() can run them
+    // Store structured outcomes including the test command
     const outcomes: Record<string, unknown> = manifest.structured
       ? { ...manifest.structured }
       : {};
@@ -311,7 +335,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         for (const f of addedFiles) {
           try {
             if (fs.existsSync(f)) fs.unlinkSync(f);
-          } catch { /* best effort */ }
+          } catch {
+            /* best effort */
+          }
         }
         restoreBackup();
         // Re-read state and remove the skill we just recorded
@@ -345,7 +371,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const f of addedFiles) {
       try {
         if (fs.existsSync(f)) fs.unlinkSync(f);
-      } catch { /* best effort */ }
+      } catch {
+        /* best effort */
+      }
     }
     restoreBackup();
     clearBackup();
@@ -354,4 +382,3 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     releaseLock();
   }
 }
-

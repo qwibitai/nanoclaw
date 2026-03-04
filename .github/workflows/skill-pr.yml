@@ -1,0 +1,151 @@
+name: Skill PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.claude/skills/**'
+      - 'skills-engine/**'
+
+jobs:
+  # ── Job 1: Policy gate ────────────────────────────────────────────────
+  # Block PRs that add NEW skill files while also modifying source code.
+  # Skill PRs should contain instructions for Claude, not raw source edits.
+  policy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for mixed skill + source changes
+        run: |
+          ADDED_SKILLS=$(git diff --name-only --diff-filter=A origin/main...HEAD \
+            | grep '^\\.claude/skills/' || true)
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          SOURCE=$(echo "$CHANGED" \
+            | grep -E '^src/|^container/|^package\.json|^package-lock\.json' || true)
+
+          if [ -n "$ADDED_SKILLS" ] && [ -n "$SOURCE" ]; then
+            echo "::error::PRs that add new skills should not modify source files."
+            echo ""
+            echo "New skill files:"
+            echo "$ADDED_SKILLS"
+            echo ""
+            echo "Source files:"
+            echo "$SOURCE"
+            echo ""
+            echo "Please split into separate PRs. See CONTRIBUTING.md."
+            exit 1
+          fi
+
+      - name: Comment on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `This PR adds a skill while also modifying source code. A skill PR should not change source files—the skill should contain **instructions** for Claude to follow.
+
+            If you're fixing a bug or simplifying code, please submit that as a separate PR.
+
+            See [CONTRIBUTING.md](https://github.com/${context.repo.owner}/${context.repo.repo}/blob/main/CONTRIBUTING.md) for details.`
+            })
+
+  # ── Job 2: Detect which skills changed ────────────────────────────────
+  detect-changed:
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.detect.outputs.skills }}
+      has_skills: ${{ steps.detect.outputs.has_skills }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed skills
+        id: detect
+        run: |
+          CHANGED_SKILLS=$(git diff --name-only origin/main...HEAD \
+            | grep '^\\.claude/skills/' \
+            | sed 's|^\.claude/skills/||' \
+            | cut -d/ -f1 \
+            | sort -u \
+            | jq -R . | jq -s .)
+          echo "skills=$CHANGED_SKILLS" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGED_SKILLS" = "[]" ]; then
+            echo "has_skills=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_skills=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Changed skills: $CHANGED_SKILLS"
+
+  # ── Job 3: Validate each changed skill in isolation ───────────────────
+  validate-skills:
+    needs: detect-changed
+    if: needs.detect-changed.outputs.has_skills == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.detect-changed.outputs.skills) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      - name: Initialize skills system
+        run: >-
+          npx tsx -e
+          "import { initNanoclawDir } from './skills-engine/index'; initNanoclawDir();"
+
+      - name: Apply skill
+        run: npx tsx scripts/apply-skill.ts ".claude/skills/${{ matrix.skill }}"
+
+      - name: Typecheck after apply
+        run: npx tsc --noEmit
+
+      - name: Run skill tests
+        run: |
+          TEST_CMD=$(npx tsx -e "
+            import { parse } from 'yaml';
+            import fs from 'fs';
+            const m = parse(fs.readFileSync('.claude/skills/${{ matrix.skill }}/manifest.yaml', 'utf-8'));
+            if (m.test) console.log(m.test);
+          ")
+          if [ -n "$TEST_CMD" ]; then
+            echo "Running: $TEST_CMD"
+            eval "$TEST_CMD"
+          else
+            echo "No test command defined, skipping"
+          fi
+
+  # ── Summary gate for branch protection ────────────────────────────────
+  skill-validation-summary:
+    needs:
+      - policy-check
+      - detect-changed
+      - validate-skills
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check results
+        run: |
+          echo "policy-check: ${{ needs.policy-check.result }}"
+          echo "validate-skills: ${{ needs.validate-skills.result }}"
+
+          if [ "${{ needs.policy-check.result }}" = "failure" ]; then
+            echo "::error::Policy check failed"
+            exit 1
+          fi
+          if [ "${{ needs.validate-skills.result }}" = "failure" ]; then
+            echo "::error::Skill validation failed"
+            exit 1
+          fi
+          echo "All skill checks passed"
