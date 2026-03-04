@@ -3,6 +3,7 @@
  * Replaces file-based IPC polling with a persistent WS connection.
  * Used by both agent-runner index.ts and ipc-mcp-stdio.ts.
  */
+import crypto from 'node:crypto';
 import WebSocket from 'ws';
 
 export interface AuthOkPayload {
@@ -42,6 +43,7 @@ export class WsClient {
     string,
     { resolve: (data: unknown) => void; reject: (err: Error) => void }
   >();
+  private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   // Event callbacks set by the consumer
   onInput: ((text: string) => void) | null = null;
@@ -82,6 +84,7 @@ export class WsClient {
           if (msg.type === 'auth_ok') {
             authResolved = true;
             this.reconnectAttempts = 0;
+            this.resetPingWatchdog();
             log('Authenticated');
             resolve(msg as unknown as AuthOkPayload);
           } else if (msg.type === 'auth_error') {
@@ -111,7 +114,27 @@ export class WsClient {
           reject(err);
         }
       });
+
+      this.ws.on('ping', () => {
+        this.resetPingWatchdog();
+      });
     });
+  }
+
+  /** If no ping arrives within 45s (1.5x server interval), assume dead connection */
+  private resetPingWatchdog(): void {
+    if (this.pingWatchdog) clearTimeout(this.pingWatchdog);
+    this.pingWatchdog = setTimeout(() => {
+      log('Ping watchdog timeout, terminating connection');
+      this.ws?.terminate();
+    }, 45_000);
+  }
+
+  private clearPingWatchdog(): void {
+    if (this.pingWatchdog) {
+      clearTimeout(this.pingWatchdog);
+      this.pingWatchdog = null;
+    }
   }
 
   private handleMessage(msg: { type: string; [key: string]: unknown }): void {
@@ -146,6 +169,7 @@ export class WsClient {
   }
 
   private async handleDisconnect(): Promise<void> {
+    this.clearPingWatchdog();
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log('Max reconnect attempts reached, giving up');
       // Reject any pending requests
@@ -212,7 +236,10 @@ export class WsClient {
     data: Record<string, unknown>,
     timeoutMs = 130_000,
   ): Promise<Record<string, unknown>> {
-    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    const requestId = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(requestId, {
         resolve: resolve as (data: unknown) => void,
@@ -239,6 +266,7 @@ export class WsClient {
   }
 
   close(): void {
+    this.clearPingWatchdog();
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'client closing');
     }

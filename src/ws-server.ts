@@ -18,6 +18,12 @@ import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 const AUTH_TIMEOUT_MS = 5000;
+const PING_INTERVAL_MS = 30_000;
+const PONG_TIMEOUT_MS = 10_000;
+
+function isNonEmptyString(val: unknown): val is string {
+  return typeof val === 'string' && val.length > 0;
+}
 
 interface TokenContext {
   groupFolder: string;
@@ -59,6 +65,10 @@ export interface WsIpcServerDeps {
 export class WsIpcServer {
   private wss: WebSocketServer | null = null;
   private tokens = new Map<string, TokenContext>();
+  private pingIntervals = new Map<
+    WebSocket,
+    ReturnType<typeof setInterval>
+  >();
   private deps: WsIpcServerDeps;
   private _port = 0;
 
@@ -116,6 +126,7 @@ export class WsIpcServer {
 
     if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
     for (const ws of ctx.connections) {
+      this.clearPing(ws);
       if (ws.readyState === WebSocket.OPEN) {
         ws.close(1000, 'token revoked');
       }
@@ -177,6 +188,11 @@ export class WsIpcServer {
 
   async shutdown(): Promise<void> {
     if (!this.wss) return;
+    // Clear all ping intervals
+    for (const interval of this.pingIntervals.values()) {
+      clearInterval(interval);
+    }
+    this.pingIntervals.clear();
     // Close the listening socket (no new connections)
     // Existing connections drain naturally
     return new Promise((resolve) => {
@@ -252,6 +268,9 @@ export class WsIpcServer {
           }),
         );
 
+        // Start ping/pong heartbeat
+        this.startPing(ws);
+
         logger.debug(
           { groupFolder: ctx.groupFolder, connCount: ctx.connections.length },
           'WS client authenticated',
@@ -271,6 +290,7 @@ export class WsIpcServer {
 
     ws.on('close', () => {
       clearTimeout(authTimer);
+      this.clearPing(ws);
       if (!tokenStr) return;
 
       const ctx = this.tokens.get(tokenStr);
@@ -292,6 +312,36 @@ export class WsIpcServer {
     ws.on('error', (err) => {
       logger.warn({ err }, 'WS connection error');
     });
+  }
+
+  private startPing(ws: WebSocket): void {
+    let isAlive = true;
+
+    ws.on('pong', () => {
+      isAlive = true;
+    });
+
+    const interval = setInterval(() => {
+      if (!isAlive) {
+        logger.warn('WS pong timeout, terminating connection');
+        clearInterval(interval);
+        this.pingIntervals.delete(ws);
+        ws.terminate();
+        return;
+      }
+      isAlive = false;
+      ws.ping();
+    }, PING_INTERVAL_MS);
+
+    this.pingIntervals.set(ws, interval);
+  }
+
+  private clearPing(ws: WebSocket): void {
+    const interval = this.pingIntervals.get(ws);
+    if (interval) {
+      clearInterval(interval);
+      this.pingIntervals.delete(ws);
+    }
   }
 
   private async routeMessage(
@@ -334,8 +384,10 @@ export class WsIpcServer {
     msg: { type: string; [key: string]: unknown },
     ctx: TokenContext,
   ): void {
+    if (msg.status !== 'success' && msg.status !== 'error') return;
+
     const output: ContainerOutput = {
-      status: msg.status as 'success' | 'error',
+      status: msg.status,
       result: (msg.result as string) ?? null,
       newSessionId: msg.newSessionId as string | undefined,
       error: msg.error as string | undefined,
@@ -346,7 +398,14 @@ export class WsIpcServer {
 
     // Chain output callbacks for ordered processing
     if (ctx.onOutput) {
-      ctx.outputChain = ctx.outputChain.then(() => ctx.onOutput!(output));
+      ctx.outputChain = ctx.outputChain
+        .then(() => ctx.onOutput!(output))
+        .catch((err) => {
+          logger.error(
+            { err, groupFolder: ctx.groupFolder },
+            'Output callback error',
+          );
+        });
     }
   }
 
@@ -354,11 +413,11 @@ export class WsIpcServer {
     msg: { type: string; [key: string]: unknown },
     ctx: TokenContext,
   ): Promise<void> {
-    const chatJid = msg.chatJid as string;
-    const text = msg.text as string;
-    const sender = msg.sender as string | undefined;
+    if (!isNonEmptyString(msg.chatJid) || !isNonEmptyString(msg.text)) return;
 
-    if (!chatJid || !text) return;
+    const chatJid = msg.chatJid;
+    const text = msg.text;
+    const sender = msg.sender as string | undefined;
 
     // Authorization: main can send to any JID, others only to their own
     const registeredGroups = this.deps.registeredGroups();
@@ -382,12 +441,18 @@ export class WsIpcServer {
 
     switch (msg.type) {
       case 'schedule_task': {
-        const prompt = msg.prompt as string;
-        const scheduleType = msg.schedule_type as string;
-        const scheduleValue = msg.schedule_value as string;
-        const targetJid = msg.targetJid as string;
+        if (
+          !isNonEmptyString(msg.prompt) ||
+          !isNonEmptyString(msg.schedule_type) ||
+          !isNonEmptyString(msg.schedule_value) ||
+          !isNonEmptyString(msg.targetJid)
+        )
+          break;
 
-        if (!prompt || !scheduleType || !scheduleValue || !targetJid) break;
+        const prompt = msg.prompt;
+        const scheduleType = msg.schedule_type;
+        const scheduleValue = msg.schedule_value;
+        const targetJid = msg.targetJid;
 
         const targetGroupEntry = registeredGroups[targetJid];
         if (!targetGroupEntry) {
@@ -462,8 +527,8 @@ export class WsIpcServer {
       }
 
       case 'pause_task': {
-        const taskId = msg.taskId as string;
-        if (!taskId) break;
+        if (!isNonEmptyString(msg.taskId)) break;
+        const taskId = msg.taskId;
         const task = getTaskById(taskId);
         if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
           updateTask(taskId, { status: 'paused' });
@@ -481,8 +546,8 @@ export class WsIpcServer {
       }
 
       case 'resume_task': {
-        const taskId = msg.taskId as string;
-        if (!taskId) break;
+        if (!isNonEmptyString(msg.taskId)) break;
+        const taskId = msg.taskId;
         const task = getTaskById(taskId);
         if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
           updateTask(taskId, { status: 'active' });
@@ -500,8 +565,8 @@ export class WsIpcServer {
       }
 
       case 'cancel_task': {
-        const taskId = msg.taskId as string;
-        if (!taskId) break;
+        if (!isNonEmptyString(msg.taskId)) break;
+        const taskId = msg.taskId;
         const task = getTaskById(taskId);
         if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
           deleteTask(taskId);
@@ -554,34 +619,39 @@ export class WsIpcServer {
           );
           break;
         }
-        const jid = msg.jid as string;
-        const name = msg.name as string;
-        const folder = msg.folder as string;
-        const trigger = msg.trigger as string;
-        if (jid && name && folder && trigger) {
-          if (!isValidGroupFolder(folder)) {
-            logger.warn(
-              { sourceGroup: ctx.groupFolder, folder },
-              'Invalid register_group request - unsafe folder name',
-            );
-            break;
-          }
-          // Defense in depth: agent cannot set isMain via IPC
-          this.deps.registerGroup(jid, {
-            name,
-            folder,
-            trigger,
-            added_at: new Date().toISOString(),
-            containerConfig:
-              msg.containerConfig as RegisteredGroup['containerConfig'],
-            requiresTrigger: msg.requiresTrigger as boolean | undefined,
-          });
-        } else {
+        if (
+          !isNonEmptyString(msg.jid) ||
+          !isNonEmptyString(msg.name) ||
+          !isNonEmptyString(msg.folder) ||
+          !isNonEmptyString(msg.trigger)
+        ) {
           logger.warn(
             { data: msg },
             'Invalid register_group request - missing required fields',
           );
+          break;
         }
+        const jid = msg.jid;
+        const name = msg.name;
+        const folder = msg.folder;
+        const trigger = msg.trigger;
+        if (!isValidGroupFolder(folder)) {
+          logger.warn(
+            { sourceGroup: ctx.groupFolder, folder },
+            'Invalid register_group request - unsafe folder name',
+          );
+          break;
+        }
+        // Defense in depth: agent cannot set isMain via IPC
+        this.deps.registerGroup(jid, {
+          name,
+          folder,
+          trigger,
+          added_at: new Date().toISOString(),
+          containerConfig:
+            msg.containerConfig as RegisteredGroup['containerConfig'],
+          requiresTrigger: msg.requiresTrigger as boolean | undefined,
+        });
         break;
       }
 

@@ -42,6 +42,8 @@ vi.mock('ws', () => {
     readyState = 1;
     send = vi.fn();
     close = vi.fn();
+    ping = vi.fn();
+    terminate = vi.fn();
     static OPEN = 1;
   }
 
@@ -409,7 +411,7 @@ describe('WsIpcServer', () => {
     const { registerIpcHandler } = await import('./ipc-handlers/registry.js');
 
     // Register a test handler for the test_ prefix
-    registerIpcHandler('test_', async (msg, _groupFolder, _isMain) => ({
+    registerIpcHandler('test_action', async (msg, _groupFolder, _isMain) => ({
       success: true,
       message: `handled ${msg.type}`,
     }));
@@ -444,7 +446,7 @@ describe('WsIpcServer', () => {
   it('handler result without requestId does not send ipc_response', async () => {
     const { registerIpcHandler } = await import('./ipc-handlers/registry.js');
 
-    registerIpcHandler('fire_', async () => ({
+    registerIpcHandler('fire_action', async () => ({
       success: true,
       message: 'fire and forget',
     }));
@@ -454,10 +456,7 @@ describe('WsIpcServer', () => {
     authenticateWs(ws, token);
 
     ws.send.mockClear();
-    ws.emit(
-      'message',
-      Buffer.from(JSON.stringify({ type: 'fire_action' })),
-    );
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'fire_action' })));
 
     await new Promise((r) => setTimeout(r, 10));
 
@@ -480,5 +479,25 @@ describe('WsIpcServer', () => {
     const chain = server.getOutputChain('nonexistent');
     expect(chain).toBeInstanceOf(Promise);
     await chain;
+  });
+
+  it('starts ping interval after auth and terminates on pong timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const token = server.createToken('test-group', 'test@g.us', false);
+      const ws = simulateConnection();
+      authenticateWs(ws, token);
+
+      // First ping interval fires — ws.ping() should be called
+      expect(ws.ping).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(ws.ping).toHaveBeenCalledTimes(1);
+
+      // No pong received — next interval should terminate the connection
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(ws.terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

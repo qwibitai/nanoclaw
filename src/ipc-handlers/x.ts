@@ -84,8 +84,6 @@ async function handleXIpc(
 ): Promise<IpcResult | null> {
   const type = msg.type as string;
 
-  if (!type?.startsWith('x_')) return null;
-
   if (!isMain) {
     logger.warn({ type }, 'X integration blocked: not main group');
     return { success: false, message: 'X integration requires main group' };
@@ -154,5 +152,7 @@ async function handleXIpc(
   return result;
 }
 
-// Self-register at import time
-registerIpcHandler('x_', handleXIpc);
+// Self-register each action type at import time
+for (const type of ['x_post', 'x_like', 'x_reply', 'x_retweet', 'x_quote']) {
+  registerIpcHandler(type, handleXIpc);
+}

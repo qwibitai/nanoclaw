@@ -416,8 +416,6 @@ async function main(): Promise<void> {
   try {
     const stdinData = await readStdin();
     containerInput = JSON.parse(stdinData);
-    // Delete the temp file the entrypoint wrote — it contains secrets
-    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
     log(`Failed to parse input: ${err instanceof Error ? err.message : String(err)}`);

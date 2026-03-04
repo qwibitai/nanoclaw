@@ -13,10 +13,14 @@ export function createFakeWs() {
     readyState: number;
     send: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
+    ping: ReturnType<typeof vi.fn>;
+    terminate: ReturnType<typeof vi.fn>;
   };
   ws.readyState = 1; // OPEN
   ws.send = vi.fn();
   ws.close = vi.fn();
+  ws.ping = vi.fn();
+  ws.terminate = vi.fn();
   return ws;
 }
 
