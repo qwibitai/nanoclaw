@@ -45,17 +45,8 @@ jobs:
       - name: Build TypeScript
         run: cd "$PROJECT_ROOT" && npm run build
 
-      - name: Rebuild container image (if changed)
-        run: |
-          cd "$PROJECT_ROOT"
-          # Check if container-related files changed in this push
-          CONTAINER_CHANGED=$(git diff --name-only HEAD~1 HEAD -- container/ 2>/dev/null || echo "container/")
-          if [ -n "$CONTAINER_CHANGED" ]; then
-            echo "Container files changed, rebuilding image..."
-            docker build -t nanoclaw-agent:latest ./container
-          else
-            echo "No container changes, skipping image rebuild"
-          fi
+      - name: Rebuild container image
+        run: cd "$PROJECT_ROOT" && docker build -t nanoclaw-agent:latest ./container
 
       - name: Restart NanoClaw
         run: |
