@@ -259,6 +259,243 @@ The groups data provided when the agent connects includes available groups with 
   },
 );
 
+// --- X (Twitter) Integration Tools (main group only) ---
+
+if (isMain) {
+  server.tool(
+    'x_post',
+    `Post a tweet to X (Twitter). Main group only.
+Make sure the content is appropriate and within X's character limit (280 chars for text).`,
+    {
+      content: z
+        .string()
+        .max(280)
+        .describe('The tweet content to post (max 280 characters)'),
+    },
+    async (args) => {
+      try {
+        await ensureWs();
+        const result = await wsClient.sendTaskRequest({
+          type: 'x_post',
+          content: args.content,
+        });
+        if (result.success) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: result.message as string,
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: result.message as string },
+          ],
+          isError: true,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `X post failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'x_like',
+    'Like a tweet on X (Twitter). Provide the tweet URL or tweet ID.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+    },
+    async (args) => {
+      try {
+        await ensureWs();
+        const result = await wsClient.sendTaskRequest({
+          type: 'x_like',
+          tweetUrl: args.tweet_url,
+        });
+        if (result.success) {
+          return {
+            content: [
+              { type: 'text' as const, text: result.message as string },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: result.message as string },
+          ],
+          isError: true,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `X like failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'x_reply',
+    'Reply to a tweet on X (Twitter). Provide the tweet URL and your reply content.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+      content: z
+        .string()
+        .max(280)
+        .describe('The reply content (max 280 characters)'),
+    },
+    async (args) => {
+      try {
+        await ensureWs();
+        const result = await wsClient.sendTaskRequest({
+          type: 'x_reply',
+          tweetUrl: args.tweet_url,
+          content: args.content,
+        });
+        if (result.success) {
+          return {
+            content: [
+              { type: 'text' as const, text: result.message as string },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: result.message as string },
+          ],
+          isError: true,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `X reply failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'x_retweet',
+    'Retweet a tweet on X (Twitter). Provide the tweet URL.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+    },
+    async (args) => {
+      try {
+        await ensureWs();
+        const result = await wsClient.sendTaskRequest({
+          type: 'x_retweet',
+          tweetUrl: args.tweet_url,
+        });
+        if (result.success) {
+          return {
+            content: [
+              { type: 'text' as const, text: result.message as string },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: result.message as string },
+          ],
+          isError: true,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `X retweet failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'x_quote',
+    'Quote tweet on X (Twitter). Retweet with your own comment added.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+      comment: z
+        .string()
+        .max(280)
+        .describe('Your comment for the quote tweet (max 280 characters)'),
+    },
+    async (args) => {
+      try {
+        await ensureWs();
+        const result = await wsClient.sendTaskRequest({
+          type: 'x_quote',
+          tweetUrl: args.tweet_url,
+          comment: args.comment,
+        });
+        if (result.success) {
+          return {
+            content: [
+              { type: 'text' as const, text: result.message as string },
+            ],
+          };
+        }
+        return {
+          content: [
+            { type: 'text' as const, text: result.message as string },
+          ],
+          isError: true,
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `X quote failed: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+}
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

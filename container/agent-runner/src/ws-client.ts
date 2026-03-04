@@ -124,12 +124,12 @@ export class WsClient {
         this.onClose?.();
         break;
 
-      case 'list_tasks_response': {
+      case 'ipc_response': {
         const requestId = msg.requestId as string;
         const pending = this.pendingRequests.get(requestId);
         if (pending) {
           this.pendingRequests.delete(requestId);
-          pending.resolve(msg.tasks);
+          pending.resolve(msg);
         }
         break;
       }
@@ -204,23 +204,34 @@ export class WsClient {
     this.send(data);
   }
 
-  async listTasks(): Promise<AuthOkPayload['tasks']> {
+  /**
+   * Send a request to the host and await a typed ipc_response.
+   * Generates a requestId, registers a pending promise, and sets a timeout.
+   */
+  async sendTaskRequest(
+    data: Record<string, unknown>,
+    timeoutMs = 130_000,
+  ): Promise<Record<string, unknown>> {
     const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(requestId, {
         resolve: resolve as (data: unknown) => void,
         reject,
       });
-      this.send({ type: 'list_tasks', requestId });
+      this.send({ ...data, requestId });
 
-      // Timeout after 5 seconds
       setTimeout(() => {
         if (this.pendingRequests.has(requestId)) {
           this.pendingRequests.delete(requestId);
-          reject(new Error('list_tasks timeout'));
+          reject(new Error(`${data.type} timeout (${timeoutMs}ms)`));
         }
-      }, 5000);
+      }, timeoutMs);
     });
+  }
+
+  async listTasks(): Promise<AuthOkPayload['tasks']> {
+    const response = await this.sendTaskRequest({ type: 'list_tasks' }, 5000);
+    return response.tasks as AuthOkPayload['tasks'];
   }
 
   refreshGroups(): void {

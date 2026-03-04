@@ -5,8 +5,6 @@
  * This is the entry point for X integration in the host process.
  *
  * Returns a SkillResult that the caller sends back via WebSocket.
- * Full WS integration (routing x_* types in handleTaskIpc and sending
- * ipc_response messages) is a follow-up task.
  */
 
 import { spawn } from 'child_process';

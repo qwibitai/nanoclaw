@@ -8,6 +8,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
+import './ipc-handlers/index.js';
 import {
   getChannelFactory,
   getRegisteredChannelNames,
@@ -317,7 +318,13 @@ async function runAgent(
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName, wsToken) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder, wsToken),
+        queue.registerProcess(
+          chatJid,
+          proc,
+          containerName,
+          group.folder,
+          wsToken,
+        ),
       wrappedOnOutput,
       wsServer,
     );
@@ -542,7 +549,13 @@ async function main(): Promise<void> {
     getSessions: () => sessions,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder, wsToken) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder, wsToken),
+      queue.registerProcess(
+        groupJid,
+        proc,
+        containerName,
+        groupFolder,
+        wsToken,
+      ),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {

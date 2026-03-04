@@ -264,7 +264,11 @@ describe('WsIpcServer', () => {
     );
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'hello', undefined);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'test@g.us',
+      'hello',
+      undefined,
+    );
   });
 
   it('blocks unauthorized cross-group message', async () => {
@@ -304,7 +308,11 @@ describe('WsIpcServer', () => {
     );
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'from main', undefined);
+    expect(deps.sendMessage).toHaveBeenCalledWith(
+      'test@g.us',
+      'from main',
+      undefined,
+    );
   });
 
   it('handles list_tasks request-response', async () => {
@@ -315,17 +323,15 @@ describe('WsIpcServer', () => {
     ws.send.mockClear();
     ws.emit(
       'message',
-      Buffer.from(
-        JSON.stringify({ type: 'list_tasks', requestId: 'req-123' }),
-      ),
+      Buffer.from(JSON.stringify({ type: 'list_tasks', requestId: 'req-123' })),
     );
 
     await new Promise((r) => setTimeout(r, 10));
 
-    // Find the list_tasks_response in send calls
+    // Find the ipc_response in send calls
     const responseCalls = ws.send.mock.calls
       .map((c: string[]) => JSON.parse(c[0]))
-      .filter((m: { type: string }) => m.type === 'list_tasks_response');
+      .filter((m: { type: string }) => m.type === 'ipc_response');
 
     expect(responseCalls).toHaveLength(1);
     expect(responseCalls[0].requestId).toBe('req-123');
@@ -380,7 +386,7 @@ describe('WsIpcServer', () => {
     );
   });
 
-  it('routes unknown message types to handleTaskIpc default', async () => {
+  it('routes unknown message types to handleTaskIpc default when no handler matches', async () => {
     const { logger } = await import('./logger.js');
 
     const token = server.createToken('test-group', 'test@g.us', false);
@@ -397,6 +403,70 @@ describe('WsIpcServer', () => {
       { type: 'some_custom_type' },
       'Unknown IPC task type',
     );
+  });
+
+  it('routes x_* messages through IPC handler registry and sends ipc_response', async () => {
+    const { registerIpcHandler } = await import('./ipc-handlers/registry.js');
+
+    // Register a test handler for the test_ prefix
+    registerIpcHandler('test_', async (msg, _groupFolder, _isMain) => ({
+      success: true,
+      message: `handled ${msg.type}`,
+    }));
+
+    const token = server.createToken('test-group', 'test@g.us', true);
+    const ws = simulateConnection();
+    authenticateWs(ws, token);
+
+    ws.send.mockClear();
+    ws.emit(
+      'message',
+      Buffer.from(
+        JSON.stringify({
+          type: 'test_action',
+          requestId: 'req-handler-1',
+        }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const responseCalls = ws.send.mock.calls
+      .map((c: string[]) => JSON.parse(c[0]))
+      .filter((m: { type: string }) => m.type === 'ipc_response');
+
+    expect(responseCalls).toHaveLength(1);
+    expect(responseCalls[0].requestId).toBe('req-handler-1');
+    expect(responseCalls[0].success).toBe(true);
+    expect(responseCalls[0].message).toBe('handled test_action');
+  });
+
+  it('handler result without requestId does not send ipc_response', async () => {
+    const { registerIpcHandler } = await import('./ipc-handlers/registry.js');
+
+    registerIpcHandler('fire_', async () => ({
+      success: true,
+      message: 'fire and forget',
+    }));
+
+    const token = server.createToken('test-group', 'test@g.us', true);
+    const ws = simulateConnection();
+    authenticateWs(ws, token);
+
+    ws.send.mockClear();
+    ws.emit(
+      'message',
+      Buffer.from(JSON.stringify({ type: 'fire_action' })),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // No ipc_response should have been sent (no requestId)
+    const responseCalls = ws.send.mock.calls
+      .map((c: string[]) => JSON.parse(c[0]))
+      .filter((m: { type: string }) => m.type === 'ipc_response');
+
+    expect(responseCalls).toHaveLength(0);
   });
 
   it('getOutputChain returns token output chain', async () => {

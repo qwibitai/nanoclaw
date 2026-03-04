@@ -13,6 +13,7 @@ import { TIMEZONE, WS_BIND_ADDRESS } from './config.js';
 import { AvailableGroup, ContainerOutput } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
+import { resolveIpcHandler } from './ipc-handlers/registry.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -217,7 +218,9 @@ export class WsIpcServer {
         const token = msg.token as string;
         const ctx = this.tokens.get(token);
         if (!ctx) {
-          ws.send(JSON.stringify({ type: 'auth_error', message: 'invalid token' }));
+          ws.send(
+            JSON.stringify({ type: 'auth_error', message: 'invalid token' }),
+          );
           ws.close(4003, 'invalid token');
           clearTimeout(authTimer);
           return;
@@ -307,12 +310,9 @@ export class WsIpcServer {
 
         case 'list_tasks': {
           const requestId = msg.requestId as string;
-          const tasks = this.deps.getTasksSnapshot(
-            ctx.groupFolder,
-            ctx.isMain,
-          );
+          const tasks = this.deps.getTasksSnapshot(ctx.groupFolder, ctx.isMain);
           const response = JSON.stringify({
-            type: 'list_tasks_response',
+            type: 'ipc_response',
             requestId,
             tasks,
           });
@@ -365,10 +365,7 @@ export class WsIpcServer {
     const targetGroup = registeredGroups[chatJid];
     if (ctx.isMain || (targetGroup && targetGroup.folder === ctx.groupFolder)) {
       await this.deps.sendMessage(chatJid, text, sender);
-      logger.info(
-        { chatJid, sourceGroup: ctx.groupFolder },
-        'WS message sent',
-      );
+      logger.info({ chatJid, sourceGroup: ctx.groupFolder }, 'WS message sent');
     } else {
       logger.warn(
         { chatJid, sourceGroup: ctx.groupFolder },
@@ -421,29 +418,20 @@ export class WsIpcServer {
             });
             nextRun = interval.next().toISOString();
           } catch {
-            logger.warn(
-              { scheduleValue },
-              'Invalid cron expression',
-            );
+            logger.warn({ scheduleValue }, 'Invalid cron expression');
             break;
           }
         } else if (validType === 'interval') {
           const ms = parseInt(scheduleValue, 10);
           if (isNaN(ms) || ms <= 0) {
-            logger.warn(
-              { scheduleValue },
-              'Invalid interval',
-            );
+            logger.warn({ scheduleValue }, 'Invalid interval');
             break;
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (validType === 'once') {
           const scheduled = new Date(scheduleValue);
           if (isNaN(scheduled.getTime())) {
-            logger.warn(
-              { scheduleValue },
-              'Invalid timestamp',
-            );
+            logger.warn({ scheduleValue }, 'Invalid timestamp');
             break;
           }
           nextRun = scheduled.toISOString();
@@ -584,7 +572,8 @@ export class WsIpcServer {
             folder,
             trigger,
             added_at: new Date().toISOString(),
-            containerConfig: msg.containerConfig as RegisteredGroup['containerConfig'],
+            containerConfig:
+              msg.containerConfig as RegisteredGroup['containerConfig'],
             requiresTrigger: msg.requiresTrigger as boolean | undefined,
           });
         } else {
@@ -596,8 +585,29 @@ export class WsIpcServer {
         break;
       }
 
-      default:
-        logger.warn({ type: msg.type }, 'Unknown IPC task type');
+      default: {
+        const result = await resolveIpcHandler(
+          msg,
+          ctx.groupFolder,
+          ctx.isMain,
+        );
+        if (result !== null) {
+          const requestId = msg.requestId as string | undefined;
+          if (requestId) {
+            const response = JSON.stringify({
+              type: 'ipc_response',
+              requestId,
+              ...result,
+            });
+            for (const ws of ctx.connections) {
+              if (ws.readyState === WebSocket.OPEN) ws.send(response);
+            }
+          }
+        } else {
+          logger.warn({ type: msg.type }, 'Unknown IPC task type');
+        }
+        break;
+      }
     }
   }
 }

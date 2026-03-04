@@ -258,7 +258,11 @@ function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string, wsToken?: string) => void,
+  onProcess: (
+    proc: ChildProcess,
+    containerName: string,
+    wsToken?: string,
+  ) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   wsServer?: WsIpcServer,
 ): Promise<ContainerOutput> {
@@ -426,9 +430,10 @@ export async function runContainerAgent(
 
       // Capture the real output chain BEFORE revoking the token
       // (revokeToken deletes the token context, losing the chain)
-      const outputChain = wsServer && wsToken
-        ? wsServer.getOutputChain(wsToken)
-        : Promise.resolve();
+      const outputChain =
+        wsServer && wsToken
+          ? wsServer.getOutputChain(wsToken)
+          : Promise.resolve();
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -575,10 +580,7 @@ export async function runContainerAgent(
       }
 
       if (wsServer && wsToken) wsServer.revokeToken(wsToken);
-      logger.info(
-        { group: group.name, duration },
-        'Container completed',
-      );
+      logger.info({ group: group.name, duration }, 'Container completed');
 
       resolve({
         status: 'success',
