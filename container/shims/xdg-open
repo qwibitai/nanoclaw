@@ -1,0 +1,3 @@
+#!/bin/bash
+# Block browser opening so Claude CLI falls back to console-friendly OAuth flow.
+exit 1
