@@ -420,7 +420,7 @@ describe('SlackChannel', () => {
       );
     });
 
-    it('flattens threaded replies into channel messages', async () => {
+    it('delivers threaded replies to onMessage (channel receives all messages)', async () => {
       const opts = createTestOpts();
       const channel = new SlackChannel(opts);
       await channel.connect();
@@ -432,7 +432,7 @@ describe('SlackChannel', () => {
       });
       await triggerMessageEvent(event);
 
-      // Threaded replies are delivered as regular channel messages
+      // Threaded replies are delivered to the agent like any other message
       expect(opts.onMessage).toHaveBeenCalledWith(
         'slack:C0123456789',
         expect.objectContaining({
@@ -846,6 +846,195 @@ describe('SlackChannel', () => {
     it('has name "slack"', () => {
       const channel = new SlackChannel(createTestOpts());
       expect(channel.name).toBe('slack');
+    });
+  });
+
+  // --- Thread routing ---
+
+  describe('thread routing', () => {
+    it('replies in thread when message is a threaded reply', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      // thread_ts != ts → this is a reply to an existing thread
+      const event = createMessageEvent({
+        ts: '1704067201.000000',
+        threadTs: '1704067200.000000',
+        text: 'Thread reply',
+      });
+      await triggerMessageEvent(event);
+
+      await channel.sendMessage('slack:C0123456789', 'My response');
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+        channel: 'C0123456789',
+        text: 'My response',
+        thread_ts: '1704067200.000000',
+      });
+    });
+
+    it('replies to channel for root messages (no thread_ts)', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        ts: '1704067200.000000',
+        text: 'Root channel message',
+      });
+      await triggerMessageEvent(event);
+
+      await channel.sendMessage('slack:C0123456789', 'My response');
+
+      // No thread_ts — reply goes to channel
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+        channel: 'C0123456789',
+        text: 'My response',
+      });
+    });
+
+    it('replies to channel when thread_ts equals ts (thread root/parent message)', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      // thread_ts === ts means this is the thread root, not a reply
+      const event = createMessageEvent({
+        ts: '1704067200.000000',
+        threadTs: '1704067200.000000',
+        text: 'Thread parent message',
+      });
+      await triggerMessageEvent(event);
+
+      await channel.sendMessage('slack:C0123456789', 'My response');
+
+      // Thread root is treated as a channel message — reply goes to channel
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+        channel: 'C0123456789',
+        text: 'My response',
+      });
+    });
+
+    it('clears thread context after sending (second reply goes to channel)', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      const event = createMessageEvent({
+        ts: '1704067201.000000',
+        threadTs: '1704067200.000000',
+        text: 'Thread reply',
+      });
+      await triggerMessageEvent(event);
+
+      // First send consumes the pending thread context
+      await channel.sendMessage('slack:C0123456789', 'First response');
+      // Second send (no new incoming message) has no pending context
+      await channel.sendMessage('slack:C0123456789', 'Second response');
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledTimes(2);
+      expect(currentApp().client.chat.postMessage).toHaveBeenNthCalledWith(1, {
+        channel: 'C0123456789',
+        text: 'First response',
+        thread_ts: '1704067200.000000',
+      });
+      expect(currentApp().client.chat.postMessage).toHaveBeenNthCalledWith(2, {
+        channel: 'C0123456789',
+        text: 'Second response',
+      });
+    });
+
+    it('queued messages preserve thread context through disconnect/reconnect', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      // Receive a threaded reply — sets pendingThreadTs
+      const event = createMessageEvent({
+        ts: '1704067201.000000',
+        threadTs: '1704067200.000000',
+        text: 'Thread reply',
+      });
+      await triggerMessageEvent(event);
+
+      // Disconnect before responding
+      await channel.disconnect();
+
+      // sendMessage queues with thread context captured at queue time
+      await channel.sendMessage('slack:C0123456789', 'Queued response');
+
+      // Reconnect triggers flush of queued messages
+      await channel.connect();
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'C0123456789',
+          text: 'Queued response',
+          thread_ts: '1704067200.000000',
+        }),
+      );
+    });
+
+    describe('SLACK_ALWAYS_REPLY_IN_THREAD=true', () => {
+      beforeEach(() => {
+        vi.mocked(readEnvFile).mockReturnValue({
+          SLACK_BOT_TOKEN: 'xoxb-test-token',
+          SLACK_APP_TOKEN: 'xapp-test-token',
+          SLACK_ALWAYS_REPLY_IN_THREAD: 'true',
+        });
+      });
+
+      afterEach(() => {
+        vi.mocked(readEnvFile).mockReturnValue({
+          SLACK_BOT_TOKEN: 'xoxb-test-token',
+          SLACK_APP_TOKEN: 'xapp-test-token',
+        });
+      });
+
+      it('replies in new thread for root channel messages', async () => {
+        const opts = createTestOpts();
+        const channel = new SlackChannel(opts);
+        await channel.connect();
+
+        // Root channel message (no thread_ts)
+        const event = createMessageEvent({
+          ts: '1704067200.000000',
+          text: 'Root message',
+        });
+        await triggerMessageEvent(event);
+
+        await channel.sendMessage('slack:C0123456789', 'My response');
+
+        // Uses the message's own ts to start a new thread
+        expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+          channel: 'C0123456789',
+          text: 'My response',
+          thread_ts: '1704067200.000000',
+        });
+      });
+
+      it('replies in existing thread for threaded replies', async () => {
+        const opts = createTestOpts();
+        const channel = new SlackChannel(opts);
+        await channel.connect();
+
+        // Threaded reply — should use the thread's thread_ts, not msg.ts
+        const event = createMessageEvent({
+          ts: '1704067201.000000',
+          threadTs: '1704067200.000000',
+          text: 'Thread reply',
+        });
+        await triggerMessageEvent(event);
+
+        await channel.sendMessage('slack:C0123456789', 'My response');
+
+        expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+          channel: 'C0123456789',
+          text: 'My response',
+          thread_ts: '1704067200.000000',
+        });
+      });
     });
   });
 });
