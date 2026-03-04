@@ -1,5 +1,5 @@
 ---
-name: add-ollama
+name: add-ollama-tool
 description: Add Ollama MCP server so the container agent can call local models for cheaper/faster tasks like summarization, translation, or general queries.
 ---
 
@@ -52,7 +52,7 @@ npx tsx scripts/apply-skill.ts --init
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-ollama
+npx tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
 ```
 
 This deterministically:
