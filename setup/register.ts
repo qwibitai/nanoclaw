@@ -23,6 +23,7 @@ interface RegisterArgs {
   requiresTrigger: boolean;
   isMain: boolean;
   assistantName: string;
+  allowedSenders: string[];
 }
 
 function parseArgs(args: string[]): RegisterArgs {
@@ -35,6 +36,7 @@ function parseArgs(args: string[]): RegisterArgs {
     requiresTrigger: true,
     isMain: false,
     assistantName: 'Andy',
+    allowedSenders: [],
   };
 
   for (let i = 0; i < args.length; i++) {
@@ -62,6 +64,12 @@ function parseArgs(args: string[]): RegisterArgs {
         break;
       case '--assistant-name':
         result.assistantName = args[++i] || 'Andy';
+        break;
+      case '--allowed-senders':
+        result.allowedSenders = (args[++i] || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
         break;
     }
   }
@@ -113,15 +121,21 @@ export async function run(args: string[]): Promise<void> {
     added_at TEXT NOT NULL,
     container_config TEXT,
     requires_trigger INTEGER DEFAULT 1,
-    is_main INTEGER DEFAULT 0
+    is_main INTEGER DEFAULT 0,
+    allowed_senders TEXT
   )`);
 
   const isMainInt = parsed.isMain ? 1 : 0;
 
+  const allowedSendersJson =
+    parsed.allowedSenders.length > 0
+      ? JSON.stringify(parsed.allowedSenders)
+      : null;
+
   db.prepare(
     `INSERT OR REPLACE INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main, allowed_senders)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
   ).run(
     parsed.jid,
     parsed.name,
@@ -130,6 +144,7 @@ export async function run(args: string[]): Promise<void> {
     timestamp,
     requiresTriggerInt,
     isMainInt,
+    allowedSendersJson,
   );
 
   db.close();

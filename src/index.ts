@@ -145,13 +145,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  const missedMessages = getMessagesSince(
+  let missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
   );
 
   if (missedMessages.length === 0) return true;
+
+  // Filter by allowed senders if configured
+  if (group.allowedSenders && group.allowedSenders.length > 0) {
+    missedMessages = missedMessages.filter(
+      (m) =>
+        m.is_from_me ||
+        group.allowedSenders!.some(
+          (s) => m.sender_name === s || m.sender === s,
+        ),
+    );
+    if (missedMessages.length === 0) return true;
+  }
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -363,7 +375,7 @@ async function startMessageLoop(): Promise<void> {
           }
         }
 
-        for (const [chatJid, groupMessages] of messagesByGroup) {
+        for (const [chatJid, _groupMessages] of messagesByGroup) {
           const group = registeredGroups[chatJid];
           if (!group) continue;
 
@@ -371,6 +383,19 @@ async function startMessageLoop(): Promise<void> {
           if (!channel) {
             logger.warn({ chatJid }, 'No channel owns JID, skipping messages');
             continue;
+          }
+
+          // Filter by allowed senders if configured
+          let groupMessages = _groupMessages;
+          if (group.allowedSenders && group.allowedSenders.length > 0) {
+            groupMessages = groupMessages.filter(
+              (m) =>
+                m.is_from_me ||
+                group.allowedSenders!.some(
+                  (s) => m.sender_name === s || m.sender === s,
+                ),
+            );
+            if (groupMessages.length === 0) continue;
           }
 
           const isMainGroup = group.isMain === true;
