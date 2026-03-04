@@ -12,19 +12,14 @@ export function escapeXml(s: string): string {
 
 export function formatMessages(
   messages: NewMessage[],
-  timezone?: string,
+  timezone: string,
 ): string {
   const lines = messages.map((m) => {
-    const displayTime = timezone
-      ? formatLocalTime(m.timestamp, timezone)
-      : m.timestamp;
+    const displayTime = formatLocalTime(m.timestamp, timezone);
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  let header = '';
-  if (timezone) {
-    header = `<context timezone="${escapeXml(timezone)}" current_time="${escapeXml(formatCurrentTime(timezone))}" />\n`;
-  }
+  const header = `<context timezone="${escapeXml(timezone)}" current_time="${escapeXml(formatCurrentTime(timezone))}" />\n`;
 
   return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
