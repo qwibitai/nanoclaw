@@ -18,6 +18,7 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { getClaudeOAuthToken } from './oauth-refresh.js';
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
@@ -211,16 +212,30 @@ function buildVolumeMounts(
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Read allowed secrets for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * For Claude OAuth tokens: reads from ~/.claude/.credentials.json
+ * (managed by Claude Code with auto-refresh) and falls back to .env.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
+  const envSecrets = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'GITHUB_TOKEN',
   ]);
+
+  // Prefer auto-refreshed token from Claude Code's credential store
+  if (!envSecrets.ANTHROPIC_API_KEY) {
+    const oauthToken = getClaudeOAuthToken();
+    if (oauthToken) {
+      envSecrets.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+    }
+  }
+
+  return envSecrets;
 }
 
 function buildContainerArgs(

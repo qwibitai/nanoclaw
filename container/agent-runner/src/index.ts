@@ -515,6 +515,15 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
+  // Expose tool-facing secrets to process.env so Bash subprocesses can use them.
+  // These are safe to expose within the isolated container.
+  const bashSecrets = ['GITHUB_TOKEN'];
+  for (const key of bashSecrets) {
+    if (containerInput.secrets?.[key]) {
+      process.env[key] = containerInput.secrets[key];
+    }
+  }
+
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
