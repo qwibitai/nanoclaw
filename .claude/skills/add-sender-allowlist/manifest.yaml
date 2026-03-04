@@ -1,0 +1,16 @@
+skill: sender-allowlist
+version: 1.0.0
+description: "Optional sender allowlist for trigger gating or message dropping"
+core_version: 1.2.1
+adds:
+  - src/sender-allowlist.ts
+  - src/sender-allowlist.test.ts
+modifies:
+  - src/index.ts
+  - src/db.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run src/sender-allowlist.test.ts"
