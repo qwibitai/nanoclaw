@@ -4,9 +4,14 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
+  NEW_GROUPS_USE_DEFAULT_CREDENTIALS,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
+import { initCredentialStore, importEnvToDefault, resolveSecrets } from './auth/index.js';
+import { isAuthError } from './auth/providers/claude.js';
+import { runReauth } from './auth/reauth.js';
+import type { ChatIO } from './auth/types.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -91,6 +96,14 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     return;
   }
 
+  // Apply global default for useDefaultCredentials if not explicitly set
+  if (group.containerConfig?.useDefaultCredentials === undefined) {
+    group.containerConfig = {
+      ...group.containerConfig,
+      useDefaultCredentials: NEW_GROUPS_USE_DEFAULT_CREDENTIALS,
+    };
+  }
+
   registeredGroups[jid] = group;
   setRegisteredGroup(jid, group);
 
@@ -128,6 +141,26 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+/** Create a ChatIO that routes through the normal channel messaging. */
+function createChatIO(channel: Channel, chatJid: string): ChatIO {
+  return {
+    async send(text: string): Promise<void> {
+      await channel.sendMessage(chatJid, text);
+    },
+    async receive(timeoutMs = 120_000): Promise<string | null> {
+      const start = Date.now();
+      const cursor = getMessagesSince(chatJid, '', ASSISTANT_NAME);
+      const lastTs = cursor.length > 0 ? cursor[cursor.length - 1].timestamp : '';
+      while (Date.now() - start < timeoutMs) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const newer = getMessagesSince(chatJid, lastTs, ASSISTANT_NAME);
+        if (newer.length > 0) return newer[0].content;
+      }
+      return null;
+    },
+  };
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -143,6 +176,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const isMainGroup = group.isMain === true;
+
+  // Check if credentials are available before processing
+  const secrets = resolveSecrets(group);
+  if (Object.keys(secrets).length === 0) {
+    logger.warn({ group: group.name }, 'No credentials available, starting reauth');
+    const chat = createChatIO(channel, chatJid);
+    const ok = await runReauth(group.folder, chat, 'No credentials configured');
+    if (!ok) return false;
+  }
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -193,7 +235,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const agentResult = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -223,7 +265,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
-  if (output === 'error' || hadError) {
+  if (agentResult.status === 'error' || hadError) {
+    // Check if this is an auth error — trigger reauth
+    if (isAuthError(agentResult.error) && !outputSentToUser) {
+      logger.warn({ group: group.name }, 'Auth error detected, starting reauth');
+      const chat = createChatIO(channel, chatJid);
+      await runReauth(group.folder, chat, `Agent failed: ${agentResult.error}`);
+    }
+
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
@@ -251,7 +300,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
+): Promise<{ status: 'success' | 'error'; error?: string }> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
@@ -317,13 +366,13 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
-      return 'error';
+      return { status: 'error', error: output.error };
     }
 
-    return 'success';
+    return { status: 'success' };
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
-    return 'error';
+    return { status: 'error', error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -449,6 +498,8 @@ function ensureContainerSystemRunning(): void {
 
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
+  initCredentialStore();
+  importEnvToDefault();
   initDatabase();
   logger.info('Database initialized');
   loadState();
