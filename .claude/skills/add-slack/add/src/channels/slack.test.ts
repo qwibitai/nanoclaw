@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Jonesy',
