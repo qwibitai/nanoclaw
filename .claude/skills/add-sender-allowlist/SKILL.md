@@ -48,7 +48,7 @@ git diff --name-only HEAD ; git ls-files --others --exclude-standard
 ```
 Every path must be under `.claude/skills/add-sender-allowlist/`. If `src/` files appear, revert them:
 ```bash
-git checkout src/index.ts src/db.ts && rm -f src/sender-allowlist.ts src/sender-allowlist.test.ts && rm -rf .nanoclaw
+git checkout src/index.ts && rm -f src/sender-allowlist.ts src/sender-allowlist.test.ts && rm -rf .nanoclaw
 ```
 
 # Phase 3: Setup — Create the Config

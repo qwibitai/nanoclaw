@@ -165,7 +165,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const hasTrigger = missedMessages.some(
       (m) =>
         TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+        isTriggerAllowed(chatJid, m.sender, allowlistCfg),
     );
     if (!hasTrigger) return true;
   }
@@ -393,7 +393,7 @@ async function startMessageLoop(): Promise<void> {
             const hasTrigger = groupMessages.some(
               (m) =>
                 TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+                isTriggerAllowed(chatJid, m.sender, allowlistCfg),
             );
             if (!hasTrigger) continue;
           }

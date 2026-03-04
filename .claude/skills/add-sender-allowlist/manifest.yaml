@@ -7,7 +7,6 @@ adds:
   - src/sender-allowlist.test.ts
 modifies:
   - src/index.ts
-  - src/db.ts
 structured:
   npm_dependencies: {}
   env_additions: []
