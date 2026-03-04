@@ -198,7 +198,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  channel
+    .setTyping?.(chatJid, true)
+    ?.catch((err) =>
+      logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+    );
   let hadError = false;
   let outputSentToUser = false;
 
@@ -229,7 +233,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  channel
+    .setTyping?.(chatJid, false)
+    ?.catch((err) =>
+      logger.warn({ chatJid, err }, 'Failed to clear typing indicator'),
+    );
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
