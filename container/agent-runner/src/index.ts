@@ -475,6 +475,12 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
+      // Stop IPC polling and end the stream so the for-await loop terminates
+      // promptly. Without stream.end(), the SDK generator waits forever for
+      // more user input, blocking runQuery from returning. The outer loop
+      // handles follow-up messages via waitForIpcMessage() + a fresh runQuery.
+      ipcPolling = false;
+      stream.end();
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({

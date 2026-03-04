@@ -10,7 +10,13 @@ import {
   TIMEZONE,
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  deleteSession,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -27,6 +33,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  resetSession: (groupFolder: string) => void;
 }
 
 let ipcWatcherRunning = false;
@@ -380,6 +387,20 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'reset_session': {
+      const targetFolder = isMain && data.folder ? data.folder : sourceGroup;
+      if (isMain || targetFolder === sourceGroup) {
+        deps.resetSession(targetFolder);
+        logger.info({ targetFolder, sourceGroup }, 'Session reset via IPC');
+      } else {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized reset_session attempt blocked',
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

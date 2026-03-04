@@ -33,6 +33,7 @@ import {
   getRouterState,
   initDatabase,
   setRegisteredGroup,
+  deleteSession,
   setRouterState,
   setSession,
   storeChatMetadata,
@@ -55,6 +56,7 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+const pendingSessionReset = new Set<string>();
 
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
@@ -226,6 +228,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
+  // If a session reset was requested, clear session from memory + DB now that
+  // the container has exited and can no longer write the session back.
+  if (pendingSessionReset.has(group.folder)) {
+    pendingSessionReset.delete(group.folder);
+    delete sessions[group.folder];
+    deleteSession(group.folder);
+    logger.info({ group: group.name }, 'Session reset completed');
+  }
+
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
@@ -286,7 +297,7 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && !pendingSessionReset.has(group.folder)) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -586,6 +597,18 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    resetSession: (groupFolder) => {
+      pendingSessionReset.add(groupFolder);
+      // Find the chatJid for this group and close the active container
+      const jid = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === groupFolder,
+      )?.[0];
+      if (jid) queue.closeStdin(jid);
+      logger.info(
+        { groupFolder },
+        'Session reset scheduled, container closing',
+      );
+    },
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

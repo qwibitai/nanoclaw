@@ -280,6 +280,25 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'reset_session',
+  'Start a fresh conversation context. Clears the current Claude session so the next message begins a new conversation without previous history. Use this when the user asks to start fresh, reset context, or begin a new session.',
+  {},
+  async () => {
+    const data = {
+      type: 'reset_session',
+      folder: groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: 'Session reset requested. The next conversation will start fresh.' }],
+    };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
