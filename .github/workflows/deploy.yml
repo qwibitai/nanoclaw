@@ -26,6 +26,9 @@ jobs:
     concurrency:
       group: deploy
       cancel-in-progress: false
+    env:
+      # systemctl --user needs the D-Bus session bus
+      XDG_RUNTIME_DIR: /run/user/${{ vars.DEPLOY_UID || '1000' }}
 
     steps:
       - name: Pull latest changes
