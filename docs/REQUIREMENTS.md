@@ -174,6 +174,13 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
 - `/update` - Pull upstream changes, merge with customizations, run migrations
 
+### WebSocket IPC Bind Address (`WS_BIND_ADDRESS`)
+
+The WebSocket IPC server binds to a specific network interface for container-to-host communication. `/setup` configures this automatically per platform:
+
+- **macOS**: Binds to `127.0.0.1`. Docker Desktop's VM shim routes `host.docker.internal` to localhost, so containers can reach the host via loopback.
+- **Linux**: `/setup` detects the Docker bridge gateway IP (e.g., `172.17.0.1`) and binds to that specific interface. Containers on the bridge network reach the host at this address. Never bind to `0.0.0.0` — that would expose the IPC server on all interfaces.
+
 ### Deployment
 - Runs on local Mac via launchd
 - Single Node.js process handles everything

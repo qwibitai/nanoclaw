@@ -19,17 +19,21 @@ import { RegisteredGroup } from './types.js';
 
 const AUTH_TIMEOUT_MS = 5000;
 const PING_INTERVAL_MS = 30_000;
-const PONG_TIMEOUT_MS = 10_000;
 
 function isNonEmptyString(val: unknown): val is string {
   return typeof val === 'string' && val.length > 0;
+}
+
+interface TypedConnection {
+  ws: WebSocket;
+  role: 'agent' | 'mcp';
 }
 
 interface TokenContext {
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
-  connections: WebSocket[];
+  connections: TypedConnection[];
   onOutput?: (output: ContainerOutput) => Promise<void>;
   resetTimeout?: () => void;
   /** Per-token promise chain to order output callbacks */
@@ -65,10 +69,7 @@ export interface WsIpcServerDeps {
 export class WsIpcServer {
   private wss: WebSocketServer | null = null;
   private tokens = new Map<string, TokenContext>();
-  private pingIntervals = new Map<
-    WebSocket,
-    ReturnType<typeof setInterval>
-  >();
+  private pingIntervals = new Map<WebSocket, ReturnType<typeof setInterval>>();
   private deps: WsIpcServerDeps;
   private _port = 0;
 
@@ -125,10 +126,10 @@ export class WsIpcServer {
     if (!ctx) return;
 
     if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
-    for (const ws of ctx.connections) {
-      this.clearPing(ws);
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.close(1000, 'token revoked');
+    for (const conn of ctx.connections) {
+      this.clearPing(conn.ws);
+      if (conn.ws.readyState === WebSocket.OPEN) {
+        conn.ws.close(1000, 'token revoked');
       }
     }
     this.tokens.delete(token);
@@ -162,14 +163,14 @@ export class WsIpcServer {
     const ctx = this.tokens.get(token);
     if (!ctx) return false;
 
-    const connected = ctx.connections.filter(
-      (ws) => ws.readyState === WebSocket.OPEN,
+    const agentConns = ctx.connections.filter(
+      (c) => c.role === 'agent' && c.ws.readyState === WebSocket.OPEN,
     );
-    if (connected.length === 0) return false;
+    if (agentConns.length === 0) return false;
 
     const msg = JSON.stringify({ type: 'input', text });
-    for (const ws of connected) {
-      ws.send(msg);
+    for (const conn of agentConns) {
+      conn.ws.send(msg);
     }
     return true;
   }
@@ -179,9 +180,9 @@ export class WsIpcServer {
     if (!ctx) return;
 
     const msg = JSON.stringify({ type: 'close' });
-    for (const ws of ctx.connections) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(msg);
+    for (const conn of ctx.connections) {
+      if (conn.role === 'agent' && conn.ws.readyState === WebSocket.OPEN) {
+        conn.ws.send(msg);
       }
     }
   }
@@ -206,6 +207,8 @@ export class WsIpcServer {
   private handleConnection(ws: WebSocket): void {
     let authenticated = false;
     let tokenStr: string | null = null;
+    let connRole: 'agent' | 'mcp' | null = null;
+    let messageChain = Promise.resolve();
 
     // Close unauthenticated connections after timeout
     const authTimer = setTimeout(() => {
@@ -215,7 +218,7 @@ export class WsIpcServer {
       }
     }, AUTH_TIMEOUT_MS);
 
-    ws.on('message', async (raw: WebSocket.RawData) => {
+    ws.on('message', (raw: WebSocket.RawData) => {
       let msg: { type: string; [key: string]: unknown };
       try {
         msg = JSON.parse(raw.toString());
@@ -232,6 +235,16 @@ export class WsIpcServer {
         }
 
         const token = msg.token as string;
+        const role = msg.role as string | undefined;
+        if (role !== 'agent' && role !== 'mcp') {
+          ws.send(
+            JSON.stringify({ type: 'auth_error', message: 'invalid role' }),
+          );
+          ws.close(4003, 'invalid role');
+          clearTimeout(authTimer);
+          return;
+        }
+
         const ctx = this.tokens.get(token);
         if (!ctx) {
           ws.send(
@@ -244,15 +257,16 @@ export class WsIpcServer {
 
         authenticated = true;
         tokenStr = token;
+        connRole = role;
         clearTimeout(authTimer);
 
-        // Clear grace timer if reconnecting
-        if (ctx.graceTimer) {
+        // Clear grace timer if an agent is reconnecting
+        if (role === 'agent' && ctx.graceTimer) {
           clearTimeout(ctx.graceTimer);
           ctx.graceTimer = undefined;
         }
 
-        ctx.connections.push(ws);
+        ctx.connections.push({ ws, role });
 
         // Send auth_ok with current snapshots
         const tasks = this.deps.getTasksSnapshot(ctx.groupFolder, ctx.isMain);
@@ -272,20 +286,22 @@ export class WsIpcServer {
         this.startPing(ws);
 
         logger.debug(
-          { groupFolder: ctx.groupFolder, connCount: ctx.connections.length },
+          { groupFolder: ctx.groupFolder, role, connCount: ctx.connections.length },
           'WS client authenticated',
         );
         return;
       }
 
-      // Authenticated — route message
+      // Authenticated — route message (serialized via promise chain)
       const ctx = this.tokens.get(tokenStr!);
       if (!ctx) {
         ws.close(4004, 'token revoked');
         return;
       }
 
-      await this.routeMessage(msg, ctx);
+      messageChain = messageChain.then(() => this.routeMessage(msg, ctx, ws)).catch((err) => {
+        logger.error({ err, type: msg.type }, 'Error processing WS message');
+      });
     });
 
     ws.on('close', () => {
@@ -296,10 +312,19 @@ export class WsIpcServer {
       const ctx = this.tokens.get(tokenStr);
       if (!ctx) return;
 
-      ctx.connections = ctx.connections.filter((c) => c !== ws);
+      const disconnectedRole = connRole;
+      ctx.connections = ctx.connections.filter((c) => c.ws !== ws);
 
-      // Start grace period if all connections dropped
-      if (ctx.connections.length === 0 && !ctx.graceTimer) {
+      if (disconnectedRole === 'mcp') {
+        logger.debug(
+          { groupFolder: ctx.groupFolder },
+          'MCP connection disconnected',
+        );
+      }
+
+      // Start grace period only when no agent connections remain
+      const hasAgent = ctx.connections.some((c) => c.role === 'agent');
+      if (!hasAgent && !ctx.graceTimer) {
         ctx.graceTimer = setTimeout(() => {
           logger.warn(
             { groupFolder: ctx.groupFolder },
@@ -347,6 +372,7 @@ export class WsIpcServer {
   private async routeMessage(
     msg: { type: string; [key: string]: unknown },
     ctx: TokenContext,
+    senderWs: WebSocket,
   ): Promise<void> {
     try {
       switch (msg.type) {
@@ -366,14 +392,12 @@ export class WsIpcServer {
             requestId,
             tasks,
           });
-          for (const ws of ctx.connections) {
-            if (ws.readyState === WebSocket.OPEN) ws.send(response);
-          }
+          if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
           break;
         }
 
         default:
-          await this.handleTaskIpc(msg, ctx);
+          await this.handleTaskIpc(msg, ctx, senderWs);
       }
     } catch (err) {
       logger.error({ err, type: msg.type }, 'Error routing WS message');
@@ -436,6 +460,7 @@ export class WsIpcServer {
   private async handleTaskIpc(
     msg: { type: string; [key: string]: unknown },
     ctx: TokenContext,
+    senderWs: WebSocket,
   ): Promise<void> {
     const registeredGroups = this.deps.registeredGroups();
 
@@ -474,9 +499,13 @@ export class WsIpcServer {
           break;
         }
 
+        if (scheduleType !== 'cron' && scheduleType !== 'interval' && scheduleType !== 'once') {
+          logger.warn({ scheduleType }, 'Invalid schedule type');
+          break;
+        }
+
         let nextRun: string | null = null;
-        const validType = scheduleType as 'cron' | 'interval' | 'once';
-        if (validType === 'cron') {
+        if (scheduleType === 'cron') {
           try {
             const interval = CronExpressionParser.parse(scheduleValue, {
               tz: TIMEZONE,
@@ -486,14 +515,14 @@ export class WsIpcServer {
             logger.warn({ scheduleValue }, 'Invalid cron expression');
             break;
           }
-        } else if (validType === 'interval') {
+        } else if (scheduleType === 'interval') {
           const ms = parseInt(scheduleValue, 10);
           if (isNaN(ms) || ms <= 0) {
             logger.warn({ scheduleValue }, 'Invalid interval');
             break;
           }
           nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (validType === 'once') {
+        } else if (scheduleType === 'once') {
           const scheduled = new Date(scheduleValue);
           if (isNaN(scheduled.getTime())) {
             logger.warn({ scheduleValue }, 'Invalid timestamp');
@@ -512,7 +541,7 @@ export class WsIpcServer {
           group_folder: targetFolder,
           chat_jid: targetJid,
           prompt,
-          schedule_type: validType,
+          schedule_type: scheduleType,
           schedule_value: scheduleValue,
           context_mode: contextMode,
           next_run: nextRun,
@@ -590,7 +619,6 @@ export class WsIpcServer {
             'Group metadata refresh requested via IPC',
           );
           await this.deps.syncGroups(true);
-          // Send updated groups to all connections for this token
           const groupsData = this.deps.getGroupsSnapshot(
             ctx.groupFolder,
             ctx.isMain,
@@ -599,9 +627,7 @@ export class WsIpcServer {
             type: 'groups_updated',
             groups: groupsData,
           });
-          for (const ws of ctx.connections) {
-            if (ws.readyState === WebSocket.OPEN) ws.send(response);
-          }
+          if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
         } else {
           logger.warn(
             { sourceGroup: ctx.groupFolder },
@@ -669,9 +695,7 @@ export class WsIpcServer {
               requestId,
               ...result,
             });
-            for (const ws of ctx.connections) {
-              if (ws.readyState === WebSocket.OPEN) ws.send(response);
-            }
+            if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
           }
         } else {
           logger.warn({ type: msg.type }, 'Unknown IPC task type');

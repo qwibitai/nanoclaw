@@ -639,6 +639,23 @@ describe('schedule_task schedule types', () => {
 
     expect(getAllTasks()).toHaveLength(0);
   });
+
+  it('rejects invalid schedule_type', async () => {
+    await sendIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'weekly task',
+        schedule_type: 'weekly',
+        schedule_value: 'monday',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      'main@g.us',
+      true,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
 });
 
 // --- context_mode defaulting ---

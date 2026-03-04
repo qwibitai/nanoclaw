@@ -18,7 +18,7 @@ const wsUrl = process.env.NANOCLAW_WS_URL!;
 const wsToken = process.env.NANOCLAW_WS_TOKEN!;
 
 // Create WS client for communicating with the host
-const wsClient = new WsClient(wsUrl, wsToken);
+const wsClient = new WsClient(wsUrl, wsToken, 'mcp');
 let wsReady = false;
 
 // Connect asynchronously — tools that need it will await this

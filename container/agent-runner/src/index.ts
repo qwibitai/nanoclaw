@@ -440,7 +440,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const wsClient = new WsClient(containerInput.wsUrl, containerInput.wsToken);
+  const wsClient = new WsClient(containerInput.wsUrl, containerInput.wsToken, 'agent');
   let authData;
   try {
     authData = await wsClient.connect();

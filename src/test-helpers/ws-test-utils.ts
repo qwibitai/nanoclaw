@@ -38,13 +38,14 @@ export async function sendAuthenticatedMessage(
   sourceGroup: string,
   chatJid: string,
   isMain: boolean,
+  role: 'agent' | 'mcp' = 'agent',
 ): Promise<FakeWs> {
   const token = server.createToken(sourceGroup, chatJid, isMain);
   const ws = createFakeWs();
   wss.emit('connection', ws, {});
 
   // Authenticate
-  ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token })));
+  ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token, role })));
 
   // Send the actual message
   ws.emit('message', Buffer.from(JSON.stringify(data)));

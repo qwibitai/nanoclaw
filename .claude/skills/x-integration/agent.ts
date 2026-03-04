@@ -50,14 +50,21 @@ Make sure the content is appropriate and within X's character limit (280 chars f
           };
         }
 
-        await wsClient.sendTask({
-          type: 'x_post',
-          content: args.content,
-        });
-
-        return {
-          content: [{ type: 'text', text: 'Tweet posted successfully.' }],
-        };
+        try {
+          const result = await wsClient.sendTaskRequest({
+            type: 'x_post',
+            content: args.content,
+          });
+          if (result.success) {
+            return { content: [{ type: 'text', text: result.message as string }] };
+          }
+          return { content: [{ type: 'text', text: result.message as string }], isError: true };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `X post failed: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -77,14 +84,21 @@ Provide the tweet URL or tweet ID to like.`,
           };
         }
 
-        await wsClient.sendTask({
-          type: 'x_like',
-          tweetUrl: args.tweet_url,
-        });
-
-        return {
-          content: [{ type: 'text', text: 'Tweet liked successfully.' }],
-        };
+        try {
+          const result = await wsClient.sendTaskRequest({
+            type: 'x_like',
+            tweetUrl: args.tweet_url,
+          });
+          if (result.success) {
+            return { content: [{ type: 'text', text: result.message as string }] };
+          }
+          return { content: [{ type: 'text', text: result.message as string }], isError: true };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `X like failed: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -105,15 +119,22 @@ Provide the tweet URL and your reply content.`,
           };
         }
 
-        await wsClient.sendTask({
-          type: 'x_reply',
-          tweetUrl: args.tweet_url,
-          content: args.content,
-        });
-
-        return {
-          content: [{ type: 'text', text: 'Reply posted successfully.' }],
-        };
+        try {
+          const result = await wsClient.sendTaskRequest({
+            type: 'x_reply',
+            tweetUrl: args.tweet_url,
+            content: args.content,
+          });
+          if (result.success) {
+            return { content: [{ type: 'text', text: result.message as string }] };
+          }
+          return { content: [{ type: 'text', text: result.message as string }], isError: true };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `X reply failed: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -133,14 +154,21 @@ Provide the tweet URL to retweet.`,
           };
         }
 
-        await wsClient.sendTask({
-          type: 'x_retweet',
-          tweetUrl: args.tweet_url,
-        });
-
-        return {
-          content: [{ type: 'text', text: 'Retweeted successfully.' }],
-        };
+        try {
+          const result = await wsClient.sendTaskRequest({
+            type: 'x_retweet',
+            tweetUrl: args.tweet_url,
+          });
+          if (result.success) {
+            return { content: [{ type: 'text', text: result.message as string }] };
+          }
+          return { content: [{ type: 'text', text: result.message as string }], isError: true };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `X retweet failed: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -161,15 +189,22 @@ Retweet with your own comment added.`,
           };
         }
 
-        await wsClient.sendTask({
-          type: 'x_quote',
-          tweetUrl: args.tweet_url,
-          comment: args.comment,
-        });
-
-        return {
-          content: [{ type: 'text', text: 'Quote tweet posted successfully.' }],
-        };
+        try {
+          const result = await wsClient.sendTaskRequest({
+            type: 'x_quote',
+            tweetUrl: args.tweet_url,
+            comment: args.comment,
+          });
+          if (result.success) {
+            return { content: [{ type: 'text', text: result.message as string }] };
+          }
+          return { content: [{ type: 'text', text: result.message as string }], isError: true };
+        } catch (err) {
+          return {
+            content: [{ type: 'text', text: `X quote failed: ${err instanceof Error ? err.message : String(err)}` }],
+            isError: true
+          };
+        }
       }
     )
   ];

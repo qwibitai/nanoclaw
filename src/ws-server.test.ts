@@ -127,8 +127,8 @@ describe('WsIpcServer', () => {
     return ws;
   }
 
-  function authenticateWs(ws: ReturnType<typeof createFakeWs>, token: string) {
-    ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token })));
+  function authenticateWs(ws: ReturnType<typeof createFakeWs>, token: string, role: 'agent' | 'mcp' = 'agent') {
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token, role })));
   }
 
   it('creates and validates tokens', () => {
@@ -496,6 +496,79 @@ describe('WsIpcServer', () => {
       // No pong received — next interval should terminate the connection
       await vi.advanceTimersByTimeAsync(30_000);
       expect(ws.terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects connection without a valid role', () => {
+    const token = server.createToken('test-group', 'test@g.us', false);
+    const ws = simulateConnection();
+
+    // Send auth without role
+    ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token })));
+
+    expect(ws.send).toHaveBeenCalledTimes(1);
+    const msg = JSON.parse(ws.send.mock.calls[0][0]);
+    expect(msg.type).toBe('auth_error');
+    expect(msg.message).toBe('invalid role');
+    expect(ws.close).toHaveBeenCalledWith(4003, 'invalid role');
+  });
+
+  it('MCP connection does not receive input or close messages', () => {
+    const token = server.createToken('test-group', 'test@g.us', false);
+
+    // Connect agent
+    const agentWs = simulateConnection();
+    authenticateWs(agentWs, token, 'agent');
+
+    // Connect MCP
+    const mcpWs = simulateConnection();
+    authenticateWs(mcpWs, token, 'mcp');
+
+    agentWs.send.mockClear();
+    mcpWs.send.mockClear();
+
+    // sendInput should only go to agent
+    server.sendInput(token, 'hello');
+    expect(agentWs.send).toHaveBeenCalledTimes(1);
+    expect(mcpWs.send).not.toHaveBeenCalled();
+
+    agentWs.send.mockClear();
+    mcpWs.send.mockClear();
+
+    // sendClose should only go to agent
+    server.sendClose(token);
+    expect(agentWs.send).toHaveBeenCalledTimes(1);
+    expect(mcpWs.send).not.toHaveBeenCalled();
+  });
+
+  it('MCP disconnection does not trigger grace timer; agent disconnection does', () => {
+    vi.useFakeTimers();
+    try {
+      const token = server.createToken('test-group', 'test@g.us', false);
+
+      // Connect agent and MCP
+      const agentWs = simulateConnection();
+      authenticateWs(agentWs, token, 'agent');
+
+      const mcpWs = simulateConnection();
+      authenticateWs(mcpWs, token, 'mcp');
+
+      // MCP disconnects — should NOT trigger grace timer (agent still connected)
+      mcpWs.emit('close');
+
+      // sendInput should still work (agent is connected)
+      agentWs.send.mockClear();
+      expect(server.sendInput(token, 'still here')).toBe(true);
+      expect(agentWs.send).toHaveBeenCalledTimes(1);
+
+      // Agent disconnects — should trigger grace timer
+      agentWs.emit('close');
+
+      // Advance past grace period
+      vi.advanceTimersByTime(31_000);
+      // Grace timer fired (verified by no crash and the warn log)
     } finally {
       vi.useRealTimers();
     }

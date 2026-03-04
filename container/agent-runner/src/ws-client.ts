@@ -38,6 +38,7 @@ export class WsClient {
   private ws: WebSocket | null = null;
   private url: string;
   private token: string;
+  private role: 'agent' | 'mcp';
   private reconnectAttempts = 0;
   private pendingRequests = new Map<
     string,
@@ -52,9 +53,10 @@ export class WsClient {
     | ((groups: AuthOkPayload['groups']) => void)
     | null = null;
 
-  constructor(url: string, token: string) {
+  constructor(url: string, token: string, role: 'agent' | 'mcp') {
     this.url = url;
     this.token = token;
+    this.role = role;
   }
 
   async connect(): Promise<AuthOkPayload> {
@@ -68,7 +70,7 @@ export class WsClient {
 
       this.ws.on('open', () => {
         log('Connected, authenticating...');
-        this.ws!.send(JSON.stringify({ type: 'auth', token: this.token }));
+        this.ws!.send(JSON.stringify({ type: 'auth', token: this.token, role: this.role }));
       });
 
       this.ws.on('message', (raw: WebSocket.RawData) => {
