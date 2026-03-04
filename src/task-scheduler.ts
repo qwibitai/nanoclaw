@@ -6,10 +6,8 @@ import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
-  writeTasksSnapshot,
 } from './container-runner.js';
 import {
-  getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
@@ -20,6 +18,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+import type { WsIpcServer } from './ws-server.js';
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -32,6 +31,7 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  wsServer?: WsIpcServer;
 }
 
 async function runTask(
@@ -88,22 +88,7 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
 
   let result: string | null = null;
   let error: string | null = null;
@@ -155,6 +140,7 @@ async function runTask(
           error = streamedOutput.error || 'Unknown error';
         }
       },
+      deps.wsServer,
     );
 
     if (closeTimer) clearTimeout(closeTimer);

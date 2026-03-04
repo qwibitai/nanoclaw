@@ -1,9 +1,8 @@
 import { ChildProcess } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
+import type { WsIpcServer } from './ws-server.js';
 
 interface QueuedTask {
   id: string;
@@ -23,6 +22,7 @@ interface GroupState {
   process: ChildProcess | null;
   containerName: string | null;
   groupFolder: string | null;
+  wsToken: string | null;
   retryCount: number;
 }
 
@@ -33,6 +33,11 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private _wsServer: WsIpcServer | null = null;
+
+  set wsServer(server: WsIpcServer) {
+    this._wsServer = server;
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -46,6 +51,7 @@ export class GroupQueue {
         process: null,
         containerName: null,
         groupFolder: null,
+        wsToken: null,
         retryCount: 0,
       };
       this.groups.set(groupJid, state);
@@ -128,15 +134,17 @@ export class GroupQueue {
     proc: ChildProcess,
     containerName: string,
     groupFolder?: string,
+    wsToken?: string,
   ): void {
     const state = this.getGroup(groupJid);
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    if (wsToken) state.wsToken = wsToken;
   }
 
   /**
-   * Mark the container as idle-waiting (finished work, waiting for IPC input).
+   * Mark the container as idle-waiting (finished work, waiting for WS input).
    * If tasks are pending, preempt the idle container immediately.
    */
   notifyIdle(groupJid: string): void {
@@ -148,42 +156,27 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Send a follow-up message to the active container via WebSocket.
+   * Returns true if the message was sent, false if no active container.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
-      return false;
+    if (!state.active || !state.wsToken || state.isTaskContainer) return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
-      fs.renameSync(tempPath, filepath);
-      return true;
-    } catch {
-      return false;
-    }
+    if (!this._wsServer) return false;
+    return this._wsServer.sendInput(state.wsToken, text);
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal the active container to wind down via WebSocket close message.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return;
+    if (!state.active || !state.wsToken) return;
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
-    } catch {
-      // ignore
+    if (this._wsServer) {
+      this._wsServer.sendClose(state.wsToken);
     }
   }
 
@@ -220,6 +213,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.wsToken = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -247,6 +241,7 @@ export class GroupQueue {
       state.process = null;
       state.containerName = null;
       state.groupFolder = null;
+      state.wsToken = null;
       this.activeCount--;
       this.drainGroup(groupJid);
     }

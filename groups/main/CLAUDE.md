@@ -79,31 +79,11 @@ Key paths inside the container:
 
 ### Finding Available Groups
 
-Available groups are provided in `/workspace/ipc/available_groups.json`:
+Available groups are provided when the agent connects via WebSocket (in the `auth_ok` message). The MCP tool `mcp__nanoclaw__list_tasks` also returns current data.
 
-```json
-{
-  "groups": [
-    {
-      "jid": "120363336345536173@g.us",
-      "name": "Family Chat",
-      "lastActivity": "2026-01-31T12:00:00.000Z",
-      "isRegistered": false
-    }
-  ],
-  "lastSync": "2026-01-31T12:00:00.000Z"
-}
-```
+Groups are ordered by most recent activity. The list is synced from the messaging channel daily.
 
-Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
-
-If a group the user mentions isn't in the list, request a fresh sync:
-
-```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
-```
-
-Then wait a moment and re-read `available_groups.json`.
+If a group the user mentions isn't in the list, use the `mcp__nanoclaw__refresh_groups` MCP tool to request a fresh sync, then check the updated data.
 
 **Fallback**: Query the SQLite database directly:
 

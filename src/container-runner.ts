@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Spawns agent execution in containers and handles WS-based IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -14,9 +14,10 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
+  WS_HOST,
 } from './config.js';
 import { readEnvFile } from './env.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -25,10 +26,7 @@ import {
 } from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
-// Sentinel markers for robust output parsing (must match agent-runner)
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+import type { WsIpcServer } from './ws-server.js';
 
 export interface ContainerInput {
   prompt: string;
@@ -39,6 +37,8 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  wsUrl?: string;
+  wsToken?: string;
 }
 
 export interface ContainerOutput {
@@ -46,6 +46,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+}
+
+export interface AvailableGroup {
+  jid: string;
+  name: string;
+  lastActivity: string;
+  isRegistered: boolean;
 }
 
 interface VolumeMount {
@@ -64,7 +71,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
+    // (group folder, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -161,18 +168,6 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Per-group IPC namespace: each group gets its own IPC directory
-  // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
-  mounts.push({
-    hostPath: groupIpcDir,
-    containerPath: '/workspace/ipc',
-    readonly: false,
-  });
-
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
@@ -232,6 +227,11 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
+  // Allow container to reach host network (for WS server).
+  // Harmless on macOS (host.docker.internal exists by default),
+  // required on Linux where the bridge gateway must be mapped.
+  args.push('--add-host=host.docker.internal:host-gateway');
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -260,6 +260,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  wsServer?: WsIpcServer,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -297,6 +298,16 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Create WS token for this container
+  let wsToken: string | undefined;
+  if (wsServer) {
+    wsToken = wsServer.createToken(
+      input.groupFolder,
+      input.chatJid,
+      input.isMain,
+    );
+  }
+
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -309,22 +320,25 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
+    // Pass secrets and WS connection info via stdin (never written to disk)
     input.secrets = readSecrets();
+    if (wsToken && wsServer) {
+      input.wsUrl = `ws://${WS_HOST}:${wsServer.port}`;
+      input.wsToken = wsToken;
+    }
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
+    // Remove secrets and token from input so they don't appear in logs
     delete input.secrets;
+    delete input.wsUrl;
+    delete input.wsToken;
 
-    // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
-    let parseBuffer = '';
     let newSessionId: string | undefined;
-    let outputChain = Promise.resolve();
+    let hadStreamingOutput = false;
 
+    // Accumulate stdout for logging only (output now comes via WS)
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
-
-      // Always accumulate for logging
       if (!stdoutTruncated) {
         const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
         if (chunk.length > remaining) {
@@ -338,39 +352,6 @@ export async function runContainerAgent(
           stdout += chunk;
         }
       }
-
-      // Stream-parse for output markers
-      if (onOutput) {
-        parseBuffer += chunk;
-        let startIdx: number;
-        while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
-          const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);
-          if (endIdx === -1) break; // Incomplete pair, wait for more data
-
-          const jsonStr = parseBuffer
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-          parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
-
-          try {
-            const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
-              newSessionId = parsed.newSessionId;
-            }
-            hadStreamingOutput = true;
-            // Activity detected — reset the hard timeout
-            resetTimeout();
-            // Call onOutput for all markers (including null results)
-            // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
-          } catch (err) {
-            logger.warn(
-              { group: group.name, error: err },
-              'Failed to parse streamed output chunk',
-            );
-          }
-        }
-      }
     });
 
     container.stderr.on('data', (data) => {
@@ -379,8 +360,6 @@ export async function runContainerAgent(
       for (const line of lines) {
         if (line) logger.debug({ container: group.folder }, line);
       }
-      // Don't reset timeout on stderr — SDK writes debug logs continuously.
-      // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
       if (stderrTruncated) return;
       const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
@@ -396,10 +375,9 @@ export async function runContainerAgent(
     });
 
     let timedOut = false;
-    let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful _close sentinel has time to trigger before the hard kill fires.
+    // graceful close signal has time to trigger before the hard kill fires.
     const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
@@ -421,15 +399,39 @@ export async function runContainerAgent(
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
 
-    // Reset the timeout whenever there's activity (streaming output)
+    // Reset the timeout whenever there's activity (WS output)
     const resetTimeout = () => {
       clearTimeout(timeout);
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
+    // Wire WS output callbacks: output messages come via WS instead of stdout markers
+    let outputChain = Promise.resolve();
+    if (wsServer && wsToken && onOutput) {
+      wsServer.setTokenCallbacks(
+        wsToken,
+        async (output: ContainerOutput) => {
+          if (output.newSessionId) {
+            newSessionId = output.newSessionId;
+          }
+          hadStreamingOutput = true;
+          await onOutput(output);
+        },
+        resetTimeout,
+      );
+    }
+
     container.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      // Revoke WS token on container exit
+      if (wsServer && wsToken) {
+        // Small grace window for in-flight WS messages
+        setTimeout(() => {
+          wsServer.revokeToken(wsToken!);
+        }, 100);
+      }
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -448,8 +450,6 @@ export async function runContainerAgent(
         );
 
         // Timeout after output = idle cleanup, not failure.
-        // The agent already sent its response; this is just the
-        // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
             { group: group.name, containerName, duration, code },
@@ -557,7 +557,7 @@ export async function runContainerAgent(
         return;
       }
 
-      // Streaming mode: wait for output chain to settle, return completion marker
+      // Wait for output chain to settle, return completion marker
       if (onOutput) {
         outputChain.then(() => {
           logger.info(
@@ -573,57 +573,23 @@ export async function runContainerAgent(
         return;
       }
 
-      // Legacy mode: parse the last output marker pair from accumulated stdout
-      try {
-        // Extract JSON between sentinel markers for robust parsing
-        const startIdx = stdout.indexOf(OUTPUT_START_MARKER);
-        const endIdx = stdout.indexOf(OUTPUT_END_MARKER);
+      logger.info(
+        { group: group.name, duration },
+        'Container completed',
+      );
 
-        let jsonLine: string;
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          jsonLine = stdout
-            .slice(startIdx + OUTPUT_START_MARKER.length, endIdx)
-            .trim();
-        } else {
-          // Fallback: last non-empty line (backwards compatibility)
-          const lines = stdout.trim().split('\n');
-          jsonLine = lines[lines.length - 1];
-        }
-
-        const output: ContainerOutput = JSON.parse(jsonLine);
-
-        logger.info(
-          {
-            group: group.name,
-            duration,
-            status: output.status,
-            hasResult: !!output.result,
-          },
-          'Container completed',
-        );
-
-        resolve(output);
-      } catch (err) {
-        logger.error(
-          {
-            group: group.name,
-            stdout,
-            stderr,
-            error: err,
-          },
-          'Failed to parse container output',
-        );
-
-        resolve({
-          status: 'error',
-          result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
+      resolve({
+        status: 'success',
+        result: null,
+        newSessionId,
+      });
     });
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      if (wsServer && wsToken) {
+        wsServer.revokeToken(wsToken);
+      }
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',
@@ -635,68 +601,4 @@ export async function runContainerAgent(
       });
     });
   });
-}
-
-export function writeTasksSnapshot(
-  groupFolder: string,
-  isMain: boolean,
-  tasks: Array<{
-    id: string;
-    groupFolder: string;
-    prompt: string;
-    schedule_type: string;
-    schedule_value: string;
-    status: string;
-    next_run: string | null;
-  }>,
-): void {
-  // Write filtered tasks to the group's IPC directory
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
-
-  // Main sees all tasks, others only see their own
-  const filteredTasks = isMain
-    ? tasks
-    : tasks.filter((t) => t.groupFolder === groupFolder);
-
-  const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
-  fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
-}
-
-export interface AvailableGroup {
-  jid: string;
-  name: string;
-  lastActivity: string;
-  isRegistered: boolean;
-}
-
-/**
- * Write available groups snapshot for the container to read.
- * Only main group can see all available groups (for activation).
- * Non-main groups only see their own registration status.
- */
-export function writeGroupsSnapshot(
-  groupFolder: string,
-  isMain: boolean,
-  groups: AvailableGroup[],
-  registeredJids: Set<string>,
-): void {
-  const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
-
-  // Main sees all groups; others see nothing (they can't activate groups)
-  const visibleGroups = isMain ? groups : [];
-
-  const groupsFile = path.join(groupIpcDir, 'available_groups.json');
-  fs.writeFileSync(
-    groupsFile,
-    JSON.stringify(
-      {
-        groups: visibleGroups,
-        lastSync: new Date().toISOString(),
-      },
-      null,
-      2,
-    ),
-  );
 }

@@ -19,9 +19,11 @@ src/container-runner.ts               container/agent-runner/
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
     ├── groups/{folder} ───────────> /workspace/group
-    ├── data/ipc/{folder} ────────> /workspace/ipc
     ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
     └── (main only) project root ──> /workspace/project
+
+Communication: WebSocket (ws://WS_HOST:port) authenticated with per-container tokens.
+Bootstrap: stdin JSON (prompt, secrets, wsUrl, wsToken).
 ```
 
 **Important:** The container runs as user `node` with `HOME=/home/node`. Session files must be mounted to `/home/node/.claude/` (not `/root/.claude/`) for session resumption to work.
@@ -119,13 +121,10 @@ Expected structure:
 ├── group/                # Current group folder (cwd)
 ├── project/              # Project root (main channel only)
 ├── global/               # Global CLAUDE.md (non-main only)
-├── ipc/                  # Inter-process communication
-│   ├── messages/         # Outgoing WhatsApp messages
-│   ├── tasks/            # Scheduled task commands
-│   ├── current_tasks.json    # Read-only: scheduled tasks visible to this group
-│   └── available_groups.json # Read-only: WhatsApp groups for activation (main only)
 └── extra/                # Additional custom mounts
 ```
+
+Note: IPC is handled via WebSocket, not filesystem mounts.
 
 ### 4. Permission Issues
 
@@ -183,12 +182,12 @@ If an MCP server fails to start, the agent may exit. Check the container logs fo
 mkdir -p data/env groups/test
 cp .env data/env/env
 
-# Run test query
-echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false}' | \
+# Run test query (requires WS server running — use npm run dev)
+echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMain":false,"wsUrl":"ws://host.docker.internal:PORT","wsToken":"TOKEN"}' | \
   docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
   -v $(pwd)/groups/test:/workspace/group \
-  -v $(pwd)/data/ipc:/workspace/ipc \
+  --add-host=host.docker.internal:host-gateway \
   nanoclaw-agent:latest
 ```
 
@@ -288,32 +287,36 @@ grep "Session initialized" logs/nanoclaw.log | tail -5
 # Should show the SAME session ID for consecutive messages in the same group
 ```
 
-## IPC Debugging
+## WebSocket IPC Debugging
 
-The container communicates back to the host via files in `/workspace/ipc/`:
+The container communicates with the host via WebSocket (`ws://WS_HOST:port`), authenticated with per-container tokens.
 
+**Check WS server is running:**
 ```bash
-# Check pending messages
-ls -la data/ipc/messages/
-
-# Check pending task operations
-ls -la data/ipc/tasks/
-
-# Read a specific IPC file
-cat data/ipc/messages/*.json
-
-# Check available groups (main channel only)
-cat data/ipc/main/available_groups.json
-
-# Check current tasks snapshot
-cat data/ipc/{groupFolder}/current_tasks.json
+grep "WebSocket IPC server listening" logs/nanoclaw.log | tail -1
+# Should show port number
 ```
 
-**IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
-- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
-- `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
+**Check container WS connection:**
+```bash
+# Look for auth success/failure in logs
+grep "WS client authenticated" logs/nanoclaw.log | tail -5
+grep "auth_error\|auth timeout" logs/nanoclaw.log | tail -5
+```
+
+**Message types (container → host):**
+- `output` - Agent result (replaces stdout markers)
+- `message` - Outgoing chat messages (via MCP tool)
+- `schedule_task`, `pause_task`, `resume_task`, `cancel_task` - Task operations (via MCP tool)
+- `register_group`, `refresh_groups` - Group management (via MCP tool)
+- `list_tasks` - Request current tasks (request-response via `requestId`)
+
+**Message types (host → container):**
+- `auth_ok` - Authentication success with task/group snapshots
+- `input` - Follow-up user message
+- `close` - Shutdown signal
+- `list_tasks_response` - Response to `list_tasks`
+- `groups_updated` - Fresh group data after `refresh_groups`
 
 ## Quick Diagnostic Script
 

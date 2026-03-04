@@ -1,37 +1,35 @@
 /**
  * Stdio MCP Server for NanoClaw
  * Standalone process that agent teams subagents can inherit.
- * Reads context from environment variables, writes IPC files for the host.
+ * Reads context from environment variables, communicates with host via WebSocket.
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
-
-const IPC_DIR = '/workspace/ipc';
-const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+import { WsClient } from './ws-client.js';
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const wsUrl = process.env.NANOCLAW_WS_URL!;
+const wsToken = process.env.NANOCLAW_WS_TOKEN!;
 
-function writeIpcFile(dir: string, data: object): string {
-  fs.mkdirSync(dir, { recursive: true });
+// Create WS client for communicating with the host
+const wsClient = new WsClient(wsUrl, wsToken);
+let wsReady = false;
 
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  const filepath = path.join(dir, filename);
+// Connect asynchronously — tools that need it will await this
+const wsConnectPromise = wsClient.connect().then(() => {
+  wsReady = true;
+}).catch((err) => {
+  console.error(`[ipc-mcp] WS connect failed: ${err instanceof Error ? err.message : String(err)}`);
+});
 
-  // Atomic write: temp file then rename
-  const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tempPath, filepath);
-
-  return filename;
+async function ensureWs(): Promise<void> {
+  if (!wsReady) await wsConnectPromise;
 }
 
 const server = new McpServer({
@@ -47,17 +45,8 @@ server.tool(
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
-      type: 'message',
-      chatJid,
-      text: args.text,
-      sender: args.sender || undefined,
-      groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(MESSAGES_DIR, data);
-
+    await ensureWs();
+    wsClient.sendMessage(chatJid, args.text, args.sender || undefined);
     return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
   },
 );
@@ -93,7 +82,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     target_group_jid: z.string().optional().describe('(Main group only) JID of the group to schedule the task for. Defaults to the current group.'),
   },
   async (args) => {
-    // Validate schedule_value before writing IPC
+    // Validate schedule_value before sending
     if (args.schedule_type === 'cron') {
       try {
         CronExpressionParser.parse(args.schedule_value);
@@ -130,7 +119,8 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     // Non-main groups can only schedule for themselves
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
-    const data = {
+    await ensureWs();
+    wsClient.sendTask({
       type: 'schedule_task',
       prompt: args.prompt,
       schedule_type: args.schedule_type,
@@ -139,12 +129,10 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       targetJid,
       createdBy: groupFolder,
       timestamp: new Date().toISOString(),
-    };
-
-    const filename = writeIpcFile(TASKS_DIR, data);
+    });
 
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
     };
   },
 );
@@ -154,26 +142,21 @@ server.tool(
   "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
   {},
   async () => {
-    const tasksFile = path.join(IPC_DIR, 'current_tasks.json');
-
+    await ensureWs();
     try {
-      if (!fs.existsSync(tasksFile)) {
+      const tasks = await wsClient.listTasks();
+
+      const filtered = isMain
+        ? tasks
+        : tasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
+
+      if (filtered.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
       }
 
-      const allTasks = JSON.parse(fs.readFileSync(tasksFile, 'utf-8'));
-
-      const tasks = isMain
-        ? allTasks
-        : allTasks.filter((t: { groupFolder: string }) => t.groupFolder === groupFolder);
-
-      if (tasks.length === 0) {
-        return { content: [{ type: 'text' as const, text: 'No scheduled tasks found.' }] };
-      }
-
-      const formatted = tasks
+      const formatted = filtered
         .map(
-          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string }) =>
+          (t: { id: string; prompt: string; schedule_type: string; schedule_value: string; status: string; next_run: string | null }) =>
             `- [${t.id}] ${t.prompt.slice(0, 50)}... (${t.schedule_type}: ${t.schedule_value}) - ${t.status}, next: ${t.next_run || 'N/A'}`,
         )
         .join('\n');
@@ -181,7 +164,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: `Scheduled tasks:\n${formatted}` }] };
     } catch (err) {
       return {
-        content: [{ type: 'text' as const, text: `Error reading tasks: ${err instanceof Error ? err.message : String(err)}` }],
+        content: [{ type: 'text' as const, text: `Error listing tasks: ${err instanceof Error ? err.message : String(err)}` }],
       };
     }
   },
@@ -192,15 +175,14 @@ server.tool(
   'Pause a scheduled task. It will not run until resumed.',
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
-    const data = {
+    await ensureWs();
+    wsClient.sendTask({
       type: 'pause_task',
       taskId: args.task_id,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
+    });
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
   },
@@ -211,15 +193,14 @@ server.tool(
   'Resume a paused task.',
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
-    const data = {
+    await ensureWs();
+    wsClient.sendTask({
       type: 'resume_task',
       taskId: args.task_id,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
+    });
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
   },
@@ -230,15 +211,14 @@ server.tool(
   'Cancel and delete a scheduled task.',
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
-    const data = {
+    await ensureWs();
+    wsClient.sendTask({
       type: 'cancel_task',
       taskId: args.task_id,
       groupFolder,
       isMain,
       timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
+    });
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
   },
@@ -248,7 +228,7 @@ server.tool(
   'register_group',
   `Register a new chat/group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+The groups data provided when the agent connects includes available groups with their JIDs. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
   {
     jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
     name: z.string().describe('Display name for the group'),
@@ -263,16 +243,15 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       };
     }
 
-    const data = {
+    await ensureWs();
+    wsClient.sendTask({
       type: 'register_group',
       jid: args.jid,
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
       timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
+    });
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],

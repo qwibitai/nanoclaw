@@ -12,10 +12,12 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.34",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "cron-parser": "^5.0.0",
+    "ws": "^8.18.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",
+    "@types/ws": "^8.5.14",
     "typescript": "^5.7.3"
   }
 }

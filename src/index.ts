@@ -13,10 +13,9 @@ import {
   getRegisteredChannelNames,
 } from './channels/registry.js';
 import {
+  AvailableGroup,
   ContainerOutput,
   runContainerAgent,
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
 } from './container-runner.js';
 import {
   cleanupOrphans,
@@ -39,11 +38,11 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { WsIpcServer } from './ws-server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -56,6 +55,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let wsServer: WsIpcServer;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -107,7 +107,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
-export function getAvailableGroups(): import('./container-runner.js').AvailableGroup[] {
+export function getAvailableGroups(): AvailableGroup[] {
   const chats = getAllChats();
   const registeredJids = new Set(Object.keys(registeredGroups));
 
@@ -119,6 +119,45 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
       lastActivity: c.last_message_time,
       isRegistered: registeredJids.has(c.jid),
     }));
+}
+
+/**
+ * Get tasks snapshot filtered by group permissions.
+ */
+function getTasksSnapshot(
+  groupFolder: string,
+  isMain: boolean,
+): Array<{
+  id: string;
+  groupFolder: string;
+  prompt: string;
+  schedule_type: string;
+  schedule_value: string;
+  status: string;
+  next_run: string | null;
+}> {
+  const tasks = getAllTasks();
+  const mapped = tasks.map((t) => ({
+    id: t.id,
+    groupFolder: t.group_folder,
+    prompt: t.prompt,
+    schedule_type: t.schedule_type,
+    schedule_value: t.schedule_value,
+    status: t.status,
+    next_run: t.next_run,
+  }));
+  return isMain ? mapped : mapped.filter((t) => t.groupFolder === groupFolder);
+}
+
+/**
+ * Get groups snapshot filtered by group permissions.
+ */
+function getGroupsSnapshot(
+  _groupFolder: string,
+  isMain: boolean,
+): { groups: AvailableGroup[]; lastSync: string } {
+  const groups = isMain ? getAvailableGroups() : [];
+  return { groups, lastSync: new Date().toISOString() };
 }
 
 /** @internal - exported for testing */
@@ -255,31 +294,6 @@ async function runAgent(
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
-  // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
-  // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
-
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
@@ -305,6 +319,7 @@ async function runAgent(
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      wsServer,
     );
 
     if (output.newSessionId) {
@@ -453,9 +468,36 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  // Start WebSocket IPC server
+  wsServer = new WsIpcServer({
+    onOutput: async (_groupFolder, _chatJid, _output) => {
+      // Output routing is handled per-token via setTokenCallbacks
+    },
+    getTasksSnapshot,
+    getGroupsSnapshot,
+    sendMessage: (jid, text) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      return channel.sendMessage(jid, text);
+    },
+    registeredGroups: () => registeredGroups,
+    registerGroup,
+    syncGroups: async (force: boolean) => {
+      await Promise.all(
+        channels
+          .filter((ch) => ch.syncGroups)
+          .map((ch) => ch.syncGroups!(force)),
+      );
+    },
+    getAvailableGroups,
+  });
+  await wsServer.start();
+  queue.wsServer = wsServer;
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await wsServer.shutdown();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -513,25 +555,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-  });
-  startIpcWatcher({
-    sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
-    syncGroups: async (force: boolean) => {
-      await Promise.all(
-        channels
-          .filter((ch) => ch.syncGroups)
-          .map((ch) => ch.syncGroups!(force)),
-      );
-    },
-    getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    wsServer,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

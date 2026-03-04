@@ -24,6 +24,7 @@
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",
+    "ws": "^8.18.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "prettier": "^3.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
+    "@types/ws": "^8.5.14",
     "vitest": "^4.0.18"
   },
   "engines": {

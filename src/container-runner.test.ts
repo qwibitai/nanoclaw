@@ -2,10 +2,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-// Sentinel markers must match container-runner.ts
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
 // Mock config
 vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
@@ -15,6 +11,7 @@ vi.mock('./config.js', () => ({
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+  WS_HOST: 'host.docker.internal',
 }));
 
 // Mock logger
@@ -85,6 +82,40 @@ vi.mock('child_process', async () => {
   };
 });
 
+// Mock WS server
+function createMockWsServer() {
+  let tokenCallbacks: {
+    onOutput?: (output: any) => Promise<void>;
+    resetTimeout?: () => void;
+  } = {};
+
+  return {
+    port: 12345,
+    createToken: vi.fn(() => 'test-token-123'),
+    revokeToken: vi.fn(),
+    setTokenCallbacks: vi.fn(
+      (
+        _token: string,
+        onOutput: (output: any) => Promise<void>,
+        resetTimeout: () => void,
+      ) => {
+        tokenCallbacks = { onOutput, resetTimeout };
+      },
+    ),
+    sendInput: vi.fn(() => true),
+    sendClose: vi.fn(),
+    // Helper to simulate WS output from container
+    _simulateOutput: async (output: any) => {
+      if (tokenCallbacks.onOutput) {
+        await tokenCallbacks.onOutput(output);
+      }
+    },
+    _resetTimeout: () => {
+      tokenCallbacks.resetTimeout?.();
+    },
+  };
+}
+
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -102,14 +133,6 @@ const testInput = {
   isMain: false,
 };
 
-function emitOutputMarker(
-  proc: ReturnType<typeof createFakeProcess>,
-  output: ContainerOutput,
-) {
-  const json = JSON.stringify(output);
-  proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
-}
-
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -122,15 +145,18 @@ describe('container-runner timeout behavior', () => {
 
   it('timeout after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
+    const mockWs = createMockWsServer();
+
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
       () => {},
       onOutput,
+      mockWs as any,
     );
 
-    // Emit output with a result
-    emitOutputMarker(fakeProc, {
+    // Simulate WS output with a result
+    await mockWs._simulateOutput({
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
@@ -145,8 +171,8 @@ describe('container-runner timeout behavior', () => {
     // Emit close event (as if container was stopped by the timeout)
     fakeProc.emit('close', 137);
 
-    // Let the promise resolve
-    await vi.advanceTimersByTimeAsync(10);
+    // Let the promise resolve (including 100ms grace for token revocation)
+    await vi.advanceTimersByTimeAsync(200);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
@@ -158,11 +184,14 @@ describe('container-runner timeout behavior', () => {
 
   it('timeout with no output resolves as error', async () => {
     const onOutput = vi.fn(async () => {});
+    const mockWs = createMockWsServer();
+
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
       () => {},
       onOutput,
+      mockWs as any,
     );
 
     // No output emitted — fire the hard timeout
@@ -171,7 +200,7 @@ describe('container-runner timeout behavior', () => {
     // Emit close event
     fakeProc.emit('close', 137);
 
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(200);
 
     const result = await resultPromise;
     expect(result.status).toBe('error');
@@ -181,15 +210,18 @@ describe('container-runner timeout behavior', () => {
 
   it('normal exit after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
+    const mockWs = createMockWsServer();
+
     const resultPromise = runContainerAgent(
       testGroup,
       testInput,
       () => {},
       onOutput,
+      mockWs as any,
     );
 
-    // Emit output
-    emitOutputMarker(fakeProc, {
+    // Simulate WS output
+    await mockWs._simulateOutput({
       status: 'success',
       result: 'Done',
       newSessionId: 'session-456',
@@ -200,7 +232,7 @@ describe('container-runner timeout behavior', () => {
     // Normal exit (no timeout)
     fakeProc.emit('close', 0);
 
-    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(200);
 
     const result = await resultPromise;
     expect(result.status).toBe('success');
