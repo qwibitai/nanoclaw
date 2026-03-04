@@ -941,9 +941,15 @@ describe('FeishuChannel', () => {
     });
   });
 
-  // --- Markdown to Post conversion ---
+  // --- Markdown to Post (md tag) ---
 
   describe('sendMessage with Markdown', () => {
+    /** Helper: extract the parsed post content from the API call */
+    function getPostContent(callIndex = 0) {
+      const call = currentClient().im.v1.message.create.mock.calls[callIndex][0];
+      return { call, content: JSON.parse(call.data.content) };
+    }
+
     it('sends plain text without Markdown as text message', async () => {
       const opts = createTestOpts();
       const channel = new FeishuChannel('app_id', 'app_secret', opts);
@@ -961,194 +967,140 @@ describe('FeishuChannel', () => {
       });
     });
 
-    it('sends bold text as post message', async () => {
+    it('wraps bold Markdown in a single md tag', async () => {
       const opts = createTestOpts();
       const channel = new FeishuChannel('app_id', 'app_secret', opts);
       await channel.connect();
 
-      await channel.sendMessage('feishu:oc_test123', 'This is **bold** text');
+      const markdown = 'This is **bold** text';
+      await channel.sendMessage('feishu:oc_test123', markdown);
 
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
+      const { call, content } = getPostContent();
       expect(call.data.msg_type).toBe('post');
-      const content = JSON.parse(call.data.content);
-      expect(content.zh_cn.content).toBeDefined();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
     });
 
-    it('sends italic text as post message', async () => {
+    it('wraps italic Markdown in a single md tag', async () => {
       const opts = createTestOpts();
       const channel = new FeishuChannel('app_id', 'app_secret', opts);
       await channel.connect();
 
-      await channel.sendMessage('feishu:oc_test123', 'This is *italic* text');
+      const markdown = 'This is *italic* text';
+      await channel.sendMessage('feishu:oc_test123', markdown);
 
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
+      const { call, content } = getPostContent();
       expect(call.data.msg_type).toBe('post');
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
     });
 
-    it('sends code as post message', async () => {
+    it('wraps inline code in a single md tag', async () => {
       const opts = createTestOpts();
       const channel = new FeishuChannel('app_id', 'app_secret', opts);
       await channel.connect();
 
-      await channel.sendMessage('feishu:oc_test123', 'Run `npm install`');
+      const markdown = 'Run `npm install`';
+      await channel.sendMessage('feishu:oc_test123', markdown);
 
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps links in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = 'Visit [OpenAI](https://openai.com) for more';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps headings in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = '# Title\nSome content';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps code blocks with language in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = '```typescript\nconst x = 1;\n```';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps mixed content in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = 'Hello **world** and *universe*!';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps multi-line Markdown in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = 'Line 1\nLine 2\n**Line 3**';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps list items in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = '- Item 1\n- Item 2\n- Item 3';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps blockquotes in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown = '> This is a quote\n> with two lines';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { content } = getPostContent();
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
+    });
+
+    it('wraps comprehensive Markdown in a single md tag', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const markdown =
+        '## Summary\n\n**Key points:**\n- First `item`\n- Second *item*\n\n> Important note\n\n```js\nconsole.log("hi");\n```';
+      await channel.sendMessage('feishu:oc_test123', markdown);
+
+      const { call, content } = getPostContent();
       expect(call.data.msg_type).toBe('post');
-    });
-
-    it('sends links as post message', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        'Check [this link](https://example.com)',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('post');
-      const content = JSON.parse(call.data.content);
-      // Should have an anchor tag
-      const hasLink = content.zh_cn.content.some((line: any[]) =>
-        line.some((node: any) => node.tag === 'a' && node.href),
-      );
-      expect(hasLink).toBe(true);
-    });
-
-    it('sends headings as post message with bold', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_test123', '# Title\nSome content');
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('post');
-      const content = JSON.parse(call.data.content);
-      // First line should be bold
-      const firstLine = content.zh_cn.content[0];
-      expect(firstLine[0].style).toContain('bold');
-      expect(firstLine[0].text).toBe('Title');
-    });
-
-    it('converts bold Markdown to post style', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_test123', '**important**');
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      const node = content.zh_cn.content[0][0];
-      expect(node.tag).toBe('text');
-      expect(node.text).toBe('important');
-      expect(node.style).toContain('bold');
-    });
-
-    it('converts italic Markdown to post style', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage('feishu:oc_test123', '*emphasized*');
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      const node = content.zh_cn.content[0][0];
-      expect(node.tag).toBe('text');
-      expect(node.text).toBe('emphasized');
-      expect(node.style).toContain('italic');
-    });
-
-    it('converts link Markdown to anchor tag', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        'Visit [OpenAI](https://openai.com) for more',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      // Find the link node
-      const linkNode = content.zh_cn.content[0].find(
-        (n: any) => n.tag === 'a',
-      );
-      expect(linkNode).toBeDefined();
-      expect(linkNode.text).toBe('OpenAI');
-      expect(linkNode.href).toBe('https://openai.com');
-    });
-
-    it('handles code blocks preserving content', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        '```\ncode line 1\ncode line 2\n```',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      expect(call.data.msg_type).toBe('post');
-      const content = JSON.parse(call.data.content);
-      // Should have 4 lines: start marker, 2 code lines, end marker
-      expect(content.zh_cn.content.length).toBe(4);
-      expect(content.zh_cn.content[0][0].text).toBe('```');
-      expect(content.zh_cn.content[1][0].text).toBe('code line 1');
-      expect(content.zh_cn.content[2][0].text).toBe('code line 2');
-      expect(content.zh_cn.content[3][0].text).toBe('```');
-    });
-
-    it('handles code blocks with language', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        '```typescript\nconst x = 1;\n```',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      expect(content.zh_cn.content[0][0].text).toBe('```typescript');
-    });
-
-    it('handles mixed content correctly', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        'Hello **world** and *universe*!',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      // Should have plain text, bold, and italic
-      expect(content.zh_cn.content[0].length).toBeGreaterThan(1);
-    });
-
-    it('handles multi-line messages', async () => {
-      const opts = createTestOpts();
-      const channel = new FeishuChannel('app_id', 'app_secret', opts);
-      await channel.connect();
-
-      await channel.sendMessage(
-        'feishu:oc_test123',
-        'Line 1\nLine 2\n**Line 3**',
-      );
-
-      const call = currentClient().im.v1.message.create.mock.calls[0][0];
-      const content = JSON.parse(call.data.content);
-      // Should have 3 lines
-      expect(content.zh_cn.content.length).toBe(3);
+      expect(content.zh_cn.content).toEqual([[{ tag: 'md', text: markdown }]]);
     });
   });
 });

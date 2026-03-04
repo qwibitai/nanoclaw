@@ -212,21 +212,24 @@ Look for `Feishu bot connected` and `Feishu message stored` entries.
 
 ### Markdown Support
 
-The Feishu channel automatically converts Markdown formatting to Feishu's rich text (post) format when sending messages. Supported Markdown syntax:
+The Feishu channel uses Feishu's native `md` tag in post format, which delegates Markdown rendering to the server. This provides full Markdown support with native styling:
 
-| Markdown | Feishu Format |
-|----------|---------------|
-| `# Heading` | Bold text |
-| `**bold**` | Bold text |
-| `__bold__` | Bold text |
-| `*italic*` | Italic text |
-| `_italic_` | Italic text |
+| Markdown | Rendering |
+|----------|-----------|
+| `# Heading` | Native heading |
+| `**bold**` / `__bold__` | Bold |
+| `*italic*` / `_italic_` | Italic |
 | `~~strikethrough~~` | Strikethrough |
-| `` `code` `` | Italic (code style) |
+| `<u>underline</u>` | Underline |
+| `` `code` `` | Inline code |
+| ` ``` ` code blocks | Syntax-highlighted code |
 | `[text](url)` | Hyperlink |
-| ` ``` ` code blocks | Preserved as-is |
+| `> quote` | Block quote |
+| `- item` / `1. item` | Lists |
 
 Plain text messages without Markdown are sent as simple text messages for efficiency.
+
+**Note:** The `md` tag is send-only. When reading back messages, Feishu returns the content as expanded post tags (`text`, `a`, etc.).
 
 ## Troubleshooting
 

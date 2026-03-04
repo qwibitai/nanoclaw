@@ -12,143 +12,18 @@ import {
 } from '../types.js';
 
 /**
- * Convert Markdown text to Feishu post message format.
+ * Wrap Markdown text in Feishu's native `md` tag for post format.
+ * Feishu renders Markdown server-side, supporting bold, italic, code blocks
+ * with syntax highlighting, quotes, lists, links, headings, etc.
  *
- * Feishu post format:
- * {
- *   "zh_cn": {
- *     "title": "optional title",
- *     "content": [[{tag, text, ...}], ...]
- *   }
- * }
- *
- * Supported tags: text, a, at, img, media
- * Supported styles: bold, italic, underline, lineThrough
- *
- * Markdown support:
- * - Headings (# ## ### etc.) → bold text
- * - Bold (**text** or __text__)
- * - Italic (*text* or _text_)
- * - Strikethrough (~~text~~)
- * - Inline code (`code`)
- * - Code blocks (```)
- * - Links [text](url)
+ * Note: md tag is send-only. Reading back messages returns converted tags.
  */
-function markdownToPost(text: string): string {
-  const lines = text.split('\n');
-  const content: PostNode[][] = [];
-  let inCodeBlock = false;
-
-  for (const line of lines) {
-    // Check for code block start/end
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        // End of code block
-        content.push([{ tag: 'text', text: '```' }]);
-        inCodeBlock = false;
-      } else {
-        // Start of code block (may include language)
-        content.push([{ tag: 'text', text: line }]);
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    // Inside code block - preserve as-is
-    if (inCodeBlock) {
-      content.push([{ tag: 'text', text: line }]);
-      continue;
-    }
-
-    content.push(parseLine(line));
-  }
-
-  return JSON.stringify({ zh_cn: { content } });
-}
-
-interface PostNode {
-  tag: string;
-  text?: string;
-  style?: string[];
-  href?: string;
-}
-
-/**
- * Parse a single line, handling headings and inline elements.
- */
-function parseLine(line: string): PostNode[] {
-  // Check for heading (# ## ### etc.)
-  const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
-  if (headingMatch) {
-    // Convert heading to bold text
-    const headingText = headingMatch[2].trim();
-    return [{ tag: 'text', text: headingText, style: ['bold'] }];
-  }
-
-  return parseInlineElements(line);
-}
-
-function parseInlineElements(line: string): PostNode[] {
-  const nodes: PostNode[] = [];
-  let remaining = line;
-
-  // Patterns for inline elements (order matters - more specific patterns first)
-  const patterns = [
-    // Code blocks (inline `code`) - must be before italic
-    { regex: /`([^`]+)`/, tag: 'text', code: true },
-    // Bold (**text** or __text__)
-    { regex: /\*\*([^*]+)\*\*/, tag: 'text', style: ['bold'] },
-    { regex: /__([^_]+)__/, tag: 'text', style: ['bold'] },
-    // Links [text](url) - must be before italic
-    { regex: /\[([^\]]+)\]\(([^)]+)\)/, tag: 'a' },
-    // Italic (*text* or _text_) - use single char patterns
-    { regex: /\*([^*]+)\*/, tag: 'text', style: ['italic'] },
-    { regex: /_([^_]+)_/, tag: 'text', style: ['italic'] },
-    // Strikethrough (~~text~~)
-    { regex: /~~([^~]+)~~/, tag: 'text', style: ['lineThrough'] },
-  ];
-
-  while (remaining.length > 0) {
-    let earliestMatch: { index: number; length: number; node: PostNode } | null = null;
-
-    for (const pattern of patterns) {
-      const match = remaining.match(pattern.regex);
-      if (match && match.index !== undefined) {
-        if (!earliestMatch || match.index < earliestMatch.index) {
-          const node: PostNode = { tag: pattern.tag };
-          if (pattern.tag === 'a') {
-            node.text = match[1];
-            node.href = match[2];
-          } else {
-            node.text = match[1];
-            if (pattern.style) node.style = pattern.style;
-            if (pattern.code) {
-              // Code style: use italic to distinguish
-              node.style = ['italic'];
-            }
-          }
-          earliestMatch = { index: match.index, length: match[0].length, node };
-        }
-      }
-    }
-
-    if (earliestMatch) {
-      // Add plain text before the match
-      if (earliestMatch.index > 0) {
-        nodes.push({ tag: 'text', text: remaining.slice(0, earliestMatch.index) });
-      }
-      nodes.push(earliestMatch.node);
-      remaining = remaining.slice(earliestMatch.index + earliestMatch.length);
-    } else {
-      // No more matches, add remaining as plain text
-      if (remaining.length > 0) {
-        nodes.push({ tag: 'text', text: remaining });
-      }
-      break;
-    }
-  }
-
-  return nodes.length > 0 ? nodes : [{ tag: 'text', text: '' }];
+function markdownToMdPost(text: string): string {
+  return JSON.stringify({
+    zh_cn: {
+      content: [[{ tag: 'md', text }]],
+    },
+  });
 }
 
 export interface FeishuChannelOpts {
@@ -440,7 +315,7 @@ export class FeishuChannel implements Channel {
 
       // Use post format for messages with Markdown, plain text otherwise
       if (this.hasMarkdown(text)) {
-        const postContent = markdownToPost(text);
+        const postContent = markdownToMdPost(text);
         await this.client.im.v1.message.create({
           params: { receive_id_type: 'chat_id' },
           data: {
