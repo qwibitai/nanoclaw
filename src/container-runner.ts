@@ -258,6 +258,19 @@ export async function buildVolumeMounts(
     });
   }
 
+  // email-mcp config: accounts.json lives in ~/.email-mcp/ on host.
+  // email-mcp subprocess (spawned by mcporter inside the container) runs as
+  // the 'node' user whose home is /home/node — mount to that path so
+  // Node's os.homedir() resolves the config correctly.
+  const emailMcpConfig = path.join(homeDir, '.email-mcp');
+  if (fs.existsSync(emailMcpConfig)) {
+    mounts.push({
+      hostPath: emailMcpConfig,
+      containerPath: '/home/node/.email-mcp',
+      readonly: true,
+    });
+  }
+
   return mounts;
 }
 
