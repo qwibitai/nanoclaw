@@ -52,6 +52,7 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+let lastPipedTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -189,6 +190,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Reset idle timer when messages are piped to the container via IPC,
+  // so the container doesn't shut down while processing new input.
+  queue.setOnPipeCallback(chatJid, resetIdleTimer);
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -222,6 +227,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+  queue.setOnPipeCallback(chatJid, null);
+  delete lastPipedTimestamp[chatJid];
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -386,25 +393,28 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Pull all messages since lastAgentTimestamp so non-trigger
-          // context that accumulated between triggers is included.
-          const allPending = getMessagesSince(
-            chatJid,
-            lastAgentTimestamp[chatJid] || '',
-            ASSISTANT_NAME,
-          );
-          const messagesToSend =
-            allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
+          // Pull messages since the later of lastAgentTimestamp and
+          // lastPipedTimestamp to avoid re-piping already-sent messages.
+          const sinceTs =
+            [lastPipedTimestamp[chatJid], lastAgentTimestamp[chatJid]]
+              .filter(Boolean)
+              .sort()
+              .pop() || '';
+          const allPending = getMessagesSince(chatJid, sinceTs, ASSISTANT_NAME);
+          if (allPending.length === 0) continue; // already piped, skip
+          const formatted = formatMessages(allPending);
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
-              { chatJid, count: messagesToSend.length },
+              { chatJid, count: allPending.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
+            // Track piped timestamp to prevent re-piping, but DON'T advance
+            // lastAgentTimestamp — only processGroupMessages should do that.
+            // This ensures piped messages are re-processed if the container
+            // times out before handling them.
+            lastPipedTimestamp[chatJid] =
+              allPending[allPending.length - 1].timestamp;
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)

@@ -147,6 +147,20 @@ export class GroupQueue {
     }
   }
 
+  private onPipeCallbacks = new Map<string, () => void>();
+
+  /**
+   * Register a callback to be invoked when a message is piped to the container.
+   * Used to reset the idle timer so the agent has time to process piped input.
+   */
+  setOnPipeCallback(groupJid: string, cb: (() => void) | null): void {
+    if (cb) {
+      this.onPipeCallbacks.set(groupJid, cb);
+    } else {
+      this.onPipeCallbacks.delete(groupJid);
+    }
+  }
+
   /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
@@ -156,6 +170,7 @@ export class GroupQueue {
     if (!state.active || !state.groupFolder || state.isTaskContainer)
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
+    state.pendingMessages = true; // Ensure drain re-checks after container exits
 
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
@@ -165,6 +180,7 @@ export class GroupQueue {
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
       fs.renameSync(tempPath, filepath);
+      this.onPipeCallbacks.get(groupJid)?.();
       return true;
     } catch {
       return false;
