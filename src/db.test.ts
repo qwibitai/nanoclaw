@@ -5,9 +5,11 @@ import {
   createTask,
   deleteTask,
   getAllChats,
+  getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -386,5 +388,39 @@ describe('task CRUD', () => {
 
     deleteTask('task-3');
     expect(getTaskById('task-3')).toBeUndefined();
+  });
+});
+
+// --- RegisteredGroup isMain round-trip ---
+
+describe('registered group isMain', () => {
+  it('persists isMain=true through set/get round-trip', () => {
+    setRegisteredGroup('main@s.whatsapp.net', {
+      name: 'Main Chat',
+      folder: 'whatsapp_main',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+      isMain: true,
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['main@s.whatsapp.net'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBe(true);
+    expect(group.folder).toBe('whatsapp_main');
+  });
+
+  it('omits isMain for non-main groups', () => {
+    setRegisteredGroup('group@g.us', {
+      name: 'Family Chat',
+      folder: 'whatsapp_family-chat',
+      trigger: '@Andy',
+      added_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const groups = getAllRegisteredGroups();
+    const group = groups['group@g.us'];
+    expect(group).toBeDefined();
+    expect(group.isMain).toBeUndefined();
   });
 });
