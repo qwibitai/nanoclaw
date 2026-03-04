@@ -1,21 +1,61 @@
 #!/bin/bash
-# telegram-e2e.sh — End-to-end verification via DB injection.
+# channel-e2e.sh — Generic end-to-end verification via DB injection.
 #
-# Bots can't see their own messages via getUpdates, so we inject a test
-# message directly into NanoClaw's SQLite database. The poll loop picks it
-# up every 2 seconds, spawns a container, and sends the response to Telegram.
+# Parameterized by channel name. Bots can't see their own messages via
+# platform APIs, so we inject a test message directly into NanoClaw's
+# SQLite database. The poll loop picks it up, spawns a container, and
+# sends the response via the channel.
 #
-# We verify the full round-trip by watching the log for all four markers,
-# then kill the container to leave a clean state.
+# We verify the full round-trip by watching the log for all required
+# markers, then kill the container to leave a clean state.
 
-E2E_TIMEOUT=120   # seconds to wait for full round-trip
+E2E_TIMEOUT=120      # seconds to wait for full round-trip
 E2E_POLL_INTERVAL=3  # seconds between log checks
 
-# All four markers are required for a full E2E pass
+# Common markers (every channel must hit these)
 MARKER_PROCESSING="Processing messages"
 MARKER_CONTAINER="Spawning container agent"
 MARKER_OUTPUT="Agent output:"
-MARKER_SENT="Telegram message sent"
+
+# ── Channel config lookup ─────────────────────────────────────────────────────
+#
+# Returns channel-specific values. Each channel needs:
+#   jid_var     — env var name holding the test chat JID
+#   sent_marker — log line proving the message was delivered
+#   display     — human-readable channel name for logs
+
+get_channel_config() {
+  local channel="$1"
+  local field="$2"
+
+  case "${channel}" in
+    telegram)
+      case "$field" in
+        jid_var)      echo "TELEGRAM_TEST_CHAT_ID" ;;
+        sent_marker)  echo "Telegram message sent" ;;
+        display)      echo "Telegram" ;;
+      esac
+      ;;
+    slack)
+      case "$field" in
+        jid_var)      echo "SLACK_TEST_CHAT_ID" ;;
+        sent_marker)  echo "Slack message sent" ;;
+        display)      echo "Slack" ;;
+      esac
+      ;;
+    discord)
+      case "$field" in
+        jid_var)      echo "DISCORD_TEST_CHAT_ID" ;;
+        sent_marker)  echo "Discord message sent" ;;
+        display)      echo "Discord" ;;
+      esac
+      ;;
+    *)
+      log_error "Unknown channel: ${channel}"
+      return 1
+      ;;
+  esac
+}
 
 # ── Strip ANSI escape codes ──────────────────────────────────────────────────
 
@@ -25,7 +65,7 @@ strip_ansi() {
 
 # ── Kill any running nanoclaw containers ─────────────────────────────────────
 #
-# Ensures a fresh container spawn so all four markers appear.
+# Ensures a fresh container spawn so all markers appear.
 
 kill_nanoclaw_containers() {
   local containers
@@ -41,6 +81,7 @@ kill_nanoclaw_containers() {
 # ── Inject test message into SQLite ──────────────────────────────────────────
 
 inject_test_message() {
+  local chat_jid="$1"
   local db_path="${CLONE_DIR}/store/messages.db"
   local ts
   ts=$(date +%s)
@@ -54,16 +95,16 @@ inject_test_message() {
     return 1
   fi
 
-  log_info "Injecting test message into DB (id=${msg_id})..."
+  log_info "Injecting test message into DB (id=${msg_id}, chat=${chat_jid})..."
 
-  sqlite3 "$db_path" "INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES ('${msg_id}', '${TELEGRAM_TEST_CHAT_ID}', 'e2e-tester', 'E2E Test', '${prompt}', '${iso_ts}', 0, 0);"
+  sqlite3 "$db_path" "INSERT INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES ('${msg_id}', '${chat_jid}', 'e2e-tester', 'E2E Test', '${prompt}', '${iso_ts}', 0, 0);"
 
   if [ $? -ne 0 ]; then
     log_error "Failed to inject message into database"
     return 1
   fi
 
-  log_ok "Test message injected (chat=${TELEGRAM_TEST_CHAT_ID})"
+  log_ok "Test message injected (chat=${chat_jid})"
   return 0
 }
 
@@ -100,13 +141,19 @@ get_new_logs() {
 
 # ── Poll logs for complete round-trip evidence ───────────────────────────────
 #
-# Watches service logs for four markers proving the full E2E path:
-#   1. Processing messages    — poll loop picked up the injected message
-#   2. Spawning container agent — fresh container was launched
-#   3. Agent output:          — agent generated a response
-#   4. Telegram message sent  — response delivered to Telegram API
+# Watches service logs for markers proving the full E2E path:
+#   1. Processing messages         — poll loop picked up the injected message
+#   2. Spawning container agent    — fresh container was launched
+#   3. Agent output:               — agent generated a response
+#   4. <Channel> message sent      — response delivered to channel API
 
 wait_for_round_trip() {
+  local channel="$1"
+  local sent_marker
+  sent_marker=$(get_channel_config "$channel" "sent_marker")
+  local display
+  display=$(get_channel_config "$channel" "display")
+
   local log_file="${CLONE_DIR}/logs/nanoclaw.log"
   local start
   start=$(timer_start)
@@ -121,7 +168,7 @@ wait_for_round_trip() {
   export E2E_JOURNAL_SINCE
   E2E_JOURNAL_SINCE=$(date -u +"%Y-%m-%d %H:%M:%S" --date="2 seconds ago")
 
-  log_info "Waiting up to ${E2E_TIMEOUT}s for round-trip..."
+  log_info "Waiting up to ${E2E_TIMEOUT}s for ${display} round-trip..."
   log_info "  Log: $log_file (baseline: line ${baseline})"
 
   local found_processing=false
@@ -134,11 +181,11 @@ wait_for_round_trip() {
     elapsed=$(timer_elapsed "$start")
 
     if [ "$elapsed" -ge "$E2E_TIMEOUT" ]; then
-      log_error "Timeout after ${E2E_TIMEOUT}s"
+      log_error "${display} E2E timeout after ${E2E_TIMEOUT}s"
       if [ "$found_sent" = true ]; then
         log_error "All stages passed but pass condition not met (bug)"
       elif [ "$found_output" = true ]; then
-        log_error "Agent responded but Telegram delivery not confirmed"
+        log_error "Agent responded but ${display} delivery not confirmed"
       elif [ "$found_container" = true ]; then
         log_error "Container spawned but no agent output"
       elif [ "$found_processing" = true ]; then
@@ -173,9 +220,9 @@ wait_for_round_trip() {
         log_ok "  [${elapsed}s] Agent produced output"
       fi
 
-      if [ "$found_sent" = false ] && echo "$new_lines" | grep -q "$MARKER_SENT"; then
+      if [ "$found_sent" = false ] && echo "$new_lines" | grep -q "$sent_marker"; then
         found_sent=true
-        log_ok "  [${elapsed}s] Response sent to Telegram"
+        log_ok "  [${elapsed}s] Response sent to ${display}"
       fi
 
       # All four markers = full E2E pass
@@ -191,23 +238,40 @@ wait_for_round_trip() {
   done
 }
 
-# ── Full E2E check ────────────────────────────────────────────────────────────
+# ── Run E2E for a single channel ─────────────────────────────────────────────
+#
+# Usage: run_channel_e2e <channel>
+# Injects a test message, polls for round-trip, cleans up.
 
-run_telegram_e2e() {
-  # Kill existing containers so we get a fresh spawn with all four markers
-  kill_nanoclaw_containers
+run_channel_e2e() {
+  local channel="$1"
+  local jid_var
+  jid_var=$(get_channel_config "$channel" "jid_var")
+  local display
+  display=$(get_channel_config "$channel" "display")
+  local chat_jid="${!jid_var}"
 
-  if ! inject_test_message; then
+  if [ -z "$chat_jid" ]; then
+    log_error "${display} E2E: JID not set (${jid_var} is empty)"
     return 1
   fi
 
-  if ! wait_for_round_trip; then
+  log_info "Starting ${display} E2E verification (jid=${chat_jid})"
+
+  # Kill existing containers so we get a fresh spawn with all markers
+  kill_nanoclaw_containers
+
+  if ! inject_test_message "$chat_jid"; then
+    return 1
+  fi
+
+  if ! wait_for_round_trip "$channel"; then
     return 1
   fi
 
   # Clean up: kill the container spawned by the test
   kill_nanoclaw_containers
 
-  log_ok "E2E verification passed: full message round-trip confirmed"
+  log_ok "${display} E2E verification passed: full message round-trip confirmed"
   return 0
 }

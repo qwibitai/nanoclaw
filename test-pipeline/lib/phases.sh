@@ -152,76 +152,7 @@ phase_container_build() {
   log_ok "Container image built and tested"
 }
 
-# ── Phase 7: Write credentials ─────────────────────────────────────────────
-
-phase_credentials() {
-  log_info "Writing credentials to test user's .env"
-  write_test_env
-}
-
-# ── Phase 8: Install Telegram channel ──────────────────────────────────────
-
-phase_channel_install() {
-  log_info "Applying Telegram skill"
-
-  # Initialize skills system first, then apply the skill
-  run_as_user "cd ${CLONE_DIR} && npx tsx scripts/apply-skill.ts --init"
-  if [ $? -ne 0 ]; then
-    log_error "Skills system initialization failed"
-    return 1
-  fi
-
-  local output
-  output=$(run_as_user "cd ${CLONE_DIR} && npx tsx scripts/apply-skill.ts .claude/skills/add-telegram" 2>&1)
-  local exit_code=$?
-
-  if [ "$exit_code" -ne 0 ]; then
-    log_error "Telegram skill application failed"
-    echo "$output" | tail -20
-    return 1
-  fi
-
-  # Rebuild after skill changes
-  run_as_user "cd ${CLONE_DIR} && npm run build"
-  if [ $? -ne 0 ]; then
-    log_error "Rebuild after skill application failed"
-    return 1
-  fi
-
-  log_ok "Telegram channel installed and rebuilt"
-}
-
-# ── Phase 9: Register test chat group ──────────────────────────────────────
-
-phase_registration() {
-  log_info "Registering test chat as main group"
-
-  local output
-  output=$(run_as_user "cd ${CLONE_DIR} && npx tsx setup/index.ts --step register -- \
-    --jid ${TELEGRAM_TEST_CHAT_ID} \
-    --name test-main \
-    --trigger '@Andy' \
-    --folder main \
-    --channel telegram \
-    --is-main \
-    --no-trigger-required" 2>&1)
-  local exit_code=$?
-
-  local status
-  status=$(parse_status_field "$output" "STATUS")
-
-  log_info "Registration: STATUS=${status}"
-
-  if [ "$exit_code" -ne 0 ] || [ "$status" != "success" ]; then
-    log_error "Group registration failed"
-    echo "$output" | tail -20
-    return 1
-  fi
-
-  log_ok "Test chat registered as main group"
-}
-
-# ── Phase 10: Mount allowlist ──────────────────────────────────────────────
+# ── Phase 7: Mount allowlist ──────────────────────────────────────────────
 
 phase_mounts() {
   log_info "Setting empty mount allowlist"
@@ -241,7 +172,7 @@ phase_mounts() {
   log_ok "Empty mount allowlist configured"
 }
 
-# ── Phase 11: Start systemd service ────────────────────────────────────────
+# ── Phase: Start systemd service (first scenario) ────────────────────────────
 
 phase_service() {
   log_info "Setting up systemd user service"
@@ -277,7 +208,7 @@ phase_service() {
   fi
 }
 
-# ── Phase 12: Infrastructure verification ──────────────────────────────────
+# ── Phase: Infrastructure verification ──────────────────────────────────
 
 phase_verify_infra() {
   log_info "Running infrastructure health check"
@@ -308,14 +239,186 @@ phase_verify_infra() {
   log_ok "Infrastructure health check passed"
 }
 
-# ── Phase 13: End-to-end Telegram verification ─────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Scenario sub-phase functions
+# Used by playbook.sh to execute individual steps within a scenario.
+# ══════════════════════════════════════════════════════════════════════════════
 
-phase_verify_e2e() {
-  log_info "Starting end-to-end Telegram verification"
-  run_telegram_e2e
+# Set by sub-phase functions on failure — playbook.sh reads this to record
+# the actual error detail (compiler output, script message, etc.)
+LAST_ERROR_DETAIL=""
+
+# Full build/test output from the last sub-phase command.
+# Used by auto-fix to gather context for Claude.
+LAST_BUILD_OUTPUT=""
+
+# ── Uninstall channel skills ─────────────────────────────────────────────────
+#
+# Usage: phase_uninstall_channels <ch1> [ch2...]
+
+phase_uninstall_channels() {
+  for channel in "$@"; do
+    # uninstall-skill.ts matches on the manifest "skill:" name, not the directory
+    log_info "Uninstalling skill: ${channel}"
+
+    local output
+    output=$(run_as_user "cd ${CLONE_DIR} && npx tsx scripts/uninstall-skill.ts ${channel}" 2>&1)
+    local exit_code=$?
+
+    if [ "$exit_code" -ne 0 ]; then
+      log_error "Failed to uninstall skill: ${channel}"
+      LAST_ERROR_DETAIL=$(echo "$output" | grep -iE 'error|fail|not applied' | tail -3)
+      echo "$output" | tail -20
+      return 1
+    fi
+
+    log_ok "Skill ${channel} uninstalled"
+  done
+
+  # Rebuild after uninstall
+  log_info "Rebuilding after skill uninstall..."
+  local build_output
+  build_output=$(run_as_user "cd ${CLONE_DIR} && npm run build" 2>&1)
+  LAST_BUILD_OUTPUT="$build_output"
+  if [ $? -ne 0 ]; then
+    log_error "Rebuild after skill uninstall failed"
+    LAST_ERROR_DETAIL=$(echo "$build_output" | grep -iE 'error TS|error:' | head -3)
+    echo "$build_output" | tail -20
+    return 1
+  fi
+
+  log_ok "Channels uninstalled and rebuilt"
 }
 
-# ── Phase 14: Teardown ─────────────────────────────────────────────────────
+# ── Install channel skills ───────────────────────────────────────────────────
+#
+# Usage: phase_install_channels <ch1> [ch2...]
+
+phase_install_channels() {
+  # Initialize skills system (idempotent)
+  run_as_user "cd ${CLONE_DIR} && npx tsx scripts/apply-skill.ts --init"
+  if [ $? -ne 0 ]; then
+    log_error "Skills system initialization failed"
+    LAST_ERROR_DETAIL="apply-skill.ts --init returned non-zero"
+    return 1
+  fi
+
+  for channel in "$@"; do
+    local skill_name="add-${channel}"
+    log_info "Installing skill: ${skill_name}"
+
+    local output
+    output=$(run_as_user "cd ${CLONE_DIR} && npx tsx scripts/apply-skill.ts .claude/skills/${skill_name}" 2>&1)
+    local exit_code=$?
+
+    if [ "$exit_code" -ne 0 ]; then
+      log_error "Failed to install skill: ${skill_name}"
+      LAST_ERROR_DETAIL=$(echo "$output" | grep -iE 'error|fail' | tail -3)
+      echo "$output" | tail -20
+      return 1
+    fi
+
+    log_ok "Skill ${skill_name} installed"
+  done
+
+  # Rebuild after install
+  log_info "Rebuilding after skill install..."
+  local build_output
+  build_output=$(run_as_user "cd ${CLONE_DIR} && npm run build" 2>&1)
+  LAST_BUILD_OUTPUT="$build_output"
+  if [ $? -ne 0 ]; then
+    log_error "Rebuild after skill install failed"
+    LAST_ERROR_DETAIL=$(echo "$build_output" | grep -iE 'error TS|error:' | head -3)
+    echo "$build_output" | tail -20
+    return 1
+  fi
+
+  log_ok "Channels installed and rebuilt"
+}
+
+# ── Register a test group ───────────────────────────────────────────────────
+#
+# Usage: phase_register_group <jid_var> <name> <channel> [--is-main]
+
+phase_register_group() {
+  local jid_var="$1"
+  local group_name="$2"
+  local channel="$3"
+  local is_main="${4:-}"
+
+  # Resolve the JID from the env var name
+  local chat_jid="${!jid_var}"
+  if [ -z "$chat_jid" ]; then
+    log_error "Registration failed: ${jid_var} is not set"
+    LAST_ERROR_DETAIL="${jid_var} env var is empty — check credentials.env"
+    return 1
+  fi
+
+  log_info "Registering group '${group_name}' (channel=${channel}, jid=${chat_jid})"
+
+  local main_flag=""
+  if [ "$is_main" = "--is-main" ]; then
+    main_flag="--is-main"
+  fi
+
+  local output
+  output=$(run_as_user "cd ${CLONE_DIR} && npx tsx setup/index.ts --step register -- \
+    --jid ${chat_jid} \
+    --name ${group_name} \
+    --trigger '@Andy' \
+    --folder ${group_name} \
+    --channel ${channel} \
+    ${main_flag} \
+    --no-trigger-required" 2>&1)
+  local exit_code=$?
+
+  local status
+  status=$(parse_status_field "$output" "STATUS")
+
+  log_info "Registration: STATUS=${status}"
+
+  if [ "$exit_code" -ne 0 ] || [ "$status" != "success" ]; then
+    log_error "Group registration failed for ${group_name}"
+    LAST_ERROR_DETAIL=$(echo "$output" | grep -iE 'error|fail' | tail -3)
+    echo "$output" | tail -20
+    return 1
+  fi
+
+  log_ok "Group '${group_name}' registered (channel=${channel})"
+}
+
+# ── Restart systemd service ──────────────────────────────────────────────────
+#
+# Used between scenarios after skill install/uninstall + rebuild.
+
+phase_restart_service() {
+  log_info "Restarting nanoclaw service"
+
+  local uid
+  uid=$(id -u "$TEST_USER")
+
+  local restart_output
+  restart_output=$(sudo -u "$TEST_USER" XDG_RUNTIME_DIR="/run/user/${uid}" \
+    systemctl --user restart nanoclaw 2>&1)
+
+  if [ $? -ne 0 ]; then
+    log_error "Service restart failed"
+    LAST_ERROR_DETAIL="$restart_output"
+    return 1
+  fi
+
+  # Wait for the service to come back up
+  sleep 5
+
+  if sudo -u "$TEST_USER" XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user is-active nanoclaw &>/dev/null; then
+    log_ok "Service restarted and running"
+  else
+    log_warn "Service restart issued but may not be active yet"
+    sudo -u "$TEST_USER" XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user status nanoclaw 2>&1 | head -10 || true
+  fi
+}
+
+# ── Teardown ──────────────────────────────────────────────────────────────────
 
 phase_teardown() {
   log_info "Tearing down test environment"

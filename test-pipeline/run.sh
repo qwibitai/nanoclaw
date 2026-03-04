@@ -4,14 +4,15 @@ set -euo pipefail
 # run.sh — NanoClaw Install Pipeline Orchestrator
 #
 # Creates a clean Linux user, runs every install step programmatically,
-# verifies the service boots and processes a real Telegram message,
-# then tears down.
+# then executes a YAML playbook of E2E scenarios (install, swap, multi-channel)
+# and tears down.
 #
 # Usage:
-#   sudo ./test-pipeline/run.sh                  # Full run
-#   sudo ./test-pipeline/run.sh --ref my-branch  # Test a branch
-#   sudo ./test-pipeline/run.sh --skip-e2e       # Build-only
-#   sudo ./test-pipeline/run.sh --keep-user      # Don't teardown
+#   sudo ./test-pipeline/run.sh                              # Full run (default playbook)
+#   sudo ./test-pipeline/run.sh --ref my-branch              # Test a branch
+#   sudo ./test-pipeline/run.sh --skip-e2e                   # Build-only
+#   sudo ./test-pipeline/run.sh --keep-user                  # Don't teardown
+#   sudo ./test-pipeline/run.sh --playbook path/to/custom.yaml
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -19,9 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source "${SCRIPT_DIR}/lib/utils.sh"
 source "${SCRIPT_DIR}/lib/credentials.sh"
-source "${SCRIPT_DIR}/lib/telegram-e2e.sh"
+source "${SCRIPT_DIR}/lib/channel-e2e.sh"
 source "${SCRIPT_DIR}/lib/reporting.sh"
+source "${SCRIPT_DIR}/lib/auto-fix.sh"
 source "${SCRIPT_DIR}/lib/phases.sh"
+source "${SCRIPT_DIR}/lib/playbook.sh"
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
@@ -33,6 +36,7 @@ REPO_URL="https://github.com/qwibitai/nanoclaw.git"
 SKIP_E2E=false
 KEEP_USER=false
 CREDENTIALS_SRC=""
+PLAYBOOK_PATH="${SCRIPT_DIR}/playbook.yaml"
 
 # ── Parse arguments ────────────────────────────────────────────────────────
 
@@ -44,6 +48,10 @@ while [ $# -gt 0 ]; do
       ;;
     --credentials)
       CREDENTIALS_SRC="$2"
+      shift 2
+      ;;
+    --playbook)
+      PLAYBOOK_PATH="$2"
       shift 2
       ;;
     --skip-e2e)
@@ -58,17 +66,21 @@ while [ $# -gt 0 ]; do
       echo "Usage: sudo ./test-pipeline/run.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --credentials <path>  Path to credentials.env file to import"
-      echo "  --ref <branch>        Git ref to test (default: main)"
-      echo "  --skip-e2e            Skip Telegram E2E verification"
-      echo "  --keep-user           Don't teardown test user after run"
-      echo "  --help                Show this help"
+      echo "  --credentials <path>   Path to credentials.env file to import"
+      echo "  --ref <branch>         Git ref to test (default: main)"
+      echo "  --playbook <path>      Path to playbook YAML (default: test-pipeline/playbook.yaml)"
+      echo "  --skip-e2e             Skip E2E verification in all scenarios"
+      echo "  --keep-user            Don't teardown test user after run"
+      echo "  --help                 Show this help"
       echo ""
       echo "First run:"
       echo "  sudo ./test-pipeline/run.sh --credentials /path/to/credentials.env"
       echo ""
       echo "Subsequent runs (credentials are persisted):"
       echo "  sudo ./test-pipeline/run.sh"
+      echo ""
+      echo "Custom playbook:"
+      echo "  sudo ./test-pipeline/run.sh --playbook test-pipeline/playbook-telegram-only.yaml"
       exit 0
       ;;
     *)
@@ -85,6 +97,14 @@ require_command git
 require_command curl
 require_command docker
 require_command sqlite3
+require_command python3
+require_command jq
+
+# Verify PyYAML is available
+if ! python3 -c "import yaml" 2>/dev/null; then
+  log_info "Installing PyYAML..."
+  pip3 install pyyaml -q
+fi
 
 # ── Ensure host directories exist ──────────────────────────────────────────
 
@@ -114,10 +134,17 @@ echo -e "${BOLD}║           NanoClaw Install Pipeline                     ║$
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 log_info "Ref: ${GIT_REF}"
+log_info "Playbook: ${PLAYBOOK_PATH}"
 log_info "Skip E2E: ${SKIP_E2E}"
 log_info "Keep user: ${KEEP_USER}"
 
-# Load credentials (needed for phases 7, 8, 9, 13)
+# Parse the playbook before loading credentials (so we fail fast on bad YAML)
+if ! parse_playbook "$PLAYBOOK_PATH"; then
+  log_error "Cannot proceed without a valid playbook"
+  exit 1
+fi
+
+# Load credentials (needed for scenario credentials/E2E phases)
 if ! load_credentials; then
   if [ "$SKIP_E2E" = true ]; then
     log_warn "Credentials not loaded — E2E will be skipped anyway"
@@ -126,6 +153,11 @@ if ! load_credentials; then
     ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-sk-ant-DUMMY}"
     TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-000000:DUMMY}"
     TELEGRAM_TEST_CHAT_ID="${TELEGRAM_TEST_CHAT_ID:-tg:0}"
+    SLACK_BOT_TOKEN="${SLACK_BOT_TOKEN:-xoxb-DUMMY}"
+    SLACK_APP_TOKEN="${SLACK_APP_TOKEN:-xapp-DUMMY}"
+    SLACK_TEST_CHAT_ID="${SLACK_TEST_CHAT_ID:-slack:0}"
+    DISCORD_BOT_TOKEN="${DISCORD_BOT_TOKEN:-DUMMY}"
+    DISCORD_TEST_CHAT_ID="${DISCORD_TEST_CHAT_ID:-dc:0}"
   else
     log_error "Cannot run full pipeline without credentials"
     exit 1
@@ -170,25 +202,20 @@ skip_phase() {
 
 # ── Sequential phase execution ──────────────────────────────────────────────
 
-# On failure, jump to teardown
+# Setup phases, then playbook scenarios, then teardown
 run_pipeline() {
-  run_phase 1  "user_create"     phase_user_create     || return 1
-  run_phase 2  "clone"           phase_clone           || return 1
-  run_phase 3  "bootstrap"       phase_bootstrap       || return 1
-  run_phase 4  "build"           phase_build           || return 1
-  run_phase 5  "environment"     phase_environment     || return 1
-  run_phase 6  "container_build" phase_container_build || return 1
-  run_phase 7  "credentials"     phase_credentials     || return 1
-  run_phase 8  "channel_install" phase_channel_install || return 1
-  run_phase 9  "registration"    phase_registration    || return 1
-  run_phase 10 "mounts"          phase_mounts          || return 1
-  run_phase 11 "service"         phase_service         || return 1
-  run_phase 12 "verify_infra"    phase_verify_infra    || return 1
+  # ── Setup (once) ─────────────────────────────────────────────────────
+  run_phase 1 "user_create"     phase_user_create     || return 1
+  run_phase 2 "clone"           phase_clone           || return 1
+  run_phase 3 "bootstrap"       phase_bootstrap       || return 1
+  run_phase 4 "build"           phase_build           || return 1
+  run_phase 5 "environment"     phase_environment     || return 1
+  run_phase 6 "container_build" phase_container_build || return 1
+  run_phase 7 "mounts"          phase_mounts          || return 1
 
-  if [ "$SKIP_E2E" = true ]; then
-    skip_phase "verify_e2e"
-  else
-    run_phase 13 "verify_e2e" phase_verify_e2e || return 1
+  # ── Scenarios (from playbook) ────────────────────────────────────────
+  if ! run_playbook; then
+    return 1
   fi
 
   return 0
@@ -207,7 +234,7 @@ if [ "$KEEP_USER" = true ]; then
   log_warn "Keeping test user ${TEST_USER} (--keep-user)"
   log_warn "To clean up manually: sudo userdel -r ${TEST_USER}"
 else
-  log_phase 14 "teardown"
+  log_phase "T" "teardown"
   local_start=$(timer_start)
   if phase_teardown; then
     record_phase "teardown" "pass" "$(timer_elapsed "$local_start")"
@@ -226,7 +253,7 @@ else
   OVERALL_STATUS="fail"
 fi
 
-write_report "$OVERALL_STATUS" "$OVERALL_DURATION" "$GIT_REF"
+write_report "$OVERALL_STATUS" "$OVERALL_DURATION" "$GIT_REF" "$PLAYBOOK_PATH"
 print_summary
 
 echo ""

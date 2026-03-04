@@ -1,0 +1,51 @@
+# NanoClaw Install Pipeline Playbook
+# Scenarios run sequentially on a single live install.
+# Each scenario modifies the running system and verifies E2E.
+#
+# Fields:
+#   name          — Human-readable scenario name (used in reports)
+#   description   — What this scenario tests
+#   uninstall     — Channel skills to remove before this scenario
+#   install       — Channel skills to add (applied via scripts/apply-skill.ts)
+#   credentials   — Which channel tokens to include in .env
+#   register      — Groups to register for this scenario
+#     jid_var     — Env var holding the chat JID (from credentials.env)
+#     name        — Group name in NanoClaw's DB
+#     channel     — Channel type (telegram, slack, discord)
+#     is_main     — Whether this is the main group (first scenario only)
+#   start_service — Whether to start the service (first scenario only)
+#   e2e           — Channels to run E2E verification against
+
+scenarios:
+  - name: "Telegram standalone"
+    description: "Fresh install with Telegram as only channel"
+    install: [telegram]
+    credentials: [telegram]
+    register:
+      - jid_var: TELEGRAM_TEST_CHAT_ID
+        name: test-telegram
+        channel: telegram
+        is_main: true
+    start_service: true
+    e2e: [telegram]
+
+  - name: "Replace Telegram with Slack"
+    description: "Uninstall Telegram, install Slack, verify swap"
+    uninstall: [telegram]
+    install: [slack]
+    credentials: [slack]
+    register:
+      - jid_var: SLACK_TEST_CHAT_ID
+        name: test-slack
+        channel: slack
+    e2e: [slack]
+
+  - name: "Add Discord alongside Slack"
+    description: "Add Discord to existing Slack install, verify both"
+    install: [discord]
+    credentials: [slack, discord]
+    register:
+      - jid_var: DISCORD_TEST_CHAT_ID
+        name: test-discord
+        channel: discord
+    e2e: [slack, discord]
