@@ -119,6 +119,7 @@ function createTextCtx(overrides: {
     },
     me: { username: 'andy_ai_bot' },
     reply: vi.fn(),
+    react: vi.fn().mockResolvedValue(undefined),
   };
 }
 
