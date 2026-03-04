@@ -946,7 +946,8 @@ describe('FeishuChannel', () => {
   describe('sendMessage with Markdown', () => {
     /** Helper: extract the parsed post content from the API call */
     function getPostContent(callIndex = 0) {
-      const call = currentClient().im.v1.message.create.mock.calls[callIndex][0];
+      const call =
+        currentClient().im.v1.message.create.mock.calls[callIndex][0];
       return { call, content: JSON.parse(call.data.content) };
     }
 

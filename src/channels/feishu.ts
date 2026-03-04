@@ -222,7 +222,11 @@ export class FeishuChannel implements Channel {
 
   private extractPostText(parsed: any): string {
     // Post (rich text) content has a nested structure: { title, content: [[{tag,text},...], ...] }
-    const lang = parsed.zh_cn || parsed.en_us || parsed.ja_jp || Object.values(parsed)[0] as any;
+    const lang =
+      parsed.zh_cn ||
+      parsed.en_us ||
+      parsed.ja_jp ||
+      (Object.values(parsed)[0] as any);
     if (!lang) return '[Post]';
     const parts: string[] = [];
     if (lang.title) parts.push(lang.title);
@@ -232,7 +236,8 @@ export class FeishuChannel implements Channel {
         for (const node of line) {
           if (node.tag === 'text' && node.text) parts.push(node.text);
           else if (node.tag === 'a' && node.text) parts.push(node.text);
-          else if (node.tag === 'at' && node.user_name) parts.push(`@${node.user_name}`);
+          else if (node.tag === 'at' && node.user_name)
+            parts.push(`@${node.user_name}`);
           else if (node.tag === 'img') parts.push('[Image]');
           else if (node.tag === 'media') parts.push('[Video]');
         }
@@ -288,20 +293,20 @@ export class FeishuChannel implements Channel {
   private hasMarkdown(text: string): boolean {
     // Check for common Markdown patterns
     const markdownPatterns = [
-      /\*\*[^*]+\*\*/,       // **bold**
-      /__[^_]+__/,           // __bold__
-      /\*[^*]+\*/,           // *italic*
-      /_[^_]+_/,             // _italic_
-      /~~[^~]+~~/,           // ~~strikethrough~~
-      /`[^`]+`/,             // `code`
+      /\*\*[^*]+\*\*/, // **bold**
+      /__[^_]+__/, // __bold__
+      /\*[^*]+\*/, // *italic*
+      /_[^_]+_/, // _italic_
+      /~~[^~]+~~/, // ~~strikethrough~~
+      /`[^`]+`/, // `code`
       /\[[^\]]+\]\([^)]+\)/, // [link](url)
-      /^#{1,6}\s/,           // # heading
-      /^[-*+]\s/,            // - list item
-      /^\d+\.\s/,            // 1. list item
-      /^>\s/,                // > quote
-      /^```/,                // code block
+      /^#{1,6}\s/, // # heading
+      /^[-*+]\s/, // - list item
+      /^\d+\.\s/, // 1. list item
+      /^>\s/, // > quote
+      /^```/, // code block
     ];
-    return markdownPatterns.some(p => p.test(text));
+    return markdownPatterns.some((p) => p.test(text));
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -324,7 +329,10 @@ export class FeishuChannel implements Channel {
             msg_type: 'post',
           },
         });
-        logger.info({ jid, length: text.length, format: 'post' }, 'Feishu message sent');
+        logger.info(
+          { jid, length: text.length, format: 'post' },
+          'Feishu message sent',
+        );
       } else {
         await this.client.im.v1.message.create({
           params: { receive_id_type: 'chat_id' },
@@ -334,7 +342,10 @@ export class FeishuChannel implements Channel {
             msg_type: 'text',
           },
         });
-        logger.info({ jid, length: text.length, format: 'text' }, 'Feishu message sent');
+        logger.info(
+          { jid, length: text.length, format: 'text' },
+          'Feishu message sent',
+        );
       }
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Feishu message');
