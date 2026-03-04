@@ -4,8 +4,7 @@ import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import { WAMessage, WASocket } from '@whiskeysockets/baileys';
+import { downloadMediaMessage, WAMessage, WASocket } from '@whiskeysockets/baileys';
 
 const execFileAsync = promisify(execFile);
 
