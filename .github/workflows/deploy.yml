@@ -1,0 +1,82 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: self-hosted
+    timeout-minutes: 15
+    # Only run one deploy at a time — queue newer deploys behind the current one
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Pull latest changes
+        run: git -C "$PROJECT_ROOT" pull --ff-only origin main
+
+      - name: Install dependencies
+        run: cd "$PROJECT_ROOT" && npm ci --prefer-offline
+
+      - name: Build TypeScript
+        run: cd "$PROJECT_ROOT" && npm run build
+
+      - name: Rebuild container image (if changed)
+        run: |
+          cd "$PROJECT_ROOT"
+          # Check if container-related files changed in this push
+          CONTAINER_CHANGED=$(git diff --name-only HEAD~1 HEAD -- container/ 2>/dev/null || echo "container/")
+          if [ -n "$CONTAINER_CHANGED" ]; then
+            echo "Container files changed, rebuilding image..."
+            docker build -t nanoclaw-agent:latest ./container
+          else
+            echo "No container changes, skipping image rebuild"
+          fi
+
+      - name: Restart NanoClaw
+        run: |
+          # Detect service manager and restart accordingly
+          if systemctl --user is-active nanoclaw >/dev/null 2>&1; then
+            systemctl --user restart nanoclaw
+            echo "Restarted via systemctl --user"
+          elif systemctl is-active nanoclaw >/dev/null 2>&1; then
+            sudo systemctl restart nanoclaw
+            echo "Restarted via systemctl (system)"
+          elif [ -f "$PROJECT_ROOT/nanoclaw.pid" ]; then
+            # nohup fallback
+            bash "$PROJECT_ROOT/start-nanoclaw.sh"
+            echo "Restarted via nohup wrapper"
+          else
+            echo "::error::No known service manager found for nanoclaw"
+            exit 1
+          fi
+
+      - name: Verify service is running
+        run: |
+          sleep 5
+          if systemctl --user is-active nanoclaw >/dev/null 2>&1; then
+            echo "nanoclaw is active (systemctl --user)"
+          elif systemctl is-active nanoclaw >/dev/null 2>&1; then
+            echo "nanoclaw is active (systemctl system)"
+          elif [ -f "$PROJECT_ROOT/nanoclaw.pid" ] && kill -0 "$(cat "$PROJECT_ROOT/nanoclaw.pid")" 2>/dev/null; then
+            echo "nanoclaw is active (PID $(cat "$PROJECT_ROOT/nanoclaw.pid"))"
+          else
+            echo "::error::nanoclaw does not appear to be running after restart"
+            exit 1
+          fi
