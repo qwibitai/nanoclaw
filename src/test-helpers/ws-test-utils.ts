@@ -45,7 +45,10 @@ export async function sendAuthenticatedMessage(
   wss.emit('connection', ws, {});
 
   // Authenticate
-  ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token, role })));
+  ws.emit(
+    'message',
+    Buffer.from(JSON.stringify({ type: 'auth', token, role })),
+  );
 
   // Send the actual message
   ws.emit('message', Buffer.from(JSON.stringify(data)));

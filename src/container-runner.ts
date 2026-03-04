@@ -424,6 +424,10 @@ export async function runContainerAgent(
       );
     }
 
+    const cleanup = () => {
+      if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+    };
+
     container.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
@@ -458,7 +462,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
-            if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+            cleanup();
             resolve({
               status: 'success',
               result: null,
@@ -473,7 +477,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+        cleanup();
         resolve({
           status: 'error',
           result: null,
@@ -553,7 +557,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+        cleanup();
         resolve({
           status: 'error',
           result: null,
@@ -565,7 +569,7 @@ export async function runContainerAgent(
       // Wait for output chain to settle, then revoke token and resolve
       if (onOutput) {
         outputChain.then(() => {
-          if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+          cleanup();
           logger.info(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
@@ -579,7 +583,7 @@ export async function runContainerAgent(
         return;
       }
 
-      if (wsServer && wsToken) wsServer.revokeToken(wsToken);
+      cleanup();
       logger.info({ group: group.name, duration }, 'Container completed');
 
       resolve({
@@ -591,9 +595,7 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      if (wsServer && wsToken) {
-        wsServer.revokeToken(wsToken);
-      }
+      cleanup();
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

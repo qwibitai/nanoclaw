@@ -42,7 +42,11 @@ export class WsClient {
   private reconnectAttempts = 0;
   private pendingRequests = new Map<
     string,
-    { resolve: (data: unknown) => void; reject: (err: Error) => void }
+    {
+      resolve: (data: unknown) => void;
+      reject: (err: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
   >();
   private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
@@ -153,6 +157,7 @@ export class WsClient {
         const requestId = msg.requestId as string;
         const pending = this.pendingRequests.get(requestId);
         if (pending) {
+          clearTimeout(pending.timer);
           this.pendingRequests.delete(requestId);
           pending.resolve(msg);
         }
@@ -176,6 +181,7 @@ export class WsClient {
       log('Max reconnect attempts reached, giving up');
       // Reject any pending requests
       for (const [, pending] of this.pendingRequests) {
+        clearTimeout(pending.timer);
         pending.reject(new Error('Connection lost'));
       }
       this.pendingRequests.clear();
@@ -243,18 +249,19 @@ export class WsClient {
     }
     const requestId = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, {
-        resolve: resolve as (data: unknown) => void,
-        reject,
-      });
-      this.send({ ...data, requestId });
-
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pendingRequests.has(requestId)) {
           this.pendingRequests.delete(requestId);
           reject(new Error(`${data.type} timeout (${timeoutMs}ms)`));
         }
       }, timeoutMs);
+
+      this.pendingRequests.set(requestId, {
+        resolve: resolve as (data: unknown) => void,
+        reject,
+        timer,
+      });
+      this.send({ ...data, requestId });
     });
   }
 

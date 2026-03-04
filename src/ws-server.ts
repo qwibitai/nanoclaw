@@ -286,7 +286,11 @@ export class WsIpcServer {
         this.startPing(ws);
 
         logger.debug(
-          { groupFolder: ctx.groupFolder, role, connCount: ctx.connections.length },
+          {
+            groupFolder: ctx.groupFolder,
+            role,
+            connCount: ctx.connections.length,
+          },
           'WS client authenticated',
         );
         return;
@@ -299,9 +303,11 @@ export class WsIpcServer {
         return;
       }
 
-      messageChain = messageChain.then(() => this.routeMessage(msg, ctx, ws)).catch((err) => {
-        logger.error({ err, type: msg.type }, 'Error processing WS message');
-      });
+      messageChain = messageChain
+        .then(() => this.routeMessage(msg, ctx, ws))
+        .catch((err) => {
+          logger.error({ err, type: msg.type }, 'Error processing WS message');
+        });
     });
 
     ws.on('close', () => {
@@ -499,7 +505,11 @@ export class WsIpcServer {
           break;
         }
 
-        if (scheduleType !== 'cron' && scheduleType !== 'interval' && scheduleType !== 'once') {
+        if (
+          scheduleType !== 'cron' &&
+          scheduleType !== 'interval' &&
+          scheduleType !== 'once'
+        ) {
           logger.warn({ scheduleType }, 'Invalid schedule type');
           break;
         }

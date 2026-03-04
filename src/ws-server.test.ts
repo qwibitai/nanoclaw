@@ -127,8 +127,15 @@ describe('WsIpcServer', () => {
     return ws;
   }
 
-  function authenticateWs(ws: ReturnType<typeof createFakeWs>, token: string, role: 'agent' | 'mcp' = 'agent') {
-    ws.emit('message', Buffer.from(JSON.stringify({ type: 'auth', token, role })));
+  function authenticateWs(
+    ws: ReturnType<typeof createFakeWs>,
+    token: string,
+    role: 'agent' | 'mcp' = 'agent',
+  ) {
+    ws.emit(
+      'message',
+      Buffer.from(JSON.stringify({ type: 'auth', token, role })),
+    );
   }
 
   it('creates and validates tokens', () => {
