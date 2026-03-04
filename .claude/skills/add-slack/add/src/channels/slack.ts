@@ -130,8 +130,9 @@ export class SlackChannel implements Channel {
         if (threadTs && threadTs !== msg.ts) {
           // Threaded reply — respond in the same thread
           this.pendingThreadTs.set(jid, threadTs);
-        } else if (this.alwaysReplyInThread) {
-          // Root channel message, always-in-thread mode — start a new thread
+        } else if (this.alwaysReplyInThread && isGroup) {
+          // Root channel message, always-in-thread mode — start a new thread.
+          // Not applied to DMs: threading a DM reply hides it in Slack's thread panel.
           this.pendingThreadTs.set(jid, msg.ts);
         } else {
           // Root channel message — respond in channel

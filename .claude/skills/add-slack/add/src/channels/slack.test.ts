@@ -1035,6 +1035,39 @@ describe('SlackChannel', () => {
           thread_ts: '1704067200.000000',
         });
       });
+
+      it('replies directly (no thread) for DM root messages', async () => {
+        const opts = createTestOpts();
+        const channel = new SlackChannel(opts);
+        await channel.connect();
+
+        // DM channel (channel_type: 'im') — threading would hide the reply
+        const event = createMessageEvent({
+          channel: 'D0123456789',
+          channelType: 'im',
+          ts: '1704067200.000000',
+          text: 'Hey Joe',
+        });
+
+        // Register the DM JID so the message is delivered
+        vi.mocked(opts.registeredGroups).mockReturnValue({
+          'slack:D0123456789': {
+            name: 'Reid DM',
+            folder: 'reid-dm',
+            trigger: '@Jonesy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        });
+
+        await triggerMessageEvent(event);
+        await channel.sendMessage('slack:D0123456789', 'My response');
+
+        // No thread_ts — reply goes directly to the DM conversation
+        expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith({
+          channel: 'D0123456789',
+          text: 'My response',
+        });
+      });
     });
   });
 });
