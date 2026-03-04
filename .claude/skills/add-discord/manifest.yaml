@@ -7,6 +7,7 @@ adds:
   - src/channels/discord.test.ts
 modifies:
   - src/channels/index.ts
+  - src/container-runner.ts
 structured:
   npm_dependencies:
     discord.js: "^14.18.0"

@@ -1,7 +1,11 @@
+import fs from 'fs';
+import path from 'path';
+
 import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { resolveGroupIpcPath } from '../group-folder.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -135,6 +139,46 @@ export class DiscordChannel implements Channel {
           'Message from unregistered Discord channel',
         );
         return;
+      }
+
+      // Download attachments so the agent can read/view them with the Read tool
+      if (message.attachments.size > 0) {
+        const downloadable = [...message.attachments.values()].filter(
+          (att) => att.url,
+        );
+        if (downloadable.length > 0) {
+          try {
+            const ipcDir = resolveGroupIpcPath(group.folder);
+            const filesDir = path.join(ipcDir, 'files');
+            fs.mkdirSync(filesDir, { recursive: true });
+            for (const att of downloadable) {
+              const name = att.name || 'file';
+              const ext = path.extname(name) || '';
+              const filename = `${msgId}-${att.id}${ext}`;
+              // Build the placeholder tag to find in the content string
+              const contentType = att.contentType || '';
+              let tag: string;
+              if (contentType.startsWith('image/')) tag = `[Image: ${name}]`;
+              else if (contentType.startsWith('video/')) tag = `[Video: ${name}]`;
+              else if (contentType.startsWith('audio/')) tag = `[Audio: ${name}]`;
+              else tag = `[File: ${name}]`;
+              try {
+                const response = await fetch(att.url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const buffer = Buffer.from(await response.arrayBuffer());
+                fs.writeFileSync(path.join(filesDir, filename), buffer);
+                content = content.replace(
+                  tag,
+                  `${tag.slice(0, -1)} — view with Read tool at /workspace/ipc/files/${filename}]`,
+                );
+              } catch (err) {
+                logger.warn({ att: name, err }, 'Failed to download Discord attachment');
+              }
+            }
+          } catch (err) {
+            logger.warn({ err }, 'Failed to set up file download directory');
+          }
+        }
       }
 
       // Deliver message — startMessageLoop() will pick it up
