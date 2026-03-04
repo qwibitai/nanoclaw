@@ -105,8 +105,8 @@ describe('loadSenderAllowlist', () => {
     const p = writeConfig({
       default: { allow: '*', mode: 'trigger' },
       chats: {
-        'good': { allow: ['alice'], mode: 'trigger' },
-        'bad': { allow: 123 },
+        good: { allow: ['alice'], mode: 'trigger' },
+        bad: { allow: 123 },
       },
     });
     const cfg = loadSenderAllowlist(p);
@@ -147,7 +147,7 @@ describe('isSenderAllowed', () => {
   it('uses per-chat entry over default', () => {
     const cfg: SenderAllowlistConfig = {
       default: { allow: '*', mode: 'trigger' },
-      chats: { 'g1': { allow: ['alice'], mode: 'trigger' } },
+      chats: { g1: { allow: ['alice'], mode: 'trigger' } },
       logDenied: true,
     };
     expect(isSenderAllowed('g1', 'bob', cfg)).toBe(false);
@@ -177,7 +177,7 @@ describe('shouldDropMessage', () => {
   it('per-chat mode override', () => {
     const cfg: SenderAllowlistConfig = {
       default: { allow: '*', mode: 'trigger' },
-      chats: { 'g1': { allow: '*', mode: 'drop' } },
+      chats: { g1: { allow: '*', mode: 'drop' } },
       logDenied: true,
     };
     expect(shouldDropMessage('g1', cfg)).toBe(true);

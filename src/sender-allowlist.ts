@@ -40,7 +40,10 @@ export function loadSenderAllowlist(
     raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return DEFAULT_CONFIG;
-    logger.warn({ err, path: filePath }, 'sender-allowlist: cannot read config');
+    logger.warn(
+      { err, path: filePath },
+      'sender-allowlist: cannot read config',
+    );
     return DEFAULT_CONFIG;
   }
 
