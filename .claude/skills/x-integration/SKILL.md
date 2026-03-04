@@ -113,9 +113,9 @@ Paths relative to project root:
 ┌─────────────────────────────────────────────────────────────┐
 │  Container (Linux VM)                                       │
 │  └── agent.ts → MCP tool definitions (x_post, etc.)    │
-│      └── Writes IPC request to /workspace/ipc/tasks/       │
+│      └── Sends IPC request via WebSocket                   │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ IPC (file system)
+                       │ IPC (WebSocket)
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Host (macOS)                                               │

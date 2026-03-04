@@ -3,10 +3,13 @@
  *
  * Handles all x_* IPC messages from container agents.
  * This is the entry point for X integration in the host process.
+ *
+ * Returns a SkillResult that the caller sends back via WebSocket.
+ * Full WS integration (routing x_* types in handleTaskIpc and sending
+ * ipc_response messages) is a follow-up task.
  */
 
 import { spawn } from 'child_process';
-import fs from 'fs';
 import path from 'path';
 import pino from 'pino';
 
@@ -15,7 +18,7 @@ const logger = pino({
   transport: { target: 'pino-pretty', options: { colorize: true } }
 });
 
-interface SkillResult {
+export interface SkillResult {
   success: boolean;
   message: string;
   data?: unknown;
@@ -63,44 +66,30 @@ async function runScript(script: string, args: object): Promise<SkillResult> {
   });
 }
 
-// Write result to IPC results directory
-function writeResult(dataDir: string, sourceGroup: string, requestId: string, result: SkillResult): void {
-  const resultsDir = path.join(dataDir, 'ipc', sourceGroup, 'x_results');
-  fs.mkdirSync(resultsDir, { recursive: true });
-  fs.writeFileSync(path.join(resultsDir, `${requestId}.json`), JSON.stringify(result));
-}
-
 /**
- * Handle X integration IPC messages
+ * Handle X integration IPC messages.
  *
- * @returns true if message was handled, false if not an X message
+ * @returns SkillResult if message was handled, null if not an X message
  */
 export async function handleXIpc(
   data: Record<string, unknown>,
   sourceGroup: string,
   isMain: boolean,
-  dataDir: string
-): Promise<boolean> {
+): Promise<SkillResult | null> {
   const type = data.type as string;
 
   // Only handle x_* types
   if (!type?.startsWith('x_')) {
-    return false;
+    return null;
   }
 
   // Only main group can use X integration
   if (!isMain) {
     logger.warn({ sourceGroup, type }, 'X integration blocked: not main group');
-    return true;
+    return { success: false, message: 'X integration requires main group' };
   }
 
-  const requestId = data.requestId as string;
-  if (!requestId) {
-    logger.warn({ type }, 'X integration blocked: missing requestId');
-    return true;
-  }
-
-  logger.info({ type, requestId }, 'Processing X request');
+  logger.info({ type }, 'Processing X request');
 
   let result: SkillResult;
 
@@ -146,14 +135,13 @@ export async function handleXIpc(
       break;
 
     default:
-      return false;
+      return null;
   }
 
-  writeResult(dataDir, sourceGroup, requestId, result);
   if (result.success) {
-    logger.info({ type, requestId }, 'X request completed');
+    logger.info({ type }, 'X request completed');
   } else {
-    logger.error({ type, requestId, message: result.message }, 'X request failed');
+    logger.error({ type, message: result.message }, 'X request failed');
   }
-  return true;
+  return result;
 }

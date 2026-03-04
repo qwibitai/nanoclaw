@@ -155,7 +155,7 @@ export class WsClient {
       this.pendingRequests.clear();
       // Signal close to consumer
       this.onClose?.();
-      process.exit(1);
+      return;
     }
 
     const delay = RECONNECT_DELAYS[this.reconnectAttempts] ?? 4000;
@@ -237,6 +237,8 @@ export class WsClient {
   private send(data: Record<string, unknown>): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));
+    } else {
+      log(`Message dropped (ws ${this.ws ? `state=${this.ws.readyState}` : 'null'}): type=${data.type}`);
     }
   }
 }

@@ -316,8 +316,8 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (proc, containerName, wsToken) =>
+        queue.registerProcess(chatJid, proc, containerName, group.folder, wsToken),
       wrappedOnOutput,
       wsServer,
     );
@@ -470,15 +470,12 @@ async function main(): Promise<void> {
 
   // Start WebSocket IPC server
   wsServer = new WsIpcServer({
-    onOutput: async (_groupFolder, _chatJid, _output) => {
-      // Output routing is handled per-token via setTokenCallbacks
-    },
     getTasksSnapshot,
     getGroupsSnapshot,
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, sender) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, sender);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
@@ -544,8 +541,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, proc, containerName, groupFolder, wsToken) =>
+      queue.registerProcess(groupJid, proc, containerName, groupFolder, wsToken),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {

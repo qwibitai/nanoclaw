@@ -258,7 +258,7 @@ function buildContainerArgs(
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (proc: ChildProcess, containerName: string, wsToken?: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   wsServer?: WsIpcServer,
 ): Promise<ContainerOutput> {
@@ -313,7 +313,7 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
-    onProcess(container, containerName);
+    onProcess(container, containerName, wsToken);
 
     let stdout = '';
     let stderr = '';
@@ -406,7 +406,6 @@ export async function runContainerAgent(
     };
 
     // Wire WS output callbacks: output messages come via WS instead of stdout markers
-    let outputChain = Promise.resolve();
     if (wsServer && wsToken && onOutput) {
       wsServer.setTokenCallbacks(
         wsToken,
@@ -425,13 +424,11 @@ export async function runContainerAgent(
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
-      // Revoke WS token on container exit
-      if (wsServer && wsToken) {
-        // Small grace window for in-flight WS messages
-        setTimeout(() => {
-          wsServer.revokeToken(wsToken!);
-        }, 100);
-      }
+      // Capture the real output chain BEFORE revoking the token
+      // (revokeToken deletes the token context, losing the chain)
+      const outputChain = wsServer && wsToken
+        ? wsServer.getOutputChain(wsToken)
+        : Promise.resolve();
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -456,6 +453,7 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
+            if (wsServer && wsToken) wsServer.revokeToken(wsToken);
             resolve({
               status: 'success',
               result: null,
@@ -470,6 +468,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
+        if (wsServer && wsToken) wsServer.revokeToken(wsToken);
         resolve({
           status: 'error',
           result: null,
@@ -549,6 +548,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
+        if (wsServer && wsToken) wsServer.revokeToken(wsToken);
         resolve({
           status: 'error',
           result: null,
@@ -557,9 +557,10 @@ export async function runContainerAgent(
         return;
       }
 
-      // Wait for output chain to settle, return completion marker
+      // Wait for output chain to settle, then revoke token and resolve
       if (onOutput) {
         outputChain.then(() => {
+          if (wsServer && wsToken) wsServer.revokeToken(wsToken);
           logger.info(
             { group: group.name, duration, newSessionId },
             'Container completed (streaming mode)',
@@ -573,6 +574,7 @@ export async function runContainerAgent(
         return;
       }
 
+      if (wsServer && wsToken) wsServer.revokeToken(wsToken);
       logger.info(
         { group: group.name, duration },
         'Container completed',

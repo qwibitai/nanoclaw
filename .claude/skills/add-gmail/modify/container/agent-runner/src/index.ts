@@ -1,23 +1,22 @@
 /**
  * NanoClaw Agent Runner
- * Runs inside a container, receives config via stdin, outputs result to stdout
+ * Runs inside a container, receives config via stdin, communicates via WebSocket.
  *
  * Input protocol:
- *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
- *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ *   Stdin: Full ContainerInput JSON (read until EOF)
+ *   WS:    Follow-up messages arrive as `input` messages
+ *          Close signal arrives as `close` message
  *
- * Stdout protocol:
- *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
- *   Multiple results may be emitted (one per agent teams result).
- *   Final marker after loop ends signals completion.
+ * Output protocol:
+ *   WS:    Results sent as `output` messages
+ *   stderr remains a direct pipe for debug logs
  */
 
 import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
+import { WsClient } from './ws-client.js';
 
 interface ContainerInput {
   prompt: string;
@@ -28,6 +27,8 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  wsUrl?: string;
+  wsToken?: string;
 }
 
 interface ContainerOutput {
@@ -54,10 +55,6 @@ interface SDKUserMessage {
   parent_tool_use_id: null;
   session_id: string;
 }
-
-const IPC_INPUT_DIR = '/workspace/ipc/input';
-const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const IPC_POLL_MS = 500;
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -103,15 +100,6 @@ async function readStdin(): Promise<string> {
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
-}
-
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-function writeOutput(output: ContainerOutput): void {
-  console.log(OUTPUT_START_MARKER);
-  console.log(JSON.stringify(output));
-  console.log(OUTPUT_END_MARKER);
 }
 
 function log(message: string): void {
@@ -284,75 +272,10 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Check for _close sentinel.
- */
-function shouldClose(): boolean {
-  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
-    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
-    return true;
-  }
-  return false;
-}
-
-/**
- * Drain all pending IPC input messages.
- * Returns messages found, or empty array.
- */
-function drainIpcInput(): string[] {
-  try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
-    const files = fs.readdirSync(IPC_INPUT_DIR)
-      .filter(f => f.endsWith('.json'))
-      .sort();
-
-    const messages: string[] = [];
-    for (const file of files) {
-      const filePath = path.join(IPC_INPUT_DIR, file);
-      try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
-        if (data.type === 'message' && data.text) {
-          messages.push(data.text);
-        }
-      } catch (err) {
-        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
-        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-      }
-    }
-    return messages;
-  } catch (err) {
-    log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-}
-
-/**
- * Wait for a new IPC message or _close sentinel.
- * Returns the messages as a single string, or null if _close.
- */
-function waitForIpcMessage(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const poll = () => {
-      if (shouldClose()) {
-        resolve(null);
-        return;
-      }
-      const messages = drainIpcInput();
-      if (messages.length > 0) {
-        resolve(messages.join('\n'));
-        return;
-      }
-      setTimeout(poll, IPC_POLL_MS);
-    };
-    poll();
-  });
-}
-
-/**
- * Run a single query and stream results via writeOutput.
+ * Run a single query and stream results via WS client.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
- * Also pipes IPC messages into the stream during the query.
+ * WS input/close messages are piped into the stream during the query.
  */
 async function runQuery(
   prompt: string,
@@ -360,31 +283,27 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  wsClient: WsClient,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Poll IPC for follow-up messages and _close sentinel during the query
-  let ipcPolling = true;
+  // Wire WS events for follow-up messages and close signal during the query
   let closedDuringQuery = false;
-  const pollIpcDuringQuery = () => {
-    if (!ipcPolling) return;
-    if (shouldClose()) {
-      log('Close sentinel detected during query, ending stream');
-      closedDuringQuery = true;
-      stream.end();
-      ipcPolling = false;
-      return;
-    }
-    const messages = drainIpcInput();
-    for (const text of messages) {
-      log(`Piping IPC message into active query (${text.length} chars)`);
-      stream.push(text);
-    }
-    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+  const prevOnInput = wsClient.onInput;
+  const prevOnClose = wsClient.onClose;
+
+  wsClient.onInput = (text: string) => {
+    log(`Piping WS message into active query (${text.length} chars)`);
+    stream.push(text);
   };
-  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
+
+  wsClient.onClose = () => {
+    log('Close signal received during query, ending stream');
+    closedDuringQuery = true;
+    stream.end();
+  };
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -447,6 +366,8 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            NANOCLAW_WS_URL: containerInput.wsUrl || '',
+            NANOCLAW_WS_TOKEN: containerInput.wsToken || '',
           },
         },
         gmail: {
@@ -482,15 +403,14 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      writeOutput({
-        status: 'success',
-        result: textResult || null,
-        newSessionId
-      });
+      wsClient.sendOutput('success', textResult || null, newSessionId);
     }
   }
 
-  ipcPolling = false;
+  // Restore previous handlers
+  wsClient.onInput = prevOnInput;
+  wsClient.onClose = prevOnClose;
+
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
@@ -505,11 +425,7 @@ async function main(): Promise<void> {
     try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
     log(`Received input for group: ${containerInput.groupFolder}`);
   } catch (err) {
-    writeOutput({
-      status: 'error',
-      result: null,
-      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
-    });
+    log(`Failed to parse input: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
 
@@ -524,29 +440,36 @@ async function main(): Promise<void> {
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
-  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Clean up stale _close sentinel from previous container runs
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  // Connect to WS server
+  if (!containerInput.wsUrl || !containerInput.wsToken) {
+    log('No WS URL/token provided, cannot start');
+    process.exit(1);
+  }
 
-  // Build initial prompt (drain any pending IPC messages too)
+  const wsClient = new WsClient(containerInput.wsUrl, containerInput.wsToken);
+  let authData;
+  try {
+    authData = await wsClient.connect();
+    log(`WS connected, got ${authData.tasks.length} tasks, ${authData.groups.groups.length} groups`);
+  } catch (err) {
+    log(`WS auth failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+
+  // Build initial prompt
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
-  const pending = drainIpcInput();
-  if (pending.length > 0) {
-    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
-    prompt += '\n' + pending.join('\n');
-  }
 
-  // Query loop: run query → wait for IPC message → run new query → repeat
+  // Query loop: run query → wait for WS message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, wsClient, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -554,23 +477,33 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
+      // If close was received during the query, exit immediately.
       if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
+        log('Close signal consumed during query, exiting');
         break;
       }
 
       // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      wsClient.sendOutput('success', null, sessionId);
 
-      log('Query ended, waiting for next IPC message...');
+      log('Query ended, waiting for next WS message...');
 
-      // Wait for the next message or _close sentinel
-      const nextMessage = await waitForIpcMessage();
+      // Wait for the next message or close signal via WS
+      const nextMessage = await new Promise<string | null>((resolve) => {
+        wsClient.onInput = (text: string) => {
+          wsClient.onInput = null;
+          wsClient.onClose = null;
+          resolve(text);
+        };
+        wsClient.onClose = () => {
+          wsClient.onInput = null;
+          wsClient.onClose = null;
+          resolve(null);
+        };
+      });
+
       if (nextMessage === null) {
-        log('Close sentinel received, exiting');
+        log('Close signal received, exiting');
         break;
       }
 
@@ -580,14 +513,11 @@ async function main(): Promise<void> {
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
-    writeOutput({
-      status: 'error',
-      result: null,
-      newSessionId: sessionId,
-      error: errorMessage
-    });
+    wsClient.sendOutput('error', null, sessionId, errorMessage);
     process.exit(1);
   }
+
+  wsClient.close();
 }
 
 main();

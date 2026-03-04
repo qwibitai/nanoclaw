@@ -104,6 +104,7 @@ function createMockWsServer() {
     ),
     sendInput: vi.fn(() => true),
     sendClose: vi.fn(),
+    getOutputChain: vi.fn(() => Promise.resolve()),
     // Helper to simulate WS output from container
     _simulateOutput: async (output: any) => {
       if (tokenCallbacks.onOutput) {

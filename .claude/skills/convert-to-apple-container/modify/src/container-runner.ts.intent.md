@@ -21,7 +21,7 @@ Apple Container (VirtioFS) only supports directory mounts, not file mounts. The 
 - Changed: `buildContainerArgs(mounts, containerName)` → `buildContainerArgs(mounts, containerName, input.isMain)`
 
 ## Invariants
-- All exported interfaces unchanged: `ContainerInput`, `ContainerOutput`, `runContainerAgent`, `writeTasksSnapshot`, `writeGroupsSnapshot`, `AvailableGroup`
+- All exported interfaces unchanged: `ContainerInput`, `ContainerOutput`, `runContainerAgent`, `AvailableGroup`
 - Non-main containers behave identically (still get `--user` flag)
 - Mount list for non-main containers is unchanged
 - Secrets still passed via stdin, never mounted as files

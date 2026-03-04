@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 
 import {
   _initTestDatabase,
@@ -8,8 +9,60 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
-import { processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
+import { WsIpcServer, WsIpcServerDeps } from './ws-server.js';
+import { sendAuthenticatedMessage } from './test-helpers/ws-test-utils.js';
+
+// Mock config
+vi.mock('./config.js', () => ({
+  WS_BIND_ADDRESS: '127.0.0.1',
+  TIMEZONE: 'UTC',
+}));
+
+// Mock logger
+vi.mock('./logger.js', () => ({
+  logger: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
+}));
+
+// Store the FakeWSServer constructor so tests can access it
+let lastCreatedServer: any = null;
+
+vi.mock('ws', () => {
+  const { EventEmitter: EE } = require('events');
+
+  class FakeWS extends EE {
+    readyState = 1;
+    send = vi.fn();
+    close = vi.fn();
+    static OPEN = 1;
+  }
+
+  class FakeWSServer extends EE {
+    options: any;
+    constructor(opts: any) {
+      super();
+      this.options = opts;
+      lastCreatedServer = this;
+      queueMicrotask(() => this.emit('listening'));
+    }
+    address() {
+      return { port: 9999 };
+    }
+    close(cb?: () => void) {
+      if (cb) cb();
+    }
+  }
+
+  return {
+    default: Object.assign(FakeWS, { OPEN: 1 }),
+    WebSocketServer: FakeWSServer,
+  };
+});
 
 // Set up registered groups used across tests
 const MAIN_GROUP: RegisteredGroup = {
@@ -35,10 +88,27 @@ const THIRD_GROUP: RegisteredGroup = {
 };
 
 let groups: Record<string, RegisteredGroup>;
-let deps: IpcDeps;
+let server: WsIpcServer;
+let wss: EventEmitter;
 
-beforeEach(() => {
+function createDeps(): WsIpcServerDeps {
+  return {
+    sendMessage: vi.fn(async () => {}),
+    registeredGroups: () => groups,
+    registerGroup: (jid, group) => {
+      groups[jid] = group;
+      setRegisteredGroup(jid, group);
+    },
+    syncGroups: vi.fn(async () => {}),
+    getAvailableGroups: () => [],
+    getTasksSnapshot: () => [],
+    getGroupsSnapshot: () => ({ groups: [], lastSync: '' }),
+  };
+}
+
+beforeEach(async () => {
   _initTestDatabase();
+  lastCreatedServer = null;
 
   groups = {
     'main@g.us': MAIN_GROUP,
@@ -51,24 +121,30 @@ beforeEach(() => {
   setRegisteredGroup('other@g.us', OTHER_GROUP);
   setRegisteredGroup('third@g.us', THIRD_GROUP);
 
-  deps = {
-    sendMessage: async () => {},
-    registeredGroups: () => groups,
-    registerGroup: (jid, group) => {
-      groups[jid] = group;
-      setRegisteredGroup(jid, group);
-      // Mock the fs.mkdirSync that registerGroup does
-    },
-    syncGroups: async () => {},
-    getAvailableGroups: () => [],
-  };
+  server = new WsIpcServer(createDeps());
+  await server.start();
+  wss = lastCreatedServer!;
 });
+
+afterEach(async () => {
+  await server.shutdown();
+});
+
+/** Helper to send an authenticated IPC message */
+async function sendIpc(
+  data: { type: string; [key: string]: unknown },
+  sourceGroup: string,
+  chatJid: string,
+  isMain: boolean,
+) {
+  return sendAuthenticatedMessage(server, wss, data, sourceGroup, chatJid, isMain);
+}
 
 // --- schedule_task authorization ---
 
 describe('schedule_task authorization', () => {
   it('main group can schedule for another group', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'do something',
@@ -77,8 +153,8 @@ describe('schedule_task authorization', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     // Verify task was created in DB for the other group
@@ -88,7 +164,7 @@ describe('schedule_task authorization', () => {
   });
 
   it('non-main group can schedule for itself', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'self task',
@@ -97,8 +173,8 @@ describe('schedule_task authorization', () => {
         targetJid: 'other@g.us',
       },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
 
     const allTasks = getAllTasks();
@@ -107,7 +183,7 @@ describe('schedule_task authorization', () => {
   });
 
   it('non-main group cannot schedule for another group', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'unauthorized',
@@ -116,8 +192,8 @@ describe('schedule_task authorization', () => {
         targetJid: 'main@g.us',
       },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
 
     const allTasks = getAllTasks();
@@ -125,7 +201,7 @@ describe('schedule_task authorization', () => {
   });
 
   it('rejects schedule_task for unregistered target JID', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'no target',
@@ -134,8 +210,8 @@ describe('schedule_task authorization', () => {
         targetJid: 'unknown@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const allTasks = getAllTasks();
@@ -174,31 +250,31 @@ describe('pause_task authorization', () => {
   });
 
   it('main group can pause any task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'pause_task', taskId: 'task-other' },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
     expect(getTaskById('task-other')!.status).toBe('paused');
   });
 
   it('non-main group can pause its own task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'pause_task', taskId: 'task-other' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-other')!.status).toBe('paused');
   });
 
   it('non-main group cannot pause another groups task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'pause_task', taskId: 'task-main' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-main')!.status).toBe('active');
   });
@@ -223,31 +299,31 @@ describe('resume_task authorization', () => {
   });
 
   it('main group can resume any task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'resume_task', taskId: 'task-paused' },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
     expect(getTaskById('task-paused')!.status).toBe('active');
   });
 
   it('non-main group can resume its own task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'resume_task', taskId: 'task-paused' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-paused')!.status).toBe('active');
   });
 
   it('non-main group cannot resume another groups task', async () => {
-    await processTaskIpc(
+    await sendIpc(
       { type: 'resume_task', taskId: 'task-paused' },
       'third-group',
+      'third@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-paused')!.status).toBe('paused');
   });
@@ -270,11 +346,11 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc(
+    await sendIpc(
       { type: 'cancel_task', taskId: 'task-to-cancel' },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
     expect(getTaskById('task-to-cancel')).toBeUndefined();
   });
@@ -293,11 +369,11 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc(
+    await sendIpc(
       { type: 'cancel_task', taskId: 'task-own' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-own')).toBeUndefined();
   });
@@ -316,11 +392,11 @@ describe('cancel_task authorization', () => {
       created_at: '2024-01-01T00:00:00.000Z',
     });
 
-    await processTaskIpc(
+    await sendIpc(
       { type: 'cancel_task', taskId: 'task-foreign' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     expect(getTaskById('task-foreign')).toBeDefined();
   });
@@ -330,7 +406,7 @@ describe('cancel_task authorization', () => {
 
 describe('register_group authorization', () => {
   it('non-main group cannot register a group', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'register_group',
         jid: 'new@g.us',
@@ -339,8 +415,8 @@ describe('register_group authorization', () => {
         trigger: '@Andy',
       },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
 
     // registeredGroups should not have changed
@@ -348,7 +424,7 @@ describe('register_group authorization', () => {
   });
 
   it('main group cannot register with unsafe folder path', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'register_group',
         jid: 'new@g.us',
@@ -357,8 +433,8 @@ describe('register_group authorization', () => {
         trigger: '@Andy',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(groups['new@g.us']).toBeUndefined();
@@ -370,22 +446,22 @@ describe('register_group authorization', () => {
 describe('refresh_groups authorization', () => {
   it('non-main group cannot trigger refresh', async () => {
     // This should be silently blocked (no crash, no effect)
-    await processTaskIpc(
+    await sendIpc(
       { type: 'refresh_groups' },
       'other-group',
+      'other@g.us',
       false,
-      deps,
     );
     // If we got here without error, the auth gate worked
   });
 });
 
 // --- IPC message authorization ---
-// Tests the authorization pattern from startIpcWatcher (ipc.ts).
+// Tests the authorization pattern used in handleMessage (ws-server.ts).
 // The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
 
 describe('IPC message authorization', () => {
-  // Replicate the exact check from the IPC watcher
+  // Replicate the exact check from handleMessage
   function isMessageAuthorized(
     sourceGroup: string,
     isMain: boolean,
@@ -438,7 +514,7 @@ describe('IPC message authorization', () => {
 
 describe('schedule_task schedule types', () => {
   it('creates task with cron schedule and computes next_run', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'cron task',
@@ -447,8 +523,8 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -462,7 +538,7 @@ describe('schedule_task schedule types', () => {
   });
 
   it('rejects invalid cron expression', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'bad cron',
@@ -471,8 +547,8 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(getAllTasks()).toHaveLength(0);
@@ -481,7 +557,7 @@ describe('schedule_task schedule types', () => {
   it('creates task with interval schedule', async () => {
     const before = Date.now();
 
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'interval task',
@@ -490,8 +566,8 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -504,7 +580,7 @@ describe('schedule_task schedule types', () => {
   });
 
   it('rejects invalid interval (non-numeric)', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'bad interval',
@@ -513,15 +589,15 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(getAllTasks()).toHaveLength(0);
   });
 
   it('rejects invalid interval (zero)', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'zero interval',
@@ -530,15 +606,15 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(getAllTasks()).toHaveLength(0);
   });
 
   it('rejects invalid once timestamp', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'bad once',
@@ -547,8 +623,8 @@ describe('schedule_task schedule types', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(getAllTasks()).toHaveLength(0);
@@ -559,7 +635,7 @@ describe('schedule_task schedule types', () => {
 
 describe('schedule_task context_mode', () => {
   it('accepts context_mode=group', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'group context',
@@ -569,8 +645,8 @@ describe('schedule_task context_mode', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -578,7 +654,7 @@ describe('schedule_task context_mode', () => {
   });
 
   it('accepts context_mode=isolated', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'isolated context',
@@ -588,8 +664,8 @@ describe('schedule_task context_mode', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -597,18 +673,18 @@ describe('schedule_task context_mode', () => {
   });
 
   it('defaults invalid context_mode to isolated', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'bad context',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
-        context_mode: 'bogus' as any,
+        context_mode: 'bogus',
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -616,7 +692,7 @@ describe('schedule_task context_mode', () => {
   });
 
   it('defaults missing context_mode to isolated', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'schedule_task',
         prompt: 'no context mode',
@@ -625,8 +701,8 @@ describe('schedule_task context_mode', () => {
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     const tasks = getAllTasks();
@@ -638,7 +714,7 @@ describe('schedule_task context_mode', () => {
 
 describe('register_group success', () => {
   it('main group can register a new group', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'register_group',
         jid: 'new@g.us',
@@ -647,8 +723,8 @@ describe('register_group success', () => {
         trigger: '@Andy',
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     // Verify group was registered in DB
@@ -660,7 +736,7 @@ describe('register_group success', () => {
   });
 
   it('register_group rejects request with missing fields', async () => {
-    await processTaskIpc(
+    await sendIpc(
       {
         type: 'register_group',
         jid: 'partial@g.us',
@@ -668,8 +744,8 @@ describe('register_group success', () => {
         // missing folder and trigger
       },
       'whatsapp_main',
+      'main@g.us',
       true,
-      deps,
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();

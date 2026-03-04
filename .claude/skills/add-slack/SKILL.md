@@ -82,14 +82,6 @@ SLACK_APP_TOKEN=xapp-your-app-token
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
-
 ### Build and restart
 
 ```bash
@@ -162,7 +154,7 @@ tail -f logs/nanoclaw.log
 
 ### Bot not responding
 
-1. Check `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set in `.env` AND synced to `data/env/env`
+1. Check `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set in `.env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'slack:%'"`
 3. For non-main channels: message must include trigger pattern
 4. Service is running: `launchctl list | grep nanoclaw`
@@ -187,8 +179,7 @@ If the bot logs `missing_scope` errors:
 2. Add the missing scope listed in the error message
 3. **Reinstall the app** to your workspace — scope changes require reinstallation
 4. Copy the new Bot Token (it changes on reinstall) and update `.env`
-5. Sync: `mkdir -p data/env && cp .env data/env/env`
-6. Restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+5. Restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
 
 ### Getting channel ID
 

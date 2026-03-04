@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { EventEmitter } from 'events';
 import { WsIpcServer, WsIpcServerDeps } from './ws-server.js';
+import { createFakeWs } from './test-helpers/ws-test-utils.js';
 
 // Mock config
 vi.mock('./config.js', () => ({
   WS_BIND_ADDRESS: '127.0.0.1',
+  TIMEZONE: 'UTC',
 }));
 
 // Mock logger
@@ -17,11 +19,17 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock ipc.ts processTaskIpc
-const mockProcessTaskIpc = vi.fn(async () => {});
-vi.mock('./ipc.js', () => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  processTaskIpc: (...args: any[]) => (mockProcessTaskIpc as any)(...args),
+// Mock DB functions used by inlined handleTaskIpc
+vi.mock('./db.js', () => ({
+  createTask: vi.fn(),
+  deleteTask: vi.fn(),
+  getTaskById: vi.fn(),
+  updateTask: vi.fn(),
+}));
+
+// Mock group-folder
+vi.mock('./group-folder.js', () => ({
+  isValidGroupFolder: vi.fn(() => true),
 }));
 
 // Store the FakeWSServer constructor so tests can access it
@@ -61,7 +69,6 @@ vi.mock('ws', () => {
 
 function createMockDeps(): WsIpcServerDeps {
   return {
-    onOutput: vi.fn(async () => {}),
     getTasksSnapshot: vi.fn(() => [
       {
         id: 'task-1',
@@ -90,19 +97,6 @@ function createMockDeps(): WsIpcServerDeps {
     syncGroups: vi.fn(async () => {}),
     getAvailableGroups: vi.fn(() => []),
   };
-}
-
-/** Create a fake WebSocket that mimics the mocked FakeWS class */
-function createFakeWs() {
-  const ws = new EventEmitter() as EventEmitter & {
-    readyState: number;
-    send: ReturnType<typeof vi.fn>;
-    close: ReturnType<typeof vi.fn>;
-  };
-  ws.readyState = 1; // OPEN
-  ws.send = vi.fn();
-  ws.close = vi.fn();
-  return ws;
 }
 
 describe('WsIpcServer', () => {
@@ -270,7 +264,7 @@ describe('WsIpcServer', () => {
     );
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'hello');
+    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'hello', undefined);
   });
 
   it('blocks unauthorized cross-group message', async () => {
@@ -310,7 +304,7 @@ describe('WsIpcServer', () => {
     );
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'from main');
+    expect(deps.sendMessage).toHaveBeenCalledWith('test@g.us', 'from main', undefined);
   });
 
   it('handles list_tasks request-response', async () => {
@@ -356,7 +350,9 @@ describe('WsIpcServer', () => {
     expect(ws2.send).toHaveBeenCalledTimes(1);
   });
 
-  it('routes task IPC messages to processTaskIpc', async () => {
+  it('routes task IPC messages through handleTaskIpc', async () => {
+    const { createTask } = await import('./db.js');
+
     const token = server.createToken('test-group', 'test@g.us', false);
     const ws = simulateConnection();
     authenticateWs(ws, token);
@@ -375,11 +371,44 @@ describe('WsIpcServer', () => {
     );
 
     await new Promise((r) => setTimeout(r, 10));
-    expect(mockProcessTaskIpc).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'schedule_task' }),
-      'test-group',
-      false,
-      expect.anything(),
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_folder: 'test-group',
+        prompt: 'do something',
+        schedule_type: 'once',
+      }),
     );
+  });
+
+  it('routes unknown message types to handleTaskIpc default', async () => {
+    const { logger } = await import('./logger.js');
+
+    const token = server.createToken('test-group', 'test@g.us', false);
+    const ws = simulateConnection();
+    authenticateWs(ws, token);
+
+    ws.emit(
+      'message',
+      Buffer.from(JSON.stringify({ type: 'some_custom_type' })),
+    );
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(logger.warn).toHaveBeenCalledWith(
+      { type: 'some_custom_type' },
+      'Unknown IPC task type',
+    );
+  });
+
+  it('getOutputChain returns token output chain', async () => {
+    const token = server.createToken('test-group', 'test@g.us', false);
+    const chain = server.getOutputChain(token);
+    expect(chain).toBeInstanceOf(Promise);
+    await chain; // should resolve immediately
+  });
+
+  it('getOutputChain returns resolved promise for unknown token', async () => {
+    const chain = server.getOutputChain('nonexistent');
+    expect(chain).toBeInstanceOf(Promise);
+    await chain;
   });
 });
