@@ -13,7 +13,10 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import { ensureContainerRuntimeRunning, cleanupOrphans } from './container-runtime.js';
+import {
+  ensureContainerRuntimeRunning,
+  cleanupOrphans,
+} from './container-runtime.js';
 import {
   ContainerOutput,
   runContainerAgent,

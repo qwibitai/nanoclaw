@@ -13,7 +13,11 @@ import {
 
 /** Sanitize a string for use as a folder name segment */
 function sanitize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
 }
 
 export interface TelegramChannelOpts {
@@ -106,8 +110,15 @@ export class TelegramChannel implements Channel {
 
       // Auto-register topic groups on first trigger message
       const groups = this.opts.registeredGroups();
-      if (topicId && !groups[chatJid] && TRIGGER_PATTERN.test(content) && this.opts.registerGroup) {
-        const topicName = (ctx.message.reply_to_message as any)?.forum_topic_created?.name || `topic-${topicId}`;
+      if (
+        topicId &&
+        !groups[chatJid] &&
+        TRIGGER_PATTERN.test(content) &&
+        this.opts.registerGroup
+      ) {
+        const topicName =
+          (ctx.message.reply_to_message as any)?.forum_topic_created?.name ||
+          `topic-${topicId}`;
         const folderName = `tg-${sanitize(chatName)}-${sanitize(topicName)}`;
         this.opts.registerGroup(chatJid, {
           name: `${chatName} / ${topicName}`,
@@ -132,9 +143,11 @@ export class TelegramChannel implements Channel {
       }
 
       // React with eyes emoji so the user knows the message was seen
-      ctx.react('👀').catch((err) =>
-        logger.debug({ chatJid, err }, 'Failed to react with eyes emoji'),
-      );
+      ctx
+        .react('👀')
+        .catch((err) =>
+          logger.debug({ chatJid, err }, 'Failed to react with eyes emoji'),
+        );
 
       // Deliver message — startMessageLoop() will pick it up
       this.opts.onMessage(chatJid, {
