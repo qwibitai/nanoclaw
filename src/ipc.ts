@@ -3,17 +3,19 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, IPC_POLL_INTERVAL } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
+import { isValidTimezone, localTimeToUtc, resolveGroupTimezone } from './timezone.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
+  updateGroupTimezone: (groupFolder: string, timezone: string) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
   writeGroupsSnapshot: (
@@ -171,6 +173,8 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For set_timezone
+    timezone?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -211,11 +215,19 @@ export async function processTaskIpc(
 
         const scheduleType = data.schedule_type as 'cron' | 'interval' | 'once';
 
+        // Resolve timezone from the source group (agent thinks in its own TZ)
+        const sourceGroupEntry = Object.values(registeredGroups).find(
+          (g) => g.folder === sourceGroup,
+        );
+        const groupTz = resolveGroupTimezone(
+          sourceGroupEntry || targetGroupEntry,
+        );
+
         let nextRun: string | null = null;
         if (scheduleType === 'cron') {
           try {
             const interval = CronExpressionParser.parse(data.schedule_value, {
-              tz: TIMEZONE,
+              tz: groupTz,
             });
             nextRun = interval.next().toISOString();
           } catch {
@@ -236,15 +248,15 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
+          try {
+            nextRun = localTimeToUtc(data.schedule_value, groupTz);
+          } catch {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = scheduled.toISOString();
         }
 
         const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -379,6 +391,24 @@ export async function processTaskIpc(
         logger.warn(
           { data },
           'Invalid register_group request - missing required fields',
+        );
+      }
+      break;
+
+    case 'set_timezone':
+      if (data.timezone) {
+        if (!isValidTimezone(data.timezone)) {
+          logger.warn(
+            { timezone: data.timezone, sourceGroup },
+            'Invalid timezone in set_timezone request',
+          );
+          break;
+        }
+        // Groups can only set their own timezone (main can set any via targetJid)
+        deps.updateGroupTimezone(sourceGroup, data.timezone);
+        logger.info(
+          { sourceGroup, timezone: data.timezone },
+          'Group timezone updated via IPC',
         );
       }
       break;

@@ -19,6 +19,7 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const groupTimezone = process.env.NANOCLAW_TIMEZONE || '';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -143,8 +144,9 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
     const filename = writeIpcFile(TASKS_DIR, data);
 
+    const tzInfo = groupTimezone ? ` (${groupTimezone})` : '';
     return {
-      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}` }],
+      content: [{ type: 'text' as const, text: `Task scheduled (${filename}): ${args.schedule_type} - ${args.schedule_value}${tzInfo}` }],
     };
   },
 );
@@ -276,6 +278,40 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+    };
+  },
+);
+
+server.tool(
+  'set_timezone',
+  `Set the timezone for this group. All scheduled tasks and message timestamps will use this timezone.
+Accepts IANA timezone names (e.g., "America/New_York", "Europe/London", "Asia/Tokyo", "Africa/Johannesburg").
+Current timezone: ${groupTimezone || '(server default)'}`,
+  {
+    timezone: z.string().describe('IANA timezone name (e.g., "America/New_York", "Europe/London", "Asia/Tokyo")'),
+  },
+  async (args) => {
+    // Basic validation: try constructing a DateTimeFormat with the timezone
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: args.timezone });
+    } catch {
+      return {
+        content: [{ type: 'text' as const, text: `Invalid timezone: "${args.timezone}". Use an IANA timezone name like "America/New_York" or "Europe/London".` }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'set_timezone',
+      timezone: args.timezone,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Timezone set to ${args.timezone}. Future messages and scheduled tasks will use this timezone.` }],
     };
   },
 );
