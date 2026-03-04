@@ -1,211 +1,138 @@
 /**
- * X Integration - MCP Tool Definitions (Agent/Container Side)
+ * X Integration — MCP Tool Definitions (Container Side)
  *
- * These tools run inside the container and communicate with the host via WebSocket.
- * The host-side implementation is in host.ts.
+ * These tools run inside the container's MCP stdio server and communicate
+ * with the host via WebSocket. The host-side handler is in host.ts.
  *
- * Note: This file is compiled in the container, not on the host.
- * The @ts-ignore is needed because the SDK is only available in the container.
+ * Integration: Add these tool registrations to container/agent-runner/src/ipc-mcp-stdio.ts
+ * inside an `if (isMain) { ... }` block, with the helper function above it.
  */
 
-// @ts-ignore - SDK available in container environment only
-import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { WsClient } from './ws-client.js';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { WsClient } from './ws-client.js';
 
-export interface SkillToolsContext {
-  groupFolder: string;
-  isMain: boolean;
-  wsClient: WsClient;
+/**
+ * Helper that sends an X action request to the host and returns an MCP tool result.
+ * Requires `ensureWs` and `wsClient` from the parent module scope.
+ */
+async function callXEndpoint(
+  ensureWs: () => Promise<void>,
+  wsClient: WsClient,
+  payload: Record<string, unknown>,
+  label: string,
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: true }> {
+  try {
+    await ensureWs();
+    const result = await wsClient.sendTaskRequest(payload);
+    const text = result.message as string;
+    return result.success
+      ? { content: [{ type: 'text' as const, text }] }
+      : { content: [{ type: 'text' as const, text }], isError: true };
+  } catch (err) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `X ${label} failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+      ],
+      isError: true,
+    };
+  }
 }
 
 /**
- * Create X integration MCP tools
+ * Register X integration MCP tools on the given server.
+ * Call inside `if (isMain) { ... }` in ipc-mcp-stdio.ts.
  */
-export function createXTools(ctx: SkillToolsContext) {
-  const { isMain, wsClient } = ctx;
+export function registerXTools(
+  server: McpServer,
+  ensureWs: () => Promise<void>,
+  wsClient: WsClient,
+): void {
+  const call = (payload: Record<string, unknown>, label: string) =>
+    callXEndpoint(ensureWs, wsClient, payload, label);
 
-  return [
-    tool(
-      'x_post',
-      `Post a tweet to X (Twitter). Main group only.
-
-The host machine will execute the browser automation to post the tweet.
+  server.tool(
+    'x_post',
+    `Post a tweet to X (Twitter). Main group only.
 Make sure the content is appropriate and within X's character limit (280 chars for text).`,
-      {
-        content: z.string().max(280).describe('The tweet content to post (max 280 characters)')
-      },
-      async (args: { content: string }) => {
-        if (!isMain) {
-          return {
-            content: [{ type: 'text', text: 'Only the main group can post tweets.' }],
-            isError: true
-          };
-        }
+    {
+      content: z
+        .string()
+        .max(280)
+        .describe('The tweet content to post (max 280 characters)'),
+    },
+    (args) => call({ type: 'x_post', content: args.content }, 'post'),
+  );
 
-        if (args.content.length > 280) {
-          return {
-            content: [{ type: 'text', text: `Tweet exceeds 280 character limit (current: ${args.content.length})` }],
-            isError: true
-          };
-        }
+  server.tool(
+    'x_like',
+    'Like a tweet on X (Twitter). Provide the tweet URL or tweet ID.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+    },
+    (args) => call({ type: 'x_like', tweetUrl: args.tweet_url }, 'like'),
+  );
 
-        try {
-          const result = await wsClient.sendTaskRequest({
-            type: 'x_post',
-            content: args.content,
-          });
-          if (result.success) {
-            return { content: [{ type: 'text', text: result.message as string }] };
-          }
-          return { content: [{ type: 'text', text: result.message as string }], isError: true };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `X post failed: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true
-          };
-        }
-      }
-    ),
+  server.tool(
+    'x_reply',
+    'Reply to a tweet on X (Twitter). Provide the tweet URL and your reply content.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+      content: z
+        .string()
+        .max(280)
+        .describe('The reply content (max 280 characters)'),
+    },
+    (args) =>
+      call(
+        { type: 'x_reply', tweetUrl: args.tweet_url, content: args.content },
+        'reply',
+      ),
+  );
 
-    tool(
-      'x_like',
-      `Like a tweet on X (Twitter). Main group only.
+  server.tool(
+    'x_retweet',
+    'Retweet a tweet on X (Twitter). Provide the tweet URL.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+    },
+    (args) =>
+      call({ type: 'x_retweet', tweetUrl: args.tweet_url }, 'retweet'),
+  );
 
-Provide the tweet URL or tweet ID to like.`,
-      {
-        tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID')
-      },
-      async (args: { tweet_url: string }) => {
-        if (!isMain) {
-          return {
-            content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
-            isError: true
-          };
-        }
-
-        try {
-          const result = await wsClient.sendTaskRequest({
-            type: 'x_like',
-            tweetUrl: args.tweet_url,
-          });
-          if (result.success) {
-            return { content: [{ type: 'text', text: result.message as string }] };
-          }
-          return { content: [{ type: 'text', text: result.message as string }], isError: true };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `X like failed: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true
-          };
-        }
-      }
-    ),
-
-    tool(
-      'x_reply',
-      `Reply to a tweet on X (Twitter). Main group only.
-
-Provide the tweet URL and your reply content.`,
-      {
-        tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID'),
-        content: z.string().max(280).describe('The reply content (max 280 characters)')
-      },
-      async (args: { tweet_url: string; content: string }) => {
-        if (!isMain) {
-          return {
-            content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
-            isError: true
-          };
-        }
-
-        try {
-          const result = await wsClient.sendTaskRequest({
-            type: 'x_reply',
-            tweetUrl: args.tweet_url,
-            content: args.content,
-          });
-          if (result.success) {
-            return { content: [{ type: 'text', text: result.message as string }] };
-          }
-          return { content: [{ type: 'text', text: result.message as string }], isError: true };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `X reply failed: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true
-          };
-        }
-      }
-    ),
-
-    tool(
-      'x_retweet',
-      `Retweet a tweet on X (Twitter). Main group only.
-
-Provide the tweet URL to retweet.`,
-      {
-        tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID')
-      },
-      async (args: { tweet_url: string }) => {
-        if (!isMain) {
-          return {
-            content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
-            isError: true
-          };
-        }
-
-        try {
-          const result = await wsClient.sendTaskRequest({
-            type: 'x_retweet',
-            tweetUrl: args.tweet_url,
-          });
-          if (result.success) {
-            return { content: [{ type: 'text', text: result.message as string }] };
-          }
-          return { content: [{ type: 'text', text: result.message as string }], isError: true };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `X retweet failed: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true
-          };
-        }
-      }
-    ),
-
-    tool(
-      'x_quote',
-      `Quote tweet on X (Twitter). Main group only.
-
-Retweet with your own comment added.`,
-      {
-        tweet_url: z.string().describe('The tweet URL (e.g., https://x.com/user/status/123) or tweet ID'),
-        comment: z.string().max(280).describe('Your comment for the quote tweet (max 280 characters)')
-      },
-      async (args: { tweet_url: string; comment: string }) => {
-        if (!isMain) {
-          return {
-            content: [{ type: 'text', text: 'Only the main group can interact with X.' }],
-            isError: true
-          };
-        }
-
-        try {
-          const result = await wsClient.sendTaskRequest({
-            type: 'x_quote',
-            tweetUrl: args.tweet_url,
-            comment: args.comment,
-          });
-          if (result.success) {
-            return { content: [{ type: 'text', text: result.message as string }] };
-          }
-          return { content: [{ type: 'text', text: result.message as string }], isError: true };
-        } catch (err) {
-          return {
-            content: [{ type: 'text', text: `X quote failed: ${err instanceof Error ? err.message : String(err)}` }],
-            isError: true
-          };
-        }
-      }
-    )
-  ];
+  server.tool(
+    'x_quote',
+    'Quote tweet on X (Twitter). Retweet with your own comment added.',
+    {
+      tweet_url: z
+        .string()
+        .describe(
+          'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
+        ),
+      comment: z
+        .string()
+        .max(280)
+        .describe('Your comment for the quote tweet (max 280 characters)'),
+    },
+    (args) =>
+      call(
+        { type: 'x_quote', tweetUrl: args.tweet_url, comment: args.comment },
+        'quote',
+      ),
+  );
 }

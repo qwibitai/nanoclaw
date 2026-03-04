@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 
-// Trigger IPC handler self-registration (x_* handler)
-import './ipc-handlers/index.js';
-
 import {
   _initTestDatabase,
   createTask,
@@ -734,74 +731,6 @@ describe('schedule_task context_mode', () => {
 
     const tasks = getAllTasks();
     expect(tasks[0].context_mode).toBe('isolated');
-  });
-});
-
-// --- x_* IPC handler authorization ---
-
-describe('x_* IPC handler authorization', () => {
-  it('main group can send x_post', async () => {
-    const ws = await sendIpc(
-      {
-        type: 'x_post',
-        content: 'Hello world',
-        requestId: 'req-x-1',
-      },
-      'whatsapp_main',
-      'main@g.us',
-      true,
-    );
-
-    // Handler was invoked — we expect an ipc_response (even if the script fails,
-    // the handler itself runs). Check that no "Unknown IPC task type" warning.
-    const { logger } = await import('./logger.js');
-    const warnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
-    const unknownWarns = warnCalls.filter(
-      (c: unknown[]) => c[1] === 'Unknown IPC task type',
-    );
-    expect(unknownWarns).toHaveLength(0);
-  });
-
-  it('non-main group x_post is blocked', async () => {
-    const ws = await sendIpc(
-      {
-        type: 'x_post',
-        content: 'Blocked tweet',
-        requestId: 'req-x-2',
-      },
-      'other-group',
-      'other@g.us',
-      false,
-    );
-
-    // Should get ipc_response with success=false
-    const responseCalls = ws.send.mock.calls
-      .map((c: string[]) => JSON.parse(c[0]))
-      .filter((m: { type: string }) => m.type === 'ipc_response');
-
-    expect(responseCalls).toHaveLength(1);
-    expect(responseCalls[0].success).toBe(false);
-    expect(responseCalls[0].message).toContain('main group');
-  });
-
-  it('non-main group x_like is blocked', async () => {
-    const ws = await sendIpc(
-      {
-        type: 'x_like',
-        tweetUrl: 'https://x.com/user/status/123',
-        requestId: 'req-x-3',
-      },
-      'other-group',
-      'other@g.us',
-      false,
-    );
-
-    const responseCalls = ws.send.mock.calls
-      .map((c: string[]) => JSON.parse(c[0]))
-      .filter((m: { type: string }) => m.type === 'ipc_response');
-
-    expect(responseCalls).toHaveLength(1);
-    expect(responseCalls[0].success).toBe(false);
   });
 });
 
