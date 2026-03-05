@@ -3,10 +3,15 @@
  * Mirrors src/channels/registry.ts. Skills register JSON-RPC method handlers.
  */
 
+export interface HandlerContext {
+  groupFolder: string;
+  chatJid: string;
+  isMain: boolean;
+}
+
 export type IpcHandler = (
   params: Record<string, unknown>,
-  groupFolder: string,
-  isMain: boolean,
+  ctx: HandlerContext,
 ) => Promise<unknown>;
 
 const registry = new Map<string, IpcHandler>();

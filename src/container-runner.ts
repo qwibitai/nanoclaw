@@ -302,20 +302,83 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  // Create WS token for this container
+  const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+  // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
+  // graceful close signal has time to trigger before the hard kill fires.
+  const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+
+  // Forward-declared mutable bindings used in closures
+  let container: ChildProcess;
+  let timedOut = false;
+  let newSessionId: string | undefined;
+  let hadStreamingOutput = false;
+  let timeout: ReturnType<typeof setTimeout>;
+
+  const killOnTimeout = () => {
+    timedOut = true;
+    logger.error(
+      { group: group.name, containerName },
+      'Container timeout, stopping gracefully',
+    );
+    exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+      if (err) {
+        logger.warn(
+          { group: group.name, containerName, err },
+          'Graceful stop failed, force killing',
+        );
+        container.kill('SIGKILL');
+      }
+    });
+  };
+
+  const resetTimeout = () => {
+    clearTimeout(timeout);
+    timeout = setTimeout(killOnTimeout, timeoutMs);
+  };
+
+  // Create WS token with all callbacks before spawn
   let wsToken: string | undefined;
   if (wsServer) {
-    wsToken = wsServer.createToken(
-      input.groupFolder,
-      input.chatJid,
-      input.isMain,
-    );
+    wsToken = wsServer.createToken({
+      groupFolder: input.groupFolder,
+      chatJid: input.chatJid,
+      isMain: input.isMain,
+      ...(onOutput
+        ? {
+            onOutput: async (output: ContainerOutput) => {
+              if (output.newSessionId) {
+                newSessionId = output.newSessionId;
+              }
+              hadStreamingOutput = true;
+              await onOutput(output);
+            },
+            resetTimeout,
+          }
+        : {}),
+      onOrphaned: () => {
+        // All agent WS connections lost — stop the container
+        logger.warn(
+          { group: group.name, containerName },
+          'Agent connection orphaned, stopping container',
+        );
+        exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+          if (err) container.kill('SIGKILL');
+        });
+      },
+    });
   }
 
+  const cleanup = async () => {
+    if (wsServer && wsToken) await wsServer.revokeToken(wsToken);
+  };
+
   return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+    container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Start timeout now that the container is running
+    timeout = setTimeout(killOnTimeout, timeoutMs);
 
     onProcess(container, containerName, wsToken);
 
@@ -330,20 +393,17 @@ export async function runContainerAgent(
       input.wsUrl = `ws://${WS_HOST}:${wsServer.port}`;
       input.wsToken = wsToken;
     }
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+    container.stdin!.write(JSON.stringify(input));
+    container.stdin!.end();
     // Remove secrets and token from input so they don't appear in logs
     delete input.secrets;
     delete input.wsUrl;
     delete input.wsToken;
 
-    let newSessionId: string | undefined;
-    let hadStreamingOutput = false;
-
     // Accumulate stdout for logging only (output flows via WS).
     // Cap at 64KB — stdout should only contain stray SDK noise now.
     const STDOUT_LOG_LIMIT = 65_536;
-    container.stdout.on('data', (data) => {
+    container.stdout!.on('data', (data) => {
       const chunk = data.toString();
       if (!stdoutTruncated) {
         const remaining = STDOUT_LOG_LIMIT - stdout.length;
@@ -360,7 +420,7 @@ export async function runContainerAgent(
       }
     });
 
-    container.stderr.on('data', (data) => {
+    container.stderr!.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
@@ -380,76 +440,9 @@ export async function runContainerAgent(
       }
     });
 
-    let timedOut = false;
-    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
-    // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
-    // graceful close signal has time to trigger before the hard kill fires.
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
-
-    const killOnTimeout = () => {
-      timedOut = true;
-      logger.error(
-        { group: group.name, containerName },
-        'Container timeout, stopping gracefully',
-      );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn(
-            { group: group.name, containerName, err },
-            'Graceful stop failed, force killing',
-          );
-          container.kill('SIGKILL');
-        }
-      });
-    };
-
-    let timeout = setTimeout(killOnTimeout, timeoutMs);
-
-    // Reset the timeout whenever there's activity (WS output)
-    const resetTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(killOnTimeout, timeoutMs);
-    };
-
-    // Wire WS output callbacks: output messages come via WS instead of stdout markers
-    if (wsServer && wsToken && onOutput) {
-      wsServer.setTokenCallbacks(
-        wsToken,
-        async (output: ContainerOutput) => {
-          if (output.newSessionId) {
-            newSessionId = output.newSessionId;
-          }
-          hadStreamingOutput = true;
-          await onOutput(output);
-        },
-        resetTimeout,
-        () => {
-          // All agent WS connections lost — stop the container
-          logger.warn(
-            { group: group.name, containerName },
-            'Agent connection orphaned, stopping container',
-          );
-          exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
-            if (err) container.kill('SIGKILL');
-          });
-        },
-      );
-    }
-
-    const cleanup = () => {
-      if (wsServer && wsToken) wsServer.revokeToken(wsToken);
-    };
-
-    container.on('close', (code) => {
+    container.on('close', async (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
-
-      // Capture the real output chain BEFORE revoking the token
-      // (revokeToken deletes the token context, losing the chain)
-      const outputChain =
-        wsServer && wsToken
-          ? wsServer.getOutputChain(wsToken)
-          : Promise.resolve();
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -473,20 +466,12 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain
-            .then(() => {
-              cleanup();
-              resolve({
-                status: 'success',
-                result: null,
-                newSessionId,
-              });
-            })
-            .catch((err) => {
-              logger.error({ err, group: group.name }, 'Output chain error');
-              cleanup();
-              resolve({ status: 'success', result: null, newSessionId });
-            });
+          await cleanup();
+          resolve({
+            status: 'success',
+            result: null,
+            newSessionId,
+          });
           return;
         }
 
@@ -495,7 +480,7 @@ export async function runContainerAgent(
           'Container timed out with no output',
         );
 
-        cleanup();
+        await cleanup();
         resolve({
           status: 'error',
           result: null,
@@ -575,7 +560,7 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
-        cleanup();
+        await cleanup();
         resolve({
           status: 'error',
           result: null,
@@ -584,32 +569,11 @@ export async function runContainerAgent(
         return;
       }
 
-      // Wait for output chain to settle, then revoke token and resolve
-      if (onOutput) {
-        outputChain
-          .then(() => {
-            cleanup();
-            logger.info(
-              { group: group.name, duration, newSessionId },
-              'Container completed (streaming mode)',
-            );
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
-            });
-          })
-          .catch((err) => {
-            logger.error({ err, group: group.name }, 'Output chain error');
-            cleanup();
-            resolve({ status: 'success', result: null, newSessionId });
-          });
-        return;
-      }
-
-      cleanup();
-      logger.info({ group: group.name, duration }, 'Container completed');
-
+      await cleanup();
+      logger.info(
+        { group: group.name, duration, newSessionId },
+        'Container completed',
+      );
       resolve({
         status: 'success',
         result: null,
@@ -617,9 +581,9 @@ export async function runContainerAgent(
       });
     });
 
-    container.on('error', (err) => {
+    container.on('error', async (err) => {
       clearTimeout(timeout);
-      cleanup();
+      await cleanup();
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',

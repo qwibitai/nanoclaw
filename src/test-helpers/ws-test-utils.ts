@@ -26,9 +26,17 @@ export function createFakeWs() {
 
 export type FakeWs = ReturnType<typeof createFakeWs>;
 
+/** Build a mock IncomingMessage with auth headers for testing */
+export function createMockReq(token: string, role: 'agent' | 'mcp' = 'agent') {
+  return {
+    headers: { authorization: `Bearer ${token}`, host: 'localhost:9999' },
+    url: `/?role=${role}`,
+  };
+}
+
 /**
  * Send an authenticated message through a WsIpcServer.
- * Creates a token, connects a fake WS, authenticates, sends the data
+ * Creates a token, connects a fake WS with auth headers, sends the data
  * as a JSON-RPC request, and waits for async processing to complete.
  */
 export async function sendAuthenticatedMessage(
@@ -40,15 +48,14 @@ export async function sendAuthenticatedMessage(
   isMain: boolean,
   role: 'agent' | 'mcp' = 'agent',
 ): Promise<FakeWs> {
-  const token = server.createToken(sourceGroup, chatJid, isMain);
+  const token = server.createToken({
+    groupFolder: sourceGroup,
+    chatJid,
+    isMain,
+  });
   const ws = createFakeWs();
-  wss.emit('connection', ws, {});
-
-  // Authenticate
-  ws.emit(
-    'message',
-    Buffer.from(JSON.stringify({ type: 'auth', token, role })),
-  );
+  const req = createMockReq(token, role);
+  wss.emit('connection', ws, req);
 
   // Send the actual message as JSON-RPC request
   const { type, ...params } = data;

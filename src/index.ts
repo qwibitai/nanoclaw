@@ -13,6 +13,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
+import { initCoreHandlers } from './ipc-handlers/core.js';
 import {
   AvailableGroup,
   ContainerOutput,
@@ -528,10 +529,8 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
-  // Start WebSocket IPC server
-  wsServer = new WsIpcServer({
-    getTasksSnapshot,
-    getGroupsSnapshot,
+  // Register core IPC handlers before starting the WS server
+  initCoreHandlers({
     sendMessage: (jid, text, sender) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -547,6 +546,14 @@ async function main(): Promise<void> {
       );
     },
     getAvailableGroups,
+    getTasksSnapshot,
+    getGroupsSnapshot,
+  });
+
+  // Start WebSocket IPC server
+  wsServer = new WsIpcServer({
+    getTasksSnapshot,
+    getGroupsSnapshot,
   });
   await wsServer.start();
   queue.wsServer = wsServer;

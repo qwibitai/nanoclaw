@@ -398,10 +398,10 @@ export class GroupQueue {
             clearTimeout(timer);
             resolve();
           }
-        }).then(() => {
+        }).then(async () => {
           // Revoke WS token so the server can clean up
           if (wsToken && this._wsServer) {
-            this._wsServer.revokeToken(wsToken);
+            await this._wsServer.revokeToken(wsToken);
           }
         }),
       ),

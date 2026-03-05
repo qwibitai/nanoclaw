@@ -1,6 +1,7 @@
 /**
  * WebSocket IPC Client for NanoClaw containers
- * Uses json-rpc-2.0 for protocol handling after auth handshake.
+ * Uses json-rpc-2.0 for all protocol handling.
+ * Authenticates via Authorization header during HTTP upgrade.
  * Used by both agent-runner index.ts and ipc-mcp-stdio.ts.
  */
 import WebSocket from 'ws';
@@ -75,49 +76,25 @@ export class WsClient {
 
   private doConnect(): Promise<AuthOkPayload> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
-      let authResolved = false;
+      this.ws = new WebSocket(`${this.url}?role=${this.role}`, {
+        headers: { Authorization: `Bearer ${this.token}` },
+      });
+      let connected = false;
 
       this.ws.on('open', () => {
-        log('Connected, authenticating...');
-        this.ws!.send(JSON.stringify({ type: 'auth', token: this.token, role: this.role }));
-      });
-
-      this.ws.on('message', (raw: WebSocket.RawData) => {
-        let msg: { type?: string; [key: string]: unknown };
-        try {
-          msg = JSON.parse(raw.toString());
-        } catch {
-          log('Malformed message from server, ignoring');
-          return;
-        }
-
-        if (!authResolved) {
-          if (msg.type === 'auth_ok') {
-            authResolved = true;
-            this.reconnectAttempts = 0;
-            this.resetPingWatchdog();
-            this.initRpc();
-            log('Authenticated');
-            resolve(msg as unknown as AuthOkPayload);
-          } else if (msg.type === 'auth_error') {
-            authResolved = true;
-            reject(new Error(`Auth failed: ${msg.message}`));
-          }
-          return;
-        }
-
-        // Post-auth: delegate to JSON-RPC
-        if (this.rpc) {
-          this.rpc.receiveAndSend(msg);
-        }
+        log('Connected');
+        this.reconnectAttempts = 0;
+        this.resetPingWatchdog();
+        this.initRpc((payload) => {
+          connected = true;
+          resolve(payload);
+        });
       });
 
       this.ws.on('close', (code: number, reason: Buffer) => {
         log(`Connection closed: ${code} ${reason.toString()}`);
-        if (!authResolved) {
-          authResolved = true;
-          reject(new Error(`Connection closed during auth: ${code}`));
+        if (!connected) {
+          reject(new Error(`Connection closed during setup: ${code}`));
           return;
         }
         this.handleDisconnect();
@@ -125,8 +102,7 @@ export class WsClient {
 
       this.ws.on('error', (err: Error) => {
         log(`Connection error: ${err.message}`);
-        if (!authResolved) {
-          authResolved = true;
+        if (!connected) {
           reject(err);
         }
       });
@@ -166,8 +142,8 @@ export class WsClient {
     }
   }
 
-  /** Initialize the JSON-RPC server+client after successful auth */
-  private initRpc(): void {
+  /** Initialize the JSON-RPC server+client and wire up message routing */
+  private initRpc(onReady?: (payload: AuthOkPayload) => void): void {
     const ws = this.ws!;
 
     this.rpc = new JSONRPCServerAndClient(
@@ -181,6 +157,12 @@ export class WsClient {
       }),
     );
 
+    // Server receives auth_ok notification with initial state
+    this.rpc.addMethod('auth_ok', (params: Record<string, unknown>) => {
+      onReady?.(params as unknown as AuthOkPayload);
+      onReady = undefined; // one-shot
+    });
+
     // Register server-side methods for incoming calls from host
     this.rpc.addMethod('input', ({ text }: { text: string }) => {
       this.pushEvent({ type: 'input', text });
@@ -190,6 +172,19 @@ export class WsClient {
       this.pushEvent({ type: 'close' });
     });
 
+    // Route all incoming messages through JSON-RPC
+    ws.on('message', (raw: WebSocket.RawData) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(raw.toString());
+      } catch {
+        log('Malformed message from server, ignoring');
+        return;
+      }
+      if (this.rpc) {
+        this.rpc.receiveAndSend(msg);
+      }
+    });
   }
 
   /** If no ping arrives within 45s (1.5x server interval), assume dead connection */

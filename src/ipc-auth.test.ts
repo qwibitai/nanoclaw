@@ -9,6 +9,7 @@ import {
   getTaskById,
   setRegisteredGroup,
 } from './db.js';
+import { initCoreHandlers } from './ipc-handlers/core.js';
 import { RegisteredGroup } from './types.js';
 import { WsIpcServer, WsIpcServerDeps } from './ws-server.js';
 import { sendAuthenticatedMessage } from './test-helpers/ws-test-utils.js';
@@ -29,10 +30,9 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock ipc-handlers registry
-vi.mock('./ipc-handlers/registry.js', () => ({
-  getRegisteredHandlers: vi.fn(() => new Map()),
-  registerIpcHandler: vi.fn(),
+// Mock group-folder
+vi.mock('./group-folder.js', () => ({
+  isValidGroupFolder: vi.fn((folder: string) => !folder.includes('..')),
 }));
 
 // Store the FakeWSServer constructor so tests can access it
@@ -99,14 +99,6 @@ let wss: EventEmitter;
 
 function createDeps(): WsIpcServerDeps {
   return {
-    sendMessage: vi.fn(async () => {}),
-    registeredGroups: () => groups,
-    registerGroup: (jid, group) => {
-      groups[jid] = group;
-      setRegisteredGroup(jid, group);
-    },
-    syncGroups: vi.fn(async () => {}),
-    getAvailableGroups: () => [],
     getTasksSnapshot: () => [],
     getGroupsSnapshot: () => ({ groups: [], lastSync: '' }),
   };
@@ -126,6 +118,20 @@ beforeEach(async () => {
   setRegisteredGroup('main@g.us', MAIN_GROUP);
   setRegisteredGroup('other@g.us', OTHER_GROUP);
   setRegisteredGroup('third@g.us', THIRD_GROUP);
+
+  // Register core handlers with real deps
+  initCoreHandlers({
+    sendMessage: vi.fn(async () => {}),
+    registeredGroups: () => groups,
+    registerGroup: (jid, group) => {
+      groups[jid] = group;
+      setRegisteredGroup(jid, group);
+    },
+    syncGroups: vi.fn(async () => {}),
+    getAvailableGroups: () => [],
+    getTasksSnapshot: () => [],
+    getGroupsSnapshot: () => ({ groups: [], lastSync: '' }),
+  });
 
   server = new WsIpcServer(createDeps());
   await server.start();
@@ -470,7 +476,7 @@ describe('refresh_groups authorization', () => {
 });
 
 // --- IPC message authorization ---
-// Tests the authorization pattern used in handleMessage (ws-server.ts).
+// Tests the authorization pattern used in handleMessage (ipc-handlers/core.ts).
 // The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
 
 describe('IPC message authorization', () => {

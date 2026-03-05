@@ -82,7 +82,7 @@ vi.mock('child_process', async () => {
   };
 });
 
-// Mock WS server
+// Mock WS server — createToken captures callbacks from opts
 function createMockWsServer() {
   let tokenCallbacks: {
     onOutput?: (output: any) => Promise<void>;
@@ -91,20 +91,16 @@ function createMockWsServer() {
 
   return {
     port: 12345,
-    createToken: vi.fn(() => 'test-token-123'),
-    revokeToken: vi.fn(),
-    setTokenCallbacks: vi.fn(
-      (
-        _token: string,
-        onOutput: (output: any) => Promise<void>,
-        resetTimeout: () => void,
-      ) => {
-        tokenCallbacks = { onOutput, resetTimeout };
-      },
-    ),
+    createToken: vi.fn((opts: any) => {
+      tokenCallbacks = {
+        onOutput: opts.onOutput,
+        resetTimeout: opts.resetTimeout,
+      };
+      return 'test-token-123';
+    }),
+    revokeToken: vi.fn(async () => {}),
     sendInput: vi.fn(() => true),
     sendClose: vi.fn(),
-    getOutputChain: vi.fn(() => Promise.resolve()),
     // Helper to simulate WS output from container
     _simulateOutput: async (output: any) => {
       if (tokenCallbacks.onOutput) {
