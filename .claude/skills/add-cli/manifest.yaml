@@ -1,0 +1,13 @@
+skill: cli-send
+version: 1.0.0
+description: "CLI tool to send messages to the NanoClaw agent"
+core_version: 0.1.0
+adds:
+  - src/cli-send.ts
+  - src/cli-send.test.ts
+  - bin/send
+modifies: []
+structured: {}
+conflicts: []
+depends: []
+test: "npx vitest run src/cli-send.test.ts"

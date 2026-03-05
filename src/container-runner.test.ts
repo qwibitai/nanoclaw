@@ -14,6 +14,7 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
+  ANTHROPIC_MODEL: undefined,
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -27,7 +28,7 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
-// Mock fs
+// Mock fs (sync + async) to avoid real I/O in tests
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -42,6 +43,19 @@ vi.mock('fs', async () => {
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
       cpSync: vi.fn(),
+      rmSync: vi.fn(),
+      promises: {
+        mkdir: vi.fn(() => Promise.resolve()),
+        chmod: vi.fn(() => Promise.resolve()),
+        stat: vi.fn(() =>
+          Promise.reject(
+            Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+          ),
+        ),
+        writeFile: vi.fn(() => Promise.resolve()),
+        readdir: vi.fn(() => Promise.resolve([])),
+        cp: vi.fn(() => Promise.resolve()),
+      },
     },
   };
 });
@@ -248,7 +262,7 @@ describe('buildVolumeMounts agent-runner source sync', () => {
         String(call[0]).includes('src'),
     );
     expect(cpSyncCalls.length).toBeGreaterThanOrEqual(1);
-    expect(cpSyncCalls[0][2]).toEqual({ recursive: true });
+    expect(cpSyncCalls[0][2]).toEqual({ recursive: true, force: true });
   });
 
   it('creates extensions directory if it does not exist', async () => {

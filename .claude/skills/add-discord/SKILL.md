@@ -210,7 +210,7 @@ If you can't copy the channel ID:
 
 The Discord bot supports:
 - Text messages in registered channels
-- Attachment descriptions (images, videos, files shown as placeholders)
+- **File downloads**: Downloads all attachments (images, documents, spreadsheets, PDFs, audio, video, text files) to `/workspace/ipc/files/` so the agent can read/view them with the Read tool
 - Reply context (shows who the user is replying to)
 - @mention translation (Discord `<@botId>` → NanoClaw trigger format)
 - Message splitting for responses over 2000 characters

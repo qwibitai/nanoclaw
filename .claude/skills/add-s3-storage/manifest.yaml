@@ -1,0 +1,8 @@
+skill: add-s3-storage
+version: 1.0.0
+description: "S3-compatible storage integration: automated backups + live file mount"
+core_version: 0.1.0
+adds: []
+modifies: []
+conflicts: []
+depends: []

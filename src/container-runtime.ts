@@ -32,7 +32,7 @@ export function ensureContainerRuntimeRunning(): void {
   if (isLinux) {
     try {
       execSync('docker info', { stdio: 'pipe', timeout: 10000 });
-      logger.debug('Docker runtime already running');
+      logger.debug('Container runtime already running');
     } catch (err) {
       logger.error({ err }, 'Failed to reach Docker runtime');
       console.error(
@@ -59,7 +59,7 @@ export function ensureContainerRuntimeRunning(): void {
       console.error(
         '╚════════════════════════════════════════════════════════════════╝\n',
       );
-      throw new Error('Docker runtime is required but failed to start');
+      throw new Error('Container runtime is required but failed to start');
     }
   } else {
     try {

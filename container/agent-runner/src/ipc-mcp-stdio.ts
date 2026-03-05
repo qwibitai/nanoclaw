@@ -41,7 +41,7 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times. Note: when running as a scheduled task, your final output is NOT sent to the user — use this tool if you need to communicate with the user or group.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
   {
     text: z.string().describe('The message text to send'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
@@ -262,6 +262,106 @@ server.tool(
     writeIpcFile(TASKS_DIR, data);
 
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+  },
+);
+
+server.tool(
+  'update_task',
+  `Update an existing scheduled task without canceling and recreating it. Preserves the task ID and history.
+
+Only provide the fields you want to change — unspecified fields remain unchanged.
+
+If you change schedule_type or schedule_value, the next execution time will be recalculated automatically.
+
+SCHEDULE VALUE FORMAT (same as schedule_task, all times are LOCAL timezone):
+• cron: Standard cron expression (e.g., "*/5 * * * *", "0 9 * * *")
+• interval: Milliseconds between runs (e.g., "300000" for 5 minutes)
+• once: Local time WITHOUT "Z" suffix (e.g., "2026-02-01T15:30:00")`,
+  {
+    task_id: z.string().describe('The ID of the task to update (e.g., "task-1772008617164-yhg6ws")'),
+    prompt: z.string().optional().describe('New prompt/instructions for the task'),
+    schedule_type: z.enum(['cron', 'interval', 'once']).optional().describe('New schedule type'),
+    schedule_value: z.string().optional().describe('New schedule value (must match schedule_type format)'),
+    context_mode: z.enum(['group', 'isolated']).optional().describe('New context mode: group=with chat history, isolated=fresh session'),
+  },
+  async (args) => {
+    // Must provide at least one field to update
+    if (!args.prompt && !args.schedule_type && !args.schedule_value && !args.context_mode) {
+      return {
+        content: [{ type: 'text' as const, text: 'No fields to update. Provide at least one of: prompt, schedule_type, schedule_value, context_mode.' }],
+        isError: true,
+      };
+    }
+
+    // If schedule_type is changing, schedule_value must also be provided (and vice versa)
+    if ((args.schedule_type && !args.schedule_value) || (!args.schedule_type && args.schedule_value)) {
+      return {
+        content: [{ type: 'text' as const, text: 'When changing the schedule, both schedule_type and schedule_value must be provided together.' }],
+        isError: true,
+      };
+    }
+
+    // Validate schedule values if provided
+    if (args.schedule_type && args.schedule_value) {
+      if (args.schedule_type === 'cron') {
+        try {
+          CronExpressionParser.parse(args.schedule_value);
+        } catch {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid cron: "${args.schedule_value}". Use format like "0 9 * * *" (daily 9am) or "*/5 * * * *" (every 5 min).` }],
+            isError: true,
+          };
+        }
+      } else if (args.schedule_type === 'interval') {
+        const ms = parseInt(args.schedule_value, 10);
+        if (isNaN(ms) || ms <= 0) {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid interval: "${args.schedule_value}". Must be positive milliseconds (e.g., "300000" for 5 min).` }],
+            isError: true,
+          };
+        }
+      } else if (args.schedule_type === 'once') {
+        if (/[Zz]$/.test(args.schedule_value) || /[+-]\d{2}:\d{2}$/.test(args.schedule_value)) {
+          return {
+            content: [{ type: 'text' as const, text: `Timestamp must be local time without timezone suffix. Got "${args.schedule_value}" — use format like "2026-02-01T15:30:00".` }],
+            isError: true,
+          };
+        }
+        const date = new Date(args.schedule_value);
+        if (isNaN(date.getTime())) {
+          return {
+            content: [{ type: 'text' as const, text: `Invalid timestamp: "${args.schedule_value}". Use local time format like "2026-02-01T15:30:00".` }],
+            isError: true,
+          };
+        }
+      }
+    }
+
+    const data: Record<string, string | undefined> = {
+      type: 'update_task',
+      taskId: args.task_id,
+      groupFolder,
+      isMain: isMain ? '1' : '0',
+      timestamp: new Date().toISOString(),
+    };
+
+    // Only include fields that were provided
+    if (args.prompt !== undefined) data.prompt = args.prompt;
+    if (args.schedule_type !== undefined) data.schedule_type = args.schedule_type;
+    if (args.schedule_value !== undefined) data.schedule_value = args.schedule_value;
+    if (args.context_mode !== undefined) data.context_mode = args.context_mode;
+
+    writeIpcFile(TASKS_DIR, data);
+
+    const updatedFields = [
+      args.prompt && 'prompt',
+      args.schedule_type && 'schedule',
+      args.context_mode && 'context_mode',
+    ].filter(Boolean).join(', ');
+
+    return {
+      content: [{ type: 'text' as const, text: `Task ${args.task_id} update requested (${updatedFields}).` }],
+    };
   },
 );
 
