@@ -188,6 +188,37 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
 
+#### Sender Allowlist
+
+After registering a group, explain the sender allowlist feature to the user:
+
+> This group can be configured with a sender allowlist to control who can interact with me. There are two modes:
+>
+> - **Trigger mode** (default): Everyone's messages are stored for context, but only allowed senders can trigger me with @{AssistantName}.
+> - **Drop mode**: Messages from non-allowed senders are not stored at all.
+>
+> For closed groups with trusted members, I recommend setting up an allow-only list so only specific people can trigger me. Want me to configure that?
+
+If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowlist.json` on the host:
+
+```json
+{
+  "default": { "allow": "*", "mode": "trigger" },
+  "chats": {
+    "<chat-jid>": {
+      "allow": ["sender-id-1", "sender-id-2"],
+      "mode": "trigger"
+    }
+  },
+  "logDenied": true
+}
+```
+
+Notes:
+- Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
+- If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
+- The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
+
 ### Removing a Group
 
 1. Read `/workspace/project/data/registered_groups.json`
