@@ -91,6 +91,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else {
+                logger.warn(
+                  { sourceGroup, file, type: data.type },
+                  'Unrecognized IPC message structure, deleting',
+                );
               }
               fs.unlinkSync(filePath);
             } catch (err) {
