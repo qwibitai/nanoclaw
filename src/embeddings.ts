@@ -133,7 +133,14 @@ export async function embedMessage(
     .prepare(
       'INSERT OR IGNORE INTO embeddings (id, chat_jid, sender_name, content, timestamp, embedding) VALUES (?, ?, ?, ?, ?, ?)',
     )
-    .run(id, chatJid, senderName, content, timestamp, float32ToBuffer(embedding));
+    .run(
+      id,
+      chatJid,
+      senderName,
+      content,
+      timestamp,
+      float32ToBuffer(embedding),
+    );
 
   logger.debug({ id, chatJid }, 'Message embedded');
 }

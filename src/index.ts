@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TELEGRAM_BOT_POOL,
@@ -33,6 +34,7 @@ import {
   getRouterState,
   initDatabase,
   deleteSession,
+  getMessageCount,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -50,7 +52,11 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { embedMessage, initEmbeddingDb, getEmbeddingCount } from './embeddings.js';
+import {
+  embedMessage,
+  initEmbeddingDb,
+  getEmbeddingCount,
+} from './embeddings.js';
 import { startMemoryServer } from './memory-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
@@ -483,29 +489,100 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // --- Agent settings helpers ---
+  const VALID_MODELS = ['opus', 'sonnet', 'haiku', 'opusplan'] as const;
+  const VALID_EFFORTS = ['low', 'medium', 'high'] as const;
+  const MODEL_DISPLAY: Record<string, string> = {
+    opus: 'claude-opus-4-6',
+    sonnet: 'claude-sonnet-4-6',
+    haiku: 'claude-haiku-4-5',
+    opusplan: 'opus (plan) \u2192 sonnet (exec)',
+  };
+
+  function getAgentSettingsPath(groupFolder: string): string {
+    return path.join(DATA_DIR, 'sessions', groupFolder, '.claude', 'settings.json');
+  }
+
+  function readAgentSettings(groupFolder: string): Record<string, unknown> {
+    const p = getAgentSettingsPath(groupFolder);
+    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return {}; }
+  }
+
+  function writeAgentSettings(groupFolder: string, settings: Record<string, unknown>): void {
+    const p = getAgentSettingsPath(groupFolder);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(settings, null, 2) + '\n');
+  }
+
+  function getCurrentModel(groupFolder: string): string {
+    const s = readAgentSettings(groupFolder);
+    return (s.model as string) || 'default';
+  }
+
+  function getCurrentEffort(groupFolder: string): string {
+    const s = readAgentSettings(groupFolder);
+    return (s.effortLevel as string) || 'adaptive';
+  }
+
   // Slash command handler (shared by all channels)
   const startedAt = Date.now();
-  const handleSlashCommand = async (chatJid: string, command: string): Promise<string | null> => {
-    const cmd = command.trim().toLowerCase();
+  const handleSlashCommand = async (
+    chatJid: string,
+    command: string,
+  ): Promise<string | null> => {
+    const parts = command.trim().split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    const arg = parts[1]?.toLowerCase();
     const group = registeredGroups[chatJid];
 
     if (cmd === '/status') {
       const uptimeMs = Date.now() - startedAt;
-      const hours = Math.floor(uptimeMs / 3600000);
+      const days = Math.floor(uptimeMs / 86400000);
+      const hours = Math.floor((uptimeMs % 86400000) / 3600000);
       const mins = Math.floor((uptimeMs % 3600000) / 60000);
-      const activeChannels = channels.filter(ch => ch.isConnected()).map(ch => ch.name);
+      const uptimeParts: string[] = [];
+      if (days > 0) uptimeParts.push(`${days}d`);
+      uptimeParts.push(`${hours}h`);
+      uptimeParts.push(`${mins}m`);
+
+      const channelStatus = channels
+        .map((ch) => `${ch.name} ${ch.isConnected() ? '\u2705' : '\u274c'}`)
+        .join(' \u00b7 ');
       const sessionId = group ? sessions[group.folder] : null;
-      const activeTasks = getAllTasks().filter(t => t.status === 'active').length;
+      const allTasks = getAllTasks();
+      const activeTasks = allTasks.filter((t) => t.status === 'active').length;
       const embedCount = getEmbeddingCount();
+      const msgCount = getMessageCount(chatJid);
+      const groupCount = Object.keys(registeredGroups).length;
+      const queueStats = queue.getStats();
+
+      // Current model & effort from agent settings
+      const model = group ? getCurrentModel(group.folder) : 'default';
+      const modelLabel = MODEL_DISPLAY[model] || model;
+      const effort = group ? getCurrentEffort(group.folder) : 'adaptive';
+
+      // Last activity for this chat
+      const lastTs = lastAgentTimestamp[chatJid];
+      let lastActivity = 'never';
+      if (lastTs) {
+        const ago = Date.now() - new Date(lastTs).getTime();
+        if (ago < 60000) lastActivity = 'just now';
+        else if (ago < 3600000) lastActivity = `${Math.floor(ago / 60000)}m ago`;
+        else if (ago < 86400000) lastActivity = `${Math.floor(ago / 3600000)}h ago`;
+        else lastActivity = `${Math.floor(ago / 86400000)}d ago`;
+      }
 
       return [
-        `<b>${ASSISTANT_NAME} Status</b>`,
-        ``,
-        `\u2022 Uptime: ${hours}h ${mins}m`,
-        `\u2022 Channels: ${activeChannels.join(', ')}`,
-        `\u2022 Session: ${sessionId ? sessionId.slice(0, 8) + '\u2026' : 'none'}`,
-        `\u2022 Active tasks: ${activeTasks}`,
-        `\u2022 Memory: ${embedCount} embeddings`,
+        `\ud83e\udd16 <b>${ASSISTANT_NAME}</b> v1.2.6`,
+        `\ud83e\udde0 Model: ${modelLabel} \u00b7 \ud83d\udd11 OAuth`,
+        `\ud83e\udde7 Think: ${effort}`,
+        `\ud83d\udce1 Channels: ${channelStatus}`,
+        `\ud83d\udcac Session: ${sessionId ? `<code>${sessionId.slice(0, 12)}</code> \u00b7 ${lastActivity}` : 'none (fresh)'}`,
+        `\u2699\ufe0f Runtime: container`,
+        `\ud83e\udea2 Queue: ${queueStats.activeContainers} active \u00b7 ${queueStats.queuedGroups} waiting`,
+        `\ud83d\udcc5 Tasks: ${activeTasks} active \u00b7 \ud83d\udc65 Groups: ${groupCount}`,
+        `\ud83e\udde9 Memory: ${embedCount.toLocaleString()} embeddings \u00b7 ${msgCount.toLocaleString()} msgs`,
+        `\u23f1 Uptime: ${uptimeParts.join(' ')}`,
       ].join('\n');
     }
 
@@ -514,18 +591,64 @@ async function main(): Promise<void> {
         delete sessions[group.folder];
         deleteSession(group.folder);
       }
-      return 'Session reset. Next message starts fresh.';
+      return '\ud83d\uddd1 Session reset. Next message starts fresh.';
+    }
+
+    if (cmd === '/model') {
+      if (!group) return '\u274c No group found for this chat.';
+
+      if (!arg) {
+        const current = getCurrentModel(group.folder);
+        const label = MODEL_DISPLAY[current] || current;
+        return `\ud83e\udde0 Current model: <b>${label}</b>\n\nUsage: /model &lt;${VALID_MODELS.join('|')}&gt;`;
+      }
+
+      if (!VALID_MODELS.includes(arg as typeof VALID_MODELS[number])) {
+        return `\u274c Unknown model: ${arg}\nAvailable: ${VALID_MODELS.join(', ')}`;
+      }
+
+      const settings = readAgentSettings(group.folder);
+      settings.model = arg;
+      writeAgentSettings(group.folder, settings);
+
+      // Reset session so the new model takes effect cleanly
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+
+      return `\ud83e\udde0 Model set to <b>${MODEL_DISPLAY[arg] || arg}</b>\nSession reset for clean start.`;
+    }
+
+    if (cmd === '/think') {
+      if (!group) return '\u274c No group found for this chat.';
+
+      if (!arg) {
+        const current = getCurrentEffort(group.folder);
+        return `\ud83e\udde7 Current effort: <b>${current}</b>\n\nUsage: /think &lt;${VALID_EFFORTS.join('|')}&gt;`;
+      }
+
+      if (!VALID_EFFORTS.includes(arg as typeof VALID_EFFORTS[number])) {
+        return `\u274c Unknown level: ${arg}\nAvailable: ${VALID_EFFORTS.join(', ')}`;
+      }
+
+      const settings = readAgentSettings(group.folder);
+      settings.effortLevel = arg;
+      writeAgentSettings(group.folder, settings);
+
+      return `\ud83e\udde7 Think level set to <b>${arg}</b>`;
     }
 
     if (cmd === '/tasks') {
       const isMain = group?.isMain === true;
       const allTasks = getAllTasks();
-      const tasks = isMain ? allTasks : allTasks.filter(t => group && t.group_folder === group.folder);
+      const tasks = isMain
+        ? allTasks
+        : allTasks.filter((t) => group && t.group_folder === group.folder);
 
       if (tasks.length === 0) return 'No scheduled tasks.';
 
-      const lines = tasks.map(t =>
-        `\u2022 <code>${t.id.slice(0, 6)}</code> ${t.prompt.slice(0, 40)}${t.prompt.length > 40 ? '\u2026' : ''} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}`
+      const lines = tasks.map(
+        (t) =>
+          `\u2022 <code>${t.id.slice(0, 6)}</code> ${t.prompt.slice(0, 40)}${t.prompt.length > 40 ? '\u2026' : ''} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}`,
       );
       return `<b>Scheduled Tasks</b>\n\n${lines.join('\n')}`;
     }

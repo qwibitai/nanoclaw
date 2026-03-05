@@ -3,7 +3,11 @@ import { Api, Bot } from 'grammy';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts, SlashCommandHandler } from './registry.js';
+import {
+  registerChannel,
+  ChannelOpts,
+  SlashCommandHandler,
+} from './registry.js';
 import {
   Channel,
   OnChatMetadata,
@@ -54,12 +58,14 @@ export class TelegramChannel implements Channel {
     });
 
     // User-facing slash commands routed to the host
-    const userCommands = ['status', 'new', 'tasks'];
+    const userCommands = ['status', 'new', 'tasks', 'model', 'think'];
     for (const cmd of userCommands) {
       this.bot.command(cmd, async (ctx) => {
         if (!this.opts.onSlashCommand) return;
         const chatJid = `tg:${ctx.chat.id}`;
-        const reply = await this.opts.onSlashCommand(chatJid, `/${cmd}`);
+        // Pass the full message text so arguments are included (e.g. "/model opus")
+        const fullText = ctx.message?.text || `/${cmd}`;
+        const reply = await this.opts.onSlashCommand(chatJid, fullText);
         if (reply) ctx.reply(reply, { parse_mode: 'HTML' });
       });
     }
@@ -106,8 +112,15 @@ export class TelegramChannel implements Channel {
       }
 
       // Store chat metadata for discovery
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'telegram',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
@@ -150,8 +163,15 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
@@ -165,9 +185,7 @@ export class TelegramChannel implements Channel {
 
     this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
+    this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
@@ -189,9 +207,11 @@ export class TelegramChannel implements Channel {
     await this.bot.api.setMyCommands([
       { command: 'status', description: 'Show bot status and stats' },
       { command: 'new', description: 'Start a new session' },
+      { command: 'model', description: 'Switch model (opus/sonnet/haiku/opusplan)' },
+      { command: 'think', description: 'Set thinking effort (low/medium/high)' },
       { command: 'tasks', description: 'List scheduled tasks' },
       { command: 'ping', description: 'Check if bot is online' },
-      { command: 'chatid', description: 'Show this chat\'s ID' },
+      { command: 'chatid', description: "Show this chat's ID" },
     ]);
 
     // Start polling — returns a Promise that resolves when started
@@ -309,9 +329,15 @@ export async function sendPoolMessage(
     try {
       await poolApis[idx].setMyName(sender);
       await new Promise((r) => setTimeout(r, 2000));
-      logger.info({ sender, groupFolder, poolIndex: idx }, 'Assigned and renamed pool bot');
+      logger.info(
+        { sender, groupFolder, poolIndex: idx },
+        'Assigned and renamed pool bot',
+      );
     } catch (err) {
-      logger.warn({ sender, err }, 'Failed to rename pool bot (sending anyway)');
+      logger.warn(
+        { sender, err },
+        'Failed to rename pool bot (sending anyway)',
+      );
     }
   }
 
@@ -326,7 +352,10 @@ export async function sendPoolMessage(
         await api.sendMessage(numericId, text.slice(i, i + MAX_LENGTH));
       }
     }
-    logger.info({ chatId, sender, poolIndex: idx, length: text.length }, 'Pool message sent');
+    logger.info(
+      { chatId, sender, poolIndex: idx, length: text.length },
+      'Pool message sent',
+    );
   } catch (err) {
     logger.error({ chatId, sender, err }, 'Failed to send pool message');
   }

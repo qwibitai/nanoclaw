@@ -344,6 +344,13 @@ export class GroupQueue {
     }
   }
 
+  getStats(): { activeContainers: number; queuedGroups: number } {
+    return {
+      activeContainers: this.activeCount,
+      queuedGroups: this.waitingGroups.length,
+    };
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

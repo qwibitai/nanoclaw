@@ -520,6 +520,19 @@ export function deleteSession(groupFolder: string): void {
   db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 
+export function getMessageCount(chatJid?: string): number {
+  if (chatJid) {
+    const row = db
+      .prepare('SELECT COUNT(*) as count FROM messages WHERE chat_jid = ?')
+      .get(chatJid) as { count: number };
+    return row.count;
+  }
+  const row = db
+    .prepare('SELECT COUNT(*) as count FROM messages')
+    .get() as { count: number };
+  return row.count;
+}
+
 export function getAllSessions(): Record<string, string> {
   const rows = db
     .prepare('SELECT group_folder, session_id FROM sessions')
