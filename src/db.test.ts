@@ -9,6 +9,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  recoverRunningTasks,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -422,5 +423,66 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- recoverRunningTasks ---
+
+describe('recoverRunningTasks', () => {
+  function makeTask(
+    id: string,
+    status: 'active' | 'running' | 'paused' | 'completed',
+  ) {
+    createTask({
+      id,
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: `task ${id}`,
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status,
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+  }
+
+  it('resets running tasks back to active', () => {
+    makeTask('t1', 'running');
+
+    const count = recoverRunningTasks();
+    expect(count).toBe(1);
+    expect(getTaskById('t1')!.status).toBe('active');
+  });
+
+  it('does not touch active, paused, or completed tasks', () => {
+    makeTask('t-active', 'active');
+    makeTask('t-paused', 'paused');
+    makeTask('t-completed', 'completed');
+
+    const count = recoverRunningTasks();
+    expect(count).toBe(0);
+    expect(getTaskById('t-active')!.status).toBe('active');
+    expect(getTaskById('t-paused')!.status).toBe('paused');
+    expect(getTaskById('t-completed')!.status).toBe('completed');
+  });
+
+  it('recovers multiple stuck tasks', () => {
+    makeTask('t1', 'running');
+    makeTask('t2', 'running');
+    makeTask('t3', 'active');
+
+    const count = recoverRunningTasks();
+    expect(count).toBe(2);
+    expect(getTaskById('t1')!.status).toBe('active');
+    expect(getTaskById('t2')!.status).toBe('active');
+    expect(getTaskById('t3')!.status).toBe('active');
+  });
+
+  it('returns zero when no tasks are running', () => {
+    makeTask('t1', 'active');
+
+    const count = recoverRunningTasks();
+    expect(count).toBe(0);
   });
 });
