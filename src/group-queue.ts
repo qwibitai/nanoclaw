@@ -1,6 +1,7 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, exec } from 'child_process';
 
 import { MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { stopContainer } from './container-runtime.js';
 import { logger } from './logger.js';
 import type { WsIpcServer } from './ws-server.js';
 
@@ -331,22 +332,69 @@ export class GroupQueue {
     }
   }
 
-  async shutdown(_gracePeriodMs: number): Promise<void> {
+  async shutdown(gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
-    const activeContainers: string[] = [];
+    // Signal all active containers to close via WS, then stop them gracefully.
+    // Unlike the old file-based IPC, containers cannot persist output after the
+    // host process exits — so we must wait for them to flush before shutting down.
+    const active: { jid: string; containerName: string; wsToken: string | null }[] = [];
     for (const [jid, state] of this.groups) {
-      if (state.process && !state.process.killed && state.containerName) {
-        activeContainers.push(state.containerName);
+      if (state.active && state.containerName) {
+        active.push({
+          jid,
+          containerName: state.containerName,
+          wsToken: state.wsToken,
+        });
+        // Signal agent to wrap up
+        if (state.wsToken && this._wsServer) {
+          this._wsServer.sendClose(state.wsToken);
+        }
       }
     }
 
+    if (active.length === 0) {
+      logger.info('GroupQueue shutting down (no active containers)');
+      return;
+    }
+
     logger.info(
-      { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      { activeCount: active.length, containers: active.map((a) => a.containerName) },
+      'GroupQueue shutting down, stopping containers',
     );
+
+    // Wait for containers to exit on their own, then force-stop stragglers
+    await Promise.all(
+      active.map(({ containerName, wsToken }) =>
+        new Promise<void>((resolve) => {
+          const timer = setTimeout(() => {
+            logger.warn({ containerName }, 'Container did not exit in time, stopping');
+            exec(stopContainer(containerName), { timeout: 15000 }, () => resolve());
+          }, gracePeriodMs);
+
+          // If the container's process exits before the grace period, resolve early
+          const state = [...this.groups.values()].find(
+            (s) => s.containerName === containerName,
+          );
+          if (state?.process && !state.process.killed) {
+            state.process.once('close', () => {
+              clearTimeout(timer);
+              resolve();
+            });
+          } else {
+            // Already exited
+            clearTimeout(timer);
+            resolve();
+          }
+        }).then(() => {
+          // Revoke WS token so the server can clean up
+          if (wsToken && this._wsServer) {
+            this._wsServer.revokeToken(wsToken);
+          }
+        }),
+      ),
+    );
+
+    logger.info('GroupQueue shutdown complete');
   }
 }

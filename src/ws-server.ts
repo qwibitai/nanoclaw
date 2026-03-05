@@ -144,7 +144,7 @@ export class WsIpcServer {
       this.clearPing(conn.ws);
       conn.rpc.rejectAllPendingRequests('token revoked');
       if (conn.ws.readyState === WebSocket.OPEN) {
-        conn.ws.close(1000, 'token revoked');
+        conn.ws.close(WS_CLOSE_TOKEN_REVOKED, 'token revoked');
       }
     }
     this.tokens.delete(token);
@@ -667,7 +667,8 @@ export class WsIpcServer {
     ctx: TokenContext,
   ): Record<string, unknown> {
     return this.withAuthorizedTask(
-      params, ctx,
+      params,
+      ctx,
       (id) => updateTask(id, { status: 'paused' }),
       'paused',
     );
@@ -678,7 +679,8 @@ export class WsIpcServer {
     ctx: TokenContext,
   ): Record<string, unknown> {
     return this.withAuthorizedTask(
-      params, ctx,
+      params,
+      ctx,
       (id) => updateTask(id, { status: 'active' }),
       'resumed',
     );
@@ -689,7 +691,8 @@ export class WsIpcServer {
     ctx: TokenContext,
   ): Record<string, unknown> {
     return this.withAuthorizedTask(
-      params, ctx,
+      params,
+      ctx,
       (id) => deleteTask(id),
       'cancelled',
     );

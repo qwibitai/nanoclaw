@@ -463,14 +463,20 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            cleanup();
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          outputChain
+            .then(() => {
+              cleanup();
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
+            })
+            .catch((err) => {
+              logger.error({ err, group: group.name }, 'Output chain error');
+              cleanup();
+              resolve({ status: 'success', result: null, newSessionId });
             });
-          });
           return;
         }
 
@@ -570,18 +576,24 @@ export async function runContainerAgent(
 
       // Wait for output chain to settle, then revoke token and resolve
       if (onOutput) {
-        outputChain.then(() => {
-          cleanup();
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        outputChain
+          .then(() => {
+            cleanup();
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
+          })
+          .catch((err) => {
+            logger.error({ err, group: group.name }, 'Output chain error');
+            cleanup();
+            resolve({ status: 'success', result: null, newSessionId });
           });
-        });
         return;
       }
 
