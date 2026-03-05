@@ -458,23 +458,6 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
-      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
-  };
-
-  // Create and connect channels
-  if (MATTERMOST_BOT_TOKEN && MATTERMOST_URL) {
-    const mattermost = new MattermostChannel(MATTERMOST_URL, MATTERMOST_BOT_TOKEN, channelOpts);
-    channels.push(mattermost);
-    await mattermost.connect();
-  }
-
-  if (!MATTERMOST_ONLY) {
-    whatsapp = new WhatsAppChannel(channelOpts);
-    channels.push(whatsapp);
-    await whatsapp.connect();
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
@@ -494,15 +477,23 @@ async function main(): Promise<void> {
       }
       storeMessage(msg);
     },
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
+    onChatMetadata: (chatJid: string, timestamp: string, name?: string, channel?: string, isGroup?: boolean) =>
+      storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
+
+  // Create and connect channels
+  if (MATTERMOST_BOT_TOKEN && MATTERMOST_URL) {
+    const mattermost = new MattermostChannel(MATTERMOST_URL, MATTERMOST_BOT_TOKEN, channelOpts);
+    channels.push(mattermost);
+    await mattermost.connect();
+  }
+
+  if (!MATTERMOST_ONLY) {
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+  }
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
