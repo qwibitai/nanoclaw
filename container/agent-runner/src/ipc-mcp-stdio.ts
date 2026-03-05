@@ -11,19 +11,35 @@ import { CronExpressionParser } from 'cron-parser';
 import { WsClient } from './ws-client.js';
 
 // Context from environment variables (set by the agent runner)
-const chatJid = process.env.NANOCLAW_CHAT_JID!;
-const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
+const chatJid = process.env.NANOCLAW_CHAT_JID;
+const groupFolder = process.env.NANOCLAW_GROUP_FOLDER;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
-const wsUrl = process.env.NANOCLAW_WS_URL!;
-const wsToken = process.env.NANOCLAW_WS_TOKEN!;
+const wsUrl = process.env.NANOCLAW_WS_URL;
+const wsToken = process.env.NANOCLAW_WS_TOKEN;
+
+if (!chatJid || !groupFolder || !wsUrl || !wsToken) {
+  console.error(
+    `[ipc-mcp] Missing required env vars: ${['NANOCLAW_CHAT_JID', 'NANOCLAW_GROUP_FOLDER', 'NANOCLAW_WS_URL', 'NANOCLAW_WS_TOKEN'].filter((k) => !process.env[k]).join(', ')}`,
+  );
+  process.exit(1);
+}
 
 // Create WS client for communicating with the host
 const wsClient = new WsClient(wsUrl, wsToken, 'mcp');
 
-// Connect asynchronously — tools that need it will await this.
-// If connection fails, the rejected promise is cached and re-thrown on each ensureWs() call.
-const wsConnectPromise = wsClient.connect().catch((err) => {
-  const msg = `WS connect failed: ${err instanceof Error ? err.message : String(err)}`;
+// Connect with a single retry for transient startup timing issues
+async function connectWithRetry(): Promise<void> {
+  try {
+    await wsClient.connect();
+  } catch (err) {
+    console.error(`[ipc-mcp] WS connect failed, retrying in 1s: ${err instanceof Error ? err.message : String(err)}`);
+    await new Promise((r) => setTimeout(r, 1000));
+    await wsClient.connect();
+  }
+}
+
+const wsConnectPromise = connectWithRetry().catch((err) => {
+  const msg = `WS connect failed after retry: ${err instanceof Error ? err.message : String(err)}`;
   console.error(`[ipc-mcp] ${msg}`);
   throw new Error(msg);
 });
@@ -120,19 +136,20 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     const targetJid = isMain && args.target_group_jid ? args.target_group_jid : chatJid;
 
     await ensureWs();
-    wsClient.sendTask({
-      type: 'schedule_task',
-      prompt: args.prompt,
-      schedule_type: args.schedule_type,
-      schedule_value: args.schedule_value,
-      context_mode: args.context_mode || 'group',
-      targetJid,
-      createdBy: groupFolder,
-    });
-
-    return {
-      content: [{ type: 'text' as const, text: `Task scheduled: ${args.schedule_type} - ${args.schedule_value}` }],
-    };
+    try {
+      const resp = await wsClient.request('schedule_task', {
+        prompt: args.prompt,
+        schedule_type: args.schedule_type,
+        schedule_value: args.schedule_value,
+        context_mode: args.context_mode || 'group',
+        targetJid,
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Task scheduled (${resp.taskId}): ${args.schedule_type} - ${args.schedule_value}` }],
+      };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to schedule task: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 
@@ -171,12 +188,12 @@ server.tool(
   { task_id: z.string().describe('The task ID to pause') },
   async (args) => {
     await ensureWs();
-    wsClient.sendTask({
-      type: 'pause_task',
-      taskId: args.task_id,
-    });
-
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
+    try {
+      await wsClient.request('pause_task', { taskId: args.task_id });
+      return { content: [{ type: 'text' as const, text: `Task ${args.task_id} paused.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to pause task: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 
@@ -186,12 +203,12 @@ server.tool(
   { task_id: z.string().describe('The task ID to resume') },
   async (args) => {
     await ensureWs();
-    wsClient.sendTask({
-      type: 'resume_task',
-      taskId: args.task_id,
-    });
-
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
+    try {
+      await wsClient.request('resume_task', { taskId: args.task_id });
+      return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resumed.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to resume task: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 
@@ -201,12 +218,12 @@ server.tool(
   { task_id: z.string().describe('The task ID to cancel') },
   async (args) => {
     await ensureWs();
-    wsClient.sendTask({
-      type: 'cancel_task',
-      taskId: args.task_id,
-    });
-
-    return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
+    try {
+      await wsClient.request('cancel_task', { taskId: args.task_id });
+      return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancelled.` }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to cancel task: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 
@@ -230,17 +247,19 @@ The groups data provided when the agent connects includes available groups with 
     }
 
     await ensureWs();
-    wsClient.sendTask({
-      type: 'register_group',
-      jid: args.jid,
-      name: args.name,
-      folder: args.folder,
-      trigger: args.trigger,
-    });
-
-    return {
-      content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
-    };
+    try {
+      await wsClient.request('register_group', {
+        jid: args.jid,
+        name: args.name,
+        folder: args.folder,
+        trigger: args.trigger,
+      });
+      return {
+        content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+      };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to register group: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 

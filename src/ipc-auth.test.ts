@@ -29,6 +29,12 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
+// Mock ipc-handlers registry
+vi.mock('./ipc-handlers/registry.js', () => ({
+  getRegisteredHandlers: vi.fn(() => new Map()),
+  registerIpcHandler: vi.fn(),
+}));
+
 // Store the FakeWSServer constructor so tests can access it
 let lastCreatedServer: any = null;
 

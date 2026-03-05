@@ -1,10 +1,14 @@
 /**
  * WebSocket IPC Client for NanoClaw containers
- * Replaces file-based IPC polling with a persistent WS connection.
+ * Uses json-rpc-2.0 for protocol handling after auth handshake.
  * Used by both agent-runner index.ts and ipc-mcp-stdio.ts.
  */
-import crypto from 'node:crypto';
 import WebSocket from 'ws';
+import {
+  JSONRPCClient,
+  JSONRPCServer,
+  JSONRPCServerAndClient,
+} from 'json-rpc-2.0';
 
 export interface AuthOkPayload {
   tasks: Array<{
@@ -40,14 +44,8 @@ export class WsClient {
   private token: string;
   private role: 'agent' | 'mcp';
   private reconnectAttempts = 0;
-  private pendingRequests = new Map<
-    string,
-    {
-      resolve: (data: unknown) => void;
-      reject: (err: Error) => void;
-      timer: ReturnType<typeof setTimeout>;
-    }
-  >();
+  private closed = false;
+  private rpc: JSONRPCServerAndClient | null = null;
   private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   // Event callbacks set by the consumer
@@ -64,6 +62,7 @@ export class WsClient {
   }
 
   async connect(): Promise<AuthOkPayload> {
+    this.closed = false;
     return this.doConnect();
   }
 
@@ -78,7 +77,7 @@ export class WsClient {
       });
 
       this.ws.on('message', (raw: WebSocket.RawData) => {
-        let msg: { type: string; [key: string]: unknown };
+        let msg: { type?: string; [key: string]: unknown };
         try {
           msg = JSON.parse(raw.toString());
         } catch {
@@ -91,6 +90,7 @@ export class WsClient {
             authResolved = true;
             this.reconnectAttempts = 0;
             this.resetPingWatchdog();
+            this.initRpc();
             log('Authenticated');
             resolve(msg as unknown as AuthOkPayload);
           } else if (msg.type === 'auth_error') {
@@ -100,7 +100,10 @@ export class WsClient {
           return;
         }
 
-        this.handleMessage(msg);
+        // Post-auth: delegate to JSON-RPC
+        if (this.rpc) {
+          this.rpc.receiveAndSend(msg);
+        }
       });
 
       this.ws.on('close', (code: number, reason: Buffer) => {
@@ -127,6 +130,32 @@ export class WsClient {
     });
   }
 
+  /** Initialize the JSON-RPC server+client after successful auth */
+  private initRpc(): void {
+    const ws = this.ws!;
+
+    this.rpc = new JSONRPCServerAndClient(
+      new JSONRPCServer(),
+      new JSONRPCClient((request) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(request));
+          return Promise.resolve();
+        }
+        return Promise.reject(new Error('WebSocket not connected'));
+      }),
+    );
+
+    // Register server-side methods for incoming calls from host
+    this.rpc.addMethod('input', ({ text }: { text: string }) => {
+      this.onInput?.(text);
+    });
+
+    this.rpc.addMethod('close', () => {
+      this.onClose?.();
+    });
+
+  }
+
   /** If no ping arrives within 45s (1.5x server interval), assume dead connection */
   private resetPingWatchdog(): void {
     if (this.pingWatchdog) clearTimeout(this.pingWatchdog);
@@ -143,49 +172,16 @@ export class WsClient {
     }
   }
 
-  private handleMessage(msg: { type: string; [key: string]: unknown }): void {
-    switch (msg.type) {
-      case 'input':
-        this.onInput?.(msg.text as string);
-        break;
-
-      case 'close':
-        this.onClose?.();
-        break;
-
-      case 'ipc_response': {
-        const requestId = msg.requestId as string;
-        const pending = this.pendingRequests.get(requestId);
-        if (pending) {
-          clearTimeout(pending.timer);
-          this.pendingRequests.delete(requestId);
-          pending.resolve(msg);
-        }
-        break;
-      }
-
-      case 'groups_updated':
-        this.onGroupsUpdated?.(
-          msg.groups as AuthOkPayload['groups'],
-        );
-        break;
-
-      default:
-        log(`Unknown message type: ${msg.type}`);
-    }
-  }
-
   private async handleDisconnect(): Promise<void> {
     this.clearPingWatchdog();
+    if (this.rpc) {
+      this.rpc.rejectAllPendingRequests('Connection closed');
+      this.rpc = null;
+    }
+    if (this.closed) return;
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log('Max reconnect attempts reached, giving up');
-      // Reject any pending requests
-      for (const [, pending] of this.pendingRequests) {
-        clearTimeout(pending.timer);
-        pending.reject(new Error('Connection lost'));
-      }
-      this.pendingRequests.clear();
-      // Signal close to consumer
+      this.close();
       this.onClose?.();
       return;
     }
@@ -196,9 +192,12 @@ export class WsClient {
 
     await new Promise((r) => setTimeout(r, delay));
 
+    if (this.closed) return;
+
     try {
-      await this.doConnect();
+      const payload = await this.doConnect();
       log('Reconnected successfully');
+      this.onGroupsUpdated?.(payload.groups);
     } catch (err) {
       log(
         `Reconnect failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -213,80 +212,62 @@ export class WsClient {
     newSessionId?: string,
     error?: string,
   ): void {
-    this.send({
-      type: 'output',
-      status,
-      result,
-      newSessionId,
-      error,
-    });
+    this.rpc?.notify('output', { status, result, newSessionId, error });
   }
 
   sendMessage(chatJid: string, text: string, sender?: string): void {
-    this.send({
-      type: 'message',
+    this.rpc?.notify('message', {
       chatJid,
       text,
       sender,
-      timestamp: new Date().toISOString(),
     });
-  }
-
-  sendTask(data: Record<string, unknown>): void {
-    this.send(data);
   }
 
   /**
-   * Send a request to the host and await a typed ipc_response.
-   * Generates a requestId, registers a pending promise, and sets a timeout.
+   * Send a JSON-RPC request to the host and await the result.
+   * Throws on error (JSON-RPC error or timeout).
    */
-  async sendTaskRequest(
-    data: Record<string, unknown>,
+  async request(
+    method: string,
+    params: Record<string, unknown>,
     timeoutMs = 130_000,
   ): Promise<Record<string, unknown>> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('WebSocket not connected'));
+    if (!this.rpc) {
+      throw new Error('WebSocket not connected');
     }
-    const requestId = crypto.randomUUID();
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pendingRequests.has(requestId)) {
-          this.pendingRequests.delete(requestId);
-          reject(new Error(`${data.type} timeout (${timeoutMs}ms)`));
-        }
-      }, timeoutMs);
-
-      this.pendingRequests.set(requestId, {
-        resolve: resolve as (data: unknown) => void,
-        reject,
-        timer,
-      });
-      this.send({ ...data, requestId });
-    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        this.rpc.request(method, params),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${method} timeout (${timeoutMs}ms)`)), timeoutMs);
+        }),
+      ]);
+      return (result as Record<string, unknown>) ?? {};
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async listTasks(): Promise<AuthOkPayload['tasks']> {
-    const response = await this.sendTaskRequest({ type: 'list_tasks' }, 5000);
+    const response = await this.request('list_tasks', {}, 5000);
     return response.tasks as AuthOkPayload['tasks'];
   }
 
-  refreshGroups(): void {
-    this.send({ type: 'refresh_groups' });
+  async refreshGroups(): Promise<void> {
+    await this.request('refresh_groups', {}, 10_000);
   }
 
   close(): void {
+    this.closed = true;
     this.clearPingWatchdog();
+    if (this.rpc) {
+      this.rpc.rejectAllPendingRequests('Connection closed');
+      this.rpc = null;
+    }
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'client closing');
     }
     this.ws = null;
-  }
-
-  private send(data: Record<string, unknown>): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data));
-    } else {
-      log(`Message dropped (ws ${this.ws ? `state=${this.ws.readyState}` : 'null'}): type=${data.type}`);
-    }
   }
 }

@@ -28,8 +28,8 @@ export type FakeWs = ReturnType<typeof createFakeWs>;
 
 /**
  * Send an authenticated message through a WsIpcServer.
- * Creates a token, connects a fake WS, authenticates, sends the data,
- * and waits for async processing to complete.
+ * Creates a token, connects a fake WS, authenticates, sends the data
+ * as a JSON-RPC request, and waits for async processing to complete.
  */
 export async function sendAuthenticatedMessage(
   server: WsIpcServer,
@@ -50,8 +50,19 @@ export async function sendAuthenticatedMessage(
     Buffer.from(JSON.stringify({ type: 'auth', token, role })),
   );
 
-  // Send the actual message
-  ws.emit('message', Buffer.from(JSON.stringify(data)));
+  // Send the actual message as JSON-RPC request
+  const { type, ...params } = data;
+  ws.emit(
+    'message',
+    Buffer.from(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: type,
+        params,
+        id: `test-${Date.now()}`,
+      }),
+    ),
+  );
 
   // Wait for async processing
   await new Promise<void>((r) => queueMicrotask(r));

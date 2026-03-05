@@ -22,11 +22,11 @@ Added Gmail MCP server to the agent's available tools so it can read and send em
 - All existing allowed tools are preserved
 - The query loop, IPC handling, MessageStream, and all other logic is untouched
 - Hooks (PreCompact, sanitize Bash) are unchanged
-- Output protocol (markers) is unchanged
+- Output protocol (WebSocket) is unchanged
 
 ## Must-keep
 - The `nanoclaw` MCP server with its environment variables
 - All existing allowedTools entries
 - The hook system (PreCompact, PreToolUse sanitize)
-- The IPC input/close sentinel handling
+- The WebSocket input/close message handling
 - The MessageStream class and query loop

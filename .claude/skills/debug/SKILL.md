@@ -287,17 +287,23 @@ grep "auth_error\|auth timeout" logs/nanoclaw.log | tail -5
 
 **Message types (container → host):**
 - `output` - Agent result (replaces stdout markers)
+**JSON-RPC notifications (container → host, no response):**
+- `output` - Agent output (status, result, newSessionId, error)
 - `message` - Outgoing chat messages (via MCP tool)
-- `schedule_task`, `pause_task`, `resume_task`, `cancel_task` - Task operations (via MCP tool)
-- `register_group`, `refresh_groups` - Group management (via MCP tool)
-- `list_tasks` - Request current tasks (request-response via `requestId`)
 
-**Message types (host → container):**
-- `auth_ok` - Authentication success with task/group snapshots
+**JSON-RPC requests (container → host, returns result):**
+- `schedule_task`, `pause_task`, `resume_task`, `cancel_task` - Task operations
+- `register_group`, `refresh_groups` - Group management
+- `list_tasks` - Request current tasks
+
+**JSON-RPC notifications (host → container, no response):**
 - `input` - Follow-up user message
 - `close` - Shutdown signal
-- `list_tasks_response` - Response to `list_tasks`
-- `groups_updated` - Fresh group data after `refresh_groups`
+
+**Non-JSON-RPC (auth handshake, before RPC init):**
+- `auth` (container → host) - Authentication with token and role
+- `auth_ok` (host → container) - Authentication success with task/group snapshots
+- `auth_error` (host → container) - Authentication failure
 
 ## Quick Diagnostic Script
 

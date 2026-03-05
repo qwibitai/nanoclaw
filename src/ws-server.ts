@@ -2,18 +2,25 @@
  * WebSocket IPC Server for NanoClaw
  * Replaces file-based IPC with a single WS server for all containers.
  * Connections are authenticated with per-container cryptographic tokens.
+ * Post-auth messages use JSON-RPC 2.0 via json-rpc-2.0 library.
  */
 import crypto from 'crypto';
 import { IncomingMessage } from 'http';
 
 import { CronExpressionParser } from 'cron-parser';
+import {
+  JSONRPCClient,
+  JSONRPCErrorException,
+  JSONRPCServer,
+  JSONRPCServerAndClient,
+} from 'json-rpc-2.0';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { TIMEZONE, WS_BIND_ADDRESS } from './config.js';
 import { AvailableGroup, ContainerOutput } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
-import { resolveIpcHandler } from './ipc-handlers/registry.js';
+import { getRegisteredHandlers } from './ipc-handlers/registry.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -27,6 +34,7 @@ function isNonEmptyString(val: unknown): val is string {
 interface TypedConnection {
   ws: WebSocket;
   role: 'agent' | 'mcp';
+  rpc: JSONRPCServerAndClient;
 }
 
 interface TokenContext {
@@ -128,6 +136,7 @@ export class WsIpcServer {
     if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
     for (const conn of ctx.connections) {
       this.clearPing(conn.ws);
+      conn.rpc.rejectAllPendingRequests('token revoked');
       if (conn.ws.readyState === WebSocket.OPEN) {
         conn.ws.close(1000, 'token revoked');
       }
@@ -168,9 +177,8 @@ export class WsIpcServer {
     );
     if (agentConns.length === 0) return false;
 
-    const msg = JSON.stringify({ type: 'input', text });
     for (const conn of agentConns) {
-      conn.ws.send(msg);
+      conn.rpc.notify('input', { text });
     }
     return true;
   }
@@ -179,10 +187,9 @@ export class WsIpcServer {
     const ctx = this.tokens.get(token);
     if (!ctx) return;
 
-    const msg = JSON.stringify({ type: 'close' });
     for (const conn of ctx.connections) {
       if (conn.role === 'agent' && conn.ws.readyState === WebSocket.OPEN) {
-        conn.ws.send(msg);
+        conn.rpc.notify('close', {});
       }
     }
   }
@@ -194,6 +201,11 @@ export class WsIpcServer {
       clearInterval(interval);
     }
     this.pingIntervals.clear();
+    // Clear all grace timers
+    for (const ctx of this.tokens.values()) {
+      if (ctx.graceTimer) clearTimeout(ctx.graceTimer);
+    }
+    this.tokens.clear();
     // Close the listening socket (no new connections)
     // Existing connections drain naturally
     return new Promise((resolve) => {
@@ -204,10 +216,74 @@ export class WsIpcServer {
     });
   }
 
+  /** Create a JSONRPCServerAndClient for a connection, registering all methods */
+  private createRpc(ws: WebSocket, ctx: TokenContext): JSONRPCServerAndClient {
+    const rpc = new JSONRPCServerAndClient(
+      new JSONRPCServer(),
+      new JSONRPCClient((request) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(request));
+          return Promise.resolve();
+        }
+        return Promise.reject(new Error('WebSocket not connected'));
+      }),
+    );
+
+    // --- Notifications (no return value) ---
+
+    rpc.addMethod('output', (params: Record<string, unknown>) => {
+      this.handleOutput(params, ctx);
+    });
+
+    rpc.addMethod('message', async (params: Record<string, unknown>) => {
+      await this.handleMessage(params, ctx);
+    });
+
+    // --- Requests (return result) ---
+
+    rpc.addMethod('list_tasks', () => {
+      return { tasks: this.deps.getTasksSnapshot(ctx.groupFolder, ctx.isMain) };
+    });
+
+    rpc.addMethod('schedule_task', (params: Record<string, unknown>) => {
+      return this.handleScheduleTask(params, ctx);
+    });
+
+    rpc.addMethod('pause_task', (params: Record<string, unknown>) => {
+      return this.handlePauseTask(params, ctx);
+    });
+
+    rpc.addMethod('resume_task', (params: Record<string, unknown>) => {
+      return this.handleResumeTask(params, ctx);
+    });
+
+    rpc.addMethod('cancel_task', (params: Record<string, unknown>) => {
+      return this.handleCancelTask(params, ctx);
+    });
+
+    rpc.addMethod('refresh_groups', async () => {
+      return this.handleRefreshGroups(ctx);
+    });
+
+    rpc.addMethod('register_group', (params: Record<string, unknown>) => {
+      return this.handleRegisterGroup(params, ctx);
+    });
+
+    // --- Skill handlers from registry ---
+    for (const [type, handler] of getRegisteredHandlers()) {
+      rpc.addMethod(type, (params: Record<string, unknown>) =>
+        handler(params, ctx.groupFolder, ctx.isMain),
+      );
+    }
+
+    return rpc;
+  }
+
   private handleConnection(ws: WebSocket): void {
     let authenticated = false;
     let tokenStr: string | null = null;
     let connRole: 'agent' | 'mcp' | null = null;
+    let rpc: JSONRPCServerAndClient | null = null;
     let messageChain = Promise.resolve();
 
     // Close unauthenticated connections after timeout
@@ -219,7 +295,7 @@ export class WsIpcServer {
     }, AUTH_TIMEOUT_MS);
 
     ws.on('message', (raw: WebSocket.RawData) => {
-      let msg: { type: string; [key: string]: unknown };
+      let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(raw.toString());
       } catch {
@@ -266,7 +342,9 @@ export class WsIpcServer {
           ctx.graceTimer = undefined;
         }
 
-        ctx.connections.push({ ws, role });
+        // Create per-connection RPC instance
+        rpc = this.createRpc(ws, ctx);
+        ctx.connections.push({ ws, role, rpc });
 
         // Send auth_ok with current snapshots
         const tasks = this.deps.getTasksSnapshot(ctx.groupFolder, ctx.isMain);
@@ -296,7 +374,7 @@ export class WsIpcServer {
         return;
       }
 
-      // Authenticated — route message (serialized via promise chain)
+      // Authenticated — route via JSON-RPC (serialized via promise chain)
       const ctx = this.tokens.get(tokenStr!);
       if (!ctx) {
         ws.close(4004, 'token revoked');
@@ -304,9 +382,9 @@ export class WsIpcServer {
       }
 
       messageChain = messageChain
-        .then(() => this.routeMessage(msg, ctx, ws))
+        .then(() => rpc!.receiveAndSend(msg))
         .catch((err) => {
-          logger.error({ err, type: msg.type }, 'Error processing WS message');
+          logger.error({ err, msg }, 'Error processing WS message');
         });
     });
 
@@ -319,6 +397,13 @@ export class WsIpcServer {
       if (!ctx) return;
 
       const disconnectedRole = connRole;
+
+      // Reject pending requests for this connection's RPC
+      const conn = ctx.connections.find((c) => c.ws === ws);
+      if (conn) {
+        conn.rpc.rejectAllPendingRequests('Connection closed');
+      }
+
       ctx.connections = ctx.connections.filter((c) => c.ws !== ws);
 
       if (disconnectedRole === 'mcp') {
@@ -375,52 +460,17 @@ export class WsIpcServer {
     }
   }
 
-  private async routeMessage(
-    msg: { type: string; [key: string]: unknown },
-    ctx: TokenContext,
-    senderWs: WebSocket,
-  ): Promise<void> {
-    try {
-      switch (msg.type) {
-        case 'output':
-          this.handleOutput(msg, ctx);
-          break;
-
-        case 'message':
-          await this.handleMessage(msg, ctx);
-          break;
-
-        case 'list_tasks': {
-          const requestId = msg.requestId as string;
-          const tasks = this.deps.getTasksSnapshot(ctx.groupFolder, ctx.isMain);
-          const response = JSON.stringify({
-            type: 'ipc_response',
-            requestId,
-            tasks,
-          });
-          if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
-          break;
-        }
-
-        default:
-          await this.handleTaskIpc(msg, ctx, senderWs);
-      }
-    } catch (err) {
-      logger.error({ err, type: msg.type }, 'Error routing WS message');
-    }
-  }
-
   private handleOutput(
-    msg: { type: string; [key: string]: unknown },
+    params: Record<string, unknown>,
     ctx: TokenContext,
   ): void {
-    if (msg.status !== 'success' && msg.status !== 'error') return;
+    if (params.status !== 'success' && params.status !== 'error') return;
 
     const output: ContainerOutput = {
-      status: msg.status,
-      result: (msg.result as string) ?? null,
-      newSessionId: msg.newSessionId as string | undefined,
-      error: msg.error as string | undefined,
+      status: params.status,
+      result: (params.result as string) ?? null,
+      newSessionId: params.newSessionId as string | undefined,
+      error: params.error as string | undefined,
     };
 
     // Reset container timeout on output activity
@@ -440,14 +490,14 @@ export class WsIpcServer {
   }
 
   private async handleMessage(
-    msg: { type: string; [key: string]: unknown },
+    params: Record<string, unknown>,
     ctx: TokenContext,
   ): Promise<void> {
-    if (!isNonEmptyString(msg.chatJid) || !isNonEmptyString(msg.text)) return;
+    if (!isNonEmptyString(params.chatJid) || !isNonEmptyString(params.text)) return;
 
-    const chatJid = msg.chatJid;
-    const text = msg.text;
-    const sender = msg.sender as string | undefined;
+    const chatJid = params.chatJid;
+    const text = params.text;
+    const sender = params.sender as string | undefined;
 
     // Authorization: main can send to any JID, others only to their own
     const registeredGroups = this.deps.registeredGroups();
@@ -463,255 +513,243 @@ export class WsIpcServer {
     }
   }
 
-  private async handleTaskIpc(
-    msg: { type: string; [key: string]: unknown },
+  private handleScheduleTask(
+    params: Record<string, unknown>,
     ctx: TokenContext,
-    senderWs: WebSocket,
-  ): Promise<void> {
+  ): { taskId: string } {
     const registeredGroups = this.deps.registeredGroups();
 
-    switch (msg.type) {
-      case 'schedule_task': {
-        if (
-          !isNonEmptyString(msg.prompt) ||
-          !isNonEmptyString(msg.schedule_type) ||
-          !isNonEmptyString(msg.schedule_value) ||
-          !isNonEmptyString(msg.targetJid)
-        )
-          break;
-
-        const prompt = msg.prompt;
-        const scheduleType = msg.schedule_type;
-        const scheduleValue = msg.schedule_value;
-        const targetJid = msg.targetJid;
-
-        const targetGroupEntry = registeredGroups[targetJid];
-        if (!targetGroupEntry) {
-          logger.warn(
-            { targetJid },
-            'Cannot schedule task: target group not registered',
-          );
-          break;
-        }
-
-        const targetFolder = targetGroupEntry.folder;
-
-        // Authorization: non-main groups can only schedule for themselves
-        if (!ctx.isMain && targetFolder !== ctx.groupFolder) {
-          logger.warn(
-            { sourceGroup: ctx.groupFolder, targetFolder },
-            'Unauthorized schedule_task attempt blocked',
-          );
-          break;
-        }
-
-        if (
-          scheduleType !== 'cron' &&
-          scheduleType !== 'interval' &&
-          scheduleType !== 'once'
-        ) {
-          logger.warn({ scheduleType }, 'Invalid schedule type');
-          break;
-        }
-
-        let nextRun: string | null = null;
-        if (scheduleType === 'cron') {
-          try {
-            const interval = CronExpressionParser.parse(scheduleValue, {
-              tz: TIMEZONE,
-            });
-            nextRun = interval.next().toISOString();
-          } catch {
-            logger.warn({ scheduleValue }, 'Invalid cron expression');
-            break;
-          }
-        } else if (scheduleType === 'interval') {
-          const ms = parseInt(scheduleValue, 10);
-          if (isNaN(ms) || ms <= 0) {
-            logger.warn({ scheduleValue }, 'Invalid interval');
-            break;
-          }
-          nextRun = new Date(Date.now() + ms).toISOString();
-        } else if (scheduleType === 'once') {
-          const scheduled = new Date(scheduleValue);
-          if (isNaN(scheduled.getTime())) {
-            logger.warn({ scheduleValue }, 'Invalid timestamp');
-            break;
-          }
-          nextRun = scheduled.toISOString();
-        }
-
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const contextMode =
-          msg.context_mode === 'group' || msg.context_mode === 'isolated'
-            ? (msg.context_mode as 'group' | 'isolated')
-            : 'isolated';
-        createTask({
-          id: taskId,
-          group_folder: targetFolder,
-          chat_jid: targetJid,
-          prompt,
-          schedule_type: scheduleType,
-          schedule_value: scheduleValue,
-          context_mode: contextMode,
-          next_run: nextRun,
-          status: 'active',
-          created_at: new Date().toISOString(),
-        });
-        logger.info(
-          { taskId, sourceGroup: ctx.groupFolder, targetFolder, contextMode },
-          'Task created via IPC',
-        );
-        break;
-      }
-
-      case 'pause_task': {
-        if (!isNonEmptyString(msg.taskId)) break;
-        const taskId = msg.taskId;
-        const task = getTaskById(taskId);
-        if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
-          updateTask(taskId, { status: 'paused' });
-          logger.info(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Task paused via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Unauthorized task pause attempt',
-          );
-        }
-        break;
-      }
-
-      case 'resume_task': {
-        if (!isNonEmptyString(msg.taskId)) break;
-        const taskId = msg.taskId;
-        const task = getTaskById(taskId);
-        if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
-          updateTask(taskId, { status: 'active' });
-          logger.info(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Task resumed via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Unauthorized task resume attempt',
-          );
-        }
-        break;
-      }
-
-      case 'cancel_task': {
-        if (!isNonEmptyString(msg.taskId)) break;
-        const taskId = msg.taskId;
-        const task = getTaskById(taskId);
-        if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
-          deleteTask(taskId);
-          logger.info(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Task cancelled via IPC',
-          );
-        } else {
-          logger.warn(
-            { taskId, sourceGroup: ctx.groupFolder },
-            'Unauthorized task cancel attempt',
-          );
-        }
-        break;
-      }
-
-      case 'refresh_groups': {
-        if (ctx.isMain) {
-          logger.info(
-            { sourceGroup: ctx.groupFolder },
-            'Group metadata refresh requested via IPC',
-          );
-          await this.deps.syncGroups(true);
-          const groupsData = this.deps.getGroupsSnapshot(
-            ctx.groupFolder,
-            ctx.isMain,
-          );
-          const response = JSON.stringify({
-            type: 'groups_updated',
-            groups: groupsData,
-          });
-          if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
-        } else {
-          logger.warn(
-            { sourceGroup: ctx.groupFolder },
-            'Unauthorized refresh_groups attempt blocked',
-          );
-        }
-        break;
-      }
-
-      case 'register_group': {
-        if (!ctx.isMain) {
-          logger.warn(
-            { sourceGroup: ctx.groupFolder },
-            'Unauthorized register_group attempt blocked',
-          );
-          break;
-        }
-        if (
-          !isNonEmptyString(msg.jid) ||
-          !isNonEmptyString(msg.name) ||
-          !isNonEmptyString(msg.folder) ||
-          !isNonEmptyString(msg.trigger)
-        ) {
-          logger.warn(
-            { data: msg },
-            'Invalid register_group request - missing required fields',
-          );
-          break;
-        }
-        const jid = msg.jid;
-        const name = msg.name;
-        const folder = msg.folder;
-        const trigger = msg.trigger;
-        if (!isValidGroupFolder(folder)) {
-          logger.warn(
-            { sourceGroup: ctx.groupFolder, folder },
-            'Invalid register_group request - unsafe folder name',
-          );
-          break;
-        }
-        // Defense in depth: agent cannot set isMain via IPC
-        this.deps.registerGroup(jid, {
-          name,
-          folder,
-          trigger,
-          added_at: new Date().toISOString(),
-          containerConfig:
-            msg.containerConfig as RegisteredGroup['containerConfig'],
-          requiresTrigger: msg.requiresTrigger as boolean | undefined,
-        });
-        break;
-      }
-
-      default: {
-        const result = await resolveIpcHandler(
-          msg,
-          ctx.groupFolder,
-          ctx.isMain,
-        );
-        if (result !== null) {
-          const requestId = msg.requestId as string | undefined;
-          if (requestId) {
-            const response = JSON.stringify({
-              type: 'ipc_response',
-              requestId,
-              ...result,
-            });
-            if (senderWs.readyState === WebSocket.OPEN) senderWs.send(response);
-          }
-        } else {
-          logger.warn({ type: msg.type }, 'Unknown IPC task type');
-        }
-        break;
-      }
+    if (
+      !isNonEmptyString(params.prompt) ||
+      !isNonEmptyString(params.schedule_type) ||
+      !isNonEmptyString(params.schedule_value) ||
+      !isNonEmptyString(params.targetJid)
+    ) {
+      throw new JSONRPCErrorException('Missing required fields', -32602);
     }
+
+    const prompt = params.prompt;
+    const scheduleType = params.schedule_type;
+    const scheduleValue = params.schedule_value;
+    const targetJid = params.targetJid;
+
+    const targetGroupEntry = registeredGroups[targetJid];
+    if (!targetGroupEntry) {
+      logger.warn(
+        { targetJid },
+        'Cannot schedule task: target group not registered',
+      );
+      throw new JSONRPCErrorException('Target group not registered', -32602);
+    }
+
+    const targetFolder = targetGroupEntry.folder;
+
+    // Authorization: non-main groups can only schedule for themselves
+    if (!ctx.isMain && targetFolder !== ctx.groupFolder) {
+      logger.warn(
+        { sourceGroup: ctx.groupFolder, targetFolder },
+        'Unauthorized schedule_task attempt blocked',
+      );
+      throw new JSONRPCErrorException('Unauthorized: cannot schedule for other groups', -32600);
+    }
+
+    if (
+      scheduleType !== 'cron' &&
+      scheduleType !== 'interval' &&
+      scheduleType !== 'once'
+    ) {
+      logger.warn({ scheduleType }, 'Invalid schedule type');
+      throw new JSONRPCErrorException(`Invalid schedule type: ${scheduleType}`, -32602);
+    }
+
+    let nextRun: string | null = null;
+    if (scheduleType === 'cron') {
+      try {
+        const interval = CronExpressionParser.parse(scheduleValue, {
+          tz: TIMEZONE,
+        });
+        nextRun = interval.next().toISOString();
+      } catch {
+        logger.warn({ scheduleValue }, 'Invalid cron expression');
+        throw new JSONRPCErrorException(`Invalid cron expression: ${scheduleValue}`, -32602);
+      }
+    } else if (scheduleType === 'interval') {
+      const ms = parseInt(scheduleValue, 10);
+      if (isNaN(ms) || ms <= 0) {
+        logger.warn({ scheduleValue }, 'Invalid interval');
+        throw new JSONRPCErrorException(`Invalid interval: ${scheduleValue}`, -32602);
+      }
+      nextRun = new Date(Date.now() + ms).toISOString();
+    } else if (scheduleType === 'once') {
+      const scheduled = new Date(scheduleValue);
+      if (isNaN(scheduled.getTime())) {
+        logger.warn({ scheduleValue }, 'Invalid timestamp');
+        throw new JSONRPCErrorException(`Invalid timestamp: ${scheduleValue}`, -32602);
+      }
+      nextRun = scheduled.toISOString();
+    }
+
+    const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const contextMode =
+      params.context_mode === 'group' || params.context_mode === 'isolated'
+        ? (params.context_mode as 'group' | 'isolated')
+        : 'isolated';
+    createTask({
+      id: taskId,
+      group_folder: targetFolder,
+      chat_jid: targetJid,
+      prompt,
+      schedule_type: scheduleType,
+      schedule_value: scheduleValue,
+      context_mode: contextMode,
+      next_run: nextRun,
+      status: 'active',
+      created_at: new Date().toISOString(),
+    });
+    logger.info(
+      { taskId, sourceGroup: ctx.groupFolder, targetFolder, contextMode },
+      'Task created via IPC',
+    );
+    return { taskId };
+  }
+
+  private handlePauseTask(
+    params: Record<string, unknown>,
+    ctx: TokenContext,
+  ): Record<string, unknown> {
+    if (!isNonEmptyString(params.taskId)) {
+      throw new JSONRPCErrorException('Missing taskId', -32602);
+    }
+    const taskId = params.taskId;
+    const task = getTaskById(taskId);
+    if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
+      updateTask(taskId, { status: 'paused' });
+      logger.info(
+        { taskId, sourceGroup: ctx.groupFolder },
+        'Task paused via IPC',
+      );
+      return { ok: true };
+    }
+    logger.warn(
+      { taskId, sourceGroup: ctx.groupFolder },
+      'Unauthorized task pause attempt',
+    );
+    throw new JSONRPCErrorException('Task not found or unauthorized', -32600);
+  }
+
+  private handleResumeTask(
+    params: Record<string, unknown>,
+    ctx: TokenContext,
+  ): Record<string, unknown> {
+    if (!isNonEmptyString(params.taskId)) {
+      throw new JSONRPCErrorException('Missing taskId', -32602);
+    }
+    const taskId = params.taskId;
+    const task = getTaskById(taskId);
+    if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
+      updateTask(taskId, { status: 'active' });
+      logger.info(
+        { taskId, sourceGroup: ctx.groupFolder },
+        'Task resumed via IPC',
+      );
+      return { ok: true };
+    }
+    logger.warn(
+      { taskId, sourceGroup: ctx.groupFolder },
+      'Unauthorized task resume attempt',
+    );
+    throw new JSONRPCErrorException('Task not found or unauthorized', -32600);
+  }
+
+  private handleCancelTask(
+    params: Record<string, unknown>,
+    ctx: TokenContext,
+  ): Record<string, unknown> {
+    if (!isNonEmptyString(params.taskId)) {
+      throw new JSONRPCErrorException('Missing taskId', -32602);
+    }
+    const taskId = params.taskId;
+    const task = getTaskById(taskId);
+    if (task && (ctx.isMain || task.group_folder === ctx.groupFolder)) {
+      deleteTask(taskId);
+      logger.info(
+        { taskId, sourceGroup: ctx.groupFolder },
+        'Task cancelled via IPC',
+      );
+      return { ok: true };
+    }
+    logger.warn(
+      { taskId, sourceGroup: ctx.groupFolder },
+      'Unauthorized task cancel attempt',
+    );
+    throw new JSONRPCErrorException('Task not found or unauthorized', -32600);
+  }
+
+  private async handleRefreshGroups(
+    ctx: TokenContext,
+  ): Promise<Record<string, unknown>> {
+    if (!ctx.isMain) {
+      logger.warn(
+        { sourceGroup: ctx.groupFolder },
+        'Unauthorized refresh_groups attempt blocked',
+      );
+      throw new JSONRPCErrorException('Unauthorized: main group only', -32600);
+    }
+    logger.info(
+      { sourceGroup: ctx.groupFolder },
+      'Group metadata refresh requested via IPC',
+    );
+    await this.deps.syncGroups(true);
+    const groupsData = this.deps.getGroupsSnapshot(
+      ctx.groupFolder,
+      ctx.isMain,
+    );
+    return { groups: groupsData };
+  }
+
+  private handleRegisterGroup(
+    params: Record<string, unknown>,
+    ctx: TokenContext,
+  ): Record<string, unknown> {
+    if (!ctx.isMain) {
+      logger.warn(
+        { sourceGroup: ctx.groupFolder },
+        'Unauthorized register_group attempt blocked',
+      );
+      throw new JSONRPCErrorException('Unauthorized: main group only', -32600);
+    }
+    if (
+      !isNonEmptyString(params.jid) ||
+      !isNonEmptyString(params.name) ||
+      !isNonEmptyString(params.folder) ||
+      !isNonEmptyString(params.trigger)
+    ) {
+      logger.warn(
+        'Invalid register_group request - missing required fields',
+      );
+      throw new JSONRPCErrorException('Missing required fields', -32602);
+    }
+    const jid = params.jid;
+    const name = params.name;
+    const folder = params.folder;
+    const trigger = params.trigger;
+    if (!isValidGroupFolder(folder)) {
+      logger.warn(
+        { sourceGroup: ctx.groupFolder, folder },
+        'Invalid register_group request - unsafe folder name',
+      );
+      throw new JSONRPCErrorException('Invalid folder name', -32602);
+    }
+    // Defense in depth: agent cannot set isMain via IPC
+    this.deps.registerGroup(jid, {
+      name,
+      folder,
+      trigger,
+      added_at: new Date().toISOString(),
+      containerConfig:
+        params.containerConfig as RegisteredGroup['containerConfig'],
+      requiresTrigger: params.requiresTrigger as boolean | undefined,
+    });
+    return { ok: true };
   }
 }

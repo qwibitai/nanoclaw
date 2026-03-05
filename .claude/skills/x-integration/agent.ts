@@ -19,16 +19,14 @@ import type { WsClient } from './ws-client.js';
 async function callXEndpoint(
   ensureWs: () => Promise<void>,
   wsClient: WsClient,
-  payload: Record<string, unknown>,
+  method: string,
+  params: Record<string, unknown>,
   label: string,
 ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: true }> {
   try {
     await ensureWs();
-    const result = await wsClient.sendTaskRequest(payload);
-    const text = result.message as string;
-    return result.success
-      ? { content: [{ type: 'text' as const, text }] }
-      : { content: [{ type: 'text' as const, text }], isError: true };
+    const result = await wsClient.request(method, params);
+    return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };
   } catch (err) {
     return {
       content: [
@@ -51,8 +49,8 @@ export function registerXTools(
   ensureWs: () => Promise<void>,
   wsClient: WsClient,
 ): void {
-  const call = (payload: Record<string, unknown>, label: string) =>
-    callXEndpoint(ensureWs, wsClient, payload, label);
+  const call = (method: string, params: Record<string, unknown>, label: string) =>
+    callXEndpoint(ensureWs, wsClient, method, params, label);
 
   server.tool(
     'x_post',
@@ -64,7 +62,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         .max(280)
         .describe('The tweet content to post (max 280 characters)'),
     },
-    (args) => call({ type: 'x_post', content: args.content }, 'post'),
+    (args) => call('x_post', { content: args.content }, 'post'),
   );
 
   server.tool(
@@ -77,7 +75,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
           'The tweet URL (e.g., https://x.com/user/status/123) or tweet ID',
         ),
     },
-    (args) => call({ type: 'x_like', tweetUrl: args.tweet_url }, 'like'),
+    (args) => call('x_like', { tweetUrl: args.tweet_url }, 'like'),
   );
 
   server.tool(
@@ -95,10 +93,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         .describe('The reply content (max 280 characters)'),
     },
     (args) =>
-      call(
-        { type: 'x_reply', tweetUrl: args.tweet_url, content: args.content },
-        'reply',
-      ),
+      call('x_reply', { tweetUrl: args.tweet_url, content: args.content }, 'reply'),
   );
 
   server.tool(
@@ -112,7 +107,7 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         ),
     },
     (args) =>
-      call({ type: 'x_retweet', tweetUrl: args.tweet_url }, 'retweet'),
+      call('x_retweet', { tweetUrl: args.tweet_url }, 'retweet'),
   );
 
   server.tool(
@@ -130,9 +125,6 @@ Make sure the content is appropriate and within X's character limit (280 chars f
         .describe('Your comment for the quote tweet (max 280 characters)'),
     },
     (args) =>
-      call(
-        { type: 'x_quote', tweetUrl: args.tweet_url, comment: args.comment },
-        'quote',
-      ),
+      call('x_quote', { tweetUrl: args.tweet_url, comment: args.comment }, 'quote'),
   );
 }
