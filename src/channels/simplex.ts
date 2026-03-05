@@ -3,8 +3,9 @@ import path from 'path';
 
 import WebSocket from 'ws';
 
-import { GROUPS_DIR } from '../config.js';
+import { GROUPS_DIR, SIMPLEX_ENABLED, SIMPLEX_PORT } from '../config.js';
 import { logger } from '../logger.js';
+import { registerChannel } from './registry.js';
 import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
 
 export interface ExtractedContent {
@@ -564,3 +565,8 @@ export class SimplexChannel implements Channel {
     }
   }
 }
+
+
+registerChannel('simplex', (opts) =>
+  SIMPLEX_ENABLED ? new SimplexChannel(SIMPLEX_PORT, opts) : null,
+);

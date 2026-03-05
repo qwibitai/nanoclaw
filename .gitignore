@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-
+.npm-cache/
 # Build output
 dist/
 
@@ -21,6 +21,9 @@ groups/global/*
 # Secrets
 *.keys.json
 .env
+
+# Temp files
+.tmp-*
 
 # OS
 .DS_Store

@@ -76,45 +76,6 @@ export interface CustomModification {
   patch_file: string;
 }
 
-export interface FileInputHashes {
-  base: string;     // SHA-256 of .nanoclaw/base/<relPath>
-  current: string;  // SHA-256 of working tree <relPath> before this merge
-  skill: string;    // SHA-256 of skill's modify/<relPath>
-}
-
-export interface ResolutionMeta {
-  skills: string[];
-  apply_order: string[];
-  core_version: string;
-  resolved_at: string;
-  tested: boolean;
-  test_passed: boolean;
-  resolution_source: 'maintainer' | 'user' | 'claude';
-  input_hashes: Record<string, string>;
-  output_hash: string;
-  file_hashes: Record<string, FileInputHashes>;
-}
-
-export interface UpdatePreview {
-  currentVersion: string;
-  newVersion: string;
-  filesChanged: string[];
-  filesDeleted: string[];
-  conflictRisk: string[];
-  customPatchesAtRisk: string[];
-}
-
-export interface UpdateResult {
-  success: boolean;
-  previousVersion: string;
-  newVersion: string;
-  mergeConflicts?: string[];
-  backupPending?: boolean;
-  customPatchFailures?: string[];
-  skillReapplyResults?: Record<string, boolean>;
-  error?: string;
-}
-
 export interface UninstallResult {
   success: boolean;
   skill: string;

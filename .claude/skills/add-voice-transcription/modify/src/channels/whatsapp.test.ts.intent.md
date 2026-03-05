@@ -8,6 +8,7 @@ Added mock for the transcription module and 3 new test cases for voice message h
 ### Mocks (top of file)
 - Added: `vi.mock('../transcription.js', ...)` with `isVoiceMessage` and `transcribeAudioMessage` mocks
 - Added: `import { transcribeAudioMessage } from '../transcription.js'` for test assertions
+- Updated: Baileys mock to include `fetchLatestWaWebVersion` and `normalizeMessageContent` exports (required by current upstream whatsapp.ts)
 
 ### Test cases (inside "message handling" describe block)
 - Changed: "handles message with no extractable text (e.g. voice note without caption)" → "transcribes voice messages"

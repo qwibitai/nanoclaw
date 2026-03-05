@@ -32,11 +32,12 @@ describe('run-migrations', () => {
     to: string,
   ): { stdout: string; exitCode: number } {
     try {
-      const stdout = execFileSync(
-        tsxBin,
-        [scriptPath, from, to, newCoreDir],
-        { cwd: tmpDir, encoding: 'utf-8', stdio: 'pipe', timeout: 30_000 },
-      );
+      const stdout = execFileSync(tsxBin, [scriptPath, from, to, newCoreDir], {
+        cwd: tmpDir,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 30_000,
+      });
       return { stdout, exitCode: 0 };
     } catch (err: any) {
       return { stdout: err.stdout ?? '', exitCode: err.status ?? 1 };

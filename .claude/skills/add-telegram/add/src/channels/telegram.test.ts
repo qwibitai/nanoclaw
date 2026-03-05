@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // --- Mocks ---
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
+
+// Mock env reader (used by the factory, not needed in unit tests)
+vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
@@ -255,6 +261,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Test Group',
+        'telegram',
+        true,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
@@ -281,6 +289,8 @@ describe('TelegramChannel', () => {
         'tg:999999',
         expect.any(String),
         'Test Group',
+        'telegram',
+        true,
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
@@ -367,6 +377,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Alice', // Private chats use sender name
+        'telegram',
+        false,
       );
     });
 
@@ -386,6 +398,8 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.any(String),
         'Project Team',
+        'telegram',
+        true,
       );
     });
 
