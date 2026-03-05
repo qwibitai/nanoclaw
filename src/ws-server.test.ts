@@ -267,7 +267,7 @@ describe('WsIpcServer', () => {
 
     server.revokeToken(token);
 
-    expect(ws.close).toHaveBeenCalledWith(4004, 'token revoked');
+    expect(ws.close).toHaveBeenCalledWith(1000, 'token revoked');
     expect(server.sendInput(token, 'after revoke')).toBe(false);
   });
 

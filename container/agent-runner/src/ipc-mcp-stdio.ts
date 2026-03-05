@@ -62,8 +62,12 @@ server.tool(
   },
   async (args) => {
     await ensureWs();
-    wsClient.sendMessage(chatJid, args.text, args.sender || undefined);
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    try {
+      await wsClient.sendMessage(chatJid, args.text, args.sender || undefined);
+      return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    } catch (err) {
+      return { content: [{ type: 'text' as const, text: `Failed to send message: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+    }
   },
 );
 

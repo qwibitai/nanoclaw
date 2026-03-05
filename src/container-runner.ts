@@ -423,6 +423,16 @@ export async function runContainerAgent(
           await onOutput(output);
         },
         resetTimeout,
+        () => {
+          // All agent WS connections lost — stop the container
+          logger.warn(
+            { group: group.name, containerName },
+            'Agent connection orphaned, stopping container',
+          );
+          exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+            if (err) container.kill('SIGKILL');
+          });
+        },
       );
     }
 

@@ -45,6 +45,7 @@ export class WsClient {
   private role: 'agent' | 'mcp';
   private reconnectAttempts = 0;
   private closed = false;
+  private reconnecting = false;
   private rpc: JSONRPCServerAndClient | null = null;
   private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
@@ -178,7 +179,7 @@ export class WsClient {
       this.rpc.rejectAllPendingRequests('Connection closed');
       this.rpc = null;
     }
-    if (this.closed) return;
+    if (this.closed || this.reconnecting) return;
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log('Max reconnect attempts reached, giving up');
       this.close();
@@ -186,19 +187,25 @@ export class WsClient {
       return;
     }
 
+    this.reconnecting = true;
     const delay = RECONNECT_DELAYS[this.reconnectAttempts] ?? 4000;
     this.reconnectAttempts++;
     log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
 
     await new Promise((r) => setTimeout(r, delay));
 
-    if (this.closed) return;
+    if (this.closed) {
+      this.reconnecting = false;
+      return;
+    }
 
     try {
       const payload = await this.doConnect();
+      this.reconnecting = false;
       log('Reconnected successfully');
       this.onGroupsUpdated?.(payload.groups);
     } catch (err) {
+      this.reconnecting = false;
       log(
         `Reconnect failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -215,12 +222,8 @@ export class WsClient {
     this.rpc?.notify('output', { status, result, newSessionId, error });
   }
 
-  sendMessage(chatJid: string, text: string, sender?: string): void {
-    this.rpc?.notify('message', {
-      chatJid,
-      text,
-      sender,
-    });
+  async sendMessage(chatJid: string, text: string, sender?: string): Promise<void> {
+    await this.request('message', { chatJid, text, sender }, 10_000);
   }
 
   /**

@@ -50,6 +50,8 @@ interface TokenContext {
   connections: TypedConnection[];
   onOutput?: (output: ContainerOutput) => Promise<void>;
   resetTimeout?: () => void;
+  /** Called when all agent connections are lost and grace period expires */
+  onOrphaned?: () => void;
   /** Per-token promise chain to order output callbacks */
   outputChain: Promise<void>;
   /** Grace timer for reconnection after all connections drop */
@@ -144,7 +146,7 @@ export class WsIpcServer {
       this.clearPing(conn.ws);
       conn.rpc.rejectAllPendingRequests('token revoked');
       if (conn.ws.readyState === WebSocket.OPEN) {
-        conn.ws.close(WS_CLOSE_TOKEN_REVOKED, 'token revoked');
+        conn.ws.close(1000, 'token revoked');
       }
     }
     this.tokens.delete(token);
@@ -166,11 +168,13 @@ export class WsIpcServer {
     token: string,
     onOutput: (output: ContainerOutput) => Promise<void>,
     resetTimeout: () => void,
+    onOrphaned?: () => void,
   ): void {
     const ctx = this.tokens.get(token);
     if (ctx) {
       ctx.onOutput = onOutput;
       ctx.resetTimeout = resetTimeout;
+      ctx.onOrphaned = onOrphaned;
     }
   }
 
@@ -241,8 +245,8 @@ export class WsIpcServer {
       this.handleOutput(params, ctx);
     });
 
-    rpc.addMethod('message', async (params: Record<string, unknown>) => {
-      await this.handleMessage(params, ctx);
+    rpc.addMethod('message', (params: Record<string, unknown>) => {
+      return this.handleMessage(params, ctx);
     });
 
     // --- Requests (return result) ---
@@ -419,14 +423,17 @@ export class WsIpcServer {
         );
       }
 
-      // Start grace period only when no agent connections remain
+      // Start grace period only when no agent connections remain.
+      // If no agent reconnects in time, notify the container-runner
+      // so it can stop the container directly.
       const hasAgent = ctx.connections.some((c) => c.role === 'agent');
       if (!hasAgent && !ctx.graceTimer) {
         ctx.graceTimer = setTimeout(() => {
           logger.warn(
             { groupFolder: ctx.groupFolder },
-            'All WS connections lost after grace period',
+            'All agent connections lost after grace period',
           );
+          ctx.onOrphaned?.();
         }, 30_000);
       }
     });
@@ -498,9 +505,10 @@ export class WsIpcServer {
   private async handleMessage(
     params: Record<string, unknown>,
     ctx: TokenContext,
-  ): Promise<void> {
-    if (!isNonEmptyString(params.chatJid) || !isNonEmptyString(params.text))
-      return;
+  ): Promise<Record<string, unknown>> {
+    if (!isNonEmptyString(params.chatJid) || !isNonEmptyString(params.text)) {
+      throw new JSONRPCErrorException('Missing chatJid or text', -32602);
+    }
 
     const chatJid = params.chatJid;
     const text = params.text;
@@ -512,12 +520,17 @@ export class WsIpcServer {
     if (ctx.isMain || (targetGroup && targetGroup.folder === ctx.groupFolder)) {
       await this.deps.sendMessage(chatJid, text, sender);
       logger.info({ chatJid, sourceGroup: ctx.groupFolder }, 'WS message sent');
-    } else {
-      logger.warn(
-        { chatJid, sourceGroup: ctx.groupFolder },
-        'Unauthorized WS message attempt blocked',
-      );
+      return { ok: true };
     }
+
+    logger.warn(
+      { chatJid, sourceGroup: ctx.groupFolder },
+      'Unauthorized WS message attempt blocked',
+    );
+    throw new JSONRPCErrorException(
+      'Unauthorized: cannot send to that group',
+      -32600,
+    );
   }
 
   private handleScheduleTask(
