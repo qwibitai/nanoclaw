@@ -118,6 +118,59 @@ async function describeImageWithVLM(
 }
 
 /**
+ * Analyse a PDF buffer via VLM: convert each page to PNG with pdftoppm,
+ * then describe each page with Qwen3-VL. Returns combined analysis text
+ * or null on failure.
+ */
+async function analysePdfWithVLM(
+  pdfBuffer: Buffer,
+  userPrompt?: string,
+): Promise<string | null> {
+  const tmpDir = path.join('/tmp', `nanoclaw-pdf-${Date.now()}`);
+  const pdfPath = path.join(tmpDir, 'input.pdf');
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(pdfPath, pdfBuffer);
+
+    // Convert PDF pages to PNG images (max 10 pages, 150 dpi)
+    await new Promise<void>((resolve, reject) => {
+      exec(
+        `pdftoppm -png -r 150 -l 10 "${pdfPath}" "${path.join(tmpDir, 'page')}"`,
+        (err) => (err ? reject(err) : resolve()),
+      );
+    });
+
+    const pageFiles = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.endsWith('.png'))
+      .sort();
+
+    if (pageFiles.length === 0) return null;
+
+    const prompt =
+      userPrompt?.trim() ||
+      'Beschreibe den Inhalt dieser PDF-Seite auf Deutsch. Extrahiere alle relevanten Informationen wie Namen, Daten, Beträge und Texte.';
+
+    const results: string[] = [];
+    for (let i = 0; i < pageFiles.length; i++) {
+      const imgBuffer = fs.readFileSync(path.join(tmpDir, pageFiles[i]));
+      const pageResult = await describeImageWithVLM(imgBuffer, 'image/png', prompt);
+      if (pageResult) {
+        const prefix = pageFiles.length > 1 ? `[Seite ${i + 1}] ` : '';
+        results.push(`${prefix}${pageResult}`);
+      }
+    }
+
+    return results.length > 0 ? results.join('\n\n') : null;
+  } catch (err) {
+    logger.warn({ err }, 'PDF VLM analysis failed');
+    return null;
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+/**
  * Transcribe an audio buffer via the local Whisper STT service.
  * Returns the transcribed text, or null on failure.
  */
@@ -513,6 +566,37 @@ export class WhatsAppChannel implements Channel {
               }
             } catch (err) {
               logger.warn({ err, chatJid }, 'Failed to download/process image');
+            }
+          }
+
+          // Analyse PDF documents via VLM (page-by-page)
+          if (!content && normalized.documentMessage) {
+            const docMsg = normalized.documentMessage;
+            const isPdf =
+              docMsg?.mimetype?.includes('pdf') ||
+              docMsg?.fileName?.toLowerCase().endsWith('.pdf');
+            if (isPdf) {
+              const caption = docMsg?.caption?.trim() || '';
+              try {
+                const docBuffer = (await downloadMediaMessage(
+                  msg,
+                  'buffer',
+                  {},
+                )) as Buffer;
+                const vlmResult = await analysePdfWithVLM(
+                  docBuffer,
+                  caption || undefined,
+                );
+                if (vlmResult) {
+                  const filename = docMsg?.fileName || 'Dokument';
+                  content = caption
+                    ? `${caption}\n[PDF-Analyse "${filename}": ${vlmResult}]`
+                    : `[PDF-Analyse "${filename}": ${vlmResult}]`;
+                  logger.info({ chatJid, filename, pages: vlmResult.split('\n\n').length }, 'PDF analysed by VLM');
+                }
+              } catch (err) {
+                logger.warn({ err, chatJid }, 'Failed to download/analyse PDF');
+              }
             }
           }
 
