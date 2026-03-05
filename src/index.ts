@@ -55,6 +55,7 @@ let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+const lastMessageWasVoiceMap: Record<string, boolean> = {};
 let messageLoopRunning = false;
 const pendingSessionReset = new Set<string>();
 
@@ -167,6 +168,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages);
+  // Note: read at send-time (inside callback), not here, to get the latest value
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -209,7 +211,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        let voiceSent = false;
+        const lastMessageWasVoice = lastMessageWasVoiceMap[chatJid] === true;
+        logger.info({ chatJid, lastMessageWasVoice, hasSendVoice: !!channel.sendVoiceMessage }, 'Sending response');
+        if (lastMessageWasVoice && channel.sendVoiceMessage) {
+          voiceSent = await channel.sendVoiceMessage(chatJid, text);
+        }
+        if (!voiceSent) {
+          await channel.sendMessage(chatJid, text);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -551,7 +561,13 @@ async function main(): Promise<void> {
 
   // Channel callbacks (shared by all channels)
   const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+    onMessage: (_chatJid: string, msg: NewMessage) => {
+      storeMessage(msg);
+      if (!msg.is_bot_message) {
+        lastMessageWasVoiceMap[msg.chat_jid] = msg.is_voice_message === true;
+        logger.info({ jid: msg.chat_jid, is_voice: msg.is_voice_message, is_bot: msg.is_bot_message }, 'onMessage voice flag');
+      }
+    },
     onChatMetadata: (
       chatJid: string,
       timestamp: string,

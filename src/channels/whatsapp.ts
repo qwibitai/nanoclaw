@@ -1,5 +1,6 @@
 import { exec } from 'child_process';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 
 import makeWASocket, {
@@ -29,6 +30,92 @@ import {
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:8083';
+const XTTS_URL = process.env.XTTS_URL || 'http://localhost:8082';
+const XTTS_SPEAKER = process.env.XTTS_SPEAKER || 'Sofia Hellen';
+const XTTS_LANGUAGE = process.env.XTTS_LANGUAGE || 'de';
+const VLM_URL = process.env.VLM_URL || 'http://192.168.178.10:8089';
+const VLM_MODEL = process.env.VLM_MODEL || 'qwen3-vl-8b';
+const VLM_TIMEOUT_MS = 60_000;
+
+/**
+ * Describe an image buffer via the local VLM service (Qwen3-VL).
+ * If userPrompt is provided it becomes the VLM question; otherwise a default
+ * German description prompt is used.
+ * Returns the VLM response text, or null on any failure.
+ */
+async function describeImageWithVLM(
+  imageBuffer: Buffer,
+  mimeType: string,
+  userPrompt?: string,
+): Promise<string | null> {
+  const ext = mimeType.includes('webp')
+    ? 'image/webp'
+    : mimeType.includes('png')
+      ? 'image/png'
+      : 'image/jpeg';
+  const b64 = imageBuffer.toString('base64');
+  const dataUrl = `data:${ext};base64,${b64}`;
+
+  const prompt =
+    userPrompt?.trim() ||
+    'Beschreibe kurz was du auf diesem Bild siehst. Antworte auf Deutsch in maximal 3 Sätzen.';
+
+  const body = JSON.stringify({
+    model: VLM_MODEL,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: dataUrl } },
+          { type: 'text', text: prompt },
+        ],
+      },
+    ],
+    max_tokens: 500,
+    temperature: 0.1,
+    stream: false,
+  });
+
+  return new Promise((resolve) => {
+    const url = new URL('/v1/chat/completions', VLM_URL);
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: Array<{ message?: { content?: string } }>;
+            };
+            const text = parsed.choices?.[0]?.message?.content?.trim();
+            resolve(text || null);
+          } catch {
+            resolve(null);
+          }
+        });
+      },
+    );
+    req.on('error', () => resolve(null));
+    req.setTimeout(VLM_TIMEOUT_MS, () => {
+      req.destroy();
+      resolve(null);
+    });
+    req.write(body);
+    req.end();
+  });
+}
 
 /**
  * Transcribe an audio buffer via the local Whisper STT service.
@@ -38,49 +125,52 @@ async function transcribeAudio(
   audioBuffer: Buffer,
   mimeType: string,
 ): Promise<string | null> {
+  const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
+  const tmpFile = path.join('/tmp', `nanoclaw-stt-${Date.now()}.${ext}`);
   try {
-    const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
-    const boundary = `----NanoclawSTT${Date.now()}`;
-    const CRLF = '\r\n';
-
-    const header = [
-      `--${boundary}`,
-      `Content-Disposition: form-data; name="file"; filename="audio.${ext}"`,
-      `Content-Type: ${mimeType}`,
-      '',
-      '',
-    ].join(CRLF);
-    const langField = [
-      `--${boundary}`,
-      `Content-Disposition: form-data; name="language"`,
-      '',
-      'de',
-      '',
-    ].join(CRLF);
-    const footer = `--${boundary}--${CRLF}`;
-
-    const body = Buffer.concat([
-      Buffer.from(header),
-      audioBuffer,
-      Buffer.from(CRLF + langField + footer),
-    ]);
-
-    const res = await fetch(`${WHISPER_URL}/transcribe`, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      signal: AbortSignal.timeout(30000),
+    fs.writeFileSync(tmpFile, audioBuffer);
+    const response = await new Promise<string>((resolve, reject) => {
+      exec(
+        `curl -s -X POST "${WHISPER_URL}/transcribe" -F "file=@${tmpFile}" -F "language=de" --max-time 30`,
+        (err, stdout) => {
+          if (err) reject(err);
+          else resolve(stdout);
+        },
+      );
     });
-
-    if (!res.ok) {
-      logger.warn({ status: res.status }, 'Whisper STT failed');
-      return null;
-    }
-
-    const data = (await res.json()) as { text?: string };
+    const data = JSON.parse(response) as { text?: string };
     return data.text?.trim() || null;
   } catch (err) {
     logger.warn({ err }, 'Whisper STT error');
+    return null;
+  } finally {
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Synthesize text to OGG/Opus audio via XTTS service.
+ * Returns the audio buffer, or null if TTS is unavailable.
+ */
+async function synthesizeVoice(text: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(`${XTTS_URL}/synthesize-ogg`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, language: XTTS_LANGUAGE, speaker: XTTS_SPEAKER }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) {
+      logger.warn({ status: res.status }, 'XTTS TTS failed');
+      return null;
+    }
+    return Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    logger.warn({ err }, 'XTTS TTS error');
     return null;
   }
 }
@@ -322,9 +412,13 @@ export class WhatsAppChannel implements Channel {
             '';
 
           // Transcribe PTT/audio messages via Whisper STT
+          let isVoiceMessage = false;
           if (!content && normalized.audioMessage) {
             const audioMsg = normalized.audioMessage;
             const isPtt = (audioMsg as Record<string, unknown>)?.ptt === true;
+            // Skip PTT sent by the bot itself (our own TTS voice responses)
+            if (isPtt && msg.key.fromMe) continue;
+            isVoiceMessage = isPtt;
             logger.info(
               { chatJid, isPtt },
               'Received audio message, transcribing...',
@@ -354,7 +448,7 @@ export class WhatsAppChannel implements Channel {
             }
           }
 
-          // Download images/stickers and save to group media folder for agent access
+          // Analyse images/stickers via VLM; fall back to saving to disk if VLM unavailable
           if (normalized.imageMessage || normalized.stickerMessage) {
             const imgMsg = normalized.imageMessage || normalized.stickerMessage;
             const group = groups[chatJid];
@@ -364,28 +458,46 @@ export class WhatsAppChannel implements Channel {
                 'buffer',
                 {},
               )) as Buffer;
-              const ext = (imgMsg?.mimetype || 'image/jpeg').includes('webp')
-                ? 'webp'
-                : 'jpg';
-              const mediaDir = path.join(
-                STORE_DIR,
-                '..',
-                'groups',
-                group.folder,
-                'media',
+              const mimeType = imgMsg?.mimetype || 'image/jpeg';
+              const caption = normalized.imageMessage?.caption?.trim() || '';
+
+              // VLM analysis — caption becomes the user question if present
+              const vlmResult = await describeImageWithVLM(
+                imgBuffer,
+                mimeType,
+                caption || undefined,
               );
-              fs.mkdirSync(mediaDir, { recursive: true });
-              const filename = `img-${Date.now()}.${ext}`;
-              const hostPath = path.join(mediaDir, filename);
-              fs.writeFileSync(hostPath, imgBuffer);
-              const containerPath = `/workspace/group/media/${filename}`;
-              const caption = normalized.imageMessage?.caption || '';
-              content = caption
-                ? `${caption}\n[Bild gespeichert unter: ${containerPath}]`
-                : `[Bild gespeichert unter: ${containerPath}]`;
-              logger.info({ chatJid, containerPath }, 'Image saved for agent');
+
+              if (vlmResult) {
+                content = caption
+                  ? `${caption}\n[Bildanalyse: ${vlmResult}]`
+                  : `[Bildanalyse: ${vlmResult}]`;
+                logger.info(
+                  { chatJid, captionLen: caption.length, vlmLen: vlmResult.length },
+                  'Image described by VLM',
+                );
+              } else {
+                // Fallback: save to disk as before
+                const ext = mimeType.includes('webp') ? 'webp' : 'jpg';
+                const mediaDir = path.join(
+                  STORE_DIR,
+                  '..',
+                  'groups',
+                  group.folder,
+                  'media',
+                );
+                fs.mkdirSync(mediaDir, { recursive: true });
+                const filename = `img-${Date.now()}.${ext}`;
+                const hostPath = path.join(mediaDir, filename);
+                fs.writeFileSync(hostPath, imgBuffer);
+                const containerPath = `/workspace/group/media/${filename}`;
+                content = caption
+                  ? `${caption}\n[Bild gespeichert unter: ${containerPath}]`
+                  : `[Bild gespeichert unter: ${containerPath}]`;
+                logger.warn({ chatJid }, 'VLM unavailable, image saved to disk as fallback');
+              }
             } catch (err) {
-              logger.warn({ err, chatJid }, 'Failed to download image');
+              logger.warn({ err, chatJid }, 'Failed to download/process image');
             }
           }
 
@@ -413,6 +525,7 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            is_voice_message: isVoiceMessage,
           });
         }
       }
@@ -446,6 +559,23 @@ export class WhatsAppChannel implements Channel {
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
       );
+    }
+  }
+
+  async sendVoiceMessage(jid: string, text: string): Promise<boolean> {
+    const audio = await synthesizeVoice(text);
+    if (!audio) return false;
+    try {
+      await this.sock.sendMessage(jid, {
+        audio,
+        mimetype: 'audio/ogg; codecs=opus',
+        ptt: true,
+      });
+      logger.info({ jid, length: audio.length }, 'Voice message sent');
+      return true;
+    } catch (err) {
+      logger.warn({ err, jid }, 'Failed to send voice message');
+      return false;
     }
   }
 
