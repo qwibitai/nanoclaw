@@ -248,9 +248,10 @@ server.tool(
   'register_group',
   `Register a new WhatsApp chat (group or individual) so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID. The folder name should be lowercase with hyphens (e.g., "family-chat").
+ALWAYS read /workspace/ipc/available_groups.json first (via Bash: cat /workspace/ipc/available_groups.json) to find the correct JID.
 For individual chats (e.g., a phone number like "491234567890@s.whatsapp.net"), set requiresTrigger to false so the agent responds to every message without needing a trigger word.
-For WhatsApp groups, set requiresTrigger to true (or omit it).`,
+For WhatsApp groups, set requiresTrigger to true (or omit it).
+The folder name should be lowercase with hyphens (e.g., "family-chat").`,
   {
     jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us" for groups, "491234567890@s.whatsapp.net" for individuals)'),
     name: z.string().describe('Display name for the chat'),

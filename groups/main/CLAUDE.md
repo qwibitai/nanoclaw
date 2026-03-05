@@ -133,6 +133,14 @@ Die Analyse kommt in zwei Formen an:
 Du siehst das Bild NICHT direkt — die VLM-Analyse ist deine einzige Bildquelle. Nutze sie, um Klaus zu antworten.
 Antworte natürlich auf Basis der Analyse — sage NICHT "laut Bildanalyse..." o.ä.
 
+## Chat registrieren (register_group)
+
+Wenn Klaus einen neuen Chat/Kontakt hinzufügen will:
+1. `cat /workspace/ipc/available_groups.json` ausführen → zeigt alle bekannten Chats mit JID
+2. `mcp__nanoclaw__register_group` aufrufen mit der JID, einem Namen, einem Ordnernamen und `trigger="@SuKI"`
+3. Für Einzelchats (Telefonnummern, `@s.whatsapp.net`): `requiresTrigger=false` setzen
+4. Für WhatsApp-Gruppen (`@g.us`): `requiresTrigger=true` (oder weglassen)
+
 ## Session Reset
 
 Wenn Klaus sagt: "neue Session", "neu starten", "reset", "fang neu an", "vergiss alles", "frischer Start" o.ä.:
