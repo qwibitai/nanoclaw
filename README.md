@@ -25,7 +25,7 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-git clone https://github.com/qwibitai/NanoClaw.git
+git clone https://github.com/qwibitai/nanoclaw.git
 cd NanoClaw
 claude
 ```
@@ -160,7 +160,7 @@ We don't want configuration sprawl. Every user should customize NanoClaw so that
 
 **Can I use third-party or open-source models?**
 
-Yes. NanoClaw supports any API-compatible model endpoint. Set these environment variables in your `.env` file:
+Yes. NanoClaw supports any Claude API-compatible model endpoint. Set these environment variables in your `.env` file:
 
 ```bash
 ANTHROPIC_BASE_URL=https://your-api-endpoint.com
