@@ -340,11 +340,13 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let hadStreamingOutput = false;
 
-    // Accumulate stdout for logging only (output now comes via WS)
+    // Accumulate stdout for logging only (output flows via WS).
+    // Cap at 64KB — stdout should only contain stray SDK noise now.
+    const STDOUT_LOG_LIMIT = 65_536;
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
       if (!stdoutTruncated) {
-        const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+        const remaining = STDOUT_LOG_LIMIT - stdout.length;
         if (chunk.length > remaining) {
           stdout += chunk.slice(0, remaining);
           stdoutTruncated = true;

@@ -115,9 +115,7 @@ function sendNotification(
 ) {
   ws.emit(
     'message',
-    Buffer.from(
-      JSON.stringify({ jsonrpc: '2.0', method, params }),
-    ),
+    Buffer.from(JSON.stringify({ jsonrpc: '2.0', method, params })),
   );
 }
 
@@ -130,9 +128,7 @@ function sendRequest(
 ) {
   ws.emit(
     'message',
-    Buffer.from(
-      JSON.stringify({ jsonrpc: '2.0', method, params, id }),
-    ),
+    Buffer.from(JSON.stringify({ jsonrpc: '2.0', method, params, id })),
   );
 }
 
@@ -395,12 +391,17 @@ describe('WsIpcServer', () => {
     authenticateWs(ws, token);
 
     ws.send.mockClear();
-    sendRequest(ws, 'schedule_task', {
-      prompt: 'do something',
-      schedule_type: 'once',
-      schedule_value: '2026-01-01',
-      targetJid: 'test@g.us',
-    }, 'req-1');
+    sendRequest(
+      ws,
+      'schedule_task',
+      {
+        prompt: 'do something',
+        schedule_type: 'once',
+        schedule_value: '2026-01-01',
+        targetJid: 'test@g.us',
+      },
+      'req-1',
+    );
 
     await new Promise((r) => setTimeout(r, 10));
     expect(createTask).toHaveBeenCalledWith(
@@ -435,7 +436,8 @@ describe('WsIpcServer', () => {
   });
 
   it('handler from registry is registered and callable', async () => {
-    const { getRegisteredHandlers } = await import('./ipc-handlers/registry.js');
+    const { getRegisteredHandlers } =
+      await import('./ipc-handlers/registry.js');
 
     // Set up mock to return a handler
     const testHandler = vi.fn(async (params: Record<string, unknown>) => ({
