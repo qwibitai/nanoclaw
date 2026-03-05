@@ -116,6 +116,27 @@ export async function run(args: string[]): Promise<void> {
     recursive: true,
   });
 
+  // Create CLAUDE.md in the new group folder from template if it doesn't exist.
+  // The agent runs with CWD=/workspace/group and loads CLAUDE.md from there.
+  const groupClaudeMdPath = path.join(
+    projectRoot,
+    'groups',
+    parsed.folder,
+    'CLAUDE.md',
+  );
+  if (!fs.existsSync(groupClaudeMdPath)) {
+    const templatePath = parsed.isMain
+      ? path.join(projectRoot, 'groups', 'main', 'CLAUDE.md')
+      : path.join(projectRoot, 'groups', 'global', 'CLAUDE.md');
+    if (fs.existsSync(templatePath)) {
+      fs.copyFileSync(templatePath, groupClaudeMdPath);
+      logger.info(
+        { file: groupClaudeMdPath, template: templatePath },
+        'Created CLAUDE.md from template',
+      );
+    }
+  }
+
   // Update assistant name in CLAUDE.md files if different from default
   let nameUpdated = false;
   if (parsed.assistantName !== 'Andy') {
@@ -124,10 +145,11 @@ export async function run(args: string[]): Promise<void> {
       'Updating assistant name',
     );
 
-    const mdFiles = [
-      path.join(projectRoot, 'groups', 'global', 'CLAUDE.md'),
-      path.join(projectRoot, 'groups', parsed.folder, 'CLAUDE.md'),
-    ];
+    const groupsDir = path.join(projectRoot, 'groups');
+    const mdFiles = fs
+      .readdirSync(groupsDir)
+      .map((d) => path.join(groupsDir, d, 'CLAUDE.md'))
+      .filter((f) => fs.existsSync(f));
 
     for (const mdFile of mdFiles) {
       if (fs.existsSync(mdFile)) {
