@@ -65,6 +65,24 @@ mcporter call weather.get_current_weather --args '{"city":"München"}'
 
 # Google Drive
 mcporter call gdrive.list_files --args '{"folder_id":"root","limit":20}'
+mcporter call gdrive.search_files --args '{"query":"Mietvertrag","limit":10}'
+mcporter call gdrive.get_file_info --args '{"file_id":"<id>"}'
+mcporter call gdrive.read_file --args '{"file_id":"<id>"}'
+mcporter call gdrive.create_document --args '{"name":"Notiz","content":"Text...","folder_id":"root"}'
+mcporter call gdrive.create_folder --args '{"name":"Ordnername","parent_id":"root"}'
+mcporter call gdrive.upload_text_file --args '{"name":"datei.txt","content":"...","folder_id":"root"}'
+mcporter call gdrive.move_file --args '{"file_id":"<id>","target_folder_id":"<folder_id>"}'
+mcporter call gdrive.rename_file --args '{"file_id":"<id>","new_name":"NeuerName"}'
+mcporter call gdrive.delete_file --args '{"file_id":"<id>"}'
+
+# Places / Navigation (Google Maps)
+mcporter call places.search_places --args '{"query":"Zahnarzt München","max_results":5}'
+mcporter call places.search_nearby --args '{"latitude":48.1351,"longitude":11.5820,"types":["restaurant"],"radius_meters":500}'
+mcporter call places.get_place_details --args '{"place_id":"<place_id>"}'
+mcporter call places.compute_route --args '{"origin":"München Hauptbahnhof","destination":"Flughafen München","mode":"DRIVE"}'
+mcporter call places.compute_route --args '{"origin":"Marienplatz München","destination":"BMW Welt","mode":"TRANSIT"}'
+mcporter call places.get_route_weather --args '{"origin":"München","destination":"Hamburg","departure_time":"2026-03-06T08:00:00"}'
+mcporter call places.usage_status --args '{}'
 
 # Teams (via ms365-work)
 mcporter call ms365-work.list_teams --args '{"top":20}'
