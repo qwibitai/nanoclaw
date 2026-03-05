@@ -246,14 +246,17 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new WhatsApp chat (group or individual) so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_groups.json to find the JID. The folder name should be lowercase with hyphens (e.g., "family-chat").
+For individual chats (e.g., a phone number like "491234567890@s.whatsapp.net"), set requiresTrigger to false so the agent responds to every message without needing a trigger word.
+For WhatsApp groups, set requiresTrigger to true (or omit it).`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
-    name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
-    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us" for groups, "491234567890@s.whatsapp.net" for individuals)'),
+    name: z.string().describe('Display name for the chat'),
+    folder: z.string().describe('Folder name for chat files (lowercase, hyphens, e.g., "family-chat")'),
+    trigger: z.string().describe('Trigger word (e.g., "@SuKI"). For individual chats with requiresTrigger=false, this can be set to the agent name.'),
+    requiresTrigger: z.boolean().optional().describe('Whether messages need a trigger word. Default true for groups, set to false for individual chats so the agent responds to every message.'),
   },
   async (args) => {
     if (!isMain) {
@@ -269,6 +272,7 @@ Use available_groups.json to find the JID for a group. The folder name should be
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
+      requiresTrigger: args.requiresTrigger,
       timestamp: new Date().toISOString(),
     };
 
