@@ -136,6 +136,8 @@ export class GitHubChannel implements Channel {
   private webhookSecret: string;
   private port: number;
   private token: string;
+  /** If set, only process events from these GitHub usernames */
+  private allowedSenders: Set<string> | null;
   /** Tracks the most recent issue/PR number per JID for reply routing */
   private replyTargets = new Map<string, number>();
 
@@ -143,11 +145,14 @@ export class GitHubChannel implements Channel {
     webhookSecret: string,
     port: number,
     token: string,
+    allowedSenders: string[],
     opts: ChannelOpts,
   ) {
     this.webhookSecret = webhookSecret;
     this.port = port;
     this.token = token;
+    this.allowedSenders =
+      allowedSenders.length > 0 ? new Set(allowedSenders) : null;
     this.opts = opts;
   }
 
@@ -195,6 +200,15 @@ export class GitHubChannel implements Channel {
       const timestamp = new Date().toISOString();
       const senderName =
         payload.sender?.login || payload.sender?.id?.toString() || 'github';
+
+      // Filter by allowed senders if configured
+      if (this.allowedSenders && !this.allowedSenders.has(senderName)) {
+        logger.debug(
+          { sender: senderName, event },
+          'GitHub event from non-allowed sender, skipping',
+        );
+        return;
+      }
 
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, repo, 'github', false);
@@ -315,6 +329,7 @@ registerChannel('github', (opts: ChannelOpts) => {
     'GITHUB_WEBHOOK_SECRET',
     'GITHUB_WEBHOOK_PORT',
     'GITHUB_TOKEN',
+    'GITHUB_ALLOWED_SENDERS',
   ]);
   const secret =
     process.env.GITHUB_WEBHOOK_SECRET || envVars.GITHUB_WEBHOOK_SECRET || '';
@@ -323,6 +338,12 @@ registerChannel('github', (opts: ChannelOpts) => {
     10,
   );
   const token = process.env.GITHUB_TOKEN || envVars.GITHUB_TOKEN || '';
+  const allowedSendersRaw =
+    process.env.GITHUB_ALLOWED_SENDERS || envVars.GITHUB_ALLOWED_SENDERS || '';
+  const allowedSenders = allowedSendersRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (!secret || !port) {
     logger.warn('GitHub: GITHUB_WEBHOOK_SECRET or GITHUB_WEBHOOK_PORT not set');
@@ -335,5 +356,9 @@ registerChannel('github', (opts: ChannelOpts) => {
     );
   }
 
-  return new GitHubChannel(secret, port, token, opts);
+  if (allowedSenders.length > 0) {
+    logger.info({ allowedSenders }, 'GitHub: sender allowlist active');
+  }
+
+  return new GitHubChannel(secret, port, token, allowedSenders, opts);
 });

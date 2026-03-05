@@ -77,7 +77,7 @@ describe('GitHubChannel', () => {
     vi.clearAllMocks();
     opts = createTestOpts();
     // Use port 0 to get a random available port
-    channel = new GitHubChannel(SECRET, 0, 'test-github-token', opts);
+    channel = new GitHubChannel(SECRET, 0, 'test-github-token', [], opts);
     await channel.connect();
     const addr = (channel as any).server.address();
     port = addr.port;
@@ -104,6 +104,7 @@ describe('GitHubChannel', () => {
         SECRET,
         0,
         'test-github-token',
+        [],
         createTestOpts(),
       );
       expect(ch.isConnected()).toBe(false);
@@ -726,5 +727,121 @@ describe('GitHubChannel', () => {
         globalThis.fetch = originalFetch;
       }
     });
+  });
+});
+
+// --- Sender allowlist tests (separate describe with its own channel) ---
+
+describe('GitHubChannel sender allowlist', () => {
+  const SECRET = 'test-webhook-secret';
+  let port: number;
+  let channel: GitHubChannel;
+  let opts: ChannelOpts;
+
+  afterEach(async () => {
+    await channel.disconnect();
+  });
+
+  it('delivers events from allowed senders', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(SECRET, 0, 'test-token', ['alice'], opts);
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'issues',
+      secret: SECRET,
+      payload: {
+        action: 'opened',
+        repository: { full_name: 'cmraible/seb' },
+        issue: {
+          number: 1,
+          title: 'Test',
+          html_url: 'https://github.com/cmraible/seb/issues/1',
+        },
+        sender: { login: 'alice' },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalled();
+  });
+
+  it('drops events from non-allowed senders', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(SECRET, 0, 'test-token', ['alice'], opts);
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'issues',
+      secret: SECRET,
+      payload: {
+        action: 'opened',
+        repository: { full_name: 'cmraible/seb' },
+        issue: {
+          number: 1,
+          title: 'Test',
+          html_url: 'https://github.com/cmraible/seb/issues/1',
+        },
+        sender: { login: 'stranger' },
+      },
+    });
+
+    expect(opts.onMessage).not.toHaveBeenCalled();
+    expect(opts.onChatMetadata).not.toHaveBeenCalled();
+  });
+
+  it('allows all senders when allowlist is empty', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(SECRET, 0, 'test-token', [], opts);
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'issues',
+      secret: SECRET,
+      payload: {
+        action: 'opened',
+        repository: { full_name: 'cmraible/seb' },
+        issue: {
+          number: 1,
+          title: 'Test',
+          html_url: 'https://github.com/cmraible/seb/issues/1',
+        },
+        sender: { login: 'anyone' },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalled();
+  });
+
+  it('supports multiple allowed senders', async () => {
+    opts = createTestOpts();
+    channel = new GitHubChannel(
+      SECRET,
+      0,
+      'test-token',
+      ['alice', 'bob'],
+      opts,
+    );
+    await channel.connect();
+    port = (channel as any).server.address().port;
+
+    await sendWebhook(port, {
+      event: 'issues',
+      secret: SECRET,
+      payload: {
+        action: 'opened',
+        repository: { full_name: 'cmraible/seb' },
+        issue: {
+          number: 1,
+          title: 'Test',
+          html_url: 'https://github.com/cmraible/seb/issues/1',
+        },
+        sender: { login: 'bob' },
+      },
+    });
+
+    expect(opts.onMessage).toHaveBeenCalled();
   });
 });
