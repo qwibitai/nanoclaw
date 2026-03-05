@@ -148,14 +148,6 @@ export class GroupQueue {
   }
 
   /**
-   * Returns true if the group currently has an active container process.
-   */
-  isActive(groupJid: string): boolean {
-    const state = this.groups.get(groupJid);
-    return !!state?.process && !state.process.killed;
-  }
-
-  /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
    */

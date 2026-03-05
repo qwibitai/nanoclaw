@@ -1,0 +1,24 @@
+skill: reactions
+version: 1.0.0
+description: "WhatsApp emoji reaction support with status tracking"
+core_version: 0.1.0
+adds:
+  - scripts/migrate-reactions.ts
+  - container/skills/reactions/SKILL.md
+  - src/status-tracker.ts
+  - src/status-tracker.test.ts
+modifies:
+  - src/db.ts
+  - src/db.test.ts
+  - src/channels/whatsapp.ts
+  - src/types.ts
+  - src/ipc.ts
+  - src/index.ts
+  - src/group-queue.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/channels/whatsapp.test.ts
+  - src/group-queue.test.ts
+  - src/ipc-auth.test.ts
+conflicts: []
+depends: []
+test: "npx tsc --noEmit"
