@@ -1,0 +1,17 @@
+skill: ollama
+version: 1.0.0
+description: "Local Ollama model inference via MCP server"
+core_version: 0.1.0
+adds:
+  - container/agent-runner/src/ollama-mcp-stdio.ts
+  - scripts/ollama-watch.sh
+modifies:
+  - container/agent-runner/src/index.ts
+  - src/container-runner.ts
+structured:
+  npm_dependencies: {}
+  env_additions:
+    - OLLAMA_HOST
+conflicts: []
+depends: []
+test: "npm run build"
