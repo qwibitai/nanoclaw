@@ -157,15 +157,17 @@ export class GroupQueue {
 
   /**
    * Send a follow-up message to the active container via WebSocket.
-   * Returns true if the message was sent, false if no active container.
+   * - 'sent':        delivered over WS
+   * - 'retry':       container active but WS not connected yet, caller should retry
+   * - 'unavailable': no container can accept this message, caller should enqueue
    */
-  sendMessage(jid: string, text: string): boolean {
+  sendMessage(jid: string, text: string): 'sent' | 'retry' | 'unavailable' {
     const state = this.getGroup(jid);
-    if (!state.active || !state.wsToken || state.isTaskContainer) return false;
+    if (!state.active || !state.wsToken || state.isTaskContainer) return 'unavailable';
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
-    if (!this._wsServer) return false;
-    return this._wsServer.sendInput(state.wsToken, text);
+    if (!this._wsServer) return 'unavailable';
+    return this._wsServer.sendInput(state.wsToken, text) ? 'sent' : 'retry';
   }
 
   /**

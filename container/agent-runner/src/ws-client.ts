@@ -53,8 +53,8 @@ export class WsClient {
   private rpc: JSONRPCServerAndClient | null = null;
   private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
-  // Buffered event queue — events are never lost
-  private eventQueue: WsEvent[] = [];
+  // Buffered event queue — null sentinel means "stop consuming"
+  private eventQueue: (WsEvent | null)[] = [];
   private eventWaiter: ((event: WsEvent | null) => void) | null = null;
 
   onGroupsUpdated:
@@ -148,7 +148,7 @@ export class WsClient {
 
   nextEvent(): Promise<WsEvent | null> {
     if (this.eventQueue.length > 0) {
-      return Promise.resolve(this.eventQueue.shift()!);
+      return Promise.resolve(this.eventQueue.shift() ?? null);
     }
     return new Promise(resolve => { this.eventWaiter = resolve; });
   }
@@ -158,6 +158,10 @@ export class WsClient {
       const resolve = this.eventWaiter;
       this.eventWaiter = null;
       resolve(null);
+    } else {
+      // Insert at front so the drain loop stops immediately,
+      // preserving any buffered events for the next query cycle.
+      this.eventQueue.unshift(null);
     }
   }
 

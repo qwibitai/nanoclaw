@@ -358,8 +358,42 @@ async function startMessageLoop(): Promise<void> {
 
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  // JIDs where WS delivery failed (container active but not connected yet).
+  // Retried each poll iteration until delivery succeeds or container exits.
+  const deliveryRetryJids = new Set<string>();
+
   while (true) {
     try {
+      // Retry undelivered messages for groups with active containers
+      for (const retryJid of deliveryRetryJids) {
+        const pending = getMessagesSince(
+          retryJid,
+          lastAgentTimestamp[retryJid] || '',
+          ASSISTANT_NAME,
+        );
+        if (pending.length === 0) {
+          deliveryRetryJids.delete(retryJid);
+          continue;
+        }
+        const formatted = formatMessages(pending);
+        const result = queue.sendMessage(retryJid, formatted);
+        if (result === 'sent') {
+          lastAgentTimestamp[retryJid] =
+            pending[pending.length - 1].timestamp;
+          saveState();
+          deliveryRetryJids.delete(retryJid);
+          logger.debug(
+            { chatJid: retryJid, count: pending.length },
+            'Retry: piped messages to active container',
+          );
+        } else if (result === 'unavailable') {
+          // Container exited or became a task container — enqueue for new one
+          deliveryRetryJids.delete(retryJid);
+          queue.enqueueMessageCheck(retryJid);
+        }
+        // 'retry': still not connected, try again next poll
+      }
+
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -419,7 +453,8 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          const deliveryResult = queue.sendMessage(chatJid, formatted);
+          if (deliveryResult === 'sent') {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -433,6 +468,9 @@ async function startMessageLoop(): Promise<void> {
               ?.catch((err) =>
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
+          } else if (deliveryResult === 'retry') {
+            // Container active but WS not connected yet — retry next poll
+            deliveryRetryJids.add(chatJid);
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
