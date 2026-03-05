@@ -556,6 +556,27 @@ describe('schedule_task schedule types', () => {
   });
 });
 
+// --- schedule_type validation ---
+
+describe('schedule_task schedule_type validation', () => {
+  it('rejects invalid schedule_type', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'bad type',
+        schedule_type: 'weekly',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
+});
+
 // --- context_mode defaulting ---
 
 describe('schedule_task context_mode', () => {
