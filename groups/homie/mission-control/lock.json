@@ -1,0 +1,9 @@
+{
+  "locked": true,
+  "task_id": "I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS",
+  "owner": "worker:research",
+  "acquired_at": "2026-03-05T00:14:00Z",
+  "timeout_minutes": 60,
+  "grace_minutes": 15,
+  "wrap_up_sent": false
+}

@@ -1,0 +1,36 @@
+{"ts":"2026-03-04T02:50:58.033Z","actor":"mc","event":"initiative.created","initiative_id":"I-CEQA-MARKET-RESEARCH","detail":"CEQA Market Research"}
+{"ts":"2026-03-04T02:52:01.622Z","actor":"mc","event":"task.created","task_id":"I-001-RESEARCH-CA-LAND-USE-CONTRACTORS","detail":"Research CA Land Use Contractors"}
+{"ts":"2026-03-04T02:52:09.843Z","actor":"mc","event":"task.status_changed","task_id":"I-001-RESEARCH-CA-LAND-USE-CONTRACTORS","detail":"backlog → ready"}
+{"ts":"2026-03-04T02:52:14.042Z","actor":"mc","event":"task.status_changed","task_id":"I-001-RESEARCH-CA-LAND-USE-CONTRACTORS","detail":"ready → in_progress"}
+{"ts":"2026-03-04T02:57:37.215Z","actor":"mc","event":"task.status_changed","task_id":"I-001-RESEARCH-CA-LAND-USE-CONTRACTORS","detail":"in_progress → done"}
+{"ts":"2026-03-04T02:57:37.216Z","actor":"mc","event":"initiative.status_changed","initiative_id":"I-CEQA-MARKET-RESEARCH","detail":"active → complete"}
+{"ts":"2026-03-04T02:57:37.217Z","actor":"mc","event":"initiative.completed","initiative_id":"I-CEQA-MARKET-RESEARCH","detail":"All tasks terminal for I-CEQA-MARKET-RESEARCH"}
+{"ts":"2026-03-04T02:58:24.580Z","actor":"mc","event":"task.status_changed","task_id":"I-001-RESEARCH-CA-LAND-USE-CONTRACTORS","detail":"done → verified"}
+{"ts":"2026-03-04T02:58:41.964Z","actor":"mc","event":"task.created","task_id":"I-002-ENRICH-CONTRACTOR-DATA-WITH-CONTACT-INFO","detail":"Enrich Contractor Data with Contact Info"}
+{"ts":"2026-03-04T02:58:46.299Z","actor":"mc","event":"task.status_changed","task_id":"I-002-ENRICH-CONTRACTOR-DATA-WITH-CONTACT-INFO","detail":"backlog → ready"}
+{"ts":"2026-03-04T02:59:02.003Z","actor":"mc","event":"task.status_changed","task_id":"I-002-ENRICH-CONTRACTOR-DATA-WITH-CONTACT-INFO","detail":"ready → in_progress"}
+{"ts":"2026-03-04T03:05:05.423Z","actor":"mc","event":"task.status_changed","task_id":"I-002-ENRICH-CONTRACTOR-DATA-WITH-CONTACT-INFO","detail":"in_progress → done"}
+{"ts":"2026-03-04T03:47:56.746Z","actor":"mc","event":"task.status_changed","task_id":"I-002-ENRICH-CONTRACTOR-DATA-WITH-CONTACT-INFO","detail":"done → verified"}
+{"ts":"2026-03-04T04:09:53.457Z","actor":"mc","event":"initiative.created","initiative_id":"I-CEQA-CONTRACTOR-OUTREACH-CAMPAIGN","detail":"CEQA Contractor Outreach Campaign"}
+{"ts":"2026-03-04T04:09:57.744Z","actor":"mc","event":"task.created","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"Draft Personalized Outreach Emails"}
+{"ts":"2026-03-04T04:10:01.229Z","actor":"mc","event":"task.created","task_id":"I-004-EXECUTE-EMAIL-OUTREACH-CAMPAIGN","detail":"Execute Email Outreach Campaign"}
+{"ts":"2026-03-04T04:25:11.594Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"backlog → ready"}
+{"ts":"2026-03-04T04:25:14.763Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"ready → in_progress"}
+{"ts":"2026-03-04T05:06:06.026Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"in_progress → blocked"}
+{"ts":"2026-03-04T05:06:49.580Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"blocked → ready"}
+{"ts":"2026-03-04T05:06:53.022Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"ready → in_progress"}
+{"ts":"2026-03-04T05:06:57.866Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"in_progress → done"}
+{"ts":"2026-03-04T05:23:56.689Z","actor":"mc","event":"task.status_changed","task_id":"I-003-DRAFT-PERSONALIZED-OUTREACH-EMAILS","detail":"done → verified"}
+{"ts":"2026-03-04T05:24:03.867Z","actor":"mc","event":"task.status_changed","task_id":"I-004-EXECUTE-EMAIL-OUTREACH-CAMPAIGN","detail":"backlog → ready"}
+{"ts":"2026-03-04T05:24:07.738Z","actor":"mc","event":"task.status_changed","task_id":"I-004-EXECUTE-EMAIL-OUTREACH-CAMPAIGN","detail":"ready → in_progress"}
+{"ts":"2026-03-04T05:24:17.159Z","actor":"mc","event":"task.status_changed","task_id":"I-004-EXECUTE-EMAIL-OUTREACH-CAMPAIGN","detail":"in_progress → blocked"}
+{"ts":"2026-03-04T20:39:20.873Z","actor":"mc","event":"task.created","task_id":"I-005-SET-UP-OUTREACH-TRACKING-SYSTEM","detail":"Set Up Outreach Tracking System"}
+{"ts":"2026-03-04T20:39:36.955Z","actor":"mc","event":"task.created","task_id":"I-006-FOLLOW-UP-WITH-NON-RESPONDERS","detail":"Follow-up with Non-Responders"}
+{"ts":"2026-03-04T20:39:41.469Z","actor":"mc","event":"task.status_changed","task_id":"I-005-SET-UP-OUTREACH-TRACKING-SYSTEM","detail":"backlog → ready"}
+{"ts":"2026-03-04T20:39:44.786Z","actor":"mc","event":"task.status_changed","task_id":"I-005-SET-UP-OUTREACH-TRACKING-SYSTEM","detail":"ready → in_progress"}
+{"ts":"2026-03-04T20:40:56.144Z","actor":"mc","event":"task.status_changed","task_id":"I-005-SET-UP-OUTREACH-TRACKING-SYSTEM","detail":"in_progress → done"}
+{"ts":"2026-03-04T20:41:28.961Z","actor":"mc","event":"task.status_changed","task_id":"I-005-SET-UP-OUTREACH-TRACKING-SYSTEM","detail":"done → verified"}
+{"ts":"2026-03-05T00:16:49.609Z","actor":"mc","event":"task.created","task_id":"I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS","detail":"Research Alternative Outreach Channels"}
+{"ts":"2026-03-05T00:17:04.395Z","actor":"mc","event":"task.status_changed","task_id":"I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS","detail":"backlog → ready"}
+{"ts":"2026-03-05T00:17:27.098Z","actor":"mc","event":"task.status_changed","task_id":"I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS","detail":"ready → in_progress"}
+{"ts":"2026-03-05T00:14:00Z","actor":"Homie","event":"worker.spawned","task_id":"I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS","detail":"Dispatched worker via IPC for task I-007-RESEARCH-ALTERNATIVE-OUTREACH-CHANNELS (Research Alternative Outreach Channels)"}
