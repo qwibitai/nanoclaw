@@ -84,6 +84,12 @@ mcporter call email-classifier.email_classifier_learn --args '{"account":"gmx"}'
 mcporter call email-classifier.email_classifier_classify --args '{"account":"gmx","dry_run":true}'
 mcporter call email-classifier.email_classifier_classify --args '{"account":"gmx","dry_run":false,"min_confidence":0.5}'
 mcporter call email-classifier.email_classifier_reorganize --args '{"source_folder":"Gelesen","account":"gmx","dry_run":true}'
+
+# LLM-basierte Email-Typklassifizierung (liest Body + PDF-Anhänge, Qwen LLM)
+# Gibt JSON-Liste zurück: [{uid, folder, from, subject, confidence, reason, has_pdf}]
+# Danach mit email.move_email verschieben.
+mcporter call email-classifier.email_classify_by_type --args '{"email_type":"Handwerkerrechnung oder Handwerker-Korrespondenz","folders":"INBOX,Gelesen/Wohnung_Haus","account":"gmx"}'
+mcporter call email-classifier.email_classify_by_type --args '{"email_type":"Kreditkartenabrechnung","folders":"INBOX","account":"gmx","min_confidence":0.7}'
 ```
 
 ## MS365 KQL-Regeln
