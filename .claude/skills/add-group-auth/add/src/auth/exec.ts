@@ -2,12 +2,12 @@
  * ExecHandle implementation — wraps container-runtime.ts to spawn commands
  * inside the agent container for auth flows.
  */
-import { spawn } from 'child_process';
+import { exec, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { CONTAINER_IMAGE, DATA_DIR, TIMEZONE } from '../config.js';
-import { CONTAINER_RUNTIME_BIN } from '../container-runtime.js';
+import { CONTAINER_IMAGE, DATA_DIR, IDLE_TIMEOUT, TIMEZONE } from '../config.js';
+import { CONTAINER_RUNTIME_BIN, stopContainer } from '../container-runtime.js';
 import { logger } from '../logger.js';
 import type { ExecHandle } from './types.js';
 
@@ -37,6 +37,10 @@ export function execInContainer(
     '--rm',
     '--name',
     containerName,
+    // Host networking so the CLI's OAuth callback server on localhost:{port}
+    // is reachable from the host (needed for the callback code delivery path).
+    '--network',
+    'host',
     '-e',
     `TZ=${TIMEZONE}`,
     '--entrypoint',
@@ -87,6 +91,21 @@ export function execInContainer(
     stderr += data.toString();
   });
 
+  // Hard timeout — uses IDLE_TIMEOUT from config: auth is waiting for user
+  // input, same as an idle agent waiting for IPC. Same kill mechanics as
+  // container-runner.ts (docker stop → SIGKILL fallback).
+  const killTimer = setTimeout(() => {
+    logger.warn({ containerName, timeoutMs: IDLE_TIMEOUT }, 'Auth container timeout, stopping gracefully');
+    exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+      if (err) {
+        logger.warn({ containerName, err }, 'Graceful stop failed, force killing');
+        proc.kill('SIGKILL');
+      }
+    });
+  }, IDLE_TIMEOUT);
+
+  proc.on('close', () => clearTimeout(killTimer));
+
   // Cache the wait promise so multiple calls don't hang
   let waitPromise: Promise<{ exitCode: number; stdout: string; stderr: string }> | null = null;
 
@@ -117,7 +136,9 @@ export function execInContainer(
       return waitPromise;
     },
     kill(): void {
-      proc.kill();
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+        if (err) proc.kill('SIGKILL');
+      });
     },
   };
 }

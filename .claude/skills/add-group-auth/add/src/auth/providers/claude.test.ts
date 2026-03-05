@@ -35,8 +35,18 @@ const { initCredentialStore, encrypt, decrypt, saveCredential } = await import(
 );
 const { readEnvFile } = await import('../../env.js');
 
+// Mock config.js for IDLE_TIMEOUT
+vi.mock('../../config.js', () => ({
+  IDLE_TIMEOUT: 1800_000,
+}));
+
+// Mock exec.js for authSessionDir
+vi.mock('../exec.js', () => ({
+  authSessionDir: vi.fn((scope: string) => path.join(tmpDir, 'sessions', scope)),
+}));
+
 // Import after mocks
-const { claudeProvider, isAuthError, waitForOutput } = await import(
+const { claudeProvider, isAuthError, waitForOutput, detectCodeDelivery, deliverCode } = await import(
   './claude.js'
 );
 
@@ -331,5 +341,149 @@ describe('waitForOutput', () => {
     expect(match![0]).toBe(
       'https://console.anthropic.com/oauth/authorize?id=full',
     );
+  });
+});
+
+describe('detectCodeDelivery', () => {
+  function makeHandle(): import('../types.js').ExecHandle {
+    let waitResolve: (v: { exitCode: number; stdout: string; stderr: string }) => void;
+    const waitPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
+      (r) => { waitResolve = r; },
+    );
+    return {
+      onStdout: vi.fn(),
+      stdin: { write: vi.fn(), end: vi.fn() },
+      wait: () => waitPromise,
+      kill: vi.fn(),
+      // Expose for test control
+      _resolve: (v: { exitCode: number; stdout: string; stderr: string }) => waitResolve(v),
+    } as any;
+  }
+
+  it('detects stdin when paste prompt appears in stdout', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-stdin');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const output = { value: '' };
+    const handle = makeHandle();
+
+    const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
+
+    // Simulate paste prompt appearing
+    output.value = 'Opening browser...\nPaste code here if prompted > ';
+
+    const result = await promise;
+    expect(result).toEqual({ method: 'stdin' });
+  });
+
+  it('detects callback when .oauth-url file appears', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-callback');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const output = { value: '' };
+    const handle = makeHandle();
+
+    const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
+
+    // Simulate shim writing the URL file
+    fs.writeFileSync(
+      path.join(sessionDir, '.oauth-url'),
+      'http://localhost:54321/callback?client_id=abc\n',
+    );
+
+    const result = await promise;
+    expect(result).toEqual({ method: 'callback', callbackPort: 54321 });
+  });
+
+  it('prefers stdin over callback when both appear', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-both');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const output = { value: '' };
+    const handle = makeHandle();
+
+    // Write URL file before starting detection
+    fs.writeFileSync(
+      path.join(sessionDir, '.oauth-url'),
+      'http://localhost:12345/callback\n',
+    );
+
+    const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
+
+    // stdin check runs first in the interval, so set it immediately
+    output.value = 'Paste code here if prompted > ';
+
+    const result = await promise;
+    expect(result).toEqual({ method: 'stdin' });
+  });
+
+  it('returns null on timeout', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-timeout');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const output = { value: 'nothing useful\n' };
+    const handle = makeHandle();
+
+    const result = await detectCodeDelivery(output, sessionDir, 500, handle);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when container exits', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-exit');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const output = { value: '' };
+    const handle = makeHandle();
+
+    const promise = detectCodeDelivery(output, sessionDir, 30_000, handle);
+
+    // Simulate container exit
+    (handle as any)._resolve({ exitCode: 1, stdout: '', stderr: '' });
+
+    const result = await promise;
+    expect(result).toBeNull();
+  });
+
+  it('cleans up stale .oauth-url from previous attempt', async () => {
+    const sessionDir = path.join(tmpDir, 'detect-cleanup');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const staleFile = path.join(sessionDir, '.oauth-url');
+    fs.writeFileSync(staleFile, 'http://localhost:99999/callback\n');
+
+    const output = { value: '' };
+    const handle = makeHandle();
+
+    // Start detection — it should unlink the stale file
+    const promise = detectCodeDelivery(output, sessionDir, 1000, handle);
+
+    // File should be gone immediately
+    expect(fs.existsSync(staleFile)).toBe(false);
+
+    // Let it timeout
+    const result = await promise;
+    expect(result).toBeNull();
+  });
+});
+
+describe('deliverCode', () => {
+  it('writes to stdin for stdin delivery', async () => {
+    const stdin = { write: vi.fn(), end: vi.fn() };
+    const handle = {
+      onStdout: vi.fn(),
+      stdin,
+      wait: vi.fn(),
+      kill: vi.fn(),
+    } as any;
+
+    const result = await deliverCode('authcode123#stateabc', { method: 'stdin' as const }, handle);
+    expect(result).toBe(true);
+    expect(stdin.write).toHaveBeenCalledWith('authcode123#stateabc\n');
+  });
+
+  it('returns false for callback without hash separator', async () => {
+    const handle = { onStdout: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() }, wait: vi.fn(), kill: vi.fn() } as any;
+    const result = await deliverCode('no-hash-here', { method: 'callback' as const, callbackPort: 12345 }, handle);
+    expect(result).toBe(false);
+  });
+
+  it('returns false for callback without port', async () => {
+    const handle = { onStdout: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() }, wait: vi.fn(), kill: vi.fn() } as any;
+    const result = await deliverCode('code#state', { method: 'callback' as const }, handle);
+    expect(result).toBe(false);
   });
 });

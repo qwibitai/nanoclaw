@@ -1,0 +1,8 @@
+#!/bin/sh
+# Shim replacing xdg-open inside auth containers.
+# Claude CLI calls xdg-open to launch the OAuth URL in a browser.
+# We capture the URL (contains localhost port for callback fallback),
+# then exit non-zero so the CLI falls back to showing the
+# "Paste code here if prompted >" stdin prompt.
+echo "$1" > /home/node/.claude/.oauth-url
+exit 1

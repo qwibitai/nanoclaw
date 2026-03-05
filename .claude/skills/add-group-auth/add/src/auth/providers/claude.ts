@@ -16,12 +16,15 @@ import {
   loadCredential,
   saveCredential,
 } from '../store.js';
+import { authSessionDir } from '../exec.js';
+import { IDLE_TIMEOUT } from '../../config.js';
 import { readEnvFile } from '../../env.js';
 import { logger } from '../../logger.js';
 import type {
   AuthContext,
   AuthExecOpts,
   AuthOption,
+  ChatIO,
   CredentialProvider,
   ExecHandle,
   FlowResult,
@@ -44,6 +47,12 @@ const AUTH_ERROR_PATTERNS = [
   /quota.*exceeded/i,
 ];
 
+/** Check if a user reply is a cancel/decline. */
+function isCancelReply(reply: string): boolean {
+  const lower = reply.trim().toLowerCase();
+  return ['cancel', 'abort', 'no', 'skip', 'quit', 'exit'].includes(lower);
+}
+
 /** Check if a container error indicates a Claude auth failure. */
 export function isAuthError(error?: string): boolean {
   if (!error) return false;
@@ -58,13 +67,108 @@ const ENV_FALLBACK_KEYS = [
   'ANTHROPIC_AUTH_TOKEN',
 ];
 
-// Block browser opening — the container has Chromium, so xdg-open would succeed
-// and Claude CLI would generate a localhost-redirect OAuth URL instead of the
-// console-friendly code#state flow we need.
+// Shim xdg-open: captures the auto-redirect URL (has localhost callback port)
+// and exits non-zero so CLI falls back to "Paste code here" stdin prompt.
 const XDG_OPEN_SHIM = path.join(process.cwd(), 'container', 'shims', 'xdg-open');
 const CLAUDE_EXEC_OPTS: AuthExecOpts = {
   extraMounts: [[XDG_OPEN_SHIM, '/usr/local/bin/xdg-open']],
 };
+
+/** File the xdg-open shim writes inside the session dir mount. */
+const OAUTH_URL_FILE = '.oauth-url';
+
+/** Stdin paste prompt pattern (interactive/setup-token flows). */
+const PASTE_PROMPT_RE = /Paste code here if prompted/;
+
+/** How long to wait for the CLI to print the OAuth URL. */
+const URL_WAIT_MS = 60_000;
+
+/** How long to wait for the code delivery mechanism to become available. */
+const DELIVERY_DETECT_MS = 30_000;
+
+type CodeDelivery = 'stdin' | 'callback';
+
+/**
+ * Detect how the CLI is ready to receive the auth code.
+ * Races two signals in parallel:
+ *   (a) stdout shows "Paste code here if prompted" → stdin (preferred)
+ *   (b) shim wrote .oauth-url with localhost callback URL → callback (fallback)
+ * Returns which mechanism fired and the callback port (if b).
+ */
+export function detectCodeDelivery(
+  outputRef: { value: string },
+  sessionDir: string,
+  timeoutMs: number,
+  handle: ExecHandle,
+): Promise<{ method: CodeDelivery; callbackPort?: number } | null> {
+  const oauthUrlPath = path.join(sessionDir, OAUTH_URL_FILE);
+  // Clean up any stale file from a previous attempt
+  try { fs.unlinkSync(oauthUrlPath); } catch { /* ignore */ }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    const done = (result: { method: CodeDelivery; callbackPort?: number } | null) => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(check);
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const check = setInterval(() => {
+      // (a) Check stdout for paste prompt
+      if (PASTE_PROMPT_RE.test(outputRef.value)) {
+        done({ method: 'stdin' });
+        return;
+      }
+      // (b) Check for shim-written URL file
+      try {
+        const url = fs.readFileSync(oauthUrlPath, 'utf-8').trim();
+        const portMatch = url.match(/localhost:(\d+)/);
+        if (portMatch) {
+          done({ method: 'callback', callbackPort: parseInt(portMatch[1], 10) });
+          return;
+        }
+      } catch { /* not yet */ }
+    }, 500);
+
+    const timer = setTimeout(() => done(null), timeoutMs);
+    handle.wait().then(() => done(null));
+  });
+}
+
+/**
+ * Deliver user-provided code#state to the CLI.
+ * Stdin path: write to stdin directly.
+ * Callback path: HTTP GET to localhost:{port}/callback?code=X&state=Y
+ */
+export async function deliverCode(
+  codeState: string,
+  delivery: { method: CodeDelivery; callbackPort?: number },
+  handle: ExecHandle,
+): Promise<boolean> {
+  if (delivery.method === 'stdin') {
+    handle.stdin.write(codeState.trim() + '\n');
+    return true;
+  }
+
+  // callback: split code#state and hit the localhost callback server
+  const hashIdx = codeState.indexOf('#');
+  if (hashIdx === -1) return false;
+  const code = codeState.slice(0, hashIdx);
+  const state = codeState.slice(hashIdx + 1);
+  const port = delivery.callbackPort;
+  if (!port) return false;
+
+  const callbackUrl = `http://localhost:${port}/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
+  try {
+    await fetch(callbackUrl);
+    return true;
+  } catch (err) {
+    logger.warn({ callbackUrl, err }, 'Callback delivery failed');
+    return false;
+  }
+}
 
 /** Parse .credentials.json content to extract accessToken and expiry. */
 function parseCredentialsJson(
@@ -133,6 +237,22 @@ function waitForOutputOrExit(
 ): Promise<RegExpMatchArray | null> {
   return Promise.race([
     waitForOutput(outputRef, pattern, timeoutMs),
+    handle.wait().then(() => null),
+  ]);
+}
+
+/**
+ * Race chat.receive() against the auth container exiting.
+ * The container has a hard timeout (DEFAULT_AUTH_TIMEOUT_MS in exec.ts)
+ * so if the user walks away, the container is killed and the group's
+ * slot is released. No separate hardcoded timeout needed here.
+ */
+function receiveOrContainerExit(
+  chat: ChatIO,
+  handle: ExecHandle,
+): Promise<string | null> {
+  return Promise.race([
+    chat.receive(IDLE_TIMEOUT - 30_000), // expire before container kill so we can notify user
     handle.wait().then(() => null),
   ]);
 }
@@ -243,10 +363,13 @@ export const claudeProvider: CredentialProvider = {
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(
-            'Paste your Anthropic API key (starts with sk-ant-api):',
+            'Paste your Anthropic API key (starts with sk-ant-api).\n\n' +
+            '⚠️ Sending API keys via messaging channels may be insecure — ' +
+            'messages could be logged or visible to other group members. ' +
+            'Consider using OAuth options instead, or reply "cancel" to abort.',
           );
-          const key = await ctx.chat.receive(120_000);
-          if (!key) return null;
+          const key = await ctx.chat.receive(IDLE_TIMEOUT - 30_000);
+          if (!key || isCancelReply(key)) return null;
 
           const trimmed = key.trim();
           if (!trimmed.startsWith('sk-ant-api')) {
@@ -269,6 +392,7 @@ export const claudeProvider: CredentialProvider = {
             'Starting Claude setup token flow. Spawning container...',
           );
 
+          const sessionDir = authSessionDir(ctx.scope);
           const handle = ctx.exec(
             ['script', '-qc', 'claude setup-token', '/dev/null'],
             CLAUDE_EXEC_OPTS,
@@ -279,10 +403,11 @@ export const claudeProvider: CredentialProvider = {
             output.value += chunk;
           });
 
+          // Wait for the manual OAuth URL in stdout
           const urlMatch = await waitForOutputOrExit(
             output,
-            /https:\/\/console\.anthropic\.com\S+/,
-            30_000,
+            /https:\/\/(?:console\.anthropic\.com|claude\.ai|platform\.claude\.com)\S+/,
+            URL_WAIT_MS,
             handle,
           );
           if (!urlMatch) {
@@ -291,18 +416,33 @@ export const claudeProvider: CredentialProvider = {
             return null;
           }
 
-          await ctx.chat.send(
-            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value:`,
+          // Detect how the CLI will accept the code
+          const delivery = await detectCodeDelivery(
+            output, sessionDir, DELIVERY_DETECT_MS, handle,
           );
-
-          const codeState = await ctx.chat.receive(300_000);
-          if (!codeState) {
-            await ctx.chat.send('Timed out waiting for code.');
+          if (!delivery) {
+            await ctx.chat.send('Could not detect auth input method. Container may have exited.');
             handle.kill();
             return null;
           }
 
-          handle.stdin.write(codeState.trim() + '\n');
+          await ctx.chat.send(
+            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value (or reply "cancel" to abort):`,
+          );
+
+          const codeState = await receiveOrContainerExit(ctx.chat, handle);
+          if (!codeState || isCancelReply(codeState)) {
+            await ctx.chat.send(codeState ? 'Cancelled.' : 'Auth container exited or timed out.');
+            handle.kill();
+            return null;
+          }
+
+          const delivered = await deliverCode(codeState, delivery, handle);
+          if (!delivered) {
+            await ctx.chat.send('Failed to deliver auth code. Invalid code#state format.');
+            handle.kill();
+            return null;
+          }
 
           const result = await handle.wait();
           const allOutput = output.value + result.stdout;
@@ -333,6 +473,7 @@ export const claudeProvider: CredentialProvider = {
             'Starting Claude auth login flow. Spawning container...',
           );
 
+          const sessionDir = authSessionDir(ctx.scope);
           const handle = ctx.exec(
             ['script', '-qc', 'claude auth login', '/dev/null'],
             CLAUDE_EXEC_OPTS,
@@ -343,10 +484,11 @@ export const claudeProvider: CredentialProvider = {
             output.value += chunk;
           });
 
+          // Wait for the manual OAuth URL in stdout
           const urlMatch = await waitForOutputOrExit(
             output,
-            /https:\/\/console\.anthropic\.com\S+/,
-            30_000,
+            /https:\/\/(?:console\.anthropic\.com|claude\.ai|platform\.claude\.com)\S+/,
+            URL_WAIT_MS,
             handle,
           );
           if (!urlMatch) {
@@ -355,26 +497,38 @@ export const claudeProvider: CredentialProvider = {
             return null;
           }
 
-          await ctx.chat.send(
-            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value:`,
+          // Detect how the CLI will accept the code
+          const delivery = await detectCodeDelivery(
+            output, sessionDir, DELIVERY_DETECT_MS, handle,
           );
-
-          const codeState = await ctx.chat.receive(300_000);
-          if (!codeState) {
-            await ctx.chat.send('Timed out waiting for code.');
+          if (!delivery) {
+            await ctx.chat.send('Could not detect auth input method. Container may have exited.');
             handle.kill();
             return null;
           }
 
-          handle.stdin.write(codeState.trim() + '\n');
+          await ctx.chat.send(
+            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value (or reply "cancel" to abort):`,
+          );
+
+          const codeState = await receiveOrContainerExit(ctx.chat, handle);
+          if (!codeState || isCancelReply(codeState)) {
+            await ctx.chat.send(codeState ? 'Cancelled.' : 'Auth container exited or timed out.');
+            handle.kill();
+            return null;
+          }
+
+          const delivered = await deliverCode(codeState, delivery, handle);
+          if (!delivered) {
+            await ctx.chat.send('Failed to deliver auth code. Invalid code#state format.');
+            handle.kill();
+            return null;
+          }
+
           await handle.wait();
 
           // Read .credentials.json from the session dir mount
-          const { authSessionDir } = await import('../exec.js');
-          const credsPath = path.join(
-            authSessionDir(ctx.scope),
-            '.credentials.json',
-          );
+          const credsPath = path.join(sessionDir, '.credentials.json');
 
           let credsContent: string | null = null;
           try {
