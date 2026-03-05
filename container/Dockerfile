@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     curl \
     git \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Chromium path for agent-browser
@@ -58,6 +61,10 @@ RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
+
+# Configure pip for non-root usage (install to user site-packages)
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+ENV PATH="/home/node/.local/bin:${PATH}"
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
