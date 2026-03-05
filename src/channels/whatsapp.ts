@@ -380,7 +380,7 @@ export class WhatsAppChannel implements Channel {
       if (this.connected) {
         this.sock.sendPresenceUpdate('available').catch(() => {});
       }
-    }, 10 * 60 * 1000); // Every 10 minutes
+    }, 5 * 60 * 1000); // Every 5 minutes
   }
 
   async disconnect(): Promise<void> {

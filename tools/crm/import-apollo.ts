@@ -13,6 +13,7 @@
  */
 
 import Database from 'better-sqlite3';
+import { getDbPath } from '../shared/db-path.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -184,7 +185,7 @@ async function main() {
   }
 
   // Open the NanoClaw database
-  const dbPath = path.join(process.cwd(), 'store', 'messages.db');
+  const dbPath = getDbPath();
   if (!fs.existsSync(dbPath)) {
     console.error(JSON.stringify({ status: 'error', error: `Database not found at ${dbPath}. Run NanoClaw first.` }));
     process.exit(1);
