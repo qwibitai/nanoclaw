@@ -1,0 +1,19 @@
+skill: add-memory
+version: 1.0.0
+description: "Three-layer semantic memory system with RAG using sqlite-vec and local embeddings"
+core_version: 0.1.0
+adds:
+  - src/memory.ts
+modifies:
+  - src/db.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/task-scheduler.ts
+structured:
+  npm_dependencies:
+    sqlite-vec: "^0.1.7-alpha.2"
+    "@huggingface/transformers": "^3.8.1"
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run .claude/skills/add-memory/tests/add-memory.test.ts"
