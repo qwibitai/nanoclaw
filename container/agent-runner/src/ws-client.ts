@@ -31,6 +31,10 @@ export interface AuthOkPayload {
   };
 }
 
+export type WsEvent =
+  | { type: 'input'; text: string }
+  | { type: 'close' };
+
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
 
@@ -49,9 +53,10 @@ export class WsClient {
   private rpc: JSONRPCServerAndClient | null = null;
   private pingWatchdog: ReturnType<typeof setTimeout> | null = null;
 
-  // Event callbacks set by the consumer
-  onInput: ((text: string) => void) | null = null;
-  onClose: (() => void) | null = null;
+  // Buffered event queue — events are never lost
+  private eventQueue: WsEvent[] = [];
+  private eventWaiter: ((event: WsEvent | null) => void) | null = null;
+
   onGroupsUpdated:
     | ((groups: AuthOkPayload['groups']) => void)
     | null = null;
@@ -131,6 +136,31 @@ export class WsClient {
     });
   }
 
+  private pushEvent(event: WsEvent): void {
+    if (this.eventWaiter) {
+      const resolve = this.eventWaiter;
+      this.eventWaiter = null;
+      resolve(event);
+    } else {
+      this.eventQueue.push(event);
+    }
+  }
+
+  nextEvent(): Promise<WsEvent | null> {
+    if (this.eventQueue.length > 0) {
+      return Promise.resolve(this.eventQueue.shift()!);
+    }
+    return new Promise(resolve => { this.eventWaiter = resolve; });
+  }
+
+  cancelWait(): void {
+    if (this.eventWaiter) {
+      const resolve = this.eventWaiter;
+      this.eventWaiter = null;
+      resolve(null);
+    }
+  }
+
   /** Initialize the JSON-RPC server+client after successful auth */
   private initRpc(): void {
     const ws = this.ws!;
@@ -148,11 +178,11 @@ export class WsClient {
 
     // Register server-side methods for incoming calls from host
     this.rpc.addMethod('input', ({ text }: { text: string }) => {
-      this.onInput?.(text);
+      this.pushEvent({ type: 'input', text });
     });
 
     this.rpc.addMethod('close', () => {
-      this.onClose?.();
+      this.pushEvent({ type: 'close' });
     });
 
   }
@@ -183,7 +213,7 @@ export class WsClient {
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log('Max reconnect attempts reached, giving up');
       this.close();
-      this.onClose?.();
+      this.pushEvent({ type: 'close' });
       return;
     }
 
@@ -262,6 +292,7 @@ export class WsClient {
   }
 
   close(): void {
+    this.cancelWait();
     this.closed = true;
     this.clearPingWatchdog();
     if (this.rpc) {

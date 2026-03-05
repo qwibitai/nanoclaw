@@ -16,7 +16,7 @@ import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
-import { WsClient } from './ws-client.js';
+import { WsClient, WsEvent } from './ws-client.js';
 
 interface ContainerInput {
   prompt: string;
@@ -289,21 +289,23 @@ async function runQuery(
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Wire WS events for follow-up messages and close signal during the query
   let closedDuringQuery = false;
-  const prevOnInput = wsClient.onInput;
-  const prevOnClose = wsClient.onClose;
 
-  wsClient.onInput = (text: string) => {
-    log(`Piping WS message into active query (${text.length} chars)`);
-    stream.push(text);
-  };
-
-  wsClient.onClose = () => {
-    log('Close signal received during query, ending stream');
-    closedDuringQuery = true;
-    stream.end();
-  };
+  const drainDone = (async () => {
+    while (true) {
+      const event = await wsClient.nextEvent();
+      if (!event) return;
+      if (event.type === 'input') {
+        log(`Piping WS message into active query (${event.text.length} chars)`);
+        stream.push(event.text);
+      } else {
+        log('Close signal received during query, ending stream');
+        closedDuringQuery = true;
+        stream.end();
+        return;
+      }
+    }
+  })();
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -403,8 +405,8 @@ async function runQuery(
       }
     }
   } finally {
-    wsClient.onInput = prevOnInput;
-    wsClient.onClose = prevOnClose;
+    wsClient.cancelWait();
+    await drainDone;
   }
 
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
@@ -483,18 +485,8 @@ async function main(): Promise<void> {
       log('Query ended, waiting for next WS message...');
 
       // Wait for the next message or close signal via WS
-      const nextMessage = await new Promise<string | null>((resolve) => {
-        wsClient.onInput = (text: string) => {
-          wsClient.onInput = null;
-          wsClient.onClose = null;
-          resolve(text);
-        };
-        wsClient.onClose = () => {
-          wsClient.onInput = null;
-          wsClient.onClose = null;
-          resolve(null);
-        };
-      });
+      const event = await wsClient.nextEvent();
+      const nextMessage = event?.type === 'input' ? event.text : null;
 
       if (nextMessage === null) {
         log('Close signal received, exiting');
