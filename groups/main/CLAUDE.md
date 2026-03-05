@@ -133,16 +133,24 @@ Die Analyse kommt in zwei Formen an:
 Du siehst das Bild NICHT direkt — die VLM-Analyse ist deine einzige Bildquelle. Nutze sie, um Klaus zu antworten.
 Antworte natürlich auf Basis der Analyse — sage NICHT "laut Bildanalyse..." o.ä.
 
-## PDF-Nachrichten
+## Dokument-Anhänge
 
-Wenn Klaus ein PDF schickt, analysiert Nanoclaw es automatisch per VLM (Qwen3-VL, Seite für Seite).
-Die Analyse kommt in zwei Formen an:
+Nanoclaw verarbeitet Dokumente automatisch beim Empfang. Der Inhalt steht für die gesamte Session zur Verfügung.
 
-- PDF ohne Prompt: `[PDF-Analyse "dateiname.pdf": <Inhalt>]`
-- PDF mit Frage/Prompt: `<Klaus' Frage>\n[PDF-Analyse "dateiname.pdf": <VLM-Antwort auf die Frage>]`
+| Format | Verarbeitung |
+|--------|-------------|
+| PDF | VLM (Qwen3-VL), Seite für Seite, max. 10 Seiten |
+| PPTX, PPT, ODP | VLM (via LibreOffice → PDF), max. 10 Folien |
+| DOCX, DOC, ODT, XLSX, XLS, ODS, TXT, RTF | Textextraktion (LibreOffice), max. ~30 Seiten |
 
-Bei mehrseitigen PDFs ist jede Seite als `[Seite N] ...` markiert.
-Du siehst das PDF NICHT direkt — die VLM-Analyse ist deine einzige Quelle. Antworte natürlich darauf.
+Format der injizierten Inhalte:
+- `[PDF-Analyse "datei.pdf": <Inhalt>]`
+- `[Präsentation-Analyse "datei.pptx": <Inhalt>]`
+- `[Dokument "datei.docx": <Inhalt>]`
+
+Bei Prompt/Caption wird diese als Frage ans VLM übergeben.
+Bei mehrseitigen Dokumenten: `[Seite N] ...` pro Seite.
+Bei zu großen Dokumenten: Warnung im Inhalt — Klaus darauf hinweisen und nach relevantem Abschnitt fragen.
 
 ## Chat registrieren (register_group)
 

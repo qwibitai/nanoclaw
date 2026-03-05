@@ -117,6 +117,87 @@ async function describeImageWithVLM(
   });
 }
 
+const DOCUMENT_TEXT_LIMIT = 50_000; // ~30 pages of text
+
+/**
+ * Extract text from Office documents (DOCX, XLSX, ODT, ODS, etc.) via LibreOffice.
+ * Returns extracted text (truncated with warning if too long), or null on failure.
+ */
+async function extractOfficeText(
+  docBuffer: Buffer,
+  mimeType: string,
+  filename: string,
+): Promise<string | null> {
+  const ext = filename.split('.').pop()?.toLowerCase() || 'bin';
+  const tmpDir = path.join('/tmp', `nanoclaw-doc-${Date.now()}`);
+  const inputPath = path.join(tmpDir, `input.${ext}`);
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(inputPath, docBuffer);
+
+    const text = await new Promise<string>((resolve, reject) => {
+      exec(
+        `libreoffice --headless --cat "${inputPath}"`,
+        { maxBuffer: 10 * 1024 * 1024 },
+        (err, stdout) => (err ? reject(err) : resolve(stdout)),
+      );
+    });
+
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+
+    if (trimmed.length > DOCUMENT_TEXT_LIMIT) {
+      return (
+        trimmed.slice(0, DOCUMENT_TEXT_LIMIT) +
+        `\n\n⚠️ Dokument zu groß — nur die ersten ~${Math.round(DOCUMENT_TEXT_LIMIT / 500)} Seiten extrahiert. Sag Klaus, dass du nur einen Ausschnitt siehst und frag ihn welcher Teil relevant ist.`
+      );
+    }
+    return trimmed;
+  } catch (err) {
+    logger.warn({ err, filename }, 'Office text extraction failed');
+    return null;
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+/**
+ * Convert an Office presentation (PPTX, PPT, ODP) to PDF via LibreOffice,
+ * then analyse via VLM page-by-page.
+ */
+async function analysePresentationWithVLM(
+  docBuffer: Buffer,
+  filename: string,
+  userPrompt?: string,
+): Promise<string | null> {
+  const ext = filename.split('.').pop()?.toLowerCase() || 'pptx';
+  const tmpDir = path.join('/tmp', `nanoclaw-ppt-${Date.now()}`);
+  const inputPath = path.join(tmpDir, `input.${ext}`);
+  try {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    fs.writeFileSync(inputPath, docBuffer);
+
+    // Convert to PDF
+    await new Promise<void>((resolve, reject) => {
+      exec(
+        `libreoffice --headless --convert-to pdf --outdir "${tmpDir}" "${inputPath}"`,
+        (err) => (err ? reject(err) : resolve()),
+      );
+    });
+
+    const pdfFile = fs.readdirSync(tmpDir).find((f) => f.endsWith('.pdf'));
+    if (!pdfFile) return null;
+
+    const pdfBuffer = fs.readFileSync(path.join(tmpDir, pdfFile));
+    return await analysePdfWithVLM(pdfBuffer, userPrompt);
+  } catch (err) {
+    logger.warn({ err, filename }, 'Presentation VLM analysis failed');
+    return null;
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 /**
  * Analyse a PDF buffer via VLM: convert each page to PNG with pdftoppm,
  * then describe each page with Qwen3-VL. Returns combined analysis text
@@ -154,7 +235,11 @@ async function analysePdfWithVLM(
     const results: string[] = [];
     for (let i = 0; i < pageFiles.length; i++) {
       const imgBuffer = fs.readFileSync(path.join(tmpDir, pageFiles[i]));
-      const pageResult = await describeImageWithVLM(imgBuffer, 'image/png', prompt);
+      const pageResult = await describeImageWithVLM(
+        imgBuffer,
+        'image/png',
+        prompt,
+      );
       if (pageResult) {
         const prefix = pageFiles.length > 1 ? `[Seite ${i + 1}] ` : '';
         results.push(`${prefix}${pageResult}`);
@@ -166,7 +251,9 @@ async function analysePdfWithVLM(
     logger.warn({ err }, 'PDF VLM analysis failed');
     return null;
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
   }
 }
 
@@ -569,33 +656,51 @@ export class WhatsAppChannel implements Channel {
             }
           }
 
-          // Analyse PDF documents via VLM (page-by-page)
+          // Process document attachments (PDF, Office, presentations)
           if (!content && normalized.documentMessage) {
             const docMsg = normalized.documentMessage;
-            const isPdf =
-              docMsg?.mimetype?.includes('pdf') ||
-              docMsg?.fileName?.toLowerCase().endsWith('.pdf');
-            if (isPdf) {
-              const caption = docMsg?.caption?.trim() || '';
+            const filename = docMsg?.fileName || 'Dokument';
+            const mime = docMsg?.mimetype || '';
+            const ext = filename.split('.').pop()?.toLowerCase() || '';
+            const caption = docMsg?.caption?.trim() || '';
+
+            const isPdf = mime.includes('pdf') || ext === 'pdf';
+            const isPresentation = ['pptx', 'ppt', 'odp'].includes(ext) ||
+              mime.includes('presentation') || mime.includes('powerpoint');
+            const isOfficeText = ['docx', 'doc', 'odt', 'xlsx', 'xls', 'ods', 'csv', 'txt', 'rtf'].includes(ext) ||
+              mime.includes('word') || mime.includes('spreadsheet') || mime.includes('text');
+
+            if (isPdf || isPresentation || isOfficeText) {
               try {
-                const docBuffer = (await downloadMediaMessage(
-                  msg,
-                  'buffer',
-                  {},
-                )) as Buffer;
-                const vlmResult = await analysePdfWithVLM(
-                  docBuffer,
-                  caption || undefined,
-                );
-                if (vlmResult) {
-                  const filename = docMsg?.fileName || 'Dokument';
-                  content = caption
-                    ? `${caption}\n[PDF-Analyse "${filename}": ${vlmResult}]`
-                    : `[PDF-Analyse "${filename}": ${vlmResult}]`;
-                  logger.info({ chatJid, filename, pages: vlmResult.split('\n\n').length }, 'PDF analysed by VLM');
+                const docBuffer = (await downloadMediaMessage(msg, 'buffer', {})) as Buffer;
+
+                if (isPdf) {
+                  const result = await analysePdfWithVLM(docBuffer, caption || undefined);
+                  if (result) {
+                    content = caption
+                      ? `${caption}\n[PDF-Analyse "${filename}": ${result}]`
+                      : `[PDF-Analyse "${filename}": ${result}]`;
+                    logger.info({ chatJid, filename }, 'PDF analysed by VLM');
+                  }
+                } else if (isPresentation) {
+                  const result = await analysePresentationWithVLM(docBuffer, filename, caption || undefined);
+                  if (result) {
+                    content = caption
+                      ? `${caption}\n[Präsentation-Analyse "${filename}": ${result}]`
+                      : `[Präsentation-Analyse "${filename}": ${result}]`;
+                    logger.info({ chatJid, filename }, 'Presentation analysed by VLM');
+                  }
+                } else if (isOfficeText) {
+                  const result = await extractOfficeText(docBuffer, mime, filename);
+                  if (result) {
+                    content = caption
+                      ? `${caption}\n[Dokument "${filename}": ${result}]`
+                      : `[Dokument "${filename}": ${result}]`;
+                    logger.info({ chatJid, filename, chars: result.length }, 'Office doc text extracted');
+                  }
                 }
               } catch (err) {
-                logger.warn({ err, chatJid }, 'Failed to download/analyse PDF');
+                logger.warn({ err, chatJid, filename }, 'Failed to process document');
               }
             }
           }
