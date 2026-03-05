@@ -2,11 +2,10 @@ import crypto from 'crypto';
 import express from 'express';
 import http from 'http';
 
-import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel, OnChatMetadata, OnInboundMessage } from '../types.js';
+import { Channel } from '../types.js';
 
 /** GitHub event types we handle */
 const SUPPORTED_EVENTS = new Set([
@@ -111,6 +110,24 @@ function formatEvent(event: string, payload: any): string | null {
   }
 }
 
+/** Extract the issue or PR number from a webhook payload */
+function extractIssueNumber(event: string, payload: any): number | null {
+  switch (event) {
+    case 'issues':
+      return payload.issue?.number ?? null;
+    case 'issue_comment':
+      return payload.issue?.number ?? null;
+    case 'pull_request':
+      return payload.pull_request?.number ?? null;
+    case 'pull_request_review':
+      return payload.pull_request?.number ?? null;
+    case 'pull_request_review_comment':
+      return payload.pull_request?.number ?? null;
+    default:
+      return null;
+  }
+}
+
 export class GitHubChannel implements Channel {
   name = 'github';
 
@@ -118,10 +135,19 @@ export class GitHubChannel implements Channel {
   private opts: ChannelOpts;
   private webhookSecret: string;
   private port: number;
+  private token: string;
+  /** Tracks the most recent issue/PR number per JID for reply routing */
+  private replyTargets = new Map<string, number>();
 
-  constructor(webhookSecret: string, port: number, opts: ChannelOpts) {
+  constructor(
+    webhookSecret: string,
+    port: number,
+    token: string,
+    opts: ChannelOpts,
+  ) {
     this.webhookSecret = webhookSecret;
     this.port = port;
+    this.token = token;
     this.opts = opts;
   }
 
@@ -173,6 +199,12 @@ export class GitHubChannel implements Channel {
       // Store chat metadata for discovery
       this.opts.onChatMetadata(chatJid, timestamp, repo, 'github', false);
 
+      // Track the issue/PR number so sendMessage can reply to it
+      const issueNumber = extractIssueNumber(event, payload);
+      if (issueNumber !== null) {
+        this.replyTargets.set(chatJid, issueNumber);
+      }
+
       // Format the event into a human-readable message
       const text = formatEvent(event, payload);
       if (!text) return;
@@ -212,12 +244,51 @@ export class GitHubChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    // GitHub sending (commenting on issues/PRs) is not yet implemented.
-    // Messages are logged for now — a future PR will add the GitHub API integration.
-    logger.debug(
-      { jid, length: text.length },
-      'GitHub sendMessage (not yet implemented)',
-    );
+    const match = jid.match(/^gh:(.+)$/);
+    if (!match) {
+      logger.error({ jid }, 'Invalid GitHub JID format');
+      return;
+    }
+    const repo = match[1]; // e.g. "owner/repo"
+
+    const issueNumber = this.replyTargets.get(jid);
+    if (!issueNumber) {
+      logger.warn(
+        { jid },
+        'No reply target for GitHub JID — no issue/PR to comment on',
+      );
+      return;
+    }
+
+    const url = `https://api.github.com/repos/${repo}/issues/${issueNumber}/comments`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ body: text }),
+      });
+
+      if (!res.ok) {
+        const body = await res.text();
+        logger.error(
+          { jid, issueNumber, status: res.status, body },
+          'GitHub API error posting comment',
+        );
+        return;
+      }
+
+      logger.info(
+        { jid, issueNumber, length: text.length },
+        'GitHub comment posted',
+      );
+    } catch (err) {
+      logger.error({ jid, issueNumber, err }, 'Failed to post GitHub comment');
+    }
   }
 
   isConnected(): boolean {
@@ -240,18 +311,29 @@ export class GitHubChannel implements Channel {
 }
 
 registerChannel('github', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['GITHUB_WEBHOOK_SECRET', 'GITHUB_WEBHOOK_PORT']);
+  const envVars = readEnvFile([
+    'GITHUB_WEBHOOK_SECRET',
+    'GITHUB_WEBHOOK_PORT',
+    'GITHUB_TOKEN',
+  ]);
   const secret =
     process.env.GITHUB_WEBHOOK_SECRET || envVars.GITHUB_WEBHOOK_SECRET || '';
   const port = parseInt(
     process.env.GITHUB_WEBHOOK_PORT || envVars.GITHUB_WEBHOOK_PORT || '0',
     10,
   );
+  const token = process.env.GITHUB_TOKEN || envVars.GITHUB_TOKEN || '';
 
   if (!secret || !port) {
     logger.warn('GitHub: GITHUB_WEBHOOK_SECRET or GITHUB_WEBHOOK_PORT not set');
     return null;
   }
 
-  return new GitHubChannel(secret, port, opts);
+  if (!token) {
+    logger.warn(
+      'GitHub: GITHUB_TOKEN not set — webhook events will be received but replies will not be posted',
+    );
+  }
+
+  return new GitHubChannel(secret, port, token, opts);
 });

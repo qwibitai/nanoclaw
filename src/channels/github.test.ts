@@ -77,7 +77,7 @@ describe('GitHubChannel', () => {
     vi.clearAllMocks();
     opts = createTestOpts();
     // Use port 0 to get a random available port
-    channel = new GitHubChannel(SECRET, 0, opts);
+    channel = new GitHubChannel(SECRET, 0, 'test-github-token', opts);
     await channel.connect();
     const addr = (channel as any).server.address();
     port = addr.port;
@@ -100,7 +100,12 @@ describe('GitHubChannel', () => {
     });
 
     it('isConnected() returns false before connect', () => {
-      const ch = new GitHubChannel(SECRET, 0, createTestOpts());
+      const ch = new GitHubChannel(
+        SECRET,
+        0,
+        'test-github-token',
+        createTestOpts(),
+      );
       expect(ch.isConnected()).toBe(false);
     });
   });
@@ -560,6 +565,166 @@ describe('GitHubChannel', () => {
   describe('channel properties', () => {
     it('has name "github"', () => {
       expect(channel.name).toBe('github');
+    });
+  });
+
+  // --- sendMessage ---
+
+  describe('sendMessage', () => {
+    it('posts a comment to the most recent issue/PR', async () => {
+      // First, send a webhook to set the reply target
+      await sendWebhook(port, {
+        event: 'issues',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          issue: {
+            number: 42,
+            title: 'Test issue',
+            html_url: 'https://github.com/cmraible/seb/issues/42',
+          },
+          sender: { login: 'alice' },
+        },
+      });
+
+      // Mock fetch for the GitHub API call
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 201,
+        json: () => Promise.resolve({ id: 1 }),
+      });
+      globalThis.fetch = mockFetch as any;
+
+      try {
+        await channel.sendMessage('gh:cmraible/seb', 'Hello from the bot!');
+
+        // Find the call that went to api.github.com (not localhost webhook)
+        const apiCall = mockFetch.mock.calls.find((c: any[]) =>
+          c[0]?.toString().includes('api.github.com'),
+        );
+        expect(apiCall).toBeDefined();
+        expect(apiCall![0]).toBe(
+          'https://api.github.com/repos/cmraible/seb/issues/42/comments',
+        );
+        const callOpts = apiCall![1];
+        expect(callOpts.method).toBe('POST');
+        expect(JSON.parse(callOpts.body)).toEqual({
+          body: 'Hello from the bot!',
+        });
+        expect(callOpts.headers.Authorization).toBe('Bearer test-github-token');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('warns when no reply target exists', async () => {
+      const { logger: mockLogger } = await import('../logger.js');
+
+      await channel.sendMessage('gh:unknown/repo', 'Hello');
+
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ jid: 'gh:unknown/repo' }),
+        expect.stringContaining('No reply target'),
+      );
+    });
+
+    it('logs error for invalid JID format', async () => {
+      const { logger: mockLogger } = await import('../logger.js');
+
+      await channel.sendMessage('invalid-jid', 'Hello');
+
+      expect(mockLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ jid: 'invalid-jid' }),
+        expect.stringContaining('Invalid GitHub JID'),
+      );
+    });
+
+    it('updates reply target when new events arrive', async () => {
+      // Send issue event
+      await sendWebhook(port, {
+        event: 'issues',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          issue: {
+            number: 10,
+            title: 'First issue',
+            html_url: 'https://github.com/cmraible/seb/issues/10',
+          },
+          sender: { login: 'alice' },
+        },
+      });
+
+      // Send another event for a different issue
+      await sendWebhook(port, {
+        event: 'issues',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          issue: {
+            number: 20,
+            title: 'Second issue',
+            html_url: 'https://github.com/cmraible/seb/issues/20',
+          },
+          sender: { login: 'bob' },
+        },
+      });
+
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+      globalThis.fetch = mockFetch as any;
+
+      try {
+        await channel.sendMessage('gh:cmraible/seb', 'Reply');
+
+        const apiCall = mockFetch.mock.calls.find((c: any[]) =>
+          c[0]?.toString().includes('api.github.com'),
+        );
+        // Should target issue 20 (most recent)
+        expect(apiCall![0]).toContain('/issues/20/comments');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it('tracks PR numbers from pull_request events', async () => {
+      await sendWebhook(port, {
+        event: 'pull_request',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          pull_request: {
+            number: 99,
+            title: 'Big PR',
+            html_url: 'https://github.com/cmraible/seb/pull/99',
+            merged: false,
+          },
+          sender: { login: 'alice' },
+        },
+      });
+
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+      globalThis.fetch = mockFetch as any;
+
+      try {
+        await channel.sendMessage('gh:cmraible/seb', 'PR comment');
+
+        const apiCall = mockFetch.mock.calls.find((c: any[]) =>
+          c[0]?.toString().includes('api.github.com'),
+        );
+        // GitHub API uses /issues/ endpoint for both issues and PRs
+        expect(apiCall![0]).toBe(
+          'https://api.github.com/repos/cmraible/seb/issues/99/comments',
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 });
