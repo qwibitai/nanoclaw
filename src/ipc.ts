@@ -22,6 +22,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  spawnAgent: (targetFolder: string, prompt: string, contextMode: 'isolated' | 'group') => void;
 }
 
 let ipcWatcherRunning = false;
@@ -162,6 +163,7 @@ export async function processTaskIpc(
     schedule_value?: string;
     context_mode?: string;
     groupFolder?: string;
+    group_folder?: string;
     chatJid?: string;
     targetJid?: string;
     // For register_group
@@ -382,6 +384,43 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'spawn_agent': {
+      if (!data.group_folder || !data.prompt) {
+        logger.warn({ sourceGroup, data }, 'spawn_agent missing required fields');
+        break;
+      }
+
+      const targetFolder = data.group_folder as string;
+
+      // Authorization: non-main can only spawn for themselves
+      if (!isMain && targetFolder !== sourceGroup) {
+        logger.warn(
+          { sourceGroup, targetFolder },
+          'Unauthorized spawn_agent attempt blocked',
+        );
+        break;
+      }
+
+      // Validate target folder exists in registered groups
+      const targetEntry = Object.entries(registeredGroups).find(
+        ([_, g]) => g.folder === targetFolder,
+      );
+      if (!targetEntry) {
+        logger.warn({ targetFolder }, 'spawn_agent: target group not registered');
+        break;
+      }
+
+      const contextMode =
+        data.context_mode === 'group' ? 'group' : 'isolated';
+
+      deps.spawnAgent(targetFolder, data.prompt, contextMode);
+      logger.info(
+        { sourceGroup, targetFolder, contextMode },
+        'spawn_agent processed',
+      );
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

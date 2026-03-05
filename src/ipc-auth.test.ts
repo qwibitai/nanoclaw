@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -62,6 +62,7 @@ beforeEach(() => {
     syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
+    spawnAgent: vi.fn(),
   };
 });
 
@@ -632,6 +633,131 @@ describe('schedule_task context_mode', () => {
 
     const tasks = getAllTasks();
     expect(tasks[0].context_mode).toBe('isolated');
+  });
+});
+
+// --- spawn_agent authorization ---
+
+describe('spawn_agent authorization', () => {
+  it('main group can spawn for another group', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'other-group',
+        prompt: 'do work',
+        context_mode: 'isolated',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).toHaveBeenCalledWith('other-group', 'do work', 'isolated');
+  });
+
+  it('non-main group can spawn for itself', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'other-group',
+        prompt: 'self spawn',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(deps.spawnAgent).toHaveBeenCalledWith('other-group', 'self spawn', 'isolated');
+  });
+
+  it('non-main group cannot spawn for another group', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'whatsapp_main',
+        prompt: 'unauthorized',
+      },
+      'other-group',
+      false,
+      deps,
+    );
+
+    expect(deps.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing group_folder', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        prompt: 'no folder',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects missing prompt', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'other-group',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('rejects unregistered target folder', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'nonexistent',
+        prompt: 'bad target',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('passes context_mode=group when specified', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'other-group',
+        prompt: 'group context',
+        context_mode: 'group',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).toHaveBeenCalledWith('other-group', 'group context', 'group');
+  });
+
+  it('defaults invalid context_mode to isolated', async () => {
+    await processTaskIpc(
+      {
+        type: 'spawn_agent',
+        group_folder: 'other-group',
+        prompt: 'bad context',
+        context_mode: 'bogus',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(deps.spawnAgent).toHaveBeenCalledWith('other-group', 'bad context', 'isolated');
   });
 });
 

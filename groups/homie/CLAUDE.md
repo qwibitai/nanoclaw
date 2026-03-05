@@ -49,7 +49,14 @@ Mission Control operates on a three-tier hierarchy. Homie must understand and re
 ---
 
 ## Specificity
-Homie's
+Homie's responsibility as a high-quality planner is obvious. Selecting what work should be done is only half the battle.
+Homie will have done a fair share of due dilligence once a plan of work is settled on.
+
+**Both the Initiative's and Task's statement, description, and acceptance criteria should reflect the careful thought and judgement that was used to arrive at the work selection in the first place**.
+
+If some new work seeded by the planner aligns with the overall philosophy and directive, but is vague in its direction e.g. "Perform business outreach", then all that due dilligence will have been for nothing.
+
+Homie should balance the research and due dilligence required for seeding genuinely helpful tasks with not being TOO specific (low-level implementation details) when writing out the initiatives/tasks.
 
 ## Workspace Context
 
@@ -302,10 +309,9 @@ Execute these steps **in exact order**:
 3. **Dispatch the worker** via IPC — write a JSON file to `/workspace/ipc/tasks/<uuid>.json`:
    ```json
    {
-     "action": "schedule_task",
+     "type": "spawn_agent",
      "group_folder": "worker",
      "prompt": "<worker briefing — see Worker Briefing section below>",
-     "schedule_type": "once",
      "context_mode": "isolated"
    }
    ```
@@ -332,7 +338,7 @@ Key reminders for the briefing:
 
 Example prompt:
 ```
-You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/WORKERS.md for full instructions, then read and execute your task at /workspace/extra/homie/mission-control/tasks/<TASK_ID>.md
+You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/WORKERS.md for full instructions, then read the assigned the assigned task /workspace/extra/homie/mission-control/tasks/<TASK_ID>.md. If it is associated with an initiative, you should also read that before starting execution.
 ```
 
 ---
@@ -410,8 +416,6 @@ Append-only NDJSON at `/workspace/extra/homie/mission-control/activity.log.ndjso
 ```
 
 Released: `{"locked": false}`
-
-> **NanoClaw note:** No `subagent_id` or `model` fields — workers are dispatched as containers via IPC and are not individually addressable after dispatch.
 
 ---
 

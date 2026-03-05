@@ -193,6 +193,12 @@ export class GroupQueue {
     }
   }
 
+  hasActiveOrPending(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    if (!state) return false;
+    return state.active || state.pendingTasks.length > 0;
+  }
+
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',

@@ -56,6 +56,20 @@ All task mutations go through the `mc` CLI. Never write task YAML directly.
    ```
    Note: `mc task update --status` already appends `task.status_changed`. This completion event is a separate human-readable audit entry.
 
+5. **Release lock:**
+   ```bash
+   echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
+   ```
+
+6. **Trigger the planner** — write a `spawn_agent` IPC file so the orchestrator picks up immediately:
+   ```bash
+   cat > /workspace/ipc/tasks/spawn-$(date +%s)-$RANDOM.json << 'SPAWN_EOF'
+   {"type":"spawn_agent","group_folder":"homie","prompt":"Heartbeat tick. Follow your orchestrator contract at /workspace/group/CLAUDE.md","context_mode":"isolated"}
+   SPAWN_EOF
+   ```
+
+7. **Self-terminate.** Exit immediately after triggering the planner.
+
 ---
 
 ## Initiative Context
@@ -86,6 +100,9 @@ If `initiative` is null, your task is a standalone deliverable.
 node /workspace/extra/homie/bin/mc.ts --base-dir /workspace/extra/homie task update <task_id> \
   --status cancelled --cancellation-reason "Infeasible because: <reason>"
 echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
+cat > /workspace/ipc/tasks/spawn-$(date +%s)-$RANDOM.json << 'SPAWN_EOF'
+{"type":"spawn_agent","group_folder":"homie","prompt":"Heartbeat tick. Follow your orchestrator contract at /workspace/group/CLAUDE.md","context_mode":"isolated"}
+SPAWN_EOF
 ```
 
 ### Unrecoverable Error
@@ -93,6 +110,9 @@ echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
 node /workspace/extra/homie/bin/mc.ts --base-dir /workspace/extra/homie task update <task_id> \
   --status failed --failure-reason "<error detail>"
 echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
+cat > /workspace/ipc/tasks/spawn-$(date +%s)-$RANDOM.json << 'SPAWN_EOF'
+{"type":"spawn_agent","group_folder":"homie","prompt":"Heartbeat tick. Follow your orchestrator contract at /workspace/group/CLAUDE.md","context_mode":"isolated"}
+SPAWN_EOF
 ```
 
 ### User Input Needed
@@ -106,6 +126,9 @@ Then:
 node /workspace/extra/homie/bin/mc.ts --base-dir /workspace/extra/homie task update <task_id> \
   --status blocked --blocked-reason "Need from Vinny: <what is needed>"
 echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
+cat > /workspace/ipc/tasks/spawn-$(date +%s)-$RANDOM.json << 'SPAWN_EOF'
+{"type":"spawn_agent","group_folder":"homie","prompt":"Heartbeat tick. Follow your orchestrator contract at /workspace/group/CLAUDE.md","context_mode":"isolated"}
+SPAWN_EOF
 ```
 
 ### "Wrap Up" Message Received
@@ -119,6 +142,9 @@ Then:
 node /workspace/extra/homie/bin/mc.ts --base-dir /workspace/extra/homie task update <task_id> \
   --status blocked --blocked-reason "Wrap-up: time limit reached. Resume file written."
 echo '{"locked": false}' > /workspace/extra/homie/mission-control/lock.json
+cat > /workspace/ipc/tasks/spawn-$(date +%s)-$RANDOM.json << 'SPAWN_EOF'
+{"type":"spawn_agent","group_folder":"homie","prompt":"Heartbeat tick. Follow your orchestrator contract at /workspace/group/CLAUDE.md","context_mode":"isolated"}
+SPAWN_EOF
 ```
 
 ---

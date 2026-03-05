@@ -563,6 +563,26 @@ async function main(): Promise<void> {
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
+    spawnAgent: (targetFolder, prompt, contextMode) => {
+      const entry = Object.entries(registeredGroups).find(
+        ([_, g]) => g.folder === targetFolder,
+      );
+      if (!entry) return;
+      const [targetJid, group] = entry;
+
+      if (queue.hasActiveOrPending(targetJid)) {
+        logger.debug(
+          { targetFolder },
+          'spawn_agent skipped: target already active or queued',
+        );
+        return;
+      }
+
+      const taskId = `spawn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      queue.enqueueTask(targetJid, taskId, async () => {
+        await runAgent(group, prompt, targetJid);
+      });
+    },
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
