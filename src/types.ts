@@ -50,7 +50,6 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  is_voice_message?: boolean;
 }
 
 export interface ScheduledTask {
@@ -83,12 +82,23 @@ export interface Channel {
   name: string;
   connect(): Promise<void>;
   sendMessage(jid: string, text: string): Promise<void>;
-  sendVoiceMessage?(jid: string, text: string): Promise<boolean>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
+  // Optional: reaction support
+  sendReaction?(
+    chatJid: string,
+    messageKey: {
+      id: string;
+      remoteJid: string;
+      fromMe?: boolean;
+      participant?: string;
+    },
+    emoji: string,
+  ): Promise<void>;
+  reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages

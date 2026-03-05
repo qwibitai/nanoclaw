@@ -63,6 +63,27 @@ server.tool(
 );
 
 server.tool(
+  'react_to_message',
+  'React to a message with an emoji. Omit message_id to react to the most recent message in the chat.',
+  {
+    emoji: z.string().describe('The emoji to react with (e.g. "\ud83d\udc4d", "\u2764\ufe0f", "\ud83d\udd25")'),
+    message_id: z.string().optional().describe('The message ID to react to. If omitted, reacts to the latest message in the chat.'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'reaction',
+      chatJid,
+      emoji: args.emoji,
+      messageId: args.message_id || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Reaction ${args.emoji} sent.` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
@@ -246,18 +267,14 @@ server.tool(
 
 server.tool(
   'register_group',
-  `Register a new WhatsApp chat (group or individual) so the agent can respond to messages there. Main group only.
+  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
 
-ALWAYS read /workspace/ipc/available_groups.json first (via Bash: cat /workspace/ipc/available_groups.json) to find the correct JID.
-For individual chats (e.g., a phone number like "491234567890@s.whatsapp.net"), set requiresTrigger to false so the agent responds to every message without needing a trigger word.
-For WhatsApp groups, set requiresTrigger to true (or omit it).
-The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us" for groups, "491234567890@s.whatsapp.net" for individuals)'),
-    name: z.string().describe('Display name for the chat'),
-    folder: z.string().describe('Folder name for chat files (lowercase, hyphens, e.g., "family-chat")'),
-    trigger: z.string().describe('Trigger word (e.g., "@SuKI"). For individual chats with requiresTrigger=false, this can be set to the agent name.'),
-    requiresTrigger: z.boolean().optional().describe('Whether messages need a trigger word. Default true for groups, set to false for individual chats so the agent responds to every message.'),
+    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    name: z.string().describe('Display name for the group'),
+    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+    trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
     if (!isMain) {
@@ -273,7 +290,6 @@ The folder name should be lowercase with hyphens (e.g., "family-chat").`,
       name: args.name,
       folder: args.folder,
       trigger: args.trigger,
-      requiresTrigger: args.requiresTrigger,
       timestamp: new Date().toISOString(),
     };
 
@@ -281,25 +297,6 @@ The folder name should be lowercase with hyphens (e.g., "family-chat").`,
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
-    };
-  },
-);
-
-server.tool(
-  'reset_session',
-  'Start a fresh conversation context. Clears the current Claude session so the next message begins a new conversation without previous history. Use this when the user asks to start fresh, reset context, or begin a new session.',
-  {},
-  async () => {
-    const data = {
-      type: 'reset_session',
-      folder: groupFolder,
-      timestamp: new Date().toISOString(),
-    };
-
-    writeIpcFile(TASKS_DIR, data);
-
-    return {
-      content: [{ type: 'text' as const, text: 'Session reset requested. The next conversation will start fresh.' }],
     };
   },
 );
