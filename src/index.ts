@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
@@ -31,6 +32,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  deleteSession,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -39,6 +41,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { initBotPool } from './channels/telegram.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -47,6 +50,8 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
+import { embedMessage, initEmbeddingDb, getEmbeddingCount } from './embeddings.js';
+import { startMemoryServer } from './memory-server.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -463,8 +468,10 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
+  initEmbeddingDb();
   logger.info('Database initialized');
   loadState();
+  startMemoryServer();
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
@@ -476,8 +483,59 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
+  // Slash command handler (shared by all channels)
+  const startedAt = Date.now();
+  const handleSlashCommand = async (chatJid: string, command: string): Promise<string | null> => {
+    const cmd = command.trim().toLowerCase();
+    const group = registeredGroups[chatJid];
+
+    if (cmd === '/status') {
+      const uptimeMs = Date.now() - startedAt;
+      const hours = Math.floor(uptimeMs / 3600000);
+      const mins = Math.floor((uptimeMs % 3600000) / 60000);
+      const activeChannels = channels.filter(ch => ch.isConnected()).map(ch => ch.name);
+      const sessionId = group ? sessions[group.folder] : null;
+      const activeTasks = getAllTasks().filter(t => t.status === 'active').length;
+      const embedCount = getEmbeddingCount();
+
+      return [
+        `<b>${ASSISTANT_NAME} Status</b>`,
+        ``,
+        `\u2022 Uptime: ${hours}h ${mins}m`,
+        `\u2022 Channels: ${activeChannels.join(', ')}`,
+        `\u2022 Session: ${sessionId ? sessionId.slice(0, 8) + '\u2026' : 'none'}`,
+        `\u2022 Active tasks: ${activeTasks}`,
+        `\u2022 Memory: ${embedCount} embeddings`,
+      ].join('\n');
+    }
+
+    if (cmd === '/new') {
+      if (group) {
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+      }
+      return 'Session reset. Next message starts fresh.';
+    }
+
+    if (cmd === '/tasks') {
+      const isMain = group?.isMain === true;
+      const allTasks = getAllTasks();
+      const tasks = isMain ? allTasks : allTasks.filter(t => group && t.group_folder === group.folder);
+
+      if (tasks.length === 0) return 'No scheduled tasks.';
+
+      const lines = tasks.map(t =>
+        `\u2022 <code>${t.id.slice(0, 6)}</code> ${t.prompt.slice(0, 40)}${t.prompt.length > 40 ? '\u2026' : ''} (${t.schedule_type}: ${t.schedule_value}) - ${t.status}`
+      );
+      return `<b>Scheduled Tasks</b>\n\n${lines.join('\n')}`;
+    }
+
+    return null;
+  };
+
   // Channel callbacks (shared by all channels)
   const channelOpts = {
+    onSlashCommand: handleSlashCommand,
     onMessage: (chatJid: string, msg: NewMessage) => {
       // Sender allowlist drop mode: discard messages from denied senders before storing
       if (!msg.is_from_me && !msg.is_bot_message && registeredGroups[chatJid]) {
@@ -496,6 +554,14 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      // Embed message for semantic search (fire and forget)
+      embedMessage(
+        msg.id,
+        msg.chat_jid,
+        msg.sender_name,
+        msg.content,
+        msg.timestamp,
+      ).catch((err) => logger.debug({ err }, 'Embedding failed'));
     },
     onChatMetadata: (
       chatJid: string,
@@ -526,6 +592,11 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  // Initialize Telegram bot pool for agent teams
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
   }
 
   // Start subsystems (independently of connection handler)

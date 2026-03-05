@@ -5,10 +5,13 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+export type SlashCommandHandler = (chatJid: string, command: string) => Promise<string | null>;
+
 export interface ChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onSlashCommand?: SlashCommandHandler;
 }
 
 export type ChannelFactory = (opts: ChannelOpts) => Channel | null;

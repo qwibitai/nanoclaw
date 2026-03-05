@@ -242,6 +242,10 @@ function buildContainerArgs(
     args.push('-e', 'HOME=/home/node');
   }
 
+  // Allow container to reach host services (memory search server)
+  args.push('--add-host', 'host.docker.internal:host-gateway');
+  args.push('-e', 'NANOCLAW_MEMORY_HOST=host.docker.internal');
+
   for (const mount of mounts) {
     if (mount.readonly) {
       args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));

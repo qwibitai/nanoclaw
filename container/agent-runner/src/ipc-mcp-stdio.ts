@@ -280,6 +280,64 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+server.tool(
+  'search_memory',
+  `Search past conversations semantically. Use this to find relevant messages from chat history based on meaning, not just keywords. Returns the most relevant messages ranked by similarity.
+
+Examples:
+• "What did Robby say about the project deadline?"
+• "previous discussions about Docker setup"
+• "when did we talk about database migrations?"`,
+  {
+    query: z.string().describe('Natural language search query'),
+    limit: z.number().optional().default(10).describe('Max results (default 10)'),
+  },
+  async (args) => {
+    const memoryHost = process.env.NANOCLAW_MEMORY_HOST || 'host.docker.internal';
+    const url = `http://${memoryHost}:7832/search`;
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: args.query,
+          limit: args.limit || 10,
+          chatJid,
+        }),
+      });
+
+      if (!res.ok) {
+        return {
+          content: [{ type: 'text' as const, text: `Memory search failed (${res.status})` }],
+          isError: true,
+        };
+      }
+
+      const data = await res.json() as { results: Array<{ content: string; senderName: string; timestamp: string; score: number }> };
+
+      if (data.results.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No relevant memories found.' }],
+        };
+      }
+
+      const formatted = data.results
+        .map((r, i) => `[${i + 1}] (${(r.score * 100).toFixed(0)}% match, ${r.timestamp})\n${r.senderName}: ${r.content}`)
+        .join('\n\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `Found ${data.results.length} relevant memories:\n\n${formatted}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Memory search unavailable: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
