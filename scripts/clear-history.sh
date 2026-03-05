@@ -15,5 +15,8 @@ rm -f  "$BASE/groups/homie/mission-control/lock.json"
 rm -rf "$BASE/groups/homie/briefings/"
 rm -rf "$BASE/groups/homie/logs/"
 rm -rf "$BASE/groups/worker/logs/"
+rm -rf "/Users/vinchenkov/Documents/dev/claws/NanoClaw/data/sessions/homie/.claude/debug"
+rm -rf "/Users/vinchenkov/Documents/dev/claws/NanoClaw/data/sessions/homie/.claude/projects/-workspace-group"
+rm -rf "/Users/vinchenkov/Documents/dev/claws/NanoClaw/data/sessions/homie/.claude/session-env"
 
 echo "NanoClaw history cleared."

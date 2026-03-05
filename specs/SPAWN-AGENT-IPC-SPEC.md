@@ -58,7 +58,7 @@ Written to `data/ipc/{source_group}/tasks/{uuid}.json`:
 {
   "type": "spawn_agent",
   "group_folder": "worker",
-  "prompt": "You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/WORKERS.md for full instructions, then read and execute your task.",
+  "prompt": "You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/CLAUDE.md for full instructions, then read and execute your task.",
   "context_mode": "isolated"
 }
 ```
@@ -143,6 +143,6 @@ With this, even if a heartbeat and a `spawn_agent` fire simultaneously, only the
 | `src/index.ts` | Wire up `spawnAgent` implementation in IPC deps |
 | `src/group-queue.ts` | Add `hasActiveOrPending(groupJid)` method for spawn deduplication |
 | `groups/homie/CLAUDE.md` | Step 6: use `spawn_agent` instead of `schedule_task` |
-| `groups/homie/workers/WORKERS.md` | Add step: trigger planner via `spawn_agent` after lock release |
+| `groups/homie/workers/CLAUDE.md` | Add step: trigger planner via `spawn_agent` after lock release |
 
 No changes to: `src/task-scheduler.ts`, `src/container-runner.ts`, `src/config.ts`.

@@ -146,7 +146,7 @@ Secrets (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, etc.) are read in `cont
 groups/homie/
   CLAUDE.md               # Orchestrator tick loop instructions
   bin/mc.ts               # Mission control CLI (standalone, node, --base-dir flag)
-  workers/WORKERS.md      # Worker agent instructions (path-adjusted for NanoClaw mounts)
+  workers/CLAUDE.md      # Worker agent instructions (path-adjusted for NanoClaw mounts)
   briefings/              # Daily briefings written by orchestrator
   mission-control/
     tasks/                # Task files (6 tasks)

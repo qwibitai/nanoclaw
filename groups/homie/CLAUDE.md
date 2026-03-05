@@ -103,6 +103,14 @@ These steps should help Homie seed the highest leverage, most helpful, proactive
 
 When assessing a repo, look at: recent commits, open TODOs in code, README state, and any obvious gaps or next logical steps.
 
+### Output Directory
+
+All non-git deliverables produced by workers land in:
+```
+/workspace/extra/homie/mission-control/outputs/
+```
+When writing task descriptions, always reference this path for outputs — never `/workspace/group/`. Workers do not share the planner's `/workspace/group` mount, so paths there are invisible to verification.
+
 ---
 
 ### What is an Initiative?
@@ -331,14 +339,14 @@ Execute these steps **in exact order**:
 The `prompt` written in the IPC dispatch JSON should be concise and direct.
 
 Key reminders for the briefing:
-- Workers read `/workspace/extra/homie/workers/WORKERS.md` for full execution instructions
+- Workers read `/workspace/extra/homie/workers/CLAUDE.md` for full execution instructions
 - Workers use `node /workspace/extra/homie/bin/mc.ts --base-dir /workspace/extra/homie` to read and manage tasks and initiatives
 - Workers write `{"locked": false}` directly to `/workspace/extra/homie/mission-control/lock.json` to release the lock upon completion
 - Workers never call `mc lock` commands — lock acquisition is Homie's job
 
 Example prompt:
 ```
-You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/WORKERS.md for full instructions, then read the assigned the assigned task /workspace/extra/homie/mission-control/tasks/<TASK_ID>.md. If it is associated with an initiative, you should also read that before starting execution.
+You are a worker agent. Your task ID is <TASK_ID>. Read /workspace/extra/homie/workers/CLAUDE.md for full instructions, then read the assigned the assigned task /workspace/extra/homie/mission-control/tasks/<TASK_ID>.md. If it is associated with an initiative, you should also read that before starting execution.
 ```
 
 ---
