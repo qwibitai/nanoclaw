@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
@@ -447,7 +448,56 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+// ── Process singleton guard (PID file) ──────────────────────────────
+const PID_FILE = path.join(DATA_DIR, 'nanoclaw.pid');
+let pidFd: number | null = null;
+
+function acquirePidLock(): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // Check for stale PID file from a previous crash
+  if (fs.existsSync(PID_FILE)) {
+    const existingPid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim(), 10);
+    if (!isNaN(existingPid) && existingPid !== process.pid) {
+      try {
+        process.kill(existingPid, 0); // signal 0 = check if alive
+        logger.fatal(
+          { existingPid },
+          'Another NanoClaw instance is already running',
+        );
+        process.exit(1);
+      } catch {
+        // Process is dead — stale PID file from a crash, safe to overwrite
+        logger.warn(
+          { existingPid },
+          'Removing stale PID file from previous crash',
+        );
+      }
+    }
+  }
+
+  // Write our PID atomically
+  pidFd = fs.openSync(PID_FILE, 'w');
+  fs.writeSync(pidFd, `${process.pid}\n`);
+  // Keep fd open so the file is held for the process lifetime
+}
+
+function releasePidLock(): void {
+  try {
+    if (pidFd !== null) {
+      fs.closeSync(pidFd);
+      pidFd = null;
+    }
+    if (fs.existsSync(PID_FILE)) {
+      fs.unlinkSync(PID_FILE);
+    }
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
 async function main(): Promise<void> {
+  acquirePidLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -456,6 +506,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    releasePidLock();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
