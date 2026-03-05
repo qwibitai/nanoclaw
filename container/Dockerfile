@@ -30,6 +30,9 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Install Python packages for skills (Google Drive API)
+RUN pip3 install --break-system-packages google-api-python-client google-auth
+
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
@@ -47,6 +50,10 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install gdrive CLI
+COPY skills/gdrive/gdrive.py /usr/local/bin/gdrive
+RUN chmod +x /usr/local/bin/gdrive
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
