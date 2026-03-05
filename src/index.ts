@@ -141,7 +141,8 @@ export function _getLastAgentTimestamp(): Record<string, string> {
 /** @internal - exported for testing */
 export const _processGroupMessages: (
   chatJid: string,
-) => Promise<{ success: boolean; rateLimitResetAt?: Date }> = processGroupMessages;
+) => Promise<{ success: boolean; rateLimitResetAt?: Date }> =
+  processGroupMessages;
 
 /**
  * Process all pending messages for a group.
@@ -565,6 +566,22 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+  queue.setRateLimitRetryNotifyFn((groupJid) => {
+    const channel = findChannel(channels, groupJid);
+    if (channel) {
+      channel
+        .sendMessage(
+          groupJid,
+          'Rate limit has reset — retrying your previous task now.',
+        )
+        .catch((err) =>
+          logger.warn(
+            { groupJid, err },
+            'Failed to send rate-limit retry notification',
+          ),
+        );
+    }
+  });
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

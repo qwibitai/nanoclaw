@@ -222,7 +222,8 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    const rateLimitMsg = "You've hit your usage limit · resets 2am (America/Los_Angeles)";
+    const rateLimitMsg =
+      "You've hit your usage limit · resets 2am (America/Los_Angeles)";
     emitOutputMarker(fakeProc, {
       status: 'error',
       result: rateLimitMsg,

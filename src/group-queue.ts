@@ -37,6 +37,7 @@ export class GroupQueue {
         groupJid: string,
       ) => Promise<{ success: boolean; rateLimitResetAt?: Date }>)
     | null = null;
+  private rateLimitRetryNotifyFn: ((groupJid: string) => void) | null = null;
   private shuttingDown = false;
 
   private getGroup(groupJid: string): GroupState {
@@ -65,6 +66,10 @@ export class GroupQueue {
     ) => Promise<{ success: boolean; rateLimitResetAt?: Date }>,
   ): void {
     this.processMessagesFn = fn;
+  }
+
+  setRateLimitRetryNotifyFn(fn: (groupJid: string) => void): void {
+    this.rateLimitRetryNotifyFn = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -298,6 +303,7 @@ export class GroupQueue {
       );
       setTimeout(() => {
         if (!this.shuttingDown) {
+          this.rateLimitRetryNotifyFn?.(groupJid);
           this.enqueueMessageCheck(groupJid);
         }
       }, delayMs);
