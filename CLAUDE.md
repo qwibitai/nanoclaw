@@ -42,6 +42,20 @@ npm run build        # Compile TypeScript
 ./container/build.sh # Rebuild agent container
 ```
 
+## Testing & CI
+
+Tests are co-located with source files (`*.test.ts`) and run with vitest:
+
+```bash
+npm run test         # Run all tests once
+npm run test:watch   # Watch mode (re-runs on changes)
+npm run typecheck    # TypeScript type check (tsc --noEmit)
+npm run format:check # Prettier format check
+npm run format       # Auto-fix formatting
+```
+
+CI runs on every pull request to `main` (format check → typecheck → tests). A pre-commit hook runs `prettier --write` automatically.
+
 Service management:
 ```bash
 # macOS (launchd)
