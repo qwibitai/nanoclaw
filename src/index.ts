@@ -378,8 +378,7 @@ async function startMessageLoop(): Promise<void> {
         const formatted = formatMessages(pending);
         const result = queue.sendMessage(retryJid, formatted);
         if (result === 'sent') {
-          lastAgentTimestamp[retryJid] =
-            pending[pending.length - 1].timestamp;
+          lastAgentTimestamp[retryJid] = pending[pending.length - 1].timestamp;
           saveState();
           deliveryRetryJids.delete(retryJid);
           logger.debug(

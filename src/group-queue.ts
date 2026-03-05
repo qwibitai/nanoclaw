@@ -163,7 +163,8 @@ export class GroupQueue {
    */
   sendMessage(jid: string, text: string): 'sent' | 'retry' | 'unavailable' {
     const state = this.getGroup(jid);
-    if (!state.active || !state.wsToken || state.isTaskContainer) return 'unavailable';
+    if (!state.active || !state.wsToken || state.isTaskContainer)
+      return 'unavailable';
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
     if (!this._wsServer) return 'unavailable';

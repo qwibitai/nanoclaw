@@ -296,7 +296,6 @@ export class WsClient {
   }
 
   close(): void {
-    this.cancelWait();
     this.closed = true;
     this.clearPingWatchdog();
     if (this.rpc) {
