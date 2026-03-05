@@ -1,0 +1,15 @@
+skill: telegram-voice
+version: 1.0.0
+description: "Local voice transcription for Telegram using whisper.cpp"
+core_version: 0.1.0
+adds:
+  - src/transcription.ts
+modifies:
+  - src/channels/telegram.ts
+  - src/channels/telegram.test.ts
+structured: {}
+conflicts:
+  - voice-transcription
+depends:
+  - telegram
+test: "npx vitest run src/channels/telegram.test.ts"
