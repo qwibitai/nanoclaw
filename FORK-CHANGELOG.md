@@ -31,3 +31,18 @@ Based on upstream NanoClaw v1.2.6.
 - **`.gitignore`** — Updated group tracking rules
 - **`package.json`** — New dependencies for embeddings + channels
 - **`src/config.ts`** + **`src/ipc.ts`** — Minor extensions
+
+## [2026-03-05] IPC Permission Fix + Container Stability
+
+### Bug Fixed
+- **Root cause:** Host runs as root (uid 0), Docker container as node (uid 1000)
+- IPC subdirs (messages, tasks, input) were root-owned → container agent couldn't delete files → agent hung → timeout killed container (exit 137 / SIGKILL)
+- Debug dir didn't exist → ENOENT crash on subagent spawn (exit 1)
+
+### Changes in 
+- IPC subdirs now get  on creation → container user can read/write/unlink
+- Debug dir pre-created with  → no more ENOENT crashes for subagents
+
+### Impact
+- Swarm tasks no longer hang indefinitely waiting on stuck IPC operations
+- No more manual `chmod -R 777 /root/nanoclaw/data/ipc/` needed after restart

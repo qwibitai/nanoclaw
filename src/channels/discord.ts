@@ -59,7 +59,10 @@ export class DiscordChannel implements Channel {
       const firstWord = message.content.trim().split(/\s/)[0].toLowerCase();
       if (knownCommands.includes(firstWord) && this.opts.onSlashCommand) {
         const chatJid = `dc:${message.channelId}`;
-        const reply = await this.opts.onSlashCommand(chatJid, message.content.trim());
+        const reply = await this.opts.onSlashCommand(
+          chatJid,
+          message.content.trim(),
+        );
         if (reply) message.reply(reply);
         return;
       }

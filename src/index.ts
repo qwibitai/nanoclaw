@@ -500,15 +500,28 @@ async function main(): Promise<void> {
   };
 
   function getAgentSettingsPath(groupFolder: string): string {
-    return path.join(DATA_DIR, 'sessions', groupFolder, '.claude', 'settings.json');
+    return path.join(
+      DATA_DIR,
+      'sessions',
+      groupFolder,
+      '.claude',
+      'settings.json',
+    );
   }
 
   function readAgentSettings(groupFolder: string): Record<string, unknown> {
     const p = getAgentSettingsPath(groupFolder);
-    try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return {}; }
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch {
+      return {};
+    }
   }
 
-  function writeAgentSettings(groupFolder: string, settings: Record<string, unknown>): void {
+  function writeAgentSettings(
+    groupFolder: string,
+    settings: Record<string, unknown>,
+  ): void {
     const p = getAgentSettingsPath(groupFolder);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify(settings, null, 2) + '\n');
@@ -567,8 +580,10 @@ async function main(): Promise<void> {
       if (lastTs) {
         const ago = Date.now() - new Date(lastTs).getTime();
         if (ago < 60000) lastActivity = 'just now';
-        else if (ago < 3600000) lastActivity = `${Math.floor(ago / 60000)}m ago`;
-        else if (ago < 86400000) lastActivity = `${Math.floor(ago / 3600000)}h ago`;
+        else if (ago < 3600000)
+          lastActivity = `${Math.floor(ago / 60000)}m ago`;
+        else if (ago < 86400000)
+          lastActivity = `${Math.floor(ago / 3600000)}h ago`;
         else lastActivity = `${Math.floor(ago / 86400000)}d ago`;
       }
 
@@ -603,7 +618,7 @@ async function main(): Promise<void> {
         return `\ud83e\udde0 Current model: <b>${label}</b>\n\nUsage: /model &lt;${VALID_MODELS.join('|')}&gt;`;
       }
 
-      if (!VALID_MODELS.includes(arg as typeof VALID_MODELS[number])) {
+      if (!VALID_MODELS.includes(arg as (typeof VALID_MODELS)[number])) {
         return `\u274c Unknown model: ${arg}\nAvailable: ${VALID_MODELS.join(', ')}`;
       }
 
@@ -626,7 +641,7 @@ async function main(): Promise<void> {
         return `\ud83e\udde7 Current effort: <b>${current}</b>\n\nUsage: /think &lt;${VALID_EFFORTS.join('|')}&gt;`;
       }
 
-      if (!VALID_EFFORTS.includes(arg as typeof VALID_EFFORTS[number])) {
+      if (!VALID_EFFORTS.includes(arg as (typeof VALID_EFFORTS)[number])) {
         return `\u274c Unknown level: ${arg}\nAvailable: ${VALID_EFFORTS.join(', ')}`;
       }
 

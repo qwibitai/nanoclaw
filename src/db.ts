@@ -527,9 +527,9 @@ export function getMessageCount(chatJid?: string): number {
       .get(chatJid) as { count: number };
     return row.count;
   }
-  const row = db
-    .prepare('SELECT COUNT(*) as count FROM messages')
-    .get() as { count: number };
+  const row = db.prepare('SELECT COUNT(*) as count FROM messages').get() as {
+    count: number;
+  };
   return row.count;
 }
 

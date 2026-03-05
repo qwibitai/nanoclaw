@@ -207,8 +207,14 @@ export class TelegramChannel implements Channel {
     await this.bot.api.setMyCommands([
       { command: 'status', description: 'Show bot status and stats' },
       { command: 'new', description: 'Start a new session' },
-      { command: 'model', description: 'Switch model (opus/sonnet/haiku/opusplan)' },
-      { command: 'think', description: 'Set thinking effort (low/medium/high)' },
+      {
+        command: 'model',
+        description: 'Switch model (opus/sonnet/haiku/opusplan)',
+      },
+      {
+        command: 'think',
+        description: 'Set thinking effort (low/medium/high)',
+      },
       { command: 'tasks', description: 'List scheduled tasks' },
       { command: 'ping', description: 'Check if bot is online' },
       { command: 'chatid', description: "Show this chat's ID" },
