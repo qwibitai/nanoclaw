@@ -279,6 +279,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           { group: group.name },
           'Agent error after output was sent, rolled back cursor to last successful output to retry piped messages',
         );
+        // Return false so the queue schedules an immediate retry for the rolled-back messages
+        return false;
       } else {
         logger.warn(
           { group: group.name },
