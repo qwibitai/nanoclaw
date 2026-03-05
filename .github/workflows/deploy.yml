@@ -35,7 +35,8 @@ jobs:
         run: |
           cd "$PROJECT_ROOT"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git pull --ff-only origin main
+          git fetch origin main
+          git reset --hard origin/main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
