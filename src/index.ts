@@ -213,7 +213,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         let voiceSent = false;
         const lastMessageWasVoice = lastMessageWasVoiceMap[chatJid] === true;
-        logger.info({ chatJid, lastMessageWasVoice, hasSendVoice: !!channel.sendVoiceMessage }, 'Sending response');
+        logger.info(
+          {
+            chatJid,
+            lastMessageWasVoice,
+            hasSendVoice: !!channel.sendVoiceMessage,
+          },
+          'Sending response',
+        );
         if (lastMessageWasVoice && channel.sendVoiceMessage) {
           voiceSent = await channel.sendVoiceMessage(chatJid, text);
         }
@@ -565,7 +572,14 @@ async function main(): Promise<void> {
       storeMessage(msg);
       if (!msg.is_bot_message) {
         lastMessageWasVoiceMap[msg.chat_jid] = msg.is_voice_message === true;
-        logger.info({ jid: msg.chat_jid, is_voice: msg.is_voice_message, is_bot: msg.is_bot_message }, 'onMessage voice flag');
+        logger.info(
+          {
+            jid: msg.chat_jid,
+            is_voice: msg.is_voice_message,
+            is_bot: msg.is_bot_message,
+          },
+          'onMessage voice flag',
+        );
       }
     },
     onChatMetadata: (

@@ -161,7 +161,11 @@ async function synthesizeVoice(text: string): Promise<Buffer | null> {
     const res = await fetch(`${XTTS_URL}/synthesize-ogg`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, language: XTTS_LANGUAGE, speaker: XTTS_SPEAKER }),
+      body: JSON.stringify({
+        text,
+        language: XTTS_LANGUAGE,
+        speaker: XTTS_SPEAKER,
+      }),
       signal: AbortSignal.timeout(60000),
     });
     if (!res.ok) {
@@ -192,6 +196,7 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private botSentPttIds = new Set<string>();
 
   private opts: WhatsAppChannelOpts;
 
@@ -417,7 +422,10 @@ export class WhatsAppChannel implements Channel {
             const audioMsg = normalized.audioMessage;
             const isPtt = (audioMsg as Record<string, unknown>)?.ptt === true;
             // Skip PTT sent by the bot itself (our own TTS voice responses)
-            if (isPtt && msg.key.fromMe) continue;
+            if (isPtt && msg.key.id && this.botSentPttIds.has(msg.key.id)) {
+              this.botSentPttIds.delete(msg.key.id);
+              continue;
+            }
             isVoiceMessage = isPtt;
             logger.info(
               { chatJid, isPtt },
@@ -473,7 +481,11 @@ export class WhatsAppChannel implements Channel {
                   ? `${caption}\n[Bildanalyse: ${vlmResult}]`
                   : `[Bildanalyse: ${vlmResult}]`;
                 logger.info(
-                  { chatJid, captionLen: caption.length, vlmLen: vlmResult.length },
+                  {
+                    chatJid,
+                    captionLen: caption.length,
+                    vlmLen: vlmResult.length,
+                  },
                   'Image described by VLM',
                 );
               } else {
@@ -494,7 +506,10 @@ export class WhatsAppChannel implements Channel {
                 content = caption
                   ? `${caption}\n[Bild gespeichert unter: ${containerPath}]`
                   : `[Bild gespeichert unter: ${containerPath}]`;
-                logger.warn({ chatJid }, 'VLM unavailable, image saved to disk as fallback');
+                logger.warn(
+                  { chatJid },
+                  'VLM unavailable, image saved to disk as fallback',
+                );
               }
             } catch (err) {
               logger.warn({ err, chatJid }, 'Failed to download/process image');
@@ -566,11 +581,12 @@ export class WhatsAppChannel implements Channel {
     const audio = await synthesizeVoice(text);
     if (!audio) return false;
     try {
-      await this.sock.sendMessage(jid, {
+      const result = await this.sock.sendMessage(jid, {
         audio,
         mimetype: 'audio/ogg; codecs=opus',
         ptt: true,
       });
+      if (result?.key?.id) this.botSentPttIds.add(result.key.id);
       logger.info({ jid, length: audio.length }, 'Voice message sent');
       return true;
     } catch (err) {
