@@ -33,7 +33,8 @@ export interface AuthOkPayload {
 
 export type WsEvent =
   | { type: 'input'; text: string }
-  | { type: 'close' };
+  | { type: 'close' }
+  | { type: 'disconnected' };
 
 const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_DELAYS = [1000, 2000, 4000];
@@ -217,7 +218,7 @@ export class WsClient {
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       log('Max reconnect attempts reached, giving up');
       this.close();
-      this.pushEvent({ type: 'close' });
+      this.pushEvent({ type: 'disconnected' });
       return;
     }
 

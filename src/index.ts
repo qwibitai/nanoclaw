@@ -232,6 +232,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let lastOutputCursor: string | undefined;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -246,6 +247,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        // Snapshot cursor so we can roll back piped-but-unprocessed messages on error
+        lastOutputCursor = lastAgentTimestamp[chatJid];
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -264,16 +267,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
-      logger.warn(
-        { group: group.name },
-        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
-      );
+    if (outputSentToUser && lastOutputCursor) {
+      // Roll back to the cursor at the time of last successful output.
+      // Messages processed before that point already reached the user (no duplicates).
+      // Messages piped after that point were not processed and need retry.
+      const currentCursor = lastAgentTimestamp[chatJid] || '';
+      if (currentCursor !== lastOutputCursor) {
+        lastAgentTimestamp[chatJid] = lastOutputCursor;
+        saveState();
+        logger.warn(
+          { group: group.name },
+          'Agent error after output was sent, rolled back cursor to last successful output to retry piped messages',
+        );
+      } else {
+        logger.warn(
+          { group: group.name },
+          'Agent error after output was sent, cursor already at last output position',
+        );
+      }
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // No output was sent — roll back to before the run started
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
     logger.warn(

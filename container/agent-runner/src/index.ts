@@ -285,11 +285,12 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   wsClient: WsClient,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; disconnectedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
   let closedDuringQuery = false;
+  let disconnectedDuringQuery = false;
 
   const drainDone = (async () => {
     while (true) {
@@ -298,6 +299,11 @@ async function runQuery(
       if (event.type === 'input') {
         log(`Piping WS message into active query (${event.text.length} chars)`);
         stream.push(event.text);
+      } else if (event.type === 'disconnected') {
+        log('WebSocket disconnected during query (reconnect exhausted), ending stream');
+        disconnectedDuringQuery = true;
+        stream.end();
+        return;
       } else {
         log('Close signal received during query, ending stream');
         closedDuringQuery = true;
@@ -409,8 +415,8 @@ async function runQuery(
     await drainDone;
   }
 
-  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}, disconnectedDuringQuery: ${disconnectedDuringQuery}`);
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, disconnectedDuringQuery };
 }
 
 async function main(): Promise<void> {
@@ -473,6 +479,11 @@ async function main(): Promise<void> {
         resumeAt = queryResult.lastAssistantUuid;
       }
 
+      // If WS disconnected (reconnect exhausted) during the query, treat as error
+      if (queryResult.disconnectedDuringQuery) {
+        throw new Error('WebSocket disconnected during query (reconnect attempts exhausted)');
+      }
+
       // If close was received during the query, exit immediately.
       if (queryResult.closedDuringQuery) {
         log('Close signal consumed during query, exiting');
@@ -486,6 +497,11 @@ async function main(): Promise<void> {
 
       // Wait for the next message or close signal via WS
       const event = await wsClient.nextEvent();
+
+      if (event?.type === 'disconnected') {
+        throw new Error('WebSocket disconnected while waiting for input (reconnect attempts exhausted)');
+      }
+
       const nextMessage = event?.type === 'input' ? event.text : null;
 
       if (nextMessage === null) {
