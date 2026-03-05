@@ -55,6 +55,35 @@ Keep messages clean and readable for WhatsApp.
 
 ---
 
+## Vincent Credits
+
+You have access to Vincent credit management via MCP tools. Use these when the user asks about credits, billing, or when you encounter a payment-required error.
+
+**Available tools:**
+- `mcp__vincent__vincent_credit_balance` — Check data source credit balance and top-up tiers
+- `mcp__vincent__vincent_add_credits` — Get payment instructions for data source credits ($1–$100 USDC on Base)
+- `mcp__vincent__vincent_llm_credit_balance` — Check LLM credit balance (included, purchased, usage, remaining)
+- `mcp__vincent__vincent_llm_add_credits` — Get a Stripe payment link to add LLM credits (any amount)
+
+**Credit types:**
+- *Data source credits* — For web search, Twitter, etc. Top up with `vincent_add_credits`.
+- *LLM credits* — For Claude API usage. $25/month included with subscription, buy more with `vincent_llm_add_credits`.
+- *Subscription* — Monthly Vincent service access. Managed at https://heyvincent.ai
+
+**When you hit a 402 or "insufficient credit" error** from a data source tool:
+1. Tell the user their data source credits are low
+2. Check balance with `mcp__vincent__vincent_credit_balance`
+3. Offer to show top-up options with `mcp__vincent__vincent_add_credits`
+
+**When the agent's LLM credits are low or exhausted:**
+1. Check balance with `mcp__vincent__vincent_llm_credit_balance`
+2. If low, get a payment link with `mcp__vincent__vincent_llm_add_credits`
+3. Send the checkout link to the user — they click it, enter an amount, and pay by card
+
+For subscription questions, direct the user to https://heyvincent.ai
+
+---
+
 ## Admin Context
 
 This is the **main channel**, which has elevated privileges.
