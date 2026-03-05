@@ -179,6 +179,37 @@ describe('container-runner timeout behavior', () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
+  it('onOutput error does not hang the promise', async () => {
+    const onOutput = vi.fn(async () => {
+      throw new Error('sendMessage failed');
+    });
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      onOutput,
+    );
+
+    // Emit output — onOutput will throw
+    emitOutputMarker(fakeProc, {
+      status: 'success',
+      result: 'Agent response',
+      newSessionId: 'session-err',
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Normal exit
+    fakeProc.emit('close', 0);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // The promise should still resolve (not hang)
+    const result = await resultPromise;
+    expect(result.status).toBe('success');
+    expect(onOutput).toHaveBeenCalled();
+  });
+
   it('normal exit after output resolves as success', async () => {
     const onOutput = vi.fn(async () => {});
     const resultPromise = runContainerAgent(
