@@ -59,6 +59,15 @@ Keep messages clean and readable for WhatsApp.
 
 This is the **main channel**, which has elevated privileges.
 
+### Platform Credentials
+
+- **HahaVending**: `https://thorh5.hahabianli.com/pages/login/login`
+  - Email: `blayke.elder1@gmail.com`
+  - Password: `Thrive17!`
+- **Vendera**: `https://vms.vendera.ai/login`
+  - Email: `blayke.elder1@gmail.com`
+  - Password: `Thrive17!`
+
 ## Container Mounts
 
 Main has access to the entire project:

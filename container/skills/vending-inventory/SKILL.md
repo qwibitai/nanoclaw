@@ -22,74 +22,153 @@ Weekly automation (runs every Friday at 7pm Central):
 3. **COMBINE PLATFORMS:** Merge sales from HahaVending + Vendera into unified per-product totals. Show platform breakdown in the report but totals should be combined.
 4. **ALL MACHINES:** Account for every machine across both platforms. List all reporting machines in the report.
 5. **NO INTERNAL TAGS:** Never wrap your final output in `<internal>` tags. The report must be delivered to the user via `send_message`.
+6. **NO PARTIAL REPORTS:** Do NOT send a report unless you have sales data from BOTH HahaVending and Vendera. If one platform fails, retry it (up to 3 attempts). If both fail after retries, send an error message requesting manual intervention — never send a report with only IDDI data.
 
 ## Credentials
 
-Login credentials are in the group's CLAUDE.md: `/workspace/group/CLAUDE.md`
+Login credentials are in the group's CLAUDE.md under "Platform Credentials": `/workspace/group/CLAUDE.md`
 
-## Platform Navigation: Vendera
+Read CLAUDE.md FIRST before doing anything else. Extract the email and password for both platforms.
 
-**Login URL:** `https://vms.vendera.ai/login`
+## Browser Automation — CRITICAL RULES
 
-### Login steps:
-1. `agent-browser open https://vms.vendera.ai/login`
-2. `agent-browser snapshot -i` — look for Email and Password fields
-3. Fill email field with credentials from CLAUDE.md
-4. Fill password field
-5. Click the orange "Login" button
-6. Save auth state: `agent-browser state save vendera-auth.json`
+The browser tool is `agent-browser`. Follow these rules exactly or logins WILL fail:
 
-### Getting weekly sales data:
-1. After login, you land on Dashboard (`/home`)
-2. Scroll down past the Transaction/Revenue/Machine Overview cards
-3. Find the **"Product Sales Ranking"** section
-4. Click **"Past Week"** tab (shows Mon-Sun date range)
-5. Click **"By Items Sold"** to sort by quantity
-6. Read the product list: each row has product image, name, Quantity, Revenue
-7. Click **"Next >"** at bottom to go to page 2 if there are more products (check "Page X of Y")
-8. Record every product name and its Quantity sold
+### Rule 1: Always close before opening
+```bash
+agent-browser close 2>/dev/null; sleep 1
+```
+Run this before EVERY `agent-browser open` call. The browser daemon persists between commands — if a previous session is running, `open` will fail or navigate in a stale context.
+
+### Rule 2: Use --session-name for auto-persistence
+```bash
+agent-browser --session-name vendera open "https://vms.vendera.ai/login"
+```
+The `--session-name` flag auto-saves and restores cookies/localStorage between runs. If a valid session exists, the site may skip the login page entirely.
+
+### Rule 3: Login sequence
+After opening a login page:
+```bash
+agent-browser snapshot -i          # See form fields and their refs
+agent-browser fill @e1 "email"     # Fill email field (use ref from snapshot)
+agent-browser fill @e2 "password"  # Fill password field
+agent-browser click @e3            # Click login button (use ref from snapshot)
+agent-browser wait 3000            # Wait for redirect
+agent-browser snapshot -i          # Verify you landed on dashboard
+```
+
+### Rule 4: Never use these (they don't work)
+- `agent-browser state load <file>` — NOT a valid command
+- `agent-browser state save <file>` — NOT a valid command
+- `agent-browser new` — NOT a valid command
+- `agent-browser navigate` — use `agent-browser open` instead
+
+### Rule 5: Wait after every navigation
+```bash
+agent-browser open <url> && agent-browser wait 3000 && agent-browser snapshot -i
+```
+Always chain: open → wait → snapshot. Never snapshot immediately after open.
+
+## Platform: HahaVending
+
+### Login
+
+```bash
+agent-browser close 2>/dev/null; sleep 1
+agent-browser --session-name hahavending open "https://thorh5.hahabianli.com/pages/login/login"
+agent-browser wait 3000
+agent-browser snapshot -i
+```
+
+If you see a login form (email/password fields):
+1. Fill email and password from CLAUDE.md credentials
+2. Click the Sign in button
+3. Wait 3 seconds, then snapshot to confirm login
+
+If redirected to `/pages/login/register` (Sign up page), look for a "Login" text link and click it first.
+
+If you land on the home page or dashboard directly, the session is still valid — proceed to sales data.
+
+### Getting weekly sales data (preferred method)
+
+Calculate this week's Monday and Friday dates in YYYY-MM-DD format, then:
+
+```bash
+agent-browser open "https://thorh5.hahabianli.com/pages/statistics/product-sales-ranking?start_time=YYYY-MM-DD&end_time=YYYY-MM-DD&tabIndex=2"
+agent-browser wait 5000
+agent-browser snapshot
+```
+
+This shows the Product Ranking page directly. Read each row: Product name, Sales ($), Sales volume (quantity). Scroll down to see all products.
+
+If "Sales volume" column is not visible, try:
+```bash
+agent-browser scroll right 200
+agent-browser snapshot
+```
+
+### Fallback method (manual navigation)
+
+1. From home page, click "More" button (top right) → Data Center
+2. Click "Week" tab at top
+3. Scroll to "Product Ranking" section
+4. Click "More >" to see full list
+
+## Platform: Vendera
+
+### Login
+
+```bash
+agent-browser close 2>/dev/null; sleep 1
+agent-browser --session-name vendera open "https://vms.vendera.ai/login"
+agent-browser wait 3000
+agent-browser snapshot -i
+```
+
+If you see a login form:
+1. Fill email and password from CLAUDE.md credentials
+2. Click the orange "Login" button
+3. Wait 3 seconds, then snapshot to confirm login
+
+If you land on Dashboard (`/home`) directly, the session is still valid — proceed.
+
+### Getting weekly sales data
+
+1. After login, navigate to Dashboard if not already there:
+   ```bash
+   agent-browser open "https://vms.vendera.ai/home"
+   agent-browser wait 3000
+   agent-browser snapshot
+   ```
+2. Scroll down past Transaction/Revenue/Machine Overview cards
+3. Find "Product Sales Ranking" section
+4. Click "Past Week" tab
+5. Click "By Items Sold" to sort by quantity
+6. Read each row: product name, Quantity, Revenue
+7. Check for pagination — look for "Page X of Y" and click "Next >" until all pages are read
+8. Record every product name and its quantity sold
 
 **Key URLs:**
 - Dashboard: `https://vms.vendera.ai/home`
 - Sales Transactions: `https://vms.vendera.ai/orders/orders/sale`
 - Product Library: `https://vms.vendera.ai/products/products/library`
 
-## Platform Navigation: HahaVending
+## Login Retry Logic
 
-**Login URL:** `https://thorh5.hahabianli.com/pages/login/login`
+If login fails (wrong page, timeout, error message on page):
 
-NOTE: This URL may redirect to `/pages/login/register` (Sign up page). If that happens, scroll down to find a "Login" link, or the browser may auto-login from saved state.
+1. **Attempt 1:** Close browser, reopen, try login again
+2. **Attempt 2:** Close browser, wait 5 seconds, reopen with a fresh session name (`--session-name vendera2`), try login again
+3. **Attempt 3:** Close browser, try without `--session-name` flag (completely fresh), try login again
 
-### Login steps:
-1. `agent-browser open https://thorh5.hahabianli.com/pages/login/login`
-2. `agent-browser snapshot -i`
-3. If on Sign up page, look for "Login" link and click it
-4. Fill Email address and Password fields with credentials from CLAUDE.md
-5. Click the Login/Sign in button
-6. Save auth state: `agent-browser state save hahavending-auth.json`
-
-### Getting weekly sales data:
-**METHOD 1 (Preferred — direct URL with date parameters):**
-1. Calculate this week's Monday and Friday dates (YYYY-MM-DD format)
-2. Navigate directly to: `https://thorh5.hahabianli.com/pages/statistics/product-sales-ranking?start_time=YYYY-MM-DD&end_time=YYYY-MM-DD&tabIndex=2`
-3. This shows the full Product Ranking page with all products
-4. Read each row: Product name, Sales ($), Sales volume (quantity)
-5. Scroll down to see all products (it's a single scrollable list)
-6. The "Sales volume" column may require swiping/scrolling left — use `agent-browser snapshot` to read the page text which includes all columns
-
-**METHOD 2 (Manual navigation):**
-1. After login, land on home page showing "Snak group" with Daily/Monthly Sales
-2. Click **"More"** button (top right, next to sales summary) — goes to Data Center
-3. Click **"Week"** tab at top of Data Center page (`/pages/statistics/statistics`)
-4. Scroll down to **"Product Ranking"** section
-5. Click **"More >"** to see full product list
-6. Read Product name + Sales volume for each item
-7. Scroll down to see all products
-
-**Key URLs:**
-- Home: `https://thorh5.hahabianli.com/`
-- Data Center: `https://thorh5.hahabianli.com/pages/statistics/statistics`
-- Product Ranking (direct): `https://thorh5.hahabianli.com/pages/statistics/product-sales-ranking?start_time=YYYY-MM-DD&end_time=YYYY-MM-DD&tabIndex=2`
+If all 3 attempts fail, do NOT proceed with partial data. Send an error message:
+```
+*VENDING INVENTORY — Login Failed*
+Platform: [name]
+Attempts: 3
+Last error: [what you saw on screen]
+Action needed: Please verify credentials in CLAUDE.md are still valid
+```
 
 ## Spreadsheet Structure
 
@@ -149,15 +228,14 @@ When inputting weekly sales, use the correct week column (Week 1, 2, 3, or 4) so
 ## Replacement Product Search
 
 When an item is blacklisted:
-1. Open Sam's Club website (`https://www.samsclub.com`) and search for similar products in the same category
-2. Open Costco website (`https://www.costco.com`) and search for similar products
-3. Suggest 2-3 replacement options with:
+1. Use web search to find similar products at Sam's Club and Costco
+2. Suggest 2-3 replacement options with:
    - Product name
    - Price (if visible)
    - Pack size
    - Which store (Sam's Club or Costco)
 
-This keeps the product lineup fresh — always rotating in new items to replace underperformers.
+Do NOT use browser automation on Sam's Club or Costco — they block headless browsers. Use web search instead.
 
 ## Step-by-step: Update Spreadsheet
 
@@ -210,48 +288,13 @@ Subtract this week's total sold from Current Stock (column C).
 
 Use WhatsApp formatting: single *bold*, _italic_, bullet points. No markdown headings.
 
-## Important Notes
+## Execution Order
 
-- Always try loading saved auth state before logging in: `agent-browser state load <name>.json`
-- Always save auth state after successful login
-- Always check Warehouse color FIRST before deciding to reorder
-- A full 4 consecutive weeks of red sales required before blacklisting
-- Blacklist lasts 3 months, then item can be retried
-- Always suggest Sam's Club/Costco replacements when blacklisting
-- If login fails, notify user — do NOT retry more than twice
-- The owner manually updates Current Stock counts periodically
-- Sales Performance colors may be cell background colors or text values — check both
-- For HahaVending, prefer the direct URL method with date parameters to avoid extra navigation
+Follow this exact sequence:
 
-## Browser Reliability for Vending Sites
-
-### General rules for ALL browser navigation
-- After EVERY `agent-browser open <url>`, immediately run `agent-browser wait --load networkidle`
-- After EVERY `agent-browser click`, wait for the page to settle: `agent-browser wait --load networkidle` or `agent-browser wait 2000`
-- Use `agent-browser snapshot -i -c` (compact + interactive) to reduce output size on data-heavy pages
-- If a snapshot shows unexpected content (like a loading spinner), wait 3 seconds and retry
-
-### HahaVending specific
-- The login page sometimes redirects to `/pages/login/register` — if this happens, look for a "Login" text link and click it
-- After login, wait for redirect: `agent-browser wait --url "**/pages/index/index"` or `agent-browser wait 3000`
-- The Product Ranking page loads data asynchronously — after opening the direct URL, wait 3-5 seconds: `agent-browser wait 5000` then snapshot
-- If "Sales volume" column is not visible in snapshot, try: `agent-browser scroll right 200` then re-snapshot
-- Always save auth state after successful login to avoid re-logging in
-
-### Vendera specific
-- Dashboard loads multiple cards asynchronously — wait for network idle after login redirect
-- Product Sales Ranking has pagination — always check for "Page X of Y" text and click "Next >" until all pages are read
-- If the "Past Week" tab does not appear, the page may still be loading — wait and re-snapshot
-
-### Sam's Club specific
-- Sam's Club pages are JavaScript-heavy and load slowly — always wait 5 seconds after opening: `agent-browser wait 5000`
-- Search results load dynamically — after searching, wait for results: `agent-browser wait --text "results" --timeout 10000`
-- If Sam's Club shows a location/zip code prompt, dismiss it or fill in 77084 (Houston TX)
-- Product pages may show "member pricing" which requires login — use the visible non-member price
-- If the page shows a CAPTCHA or bot detection, stop and note it in the report — do not retry endlessly
-
-### Google Sheets via tool (not browser)
-- For reading/writing Google Sheets, use the sheets tool directly — do NOT use browser automation for Sheets
-- The sheets tool is faster and more reliable than browsing to sheets.google.com
-- Command: `npx tsx /workspace/project/tools/sheets/sheets.ts read --range "Tab Name!A:Z"`
-- For writing: `npx tsx /workspace/project/tools/sheets/sheets.ts write --range "Tab!A1" --values [[val1,val2]]`
+1. Read CLAUDE.md — get credentials
+2. Read Google Sheets (all 3 tabs) — understand current state
+3. Login to HahaVending — pull weekly sales (retry up to 3x if needed)
+4. Login to Vendera — pull weekly sales (retry up to 3x if needed)
+5. If BOTH platforms succeeded: combine data, update sheets, generate report, send ONE message
+6. If EITHER platform failed after 3 retries: send error message, do NOT send partial report
