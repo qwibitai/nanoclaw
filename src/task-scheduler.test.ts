@@ -96,6 +96,41 @@ describe('task scheduler', () => {
     expect(computeNextRun(task)).toBeNull();
   });
 
+  it('computeNextRun falls back to 60s for invalid interval values', () => {
+    const baseTask = {
+      id: 'invalid-interval',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'interval' as const,
+      context_mode: 'isolated' as const,
+      next_run: new Date().toISOString(),
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2026-01-01T00:00:00.000Z',
+    };
+
+    const now = Date.now();
+
+    // Zero interval would cause infinite while-loop without the guard
+    const zeroResult = computeNextRun({ ...baseTask, schedule_value: '0' });
+    expect(zeroResult).not.toBeNull();
+    expect(new Date(zeroResult!).getTime()).toBeGreaterThanOrEqual(
+      now + 60_000,
+    );
+
+    // Negative interval
+    const negResult = computeNextRun({ ...baseTask, schedule_value: '-5000' });
+    expect(negResult).not.toBeNull();
+    expect(new Date(negResult!).getTime()).toBeGreaterThanOrEqual(now + 60_000);
+
+    // Non-numeric string
+    const nanResult = computeNextRun({ ...baseTask, schedule_value: 'abc' });
+    expect(nanResult).not.toBeNull();
+    expect(new Date(nanResult!).getTime()).toBeGreaterThanOrEqual(now + 60_000);
+  });
+
   it('computeNextRun skips missed intervals without infinite loop', () => {
     // Task was due 10 intervals ago (missed)
     const ms = 60000;
