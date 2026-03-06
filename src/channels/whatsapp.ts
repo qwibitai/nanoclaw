@@ -96,7 +96,9 @@ export class WhatsAppChannel implements Channel {
         // other channels (Telegram, Slack, etc.) should keep running.
         this.connected = false;
         this.disabled = true;
-        logger.warn('WhatsApp disabled (needs re-auth). Other channels unaffected.');
+        logger.warn(
+          'WhatsApp disabled (needs re-auth). Other channels unaffected.',
+        );
         return;
       }
 
@@ -129,7 +131,9 @@ export class WhatsAppChannel implements Channel {
           // Logged out (401) — disable this channel instead of killing the
           // entire process. Other channels should keep running.
           this.disabled = true;
-          logger.warn('WhatsApp logged out. Run /setup to re-authenticate. Other channels unaffected.');
+          logger.warn(
+            'WhatsApp logged out. Run /setup to re-authenticate. Other channels unaffected.',
+          );
         }
       } else if (connection === 'open') {
         this.connected = true;

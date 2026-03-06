@@ -210,10 +210,7 @@ export class SlackChannel implements Channel {
           });
         }
       }
-      logger.info(
-        { jid, length: text.length, threadTs },
-        'Slack message sent',
-      );
+      logger.info({ jid, length: text.length, threadTs }, 'Slack message sent');
     } catch (err) {
       this.outgoingQueue.push({ jid, text });
       logger.warn(
