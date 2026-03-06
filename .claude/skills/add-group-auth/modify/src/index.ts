@@ -273,16 +273,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-      streamedAuthError = null;
-    } else if (result.status === 'error') {
+    streamedAuthError = null;
+    queue.notifyIdle(chatJid);
+    if (result.status === 'error') {
       hadError = true;
-      // Check streamed error text for auth failures
-      if (result.result) {
-        const errText = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-        if (isAuthError(errText)) streamedAuthError = errText;
-      }
+    }
+    if (typeof result.error === 'string' && isAuthError(result.error)) {
+      streamedAuthError = result.error;
+    } else if (typeof result.result === 'string' && isAuthError(result.result)) {
+      // This condition is a hack, because Claude doesnt mark errors in stream
+      streamedAuthError = result.result;
     }
   });
 
@@ -291,9 +291,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (agentResult.status === 'error' || hadError) {
     // Check if this is an auth error — trigger reauth
-    const authErrorText = streamedAuthError || agentResult.error;
-    streamedAuthError = null;
-    if (isAuthError(authErrorText)) {
+    if (agentResult.error && isAuthError(agentResult.error)) {
+      streamedAuthError = agentResult.error;
+    }
+    if (streamedAuthError) {
+      const authErrorText = streamedAuthError;
+      streamedAuthError = null;
+      
       logger.warn({ group: group.name }, 'Auth error detected, starting reauth');
       const chat = createChatIO(channel, chatJid);
       const ok = await runReauth(group.folder, chat, `Agent failed: ${authErrorText}`);

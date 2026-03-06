@@ -42,7 +42,7 @@ export interface AuthErrorInfo {
  * Extract HTTP status code from structured SDK error:
  *   Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token"},"request_id":"req_..."}
  */
-const API_ERROR_RE = /API Error:\s*(\d{3})\s*(\{.+)/;
+const API_ERROR_RE = /^Failed to authenticate\.\s*API Error:\s*(\d{3})\s*\{"type":"error","error":\{"type":"[^"]+","message":"([^"]*)"\},"request_id":"[^"]+"\}\s*$/;
 
 /** Auth-related HTTP status codes. */
 const AUTH_STATUS_CODES = new Set([401, 403]);
@@ -52,13 +52,7 @@ function parseApiError(error: string): AuthErrorInfo | null {
   if (!m) return null;
   const code = parseInt(m[1], 10);
   if (!AUTH_STATUS_CODES.has(code)) return null;
-  let message = `HTTP ${code}`;
-  try {
-    const body = JSON.parse(m[2]);
-    const errMsg: string = body?.error?.message;
-    if (errMsg) message = errMsg;
-  } catch { /* use default message */ }
-  return { code, message };
+  return { code, message: m[2] || `HTTP ${code}` };
 }
 
 /** Classify a container error. Returns null if not auth-related. */

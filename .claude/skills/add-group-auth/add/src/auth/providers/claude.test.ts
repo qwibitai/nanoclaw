@@ -46,7 +46,7 @@ vi.mock('../exec.js', () => ({
 }));
 
 // Import after mocks
-const { claudeProvider, isAuthError, waitForOutput, UrlExtractor, LineExtractor, detectCodeDelivery, deliverCode } = await import(
+const { claudeProvider, isAuthError, classifyAuthError, waitForOutput, UrlExtractor, LineExtractor, detectCodeDelivery, deliverCode } = await import(
   './claude.js'
 );
 
@@ -223,26 +223,25 @@ describe('claudeProvider', () => {
   });
 });
 
-describe('isAuthError', () => {
+describe('isAuthError / classifyAuthError', () => {
   const apiError = (status: number, type: string, message: string) =>
-    `Failed to authenticate. API Error: ${status} {"type":"error","error":{"type":"${type}","message":"${message}"},"request_id":"req_test"}`;
+    `Failed to authenticate. API Error: ${status} {"type":"error","error":{"type":"${type}","message":"${message}"},"request_id":"req_011CYn1REexA8rAwsuHGTCAJ"}`;
 
   it('detects 401 authentication_error', () => {
     expect(isAuthError(apiError(401, 'authentication_error', 'Invalid bearer token'))).toBe(true);
+    const info = classifyAuthError(apiError(401, 'authentication_error', 'Invalid bearer token'));
+    expect(info).toEqual({ code: 401, message: 'Invalid bearer token' });
   });
 
   it('detects 403 permission_error', () => {
     expect(isAuthError(apiError(403, 'permission_error', 'Forbidden'))).toBe(true);
+    const info = classifyAuthError(apiError(403, 'permission_error', 'Forbidden'));
+    expect(info).toEqual({ code: 403, message: 'Forbidden' });
   });
 
-  it('detects 401/403 with unknown error type', () => {
+  it('detects 401/403 with any error type', () => {
     expect(isAuthError(apiError(401, 'some_new_error', 'whatever'))).toBe(true);
     expect(isAuthError(apiError(403, 'some_new_error', 'whatever'))).toBe(true);
-  });
-
-  it('handles malformed JSON after status code', () => {
-    expect(isAuthError('API Error: 401 {not valid json')).toBe(true);
-    expect(isAuthError('API Error: 403 {broken')).toBe(true);
   });
 
   it('does not trigger on 429 or 529', () => {
@@ -253,6 +252,12 @@ describe('isAuthError', () => {
   it('does not trigger on other status codes', () => {
     expect(isAuthError(apiError(400, 'invalid_request_error', 'Bad request'))).toBe(false);
     expect(isAuthError(apiError(500, 'api_error', 'Internal error'))).toBe(false);
+  });
+
+  it('does not match partial or embedded errors', () => {
+    expect(isAuthError('prefix ' + apiError(401, 'authentication_error', 'test'))).toBe(false);
+    expect(isAuthError(apiError(401, 'authentication_error', 'test') + ' suffix')).toBe(false);
+    expect(isAuthError('API Error: 401 {not valid json')).toBe(false);
   });
 
   it('returns false for non-API errors', () => {
