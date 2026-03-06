@@ -28,6 +28,7 @@ DB_PATH = str(PROJECT_ROOT / "store" / "messages.db")
 CHAT_JID = "tg:8253215818"  # Telegram main chat
 SOUND_START = "/System/Library/Sounds/Purr.aiff"
 SOUND_STOP = "/System/Library/Sounds/Pop.aiff"
+PLAYBACK_PID_FILE = os.path.join(tempfile.gettempdir(), "nanoclaw-playback.pid")
 
 
 def load_env():
@@ -45,6 +46,34 @@ def load_env():
 def play_sound(path):
     """Play a sound file asynchronously."""
     subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def is_audio_playing():
+    """Check if NanoClaw is currently playing audio via ffplay."""
+    try:
+        with open(PLAYBACK_PID_FILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)  # check if process exists
+        return pid
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        return None
+
+
+def stop_audio_playback():
+    """Kill the running ffplay process."""
+    pid = is_audio_playing()
+    if pid:
+        try:
+            os.kill(pid, 15)  # SIGTERM
+            print(f"  Audio playback interrupted (pid {pid})")
+        except ProcessLookupError:
+            pass
+        try:
+            os.unlink(PLAYBACK_PID_FILE)
+        except FileNotFoundError:
+            pass
+        return True
+    return False
 
 
 def transcribe(audio_bytes, openai_key):
@@ -130,6 +159,11 @@ def main():
                 recorded_frames.append(frame)
 
             if keyword_index >= 0:
+                # If audio is playing, interrupt it instead of starting recording
+                if not recording and stop_audio_playback():
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Playback interrupted")
+                    continue
+
                 if not recording:
                     # Start recording
                     recording = True

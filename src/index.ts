@@ -139,13 +139,27 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+const PLAYBACK_PID_FILE = path.join(os.tmpdir(), 'nanoclaw-playback.pid');
+
 function playAudioLocally(audio: Buffer): void {
   const tmpFile = path.join(os.tmpdir(), `nanoclaw-play-${Date.now()}.ogg`);
   fs.writeFileSync(tmpFile, audio);
-  exec(`/opt/homebrew/bin/ffplay -nodisp -autoexit -loglevel quiet "${tmpFile}"`, (err) => {
-    try { fs.unlinkSync(tmpFile); } catch {}
-    if (err) logger.warn({ err }, 'Local audio playback failed');
-  });
+  const child = exec(
+    `/opt/homebrew/bin/ffplay -nodisp -autoexit -loglevel quiet -af "atempo=1.35" "${tmpFile}"`,
+    (err) => {
+      try {
+        fs.unlinkSync(tmpFile);
+      } catch {}
+      try {
+        fs.unlinkSync(PLAYBACK_PID_FILE);
+      } catch {}
+      if (err && (err as any).killed) return; // interrupted by voice daemon
+      if (err) logger.warn({ err }, 'Local audio playback failed');
+    },
+  );
+  if (child.pid) {
+    fs.writeFileSync(PLAYBACK_PID_FILE, String(child.pid));
+  }
 }
 
 /**
@@ -175,7 +189,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Detect if the latest non-bot message was a voice message
   // In self-chat, is_from_me is true for all messages, so check is_bot_message instead
-  const lastUserMsg = [...missedMessages].reverse().find((m) => !m.is_bot_message);
+  const lastUserMsg = [...missedMessages]
+    .reverse()
+    .find((m) => !m.is_bot_message);
   if (lastUserMsg && /^\[Voice:/.test(lastUserMsg.content)) {
     voiceChats.add(chatJid);
   } else {
@@ -238,7 +254,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         // If the user sent a voice message, reply with voice too
         const isVoiceReply = voiceChats.has(chatJid) && !!channel.sendVoice;
-        logger.info({ chatJid, isVoiceReply, voiceChatsSize: voiceChats.size }, 'Sending response');
+        logger.info(
+          { chatJid, isVoiceReply, voiceChatsSize: voiceChats.size },
+          'Sending response',
+        );
         if (isVoiceReply) {
           const audio = await textToSpeech(text);
           if (audio) {
@@ -450,7 +469,9 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend);
 
           // Detect voice in piped messages too
-          const lastUserMsgPiped = [...messagesToSend].reverse().find((m) => !m.is_bot_message);
+          const lastUserMsgPiped = [...messagesToSend]
+            .reverse()
+            .find((m) => !m.is_bot_message);
           if (lastUserMsgPiped && /^\[Voice:/.test(lastUserMsgPiped.content)) {
             voiceChats.add(chatJid);
           }

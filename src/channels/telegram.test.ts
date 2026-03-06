@@ -590,12 +590,16 @@ describe('TelegramChannel', () => {
 
       const ctx = createMediaCtx({});
       (ctx as any).message.voice = { file_id: 'test-file-id' };
-      (ctx as any).api = { getFile: vi.fn().mockRejectedValue(new Error('no file')) };
+      (ctx as any).api = {
+        getFile: vi.fn().mockRejectedValue(new Error('no file')),
+      };
       await triggerMediaMessage('message:voice', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
-        expect.objectContaining({ content: '[Voice Message - transcription failed]' }),
+        expect.objectContaining({
+          content: '[Voice Message - transcription failed]',
+        }),
       );
     });
 
