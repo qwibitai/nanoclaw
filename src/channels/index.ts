@@ -4,9 +4,13 @@
 // discord
 
 // gmail
+import './gmail.js';
 
 // slack
+import './slack.js';
 
 // telegram
+import './telegram.js';
 
 // whatsapp
+import './whatsapp.js';
