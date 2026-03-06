@@ -36,7 +36,6 @@ export { findSkillDir, replaySkills } from './replay.js';
 export type { ReplayOptions, ReplayResult } from './replay.js';
 export { uninstallSkill } from './uninstall.js';
 export { initSkillsSystem, migrateExisting } from './migrate.js';
-export { applyUpdate, previewUpdate } from './update.js';
 export {
   compareSemver,
   computeFileHash,
@@ -65,6 +64,4 @@ export type {
   SkillManifest,
   SkillState,
   UninstallResult,
-  UpdatePreview,
-  UpdateResult,
 } from './types.js';
