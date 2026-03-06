@@ -1,0 +1,4 @@
+interface:
+  display_name: "Farm Integration Handoff"
+  short_description: "Detect integration-ready parent work and request review handoff approval."
+  default_prompt: "Use farm-integration-handoff to detect parents whose child tasks are all done/canceled, summarize evidence and blockers, and ask if integration review should start."

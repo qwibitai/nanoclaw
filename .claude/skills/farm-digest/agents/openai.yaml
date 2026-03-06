@@ -1,0 +1,4 @@
+interface:
+  display_name: "Farm Digest"
+  short_description: "Create hourly/daily Farm snapshots: ready-to-launch, in-progress, and review-ready tasks."
+  default_prompt: "Run farm-digest across farm, scout, and train. Report approved tasks ready to launch, coding progress, and review-ready items with explicit issue IDs."

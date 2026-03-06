@@ -1,0 +1,4 @@
+interface:
+  display_name: "Farm Launch"
+  short_description: "Launch approved Farm issues into coding via farm run with a configurable launch cap."
+  default_prompt: "Use farm-launch to discover approved child tasks and launch up to 3 using farm run. Include issue IDs, repo, session, and worktree for each launch."
