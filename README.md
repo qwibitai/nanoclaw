@@ -25,7 +25,7 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git
+git clone https://github.com/qwibitai/nanoclaw.git NanoClaw
 cd NanoClaw
 claude
 ```
