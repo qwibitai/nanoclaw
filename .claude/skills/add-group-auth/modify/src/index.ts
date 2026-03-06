@@ -253,6 +253,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let streamedAuthError: string | null = null;
 
   const agentResult = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -274,10 +275,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
-    }
-
-    if (result.status === 'error') {
+      streamedAuthError = null;
+    } else if (result.status === 'error') {
       hadError = true;
+      // Check streamed error text for auth failures
+      if (result.result) {
+        const errText = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+        if (isAuthError(errText)) streamedAuthError = errText;
+      }
     }
   });
 
@@ -286,10 +291,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (agentResult.status === 'error' || hadError) {
     // Check if this is an auth error — trigger reauth
-    if (isAuthError(agentResult.error) && !outputSentToUser) {
+    const authErrorText = streamedAuthError || agentResult.error;
+    streamedAuthError = null;
+    if (isAuthError(authErrorText)) {
       logger.warn({ group: group.name }, 'Auth error detected, starting reauth');
       const chat = createChatIO(channel, chatJid);
-      const ok = await runReauth(group.folder, chat, `Agent failed: ${agentResult.error}`);
+      const ok = await runReauth(group.folder, chat, `Agent failed: ${authErrorText}`);
       if (!ok) return true; // Reauth failed/cancelled — stop retrying
       // Snapshot cursor before reauth was taken at line 220 (last original msg).
       // If reauth was invasive, advanceCursor moved it further — nothing to retry.
