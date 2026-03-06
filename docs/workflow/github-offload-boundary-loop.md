@@ -31,6 +31,7 @@ Keep local when the task requires:
 | Workflow Concern | Primary Plane | Why |
 |------------------|---------------|-----|
 | PR CI (`build`, `typecheck`, tests, lint) | GitHub | Deterministic, required-status friendly, branch-protection compatible |
+| CI failure summarization on PRs | GitHub | Event-driven, deterministic metadata extraction from workflow jobs/logs |
 | Contract/governance script checks | GitHub | Objective and enforceable as required checks |
 | Branch merge policy (rulesets, required checks, merge queue) | GitHub | Centralized merge gate, prevents broken default branch |
 | CODEOWNERS + required reviews | GitHub | Native ownership enforcement on protected branches |
@@ -122,8 +123,13 @@ For this repository, keep:
 Offload and enforce on GitHub:
 
 1. CI plus workflow/mirror/tooling governance checks as required checks.
-2. Skill and policy validation workflows for PR gating where applicable.
-3. Security and dependency review workflows as policy checks.
+2. Sticky PR failure summarization via `workflow_run` after `CI` failures, with model analysis remaining opt-in.
+3. Skill and policy validation workflows for PR gating where applicable.
+4. Security and dependency review workflows as policy checks.
+
+Important caveat:
+
+1. `workflow_run` automation only activates once the workflow file exists on the default branch, so bootstrap PRs cannot rely on a newly added `workflow_run` workflow to summarize that same PR's failures before merge.
 
 ## Decision Checklist (Before Offloading a Task)
 
@@ -152,3 +158,4 @@ Use `docs/workflow/workflow-optimization-loop.md` decision gate for pilot/adopt/
 2. Making non-deterministic AI summaries required merge checks.
 3. Enabling merge queue without `merge_group` CI coverage.
 4. Expanding required checks without measuring latency/noise impact.
+5. Auto-merging GitHub App-generated workflow PRs without reconciling them against the repository's curated control-plane policy.
