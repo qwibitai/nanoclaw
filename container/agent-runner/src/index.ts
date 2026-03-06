@@ -109,6 +109,12 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const STREAM_TEXT_MARKER = '---NANOCLAW_STREAM_TEXT---';
 const STREAM_TEXT_END_MARKER = '---NANOCLAW_STREAM_TEXT_END---';
+const TRACE_MARKER = '---NANOCLAW_TRACE---';
+
+/** Emit a structured trace event to the host for observability. */
+function writeTrace(event: Record<string, unknown>): void {
+  process.stdout.write(`${TRACE_MARKER}${JSON.stringify({ ...event, ts: Date.now() })}\n`);
+}
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
@@ -489,13 +495,42 @@ async function runQuery(
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
-    // Stream text deltas to host for real-time draft display
+    // Stream text deltas + trace events to host
     if (message.type === 'stream_event') {
       const event = (message as any).event;
       const parentToolUseId = (message as any).parent_tool_use_id;
+      const isMainAgent = parentToolUseId === null || parentToolUseId === undefined;
+
+      // Trace: LLM call start (input tokens)
+      if (event?.type === 'message_start' && isMainAgent) {
+        writeTrace({
+          type: 'llm_start',
+          input_tokens: event.message?.usage?.input_tokens ?? null,
+          model: event.message?.model ?? null,
+        });
+      }
+
+      // Trace: LLM call end (output tokens, stop reason)
+      if (event?.type === 'message_delta' && isMainAgent) {
+        writeTrace({
+          type: 'llm_end',
+          output_tokens: event.usage?.output_tokens ?? null,
+          stop_reason: event.delta?.stop_reason ?? null,
+        });
+      }
+
+      // Trace: tool call start
+      if (event?.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        writeTrace({
+          type: 'tool_start',
+          tool_id: event.content_block.id,
+          tool_name: event.content_block.name,
+          is_subagent: !isMainAgent,
+        });
+      }
 
       // Only stream main agent text (skip subagent streams)
-      if (parentToolUseId === null || parentToolUseId === undefined) {
+      if (isMainAgent) {
         if (event?.type === 'content_block_start') {
           isTextBlock = event.content_block?.type === 'text';
           if (isTextBlock) {
@@ -521,6 +556,21 @@ async function runQuery(
           }
           streamBuffer = '';
           isTextBlock = false;
+        }
+      }
+    }
+
+    // Trace: tool result (input_tokens of the follow-up message)
+    if (message.type === 'user') {
+      const content = (message as any).message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            const output = typeof block.content === 'string'
+              ? block.content.slice(0, 500)
+              : JSON.stringify(block.content ?? '').slice(0, 500);
+            writeTrace({ type: 'tool_end', tool_id: block.tool_use_id, output });
+          }
         }
       }
     }
@@ -597,13 +647,26 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  // Emit trace start
+  const traceId = `${containerInput.groupFolder}-${Date.now()}`;
+  writeTrace({
+    type: 'trace_start',
+    trace_id: traceId,
+    group: containerInput.groupFolder,
+    chat_jid: containerInput.chatJid,
+    is_scheduled: containerInput.isScheduledTask ?? false,
+    prompt_preview: containerInput.prompt.slice(0, 200),
+  });
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      writeTrace({ type: 'llm_call_start', trace_id: traceId });
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      writeTrace({ type: 'llm_call_done', trace_id: traceId });
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
@@ -634,9 +697,11 @@ async function main(): Promise<void> {
       log(`Got new message (${nextMessage.length} chars), starting new query`);
       prompt = nextMessage;
     }
+    writeTrace({ type: 'trace_end', trace_id: traceId, status: 'success' });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
+    writeTrace({ type: 'trace_end', trace_id: traceId, status: 'error', error: errorMessage });
     writeOutput({
       status: 'error',
       result: null,

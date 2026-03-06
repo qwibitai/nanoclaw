@@ -49,6 +49,8 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { StatusTracker } from './status-tracker.js';
 import { logger } from './logger.js';
+import { initTraceDb, upsertTrace, finishTrace, startLlmCall, endLlmCall, startToolCall, endToolCall } from './trace-db.js';
+import { startTraceServer } from './trace-server.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -248,39 +250,47 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let outputSentToUser = false;
   let firstOutputSeen = false;
 
-  const output = await runAgent(group, datePrefix() + prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      if (!firstOutputSeen) {
-        firstOutputSeen = true;
-        for (const um of userMessages) {
-          statusTracker.markWorking(um.id);
+  const output = await runAgent(
+    group,
+    datePrefix() + prompt,
+    chatJid,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        if (!firstOutputSeen) {
+          firstOutputSeen = true;
+          for (const um of userMessages) {
+            statusTracker.markWorking(um.id);
+          }
         }
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+
+      if (result.status === 'success') {
+        statusTracker.markAllDone(chatJid);
+        queue.notifyIdle(chatJid);
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      statusTracker.markAllDone(chatJid);
-      queue.notifyIdle(chatJid);
-    }
-
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -401,6 +411,28 @@ async function runAgent(
       }
     : undefined;
 
+  // Build trace callback
+  let currentTraceId: string | null = null;
+  const onTrace = (ev: Record<string, unknown>) => {
+    try {
+      const type = ev.type as string;
+      if (type === 'trace_start') {
+        currentTraceId = ev.trace_id as string;
+        upsertTrace(currentTraceId, group.folder, chatJid, !!(ev.is_scheduled), String(ev.prompt_preview ?? ''));
+      } else if (type === 'trace_end' && currentTraceId) {
+        finishTrace(currentTraceId, String(ev.status ?? 'unknown'), ev.error as string | undefined);
+      } else if (type === 'llm_start' && currentTraceId) {
+        startLlmCall(currentTraceId, (ev.input_tokens as number) ?? null, (ev.model as string) ?? null);
+      } else if (type === 'llm_end' && currentTraceId) {
+        endLlmCall(currentTraceId, (ev.output_tokens as number) ?? null, (ev.stop_reason as string) ?? null);
+      } else if (type === 'tool_start' && currentTraceId) {
+        startToolCall(currentTraceId, String(ev.tool_id), String(ev.tool_name), !!(ev.is_subagent));
+      } else if (type === 'tool_end' && currentTraceId) {
+        endToolCall(currentTraceId, String(ev.tool_id), String(ev.output ?? ''));
+      }
+    } catch { /* trace errors must never affect the main flow */ }
+  };
+
   try {
     const output = await runContainerAgent(
       group,
@@ -416,6 +448,7 @@ async function runAgent(
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
       onStreamDelta,
+      onTrace,
     );
 
     if (output.newSessionId) {
@@ -627,6 +660,8 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
+  initTraceDb();
+  startTraceServer();
   logger.info('Database initialized');
   loadState();
 

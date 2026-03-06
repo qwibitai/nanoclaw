@@ -32,6 +32,7 @@ const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 const STREAM_TEXT_MARKER = '---NANOCLAW_STREAM_TEXT---';
 const STREAM_TEXT_END_MARKER = '---NANOCLAW_STREAM_TEXT_END---';
+const TRACE_MARKER = '---NANOCLAW_TRACE---';
 
 export interface ContainerInput {
   prompt: string;
@@ -198,7 +199,10 @@ export async function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true, force: true });
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, {
+      recursive: true,
+      force: true,
+    });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -333,6 +337,7 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   onStreamDelta?: (text: string) => void,
+  onTrace?: (event: Record<string, unknown>) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -416,6 +421,23 @@ export async function runContainerAgent(
       if (onOutput) {
         parseBuffer += chunk;
 
+        // Parse TRACE markers (observability events)
+        if (onTrace) {
+          let traceIdx: number;
+          while ((traceIdx = parseBuffer.indexOf(TRACE_MARKER)) !== -1) {
+            const lineEnd = parseBuffer.indexOf('\n', traceIdx);
+            if (lineEnd === -1) break;
+            const jsonStr = parseBuffer.slice(traceIdx + TRACE_MARKER.length, lineEnd).trim();
+            parseBuffer = parseBuffer.slice(lineEnd + 1);
+            try {
+              const ev = JSON.parse(jsonStr);
+              onTrace(ev);
+            } catch {
+              // ignore malformed trace
+            }
+          }
+        }
+
         // Parse STREAM_TEXT markers (real-time text deltas for draft display)
         if (onStreamDelta) {
           let stIdx: number;
@@ -426,7 +448,9 @@ export async function runContainerAgent(
             const streamText = parseBuffer
               .slice(stIdx + STREAM_TEXT_MARKER.length, stEnd)
               .trim();
-            parseBuffer = parseBuffer.slice(stEnd + STREAM_TEXT_END_MARKER.length);
+            parseBuffer = parseBuffer.slice(
+              stEnd + STREAM_TEXT_END_MARKER.length,
+            );
 
             if (streamText) {
               try {
