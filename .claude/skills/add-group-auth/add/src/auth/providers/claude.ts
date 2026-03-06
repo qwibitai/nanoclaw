@@ -33,7 +33,7 @@ import type {
 const SERVICE = 'claude_auth';
 
 export interface AuthErrorInfo {
-  /** HTTP status code (401, 403, 429, 529) or 0 for pattern-matched errors. */
+  /** HTTP status code (401, 403) extracted from the API error. */
   code: number;
   message: string;
 }
@@ -42,9 +42,9 @@ export interface AuthErrorInfo {
  * Extract HTTP status code from structured SDK error:
  *   Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token"},"request_id":"req_..."}
  */
-const API_ERROR_RE = /^Failed to authenticate\.\s*API Error:\s*(\d{3})\s*\{"type":"error","error":\{"type":"[^"]+","message":"([^"]*)"\},"request_id":"[^"]+"\}\s*$/;
+const API_ERROR_RE = /API Error:\s*(\d{3})\s*(\{.+)/;
 
-/** Auth-related HTTP status codes. */
+/** HTTP status codes that mean credentials should be replaced. */
 const AUTH_STATUS_CODES = new Set([401, 403]);
 
 function parseApiError(error: string): AuthErrorInfo | null {
@@ -52,7 +52,13 @@ function parseApiError(error: string): AuthErrorInfo | null {
   if (!m) return null;
   const code = parseInt(m[1], 10);
   if (!AUTH_STATUS_CODES.has(code)) return null;
-  return { code, message: m[2] || `HTTP ${code}` };
+  let message = `HTTP ${code}`;
+  try {
+    const body = JSON.parse(m[2]);
+    const errMsg: string = body?.error?.message;
+    if (errMsg) message = errMsg;
+  } catch { /* use default message */ }
+  return { code, message };
 }
 
 /** Classify a container error. Returns null if not auth-related. */
@@ -101,6 +107,56 @@ const DELIVERY_DETECT_MS = 30_000;
 
 type CodeDelivery = 'stdin' | 'callback';
 
+/** ANSI escape sequence pattern. */
+const ANSI_RE_G = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07/g;
+
+/** Strip ANSI escapes and control characters from PTY output. */
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_RE_G, '').replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
+}
+
+/**
+ * Poll accumulating output for a regex match.
+ * PTY is set to 500 columns so nothing wraps — simple regex is sufficient.
+ */
+export function waitForPattern(
+  outputRef: { value: string },
+  pattern: RegExp,
+  timeoutMs: number,
+): Promise<RegExpMatchArray | null> {
+  return new Promise((resolve) => {
+    const check = setInterval(() => {
+      const clean = stripAnsi(outputRef.value);
+      const match = clean.match(pattern);
+      if (match) {
+        clearInterval(check);
+        clearTimeout(timer);
+        resolve(match);
+      }
+    }, 500);
+    const timer = setTimeout(() => {
+      clearInterval(check);
+      resolve(null);
+    }, timeoutMs);
+  });
+}
+
+/** Race waitForPattern against the process exiting. */
+function waitForPatternOrExit(
+  outputRef: { value: string },
+  pattern: RegExp,
+  timeoutMs: number,
+  handle: ExecHandle,
+): Promise<RegExpMatchArray | null> {
+  return Promise.race([
+    waitForPattern(outputRef, pattern, timeoutMs),
+    handle.wait().then(() => null),
+  ]);
+}
+
+/** OAuth URL pattern for Anthropic/Claude domains. */
+const OAUTH_URL_RE = /https:\/\/(?:console\.anthropic\.com|claude\.ai|platform\.claude\.com)\S+/;
+
 /**
  * Detect how the CLI is ready to receive the auth code.
  * Races two signals in parallel:
@@ -128,11 +184,9 @@ export function detectCodeDelivery(
       resolve(result);
     };
 
-    const pasteExtractor = new LineExtractor(PASTE_PROMPT_RE, { matchPartial: true });
     const check = setInterval(() => {
       // (a) Check stdout for paste prompt
-      pasteExtractor.feed(outputRef.value);
-      if (pasteExtractor.result()) {
+      if (PASTE_PROMPT_RE.test(stripAnsi(outputRef.value))) {
         done({ method: 'stdin' });
         return;
       }
@@ -219,175 +273,6 @@ function isExpired(expiresAt: string | null): boolean {
   if (!expiresAt) return false;
   const expiry = new Date(expiresAt).getTime();
   return Date.now() > expiry - 5 * 60 * 1000;
-}
-
-/** ANSI escape sequence pattern. */
-const ANSI_RE_G = /\x1b\[[0-9;]*[A-Za-z]|\x1b\][^\x07]*\x07/g;
-
-/** Valid URL characters (RFC 3986 unreserved + reserved + percent-encoding). */
-const URL_CHAR_RE = /[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/;
-const NON_URL_CHAR_RE = /[^A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]/;
-
-/** Common interface for output extractors. */
-export interface OutputExtractor {
-  feed(text: string): void;
-  result(): RegExpMatchArray | null;
-}
-
-/**
- * Stateful URL extractor for streaming console output.
- * Handles URLs wrapped across lines with ANSI sequences.
- *
- * Feed complete lines via feedLines(). Once the URL terminates
- * (empty segment or non-URL char found inside), result() returns it.
- * While still accumulating, result() returns null.
- */
-export class UrlExtractor implements OutputExtractor {
-  private url = '';
-  private found = false;  // anchor found
-  private done = false;   // URL terminated
-  private processedUpTo = 0;  // how far we've consumed in the input
-
-  constructor(private pattern: RegExp) {}
-
-  /** Feed new complete lines. Call repeatedly as output grows. */
-  feed(text: string): void {
-    if (this.done) return;
-
-    let remaining = text.slice(this.processedUpTo);
-
-    // Find anchor if not yet found
-    if (!this.found) {
-      const anchor = remaining.indexOf('https://');
-      if (anchor === -1) {
-        // No anchor — advance past all complete lines
-        const lastNl = remaining.lastIndexOf('\n');
-        if (lastNl !== -1) this.processedUpTo += lastNl + 1;
-        return;
-      }
-      this.found = true;
-      remaining = remaining.slice(anchor);
-      this.processedUpTo += anchor;
-    }
-
-    // Process line by line
-    while (remaining.length > 0) {
-      const nl = remaining.indexOf('\n');
-      if (nl === -1) break; // incomplete line, wait for more
-
-      const segment = remaining.slice(0, nl);
-      remaining = remaining.slice(nl + 1);
-      this.processedUpTo += nl + 1;
-
-      // Strip ANSI, trim non-URL from both ends
-      const clean = segment.replace(ANSI_RE_G, '');
-      const trimmed = clean.replace(/^[^A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+/, '')
-                           .replace(/[^A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$/, '');
-
-      if (!trimmed) {
-        // Empty after trim — URL is complete
-        this.done = true;
-        return;
-      }
-
-      // Check for non-URL char inside
-      const nonUrl = trimmed.search(NON_URL_CHAR_RE);
-      if (nonUrl === -1) {
-        this.url += trimmed;
-      } else {
-        this.url += trimmed.slice(0, nonUrl);
-        this.done = true;
-        return;
-      }
-    }
-  }
-
-  result(): RegExpMatchArray | null {
-    if (this.done && this.url) return this.url.match(this.pattern);
-    return null;
-  }
-}
-
-/**
- * Stateful single-line pattern extractor for streaming console output.
- * Strips ANSI sequences and matches pattern against each complete line.
- */
-export class LineExtractor implements OutputExtractor {
-  private processedUpTo = 0;
-  private match: RegExpMatchArray | null = null;
-  private matchPartial: boolean;
-
-  constructor(private pattern: RegExp, opts?: { matchPartial?: boolean }) {
-    this.matchPartial = opts?.matchPartial ?? false;
-  }
-
-  feed(text: string): void {
-    if (this.match) return;
-    let remaining = text.slice(this.processedUpTo);
-    while (remaining.length > 0) {
-      const nl = remaining.indexOf('\n');
-      if (nl === -1) {
-        if (this.matchPartial) {
-          const clean = remaining.replace(ANSI_RE_G, ' ');
-          const m = clean.match(this.pattern);
-          if (m) { this.match = m; return; }
-        }
-        break;
-      }
-      const line = remaining.slice(0, nl).replace(ANSI_RE_G, ' ');
-      remaining = remaining.slice(nl + 1);
-      this.processedUpTo += nl + 1;
-      const m = line.match(this.pattern);
-      if (m) {
-        this.match = m;
-        return;
-      }
-    }
-  }
-
-  result(): RegExpMatchArray | null {
-    return this.match;
-  }
-}
-
-/**
- * Wait for an extractor to produce a match in accumulating output.
- */
-export function waitForOutput(
-  outputRef: { value: string },
-  extractor: OutputExtractor,
-  timeoutMs: number,
-): Promise<RegExpMatchArray | null> {
-  return new Promise((resolve) => {
-    const check = setInterval(() => {
-      extractor.feed(outputRef.value);
-      const match = extractor.result();
-      if (match) {
-        clearInterval(check);
-        resolve(match);
-      }
-    }, 500);
-    setTimeout(() => {
-      clearInterval(check);
-      resolve(null);
-    }, timeoutMs);
-  });
-}
-
-/**
- * Race waitForOutput against the process exiting.
- * Returns the match if found, null if process exits first or timeout.
- */
-function waitForOutputOrExit(
-  outputRef: { value: string },
-  extractor: OutputExtractor,
-  timeoutMs: number,
-  handle: ExecHandle,
-): Promise<RegExpMatchArray | null> {
-  return Promise.race([
-    waitForOutput(outputRef, extractor, timeoutMs),
-    handle.wait().then(() => null),
-  ]);
 }
 
 /**
@@ -518,7 +403,8 @@ export const claudeProvider: CredentialProvider = {
           const sessionDir = authSessionDir(ctx.scope);
           const authIpcDir = path.join(sessionDir, 'auth-ipc');
           const handle = ctx.exec(
-            ['script', '-qc', 'claude setup-token', '/dev/null'],
+            // Wide PTY so Ink doesn't wrap the token at 80 cols (\r overwrites corrupt it)
+            ['script', '-qc', 'stty columns 500 && claude setup-token', '/dev/null'],
             claudeExecOpts(sessionDir),
           );
 
@@ -528,11 +414,8 @@ export const claudeProvider: CredentialProvider = {
           });
 
           // Wait for the manual OAuth URL in stdout
-          const urlMatch = await waitForOutputOrExit(
-            output,
-            new UrlExtractor(/https:\/\/(?:console\.anthropic\.com|claude\.ai|platform\.claude\.com)\S+/),
-            URL_WAIT_MS,
-            handle,
+          const urlMatch = await waitForPatternOrExit(
+            output, OAUTH_URL_RE, URL_WAIT_MS, handle,
           );
           if (!urlMatch) {
             await ctx.chat.send('Container exited or timed out before providing OAuth URL.');
@@ -569,9 +452,7 @@ export const claudeProvider: CredentialProvider = {
           }
 
           const result = await handle.wait();
-          const allOutput = (output.value + result.stdout)
-            .replace(ANSI_RE_G, '')
-            .replace(/[\x00-\x1f\x7f-\x9f]/g, '');
+          const allOutput = stripAnsi(output.value + result.stdout);
 
           const tokenMatch = allOutput.match(/sk-ant-\S+/);
           if (!tokenMatch) {
@@ -602,7 +483,8 @@ export const claudeProvider: CredentialProvider = {
           const sessionDir = authSessionDir(ctx.scope);
           const authIpcDir = path.join(sessionDir, 'auth-ipc');
           const handle = ctx.exec(
-            ['script', '-qc', 'claude auth login', '/dev/null'],
+            // Wide PTY so Ink doesn't wrap long OAuth URLs (\r overwrites corrupt them)
+            ['script', '-qc', 'stty columns 500 && claude auth login', '/dev/null'],
             claudeExecOpts(sessionDir),
           );
 
@@ -612,11 +494,8 @@ export const claudeProvider: CredentialProvider = {
           });
 
           // Wait for the manual OAuth URL in stdout
-          const urlMatch = await waitForOutputOrExit(
-            output,
-            new UrlExtractor(/https:\/\/(?:console\.anthropic\.com|claude\.ai|platform\.claude\.com)\S+/),
-            URL_WAIT_MS,
-            handle,
+          const urlMatch = await waitForPatternOrExit(
+            output, OAUTH_URL_RE, URL_WAIT_MS, handle,
           );
           if (!urlMatch) {
             await ctx.chat.send('Container exited or timed out before providing OAuth URL.');
