@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y \
     libdrm2 \
     libxshmfence1 \
     curl \
+    postgresql-client \
+    python3 \
     git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -46,6 +48,10 @@ COPY agent-runner/ ./
 
 # Build TypeScript
 RUN npm run build
+
+# Install neo_api trading tool
+COPY skills/neo-trading/neo_api /usr/local/bin/neo_api
+RUN chmod +x /usr/local/bin/neo_api
 
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
