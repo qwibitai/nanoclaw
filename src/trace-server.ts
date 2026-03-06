@@ -3,7 +3,13 @@
  * Shows tool calls, LLM call durations, and token usage per agent run.
  */
 import express from 'express';
-import { getTraces, getTrace, getLlmCalls, getToolCalls, getStats } from './trace-db.js';
+import {
+  getTraces,
+  getTrace,
+  getLlmCalls,
+  getToolCalls,
+  getStats,
+} from './trace-db.js';
 import { logger } from './logger.js';
 
 const PORT = parseInt(process.env.TRACE_PORT || '3001', 10);
@@ -192,8 +198,11 @@ async function openTrace(id) {
       html += '<div class="tl-item"><div class="tl-dot tool"></div><div class="tl-content">';
       html += '<div class="tl-header"><span class="tl-name tool">🔧 '+ev.tool_name+sub+'</span>';
       html += '<span class="tl-dur">'+dur(ev.started_at,ev.finished_at)+'</span></div>';
+      if (ev.input_preview) {
+        html += '<div class="tl-detail" style="color:#aaa">▶ '+ev.input_preview.replace(/</g,'&lt;').slice(0,400)+'</div>';
+      }
       if (ev.output_preview) {
-        html += '<div class="tl-detail">'+ev.output_preview.replace(/</g,'&lt;').slice(0,300)+'</div>';
+        html += '<div class="tl-detail">◀ '+ev.output_preview.replace(/</g,'&lt;').slice(0,300)+'</div>';
       }
       html += '</div></div>';
     }
@@ -230,8 +239,12 @@ export function startTraceServer(): void {
     if (!t) return res.status(404).json({ error: 'not found' });
     return res.json(t);
   });
-  app.get('/api/traces/:id/llm', (req, res) => res.json(getLlmCalls(req.params.id)));
-  app.get('/api/traces/:id/tools', (req, res) => res.json(getToolCalls(req.params.id)));
+  app.get('/api/traces/:id/llm', (req, res) =>
+    res.json(getLlmCalls(req.params.id)),
+  );
+  app.get('/api/traces/:id/tools', (req, res) =>
+    res.json(getToolCalls(req.params.id)),
+  );
 
   app.listen(PORT, '127.0.0.1', () => {
     logger.info({ port: PORT }, 'Trace UI started');

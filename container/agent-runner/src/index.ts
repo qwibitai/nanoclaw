@@ -412,6 +412,9 @@ async function runQuery(
   let lastStreamFlush = 0;
   let isTextBlock = false;
 
+  // Trace: accumulate tool_use input JSON across deltas before emitting tool_start
+  let currentToolBlock: { id: string; name: string; isSubagent: boolean; inputBuf: string } | null = null;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -519,14 +522,26 @@ async function runQuery(
         });
       }
 
-      // Trace: tool call start
+      // Trace: start tracking tool_use block (input arrives via deltas)
       if (event?.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+        currentToolBlock = { id: event.content_block.id, name: event.content_block.name, isSubagent: !isMainAgent, inputBuf: '' };
+      }
+
+      // Trace: accumulate tool_use input JSON deltas
+      if (event?.type === 'content_block_delta' && event.delta?.type === 'input_json_delta' && currentToolBlock) {
+        currentToolBlock.inputBuf += event.delta.partial_json ?? '';
+      }
+
+      // Trace: emit tool_start with full input once block is complete
+      if (event?.type === 'content_block_stop' && currentToolBlock) {
         writeTrace({
           type: 'tool_start',
-          tool_id: event.content_block.id,
-          tool_name: event.content_block.name,
-          is_subagent: !isMainAgent,
+          tool_id: currentToolBlock.id,
+          tool_name: currentToolBlock.name,
+          is_subagent: currentToolBlock.isSubagent,
+          input_preview: currentToolBlock.inputBuf.slice(0, 500),
         });
+        currentToolBlock = null;
       }
 
       // Only stream main agent text (skip subagent streams)
