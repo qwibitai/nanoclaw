@@ -64,6 +64,27 @@ The voice daemon is a standalone Python process, independent of the NanoClaw Nod
 
 WhatsApp voice transcription (inbound) works fine, but voice *responses* (outbound) cause an echo loop in self-chat mode — the bot's voice message gets re-transcribed as a new input. Telegram doesn't have this issue because bot messages are clearly separated.
 
+### Outdoor / Backpack Use
+
+For hands-free use with the MacBook lid closed (e.g. in a backpack):
+
+| Item | Why | Notes |
+|------|-----|-------|
+| **USB wireless headset with dongle** | Audio input/output with lid closed | Built-in mic does NOT work with lid closed! |
+| **USB-C hub** | Connect USB headset dongle | If headset isn't USB-C native |
+| **Amphetamine app** (Mac App Store, free) | Prevents sleep with lid closed | Set Trigger → uncheck "Allow system to sleep when display is closed" |
+| **USB-C power bank** (recommended) | Extends battery + ensures clamshell mode | macOS is more reliable with power connected |
+
+**Critical**: Set the USB headset as default audio input before closing the lid:
+```bash
+brew install switchaudio-osx
+SwitchAudioSource -t input -s "Your Headset Name"
+# Then restart voice daemon
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw.voice-daemon
+```
+
+Why not AirPods? They work, but macOS sometimes switches back to built-in mic after sleep/wake cycles. A USB dongle headset stays as default input reliably.
+
 ## Setup
 
 ### 1. Get your API keys
