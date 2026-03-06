@@ -18,6 +18,11 @@ describe('JID ownership patterns', () => {
     expect(jid.endsWith('@g.us')).toBe(true);
   });
 
+  it('Discord JID: starts with dc:', () => {
+    const jid = 'dc:1234567890123456';
+    expect(jid.startsWith('dc:')).toBe(true);
+  });
+
   it('WhatsApp DM JID: ends with @s.whatsapp.net', () => {
     const jid = '12345678@s.whatsapp.net';
     expect(jid.endsWith('@s.whatsapp.net')).toBe(true);
@@ -37,6 +42,36 @@ describe('getAvailableGroups', () => {
     expect(groups.map((g) => g.jid)).toContain('group1@g.us');
     expect(groups.map((g) => g.jid)).toContain('group2@g.us');
     expect(groups.map((g) => g.jid)).not.toContain('user@s.whatsapp.net');
+  });
+
+  it('includes Discord channel JIDs', () => {
+    storeChatMetadata('dc:1234567890123456', '2024-01-01T00:00:01.000Z', 'Discord Channel', 'discord', true);
+    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM', 'whatsapp', false);
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].jid).toBe('dc:1234567890123456');
+  });
+
+  it('marks registered Discord channels correctly', () => {
+    storeChatMetadata('dc:1234567890123456', '2024-01-01T00:00:01.000Z', 'DC Registered', 'discord', true);
+    storeChatMetadata('dc:9999999999999999', '2024-01-01T00:00:02.000Z', 'DC Unregistered', 'discord', true);
+
+    _setRegisteredGroups({
+      'dc:1234567890123456': {
+        name: 'DC Registered',
+        folder: 'dc-registered',
+        trigger: '@Andy',
+        added_at: '2024-01-01T00:00:00.000Z',
+      },
+    });
+
+    const groups = getAvailableGroups();
+    const dcReg = groups.find((g) => g.jid === 'dc:1234567890123456');
+    const dcUnreg = groups.find((g) => g.jid === 'dc:9999999999999999');
+
+    expect(dcReg?.isRegistered).toBe(true);
+    expect(dcUnreg?.isRegistered).toBe(false);
   });
 
   it('excludes __group_sync__ sentinel', () => {
@@ -96,5 +131,17 @@ describe('getAvailableGroups', () => {
   it('returns empty array when no chats exist', () => {
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(0);
+  });
+
+  it('mixes WhatsApp and Discord chats ordered by activity', () => {
+    storeChatMetadata('wa@g.us', '2024-01-01T00:00:01.000Z', 'WhatsApp', 'whatsapp', true);
+    storeChatMetadata('dc:555', '2024-01-01T00:00:03.000Z', 'Discord', 'discord', true);
+    storeChatMetadata('wa2@g.us', '2024-01-01T00:00:02.000Z', 'WhatsApp 2', 'whatsapp', true);
+
+    const groups = getAvailableGroups();
+    expect(groups).toHaveLength(3);
+    expect(groups[0].jid).toBe('dc:555');
+    expect(groups[1].jid).toBe('wa2@g.us');
+    expect(groups[2].jid).toBe('wa@g.us');
   });
 });
