@@ -24,6 +24,10 @@ Canonical classification for repository docs.
 ## `docs/workflow/`
 
 - `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`: strict dispatch/completion contract
+- `docs/workflow/nanoclaw-development-loop.md`: default feature/bug/reliability delivery loop
+- `docs/workflow/workflow-optimization-loop.md`: research-to-pilot workflow optimization process and decision gates
+- `docs/workflow/weekly-slop-optimization-loop.md`: weekly deterministic slop-pruning workflow for docs/scripts/config/code surfaces
+- `docs/workflow/unified-codex-claude-loop.md`: cross-tool anti-slop execution loop shared by Claude and Codex
 - `docs/workflow/nanoclaw-jarvis-worker-runtime.md`: worker runtime, mounts, model fallback, role bundles
 - `docs/workflow/nanoclaw-jarvis-acceptance-checklist.md`: acceptance and smoke validation gates
 - `docs/workflow/nanoclaw-github-control-plane.md`: GitHub workflow/review control-plane rules
@@ -36,6 +40,9 @@ Canonical classification for repository docs.
 - `docs/operations/update-requirements-matrix.md`: required doc/code update surfaces by change type
 - `docs/operations/agreement-sync-protocol.md`: agreement-driven sync protocol for docs/code
 - `docs/operations/skills-vs-docs-map.md`: decision boundary for skill-first vs docs-first execution
+- `docs/operations/claude-codex-adapter-matrix.md`: mapping of workflow intents to Claude/Codex internal controls
+- `docs/operations/subagent-catalog.md`: canonical subagent purpose/scope/output contracts
+- `docs/operations/tooling-governance-budget.json`: deterministic budget and required coverage for hooks, subagents, and built-in tooling gates
 - `docs/operations/upstream-sync-policy.md`: upstream sync operating policy
 - `docs/operations/runtime-vs-prebaked-boundary.md`: runtime-local vs prebaked placement policy
 - `docs/operations/workflow-setup-responsibility-map.md`: ownership map for setup and workflow governance
@@ -55,6 +62,13 @@ Canonical classification for repository docs.
 ## `docs/archives/`
 
 - `docs/archives/CHANGELOG-2026-02-26.md`: historical changelog snapshot prior to current changelog flow
+
+## `docs/research/`
+
+- `docs/research/README.md`: index for workflow optimization research intake and weekly evidence artifacts
+- `docs/research/EXPERT-WORKFLOW-RESEARCH-YYYY-MM-DD.md`: external high-signal workflow research intake
+- `docs/research/WORKFLOW-ANALYSIS-YYYY-MM-DD.md`: NanoClaw-specific workflow translation and gap analysis
+- `docs/research/WEEKLY-SLOP-OPTIMIZATION-YYYY-MM-DD.md`: deterministic weekly slop findings, actions, and ratchet queue
 
 ## Worker-Local Workflow Docs
 

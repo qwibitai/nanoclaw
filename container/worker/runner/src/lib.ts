@@ -1,4 +1,5 @@
 export const DEFAULT_FALLBACK_MODELS = [
+  'minimax/MiniMax-M2.5',
   'opencode/minimax-m2.5-free',
   'opencode/big-pickle',
   'opencode/kimi-k2.5-free',

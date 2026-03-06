@@ -14,12 +14,16 @@ Canonical decision map for when to run a skill and when to follow repository doc
 |-----------|--------------|-----|
 | Setup, authentication, service bring-up | skill-first (`/setup`) | deterministic operational workflow |
 | Runtime troubleshooting and recovery | skill-first (`/debug`) | fast diagnostics and known fix paths |
-| Incident triage, root-cause tracking, and resolution lifecycle | skill-first (`/incident-debugger`) | standardized incident script routing + history tracking |
+| Incident triage, root-cause tracking, and resolution lifecycle | docs-first (`docs/workflow/nanoclaw-jarvis-debug-loop.md`, `docs/workflow/nanoclaw-container-debugging.md`) | script-first diagnostics + durable lessons in incident registry without extra skill indirection |
 | Upstream sync and merge flow | skill-first (`/update`) | structured fetch/preview/apply/conflict loop |
 | Feature/channel additions and integration changes | skill-first (`/customize`, `/add-*`) | guided implementation and post-change verification |
 | Container runtime migration (Docker/Apple) | skill-first (`/convert-to-apple-container`) | deterministic runtime conversion |
 | Architecture, dispatch contract, security, role governance | docs-first (`docs/*`, `.claude/rules/*`) | contractual invariants and ownership model |
 | Workflow ownership/update placement decisions | docs-first (`docs/operations/*`) | policy authority and change governance |
+| Workflow optimization strategy/cadence changes | docs-first (`docs/workflow/workflow-optimization-loop.md`) | research-informed process changes must be evidence-gated |
+| Hook/subagent/built-in tooling governance review and pruning | docs-first (`docs/workflow/weekly-slop-optimization-loop.md`, `docs/operations/tooling-governance-budget.json`) | prevents config/process drift and duplicate-tool creation |
+| Cross-tool workflow (Claude/Codex assignment, worktree/session topology, mirror governance) | docs-first (`docs/workflow/unified-codex-claude-loop.md`, `docs/operations/claude-codex-adapter-matrix.md`) | prevents tool-specific process drift and code slop |
+| Subagent fanout design for plan/review/verification | docs-first (`docs/operations/subagent-catalog.md`) | enforces scoped outputs and deterministic handoffs |
 
 ## Mandatory Pre-Work Skill Router
 
@@ -27,10 +31,14 @@ Run these first, before implementation work starts:
 
 | User Intent | Must-Call Skill First |
 |------------|------------------------|
+| Feature/bug/reliability implementation execution | read `docs/workflow/nanoclaw-development-loop.md`, then `/customize` |
+| Workflow optimization planning from external research | read `docs/workflow/workflow-optimization-loop.md` |
+| Hook/subagent/built-in governance audit | read `docs/workflow/weekly-slop-optimization-loop.md` then run `bash scripts/check-tooling-governance.sh` |
+| Parallel Claude/Codex workflow setup or tool assignment strategy | read `docs/workflow/unified-codex-claude-loop.md`, `docs/operations/claude-codex-adapter-matrix.md`, and `docs/operations/subagent-catalog.md` |
 | Add a new feature or modify behavior | `/customize` |
 | Add a specific channel/integration with an existing skill | matching `/add-*` skill (fallback: `/customize`) |
 | Container/auth/runtime issue, service failure, link/auth breakage | `/debug` |
-| Incident investigation, recurrence analysis, incident tracking/resolution | `/incident-debugger` |
+| Incident investigation, recurrence analysis, incident tracking/resolution | docs-first: `docs/workflow/nanoclaw-jarvis-debug-loop.md` + `docs/workflow/nanoclaw-container-debugging.md` + `.claude/progress/incident.json` |
 | First-time install/onboarding | `/setup` |
 | Pull latest upstream core changes | `/update` |
 | Move runtime from Docker to Apple Container | `/convert-to-apple-container` |
@@ -68,7 +76,6 @@ Fallback policy:
 | `/setup` | bootstrap, auth, registration, service start/verify |
 | `/customize` | guided customization for channels/integrations/behavior |
 | `/debug` | container/runtime/auth/debug loops |
-| `/incident-debugger` | incident triage workflow, tracking in `.claude/progress/incident.json`, guarded resolution |
 | `/update` | upstream sync with customization preservation |
 | `/convert-to-apple-container` | Docker -> Apple Container migration |
 | `/add-telegram` | add Telegram channel |

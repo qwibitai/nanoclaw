@@ -221,10 +221,7 @@ async function waitForWorkerRunTerminal(
   return null;
 }
 
-function extractRequestIdFromAck(text: string): string | null {
-  const match = text.match(/Tracking this as\s+`([^`]+)`/i);
-  return match?.[1] || null;
-}
+// request_id is sourced from the DB andy_requests row, not ack text.
 
 async function askStatusAndValidateImmediate(
   db: Database.Database,
@@ -306,26 +303,24 @@ async function runStage(
     }
     console.log(`  attempt ${attempt}: request_id=${request.request_id} state=${request.state}`);
 
+    // Ack validation: match actual conversational ack text (not request_id echo).
+    // Source of truth for request_id is the DB row, not ack text.
     const ack = await waitForBotMessage(
       db,
       chatJid,
       baselineBotIds,
       sentMs,
       REQUEST_ACK_TIMEOUT_MS,
-      (m) => /Tracking this as\s+`req-/i.test(m.content),
+      (m) => /coordinating this with Jarvis|Got it/i.test(m.content),
     );
     if (!ack) {
       throw new Error(`${stage.name}: intake ack not received (attempt ${attempt})`);
-    }
-    const ackRequestId = extractRequestIdFromAck(ack.content);
-    if (!ackRequestId || ackRequestId !== request.request_id) {
-      throw new Error(`${stage.name}: ack request_id mismatch (attempt ${attempt})`);
     }
     const ackLatencyMs = Date.parse(ack.timestamp) - sentMs;
     if (!Number.isFinite(ackLatencyMs) || ackLatencyMs < 0 || ackLatencyMs > IMMEDIATE_REPLY_MAX_MS) {
       throw new Error(`${stage.name}: intake ack latency invalid ${ackLatencyMs} (attempt ${attempt})`);
     }
-    console.log(`  [PASS] intake ack ${ackLatencyMs}ms (attempt ${attempt})`);
+    console.log(`  [PASS] intake ack ${ackLatencyMs}ms, request_id=${request.request_id} (attempt ${attempt})`);
 
     await askStatusAndValidateImmediate(db, chatJid, baselineBotIds, token, request.request_id);
 

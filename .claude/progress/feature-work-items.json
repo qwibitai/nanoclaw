@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-03T07:47:23.375Z",
+  "updated_at": "2026-03-06T09:27:59.410Z",
   "items": [
     {
       "id": "work-jarvis-worker-lifecycle-1772518124323",
@@ -71,6 +71,92 @@
       "evidence": [],
       "created_at": "2026-03-03T07:40:30.069Z",
       "updated_at": "2026-03-03T07:47:23.374Z"
+    },
+    {
+      "id": "work-ops-reliability-tooling-1772615692148",
+      "title": "Weekly deterministic slop pruning loop",
+      "feature_id": "ops-reliability-tooling",
+      "status": "done",
+      "request": "Weekly workflow to detect/reduce code+config+docs+scripts slop with deterministic and reliable outputs",
+      "notes": [
+        "2026-03-04T09:18:41.685Z: Added weekly slop optimization workflow doc and wired canonical indices; contract and mirror checks passed."
+      ],
+      "evidence": [
+        "data/diagnostics/workflow/weekly-slop-optimization-docs-20260304T091830Z.md"
+      ],
+      "created_at": "2026-03-04T09:14:52.148Z",
+      "updated_at": "2026-03-04T09:18:41.685Z"
+    },
+    {
+      "id": "work-ops-reliability-tooling-1772616442279",
+      "title": "Hooks/subagents/built-in governance gate",
+      "feature_id": "ops-reliability-tooling",
+      "status": "done",
+      "request": "Deterministic lint and budget to prevent hook/subagent/built-in tooling slop",
+      "notes": [
+        "2026-03-04T09:27:43.276Z: Added tooling governance lint + budget; wired into CI/workflow scripts; all governance checks pass."
+      ],
+      "evidence": [
+        "data/diagnostics/workflow/tooling-governance-20260304T092733Z.md"
+      ],
+      "created_at": "2026-03-04T09:27:22.279Z",
+      "updated_at": "2026-03-04T09:27:43.276Z"
+    },
+    {
+      "id": "work-ops-reliability-tooling-1772617771896",
+      "title": "Bash-compat worker connectivity + slop workflow hardening",
+      "feature_id": "ops-reliability-tooling",
+      "status": "done",
+      "request": "Fix worker connectivity mapfile break, harden slop inventory to avoid routed-script false positives, and prune stale governance config entries.",
+      "notes": [
+        "2026-03-04T09:49:34.795Z: Linked incidents: incident-worker-connectivity-block-20260227; implementing bash-compat fix + workflow slop detector hardening + stale allowlist pruning.",
+        "2026-03-04T10:55:37.873Z: Validation run: npm run build, npm test, workflow/mirror/governance checks, slop-inventory summary all pass; acceptance-gate executed outside sandbox for real runtime verification.",
+        "2026-03-04T10:55:37.880Z: Closed with PASS acceptance manifest and workflow hardening merged: bash-compat worker connectivity scripts, slop-inventory workflow helper, stale allowlist pruning, governance lint expansion, and regression tests."
+      ],
+      "evidence": [
+        "data/diagnostics/acceptance/acceptance-20260304T105215Z.json",
+        "docs/research/WEEKLY-SLOP-OPTIMIZATION-2026-03-04.md"
+      ],
+      "created_at": "2026-03-04T09:49:31.896Z",
+      "updated_at": "2026-03-04T10:55:37.880Z"
+    },
+    {
+      "id": "work-ops-reliability-tooling-1772778923872",
+      "title": "P0 core gates: dispatch/completion/auth/linkage",
+      "feature_id": "ops-reliability-tooling",
+      "status": "done",
+      "request": "Implement approved P0 prevention setup",
+      "notes": [
+        "2026-03-06T06:35:39.250Z: Start P0 implementation for dispatch/completion/auth/linkage guardrails; incident context: incident-20260304T110850Z, incident-20260305T180540Z, incident-20260304T173206Z",
+        "2026-03-06T06:52:49.092Z: Validation complete: npm run build + npm test pass; new P0 gate scripts smoke-validated (dispatch/completion/auth/linkage).",
+        "2026-03-06T06:52:56.726Z: P0 reliability gates implemented and verified; pre-dispatch gate bug fixed to block correctly on failed checks; build+test pass in direct execution.",
+        "2026-03-06T07:03:36.165Z: Post-validation note: acceptance-gate test step can still hit sandbox tsx IPC EPERM in this environment; direct npm build/test and all new P0 gate artifacts pass."
+      ],
+      "evidence": [
+        ".claude/progress/test-report-ops-reliability-tooling-20260306.json",
+        "data/diagnostics/workflow/pre-dispatch-gate-negative-20260306.json",
+        "data/diagnostics/workflow/pre-dispatch-gate-positive-20260306.json",
+        "data/diagnostics/workflow/completion-lint-20260306.json",
+        "data/diagnostics/workflow/auth-health-20260306.json",
+        "data/diagnostics/workflow/linkage-audit-20260306.json"
+      ],
+      "created_at": "2026-03-06T06:35:23.872Z",
+      "updated_at": "2026-03-06T07:03:36.165Z"
+    },
+    {
+      "id": "work-core-skill-workflows-1772788990923",
+      "title": "Set up Symphony integration",
+      "feature_id": "core-skill-workflows",
+      "status": "blocked",
+      "request": "Set up Symphony for my repository based on https://github.com/openai/symphony/blob/main/elixir/README.md",
+      "notes": [
+        "2026-03-06T09:27:59.409Z: npm run build and npm test passed; acceptance-gate failed at worker_connectivity due no recent probe run in existing runtime state."
+      ],
+      "evidence": [
+        "data/diagnostics/acceptance/acceptance-20260306T092654Z.json"
+      ],
+      "created_at": "2026-03-06T09:23:10.923Z",
+      "updated_at": "2026-03-06T09:27:59.409Z"
     }
   ]
 }

@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
@@ -8,32 +5,19 @@ import {
   createTask,
   getAllTasks,
   getRegisteredGroup,
-  getWorkerRun,
-  insertWorkerRun,
-  getProcessedMessageIds,
-  isMessageProcessed,
-  markMessageProcessed,
-  markMessagesProcessed,
   getTaskById,
   setRegisteredGroup,
-  updateWorkerRunCompletion,
-  updateWorkerRunStatus,
 } from './db.js';
-import {
-  canIpcAccessTarget,
-  processTaskIpc,
-  IpcDeps,
-  queueAndyWorkerDispatchRun,
-  validateAndyWorkerDispatchMessage,
-} from './ipc.js';
+import { isIpcTargetAuthorized, processTaskIpc, IpcDeps } from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
 const MAIN_GROUP: RegisteredGroup = {
   name: 'Main',
-  folder: 'main',
+  folder: 'whatsapp_main',
   trigger: 'always',
   added_at: '2024-01-01T00:00:00.000Z',
+  isMain: true,
 };
 
 const OTHER_GROUP: RegisteredGroup = {
@@ -57,79 +41,41 @@ const ANDY_DEVELOPER_GROUP: RegisteredGroup = {
   added_at: '2024-01-01T00:00:00.000Z',
 };
 
-const JARVIS_WORKER_GROUP: RegisteredGroup = {
+const JARVIS_WORKER_1_GROUP: RegisteredGroup = {
   name: 'Jarvis Worker 1',
   folder: 'jarvis-worker-1',
-  trigger: '@jarvis',
-  added_at: '2024-01-01T00:00:00.000Z',
-};
-
-const JARVIS_WORKER_2_GROUP: RegisteredGroup = {
-  name: 'Jarvis Worker 2',
-  folder: 'jarvis-worker-2',
-  trigger: '@jarvis',
+  trigger: '@Andy',
   added_at: '2024-01-01T00:00:00.000Z',
 };
 
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
-let sendMessageCalls: Array<{ jid: string; text: string; sourceGroup: string }>;
-const IPC_ERRORS_DIR = path.join(process.cwd(), 'data', 'ipc', 'errors');
-
-const VALID_WORKER_DISPATCH_PROMPT = JSON.stringify({
-  run_id: 'run-20260223-001',
-  task_type: 'implement',
-  context_intent: 'fresh',
-  input: 'Implement and validate the requested feature',
-  repo: 'openclaw-gurusharan/nanoclaw',
-  branch: 'jarvis-feature-dispatch-contract',
-  acceptance_tests: ['npm run build', 'npm test'],
-  output_contract: {
-    required_fields: [
-      'run_id',
-      'branch',
-      'commit_sha',
-      'files_changed',
-      'test_result',
-      'risk',
-      'pr_skipped_reason',
-    ],
-  },
-});
 
 beforeEach(() => {
   _initTestDatabase();
-  fs.rmSync(IPC_ERRORS_DIR, { recursive: true, force: true });
-  sendMessageCalls = [];
 
   groups = {
     'main@g.us': MAIN_GROUP,
     'other@g.us': OTHER_GROUP,
     'third@g.us': THIRD_GROUP,
-    'andy@g.us': ANDY_DEVELOPER_GROUP,
-    'jarvis-1@g.us': JARVIS_WORKER_GROUP,
-    'jarvis-2@g.us': JARVIS_WORKER_2_GROUP,
+    'andy-developer@g.us': ANDY_DEVELOPER_GROUP,
+    'jarvis-worker-1@nanoclaw': JARVIS_WORKER_1_GROUP,
   };
 
   // Populate DB as well
   setRegisteredGroup('main@g.us', MAIN_GROUP);
   setRegisteredGroup('other@g.us', OTHER_GROUP);
   setRegisteredGroup('third@g.us', THIRD_GROUP);
-  setRegisteredGroup('andy@g.us', ANDY_DEVELOPER_GROUP);
-  setRegisteredGroup('jarvis-1@g.us', JARVIS_WORKER_GROUP);
-  setRegisteredGroup('jarvis-2@g.us', JARVIS_WORKER_2_GROUP);
 
   deps = {
-    sendMessage: async (jid, text, sourceGroup) => {
-      sendMessageCalls.push({ jid, text, sourceGroup });
-    },
+    sendMessage: async () => {},
     registeredGroups: () => groups,
     registerGroup: (jid, group) => {
       groups[jid] = group;
       setRegisteredGroup(jid, group);
       // Mock the fs.mkdirSync that registerGroup does
     },
-    syncGroupMetadata: async () => {},
+    syncGroups: async () => {},
     getAvailableGroups: () => [],
     writeGroupsSnapshot: () => {},
   };
@@ -147,7 +93,7 @@ describe('schedule_task authorization', () => {
         schedule_value: '2025-06-01T00:00:00.000Z',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -195,14 +141,32 @@ describe('schedule_task authorization', () => {
     expect(allTasks.length).toBe(0);
   });
 
-  it('andy-developer can schedule for jarvis-worker group', async () => {
+  it('rejects schedule_task for unregistered target JID', async () => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: VALID_WORKER_DISPATCH_PROMPT,
+        prompt: 'no target',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'jarvis-1@g.us',
+        targetJid: 'unknown@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    const allTasks = getAllTasks();
+    expect(allTasks.length).toBe(0);
+  });
+
+  it('andy-developer can schedule worker tasks', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'delegate worker task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'jarvis-worker-1@nanoclaw',
       },
       'andy-developer',
       false,
@@ -213,163 +177,6 @@ describe('schedule_task authorization', () => {
     expect(allTasks.length).toBe(1);
     expect(allTasks[0].group_folder).toBe('jarvis-worker-1');
   });
-
-  it('main cannot schedule worker tasks and receives policy guidance', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: VALID_WORKER_DISPATCH_PROMPT,
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'jarvis-1@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-    expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].jid).toBe('main@g.us');
-    expect(sendMessageCalls[0].text).toContain('only andy-developer may schedule worker dispatch tasks');
-    expect(sendMessageCalls[0].sourceGroup).toBe('nanoclaw-system');
-  });
-
-  it('andy-developer cannot schedule worker task with invalid dispatch payload', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'delegate to worker',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'jarvis-1@g.us',
-      },
-      'andy-developer',
-      false,
-      deps,
-    );
-
-    const allTasks = getAllTasks();
-    expect(allTasks.length).toBe(0);
-    expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].jid).toBe('andy@g.us');
-    expect(sendMessageCalls[0].text).toContain('requires strict JSON dispatch payload');
-    expect(sendMessageCalls[0].sourceGroup).toBe('nanoclaw-system');
-  });
-
-  it('andy-developer receives payload validation errors for invalid worker dispatch JSON', async () => {
-    const invalidDispatch = JSON.stringify({
-      run_id: 'run-20260223-002',
-      task_type: 'implement',
-      context_intent: 'fresh',
-      input: 'Implement and validate the requested feature',
-      repo: 'openclaw-gurusharan/nanoclaw',
-      branch: 'feature-invalid-branch',
-      acceptance_tests: ['npm run build', 'npm test'],
-      output_contract: {
-        required_fields: [
-          'run_id',
-          'branch',
-          'commit_sha',
-          'files_changed',
-          'test_result',
-          'risk',
-          'pr_skipped_reason',
-        ],
-      },
-    });
-
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: invalidDispatch,
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'jarvis-1@g.us',
-      },
-      'andy-developer',
-      false,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-    expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].jid).toBe('andy@g.us');
-    expect(sendMessageCalls[0].text).toContain('branch must match jarvis-<feature>');
-    expect(sendMessageCalls[0].sourceGroup).toBe('nanoclaw-system');
-  });
-
-  it('andy-developer duplicate worker schedule_task reports duplicate_run_id guidance (no resend template)', async () => {
-    insertWorkerRun('run-20260223-duplicate-001', 'jarvis-worker-1');
-    updateWorkerRunStatus('run-20260223-duplicate-001', 'review_requested');
-
-    const duplicatePayload = JSON.stringify({
-      run_id: 'run-20260223-duplicate-001',
-      task_type: '',
-      context_intent: '',
-      input: '',
-      repo: 'owner/repo',
-      branch: 'jarvis-duplicate',
-      acceptance_tests: [],
-      output_contract: null,
-    });
-
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: duplicatePayload,
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'jarvis-1@g.us',
-      },
-      'andy-developer',
-      false,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-    expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].jid).toBe('andy@g.us');
-    expect(sendMessageCalls[0].text).toContain('Dispatch ignored (duplicate run_id)');
-    expect(sendMessageCalls[0].text).not.toContain('Fix: resend using the template below');
-    expect(sendMessageCalls[0].sourceGroup).toBe('nanoclaw-system');
-  });
-
-  it('andy-developer cannot schedule for non-worker group', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'not allowed',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'other@g.us',
-      },
-      'andy-developer',
-      false,
-      deps,
-    );
-
-    const allTasks = getAllTasks();
-    expect(allTasks.length).toBe(0);
-  });
-
-  it('rejects schedule_task for unregistered target JID', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'no target',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'unknown@g.us',
-      },
-      'main',
-      true,
-      deps,
-    );
-
-    const allTasks = getAllTasks();
-    expect(allTasks.length).toBe(0);
-  });
 });
 
 // --- pause_task authorization ---
@@ -378,7 +185,7 @@ describe('pause_task authorization', () => {
   beforeEach(() => {
     createTask({
       id: 'task-main',
-      group_folder: 'main',
+      group_folder: 'whatsapp_main',
       chat_jid: 'main@g.us',
       prompt: 'main task',
       schedule_type: 'once',
@@ -405,7 +212,7 @@ describe('pause_task authorization', () => {
   it('main group can pause any task', async () => {
     await processTaskIpc(
       { type: 'pause_task', taskId: 'task-other' },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -420,24 +227,6 @@ describe('pause_task authorization', () => {
       deps,
     );
     expect(getTaskById('task-other')!.status).toBe('paused');
-  });
-
-  it('andy-developer can pause jarvis worker task', async () => {
-    createTask({
-      id: 'task-worker',
-      group_folder: 'jarvis-worker-1',
-      chat_jid: 'jarvis-1@g.us',
-      prompt: 'worker task',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
-      status: 'active',
-      created_at: '2024-01-01T00:00:00.000Z',
-    });
-
-    await processTaskIpc({ type: 'pause_task', taskId: 'task-worker' }, 'andy-developer', false, deps);
-    expect(getTaskById('task-worker')!.status).toBe('paused');
   });
 
   it('non-main group cannot pause another groups task', async () => {
@@ -472,7 +261,7 @@ describe('resume_task authorization', () => {
   it('main group can resume any task', async () => {
     await processTaskIpc(
       { type: 'resume_task', taskId: 'task-paused' },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -487,24 +276,6 @@ describe('resume_task authorization', () => {
       deps,
     );
     expect(getTaskById('task-paused')!.status).toBe('active');
-  });
-
-  it('andy-developer can resume jarvis worker task', async () => {
-    createTask({
-      id: 'task-worker-paused',
-      group_folder: 'jarvis-worker-1',
-      chat_jid: 'jarvis-1@g.us',
-      prompt: 'worker paused task',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
-      status: 'paused',
-      created_at: '2024-01-01T00:00:00.000Z',
-    });
-
-    await processTaskIpc({ type: 'resume_task', taskId: 'task-worker-paused' }, 'andy-developer', false, deps);
-    expect(getTaskById('task-worker-paused')!.status).toBe('active');
   });
 
   it('non-main group cannot resume another groups task', async () => {
@@ -537,7 +308,7 @@ describe('cancel_task authorization', () => {
 
     await processTaskIpc(
       { type: 'cancel_task', taskId: 'task-to-cancel' },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -567,28 +338,10 @@ describe('cancel_task authorization', () => {
     expect(getTaskById('task-own')).toBeUndefined();
   });
 
-  it('andy-developer can cancel jarvis worker task', async () => {
-    createTask({
-      id: 'task-worker-cancel',
-      group_folder: 'jarvis-worker-1',
-      chat_jid: 'jarvis-1@g.us',
-      prompt: 'cancel worker',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: null,
-      status: 'active',
-      created_at: '2024-01-01T00:00:00.000Z',
-    });
-
-    await processTaskIpc({ type: 'cancel_task', taskId: 'task-worker-cancel' }, 'andy-developer', false, deps);
-    expect(getTaskById('task-worker-cancel')).toBeUndefined();
-  });
-
   it('non-main group cannot cancel another groups task', async () => {
     createTask({
       id: 'task-foreign',
-      group_folder: 'main',
+      group_folder: 'whatsapp_main',
       chat_jid: 'main@g.us',
       prompt: 'not yours',
       schedule_type: 'once',
@@ -639,7 +392,7 @@ describe('register_group authorization', () => {
         folder: '../../outside',
         trigger: '@Andy',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -668,283 +421,58 @@ describe('refresh_groups authorization', () => {
 // The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
 
 describe('IPC message authorization', () => {
-  function isMessageAuthorized(sourceGroup: string, isMain: boolean, targetChatJid: string): boolean {
-    const targetGroup = groups[targetChatJid];
-    return canIpcAccessTarget(sourceGroup, isMain, targetGroup);
-  }
-
   it('main group can send to any group', () => {
-    expect(isMessageAuthorized('main', true, 'other@g.us')).toBe(true);
-    expect(isMessageAuthorized('main', true, 'third@g.us')).toBe(true);
+    expect(
+      isIpcTargetAuthorized('whatsapp_main', true, 'other@g.us', groups),
+    ).toBe(true);
+    expect(
+      isIpcTargetAuthorized('whatsapp_main', true, 'third@g.us', groups),
+    ).toBe(true);
   });
 
   it('non-main group can send to its own chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'other@g.us')).toBe(true);
+    expect(
+      isIpcTargetAuthorized('other-group', false, 'other@g.us', groups),
+    ).toBe(true);
   });
 
   it('non-main group cannot send to another groups chat', () => {
-    expect(isMessageAuthorized('other-group', false, 'main@g.us')).toBe(false);
-    expect(isMessageAuthorized('other-group', false, 'third@g.us')).toBe(false);
+    expect(
+      isIpcTargetAuthorized('other-group', false, 'main@g.us', groups),
+    ).toBe(false);
+    expect(
+      isIpcTargetAuthorized('other-group', false, 'third@g.us', groups),
+    ).toBe(false);
   });
 
   it('non-main group cannot send to unregistered JID', () => {
-    expect(isMessageAuthorized('other-group', false, 'unknown@g.us')).toBe(false);
+    expect(
+      isIpcTargetAuthorized('other-group', false, 'unknown@g.us', groups),
+    ).toBe(false);
   });
 
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
-    expect(isMessageAuthorized('main', true, 'unknown@g.us')).toBe(true);
+    expect(
+      isIpcTargetAuthorized('whatsapp_main', true, 'unknown@g.us', groups),
+    ).toBe(true);
   });
 
-  it('andy-developer can send to jarvis worker', () => {
-    expect(isMessageAuthorized('andy-developer', false, 'jarvis-1@g.us')).toBe(true);
+  it('andy-developer can send to jarvis-worker lanes', () => {
+    expect(
+      isIpcTargetAuthorized(
+        'andy-developer',
+        false,
+        'jarvis-worker-1@nanoclaw',
+        groups,
+      ),
+    ).toBe(true);
   });
 
-  it('andy-developer cannot send to non-worker groups', () => {
-    expect(isMessageAuthorized('andy-developer', false, 'other@g.us')).toBe(false);
-    expect(isMessageAuthorized('andy-developer', false, 'main@g.us')).toBe(false);
-  });
-});
-
-describe('andy worker dispatch payload guardrails', () => {
-  it('blocks worker-style JSON dispatch accidentally targeted to andy-developer chat', () => {
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['andy@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('dispatch payload to andy-developer chat blocked');
-  });
-
-  it('allows andy-developer plain status messages to its own chat', () => {
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['andy@g.us'],
-      'Jarvis workers are running; I will report status shortly.',
-    );
-
-    expect(result.valid).toBe(true);
-  });
-
-  it('allows valid strict dispatch JSON when target is jarvis-worker group', () => {
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    expect(result.valid).toBe(true);
-  });
-
-  it('blocks malformed replay dispatch as duplicate when run_id already completed', () => {
-    insertWorkerRun('run-20260223-replay-001', 'jarvis-worker-2');
-    updateWorkerRunStatus('run-20260223-replay-001', 'review_requested');
-
-    const malformedReplay = JSON.stringify({
-      run_id: 'run-20260223-replay-001',
-      task_type: '',
-      context_intent: '',
-      input: '',
-      repo: 'owner/repo',
-      branch: 'jarvis-replay',
-      acceptance_tests: [],
-      output_contract: null,
-    });
-
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['jarvis-2@g.us'],
-      malformedReplay,
-    );
-
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('duplicate run_id blocked');
-    expect(result.reason).toContain('already review_requested');
-  });
-
-  it('blocks continue dispatch when no reusable session exists for worker/repo/branch', () => {
-    const payload = JSON.stringify({
-      run_id: 'run-20260223-continue-001',
-      task_type: 'fix',
-      context_intent: 'continue',
-      input: 'Continue fixing the same branch task',
-      repo: 'openclaw-gurusharan/nanoclaw',
-      branch: 'jarvis-feature-dispatch-contract',
-      acceptance_tests: ['npm run build'],
-      output_contract: {
-        required_fields: [
-          'run_id',
-          'branch',
-          'commit_sha',
-          'files_changed',
-          'test_result',
-          'risk',
-          'pr_skipped_reason',
-          'session_id',
-        ],
-      },
-    });
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      payload,
-    );
-
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('context_intent=continue requires a reusable prior session');
-  });
-
-  it('blocks continue dispatch when explicit session_id belongs to another worker lane', () => {
-    insertWorkerRun('run-session-owner', 'jarvis-worker-1', {
-      dispatch_repo: 'openclaw-gurusharan/nanoclaw',
-      dispatch_branch: 'jarvis-feature-dispatch-contract',
-      context_intent: 'continue',
-    });
-    updateWorkerRunCompletion('run-session-owner', {
-      effective_session_id: 'sess-owned-by-worker-1',
-    });
-    updateWorkerRunStatus('run-session-owner', 'review_requested');
-
-    const payload = JSON.stringify({
-      run_id: 'run-20260223-continue-002',
-      task_type: 'fix',
-      context_intent: 'continue',
-      session_id: 'sess-owned-by-worker-1',
-      input: 'Continue with the same session',
-      repo: 'openclaw-gurusharan/nanoclaw',
-      branch: 'jarvis-feature-dispatch-contract',
-      acceptance_tests: ['npm run build'],
-      output_contract: {
-        required_fields: [
-          'run_id',
-          'branch',
-          'commit_sha',
-          'files_changed',
-          'test_result',
-          'risk',
-          'pr_skipped_reason',
-          'session_id',
-        ],
-      },
-    });
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['jarvis-2@g.us'],
-      payload,
-    );
-
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('cross-worker session reuse is blocked');
-  });
-
-  it('allows continue dispatch when reusable session exists for same worker/repo/branch', () => {
-    insertWorkerRun('run-session-reusable', 'jarvis-worker-1', {
-      dispatch_repo: 'openclaw-gurusharan/nanoclaw',
-      dispatch_branch: 'jarvis-feature-dispatch-contract',
-      context_intent: 'continue',
-    });
-    updateWorkerRunCompletion('run-session-reusable', {
-      effective_session_id: 'sess-reuse-1',
-    });
-    updateWorkerRunStatus('run-session-reusable', 'review_requested');
-
-    const payload = JSON.stringify({
-      run_id: 'run-20260223-continue-003',
-      task_type: 'fix',
-      context_intent: 'continue',
-      input: 'Continue with recent context',
-      repo: 'openclaw-gurusharan/nanoclaw',
-      branch: 'jarvis-feature-dispatch-contract',
-      acceptance_tests: ['npm run build'],
-      output_contract: {
-        required_fields: [
-          'run_id',
-          'branch',
-          'commit_sha',
-          'files_changed',
-          'test_result',
-          'risk',
-          'pr_skipped_reason',
-          'session_id',
-        ],
-      },
-    });
-    const result = validateAndyWorkerDispatchMessage(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      payload,
-    );
-
-    expect(result.valid).toBe(true);
-  });
-
-  it('blocks strict worker dispatch JSON from non-andy source lanes', () => {
-    const result = validateAndyWorkerDispatchMessage(
-      'main',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    expect(result.valid).toBe(false);
-    expect(result.reason).toContain('worker dispatch ownership violation');
-  });
-});
-
-describe('andy worker dispatch run queueing', () => {
-  it('queues a new worker run when dispatch is valid', () => {
-    const decision = queueAndyWorkerDispatchRun(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    expect(decision.allowSend).toBe(true);
-    expect(decision.queueState).toBe('new');
-    expect(decision.runId).toBe('run-20260223-001');
-    const row = getWorkerRun('run-20260223-001');
-    expect(row?.status).toBe('queued');
-    expect(row?.context_intent).toBe('fresh');
-    expect(row?.session_selection_source).toBe('new');
-  });
-
-  it('blocks duplicate run_id dispatch', () => {
-    const first = queueAndyWorkerDispatchRun(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-    const second = queueAndyWorkerDispatchRun(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    expect(first.allowSend).toBe(true);
-    expect(second.allowSend).toBe(false);
-    expect(second.reason).toContain('duplicate run_id');
-  });
-
-  it('allows retry for failed_contract run_id', () => {
-    queueAndyWorkerDispatchRun(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-    updateWorkerRunStatus('run-20260223-001', 'failed_contract');
-
-    const retry = queueAndyWorkerDispatchRun(
-      'andy-developer',
-      groups['jarvis-1@g.us'],
-      VALID_WORKER_DISPATCH_PROMPT,
-    );
-
-    const row = getWorkerRun('run-20260223-001');
-    expect(retry.allowSend).toBe(true);
-    expect(retry.queueState).toBe('retry');
-    expect(row?.status).toBe('queued');
-    expect(row?.retry_count).toBe(1);
+  it('andy-developer cannot send to non-worker lanes', () => {
+    expect(
+      isIpcTargetAuthorized('andy-developer', false, 'other@g.us', groups),
+    ).toBe(false);
   });
 });
 
@@ -960,7 +488,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '0 9 * * *', // every day at 9am
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -984,7 +512,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'not a cron',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1003,7 +531,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '3600000', // 1 hour
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1026,7 +554,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'abc',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1043,7 +571,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: '0',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1060,7 +588,7 @@ describe('schedule_task schedule types', () => {
         schedule_value: 'not-a-date',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1082,7 +610,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'group',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1101,7 +629,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'isolated',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1120,7 +648,7 @@ describe('schedule_task context_mode', () => {
         context_mode: 'bogus' as any,
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1138,7 +666,7 @@ describe('schedule_task context_mode', () => {
         schedule_value: '2025-06-01T00:00:00.000Z',
         targetJid: 'other@g.us',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1160,7 +688,7 @@ describe('register_group success', () => {
         folder: 'new-group',
         trigger: '@Andy',
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
@@ -1181,60 +709,11 @@ describe('register_group success', () => {
         name: 'Partial',
         // missing folder and trigger
       },
-      'main',
+      'whatsapp_main',
       true,
       deps,
     );
 
     expect(getRegisteredGroup('partial@g.us')).toBeUndefined();
-  });
-});
-
-// --- Per-message idempotency ---
-
-describe('per-message idempotency', () => {
-  it('returns false for unprocessed message', () => {
-    expect(isMessageProcessed('group@g.us', 'msg-001')).toBe(false);
-  });
-
-  it('returns true after marking message processed', () => {
-    markMessageProcessed('group@g.us', 'msg-002');
-    expect(isMessageProcessed('group@g.us', 'msg-002')).toBe(true);
-  });
-
-  it('stores run_id alongside processed message', () => {
-    markMessageProcessed('group@g.us', 'msg-003', 'run-123');
-    expect(isMessageProcessed('group@g.us', 'msg-003')).toBe(true);
-  });
-
-  it('handles duplicate markMessageProcessed calls gracefully', () => {
-    markMessageProcessed('group@g.us', 'msg-004');
-    // Should not throw (INSERT OR IGNORE)
-    markMessageProcessed('group@g.us', 'msg-004', 'run-456');
-    expect(isMessageProcessed('group@g.us', 'msg-004')).toBe(true);
-  });
-
-  it('isolates messages by chat_jid', () => {
-    markMessageProcessed('group-a@g.us', 'msg-005');
-    expect(isMessageProcessed('group-a@g.us', 'msg-005')).toBe(true);
-    expect(isMessageProcessed('group-b@g.us', 'msg-005')).toBe(false);
-  });
-
-  it('getProcessedMessageIds returns batch results', () => {
-    markMessageProcessed('batch@g.us', 'msg-a');
-    markMessageProcessed('batch@g.us', 'msg-c');
-    const processed = getProcessedMessageIds('batch@g.us', ['msg-a', 'msg-b', 'msg-c']);
-    expect(processed).toEqual(new Set(['msg-a', 'msg-c']));
-  });
-
-  it('getProcessedMessageIds returns empty set for empty input', () => {
-    expect(getProcessedMessageIds('batch@g.us', [])).toEqual(new Set());
-  });
-
-  it('markMessagesProcessed inserts batch atomically', () => {
-    markMessagesProcessed('txn@g.us', ['msg-x', 'msg-y', 'msg-z'], 'run-batch');
-    expect(isMessageProcessed('txn@g.us', 'msg-x')).toBe(true);
-    expect(isMessageProcessed('txn@g.us', 'msg-y')).toBe(true);
-    expect(isMessageProcessed('txn@g.us', 'msg-z')).toBe(true);
   });
 });

@@ -8,9 +8,11 @@ DB_PATH="${DB_PATH:-$ROOT_DIR/store/messages.db}"
 WINDOW_MINUTES="${WINDOW_MINUTES:-60}"
 STALE_QUEUED_MINUTES="${STALE_QUEUED_MINUTES:-20}"
 STALE_RUNNING_MINUTES="${STALE_RUNNING_MINUTES:-60}"
-PROBE_TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-120}"
+PROBE_TIMEOUT_SEC="${PROBE_TIMEOUT_SEC:-${VERIFY_WORKER_PROBE_TIMEOUT_SEC:-480}}"
 PROBE_POLL_SEC="${PROBE_POLL_SEC:-2}"
 PROBE_INFLIGHT_WINDOW_MINUTES="${PROBE_INFLIGHT_WINDOW_MINUTES:-180}"
+PROBE_RUNNING_WATCHDOG_MS="${WORKER_PROBE_RUNNING_STALE_MS:-360000}"
+PROBE_TIMEOUT_MARGIN_SEC="${PROBE_TIMEOUT_MARGIN_SEC:-10}"
 SKIP_PRECHECKS=0
 SKIP_PROBE=0
 
@@ -23,7 +25,7 @@ Options:
   --window-minutes <n>           Probe-result freshness window (default: 60)
   --stale-queued-minutes <n>     Stale queued threshold (default: 20)
   --stale-running-minutes <n>    Stale running threshold (default: 60)
-  --probe-timeout-sec <n>        Probe timeout per worker lane (default: 120)
+  --probe-timeout-sec <n>        Probe timeout per worker lane (default: VERIFY_WORKER_PROBE_TIMEOUT_SEC or 480)
   --probe-poll-sec <n>           Probe poll interval (default: 2)
   --probe-inflight-window-minutes <n>
                                  Block duplicate probes when a probe run is already queued/running in this window (default: 180)
@@ -59,6 +61,12 @@ for n in "$WINDOW_MINUTES" "$STALE_QUEUED_MINUTES" "$STALE_RUNNING_MINUTES" "$PR
     exit 1
   fi
 done
+for n in "$PROBE_RUNNING_WATCHDOG_MS" "$PROBE_TIMEOUT_MARGIN_SEC"; do
+  if ! is_pos_int "$n"; then
+    echo "Expected positive integer, got: $n"
+    exit 1
+  fi
+done
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 is required"
@@ -75,6 +83,14 @@ echo "window: ${WINDOW_MINUTES}m"
 echo "probe timeout: ${PROBE_TIMEOUT_SEC}s per lane"
 echo "probe poll: ${PROBE_POLL_SEC}s"
 echo "probe inflight window: ${PROBE_INFLIGHT_WINDOW_MINUTES}m"
+
+required_probe_timeout_sec=$(( (PROBE_RUNNING_WATCHDOG_MS + 999) / 1000 + PROBE_TIMEOUT_MARGIN_SEC ))
+if [ "$PROBE_TIMEOUT_SEC" -le "$required_probe_timeout_sec" ]; then
+  echo "[FAIL] probe timeout guard"
+  echo "  detail: --probe-timeout-sec (${PROBE_TIMEOUT_SEC}) must be greater than running probe watchdog (${PROBE_RUNNING_WATCHDOG_MS}ms) + margin (${PROBE_TIMEOUT_MARGIN_SEC}s)"
+  echo "  required: > ${required_probe_timeout_sec}s"
+  exit 1
+fi
 
 overall_fail=0
 preflight_fail=0
@@ -133,7 +149,11 @@ if [ "$SKIP_PROBE" -eq 0 ]; then
   fi
 fi
 
-mapfile -t lanes < <(sqlite3 "$DB_PATH" "SELECT folder FROM registered_groups WHERE folder LIKE 'jarvis-worker-%' ORDER BY folder;")
+lanes=()
+while IFS= read -r lane; do
+  [ -n "$lane" ] || continue
+  lanes+=("$lane")
+done < <(sqlite3 "$DB_PATH" "SELECT folder FROM registered_groups WHERE folder LIKE 'jarvis-worker-%' ORDER BY folder;")
 if [ "${#lanes[@]}" -eq 0 ]; then
   echo "[FAIL] no registered jarvis-worker lanes found"
   exit 1

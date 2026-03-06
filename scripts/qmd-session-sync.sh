@@ -83,6 +83,35 @@ sync_sessions() {
 
   echo "Refreshing QMD index..."
   "$QMD_BIN" update
+
+  embed_if_pending
+}
+
+get_pending_embeddings() {
+  local status_output=""
+  local pending=""
+
+  status_output="$("$QMD_BIN" status 2>/dev/null || true)"
+  pending="$(printf '%s\n' "$status_output" | awk '/^[[:space:]]*Pending:[[:space:]]*[0-9]+/{print $2; exit}')"
+
+  if [[ -z "$pending" || ! "$pending" =~ ^[0-9]+$ ]]; then
+    echo "0"
+    return 0
+  fi
+
+  echo "$pending"
+}
+
+embed_if_pending() {
+  local pending="0"
+  pending="$(get_pending_embeddings)"
+
+  if (( pending > 0 )); then
+    echo "Embedding pending QMD vectors: $pending"
+    "$QMD_BIN" embed
+  else
+    echo "No pending QMD embeddings."
+  fi
 }
 
 commit_exports() {

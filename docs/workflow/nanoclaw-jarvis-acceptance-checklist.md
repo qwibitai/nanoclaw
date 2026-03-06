@@ -1,60 +1,73 @@
-# NanoClaw-Jarvis Acceptance Checklist
+# NanoClaw-Jarvis Acceptance Contract
 
-Use this checklist before marking NanoClaw-Jarvis integration complete.
+Use this contract before marking NanoClaw-Jarvis integration changes complete.
 
-## Architecture Boundaries
+This document defines required outcomes.
+Evidence must be produced by executable gates, not static checkbox edits.
 
-- [x] NanoClaw host loop remains the orchestrator (`src/index.ts`, `src/container-runner.ts`, `src/group-queue.ts`, `src/ipc.ts`, `src/db.ts`).
-- [x] No worker HTTP microservice introduced.
-- [x] Non-worker groups keep existing Claude Agent SDK behavior.
-- [x] Role split preserved: `Andy-bot` (observe/research) and `Andy-developer` (dispatch/review).
+## 1) Architecture Boundaries (Must Hold)
 
-## Dispatch and State Contract
+1. NanoClaw host loop remains orchestrator (`src/index.ts`, `src/container-runner.ts`, `src/group-queue.ts`, `src/ipc.ts`, `src/db.ts`).
+2. No worker HTTP microservice is introduced.
+3. Non-worker groups keep existing Claude Agent SDK behavior.
+4. Role split remains explicit: `Andy-bot` (observe/research), `Andy-developer` (dispatch/review), `jarvis-worker-*` (bounded execution).
 
-- [x] Worker dispatch requires strict JSON payload (`run_id`, `task_type`, `context_intent`, `input`, `repo`, `branch`, `acceptance_tests`, `output_contract`).
-- [x] Plain-text worker dispatch is rejected.
-- [x] `run_id` is canonical and required (no fallback hash generation).
-- [x] Duplicate `run_id` does not double execute.
-- [x] Retry semantics are bounded to `failed` and `failed_contract`.
-- [x] Session intent enforcement works:
-  - `context_intent=fresh` rejects provided `session_id`
-  - `context_intent=continue` requires `session_id` in `output_contract.required_fields`
-  - cross-worker explicit `session_id` reuse is blocked
+## 2) Dispatch/Completion Contract (Must Hold)
 
-## Completion Contract
+1. Worker dispatch is strict JSON.
+2. Plain-text worker dispatch is rejected.
+3. `run_id` is canonical and caller-provided.
+4. Duplicate `run_id` does not double execute.
+5. Retry semantics are bounded to `failed` and `failed_contract`.
+6. Completion artifacts satisfy required fields and `run_id`/branch matching.
 
-- [x] `review_requested` requires valid `<completion>` JSON.
-- [x] Completion requires `run_id`, `branch`, `commit_sha`, `files_changed`, `test_result`, `risk`, and `pr_url|pr_skipped_reason`.
-- [x] Completion `run_id` must match dispatch `run_id`.
-- [x] Completion artifacts are persisted in `worker_runs`.
-- [x] Continue-mode runs require completion `session_id` when requested by dispatch contract.
+Reference: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`.
 
-## Worker Runtime Standardization
+## 3) Worker Runtime Contract (Must Hold)
 
-- [x] Worker groups route to OpenCode worker image (`nanoclaw-worker:latest` by default).
-- [x] Worker secret scope is limited to `GITHUB_TOKEN`.
-- [x] Worker git identity defaults to `openclaw-gurusharan` values.
-- [x] Worker skills/rules are staged and mounted read-only for OpenCode.
+1. Worker lanes use `nanoclaw-worker:latest` (unless explicitly overridden).
+2. Worker secret scope remains role-bounded.
+3. Worker skills/rules staging is deterministic and read-only in-container.
+4. Timeout/probe guardrails remain deterministic.
 
-## Documentation
+Reference: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`.
 
-- [x] `docs/architecture/nanoclaw-jarvis.md` updated as architecture source of truth.
-- [x] `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` added.
-- [x] `docs/workflow/nanoclaw-jarvis-worker-runtime.md` added.
-- [x] Root `CLAUDE.md` updated with compressed trigger-based docs index.
+## 4) Executable Verification Gate (Required)
 
-## Verification
+Run:
 
-- [x] `npm run build` passes.
-- [x] `npm test` passes.
-- [x] Live E2E dispatch to `jarvis-worker-1` with valid completion proof captured.
-- [ ] Parallel live dispatch (`jarvis-worker-1` + `jarvis-worker-2`) proof captured.
-- [x] Runtime validation with actual worker image rebuild completed (`container/worker/build.sh`).
+```bash
+bash scripts/jarvis-ops.sh acceptance-gate
+```
 
-### Evidence
+For Andy user-facing reliability/sign-off changes:
 
-- 2026-02-22: `npx tsx scripts/test-worker-e2e.ts` passed (`review_requested` persisted in `worker_runs`).
+```bash
+bash scripts/jarvis-ops.sh acceptance-gate --include-happiness --happiness-user-confirmation "<manual User POV runbook completed>"
+```
 
-## Exit Criteria
+## 5) Evidence Requirements (Required)
 
-Mark complete when all unchecked verification items are either passed or explicitly waived with rationale.
+Acceptance evidence must include the generated manifest:
+
+- `data/diagnostics/acceptance/acceptance-<timestamp>.json`
+
+And, when relevant, supporting incident artifacts:
+
+- `bash scripts/jarvis-ops.sh incident-bundle --window-minutes 180 --lane andy-developer [--incident-id <id>]`
+
+## 6) Exit Criteria
+
+A change is complete only when:
+
+1. Acceptance gate summary status is `pass`.
+2. Contract/runtime/docs updates are synchronized in the same change set.
+3. Any linked incident is updated with verification and next action/resolution state.
+
+## Agent Routing
+
+| Step | Agent | Mode | Notes |
+|------|-------|------|-------|
+| Pass/fail judgment | opus | — | Final acceptance decision stays with Opus |
+| Full gate sequence | verifier | bg | Run all acceptance gates in background |
+| Evidence collection | scout | fg | Gather pre-gate artifacts and state |

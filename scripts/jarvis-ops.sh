@@ -10,6 +10,7 @@ Usage: scripts/jarvis-ops.sh <command> [args]
 Commands:
   preflight       Run runtime/auth/db baseline health checks
   reliability     Run reliability triage checks
+  acceptance-gate Run deterministic acceptance gate and write evidence manifest
   status          Show lane health and root-cause summaries from worker_runs
   watch           Follow categorized runtime logs
   trace           Build end-to-end timeline for lane/chat/run
@@ -18,13 +19,23 @@ Commands:
   hi-timeline     Alias for message-timeline
   verify-worker-connectivity
                   Validate worker lane connectivity gate using probe + DB checks
-  happiness-gate  Run user-facing happiness gate (status + andy user e2e probe)
+  happiness-gate  Run user-facing happiness gate (requires --user-confirmation)
+  pre-dispatch-gate
+                  Hard pre-dispatch gate (dispatch/auth/connectivity/stale-state)
   dispatch-lint   Validate worker dispatch payload against current rules
+  completion-lint Validate worker completion contract from raw output text
+  consult         Run Claude CLI consult lane wrapper (resume/fork/fresh)
+  auth-health     Diagnose local auth/quota health signals
+  linkage-audit   Enforce request->worker linkage SLA checks
   db-doctor       Diagnose database schema/index/readiness drift (read-only)
   incident        Manage incident registry (list/show/resolve/reopen/note)
   probe           Dispatch worker-lane probes and wait for terminal statuses
   hotspots        Show recurring reliability hotspots over time window
+  weekend-prevention
+                  Run weekly prevention workflow (frequency + gates + artifacts)
   incident-bundle Collect a timestamped diagnostics bundle for an incident
+  reconcile-stale-runs
+                  Reconcile stale worker_runs (dry-run by default)
   recover         Run runtime/builder recovery and service restart
   smoke           Rebuild worker image and run worker e2e smoke
   help            Show this help
@@ -42,6 +53,9 @@ case "$command_name" in
     ;;
   reliability)
     exec "$SCRIPT_DIR/jarvis-reliability.sh" "$@"
+    ;;
+  acceptance-gate)
+    exec "$SCRIPT_DIR/jarvis-acceptance-gate.sh" "$@"
     ;;
   status)
     exec "$SCRIPT_DIR/jarvis-status.sh" "$@"
@@ -61,8 +75,23 @@ case "$command_name" in
   happiness-gate)
     exec "$SCRIPT_DIR/jarvis-happiness-gate.sh" "$@"
     ;;
+  pre-dispatch-gate)
+    exec "$SCRIPT_DIR/jarvis-pre-dispatch-gate.sh" "$@"
+    ;;
   dispatch-lint)
     exec "$SCRIPT_DIR/jarvis-dispatch-lint.sh" "$@"
+    ;;
+  completion-lint)
+    exec "$SCRIPT_DIR/jarvis-completion-contract-lint.sh" "$@"
+    ;;
+  consult)
+    exec "$SCRIPT_DIR/claude-consult.sh" "$@"
+    ;;
+  auth-health)
+    exec "$SCRIPT_DIR/jarvis-auth-health.sh" "$@"
+    ;;
+  linkage-audit)
+    exec "$SCRIPT_DIR/jarvis-linkage-audit.sh" "$@"
     ;;
   db-doctor)
     exec "$SCRIPT_DIR/jarvis-db-doctor.sh" "$@"
@@ -76,8 +105,14 @@ case "$command_name" in
   hotspots)
     exec "$SCRIPT_DIR/jarvis-hotspots.sh" "$@"
     ;;
+  weekend-prevention)
+    exec "$SCRIPT_DIR/workflow/weekend-prevention-run.sh" "$@"
+    ;;
   incident-bundle)
     exec "$SCRIPT_DIR/jarvis-incident-bundle.sh" "$@"
+    ;;
+  reconcile-stale-runs)
+    exec "$SCRIPT_DIR/jarvis-reconcile-stale-runs.sh" "$@"
     ;;
   recover)
     exec "$SCRIPT_DIR/jarvis-recover.sh" "$@"

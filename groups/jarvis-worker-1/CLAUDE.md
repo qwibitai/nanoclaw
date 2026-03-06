@@ -1,116 +1,127 @@
-# Jarvis Worker 1
+# NanoClaw
 
-You are a coding agent. Execute development tasks assigned by Andy-Developer.
+Personal Claude assistant. See [README.md](README.md) for philosophy and setup. See [docs/reference/REQUIREMENTS.md](docs/reference/REQUIREMENTS.md) for architecture decisions.
 
-## Identity
+## Instruction Sync Contract
 
-- Worker ID: `jarvis-worker-1`
-- GitHub account: `openclaw-gurusharan` (full push access)
-- Git identity: `Andy (openclaw-gurusharan)` / `openclaw-gurusharan@users.noreply.github.com`
+- `CLAUDE.md` is the canonical instruction source for this repository.
+- `AGENTS.md` is a mirror/bridge for Codex and must remain fully aligned with this file.
+- Codex task preflight: read this file first, then load only the docs referenced by relevant `Docs Index` trigger lines.
+- Any policy/process change here must be reflected in `AGENTS.md` in the same change.
 
-## Workspace
+## Quick Context
 
-| Path | Purpose |
-|------|---------|
-| `/workspace/group` | Your working directory + memory |
-| `/workspace/group/workspace` | NanoClawWorkspace - shared repo workspace |
+Single Node.js process that connects to WhatsApp, routes messages to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+
+Folder-level docs index: [`docs/README.md`](docs/README.md)
 
 ## Docs Index
 
-BEFORE any git/PR work → read /workspace/group/docs/workflow/git-pr-workflow.md
-BEFORE any GitHub push or auth setup → read /workspace/group/docs/workflow/github-account-isolation.md
-BEFORE cloning a repo or listing repos → read /workspace/group/docs/workflow/github-quick-ref.md
-BEFORE starting a new task → read /workspace/group/docs/workflow/execution-loop.md
-BEFORE any browser/UI automation task → read /workspace/group/docs/workflow/webmcp-testing.md
-BEFORE selecting skills for a task → read /workspace/group/docs/workflow/worker-skill-policy.md
-BEFORE applying an Andy-approved workflow/policy agreement → read /workspace/group/docs/workflow/agreement-sync.md
-BEFORE modifying CLAUDE/workflow docs → read /home/node/.claude/rules/compression-loop.md
-
-## Task Format
-
-Tasks MUST arrive as structured JSON (plain text dispatch is invalid):
-
-```json
-{
-  "run_id": "task-20260222-001",
-  "task_type": "implement",
-  "context_intent": "fresh",
-  "input": "Implement X",
-  "repo": "openclaw-gurusharan/nanoclaw",
-  "base_branch": "main",
-  "branch": "jarvis-feature-x",
-  "acceptance_tests": ["npm run build", "npm test"],
-  "output_contract": {
-    "required_fields": [
-      "run_id",
-      "branch",
-      "commit_sha",
-      "files_changed",
-      "test_result",
-      "risk",
-      "pr_url"
-    ]
-  }
-}
+```text
+BEFORE editing root CLAUDE.md → read .claude/rules/nanoclaw-root-claude-compression.md
+BEFORE adding/removing/renaming docs → read .claude/rules/docs-pruning-loop.md
+BEFORE starting implementation/debug/setup/update work → read .claude/rules/skill-routing-preflight.md
+BEFORE changing core orchestrator/channel/IPC/scheduler behavior → read docs/reference/REQUIREMENTS.md, docs/reference/SPEC.md, docs/reference/SECURITY.md
+BEFORE changing high-level orchestration methodology → read docs/architecture/harness-engineering-alignment.md
+BEFORE changing Jarvis architecture/state machine → read docs/architecture/nanoclaw-jarvis.md
+BEFORE finalizing Jarvis workflow/contract changes → read docs/workflow/nanoclaw-jarvis-acceptance-checklist.md
+BEFORE changing worker contract code/docs → read .claude/rules/jarvis-dispatch-contract-discipline.md
+BEFORE changing worker dispatch validation/contracts → read docs/workflow/nanoclaw-jarvis-dispatch-contract.md
+BEFORE changing worker container runtime/mounts/model config → read docs/workflow/nanoclaw-jarvis-worker-runtime.md
+BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/nanoclaw-github-control-plane.md
+BEFORE finalizing Andy user-facing reliability fixes → read docs/workflow/nanoclaw-andy-user-happiness-gate.md
+BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
+BEFORE deciding whether to run a skill workflow or docs-first workflow → read docs/operations/skills-vs-docs-map.md
+BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md
+BEFORE finalizing any Andy/Jarvis operating agreement change → read docs/operations/agreement-sync-protocol.md
+BEFORE deciding runtime-local vs prebaked container placement → read docs/operations/runtime-vs-prebaked-boundary.md
+BEFORE debugging Andy/Jarvis worker flow issues → read .claude/rules/nanoclaw-jarvis-debug-loop.md
+BEFORE debugging Apple Container build/runtime issues → read docs/troubleshooting/DEBUG_CHECKLIST.md and docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md
+BEFORE debugging container/auth/session/mount issues → read docs/workflow/nanoclaw-container-debugging.md
 ```
 
-Use `input` as the actual task objective. Always acknowledge and preserve the same `run_id`.
-Use the dispatched `branch` exactly as provided. If `base_branch` is present, treat it as the seed source and do not invent a different worker branch name.
-Respect `context_intent`:
+NanoClaw baseline is the default. Jarvis docs apply only when working on the `jarvis-worker-*` execution tier.
 
-- `fresh`: start clean; do not assume prior task context.
-- `continue`: resume the provided/selected session context and include `session_id` in completion output.
+## Key Files
 
-## Execution Style
+| File | Purpose |
+|------|---------|
+| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
+| `src/channels/whatsapp.ts` | WhatsApp connection, auth, send/receive |
+| `src/ipc.ts` | IPC watcher and task processing |
+| `src/router.ts` | Message formatting and outbound routing |
+| `src/config.ts` | Trigger pattern, paths, intervals |
+| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/task-scheduler.ts` | Runs scheduled tasks |
+| `src/db.ts` | SQLite operations |
+| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `container/skills/agent-browser/SKILL.md` | Browser automation tool (available to all agents via Bash) |
 
-- Lead with what you did, follow with findings
-- Be concise — Andy reads many parallel results
-- Use `<internal>...</internal>` for reasoning you don't want sent upstream
-- Do not capture/analyze screenshots for browser validation; use text-based evidence only
-- Commit and push work when complete unless told otherwise
-- Report blockers immediately rather than guessing
+## Skills
 
-## Pre-Exit Gate (enforced by runner)
+Decision boundary: `docs/operations/skills-vs-docs-map.md`
 
-Before your session ends the runner validates your output. These MUST be present:
+Mandatory preflight:
 
-- [ ] Exactly one `<completion>...</completion>` block in your output
-- [ ] `run_id` matches the dispatched run_id
-- [ ] `branch` matches `jarvis-*` pattern from dispatch
-- [ ] `commit_sha` is a real git SHA (`git rev-parse HEAD` after push)
-- [ ] `files_changed` is an array of modified file paths
-- [ ] `test_result` describes what passed/failed
-- [ ] `risk` describes the risk level
-- [ ] `pr_url` or `pr_skipped_reason` is present
+- New feature/custom behavior work starts with `/customize` (or a more specific `/add-*` skill if available)
+- Runtime/auth/container issue debugging starts with `/debug`
+- Incident triage, recurring-issue investigation, and incident lifecycle tracking starts with `/incident-debugger`
+- Incident registry is `.claude/progress/incident.json` (open/resolved state and lifecycle notes)
+- For browser/docs/repo tasks, use intent-matched MCP routing from `docs/operations/skills-vs-docs-map.md` (`chrome-devtools` preferred for browser tasks)
 
-If the runner finds missing fields, it will re-invoke you with the exact missing list.
+Primary ops:
 
-## Completion Contract
+- `/setup`, `/customize`, `/debug`, `/incident-debugger`, `/update`, `/convert-to-apple-container`
 
-Every code/fix task MUST end with a completion block:
+Channel/integration skills:
 
+- `/add-telegram`, `/add-telegram-swarm`, `/add-discord`, `/add-gmail`, `/add-voice-transcription`, `/add-parallel`, `/x-integration`
+
+Quality/governance helpers:
+
+- `/get-qodo-rules`, `/qodo-pr-resolver`
+
+## Development
+
+Run commands directly—don't tell the user to run them.
+
+```bash
+npm run dev          # Run with hot reload
+npm run build        # Compile TypeScript
+./container/build.sh # Rebuild agent container
 ```
-<completion>
-{
-  "run_id": "task-20260222-001",
-  "branch": "jarvis-featurename",
-  "commit_sha": "abc1234def5678901234567890abcdef12345678",
-  "files_changed": ["src/a.ts", "src/b.ts"],
-  "test_result": "all 12 tests pass",
-  "risk": "low — isolated to X module",
-  "pr_url": "https://github.com/..."
-}
-</completion>
+
+Jarvis ops entrypoint:
+
+```bash
+bash scripts/jarvis-ops.sh reliability
+bash scripts/jarvis-ops.sh trace --lane andy-developer --until <iso-timestamp>
+bash scripts/jarvis-ops.sh verify-worker-connectivity
+bash scripts/jarvis-ops.sh happiness-gate
 ```
 
-**commit_sha MUST be a valid 40-character git SHA** (e.g., `abc1234def5678901234567890abcdef12345678`).
+Runtime tuning env vars (see `.env.example` for defaults):
 
-Get it after push with: `git rev-parse HEAD` or from PR URL.
+- `IDLE_TIMEOUT`
+- `CONTAINER_TIMEOUT`
+- `CONTAINER_NO_OUTPUT_TIMEOUT`
+- `WA_RECONNECT_BASE_DELAY_MS`
+- `WA_RECONNECT_MAX_DELAY_MS`
+- `WA_RECONNECT_JITTER_MS`
+- `WA_RECONNECT_BURST_WINDOW_MS`
+- `WA_RECONNECT_BURST_THRESHOLD`
+- `WA_RECONNECT_COOLDOWN_MS`
 
-Prefer `"pr_url"` for code tasks. If push/PR is blocked, use `"pr_skipped_reason"` with the exact blocker and next step.
-Recommended quick check after push: `git ls-remote --heads origin <branch>`.
-When dispatch `output_contract.required_fields` includes `session_id` (continue runs), completion must include `"session_id": "<current-session-id>"`.
+Service management:
 
-## Communication
+```bash
+# macOS (launchd)
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # restart
 
-No markdown headings. Use *bold* and bullets.
+# Linux (systemd)
+systemctl --user start nanoclaw
+systemctl --user stop nanoclaw
+systemctl --user restart nanoclaw
+```

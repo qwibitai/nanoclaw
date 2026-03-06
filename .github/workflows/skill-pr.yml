@@ -6,6 +6,8 @@ on:
     paths:
       - '.claude/skills/**'
       - 'skills-engine/**'
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   # ── Job 1: Policy gate ────────────────────────────────────────────────

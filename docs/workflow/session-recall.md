@@ -61,8 +61,8 @@ bash scripts/qmd-context-recall.sh --bootstrap
    - `qctx --search-mode hybrid "<topic>"`
 4. Refresh session exports + index and commit exported markdown:
    - `bash scripts/qmd-session-sync.sh`
-5. Embeddings backlog exists (`qmd status` shows `Pending > 0`):
-   - `qmd embed`
+5. If embeddings are pending after sync:
+   - `qmd-session-sync.sh` auto-runs `qmd embed` when `qmd status` reports `Pending > 0`
 6. End of session handoff:
    - `qctx --close --next "<next step>" ...`
 7. Concept query with different wording (semantic fallback):
@@ -108,8 +108,9 @@ bash scripts/qmd-context-recall.sh --bootstrap
 1. `claude-sessions export --today`
 2. `claude-sessions codex-export --days <N>`
 3. `qmd update`
-4. `git add` export folder
-5. `git commit` export changes (if any)
+4. `qmd embed` (auto, only when `qmd status` reports pending vectors)
+5. `git add` export folder
+6. `git commit` export changes (if any)
 
 Example:
 

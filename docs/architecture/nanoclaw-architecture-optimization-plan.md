@@ -9,6 +9,7 @@
   3. Eliminate the running_without_container race path and verify no recurrence.
   4. Reduce WA reconnect churn while also proving/ disproving causal linkage to no-output failures.
   5. Keep incident open until evidence gates pass and user explicitly confirms resolution.
+  6. Enforce terminal-is-final worker lifecycle semantics to prevent watchdog/completion race regressions.
 
   ## Scope
 
@@ -38,6 +39,9 @@
   - WA_RECONNECT_BURST_WINDOW_MS default 600000.
   - WA_RECONNECT_BURST_THRESHOLD default 15.
   - WA_RECONNECT_COOLDOWN_MS default 60000.
+  - WORKER_PROBE_QUEUED_STALE_MS default 180000.
+  - WORKER_PROBE_RUNNING_STALE_MS default 180000.
+  - VERIFY_WORKER_PROBE_TIMEOUT_SEC default 240.
 
   2. src/types.ts ContainerConfig updates:
 
@@ -233,4 +237,3 @@
   4. IDLE_TIMEOUT default moves to 300000, with per-group override available for long-running lanes.
   5. Historical running_without_container rows remain as baseline history and are not retroactively
      rewritten.
-

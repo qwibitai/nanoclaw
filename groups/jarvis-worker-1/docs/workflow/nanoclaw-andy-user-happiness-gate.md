@@ -1,0 +1,83 @@
+# NanoClaw Andy User Happiness Gate
+
+Release gate for `andy-developer` user-facing behavior.
+
+This gate is intentionally user-centric:
+
+1. The response must arrive fast enough to feel immediate.
+2. The response content must directly answer the user.
+3. Internal state handling must remain correct and stable.
+4. The user should not need to remember internal IDs to get useful status.
+
+## When To Run
+
+Run before declaring any Andy/Jarvis reliability fix complete, and before any bloat-strip phase.
+
+## Pass Criteria
+
+### 1) User Perceived Latency
+
+- Greeting (`hi`-style) response within `<= 8s`
+- Progress query response within `<= 8s`
+- Natural status query (no internal IDs) response within `<= 8s`
+
+### 2) User Response Quality
+
+- Replies are direct and actionable (not generic filler).
+- Progress/status replies include concrete state details (what is running now, what just finished, what is queued next).
+- Replies do not contain stack traces, raw exceptions, or generic internal error dumps.
+- Default status questions should work without `req-*` IDs.
+
+### 3) Internal Correctness
+
+- Status/greeting probes do not trigger unintended worker dispatches.
+- Status/greeting probes do not create `andy_requests` intake rows.
+- Probe window must not introduce `running_without_container` regression failures.
+
+### 4) Human Satisfaction Check (Required)
+
+- Operator confirms: "As a user, I am satisfied with what I got, when I got it, and how the system behaved."
+- Tester uses judgment as a real user, not only regex/test-pass output.
+
+## Workflow
+
+1. Run the consolidated gate command:
+   - `bash scripts/jarvis-ops.sh happiness-gate`
+2. If probe fails, do not proceed to strip-down.
+3. Fix issue, rerun probe, and only continue when all checks pass.
+4. Add or update incident note with probe evidence before closing incident.
+
+## User POV Runbook (Required)
+
+Run this manual sequence at least once per release candidate:
+
+1. Send a normal development request to `andy-developer` (for example: "build a small app and add feature X").
+2. While work is in progress, ask naturally: "what are you working on right now?"
+3. Ask another follow-up naturally: "what is the current progress?"
+4. Confirm replies are immediate, specific, and understandable without `req-*` or internal IDs.
+5. Confirm answer quality feels human-helpful, not robotic boilerplate.
+
+This runbook is a hard requirement in addition to script checks.
+
+Equivalent expanded form (for debugging):
+
+- `bash scripts/jarvis-ops.sh status`
+- `node --experimental-transform-types scripts/test-andy-user-e2e.ts`
+
+## Probe Script
+
+`scripts/test-andy-user-e2e.ts` validates:
+
+- `@Andy hi` reply quality + latency
+- `@Andy what are you working on right now?` reply quality + latency
+- `@Andy what is the current progress` reply quality + latency
+- Internal guardrails for request/worker side effects
+- Baseline user-facing quality for no-ID status probing
+
+## Fail Handling
+
+Treat any failure as blocking for release:
+
+- UX latency/quality failure: fix router/frontdesk handling before release.
+- Internal correctness failure: fix state transitions/side effects before release.
+- Human satisfaction failure: tighten response style/behavior, then re-test.

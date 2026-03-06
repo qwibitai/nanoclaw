@@ -1,0 +1,8 @@
+model = "gpt-5.3-codex"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implement only the approved scope in mapped touch-set files.
+Keep unrelated files unchanged and validate with required workflow gates.
+If uncertain about contract boundaries, stop and surface the blocker.
+"""

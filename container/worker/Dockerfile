@@ -36,13 +36,17 @@ RUN mkdir -p /usr/local/lib/node_modules \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Worker runner (plain Node.js, no container-time dependency install)
+# Worker runner (compiled from runner/src/*.ts → runner/dist/*.js)
+# Uses async spawn + heartbeat instead of blocking spawnSync.
 WORKDIR /app
-COPY runner/index.js /app/index.js
+COPY runner/dist/index.js /app/index.js
+COPY runner/dist/lib.js /app/lib.js
 
 # OpenCode config via OPENCODE_CONFIG_CONTENT env var (highest precedence).
-# Keep a pinned free model; load group CLAUDE.md and skill path deterministically.
-ENV OPENCODE_CONFIG_CONTENT='{"model":"opencode/minimax-m2.5-free","autoupdate":false,"instructions":["/workspace/group/CLAUDE.md"],"skills":{"paths":["/home/node/.claude/skills"]},"mcp":{"deepwiki":{"type":"local","enabled":true,"command":["mcp-remote","https://mcp.deepwiki.com/mcp","--transport","streamable-http"]},"context7":{"type":"local","enabled":true,"command":["context7-mcp"]},"token-efficient":{"type":"local","enabled":true,"command":["node","/workspace/mcp-servers/token-efficient-mcp/dist/index.js"]},"chrome-devtools":{"type":"local","enabled":true,"command":["chrome-devtools-mcp","--headless","--isolated","--executablePath","/usr/bin/chromium","--chromeArg=--disable-dev-shm-usage","--chromeArg=--no-sandbox"]}}}'
+# Uses MiniMax-M2.5 via direct MiniMax API (Anthropic-compatible endpoint).
+# MINIMAX_API_KEY injected at runtime from host .env via runner secrets.
+# Fallback models use OpenRouter free tier if MiniMax key is unavailable.
+ENV OPENCODE_CONFIG_CONTENT='{"model":"minimax/MiniMax-M2.5","autoupdate":false,"provider":{"minimax":{"npm":"@ai-sdk/anthropic","options":{"baseURL":"https://api.minimax.io/anthropic/v1"},"models":{"MiniMax-M2.5":{"name":"MiniMax-M2.5"}}}},"instructions":["/workspace/group/CLAUDE.md"],"skills":{"paths":["/home/node/.claude/skills"]},"mcp":{"deepwiki":{"type":"local","enabled":true,"command":["mcp-remote","https://mcp.deepwiki.com/mcp","--transport","streamable-http"]},"context7":{"type":"local","enabled":true,"command":["context7-mcp"]},"token-efficient":{"type":"local","enabled":true,"command":["node","/workspace/mcp-servers/token-efficient-mcp/dist/index.js"]},"chrome-devtools":{"type":"local","enabled":true,"command":["chrome-devtools-mcp","--headless","--isolated","--executablePath","/usr/bin/chromium","--chromeArg=--disable-dev-shm-usage","--chromeArg=--no-sandbox"]}}}'
 ENV WORKER_GIT_NAME='Andy (openclaw-gurusharan)'
 ENV WORKER_GIT_EMAIL='openclaw-gurusharan@users.noreply.github.com'
 

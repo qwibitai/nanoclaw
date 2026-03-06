@@ -16,6 +16,7 @@ Worker tasks MUST be sent as a JSON object string. Plain text dispatch is reject
 | Field | Required | Notes |
 |-------|----------|-------|
 | `run_id` | Yes | Canonical run identifier, no whitespace, max 64 chars |
+| `request_id` | Yes | Coordinator request tracking id, no whitespace, max 64 chars |
 | `task_type` | Yes | `analyze`, `implement`, `fix`, `refactor`, `test`, `release`, `research`, `code` |
 | `context_intent` | Yes | `fresh` for new context, `continue` for follow-up context |
 | `input` | Yes | Exact task objective |
@@ -109,7 +110,7 @@ Use `mcp__nanoclaw__send_message` with `target_group_jid`:
 ```json
 {
   "target_group_jid": "jarvis-worker-1@nanoclaw",
-  "text": "{\"run_id\":\"task-20260222-001\",\"task_type\":\"implement\",\"context_intent\":\"fresh\",\"input\":\"Implement strict dispatch validation for worker runs\",\"repo\":\"openclaw-gurusharan/nanoclaw\",\"base_branch\":\"main\",\"branch\":\"jarvis-dispatch-contract\",\"acceptance_tests\":[\"npm run build\",\"npm test\"],\"output_contract\":{\"required_fields\":[\"run_id\",\"branch\",\"commit_sha\",\"files_changed\",\"test_result\",\"risk\",\"pr_url\"]},\"priority\":\"high\"}"
+  "text": "{\"run_id\":\"task-20260222-001\",\"request_id\":\"req-20260302-001\",\"task_type\":\"implement\",\"context_intent\":\"fresh\",\"input\":\"Implement strict dispatch validation for worker runs\",\"repo\":\"openclaw-gurusharan/nanoclaw\",\"base_branch\":\"main\",\"branch\":\"jarvis-dispatch-contract\",\"acceptance_tests\":[\"npm run build\",\"npm test\"],\"output_contract\":{\"required_fields\":[\"run_id\",\"branch\",\"commit_sha\",\"files_changed\",\"test_result\",\"risk\",\"pr_url\"]},\"priority\":\"high\"}"
 }
 ```
 

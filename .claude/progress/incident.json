@@ -1,58 +1,395 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-03T11:27:36.231242+00:00",
+  "updated_at": "2026-03-06T06:56:46.456593+00:00",
   "incidents": [
     {
-      "id": "incident-worker-connectivity-block-20260227",
-      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
+      "id": "incident-20260304T173206Z",
+      "title": "Andy status check-in misclassified as work intake",
       "status": "open",
-      "severity": "high",
-      "created_at": "2026-02-27T13:02:09.098285+00:00",
-      "updated_at": "2026-03-03T11:27:36.231173+00:00",
+      "severity": "unknown",
+      "created_at": "2026-03-04T17:32:06.597235+00:00",
+      "updated_at": "2026-03-06T06:56:46.456434+00:00",
       "summary": {
-        "symptom": "Workers are not connected and I don't have access to restart them. To restart the push task: start worker containers manually via deployment system, then I will dispatch push task. Alternative: push branches manually from local environment.",
-        "suspected_cause": "unknown",
-        "impact": "Valid worker output can be produced after auto-fail, but DB status remains failed because failed->review_requested transition is blocked; Andy reports workers disconnected and re-dispatch loops",
-        "next_action": "Implement watchdog guard for in-flight worker processing/repair handoff and optionally track no-container elapsed separately; then re-run probe + real multi-step dispatch and confirm no invalid transition logs"
+        "symptom": "Andy status check-in misclassified as work intake",
+        "suspected_cause": "Andy frontdesk classified work-check-in phrasing ('are you doing any work?') as work_intake, generating a frontdesk request and model-aut...",
+        "impact": "User received contextually incorrect reply in andy-developer chat, reducing trust in frontdesk status behavior",
+        "next_action": "Deploy updated classifier/status filter and verify with live WhatsApp check-in phrases before resolve"
       },
       "evidence": {
-        "bundle_count": 5,
-        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
-        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
-        "last_root_cause": "unknown",
-        "last_status": "warn",
-        "last_checked_at": "2026-03-03T07:04:47.530612+00:00",
-        "non_zero_command_count": 2,
-        "debug_summary": "root_cause=unknown; messages=58; worker_runs=0; dispatch_blocks=0; non_zero_commands=2"
+        "bundle_count": 0
       },
       "context": {
         "lane": "andy-developer"
       },
       "notes": [
         {
-          "ts": "2026-03-03T11:03:38.587917+00:00",
-          "author": "operator",
-          "text": "2026-03-03 16:32 IST: Replay-loop fix active (log shows 'Agent error after worker run terminalized...'). However worker execution path still unstable: probe containers emit no completion/stdout and hit stale_probe_run_watchdog/exit 137; verify-worker-connectivity remains FAIL (jarvis-worker-2 probe run probe-jarvis-worker-2-1772535666-8018 timed out in 120s while still running)."
+          "ts": "2026-03-06T06:54:21.392416+00:00",
+          "author": "codex",
+          "text": "Added linkage-audit (stale/unlinked request detection) and pre-dispatch hard gate integration to reduce accidental work dispatch propagation from misclassified frontdesk traffic."
         },
         {
-          "ts": "2026-03-03T11:04:43.115313+00:00",
-          "author": "operator",
-          "text": "2026-03-03 health check: preflight PASS(12/12, main lane inactivity warning); reliability WARN on recent container errors (18) and one running worker probe; status shows top failure reasons stale_probe_queued_watchdog=9, stale_probe_run_watchdog=4, worker execution failed=4; running_without_container historical count=14."
+          "ts": "2026-03-06T06:56:42.367499+00:00",
+          "author": "codex",
+          "text": "Historical context restored: regression probe on 2026-03-04 for '@Andy are you doing any work?' did not reproduce misclassification (status-style reply, no andy_request rows, no worker runs in probe window)."
         },
         {
-          "ts": "2026-03-03T11:27:36.231168+00:00",
-          "author": "operator",
-          "text": "2026-03-03 patch applied: coupled watchdog timeout path with runtime fallback stops (GroupQueue abort now supports activeContainerName/groupFolder fallback and supervisor passes run lifecycle metadata). Probe watchdog/no-output budgets tightened (110s/115s) to keep verify-worker-connectivity deterministic. Evidence after restart (pid 67118): probe runs now terminalize failed_timeout with timeout_ms=110000 and abort.detail=runtime_container_stop_fallback; stale queued/running counts remain 0; no in-flight probe backlog persists after probe/verify runs."
+          "ts": "2026-03-06T06:56:46.456431+00:00",
+          "author": "codex",
+          "text": "Historical context restored: targeted phrase probe at 2026-03-04T18:55:25Z returned status-style reply with no intake request and no matched worker run token."
         }
       ]
     },
     {
+      "id": "incident-20260304T110850Z",
+      "title": "Andy request linkage missing after successful dispatch",
+      "status": "open",
+      "severity": "medium",
+      "created_at": "2026-03-04T11:08:50.813404+00:00",
+      "updated_at": "2026-03-06T06:56:37.967976+00:00",
+      "summary": {
+        "symptom": "Live Build App request created worker run and reached review_requested, but andy_requests.request_id=req-1772622326048-pprimary remained coordinator_active with empty worker_run_id.",
+        "suspected_cause": "andy_no_output_timeout_watchdog_mismatch",
+        "impact": "User task flow stalls: intake/status replies succeed but no worker run is linked and task eventually fails with dispatch-block notice.",
+        "next_action": "Run scripts/test-andy-full-user-journey-e2e.ts against live runtime and confirm request_id -> worker_run_id linkage remains stable with zero new no_output_timeout artifacts in trace window."
+      },
+      "evidence": {
+        "bundle_count": 2,
+        "last_bundle_dir": "data/diagnostics/incidents/incident-20260304T194337Z",
+        "last_manifest_path": "data/diagnostics/incidents/incident-20260304T194337Z/manifest.json",
+        "last_root_cause": "andy_no_output_timeout_watchdog_mismatch",
+        "last_status": "warn",
+        "last_checked_at": "2026-03-04T19:44:17.162443+00:00",
+        "non_zero_command_count": 1,
+        "debug_summary": "Patched src/container-runner.ts to restore noOutput/idle config, add explicit timeout reason logging, and reset no-output watchdog on worker heartbeat lines; added regression coverage in src/container-runner.test.ts."
+      },
+      "context": {
+        "lane": "andy-developer",
+        "run_id": "userflow-1772622324403-vd1vh"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-05T17:31:00.115691+00:00",
+          "author": "operator",
+          "text": "Applied Apple-container patch in src/container-runtime.ts (runtime bin default container, health/list command adaptation, readonly mount adaptation) with passing typecheck/tests/build. Post-restart verification still blocked because app exits with FATAL 'No channels connected': src/channels/index.ts has no channel imports and src/channels contains only registry files in current workspace, so launchd service stays spawnscheduled."
+        },
+        {
+          "ts": "2026-03-06T06:54:15.429019+00:00",
+          "author": "codex",
+          "text": "P0 prevention controls added: jarvis-pre-dispatch-gate (dispatch lint + stale-state gate), jarvis-auth-health, and completion contract lint routed via jarvis-ops to reduce no-output timeout/watchdog drift before dispatch."
+        },
+        {
+          "ts": "2026-03-06T06:56:37.967972+00:00",
+          "author": "codex",
+          "text": "Historical context restored: 2026-03-05 root-cause isolation identified host no-output watchdog firing before final output when worker emitted heartbeat on stderr; prior fix path included container-runner watchdog reset on heartbeat and timeout-reason logging with regression test coverage."
+        }
+      ]
+    },
+    {
+      "id": "incident-20260305T180540Z",
+      "title": "Andy-Developer fails after restart with ERR_FS_CP_EINVAL in buildVolumeMounts",
+      "status": "open",
+      "severity": "medium",
+      "created_at": "2026-03-05T18:05:40.429157+00:00",
+      "updated_at": "2026-03-06T06:56:32.738853+00:00",
+      "summary": {
+        "symptom": "Agent error: src and dest cannot be the same .../.claude/skills/.docs",
+        "suspected_cause": "skills sync attempted problematic symlink copies (.docs/self-path + symlink destination collisions) and Apple container runtime fails whe...",
+        "impact": "andy-developer agent failed to start containers and retried, causing no effective responses",
+        "next_action": "keep --user disabled for Apple container runtime and monitor live runs; address separate stale worker_runs record"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-06T05:41:39.648923+00:00",
+          "author": "codex",
+          "text": "Workflow update: scripts/qmd-session-sync.sh now auto-runs qmd embed when qmd status reports pending vectors; mirrored in docs/workflow/session-recall.md."
+        },
+        {
+          "ts": "2026-03-06T06:54:26.690371+00:00",
+          "author": "codex",
+          "text": "P0 tooling hardening shipped in scripts/jarvis-ops.sh with new auth-health, linkage-audit, completion-lint, and pre-dispatch-gate commands; these add deterministic guardrails and JSON evidence outputs for workflow governance."
+        },
+        {
+          "ts": "2026-03-06T06:56:32.738850+00:00",
+          "author": "codex",
+          "text": "Historical context restored: post-fix runtime validation on pid 16298 showed andy-developer spawned container, produced output, and sent message; remaining reliability issue at that point was stale run userflow-1772654367569-bsprb (jarvis-worker-1, 2026-03-04)."
+        }
+      ]
+    },
+    {
+      "id": "incident-20260304T110817Z",
+      "title": "Andy full-journey E2E script ack parser drift",
+      "status": "resolved",
+      "severity": "low",
+      "created_at": "2026-03-04T11:08:17.595599+00:00",
+      "updated_at": "2026-03-04T12:00:00.000000+00:00",
+      "summary": {
+        "symptom": "scripts/test-andy-full-user-journey-e2e.ts failed at intake-ack detection even though live dispatch succeeded and worker run reached review_requested.",
+        "suspected_cause": "E2E parser matched legacy 'Tracking this as' text while andy-developer emits conversational ack.",
+        "impact": "False-negative E2E failures can mask true runtime health and reduce confidence in regression gate.",
+        "next_action": "None; ack matcher updated to match current conversational text."
+      },
+      "evidence": {
+        "bundle_count": 0,
+        "debug_summary": "PASS: ack matcher now matches 'coordinating this with Jarvis'/'Got it'; request_id sourced from DB row"
+      },
+      "context": {
+        "lane": "andy-developer",
+        "run_id": "userflow-1772622324403-vd1vh"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-04T11:08:17.595599+00:00",
+          "author": "codex",
+          "text": "reported: scripts/test-andy-full-user-journey-e2e.ts failed at intake-ack detection even though live dispatch succeeded and worker run reached review_requested."
+        },
+        {
+          "ts": "2026-03-04T11:08:25.843363+00:00",
+          "author": "codex",
+          "text": "Parser mismatch detail: script currently expects intake text containing Tracking this as req-<id>; live andy-developer response was conversational ('Got it. I\\'m coordinating this with Jarvis now') followed by dispatch confirmation. Worker run userflow-1772622324403-vd1vh reached review_requested at 2026-03-04T11:07:14Z."
+        },
+        {
+          "ts": "2026-03-04T12:00:00.000000+00:00",
+          "author": "claude-code",
+          "text": "Fix applied: ack matcher updated to match 'coordinating this with Jarvis'/'Got it'. Removed extractRequestIdFromAck; request_id now sourced from DB andy_requests row. Happiness gate PASS confirms live ack path works."
+        }
+      ],
+      "resolution": {
+        "summary": "E2E ack matcher updated to match current conversational ack text; request_id sourced from DB row.",
+        "confirmed_by_user": "",
+        "confirmed_at": "2026-03-04T12:00:00.000000+00:00",
+        "verification": "happiness-gate PASS with greeting/status/progress latency under 1s; build + 500 tests PASS",
+        "fix_reference": "scripts/test-andy-full-user-journey-e2e.ts",
+        "resolved_by": "claude-code"
+      },
+      "resolved_at": "2026-03-04T12:00:00.000000+00:00"
+    },
+    {
+      "id": "incident-20260304T080739Z",
+      "title": "format:check fails due existing src formatting drift",
+      "status": "resolved",
+      "severity": "low",
+      "created_at": "2026-03-04T08:07:39.300927+00:00",
+      "updated_at": "2026-03-04T12:00:00.000000+00:00",
+      "summary": {
+        "symptom": "npm run format:check reports style issues across multiple src/*.ts files",
+        "suspected_cause": "pre_existing_format_drift",
+        "impact": "CI format gate cannot pass until files are normalized",
+        "next_action": "None; all 18 files formatted and format:check passes clean."
+      },
+      "evidence": {
+        "bundle_count": 0,
+        "debug_summary": "PASS: prettier --check src/**/*.ts reports 'All matched files use Prettier code style!'"
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-04T08:07:39.300927+00:00",
+          "author": "user",
+          "text": "reported: npm run format:check reports style issues across multiple src/*.ts files"
+        },
+        {
+          "ts": "2026-03-04T12:00:00.000000+00:00",
+          "author": "claude-code",
+          "text": "Fix applied: prettier --write run on all 18 flagged src/**/*.ts files. format:check now passes clean."
+        }
+      ],
+      "resolution": {
+        "summary": "All 18 src files formatted with Prettier; format:check gate passes.",
+        "confirmed_by_user": "",
+        "confirmed_at": "2026-03-04T12:00:00.000000+00:00",
+        "verification": "npm run format:check exits 0 with 'All matched files use Prettier code style!'",
+        "fix_reference": "18 src/**/*.ts files formatted",
+        "resolved_by": "claude-code"
+      },
+      "resolved_at": "2026-03-04T12:00:00.000000+00:00"
+    },
+    {
+      "id": "incident-tooling-governance-drift-20260304",
+      "title": "Hook/subagent/built-in governance drift risk",
+      "status": "resolved",
+      "severity": "medium",
+      "created_at": "2026-03-04T09:23:20.918041+00:00",
+      "updated_at": "2026-03-04T11:11:33.388352+00:00",
+      "summary": {
+        "symptom": "Hooks and subagent surfaces can drift; built-in-first usage is not hard-enforced.",
+        "suspected_cause": "Missing enforceable gate for hook registration, codex subagent wiring, and built-in-first routing.",
+        "impact": "Config/process slop and duplicate tooling creation risk.",
+        "next_action": "Run scripts/check-tooling-governance.sh weekly via weekly-slop loop and CI; ratchet budget downward intentionally."
+      },
+      "evidence": {
+        "bundle_count": 0,
+        "debug_summary": "PASS: check-tooling-governance + workflow-contract + mirror checks after wiring."
+      },
+      "notes": [
+        {
+          "ts": "2026-03-04T09:23:20.918041+00:00",
+          "author": "codex",
+          "text": "reported: Hooks and subagent surfaces can drift; built-in-first usage is not hard-enforced."
+        },
+        {
+          "ts": "2026-03-04T09:27:13.614128+00:00",
+          "author": "codex",
+          "text": "Implemented deterministic tooling governance lint (hooks/subagents/built-ins), budget ratchet, and wired checks into workflow wrappers + CI."
+        }
+      ],
+      "resolution": {
+        "summary": "Governance drift controls are now enforceable and currently passing.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:33.388352+00:00",
+        "verification": "check-tooling-governance PASS with ratcheted budget and stale-allow detection",
+        "fix_reference": "scripts/check-tooling-governance.sh and docs/operations/tooling-governance-budget.json",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:33.388352+00:00"
+    },
+    {
+      "id": "incident-20260304T090843Z",
+      "title": "jarvis-acceptance-gate mktemp template incompatible on macOS",
+      "status": "resolved",
+      "severity": "low",
+      "created_at": "2026-03-04T09:08:43.171474+00:00",
+      "updated_at": "2026-03-04T11:11:33.161626+00:00",
+      "summary": {
+        "symptom": "scripts/workflow/verify.sh failed on acceptance-gate with mktemp File exists during build log capture",
+        "suspected_cause": "mktemp template included suffix after XXXXXX causing collision/compatibility issues on macOS",
+        "impact": "deterministic verify wrapper could fail before reporting real gate results",
+        "next_action": "keep mktemp template suffix-free and monitor wrapper runs for recurrence"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-04T09:08:43.171474+00:00",
+          "author": "operator",
+          "text": "reported: scripts/workflow/verify.sh failed on acceptance-gate with mktemp File exists during build log capture"
+        },
+        {
+          "ts": "2026-03-04T09:08:46.837625+00:00",
+          "author": "operator",
+          "text": "Applied fix in scripts/jarvis-acceptance-gate.sh: mktemp template now /tmp/jarvis-acceptance-<check>.XXXXXX. Re-ran scripts/workflow/verify.sh --skip-tests --skip-connectivity: PASS."
+        }
+      ],
+      "resolution": {
+        "summary": "Acceptance gate mktemp template compatibility issue corrected and no recurrence in live acceptance runs.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:33.161626+00:00",
+        "verification": "Acceptance gate executed successfully after mktemp template correction; no mktemp collision errors observed",
+        "fix_reference": "scripts/jarvis-acceptance-gate.sh",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:33.161626+00:00"
+    },
+    {
+      "id": "incident-20260303T073709Z",
+      "title": "verify-worker-connectivity preflight false-negative during transient launchd/container status window",
+      "status": "resolved",
+      "severity": "unknown",
+      "created_at": "2026-03-03T07:37:09.694540+00:00",
+      "updated_at": "2026-03-04T11:11:32.960247+00:00",
+      "summary": {
+        "symptom": "verify-worker-connectivity preflight false-negative during transient launchd/container status window",
+        "suspected_cause": "preflight check in verify-worker-connectivity intermittently observes launchd/container status as down while standalone preflight passes...",
+        "impact": "verify-worker-connectivity returns FAIL despite successful worker probe and stale-state gates, creating noisy reliability signal",
+        "next_action": "stabilize service/runtime health sampling in verify prechecks or split hard-gate and advisory precheck modes"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-03T07:51:45.895745+00:00",
+          "author": "operator",
+          "text": "2026-03-03 mitigation applied: verify-worker-connectivity preflight changed to advisory; functional gates (probe dispatch + lane evidence + stale-state) remain hard-fail. Command now returns PASS with WARN preflight in transient windows."
+        },
+        {
+          "ts": "2026-03-03T08:31:32.532338+00:00",
+          "author": "operator",
+          "text": "2026-03-03 deterministic gate update: preflight now uses launchctl print state checks, prints concrete failure detail, and verify-worker-connectivity hard-fails preflight before probe to avoid mixed signals. Added permission-block hint when container checks fail with Operation not permitted in restricted contexts."
+        },
+        {
+          "ts": "2026-03-03T08:33:25.193172+00:00",
+          "author": "operator",
+          "text": "2026-03-03 follow-up: preflight stale-queue check now distinguishes non-probe vs probe runs. Non-probe stale queue remains hard-fail; stale probe backlog is warning, preventing diagnostics deadlock while preserving signal."
+        }
+      ],
+      "resolution": {
+        "summary": "Transient preflight false-negative no longer reproducing in live out-of-sandbox validation.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:32.960247+00:00",
+        "verification": "verify-worker-connectivity PASS with preflight PASS and probe PASS on 2026-03-04",
+        "fix_reference": "scripts/jarvis-verify-worker-connectivity.sh",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:32.960247+00:00"
+    },
+    {
+      "id": "incident-20260303T072358Z",
+      "title": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
+      "status": "resolved",
+      "severity": "unknown",
+      "created_at": "2026-03-03T07:23:58.677764+00:00",
+      "updated_at": "2026-03-04T11:11:32.758418+00:00",
+      "summary": {
+        "symptom": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
+        "suspected_cause": "worker completion contract drift: first completion block used stale branch, causing branch mismatch validation",
+        "impact": "verify-worker-connectivity can fail even when worker runtime is healthy; creates false-negative reliability signal for mission gate",
+        "next_action": "tighten worker probe completion validation/retry path so stale first completion blocks do not leave failed_contract terminal state"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "jarvis-worker-1"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-03T07:43:32.945831+00:00",
+          "author": "operator",
+          "text": "2026-03-03: fixed completion parser to prefer latest valid <completion> block (src/dispatch-validator.ts). Added regression test in src/jarvis-worker-dispatch.test.ts. Focused probe run probe-jarvis-worker-1-1772523711-18103 PASS review_requested."
+        },
+        {
+          "ts": "2026-03-03T07:47:27.462052+00:00",
+          "author": "operator",
+          "text": "2026-03-03 post-fix validation: verify-worker-connectivity --skip-prechecks PASS with jarvis-worker-1 review_requested (probe-jarvis-worker-1-1772523843-18433) and jarvis-worker-2 review_requested (probe-jarvis-worker-2-1772523906-6470)."
+        },
+        {
+          "ts": "2026-03-03T11:04:43.148423+00:00",
+          "author": "operator",
+          "text": "2026-03-03 status confirms one dispatch-block artifact exists (request_id validation mismatch on probe run); branch/contract validation noise still impacts connectivity signal."
+        }
+      ],
+      "resolution": {
+        "summary": "Completion contract branch mismatch no longer reproduced in live probe and live userflow dispatch.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:32.758418+00:00",
+        "verification": "Recent probe and userflow runs reached review_requested with accepted completion contract and zero dispatch blocks",
+        "fix_reference": "src/dispatch-validator.ts and src/jarvis-worker-dispatch.test.ts",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:32.758418+00:00"
+    },
+    {
       "id": "incident-20260301T164404Z",
       "title": "Andy greeting delayed after hi due to no-output run",
-      "status": "open",
+      "status": "resolved",
       "severity": "unknown",
       "created_at": "2026-03-01T16:44:04.869450+00:00",
-      "updated_at": "2026-03-03T11:05:06.737324+00:00",
+      "updated_at": "2026-03-04T11:11:32.555820+00:00",
       "summary": {
         "symptom": "Andy greeting delayed after hi due to no-output run",
         "suspected_cause": "andy_no_output_timeout",
@@ -88,81 +425,69 @@
           "author": "operator",
           "text": "2026-03-03 watch/log check still shows no-output and stale probe watchdog patterns; andy responsiveness risk remains open pending fast-path greeting and watchdog behavior hardening."
         }
-      ]
+      ],
+      "resolution": {
+        "summary": "Andy user-facing responsiveness recovered for greeting/status/progress path.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:32.555820+00:00",
+        "verification": "happiness-gate PASS on 2026-03-04 with greeting/status/progress latencies under 1200ms",
+        "fix_reference": "scripts/test-andy-user-e2e.ts and scripts/jarvis-happiness-gate.sh",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:32.555820+00:00"
     },
     {
-      "id": "incident-20260303T072358Z",
-      "title": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
-      "status": "open",
-      "severity": "unknown",
-      "created_at": "2026-03-03T07:23:58.677764+00:00",
-      "updated_at": "2026-03-03T11:04:43.148427+00:00",
+      "id": "incident-worker-connectivity-block-20260227",
+      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
+      "status": "resolved",
+      "severity": "high",
+      "created_at": "2026-02-27T13:02:09.098285+00:00",
+      "updated_at": "2026-03-04T11:11:32.354307+00:00",
       "summary": {
-        "symptom": "jarvis-worker-1 probe failed_contract due completion branch mismatch",
-        "suspected_cause": "worker completion contract drift: first completion block used stale branch, causing branch mismatch validation",
-        "impact": "verify-worker-connectivity can fail even when worker runtime is healthy; creates false-negative reliability signal for mission gate",
-        "next_action": "tighten worker probe completion validation/retry path so stale first completion blocks do not leave failed_contract terminal state"
+        "symptom": "Workers are not connected and I don't have access to restart them. To restart the push task: start worker containers manually via deployment system, then I will dispatch push task. Alternative: push branches manually from local environment.",
+        "suspected_cause": "unknown",
+        "impact": "Valid worker output can be produced after auto-fail, but DB status remains failed because failed->review_requested transition is blocked; Andy reports workers disconnected and re-dispatch loops",
+        "next_action": "Implement watchdog guard for in-flight worker processing/repair handoff and optionally track no-container elapsed separately; then re-run probe + real multi-step dispatch and confirm no invalid transition logs"
       },
       "evidence": {
-        "bundle_count": 0
-      },
-      "context": {
-        "lane": "jarvis-worker-1"
-      },
-      "notes": [
-        {
-          "ts": "2026-03-03T07:43:32.945831+00:00",
-          "author": "operator",
-          "text": "2026-03-03: fixed completion parser to prefer latest valid <completion> block (src/dispatch-validator.ts). Added regression test in src/jarvis-worker-dispatch.test.ts. Focused probe run probe-jarvis-worker-1-1772523711-18103 PASS review_requested."
-        },
-        {
-          "ts": "2026-03-03T07:47:27.462052+00:00",
-          "author": "operator",
-          "text": "2026-03-03 post-fix validation: verify-worker-connectivity --skip-prechecks PASS with jarvis-worker-1 review_requested (probe-jarvis-worker-1-1772523843-18433) and jarvis-worker-2 review_requested (probe-jarvis-worker-2-1772523906-6470)."
-        },
-        {
-          "ts": "2026-03-03T11:04:43.148423+00:00",
-          "author": "operator",
-          "text": "2026-03-03 status confirms one dispatch-block artifact exists (request_id validation mismatch on probe run); branch/contract validation noise still impacts connectivity signal."
-        }
-      ]
-    },
-    {
-      "id": "incident-20260303T073709Z",
-      "title": "verify-worker-connectivity preflight false-negative during transient launchd/container status window",
-      "status": "open",
-      "severity": "unknown",
-      "created_at": "2026-03-03T07:37:09.694540+00:00",
-      "updated_at": "2026-03-03T08:33:25.193175+00:00",
-      "summary": {
-        "symptom": "verify-worker-connectivity preflight false-negative during transient launchd/container status window",
-        "suspected_cause": "preflight check in verify-worker-connectivity intermittently observes launchd/container status as down while standalone preflight passes...",
-        "impact": "verify-worker-connectivity returns FAIL despite successful worker probe and stale-state gates, creating noisy reliability signal",
-        "next_action": "stabilize service/runtime health sampling in verify prechecks or split hard-gate and advisory precheck modes"
-      },
-      "evidence": {
-        "bundle_count": 0
+        "bundle_count": 5,
+        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
+        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
+        "last_root_cause": "unknown",
+        "last_status": "warn",
+        "last_checked_at": "2026-03-03T07:04:47.530612+00:00",
+        "non_zero_command_count": 2,
+        "debug_summary": "root_cause=unknown; messages=58; worker_runs=0; dispatch_blocks=0; non_zero_commands=2"
       },
       "context": {
         "lane": "andy-developer"
       },
       "notes": [
         {
-          "ts": "2026-03-03T07:51:45.895745+00:00",
+          "ts": "2026-03-03T18:24:15.264013+00:00",
           "author": "operator",
-          "text": "2026-03-03 mitigation applied: verify-worker-connectivity preflight changed to advisory; functional gates (probe dispatch + lane evidence + stale-state) remain hard-fail. Command now returns PASS with WARN preflight in transient windows."
+          "text": "2026-03-03 implementation validation: applied terminal-is-final race fix (no ungated completion fallback), probe watchdog moved to env-backed 180s with verify guard 240s. After daemon restart (pid 88861), verify-worker-connectivity still FAILS but reason shifted from stale_probe_run_watchdog to worker_execution_timeout (container no_output_timeout after 115000ms) for probe runs probe-jarvis-worker-1-1772561978-20667 and probe-jarvis-worker-2-1772562102-29270. No new 'falling back to ungated completion' or invalid completion transition logs for these runs."
         },
         {
-          "ts": "2026-03-03T08:31:32.532338+00:00",
-          "author": "operator",
-          "text": "2026-03-03 deterministic gate update: preflight now uses launchctl print state checks, prints concrete failure detail, and verify-worker-connectivity hard-fails preflight before probe to avoid mixed signals. Added permission-block hint when container checks fail with Operation not permitted in restricted contexts."
+          "ts": "2026-03-04T09:35:02.357210+00:00",
+          "author": "codex",
+          "text": "2026-03-04 optimization workflow run: acceptance-gate failed at worker_connectivity (exit 127). Evidence: data/diagnostics/acceptance/acceptance-20260304T093428Z.json. Failure detail shows bash compatibility issue: mapfile command not found in scripts/jarvis-worker-probe.sh:83 and scripts/jarvis-verify-worker-connectivity.sh:152."
         },
         {
-          "ts": "2026-03-03T08:33:25.193172+00:00",
-          "author": "operator",
-          "text": "2026-03-03 follow-up: preflight stale-queue check now distinguishes non-probe vs probe runs. Non-probe stale queue remains hard-fail; stale probe backlog is warning, preventing diagnostics deadlock while preserving signal."
+          "ts": "2026-03-04T10:55:42.301499+00:00",
+          "author": "codex",
+          "text": "2026-03-04 fix applied: replaced mapfile usage in worker probe/connectivity scripts for bash 3 compatibility. Acceptance gate PASS with evidence data/diagnostics/acceptance/acceptance-20260304T105215Z.json (run outside sandbox to avoid permission artifacts)."
         }
-      ]
+      ],
+      "resolution": {
+        "summary": "Worker connectivity gate stabilized; live probe + acceptance gate now pass with review_requested terminals.",
+        "confirmed_by_user": "incidents which came out passed can be marked resolved",
+        "confirmed_at": "2026-03-04T11:11:32.354307+00:00",
+        "verification": "verify-worker-connectivity PASS and acceptance evidence data/diagnostics/acceptance/acceptance-20260304T105215Z.json",
+        "fix_reference": "scripts/jarvis-worker-probe.sh, scripts/jarvis-verify-worker-connectivity.sh, scripts/jarvis-acceptance-gate.sh",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-04T11:11:32.354307+00:00"
     }
   ]
 }

@@ -1,0 +1,8 @@
+model = "gpt-5.3-codex"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Stay in exploration mode.
+Map real execution paths, cite exact files/symbols, and avoid code edits.
+Prefer targeted search/read commands over broad scans.
+"""

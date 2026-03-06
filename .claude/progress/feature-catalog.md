@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-03T07:59:53.064Z
+Generated: 2026-03-06T09:22:35.021Z
 Project: nanoclaw
 
 ## Features
@@ -41,6 +41,8 @@ Project: nanoclaw
 - Shared Files:
   - src/config.ts
   - src/types.ts
+- Validation Warnings:
+  - missing file: src/whatsapp-auth.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/channels/whatsapp.test.ts
@@ -60,6 +62,9 @@ Project: nanoclaw
 - Shared Files:
   - src/dispatch-validator.ts
   - src/ipc.ts
+- Validation Warnings:
+  - missing file: src/event-bridge.ts
+  - missing test: src/jarvis-worker-dispatch.test.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
@@ -79,6 +84,9 @@ Project: nanoclaw
   - src/worker-run-supervisor.test.ts
 - Shared Files:
   - src/worker-run-supervisor.ts
+- Validation Warnings:
+  - missing file: src/worker-run-supervisor.ts
+  - missing test: src/worker-run-supervisor.test.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts
@@ -160,6 +168,10 @@ Project: nanoclaw
   - src/dispatch-validator.ts
   - src/ipc.ts
   - src/worker-run-supervisor.ts
+- Validation Warnings:
+  - missing file: src/worker-run-supervisor.ts
+  - missing test: src/jarvis-worker-dispatch.test.ts
+  - missing test: src/worker-run-supervisor.test.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts
@@ -246,6 +258,9 @@ Project: nanoclaw
   - skills-engine/__tests__/rebase.test.ts
   - skills-engine/__tests__/uninstall.test.ts
   - skills-engine/__tests__/update.test.ts
+- Validation Warnings:
+  - missing file: scripts/post-update.ts
+  - missing file: scripts/rebase.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run skills-engine/__tests__/apply.test.ts skills-engine/__tests__/rebase.test.ts skills-engine/__tests__/uninstall.test.ts skills-engine/__tests__/update.test.ts
@@ -294,6 +309,8 @@ Project: nanoclaw
   - .claude/skills/update/SKILL.md
 - Tests (0):
   - none
+- Validation Warnings:
+  - missing file: .claude/skills/incident-debugger/SKILL.md
 - Suggested Verify:
   - npm run typecheck
 

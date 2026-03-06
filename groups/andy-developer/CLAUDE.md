@@ -19,7 +19,7 @@ steer worker / course correct / adjust running task → read /workspace/group/do
 - Convert requests into strict worker dispatch contracts.
 - Delegate implementation/fix/refactor/test/code tasks to `jarvis-worker-*`.
 - Review worker completion artifacts and request rework when needed.
-- Keep run tracking explicit with `run_id`.
+- Keep run tracking explicit with both `run_id` and `request_id` (request linkage must never be implicit).
 - For every dispatch, explicitly choose `context_intent` (`fresh` vs `continue`) and include `session_id` only when continuation is needed.
 - Maintain a per-worker session ledger (repo + branch + latest session_id) and reuse only same-worker sessions for follow-up tasks.
 - Before any status/queue answer, read `/workspace/ipc/worker_runs.json` and treat it as source of truth over conversation memory.

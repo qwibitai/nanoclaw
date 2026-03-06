@@ -56,6 +56,12 @@ Before run, host copies skills/rules to `data/sessions/<group>/.opencode/*` with
 Hidden metadata entries are skipped and source/destination overlap is rejected.
 This prevents broken symlink targets and copy-collision failures inside the worker container.
 
+Agent-runner source sync guardrail:
+
+- Host stages `container/agent-runner/src` into `data/sessions/<group>/agent-runner-src` with sync metadata.
+- If staged source diverges from tracked sync baseline due local lane edits, host logs drift and preserves local edits.
+- If legacy staged source has no sync metadata and drifts from repo baseline, host backs it up and resets to repo baseline to avoid silent runtime contract drift.
+
 ## Role-Based Prebaked Bundles
 
 Bundles are group-aware:
@@ -144,6 +150,17 @@ Worker/Andy container runtime now uses three timeout layers:
 2. `CONTAINER_NO_OUTPUT_TIMEOUT` (default `720000` ms): fail-fast when no streamed marker output appears.
 3. `CONTAINER_TIMEOUT` (default `1800000` ms): hard safety timeout (effective hard timeout is at least `IDLE_TIMEOUT + 30000`).
 
+Probe watchdog controls for worker lanes:
+
+1. `WORKER_PROBE_QUEUED_STALE_MS` (default `180000` ms): stale threshold for queued/provisioning probe runs.
+2. `WORKER_PROBE_RUNNING_STALE_MS` (default `180000` ms): stale threshold for running/stopping probe runs.
+3. `VERIFY_WORKER_PROBE_TIMEOUT_SEC` (default `240` s): verify gate timeout per probe lane.
+
+Verification guardrail:
+
+- `--probe-timeout-sec` must be greater than `WORKER_PROBE_RUNNING_STALE_MS` plus safety margin.
+- Current default inequality is `240s > 180s + 10s`, which avoids deterministic false-negative probe failures.
+
 Timeout artifacts include explicit reason codes:
 
 - `no_output_timeout`
@@ -165,3 +182,12 @@ Token counts are zero-filled until OpenCode exposes deterministic per-call usage
 1. Worker behavior is contract-driven (`dispatch-validator.ts`), not prompt-only.
 2. Non-worker groups remain on the Claude Agent SDK runtime path.
 3. Worker-specific behavior is bounded by folder/image detection and does not alter main-group orchestration semantics.
+
+## Agent Routing
+
+| Step | Agent | Mode | Notes |
+|------|-------|------|-------|
+| Runtime architecture decisions | opus | — | Requires cross-system judgment |
+| Config mapping | scout | fg | Read worker config, env vars, model fallback chains |
+| Dockerfile reads | scout | fg | Scan container definitions and mount paths |
+| Build verification | verifier | fg | `./container/worker/build.sh` exit code |

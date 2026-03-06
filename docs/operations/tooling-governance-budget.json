@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "claude_settings": {
+    "max_allow_entries": 50,
+    "max_wildcard_allow_entries": 40,
+    "required_pretool_hook_paths": [
+      ".claude/hooks/risk-tier-pretool-guard.sh"
+    ],
+    "required_posttool_hook_paths": [
+      ".claude/hooks/posttool-workflow-sync-check.sh"
+    ]
+  },
+  "codex_agents": {
+    "required_roles": [
+      "explorer",
+      "reviewer",
+      "monitor",
+      "worker"
+    ]
+  },
+  "subagents": {
+    "required_agent_files": [
+      "scout",
+      "implementer",
+      "verifier"
+    ],
+    "required_catalog_entries": [
+      "plan-architect",
+      "feature-worker",
+      "verify-app",
+      "contract-auditor",
+      "incident-regression",
+      "code-simplifier",
+      "docs-sync-checker"
+    ],
+    "required_adapter_entries": [
+      "plan-architect",
+      "feature-worker",
+      "verify-app",
+      "contract-auditor",
+      "incident-regression"
+    ]
+  },
+  "builtins": {
+    "required_jarvis_ops_commands": [
+      "preflight",
+      "reliability",
+      "acceptance-gate",
+      "status",
+      "watch",
+      "trace",
+      "message-timeline",
+      "hi-timeline",
+      "verify-worker-connectivity",
+      "happiness-gate",
+      "dispatch-lint",
+      "db-doctor",
+      "incident",
+      "probe",
+      "hotspots",
+      "incident-bundle",
+      "recover",
+      "smoke"
+    ],
+    "required_mcp_router_entries": [
+      "token-efficient",
+      "chrome-devtools",
+      "context7",
+      "deepwiki"
+    ]
+  }
+}

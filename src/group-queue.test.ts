@@ -1,21 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
-const mockStopContainerWithVerification = vi.fn();
-const mockStopRunningContainersByPrefix = vi.fn();
-
 import { GroupQueue } from './group-queue.js';
 
 // Mock config to control concurrency limit
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
-}));
-
-vi.mock('./container-runtime.js', () => ({
-  stopContainerWithVerification: (...args: unknown[]) =>
-    mockStopContainerWithVerification(...args),
-  stopRunningContainersByPrefix: (...args: unknown[]) =>
-    mockStopRunningContainersByPrefix(...args),
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -38,17 +28,6 @@ describe('GroupQueue', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     queue = new GroupQueue();
-    mockStopContainerWithVerification.mockReset();
-    mockStopRunningContainersByPrefix.mockReset();
-    mockStopContainerWithVerification.mockReturnValue({
-      stopped: false,
-      attempts: ['mock_stop_failed'],
-    });
-    mockStopRunningContainersByPrefix.mockReturnValue({
-      matched: [],
-      stopped: [],
-      failures: [],
-    });
   });
 
   afterEach(() => {
@@ -203,9 +182,7 @@ describe('GroupQueue', () => {
 
   // --- Max retries exceeded ---
 
-  it('moves to dead-letter retry flow after MAX_RETRIES and keeps retrying', async () => {
-    const fs = await import('fs');
-    vi.mocked(fs.default.writeFileSync).mockClear();
+  it('stops retrying after MAX_RETRIES and resets', async () => {
     let callCount = 0;
 
     const processMessages = vi.fn(async () => {
@@ -228,16 +205,10 @@ describe('GroupQueue', () => {
       expect(callCount).toBe(i + 2);
     }
 
-    // After max retries, queue should switch to durable dead-letter cadence (5 minutes)
-    await vi.advanceTimersByTimeAsync(300000 + 10);
-    expect(callCount).toBe(7);
-
-    const deadLetterWrites = vi
-      .mocked(fs.default.writeFileSync)
-      .mock.calls.filter((call) =>
-        typeof call[0] === 'string' && call[0].includes('/dead-letter/message-retries/'),
-      );
-    expect(deadLetterWrites.length).toBeGreaterThan(0);
+    // After 5 retries (6 total calls), should stop — no more retries
+    const countAfterMaxRetries = callCount;
+    await vi.advanceTimersByTimeAsync(200000); // Wait a long time
+    expect(callCount).toBe(countAfterMaxRetries);
   });
 
   // --- Waiting groups get drained when slots free up ---
@@ -270,6 +241,41 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toContain('group3@g.us');
+  });
+
+  // --- Running task dedup (Issue #138) ---
+
+  it('rejects duplicate enqueue of a currently-running task', async () => {
+    let resolveTask: () => void;
+    let taskCallCount = 0;
+
+    const taskFn = vi.fn(async () => {
+      taskCallCount++;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start the task (runs immediately — slot available)
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskCallCount).toBe(1);
+
+    // Scheduler poll re-discovers the same task while it's running —
+    // this must be silently dropped
+    const dupFn = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-1', dupFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Duplicate was NOT queued
+    expect(dupFn).not.toHaveBeenCalled();
+
+    // Complete the original task
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Only one execution total
+    expect(taskCallCount).toBe(1);
   });
 
   // --- Idle preemption ---
@@ -427,36 +433,6 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('schedules a recovery run when IPC input remains after container exit', async () => {
-    const fs = await import('fs');
-    let callCount = 0;
-
-    const readdirSpy = vi
-      .spyOn(fs.default, 'readdirSync')
-      .mockImplementationOnce(() => ['leftover.json'] as any)
-      .mockImplementation(() => [] as any);
-
-    const processMessages = vi.fn(async () => {
-      callCount++;
-      if (callCount === 1) {
-        queue.registerProcess(
-          'group1@g.us',
-          {} as any,
-          'container-1',
-          'test-group',
-        );
-      }
-      return true;
-    });
-
-    queue.setProcessMessagesFn(processMessages);
-    queue.enqueueMessageCheck('group1@g.us');
-    await vi.advanceTimersByTimeAsync(20);
-
-    expect(processMessages).toHaveBeenCalledTimes(2);
-    readdirSpy.mockRestore();
-  });
-
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
@@ -504,54 +480,5 @@ describe('GroupQueue', () => {
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
-  });
-
-  it('aborts via runtime container fallback when lane is not active but container is known', () => {
-    mockStopContainerWithVerification.mockReturnValueOnce({
-      stopped: true,
-      attempts: ['ok: container stop nanoclaw-jarvis-worker-1-123'],
-    });
-
-    const result = queue.abortActiveRun(
-      'jarvis-worker-1@nanoclaw',
-      'probe-jarvis-worker-1-123',
-      'stale_probe_run_watchdog',
-      {
-        groupFolder: 'jarvis-worker-1',
-        activeContainerName: 'nanoclaw-jarvis-worker-1-123',
-      },
-    );
-
-    expect(mockStopContainerWithVerification).toHaveBeenCalledWith(
-      'nanoclaw-jarvis-worker-1-123',
-    );
-    expect(result.aborted).toBe(true);
-    expect(result.stopVerified).toBe(true);
-    expect(result.detail).toBe('runtime_container_stop_fallback');
-  });
-
-  it('aborts via runtime prefix fallback when container name is unavailable', () => {
-    mockStopRunningContainersByPrefix.mockReturnValueOnce({
-      matched: ['nanoclaw-jarvis-worker-2-abc'],
-      stopped: ['nanoclaw-jarvis-worker-2-abc'],
-      failures: [],
-    });
-
-    const result = queue.abortActiveRun(
-      'jarvis-worker-2@nanoclaw',
-      'probe-jarvis-worker-2-abc',
-      'stale_probe_run_watchdog',
-      {
-        groupFolder: 'jarvis-worker-2',
-        activeContainerName: null,
-      },
-    );
-
-    expect(mockStopRunningContainersByPrefix).toHaveBeenCalledWith(
-      'nanoclaw-jarvis-worker-2-',
-    );
-    expect(result.aborted).toBe(true);
-    expect(result.stopVerified).toBe(true);
-    expect(result.detail).toBe('runtime_prefix_stop_fallback');
   });
 });

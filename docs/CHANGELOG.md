@@ -3,36 +3,35 @@
 Tracks only the latest upstream sync outcome.
 Previous entries must be moved to `docs/archives/CHANGELOG-YYYY-MM-DD.md`.
 
-## 2026-02-26
+## 2026-03-04
 
-- Synced from: `upstream/main` into `andy-developer-optimization`
-- Merge commit: `upstream/main` (version 1.1.3)
+- Synced from: `upstream/main` into `andy-autonomous`
+- Version: `1.1.6` -> `1.2.4`
 
 ### Bug Fixes
 
-- CI workflow improvements from upstream.
-- Various codebase formatting fixes (Prettier).
+- Upstream worker/runtime reliability fixes landed across container runtime, container runner, IPC auth, DB, scheduler, and queue paths.
+- Upstream test coverage expanded for channel registry, sender allowlist, and runtime/dispatch-adjacent flows.
 
 ### Features
 
-- Added `/add-slack` skill (new Slack channel integration).
-- New GitHub Actions: `skill-drift.yml`, `skill-pr.yml`.
-- Updated skills engine with improved reliability.
+- Added channel registry architecture (`src/channels/index.ts`, `src/channels/registry.ts`) replacing direct WhatsApp-only channel module wiring.
+- Added sender allowlist support (`src/sender-allowlist.ts`) and associated tests.
+- Added agent-runner IPC MCP stdio updates in container runner code path.
 
 ### Functionality/Behavior
 
-- Removed queue disk persistence (upstream removed this feature).
-- 2 tests skipped for removed queue persistence functionality.
+- Legacy WhatsApp-specific files were removed from core (`src/channels/whatsapp.ts` and test), in favor of centralized channel registration.
+- Legacy dispatch/event bridge and worker supervisor paths removed, with behavior consolidated into updated runtime/index/queue/IPC contracts.
+- Core package/runtime metadata updated to `1.2.4`.
 
 ### Docs/Infra
 
-- Added CONTRIBUTORS.md.
-- Updated `.github/workflows` naming (test.yml → ci.yml).
+- Container rules markdown files from old runtime paths removed in upstream core.
+- Changelog archived to `docs/archives/CHANGELOG-2026-03-04.md` per sync policy.
 
-### Conflict Notes
+### Conflict Notes And Local Compatibility Decisions
 
-- `src/container-runtime.ts` - Kept Apple Container (local requirement).
-- `src/container-runner.ts` - Kept worker mount paths (local requirement).
-- `src/index.ts`, `src/ipc.ts` - Kept worker dispatch system (local requirement).
-- `src/db.ts` - Kept worker_runs table (local requirement).
-- `src/channels/whatsapp.ts` - Accepted upstream version (queue persistence removed upstream).
+- Merge conflicts: none.
+- Local compatibility overrides during sync: none.
+- Sync applied upstream-first with no custom patch reapply failures and no skill reapply failures.

@@ -8,6 +8,7 @@ dist/
 store/
 data/
 logs/
+.symphony/
 
 # Groups - track role instructions only (CLAUDE.md + docs/)
 groups/*
@@ -63,7 +64,15 @@ groups/**/smoke-*.txt
 
 # Skills system (local per-installation state)
 .nanoclaw/
-.codex/
+.codex/*
+!.codex/rules
+!.codex/scripts
+!.codex/skills
+!.codex/settings.local.json
+!.codex/config.toml
+!.codex/agents/
+.codex/agents/*
+!.codex/agents/*.toml
 
 agents-sdk-docs
 

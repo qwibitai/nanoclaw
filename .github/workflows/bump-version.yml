@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths: ['src/**', 'container/**']
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   bump-version:
     runs-on: ubuntu-latest
@@ -18,15 +22,40 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
       - name: Bump patch version
-        run: |
-          npm version patch --no-git-tag-version
-          git add package.json package-lock.json
-          git diff --cached --quiet && exit 0
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          VERSION=$(node -p "require('./package.json').version")
-          git commit -m "chore: bump version to $VERSION"
-          git pull --rebase
-          git push
+        run: npm version patch --no-git-tag-version
+
+      - name: Read bumped version
+        id: version
+        run: echo "version=$(node -p \"require('./package.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        id: cpr
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: ci/bump-version
+          delete-branch: true
+          add-paths: |
+            package.json
+            package-lock.json
+          commit-message: "chore: bump version to ${{ steps.version.outputs.version }}"
+          title: "chore: bump version to ${{ steps.version.outputs.version }}"
+          body: |
+            Automated patch version bump generated after source changes landed on `main`.
+          labels: automated,version-bump
+
+      - name: Enable auto-merge
+        if: steps.cpr.outputs.pull-request-number != ''
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          pull-request-number: ${{ steps.cpr.outputs.pull-request-number }}
+          merge-method: squash

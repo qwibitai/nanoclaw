@@ -164,16 +164,34 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Inject secrets
-  if (input.secrets?.GITHUB_TOKEN) {
-    process.env.GITHUB_TOKEN = input.secrets.GITHUB_TOKEN;
-    process.env.GH_TOKEN = input.secrets.GITHUB_TOKEN;
+  // Inject secrets as environment variables so opencode and tools can use them
+  if (input.secrets) {
+    // Note: ANTHROPIC_BASE_URL and ANTHROPIC_DEFAULT_SONNET_MODEL are intentionally
+    // excluded — they conflict with OpenCode's built-in anthropic provider. The custom
+    // minimax provider in OPENCODE_CONFIG_CONTENT has its own explicit baseURL.
+    const secretKeys = [
+      'GITHUB_TOKEN', 'GH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'OPENROUTER_API_KEY',
+      'MINIMAX_API_KEY',
+    ];
+    for (const key of secretKeys) {
+      if (input.secrets[key]) {
+        process.env[key] = input.secrets[key];
+      }
+    }
+    // GH_TOKEN mirrors GITHUB_TOKEN when only one is provided
+    if (input.secrets.GITHUB_TOKEN && !input.secrets.GH_TOKEN) {
+      process.env.GH_TOKEN = input.secrets.GITHUB_TOKEN;
+    }
 
     // Configure git identity for authenticated operations
-    try {
-      configureGitIdentity();
-    } catch {
-      // Non-fatal
+    if (input.secrets.GITHUB_TOKEN) {
+      try {
+        configureGitIdentity();
+      } catch {
+        // Non-fatal
+      }
     }
   }
 

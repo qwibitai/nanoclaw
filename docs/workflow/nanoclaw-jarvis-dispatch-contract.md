@@ -45,7 +45,7 @@ Screenshot capture/analysis is prohibited in worker dispatch and completion evid
 | Field | Rule |
 |-------|------|
 | `run_id` | required, max 64 chars, no whitespace |
-| `request_id` | optional tracking id, max 64 chars, no whitespace |
+| `request_id` | required tracking id, max 64 chars, no whitespace |
 | `task_type` | one of `analyze`, `implement`, `fix`, `refactor`, `test`, `release`, `research`, `code` |
 | `context_intent` | required; `fresh` (new context) or `continue` (resume related context) |
 | `input` | required non-empty string |
@@ -153,3 +153,12 @@ If dispatch is blocked before run creation, classify it as policy-blocked dispat
 | `running` | duplicate blocked |
 | `review_requested` | duplicate blocked |
 | `done` | duplicate blocked |
+
+## Agent Routing
+
+| Step | Agent | Mode | Notes |
+|------|-------|------|-------|
+| Field change decisions | opus | — | Requires contract design judgment |
+| Build + test | verifier | fg | `npm run build && npm test` |
+| Contract lint | verifier | fg | `bash scripts/check-workflow-contracts.sh` |
+| Schema validation | verifier | fg | Dispatch/completion field checks |

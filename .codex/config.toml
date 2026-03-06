@@ -1,0 +1,26 @@
+# Project-level Codex role configuration for NanoClaw
+# Canonical policy remains in CLAUDE.md; this file adapts role behavior.
+
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 6
+max_depth = 1
+job_max_runtime_seconds = 1800
+
+[agents.explorer]
+description = "Read-only codebase explorer for planning and scoping."
+config_file = "agents/explorer.toml"
+
+[agents.reviewer]
+description = "Read-only reviewer focused on regressions, security, and missing tests."
+config_file = "agents/reviewer.toml"
+
+[agents.monitor]
+description = "Long-running monitor for deterministic checks and polling workflows."
+config_file = "agents/monitor.toml"
+
+[agents.worker]
+description = "Scoped implementation worker for bounded changes in mapped touch-set."
+config_file = "agents/worker.toml"

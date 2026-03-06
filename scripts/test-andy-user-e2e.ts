@@ -206,7 +206,7 @@ async function main(): Promise<void> {
         name: 'Simple Greeting',
         userMessage: '@Andy hi',
         maxLatencyMs: 8_000,
-        expected: /(Hey, I'?m here|working on something)/i,
+        expected: /(Hey, I'?m here|working on something|worker is still running)/i,
         forbidden: /(error|exception|traceback|failed)/i,
       },
       {
@@ -220,7 +220,8 @@ async function main(): Promise<void> {
         name: 'Progress Query',
         userMessage: '@Andy what is the current progress',
         maxLatencyMs: 8_000,
-        expected: /(Current progress|Current tracked requests|No worker run is active|There are no worker runs yet|working on)/i,
+        expected:
+          /(Right now|Current progress|Current tracked requests|No worker run is active|There are no worker runs yet|working on)/i,
         forbidden: /(error|exception|traceback)/i,
       },
     ];

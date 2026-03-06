@@ -13,7 +13,7 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 2. **Feature map preflight** - Resolve owning files/tests via `feature-tracking`
 3. **Plan the changes** - Identify files to modify
 4. **Implement** - Make changes directly to the code
-5. **Test guidance** - Tell user how to verify
+5. **Execute verification** - Run mapped tests/gates and capture evidence before closure
 
 ### Feature map preflight (required for feature changes)
 
@@ -102,18 +102,23 @@ Implementation:
 2. Update paths in config
 3. Provide setup instructions
 
-## After Changes
+## After Changes (Required)
 
-Run verification/restart commands directly where possible:
+Run verification directly (do not stop at guidance):
 ```bash
-# Rebuild and restart
+# Baseline deterministic gate
 npm run build
-# macOS:
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
-# Linux:
-systemctl --user restart nanoclaw
+npm test
+bash scripts/jarvis-ops.sh acceptance-gate
 ```
+
+For Andy user-facing reliability behavior, include:
+
+```bash
+bash scripts/jarvis-ops.sh acceptance-gate --include-happiness --happiness-user-confirmation "<manual User POV runbook completed>"
+```
+
+Use `selected_feature.tests` from feature-tracking as the default test set, then run acceptance gate for final proof.
 
 ## Example Interaction
 

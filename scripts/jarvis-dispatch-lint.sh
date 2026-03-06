@@ -102,6 +102,7 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_PATTERN = re.compile(r"^jarvis-[A-Za-z0-9._/-]+$")
 BASE_BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
 SESSION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
+SCREENSHOT_PATTERN = re.compile(r"\b(screenshot|screen[\s-]?shot|take_screenshot|browser_take_screenshot|comet_screenshot|image analysis|analyze screenshot)\b", re.I)
 
 required_completion_fields = [
     "run_id",
@@ -134,6 +135,18 @@ if not isinstance(payload, dict):
 run_id = str(payload.get("run_id", "")).strip()
 if not run_id or re.search(r"\s", run_id):
     errors.append("run_id must be non-empty and contain no whitespace")
+elif len(run_id) > 64:
+    errors.append("run_id must be <= 64 chars")
+
+request_id = payload.get("request_id")
+if not isinstance(request_id, str) or not request_id.strip():
+    errors.append("request_id is required for worker dispatch")
+else:
+    request_id = request_id.strip()
+    if re.search(r"\s", request_id):
+        errors.append("request_id must contain no whitespace")
+    if len(request_id) > 64:
+        errors.append("request_id must be <= 64 chars")
 
 context_intent = payload.get("context_intent")
 if context_intent not in {"fresh", "continue"}:
@@ -143,9 +156,15 @@ task_type = payload.get("task_type")
 if not isinstance(task_type, str) or not task_type.strip():
     errors.append("task_type is required")
 
+ui_impacting = payload.get("ui_impacting")
+if ui_impacting is not None and not isinstance(ui_impacting, bool):
+    errors.append("ui_impacting must be a boolean when provided")
+
 input_text = payload.get("input")
 if not isinstance(input_text, str) or not input_text.strip():
     errors.append("input is required")
+elif SCREENSHOT_PATTERN.search(input_text):
+    errors.append("input must not request screenshot capture/analysis; use text-based browser evidence")
 
 repo = payload.get("repo")
 if not isinstance(repo, str) or not REPO_PATTERN.match(repo):
@@ -165,6 +184,11 @@ if session_id is not None:
     if not isinstance(session_id, str) or not session_id.strip() or re.search(r"\s", session_id) or not SESSION_ID_PATTERN.match(session_id):
         errors.append("session_id must be a non-empty opaque id with no whitespace when provided")
 
+parent_run_id = payload.get("parent_run_id")
+if parent_run_id is not None:
+    if not isinstance(parent_run_id, str) or not parent_run_id.strip() or re.search(r"\s", parent_run_id) or len(parent_run_id) > 64:
+        errors.append("parent_run_id must be a non-empty id with no whitespace and <= 64 chars when provided")
+
 if context_intent == "fresh" and session_id:
     errors.append('session_id must not be provided when context_intent is "fresh"')
 
@@ -175,11 +199,16 @@ else:
     for i, item in enumerate(acc):
         if not isinstance(item, str) or not item.strip():
             errors.append(f"acceptance_tests[{i}] must be a non-empty string")
+        elif SCREENSHOT_PATTERN.search(item):
+            errors.append(f"acceptance_tests[{i}] must not include screenshot commands; use text-based checks")
 
 output_contract = payload.get("output_contract")
 if not isinstance(output_contract, dict):
     errors.append("output_contract is required")
 else:
+    browser_evidence_required = output_contract.get("browser_evidence_required")
+    if browser_evidence_required is not None and not isinstance(browser_evidence_required, bool):
+        errors.append("output_contract.browser_evidence_required must be a boolean when provided")
     fields = output_contract.get("required_fields")
     if not isinstance(fields, list) or not fields:
         errors.append("output_contract.required_fields must be a non-empty array")
@@ -238,9 +267,11 @@ out = {
     "warnings": warnings,
     "normalized": {
         "run_id": run_id,
+        "request_id": request_id if isinstance(request_id, str) else None,
         "context_intent": context_intent,
         "repo": repo,
         "branch": branch,
+        "parent_run_id": parent_run_id if isinstance(parent_run_id, str) else None,
         "target_folder": target_folder if target_folder else None,
     },
 }

@@ -42,7 +42,7 @@ npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-i
 - For high-risk features (dispatch/container/worker lifecycle), run mapped tests and at least one integration-adjacent test where applicable.
 - Fail fast: stop at first broken command, fix, rerun from top.
 - For incident fixes, run with `--live` so ops verification from `scripts/jarvis-ops.sh` is included.
-- For Andy user-facing reliability fixes, `--live` must include `bash scripts/jarvis-ops.sh happiness-gate`.
+- For Andy user-facing reliability fixes, `--live` must include `bash scripts/jarvis-ops.sh happiness-gate --user-confirmation "<manual User POV runbook completed>"`.
 - `happiness-gate` pass is not sufficient by itself; also complete manual user POV runbook in `docs/workflow/nanoclaw-andy-user-happiness-gate.md`.
 
 ## Evidence Format

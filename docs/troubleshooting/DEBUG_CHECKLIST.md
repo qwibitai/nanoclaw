@@ -167,6 +167,12 @@ bash scripts/jarvis-ops.sh probe
 # Connectivity gate (preflight + probe + DB pass/fail checks)
 bash scripts/jarvis-ops.sh verify-worker-connectivity
 
+# Deterministic acceptance gate + evidence manifest
+bash scripts/jarvis-ops.sh acceptance-gate
+
+# Acceptance gate including user-facing happiness validation
+bash scripts/jarvis-ops.sh acceptance-gate --include-happiness --happiness-user-confirmation "<manual User POV runbook completed>"
+
 # Recurring issue hotspots (failure reasons + lane ranking)
 bash scripts/jarvis-ops.sh hotspots --window-hours 72
 

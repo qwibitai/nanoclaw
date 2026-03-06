@@ -6,6 +6,7 @@ cd "$ROOT_DIR"
 
 run_status=true
 forward_args=()
+user_confirmation=""
 
 usage() {
   cat <<'USAGE'
@@ -17,6 +18,8 @@ Runs the Andy user-facing reliability gate:
 
 Options:
   --skip-status   Skip jarvis status snapshot
+  --user-confirmation <text>
+                  Required: explicit confirmation that User POV runbook was completed
   -h, --help      Show this help
 
 Any remaining args are forwarded to test-andy-user-e2e.ts.
@@ -28,6 +31,10 @@ while [ "$#" -gt 0 ]; do
     --skip-status)
       run_status=false
       shift
+      ;;
+    --user-confirmation)
+      user_confirmation="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -47,6 +54,11 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "${#user_confirmation}" -lt 3 ]; then
+  echo "error: --user-confirmation is required and must be explicit"
+  exit 1
+fi
+
 echo "== Andy Happiness Gate =="
 echo "repo: $ROOT_DIR"
 echo
@@ -58,5 +70,7 @@ fi
 
 NODE_NO_WARNINGS=1 node --experimental-transform-types scripts/test-andy-user-e2e.ts "${forward_args[@]}"
 echo
-echo "Manual user POV check required:"
+echo "Manual User POV runbook confirmed:"
+echo "  $user_confirmation"
+echo "Reference:"
 echo "  docs/workflow/nanoclaw-andy-user-happiness-gate.md (User POV Runbook)"

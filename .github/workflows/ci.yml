@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   ci:
@@ -14,6 +16,15 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+
+      - name: Workflow contract lint
+        run: bash scripts/check-workflow-contracts.sh
+
+      - name: Claude/Codex mirror lint
+        run: bash scripts/check-claude-codex-mirror.sh
+
+      - name: Tooling governance lint
+        run: bash scripts/check-tooling-governance.sh
 
       - name: Format check
         run: npm run format:check

@@ -455,6 +455,8 @@ p_resolve.add_argument("--id", required=True, help="Incident ID")
 p_resolve.add_argument("--resolution", required=True, help="Exact fix summary")
 p_resolve.add_argument("--verification", default="", help="Verification evidence")
 p_resolve.add_argument("--fix-reference", default="", help="Commit/PR/script/docs reference")
+p_resolve.add_argument("--prevention-note", required=True, help="Prevention action added to avoid recurrence")
+p_resolve.add_argument("--lesson-reference", required=True, help="Path/reference where lesson was persisted (CLAUDE/docs)")
 p_resolve.add_argument("--resolved-by", default="user", help="Actor recording resolution")
 p_resolve.add_argument("--user-confirmed-fixed", action="store_true", help="Required guard to resolve")
 p_resolve.add_argument("--user-confirmation", required=True, help="Explicit user confirmation text")
@@ -624,6 +626,8 @@ if args.command == "show":
             print(f"  summary: {res.get('summary')}")
             print(f"  verification: {res.get('verification','')}")
             print(f"  fix_reference: {res.get('fix_reference','')}")
+            print(f"  prevention_note: {res.get('prevention_note','')}")
+            print(f"  lesson_reference: {res.get('lesson_reference','')}")
             print(f"  confirmed_by_user: {res.get('confirmed_by_user','')}")
             print(f"  confirmed_at: {res.get('confirmed_at','')}")
         if args.json_out:
@@ -778,6 +782,18 @@ if args.command == "resolve":
     if len(compact_text(args.user_confirmation, 240)) < 3:
         print("error: --user-confirmation must be explicit", file=sys.stderr)
         sys.exit(1)
+    if len(compact_text(args.verification, 500)) < 3:
+        print("error: --verification is required for resolution evidence", file=sys.stderr)
+        sys.exit(1)
+    if len(compact_text(args.fix_reference, 240)) < 3:
+        print("error: --fix-reference is required for resolution evidence", file=sys.stderr)
+        sys.exit(1)
+    if len(compact_text(args.prevention_note, 500)) < 5:
+        print("error: --prevention-note is required to document recurrence prevention", file=sys.stderr)
+        sys.exit(1)
+    if len(compact_text(args.lesson_reference, 240)) < 3:
+        print("error: --lesson-reference is required (CLAUDE/docs path or link)", file=sys.stderr)
+        sys.exit(1)
 
     idx, incident = find_incident(doc, args.id)
     if incident is None:
@@ -789,6 +805,8 @@ if args.command == "resolve":
         "summary": compact_text(args.resolution, 500),
         "verification": compact_text(args.verification, 500),
         "fix_reference": compact_text(args.fix_reference, 240),
+        "prevention_note": compact_text(args.prevention_note, 500),
+        "lesson_reference": compact_text(args.lesson_reference, 240),
         "confirmed_by_user": compact_text(args.user_confirmation, 240),
         "confirmed_at": ts,
         "resolved_by": compact_text(args.resolved_by, 80) or "user",

@@ -3,13 +3,6 @@
     "allow": [
       "mcp__deepwiki__read_wiki_structure",
       "mcp__deepwiki__ask_question",
-      "Bash(./.claude/skills/setup/scripts/01-check-environment.sh:*)",
-      "Bash(./.claude/skills/setup/scripts/02-install-deps.sh:*)",
-      "Bash(./.claude/skills/setup/scripts/03-setup-container.sh:*)",
-      "Bash(./.claude/skills/setup/scripts/05-sync-groups.sh:*)",
-      "Bash(./.claude/skills/setup/scripts/06-register-channel.sh:*)",
-      "Bash(echo '{\n  \"allowedRoots\": [\n    {\"path\": \"/Users/gurusharan/Documents/remote-claude/Research\", \"readOnly\": false},\n    {\"path\": \"/Users/gurusharan/Documents/remote-claude/NanoClawWorkspace\", \"readOnly\": false}\n  ],\n  \"blockedPatterns\": [],\n  \"nonMainReadOnly\": true\n}' | ./.claude/skills/setup/scripts/07-configure-mounts.sh 2>&1)",
-      "Bash(sleep 3 && ./.claude/skills/setup/scripts/09-verify.sh 2>&1)",
       "Bash(container run -i --rm --name nanoclaw-manual-test --user 501:20 -e HOME=/home/node -v /Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw:/workspace/project -v /Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/groups/main:/workspace/group -v /Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/sessions/main/.claude:/home/node/.claude -v /Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/ipc/main:/workspace/ipc --mount type=bind,source=/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/container/agent-runner/src,target=/app/src,readonly nanoclaw-agent:latest)",
       "Bash(# Test with --user flag only \\(no mounts\\)\necho '{}' | container run -i --rm --user 501:20 -e HOME=/home/node nanoclaw-agent:latest echo test 2>&1)",
       "Bash(# Test without --user, with -i\necho '{}' | container run -i --rm nanoclaw-agent:latest echo test 2>&1)",
@@ -41,7 +34,6 @@
       "Bash(launchctl list:*)",
       "Bash(launchctl:*)",
       "Bash(lsof:*)",
-      "Bash(kill 54775:*)",
       "mcp__exa__web_search_exa",
       "WebFetch(domain:x.com)",
       "Bash(npx obsidian-cli:*)",
@@ -55,7 +47,10 @@
       "Bash(node-gyp rebuild:*)",
       "Bash(chmod +x:*)",
       "Bash(find:*)",
-      "Bash(~/.zshrc:*)"
+      "Bash(~/.zshrc:*)",
+      "Bash(./container/worker/build.sh:*)",
+      "Bash(container exec:*)",
+      "Bash(opencode run:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
@@ -64,5 +59,32 @@
     "context-graph",
     "context7",
     "exa"
-  ]
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/risk-tier-pretool-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/posttool-workflow-sync-check.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "remote": {
+    "defaultEnvironmentId": "env_01HbMxf8Uo55p59Q1NSuFYjx"
+  }
 }

@@ -16,7 +16,7 @@ Project-level orchestration skill for disciplined feature delivery.
 
 ## Issue Pipeline (runtime/reliability incidents)
 
-1. `/incident-debugger` for incident lifecycle + evidence
+1. Docs-first incident workflow: `docs/workflow/nanoclaw-jarvis-debug-loop.md` + `.claude/progress/incident.json`
 2. `/debug` for runtime/container/auth root-cause
 3. `feature-tracking` to map fix ownership
 4. `nanoclaw-implementation` for minimal fix
@@ -84,5 +84,5 @@ npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts update \
 - If feature resolution fails, update seed catalog before coding.
 - Use `blocked` status for unresolved dependencies or failed validations.
 - Keep work history in `.claude/progress/feature-work-items.json`.
-- For runtime incidents, run `/incident-debugger` before implementation and keep incident id in work-item notes.
+- For runtime incidents, run docs-first incident workflow before implementation and keep incident id in work-item notes.
 - `done` requires explicit evidence (`--evidence`) for testability/auditability.

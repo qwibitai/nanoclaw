@@ -19,8 +19,6 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
-const schedulerEnabled = process.env.NANOCLAW_SCHEDULER_ENABLED === '1';
-const dynamicGroupRegistrationEnabled = process.env.NANOCLAW_DYNAMIC_GROUP_REG_ENABLED === '1';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -63,15 +61,11 @@ server.tool(
     writeIpcFile(MESSAGES_DIR, data);
 
     return {
-      content: [{
-        type: 'text' as const,
-        text: `Message queued for ${targetJid}. Host validation is pending and policy may block delivery.`,
-      }],
+      content: [{ type: 'text' as const, text: `Message queued for ${targetJid}.` }],
     };
   },
 );
 
-if (schedulerEnabled) {
 server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
@@ -159,9 +153,7 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
     };
   },
 );
-}
 
-if (schedulerEnabled) {
 server.tool(
   'list_tasks',
   "List all scheduled tasks. From main: shows all tasks. From other groups: shows only that group's tasks.",
@@ -199,9 +191,7 @@ server.tool(
     }
   },
 );
-}
 
-if (schedulerEnabled) {
 server.tool(
   'pause_task',
   'Pause a scheduled task. It will not run until resumed.',
@@ -220,9 +210,7 @@ server.tool(
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} pause requested.` }] };
   },
 );
-}
 
-if (schedulerEnabled) {
 server.tool(
   'resume_task',
   'Resume a paused task.',
@@ -241,9 +229,7 @@ server.tool(
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} resume requested.` }] };
   },
 );
-}
 
-if (schedulerEnabled) {
 server.tool(
   'cancel_task',
   'Cancel and delete a scheduled task.',
@@ -262,18 +248,16 @@ server.tool(
     return { content: [{ type: 'text' as const, text: `Task ${args.task_id} cancellation requested.` }] };
   },
 );
-}
 
-if (dynamicGroupRegistrationEnabled) {
 server.tool(
   'register_group',
-  `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+  `Register a new chat/group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
   {
-    jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
+    jid: z.string().describe('The chat JID (e.g., "120363336345536173@g.us", "tg:-1001234567890", "dc:1234567890123456")'),
     name: z.string().describe('Display name for the group'),
-    folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+    folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
   },
   async (args) => {
@@ -300,7 +284,6 @@ Use available_groups.json to find the JID for a group. The folder name should be
     };
   },
 );
-}
 
 // Start the stdio transport
 const transport = new StdioServerTransport();
