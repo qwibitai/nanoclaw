@@ -289,7 +289,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
 
     // Enqueue a task while container is active but NOT idle
     const taskFn = vi.fn(async () => {});
@@ -326,7 +326,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
     queue.notifyIdle('group1@g.us');
 
     // Enqueue a task — should preempt because container is idle
@@ -341,7 +341,7 @@ describe('GroupQueue', () => {
   });
 
   it('sendMessage resets idleWaiting so a subsequent task enqueue does not preempt', async () => {
-    const sendFn = vi.fn();
+    const sendFn = vi.fn(() => true);
     const closeFn = vi.fn();
     let resolveProcess: () => void;
 
@@ -400,7 +400,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(), vi.fn());
+    queue.registerIpcFns('group1@g.us', vi.fn(() => true), vi.fn());
 
     // sendMessage should return false — user messages must not go to task containers
     const result = queue.sendMessage('group1@g.us', 'hello');
@@ -434,7 +434,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
 
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);

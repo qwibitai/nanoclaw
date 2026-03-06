@@ -23,8 +23,9 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
-  sendFn: ((text: string) => void) | null;
+  sendFn: ((text: string) => boolean) | null;
   closeFn: (() => void) | null;
+  onPipedCallback: (() => void) | null;
 }
 
 export class GroupQueue {
@@ -51,6 +52,7 @@ export class GroupQueue {
         retryCount: 0,
         sendFn: null,
         closeFn: null,
+        onPipedCallback: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -143,10 +145,19 @@ export class GroupQueue {
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
-  registerIpcFns(groupJid: string, sendFn: (text: string) => void, closeFn: () => void): void {
+  registerIpcFns(groupJid: string, sendFn: (text: string) => boolean, closeFn: () => void): void {
     const state = this.getGroup(groupJid);
     state.sendFn = sendFn;
     state.closeFn = closeFn;
+  }
+
+  /**
+   * Register a callback invoked when a message is successfully piped to the
+   * active container. Used by processGroupMessages to reset the idle timer.
+   */
+  registerOnPiped(groupJid: string, callback: () => void): void {
+    const state = this.getGroup(groupJid);
+    state.onPipedCallback = callback;
   }
 
   /**
@@ -168,18 +179,30 @@ export class GroupQueue {
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.sendFn || state.isTaskContainer) return false;
+    if (!state.sendFn(text)) return false;
     state.idleWaiting = false;
-    state.sendFn(text);
+    state.onPipedCallback?.();
     return true;
   }
 
   /**
    * Signal the active container to wind down via JSON-RPC.
+   * Nulls sendFn to prevent input requests racing with the close notification.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.closeFn) return;
+    state.sendFn = null;
     state.closeFn();
+  }
+
+  private clearContainerState(state: GroupState): void {
+    state.process = null;
+    state.containerName = null;
+    state.groupFolder = null;
+    state.sendFn = null;
+    state.closeFn = null;
+    state.onPipedCallback = null;
   }
 
   private async runForGroup(
@@ -212,11 +235,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
-      state.sendFn = null;
-      state.closeFn = null;
+      this.clearContainerState(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -243,11 +262,7 @@ export class GroupQueue {
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
-      state.sendFn = null;
-      state.closeFn = null;
+      this.clearContainerState(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }

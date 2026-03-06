@@ -2,6 +2,11 @@ import { CronExpressionParser } from 'cron-parser';
 import { JSONRPCErrorException } from 'json-rpc-2.0';
 
 import { TIMEZONE } from '../config.js';
+
+// Application-level JSON-RPC error codes (reserved range: -32000 to -32099)
+const ERR_UNAUTHORIZED = -32000;
+
+
 import {
   createTask,
   deleteTask,
@@ -35,7 +40,7 @@ registerHandler(
       );
       throw new JSONRPCErrorException(
         'Not authorized to send messages to this chat',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -68,7 +73,7 @@ registerHandler(
     if (!targetGroupEntry) {
       throw new JSONRPCErrorException(
         'Cannot schedule task: target group not registered',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -77,7 +82,7 @@ registerHandler(
     if (!context.isMain && targetFolder !== context.sourceGroup) {
       throw new JSONRPCErrorException(
         'Not authorized to schedule tasks for other groups',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -182,13 +187,13 @@ registerHandler(
     if (!task) {
       throw new JSONRPCErrorException(
         `Task not found: ${params.taskId}`,
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
     if (!context.isMain && task.group_folder !== context.sourceGroup) {
       throw new JSONRPCErrorException(
         'Not authorized to pause this task',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -212,13 +217,13 @@ registerHandler(
     if (!task) {
       throw new JSONRPCErrorException(
         `Task not found: ${params.taskId}`,
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
     if (!context.isMain && task.group_folder !== context.sourceGroup) {
       throw new JSONRPCErrorException(
         'Not authorized to resume this task',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -311,13 +316,13 @@ registerHandler(
     if (!task) {
       throw new JSONRPCErrorException(
         `Task not found: ${params.taskId}`,
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
     if (!context.isMain && task.group_folder !== context.sourceGroup) {
       throw new JSONRPCErrorException(
         'Not authorized to cancel this task',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -348,7 +353,7 @@ registerHandler(
     if (!context.isMain) {
       throw new JSONRPCErrorException(
         'Only the main group can register new groups',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 
@@ -394,7 +399,7 @@ registerHandler(
     if (!context.isMain) {
       throw new JSONRPCErrorException(
         'Only the main group can refresh groups',
-        -32600,
+        ERR_UNAUTHORIZED,
       );
     }
 

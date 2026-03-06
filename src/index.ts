@@ -255,16 +255,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
-async function runAgent(
-  group: RegisteredGroup,
-  prompt: string,
-  chatJid: string,
-  onOutput?: (output: ContainerOutput) => Promise<void>,
-): Promise<'success' | 'error'> {
-  const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
-
-  const handlerDeps: HandlerDeps = {
+function buildHandlerDeps(): HandlerDeps {
+  return {
     sendMessage: async (jid, text, sender) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
@@ -279,6 +271,16 @@ async function runAgent(
     },
     getAvailableGroups,
   };
+}
+
+async function runAgent(
+  group: RegisteredGroup,
+  prompt: string,
+  chatJid: string,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
+): Promise<'success' | 'error'> {
+  const isMain = group.isMain === true;
+  const sessionId = sessions[group.folder];
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -305,7 +307,7 @@ async function runAgent(
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
-      handlerDeps,
+      buildHandlerDeps(),
       (sendFn, closeFn) => queue.registerIpcFns(chatJid, sendFn, closeFn),
     );
 
@@ -521,23 +523,6 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Build handler deps for JSON-RPC IPC (shared by message processing and scheduler)
-  const handlerDeps: HandlerDeps = {
-    sendMessage: async (jid, text, sender) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
-    syncGroups: async (force: boolean) => {
-      await Promise.all(
-        channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
-      );
-    },
-    getAvailableGroups,
-  };
-
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -554,7 +539,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-    handlerDeps,
+    handlerDeps: buildHandlerDeps(),
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

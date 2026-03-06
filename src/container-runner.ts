@@ -8,6 +8,9 @@ import path from 'path';
 
 import { JSONRPCServerAndClient, JSONRPCServer, JSONRPCClient } from 'json-rpc-2.0';
 
+// NUL byte prefix for JSON-RPC framing — must match container-side transport
+const RPC_PREFIX = '\0';
+
 import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
@@ -248,7 +251,7 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   deps?: HandlerDeps,
-  onReady?: (sendFn: (text: string) => void, closeFn: () => void) => void,
+  onReady?: (sendFn: (text: string) => boolean, closeFn: () => void) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -304,7 +307,7 @@ export async function runContainerAgent(
     const rpcServer = new JSONRPCServer();
     const rpcClient = new JSONRPCClient((jsonRPCMessage) => {
       if (container.stdin.writable) {
-        container.stdin.write(JSON.stringify(jsonRPCMessage) + '\n');
+        container.stdin.write(RPC_PREFIX + JSON.stringify(jsonRPCMessage) + '\n');
       }
     });
     const rpc = new JSONRPCServerAndClient(rpcServer, rpcClient);
@@ -364,36 +367,45 @@ export async function runContainerAgent(
       stdoutBuffer = lines.pop()!; // Keep incomplete last line in buffer
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          rpc.receiveAndSend(parsed);
-        } catch {
-          // Non-JSON line (tsc output, startup messages) — log and discard
-          logger.debug({ container: group.folder }, trimmed);
+        if (line.startsWith(RPC_PREFIX)) {
+          try {
+            const parsed = JSON.parse(line.slice(RPC_PREFIX.length));
+            rpc.receiveAndSend(parsed);
+          } catch {
+            logger.debug({ container: group.folder }, line.slice(RPC_PREFIX.length));
+          }
+        } else if (line.trim()) {
+          logger.debug({ container: group.folder }, line);
         }
       }
     });
 
-    // Send initialize request with ContainerInput (including secrets)
+    // Send initialize request with ContainerInput (including secrets).
+    // Delete secrets from `input` immediately so they can't leak into
+    // log output if the container exits before the promise resolves.
     input.secrets = readSecrets();
-    Promise.resolve(rpc.request('initialize', input)).then(() => {
-      // Remove secrets so they don't appear in logs
-      delete input.secrets;
+    const initPromise = rpc.request('initialize', input);
+    delete input.secrets;
 
+    Promise.resolve(initPromise).then(() => {
       if (onReady) {
-        const sendFn = (text: string) => {
+        const sendFn = (text: string): boolean => {
+          if (!container.stdin.writable) return false;
           rpc.notify('input', { text });
+          return true;
         };
         const closeFn = () => {
-          rpc.notify('close', {});
+          if (container.stdin.writable) {
+            rpc.notify('close', {});
+          } else {
+            logger.warn({ group: group.name }, 'stdin not writable on close, killing container');
+            container.kill();
+          }
         };
         onReady(sendFn, closeFn);
       }
     }).catch((err: unknown) => {
       logger.error({ group: group.name, err }, 'Failed to initialize container');
-      delete input.secrets;
     });
 
     container.stderr.on('data', (data) => {

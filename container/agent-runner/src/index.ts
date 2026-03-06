@@ -298,7 +298,9 @@ async function runQuery(
       }
     }
   };
-  drainLoop(); // Don't await — runs concurrently
+  drainLoop().catch((err) => {
+    log(`drainLoop error: ${err instanceof Error ? err.message : String(err)}`);
+  });
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -402,7 +404,14 @@ async function main(): Promise<void> {
   const transport = new JsonRpcTransport();
 
   // Wait for host to send initialize request with ContainerInput
-  const containerInput: ContainerInput = await transport.initialized;
+  const INIT_TIMEOUT_MS = 30_000;
+  let initTimer: ReturnType<typeof setTimeout>;
+  const containerInput: ContainerInput = await Promise.race([
+    transport.initialized,
+    new Promise<never>((_, reject) => {
+      initTimer = setTimeout(() => reject(new Error('No initialize request received')), INIT_TIMEOUT_MS);
+    }),
+  ]).finally(() => clearTimeout(initTimer!));
   log(`Received input for group: ${containerInput.groupFolder}`);
 
   // Build SDK env: merge secrets into process.env for the SDK only.
@@ -466,4 +475,4 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+main().then(() => process.exit(0));

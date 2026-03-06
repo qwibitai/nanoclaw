@@ -14,23 +14,30 @@ import {
 // Capture real stdout BEFORE any other code writes to it
 const realStdoutWrite = process.stdout.write.bind(process.stdout);
 
-// Replace stdout.write: JSON-RPC messages pass through; everything else
-// gets wrapped in a JSON-RPC "log" notification.
+// NUL byte prefix for JSON-RPC framing — no logger produces this,
+// so we can reliably distinguish protocol messages from debug output.
+const RPC_PREFIX = '\0';
+
+// Replace stdout.write: lines starting with RPC_PREFIX pass through;
+// everything else gets wrapped in a JSON-RPC "log" notification.
 process.stdout.write = ((
   data: string | Uint8Array,
   encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
   callback?: (err?: Error | null) => void,
 ): boolean => {
   const text = typeof data === 'string' ? data : Buffer.from(data).toString();
-  if (text.trimStart().startsWith('{"jsonrpc"')) {
-    return realStdoutWrite(data, encodingOrCallback as BufferEncoding, callback);
+  if (text.startsWith(RPC_PREFIX)) {
+    if (typeof encodingOrCallback === 'function') {
+      return realStdoutWrite(data, encodingOrCallback);
+    }
+    return realStdoutWrite(data, encodingOrCallback, callback);
   }
   const notification = JSON.stringify({
     jsonrpc: '2.0',
     method: 'log',
     params: { text },
   });
-  return realStdoutWrite(notification + '\n');
+  return realStdoutWrite(RPC_PREFIX + notification + '\n');
 }) as typeof process.stdout.write;
 
 export { realStdoutWrite };
@@ -54,7 +61,7 @@ export class JsonRpcTransport {
 
     const server = new JSONRPCServer();
     const client = new JSONRPCClient((jsonRPCMessage) => {
-      realStdoutWrite(JSON.stringify(jsonRPCMessage) + '\n');
+      realStdoutWrite(RPC_PREFIX + JSON.stringify(jsonRPCMessage) + '\n');
     });
 
     this.serverAndClient = new JSONRPCServerAndClient(server, client);
@@ -94,15 +101,15 @@ export class JsonRpcTransport {
       buffer = lines.pop()!; // Keep incomplete last line in buffer
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        try {
-          const parsed = JSON.parse(trimmed);
-          this.serverAndClient.receiveAndSend(parsed);
-        } catch {
-          // Ignore non-JSON lines (startup noise)
+        if (line.startsWith(RPC_PREFIX)) {
+          try {
+            const parsed = JSON.parse(line.slice(RPC_PREFIX.length));
+            this.serverAndClient.receiveAndSend(parsed);
+          } catch {
+            // Malformed JSON-RPC — ignore
+          }
         }
+        // Lines without prefix are non-protocol (startup noise) — ignore
       }
     });
 
@@ -128,7 +135,6 @@ export class JsonRpcTransport {
   }
 
   cancelWait(): void {
-    this.closed = true;
     if (this.eventWaiter) {
       this.eventWaiter(null);
       this.eventWaiter = null;

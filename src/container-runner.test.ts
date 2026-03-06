@@ -111,7 +111,7 @@ function sendInitializeResponse(
   id: number = 1,
 ) {
   const response = JSON.stringify({ jsonrpc: '2.0', id, result: {} });
-  proc.stdout.push(response + '\n');
+  proc.stdout.push('\0' + response + '\n');
 }
 
 /** Send a JSON-RPC notification (output) to the container's stdout */
@@ -124,7 +124,7 @@ function sendOutputNotification(
     method: 'output',
     params: output,
   });
-  proc.stdout.push(notification + '\n');
+  proc.stdout.push('\0' + notification + '\n');
 }
 
 describe('container-runner timeout behavior', () => {
