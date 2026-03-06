@@ -68,22 +68,26 @@ WhatsApp voice transcription (inbound) works fine, but voice *responses* (outbou
 
 For hands-free use with the MacBook lid closed (e.g. in a backpack):
 
+**Required:**
 | Item | Why | Notes |
 |------|-----|-------|
-| **USB wireless headset with dongle** | Audio input/output with lid closed | Built-in mic does NOT work with lid closed! |
-| **USB-C hub** | Connect USB headset dongle | If headset isn't USB-C native |
+| **Bluetooth or USB headset** | Built-in mic does NOT work with lid closed | AirPods, any BT headset, or USB wireless headset |
 | **Amphetamine app** (Mac App Store, free) | Prevents sleep with lid closed | Set Trigger → uncheck "Allow system to sleep when display is closed" |
-| **USB-C power bank** (recommended) | Extends battery + ensures clamshell mode | macOS is more reliable with power connected |
 
-**Critical**: Set the USB headset as default audio input before closing the lid:
+**Recommended:**
+| Item | Why | Notes |
+|------|-----|-------|
+| **USB wireless headset with dongle** | Directional mic = better in noisy environments, hardware mute button, stays as default input reliably | AirPods work but macOS sometimes switches back to built-in mic after sleep/wake |
+| **USB-C hub** | Connect USB headset dongle | If headset isn't USB-C native |
+| **USB-C power bank** | Extends battery + ensures clamshell mode | macOS is more reliable with power connected |
+
+**Critical**: Set your headset as default audio input before closing the lid:
 ```bash
 brew install switchaudio-osx
 SwitchAudioSource -t input -s "Your Headset Name"
 # Then restart voice daemon
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw.voice-daemon
 ```
-
-Why not AirPods? They work, but macOS sometimes switches back to built-in mic after sleep/wake cycles. A USB dongle headset stays as default input reliably.
 
 ## Setup
 
