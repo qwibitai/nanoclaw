@@ -1,8 +1,7 @@
 name: Codex Repair (On Demand)
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -16,17 +15,7 @@ concurrency:
 
 jobs:
   codex-repair:
-    if: >
-      github.event.issue.pull_request &&
-      (
-        contains(github.event.comment.body, '@codex fix') ||
-        contains(github.event.comment.body, '/codex fix')
-      ) &&
-      (
-        github.event.comment.author_association == 'OWNER' ||
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'COLLABORATOR'
-      )
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

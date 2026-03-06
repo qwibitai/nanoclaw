@@ -30,7 +30,8 @@ For cross-domain ownership and update-location mapping, see
 - Use `anthropics/claude-code-action@v1` for PR review automation.
 - Default trigger should be on-demand comment invocation (`@claude`) on PR threads/review comments unless project requirements require always-on review.
 - Keep permissions minimal (`contents: read`, `pull-requests: write`, `issues: write`).
-- Store API key in `ANTHROPIC_API_KEY` repository secret.
+- This repository currently authenticates Claude GitHub Actions through `CLAUDE_CODE_OAUTH_TOKEN`.
+- If OAuth automation becomes unstable or expires unexpectedly, switch the workflow to `ANTHROPIC_API_KEY`.
 - Bound the lane with workflow concurrency and a short timeout; Claude should stay review/discussion-first, not a required merge gate.
 - This repository ships an on-demand example at `.github/workflows/claude-review.yml`.
 
@@ -42,7 +43,7 @@ For cross-domain ownership and update-location mapping, see
 - Restrict Codex repairs to same-repository PR branches and bounded branch-local edits.
 - Run Codex with `safety-strategy: drop-sudo` and the narrowest sandbox that can complete the repair (`workspace-write` by default).
 - Store API key in `OPENAI_API_KEY` repository secret.
-- This repository ships an on-demand repair lane at `.github/workflows/codex-repair.yml`.
+- This repository keeps the repair lane scaffold at `.github/workflows/codex-repair.yml`, but it is intentionally disabled until `OPENAI_API_KEY` is provisioned.
 
 ## Workflow Selection Matrix (Andy-Owned)
 
