@@ -6,6 +6,7 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -32,6 +33,28 @@ import {
 } from '../types.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const WHISPER_URL = process.env.WHISPER_URL || 'http://localhost:8083';
+
+async function transcribeAudio(audioBuffer: Buffer, mimeType: string): Promise<string | null> {
+  const ext = mimeType.includes('ogg') ? 'ogg' : 'mp4';
+  const tmpFile = path.join('/tmp', `nanoclaw-stt-${Date.now()}.${ext}`);
+  try {
+    fs.writeFileSync(tmpFile, audioBuffer);
+    const response = await new Promise<string>((resolve, reject) => {
+      exec(
+        `curl -s -X POST "${WHISPER_URL}/transcribe" -F "file=@${tmpFile}" -F "language=de" --max-time 30`,
+        (err, stdout) => { if (err) reject(err); else resolve(stdout); },
+      );
+    });
+    const data = JSON.parse(response) as { text?: string };
+    return data.text?.trim() || null;
+  } catch (err) {
+    logger.warn({ err }, 'Whisper STT error');
+    return null;
+  } finally {
+    try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
+  }
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -201,12 +224,30 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
-          const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
+          const normalized = msg.message!;
+          let content =
+            normalized.conversation ||
+            normalized.extendedTextMessage?.text ||
+            normalized.imageMessage?.caption ||
+            normalized.videoMessage?.caption ||
             '';
+
+          // Transcribe PTT/audio messages via Whisper STT
+          let isVoiceMessage = false;
+          if (!content && normalized.audioMessage) {
+            const isPtt = (normalized.audioMessage as Record<string, unknown>)?.ptt === true;
+            isVoiceMessage = isPtt;
+            try {
+              const audioBuffer = (await downloadMediaMessage(msg, 'buffer', {})) as Buffer;
+              const mimeType = normalized.audioMessage?.mimetype || 'audio/ogg; codecs=opus';
+              const transcribed = await transcribeAudio(audioBuffer, mimeType);
+              if (transcribed) {
+                content = `[Sprachnachricht]: ${transcribed}`;
+              }
+            } catch (err) {
+              logger.warn({ err, chatJid }, 'Failed to download/transcribe audio');
+            }
+          }
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           if (!content) continue;
@@ -232,6 +273,7 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
+            is_voice_message: isVoiceMessage,
           });
         }
       }
