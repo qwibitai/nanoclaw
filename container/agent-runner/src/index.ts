@@ -188,7 +188,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
 // Secrets to strip from Bash tool subprocess environments.
 // These are needed by claude-code for API auth but should never
 // be visible to commands Kit runs.
-const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'GOOGLE_SERVICE_ACCOUNT_KEY'];
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -513,6 +513,16 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+  }
+
+  // Write Google service account key to temp file so Python/gdrive can use it.
+  // Only set on sdkEnv (never process.env — see comment above).
+  const googleKey = sdkEnv['GOOGLE_SERVICE_ACCOUNT_KEY'];
+  if (googleKey) {
+    const keyPath = '/tmp/gcloud-service-account.json';
+    fs.writeFileSync(keyPath, googleKey, { mode: 0o600 });
+    sdkEnv['GOOGLE_APPLICATION_CREDENTIALS'] = keyPath;
+    log('Wrote Google service account key to ' + keyPath);
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
