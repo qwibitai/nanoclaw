@@ -1,76 +1,91 @@
 # Subagent Routing
 
-Central routing reference for model-tiered agent delegation.
+Central routing reference for Codex role delegation and Claude consult escalation.
 
 ## Agent Profiles
 
-| Agent | Model | Tools | Mode | Memory | Cost Tier |
-|-------|-------|-------|------|--------|-----------|
-| `scout` | haiku | Read, Grep, Glob, Bash, WebSearch, WebFetch | foreground | project | ~$0.25/1M |
-| `implementer` | sonnet | Read, Edit, Write, Bash, Grep, Glob | foreground | none | ~$3/1M |
-| `verifier` | haiku | Bash, Read, Grep, Glob | foreground or background | project | ~$0.25/1M |
+| Agent | Model | Sandbox | Mode | Primary Use |
+|-------|-------|---------|------|-------------|
+| `main` | `gpt-5.3-codex` `high` | session default | foreground | orchestration, user interaction, architecture, final synthesis |
+| `explorer` | `gpt-5.1-codex-mini` `medium` | read-only | foreground | read-heavy discovery, docs/config lookup, first-pass logs |
+| `worker` | `gpt-5.3-codex` `medium` | workspace-write | foreground | bounded implementation in approved touch-set |
+| `reviewer` | `gpt-5.3-codex` `high` | read-only | foreground | regression review, contract audit, failure interpretation |
+| `monitor` | `gpt-5.1-codex-mini` `low` | read-only | background by default | long-running checks, polling, watch/probe flows |
+| `gpt54_escalation` | `gpt-5.4` `xhigh` | profile only | foreground | cross-system ambiguity, large-context synthesis, repeated-failure escalation |
+| `claude consult` | Claude Code CLI | read-only or scoped ops | foreground | prior-context consult or independent review escalation |
 
-## Opus-Only Boundary
+## Main-Agent Boundary
 
-Never delegate these to subagents:
+Never delegate these away from the main Codex agent:
 
 | Task | Reason |
 |------|--------|
-| Architectural decisions | Requires cross-codebase judgment |
-| Incident root-cause triage | Requires reasoning across symptoms |
-| User interaction / clarification | Requires conversation context |
+| User interaction / clarification | Requires full conversation context |
 | Plan approval / prioritization | Requires mission alignment judgment |
-| Cross-tool coordination (Claude/Codex) | Requires orchestration context |
-| Research evaluation / scoring | Requires domain expertise |
+| Architectural decisions | Requires cross-codebase judgment |
+| Contract-boundary decisions | Requires orchestrator ownership |
+| Cross-tool coordination (Codex/Claude) | Requires topology awareness |
+| Final acceptance judgment | Must synthesize script evidence and review findings |
+| Escalation decisions | Main agent decides when Codex-local paths are insufficient |
 | `incident-regression` catalog role | Requires cross-codepath judgment |
 
 ## Delegation Decision Table
 
 | Need | Agent | Mode |
 |------|-------|------|
-| Facts before deciding | `scout` | foreground |
-| Approved plan to execute | `implementer` | foreground |
-| Build/test/lint gates | `verifier` | background (long) or foreground (quick) |
-| Config/Dockerfile reads | `scout` | foreground |
-| Contract invariant checks | `verifier` | foreground |
-| Documentation sync scan | `scout` | foreground |
-| Acceptance gate sequence | `verifier` | background |
-| Probe scripts | `verifier` | background |
+| Facts before deciding | `explorer` | foreground |
+| Config/docs/log lookup | `explorer` | foreground |
+| Approved plan to execute | `worker` | foreground |
+| Diff review / regression scan | `reviewer` | foreground |
+| Contract invariant checks | `reviewer` | foreground |
+| Build/test/verify polling | `monitor` | background |
+| Acceptance gate sequence | `monitor` | background |
+| Probe/watch/status flows | `monitor` | background |
+| Large-context ambiguity or repeated failed loops | `gpt54_escalation` | foreground |
+| Prior Claude context or independent expert pass | `claude consult` | foreground |
+
+## Foreground vs Background
+
+- Keep `explorer`, `worker`, and `reviewer` in the foreground when their output changes the next decision immediately.
+- Use `monitor` in the background for long deterministic runs, polling, and log watch tasks.
+- Use `reviewer` in parallel only after there is a coherent patch or stable repro to inspect.
+- Allow only one write-enabled `worker` at a time.
 
 ## Skip-Delegation Rules
 
 Do not delegate when:
 
-- Task is < 2 minutes for Opus directly
+- Task is faster for the main agent to complete directly
 - Task requires user interaction mid-flow
 - Task requires cross-agent coordination judgment
-- Result is needed immediately with no parallel work
+- Result is needed immediately and there is no parallel work to do locally
 
 ## Anti-Patterns
 
 | Anti-Pattern | Why |
 |--------------|-----|
-| Re-verifying verifier output | Verifier returns exit codes; trust them |
-| Using implementer for exploration | Implementer has write tools; use scout for reads |
-| Scout for writing files | Scout is read-only by design |
-| Delegating without a plan to implementer | Implementer needs explicit instructions |
-| Running verifier foreground when you could parallel | Use background for long gates |
+| Using `worker` for exploration | `worker` has write access; use `explorer` for reads |
+| Using `explorer` or `monitor` for product decisions | They gather evidence; the main agent decides |
+| Treating `monitor` as a debugger | `monitor` reports state; `reviewer` interprets failures |
+| Running multiple write-enabled workers | Creates merge/conflict risk and unclear ownership |
+| Keeping `gpt-5.4` as the default lane | Adds cost and latency without enough routine coding upside |
+| Using Claude as a routine second reviewer | The default path should stay Codex-local unless escalation is justified |
 
 ## Workflow Doc Routing Index
 
-| Workflow Doc | Agent | Mode | Opus Owns | Delegates |
+| Workflow Doc | Agent | Mode | Main Owns | Delegates |
 |---|---|---|---|---|
-| `nanoclaw-jarvis-dispatch-contract.md` | verifier | fg | field change decisions | build + test + contract lint |
-| `nanoclaw-jarvis-worker-runtime.md` | scout | fg | runtime architecture decisions | config mapping, Dockerfile reads |
-| `nanoclaw-jarvis-acceptance-checklist.md` | verifier | bg | pass/fail judgment | full gate sequence |
-| `nanoclaw-container-debugging.md` | scout | fg | root-cause triage | diagnostics, log grep |
-| `nanoclaw-github-control-plane.md` | scout | fg | policy decisions | workflow YAML reads, drift detection |
-| `nanoclaw-andy-user-happiness-gate.md` | verifier | bg | user satisfaction judgment | probe scripts |
-| `weekly-slop-optimization-loop.md` | scout→verifier | fg→bg | prioritization | inventory scripts, then verification gates |
+| `nanoclaw-jarvis-dispatch-contract.md` | `reviewer` | fg | field change decisions | contract audit + diff findings |
+| `nanoclaw-jarvis-worker-runtime.md` | `explorer` | fg | runtime architecture decisions | config mapping, Dockerfile reads |
+| `nanoclaw-jarvis-acceptance-checklist.md` | `monitor` | bg | pass/fail judgment | full gate sequence |
+| `nanoclaw-container-debugging.md` | `explorer` -> `reviewer` | fg | root-cause triage | diagnostics first, then interpretation |
+| `nanoclaw-github-control-plane.md` | `explorer` | fg | policy decisions | workflow YAML reads, drift detection |
+| `nanoclaw-andy-user-happiness-gate.md` | `monitor` | bg | user satisfaction judgment | probe scripts and verification runs |
+| `weekly-slop-optimization-loop.md` | `explorer` -> `monitor` | fg -> bg | prioritization | inventory first, then deterministic checks |
 
-## NOT Routed (Opus-Only)
+## Not Routed Away From Main
 
-- `nanoclaw-development-loop.md` — IS the orchestration loop
+- `nanoclaw-development-loop.md` — is the orchestration loop
 - `workflow-optimization-loop.md` — requires research judgment
-- `unified-codex-claude-loop.md` — cross-tool coordination
-- `session-recall.md` — script-driven, Opus needs result immediately
+- `unified-codex-claude-loop.md` — defines cross-tool coordination
+- `session-recall.md` — script-driven, result is needed immediately

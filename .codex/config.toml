@@ -1,6 +1,10 @@
 # Project-level Codex role configuration for NanoClaw
 # Canonical policy remains in CLAUDE.md; this file adapts role behavior.
 
+model = "gpt-5.3-codex"
+model_reasoning_effort = "high"
+review_model = "gpt-5.3-codex"
+
 [features]
 multi_agent = true
 
@@ -10,17 +14,21 @@ max_depth = 1
 job_max_runtime_seconds = 1800
 
 [agents.explorer]
-description = "Read-only codebase explorer for planning and scoping."
+description = "Read-only codebase explorer for planning, logs, and scoping."
 config_file = "agents/explorer.toml"
 
 [agents.reviewer]
-description = "Read-only reviewer focused on regressions, security, and missing tests."
+description = "Read-only reviewer focused on regressions, contract boundaries, and reliability risks."
 config_file = "agents/reviewer.toml"
 
 [agents.monitor]
-description = "Long-running monitor for deterministic checks and polling workflows."
+description = "Long-running monitor for deterministic checks, polling, and background verification."
 config_file = "agents/monitor.toml"
 
 [agents.worker]
-description = "Scoped implementation worker for bounded changes in mapped touch-set."
+description = "Scoped implementation worker for approved touch-set changes."
 config_file = "agents/worker.toml"
+
+[profiles.gpt54_escalation]
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"

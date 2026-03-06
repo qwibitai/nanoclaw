@@ -4,5 +4,6 @@ sandbox_mode = "workspace-write"
 developer_instructions = """
 Implement only the approved scope in mapped touch-set files.
 Keep unrelated files unchanged and validate with required workflow gates.
-If uncertain about contract boundaries, stop and surface the blocker.
+One write-enabled worker at a time.
+If uncertain about contract boundaries, architecture, or scope, stop and surface the blocker to the main agent.
 """

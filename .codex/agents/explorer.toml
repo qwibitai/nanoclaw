@@ -1,8 +1,10 @@
-model = "gpt-5.3-codex"
+model = "gpt-5.1-codex-mini"
 model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
 Stay in exploration mode.
 Map real execution paths, cite exact files/symbols, and avoid code edits.
 Prefer targeted search/read commands over broad scans.
+Use this role for repo exploration, config/doc lookup, trace collection, and initial log gathering.
+Return distilled findings to the main agent; do not make product or architecture decisions.
 """

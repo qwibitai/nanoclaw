@@ -7,6 +7,7 @@ Mission anchor: `docs/MISSION.md`.
 ## Objective
 
 Use Claude Code as a scoped consult/review lane while keeping Codex as primary orchestrator and executor.
+Codex-local reasoning and subagent paths remain the default; Claude is consulted only when that path is insufficient or prior Claude context is uniquely valuable.
 
 ## Decision Boundary
 
@@ -21,6 +22,7 @@ Skip this lane when:
 1. Task is simple and local context is sufficient.
 2. A fresh deterministic script check is more appropriate than model reasoning.
 3. Session context is stale and cannot be trusted.
+4. Codex main + `explorer`/`reviewer`/`monitor` can still resolve the task without outside context.
 
 ## Session Strategy
 
