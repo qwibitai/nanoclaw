@@ -28,11 +28,10 @@ For cross-domain ownership and update-location mapping, see
 ## Claude Review Automation Baseline
 
 - Use `anthropics/claude-code-action@v1` for PR review automation.
-- Default trigger should be on-demand comment invocation (`@claude`) on PR threads/review comments unless project requirements require always-on review.
+- Default trigger should be on-demand comment invocation (`@claude`) on PR threads, review comments, or submitted PR reviews unless project requirements require always-on review.
 - Keep permissions minimal (`contents: read`, `pull-requests: write`, `issues: write`).
-- This repository currently authenticates Claude GitHub Actions through `CLAUDE_CODE_OAUTH_TOKEN`.
+- This repository currently authenticates Claude GitHub Actions through `ANTHROPIC_API_KEY`.
 - Grant `id-token: write` so the action can mint the GitHub token it uses for repository interaction.
-- If OAuth automation becomes unstable or expires unexpectedly, switch the workflow to `ANTHROPIC_API_KEY`.
 - Bound the lane with workflow concurrency and a short timeout; Claude should stay review/discussion-first, not a required merge gate.
 - This repository ships an on-demand example at `.github/workflows/claude-review.yml`.
 
