@@ -13,6 +13,8 @@ import {
   THINGS_AUTH_TOKEN,
   THINGS_DB_PATH,
   THINGS_SYNC_INTERVAL,
+  OBSIDIAN_VAULT_PATH,
+  OBSIDIAN_SYNC_INTERVAL,
 } from './config.js';
 import { TelegramChannel } from './channels/telegram.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -50,6 +52,7 @@ import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 import { startThingsSync } from './things-sync.js';
 import { startExocortexSync } from './exocortex-sync.js';
+import { startObsidianSync } from './obsidian-sync.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -541,6 +544,10 @@ async function main(): Promise<void> {
   // Exocortex git sync (commit + push daily)
   if (EXOCORTEX_PATH) {
     startExocortexSync(EXOCORTEX_PATH);
+  }
+  // Obsidian vault sync (render exocortex → vault)
+  if (EXOCORTEX_PATH && OBSIDIAN_VAULT_PATH) {
+    startObsidianSync(EXOCORTEX_PATH, OBSIDIAN_VAULT_PATH, OBSIDIAN_SYNC_INTERVAL);
   }
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();

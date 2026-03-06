@@ -19,6 +19,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `src/obsidian-sync.ts` | Renders exocortex → Obsidian vault |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
 
 ## Skills
@@ -31,6 +32,10 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `/update` | Pull upstream NanoClaw changes, merge with customizations, run migrations |
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| `/opsx:explore` | Explore a NanoClaw improvement idea — map impact, surface related goals |
+| `/opsx:propose` | Write a concrete change proposal with scope, plan, and acceptance criteria |
+| `/opsx:apply` | Execute an approved proposal — track progress, update specs |
+| `/opsx:archive` | Archive a completed change — mark tasks done, retire proposal |
 
 ## Development
 
@@ -66,18 +71,65 @@ systemctl --user stop nanoclaw
 systemctl --user restart nanoclaw
 ```
 
+## Working on NanoClaw
+
+### Communication Style
+
+You MUST present results in two layers:
+
+1. **User summary** (ALWAYS first — never skip this):
+   - **Purpose**: What this change does and why it matters
+   - **New capabilities**: What becomes possible that wasn't before
+   - **Environment impact**: What changes in the running system (new processes, config, mounts, scheduled jobs)
+   - Include diagrams when they clarify flow or architecture
+
+2. **Implementation details** (underneath, AFTER the user summary):
+   - File-level changes, technical specifics, code snippets
+   - Used in plan files and during execution — not the lead
+
+### Goals
+
+Active goals from [`goals.md`](~/Documents/ai_assistant/nanoclaw/goals.md):
+
+- **Smooth information flow** — Zero inbox, notes become action, compression without loss, traceability
+  - H1: Agent-based workflow automation (in progress)
+  - H2: Zero-touch email processing (not started)
+  - H3: Structured agent documentation / L-A-D-E (in progress)
+
+Evaluate proposed changes against these goals. If a change doesn't advance any goal, note that explicitly.
+
+### OpenSpec
+
+When discussing NanoClaw improvements, auto-invoke OpenSpec:
+
+| Situation | Action |
+|-----------|--------|
+| User describes a vague idea or asks "what if" | Start with `/opsx:explore` |
+| User describes a concrete change | Start with `/opsx:propose` |
+| Proposal is approved and work begins | Use `/opsx:apply` to track |
+| Work is complete and verified | Use `/opsx:archive` to close out |
+
+After completing work, update OpenSpec artifacts:
+- Mark tasks done in `tasks.md`
+- Update specs when capabilities change
+- Archive completed changes
+
+OpenSpec state lives in `~/Documents/ai_assistant/nanoclaw/.claude/` (symlinked into this project).
+
 ## Exocortex
 
 Personal knowledge base at `~/Documents/ai_assistant` (separate repo: `index-engine/ai_assistant`). See `exocortex/README.md` for details.
 
-- `projects/nanoclaw/` — architecture discussions, decisions, TODOs
+- `soul.md` — founding philosophy (governs all projects and agents)
+- `nanoclaw/` — architecture discussions, decisions, TODOs
 - `ingest/` — Things 3 sync pipeline (inbox, config, sync state)
 - `archive/` — legacy strategic assistant files (read-only reference)
 - `jobs.md` — registry of all scheduled jobs; any new job MUST be added there
 
-Two NanoClaw processes write to the exocortex (see `src/index.ts`):
-- **Things sync** (`src/things-sync.ts`) — reads Things 3 DB, writes new items to `ingest/things_inbox.json` every hour
+Three NanoClaw processes manage the exocortex (see `src/index.ts`):
+- **Things sync** (`src/things-sync.ts`) — reads Things 3 DB, writes new items to `ingest/things_inbox.json` every 10 min
 - **Exocortex git sync** (`src/exocortex-sync.ts`) — commits and pushes changes daily
+- **Obsidian vault sync** (`src/obsidian-sync.ts`) — renders exocortex content (fleeting/, notes/, projects) to an Obsidian vault every 10 min
 
 ## Container Build Cache
 

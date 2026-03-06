@@ -105,7 +105,6 @@ export async function syncThingsToExocortex(
         AND t.heading IS NULL
     `;
     const items = db.prepare(query).all(...projectUuids) as ThingsItem[];
-
     // 4. Read last sync state
     const syncState = readJsonFile<SyncState>(syncStatePath) || {
       lastSyncUuids: [],
@@ -145,20 +144,22 @@ export async function syncThingsToExocortex(
     const ingested = readJsonFile<string[]>(ingestedPath);
     if (ingested && ingested.length > 0) {
       for (const uuid of ingested) {
-        // Find the project config for this item to get the ingested heading UUID
-        const item = items.find((i) => i.uuid === uuid);
-        if (!item) continue;
-
-        // Find which project this item belongs to
+        // Find which project this item belongs to (query DB directly, not filtered result)
         const itemProjectRow = db
           .prepare('SELECT project FROM TMTask WHERE uuid = ?')
           .get(uuid) as { project: string } | undefined;
-        if (!itemProjectRow) continue;
+        if (!itemProjectRow) {
+          logger.warn({ uuid }, 'Things: ingested item not found in DB, skipping');
+          continue;
+        }
 
         const projectConfig = config.projects.find(
           (p) => p.uuid === itemProjectRow.project,
         );
-        if (!projectConfig) continue;
+        if (!projectConfig) {
+          logger.warn({ uuid, project: itemProjectRow.project }, 'Things: no config for item project, skipping');
+          continue;
+        }
 
         const url = `things:///update?id=${uuid}&auth-token=${thingsAuthToken}&heading-id=${projectConfig.ingestedHeadingUuid}`;
         exec(`open ${JSON.stringify(url)}`, (err) => {
@@ -178,6 +179,20 @@ export async function syncThingsToExocortex(
 
       // Clear ingested file
       writeJsonFile(ingestedPath, []);
+
+      // Remove ingested items from the inbox queue so they aren't re-read
+      const currentInbox = readJsonFile<ThingsItem[]>(inboxPath) || [];
+      const ingestedSet = new Set(ingested);
+      const remainingInbox = currentInbox.filter(
+        (item) => !ingestedSet.has(item.uuid),
+      );
+      writeJsonFile(inboxPath, remainingInbox);
+      if (currentInbox.length !== remainingInbox.length) {
+        logger.info(
+          { removed: currentInbox.length - remainingInbox.length },
+          'Things: cleared ingested items from inbox queue',
+        );
+      }
     }
 
     // 8. Update sync state

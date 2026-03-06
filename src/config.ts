@@ -15,6 +15,8 @@ const envConfig = readEnvFile([
   'THINGS_SYNC_INTERVAL',
   'THINGS_DB_PATH',
   'EXOCORTEX_PATH',
+  'OBSIDIAN_VAULT_PATH',
+  'OBSIDIAN_SYNC_INTERVAL',
 ]);
 
 export const ASSISTANT_NAME =
@@ -93,3 +95,11 @@ export const THINGS_DB_PATH =
   '~/Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-YN4YZ/Things Database.thingsdatabase/main.sqlite';
 export const EXOCORTEX_PATH =
   process.env.EXOCORTEX_PATH || envConfig.EXOCORTEX_PATH || '';
+export const OBSIDIAN_VAULT_PATH =
+  process.env.OBSIDIAN_VAULT_PATH || envConfig.OBSIDIAN_VAULT_PATH || '';
+export const OBSIDIAN_SYNC_INTERVAL = parseInt(
+  process.env.OBSIDIAN_SYNC_INTERVAL ||
+    envConfig.OBSIDIAN_SYNC_INTERVAL ||
+    '600000',
+  10,
+);
