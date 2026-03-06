@@ -1,8 +1,2 @@
 npm run format:fix
-
-# Scan staged changes for secrets with gitleaks
-if command -v gitleaks >/dev/null 2>&1; then
-  gitleaks git --pre-commit --staged --verbose
-else
-  echo "⚠ gitleaks not installed — skipping secret scan (install: https://github.com/gitleaks/gitleaks#installing)"
-fi
+gitleaks git --pre-commit --staged --verbose
