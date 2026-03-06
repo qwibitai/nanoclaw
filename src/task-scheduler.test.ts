@@ -44,6 +44,13 @@ describe('task scheduler', () => {
       queue: { enqueueTask } as any,
       onProcess: () => {},
       sendMessage: async () => {},
+      handlerDeps: {
+        sendMessage: async () => {},
+        registeredGroups: () => ({}),
+        registerGroup: () => {},
+        syncGroups: async () => {},
+        getAvailableGroups: () => [],
+      },
     });
 
     await vi.advanceTimersByTimeAsync(10);

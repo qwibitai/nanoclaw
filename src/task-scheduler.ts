@@ -6,10 +6,9 @@ import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
-  writeTasksSnapshot,
 } from './container-runner.js';
+import { HandlerDeps } from './ipc-handlers/registry.js';
 import {
-  getAllTasks,
   getDueTasks,
   getTaskById,
   logTaskRun,
@@ -73,6 +72,7 @@ export interface SchedulerDependencies {
     groupFolder: string,
   ) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
+  handlerDeps: HandlerDeps;
 }
 
 async function runTask(
@@ -129,22 +129,7 @@ async function runTask(
     return;
   }
 
-  // Update tasks snapshot for container to read (filtered by group)
   const isMain = group.isMain === true;
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    task.group_folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
 
   let result: string | null = null;
   let error: string | null = null;
@@ -196,6 +181,8 @@ async function runTask(
           error = streamedOutput.error || 'Unknown error';
         }
       },
+      deps.handlerDeps,
+      (sendFn, closeFn) => deps.queue.registerIpcFns(task.chat_jid, sendFn, closeFn),
     );
 
     if (closeTimer) clearTimeout(closeTimer);

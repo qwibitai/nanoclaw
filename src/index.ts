@@ -16,8 +16,6 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
-  writeGroupsSnapshot,
-  writeTasksSnapshot,
 } from './container-runner.js';
 import {
   cleanupOrphans,
@@ -27,7 +25,6 @@ import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
-  getAllTasks,
   getMessagesSince,
   getNewMessages,
   getRegisteredGroup,
@@ -41,7 +38,8 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import './ipc-handlers/index.js';
+import { HandlerDeps } from './ipc-handlers/registry.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -266,30 +264,21 @@ async function runAgent(
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
 
-  // Update tasks snapshot for container to read (filtered by group)
-  const tasks = getAllTasks();
-  writeTasksSnapshot(
-    group.folder,
-    isMain,
-    tasks.map((t) => ({
-      id: t.id,
-      groupFolder: t.group_folder,
-      prompt: t.prompt,
-      schedule_type: t.schedule_type,
-      schedule_value: t.schedule_value,
-      status: t.status,
-      next_run: t.next_run,
-    })),
-  );
-
-  // Update available groups snapshot (main group only can see all groups)
-  const availableGroups = getAvailableGroups();
-  writeGroupsSnapshot(
-    group.folder,
-    isMain,
-    availableGroups,
-    new Set(Object.keys(registeredGroups)),
-  );
+  const handlerDeps: HandlerDeps = {
+    sendMessage: async (jid, text, sender) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      return channel.sendMessage(jid, text);
+    },
+    registeredGroups: () => registeredGroups,
+    registerGroup,
+    syncGroups: async (force: boolean) => {
+      await Promise.all(
+        channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
+      );
+    },
+    getAvailableGroups,
+  };
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -316,6 +305,8 @@ async function runAgent(
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
+      handlerDeps,
+      (sendFn, closeFn) => queue.registerIpcFns(chatJid, sendFn, closeFn),
     );
 
     if (output.newSessionId) {
@@ -530,6 +521,23 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Build handler deps for JSON-RPC IPC (shared by message processing and scheduler)
+  const handlerDeps: HandlerDeps = {
+    sendMessage: async (jid, text, sender) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      return channel.sendMessage(jid, text);
+    },
+    registeredGroups: () => registeredGroups,
+    registerGroup,
+    syncGroups: async (force: boolean) => {
+      await Promise.all(
+        channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
+      );
+    },
+    getAvailableGroups,
+  };
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -546,25 +554,7 @@ async function main(): Promise<void> {
       const text = formatOutbound(rawText);
       if (text) await channel.sendMessage(jid, text);
     },
-  });
-  startIpcWatcher({
-    sendMessage: (jid, text) => {
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
-    syncGroups: async (force: boolean) => {
-      await Promise.all(
-        channels
-          .filter((ch) => ch.syncGroups)
-          .map((ch) => ch.syncGroups!(force)),
-      );
-    },
-    getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
+    handlerDeps,
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
