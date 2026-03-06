@@ -332,10 +332,10 @@ describe('refresh_groups authorization', () => {
 
 // --- IPC message authorization ---
 // Tests the authorization pattern from startIpcWatcher (ipc.ts).
-// The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup)
+// The logic: isMain || (targetGroup && targetGroup.folder === sourceGroup) || allowedOutputJids.includes(chatJid)
 
 describe('IPC message authorization', () => {
-  // Replicate the exact check from the IPC watcher
+  // Replicate the exact check from the IPC watcher (updated with allowedOutputJids)
   function isMessageAuthorized(
     sourceGroup: string,
     isMain: boolean,
@@ -343,7 +343,15 @@ describe('IPC message authorization', () => {
     registeredGroups: Record<string, RegisteredGroup>,
   ): boolean {
     const targetGroup = registeredGroups[targetChatJid];
-    return isMain || (!!targetGroup && targetGroup.folder === sourceGroup);
+    const sourceGroupConfig = Object.values(registeredGroups).find(
+      (g) => g.folder === sourceGroup,
+    );
+    const allowedJids = sourceGroupConfig?.containerConfig?.allowedOutputJids || [];
+    return (
+      isMain ||
+      (!!targetGroup && targetGroup.folder === sourceGroup) ||
+      allowedJids.includes(targetChatJid)
+    );
   }
 
   it('main group can send to any group', () => {
@@ -367,6 +375,99 @@ describe('IPC message authorization', () => {
   it('main group can send to unregistered JID', () => {
     // Main is always authorized regardless of target
     expect(isMessageAuthorized('main', true, 'unknown@g.us', groups)).toBe(true);
+  });
+});
+
+// --- allowedOutputJids authorization ---
+
+describe('allowedOutputJids cross-group messaging', () => {
+  // Replicate the exact check from the IPC watcher
+  function isMessageAuthorized(
+    sourceGroup: string,
+    isMain: boolean,
+    targetChatJid: string,
+    registeredGroups: Record<string, RegisteredGroup>,
+  ): boolean {
+    const targetGroup = registeredGroups[targetChatJid];
+    const sourceGroupConfig = Object.values(registeredGroups).find(
+      (g) => g.folder === sourceGroup,
+    );
+    const allowedJids = sourceGroupConfig?.containerConfig?.allowedOutputJids || [];
+    return (
+      isMain ||
+      (!!targetGroup && targetGroup.folder === sourceGroup) ||
+      allowedJids.includes(targetChatJid)
+    );
+  }
+
+  it('group with allowedOutputJids can send to allowed JID', () => {
+    const groupsWithAllowed: Record<string, RegisteredGroup> = {
+      ...groups,
+      'neo-trading@g.us': {
+        name: 'NEO Trading',
+        folder: 'neo-trading',
+        trigger: '@Neo',
+        added_at: '2024-01-01T00:00:00.000Z',
+        containerConfig: {
+          allowedOutputJids: ['dc:1476665384005271755', 'third@g.us'],
+        },
+      },
+    };
+
+    expect(isMessageAuthorized('neo-trading', false, 'dc:1476665384005271755', groupsWithAllowed)).toBe(true);
+    expect(isMessageAuthorized('neo-trading', false, 'third@g.us', groupsWithAllowed)).toBe(true);
+  });
+
+  it('group with allowedOutputJids cannot send to non-allowed JID', () => {
+    const groupsWithAllowed: Record<string, RegisteredGroup> = {
+      ...groups,
+      'neo-trading@g.us': {
+        name: 'NEO Trading',
+        folder: 'neo-trading',
+        trigger: '@Neo',
+        added_at: '2024-01-01T00:00:00.000Z',
+        containerConfig: {
+          allowedOutputJids: ['dc:1476665384005271755'],
+        },
+      },
+    };
+
+    expect(isMessageAuthorized('neo-trading', false, 'main@g.us', groupsWithAllowed)).toBe(false);
+    expect(isMessageAuthorized('neo-trading', false, 'other@g.us', groupsWithAllowed)).toBe(false);
+  });
+
+  it('group without containerConfig cannot send cross-group', () => {
+    expect(isMessageAuthorized('other-group', false, 'main@g.us', groups)).toBe(false);
+  });
+
+  it('group with empty allowedOutputJids cannot send cross-group', () => {
+    const groupsEmpty: Record<string, RegisteredGroup> = {
+      ...groups,
+      'other@g.us': {
+        ...OTHER_GROUP,
+        containerConfig: { allowedOutputJids: [] },
+      },
+    };
+
+    expect(isMessageAuthorized('other-group', false, 'main@g.us', groupsEmpty)).toBe(false);
+  });
+
+  it('allowedOutputJids works for Discord JIDs (dc: prefix)', () => {
+    const groupsDiscord: Record<string, RegisteredGroup> = {
+      ...groups,
+      'dc:999': {
+        name: 'Discord Alert Channel',
+        folder: 'neo-alerts',
+        trigger: '@Neo',
+        added_at: '2024-01-01T00:00:00.000Z',
+        containerConfig: {
+          allowedOutputJids: ['dc:123456789'],
+        },
+      },
+    };
+
+    expect(isMessageAuthorized('neo-alerts', false, 'dc:123456789', groupsDiscord)).toBe(true);
+    expect(isMessageAuthorized('neo-alerts', false, 'dc:999999999', groupsDiscord)).toBe(false);
   });
 });
 
