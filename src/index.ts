@@ -145,7 +145,7 @@ function playAudioLocally(audio: Buffer): void {
   const tmpFile = path.join(os.tmpdir(), `nanoclaw-play-${Date.now()}.ogg`);
   fs.writeFileSync(tmpFile, audio);
   const child = exec(
-    `/opt/homebrew/bin/ffplay -nodisp -autoexit -loglevel quiet -af "atempo=1.35" "${tmpFile}"`,
+    `/opt/homebrew/bin/ffplay -nodisp -autoexit -loglevel quiet -af "atempo=1.25" "${tmpFile}"`,
     (err) => {
       try {
         fs.unlinkSync(tmpFile);
