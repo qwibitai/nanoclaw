@@ -12,6 +12,7 @@ structured:
     grammy: "^1.39.3"
   env_additions:
     - TELEGRAM_BOT_TOKEN
+    - DEEPGRAM_API_KEY  # optional: enables voice message transcription
 conflicts: []
 depends: []
 test: "npx vitest run src/channels/telegram.test.ts"
