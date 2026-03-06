@@ -80,22 +80,37 @@ export const SWARM_NUM_AGENTS = Math.max(
 );
 
 // Aggregation policy: one of 'synthesize' | 'send_all' | 'majority_vote' | 'select_best' | 'first_response' | 'quorum'
-export const SWARM_POLICY = (process.env.SWARM_POLICY || 'synthesize').toLowerCase();
+export const SWARM_POLICY = (
+  process.env.SWARM_POLICY || 'synthesize'
+).toLowerCase();
 
 // How long (ms) to wait for subagents before aggregating/returning partial results
-export const SWARM_TIMEOUT_MS = parseInt(process.env.SWARM_TIMEOUT_MS || '10000', 10);
+export const SWARM_TIMEOUT_MS = parseInt(
+  process.env.SWARM_TIMEOUT_MS || '10000',
+  10,
+);
 
 // Whether to keep raw subagent outputs (for audit or optional display)
-export const SWARM_KEEP_RAW = (process.env.SWARM_KEEP_RAW || 'false') === 'true';
+export const SWARM_KEEP_RAW =
+  (process.env.SWARM_KEEP_RAW || 'false') === 'true';
+
+// Quorum size for 'quorum' policy. If not set, defaults to ceil(SWARM_NUM_AGENTS/2).
+export const SWARM_QUORUM_K = Math.max(
+  1,
+  parseInt(process.env.SWARM_QUORUM_K || String(Math.ceil(SWARM_NUM_AGENTS / 2)), 10),
+);
 
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return str.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
 }
 
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+// Whether to enable LLM-based synthesis. Default: false (opt-in via env)
+export const SWARM_USE_LLM = (process.env.SWARM_USE_LLM || 'false').toLowerCase();
 
 // Timezone for scheduled tasks, message formatting, etc.
 // Validates each candidate is a real IANA identifier before accepting.
