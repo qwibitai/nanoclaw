@@ -1,0 +1,18 @@
+skill: add-whatsapp-image-understanding
+version: 1.0.0
+description: "WhatsApp image understanding — download, save, and prompt agent to view WhatsApp images"
+core_version: 0.1.0
+adds:
+  - src/image-handler.ts
+  - src/image-cleanup.ts
+modifies:
+  - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
+  - src/index.ts
+  - groups/global/CLAUDE.md
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/whatsapp.test.ts"
