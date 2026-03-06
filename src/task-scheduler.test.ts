@@ -131,6 +131,27 @@ describe('task scheduler', () => {
     expect(new Date(nanResult!).getTime()).toBeGreaterThanOrEqual(now + 60_000);
   });
 
+  it('computeNextRun returns null for invalid cron expressions instead of throwing', () => {
+    const task = {
+      id: 'bad-cron',
+      group_folder: 'test',
+      chat_jid: 'test@g.us',
+      prompt: 'test',
+      schedule_type: 'cron' as const,
+      schedule_value: 'not a valid cron',
+      context_mode: 'isolated' as const,
+      next_run: new Date().toISOString(),
+      last_run: null,
+      last_result: null,
+      status: 'active' as const,
+      created_at: '2026-01-01T00:00:00.000Z',
+    };
+
+    // Should return null instead of throwing, preventing tasks from
+    // getting stuck in 'running' status when cron parsing fails
+    expect(computeNextRun(task)).toBeNull();
+  });
+
   it('computeNextRun skips missed intervals without infinite loop', () => {
     // Task was due 10 intervals ago (missed)
     const ms = 60000;

@@ -34,10 +34,18 @@ export function computeNextRun(task: ScheduledTask): string | null {
   const now = Date.now();
 
   if (task.schedule_type === 'cron') {
-    const interval = CronExpressionParser.parse(task.schedule_value, {
-      tz: TIMEZONE,
-    });
-    return interval.next().toISOString();
+    try {
+      const interval = CronExpressionParser.parse(task.schedule_value, {
+        tz: TIMEZONE,
+      });
+      return interval.next().toISOString();
+    } catch {
+      logger.warn(
+        { taskId: task.id, value: task.schedule_value },
+        'Invalid cron expression, cannot compute next run',
+      );
+      return null;
+    }
   }
 
   if (task.schedule_type === 'interval') {
