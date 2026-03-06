@@ -16,7 +16,7 @@ export interface ExecContainerOpts {
   mounts?: Array<[string, string, string?]>;
 }
 
-// Shim xdg-open: captures OAuth URL and exits non-zero so CLI falls back to console prompt.
+// Shim xdg-open: captures OAuth URL and exits 0 so CLI thinks browser opened.
 const XDG_OPEN_SHIM = path.join(process.cwd(), 'container', 'shims', 'xdg-open');
 
 /**
