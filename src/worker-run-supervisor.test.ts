@@ -101,7 +101,9 @@ describe('WorkerRunSupervisor.reconcile', () => {
     expect(row?.status).toBe('running');
     expect(row?.phase).toBe('completion_repair_active');
     expect(row?.no_container_since).toBeNull();
-    expect(row?.active_container_name).toContain('prefix:nanoclaw-jarvis-worker-3-');
+    expect(row?.active_container_name).toContain(
+      'prefix:nanoclaw-jarvis-worker-3-',
+    );
   });
 
   it('fails queued run when group cursor is already past dispatch timestamp', () => {
@@ -118,7 +120,9 @@ describe('WorkerRunSupervisor.reconcile', () => {
     expect(changed).toBe(true);
     expect(row?.status).toBe('failed');
     expect(row?.phase).toBe('terminal');
-    expect(row?.error_details).toContain('"reason":"queued_stale_before_spawn"');
+    expect(row?.error_details).toContain(
+      '"reason":"queued_stale_before_spawn"',
+    );
   });
 
   it('does not fail queued run from cursor mismatch when spawn was already acknowledged', () => {

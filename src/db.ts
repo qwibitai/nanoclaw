@@ -946,7 +946,11 @@ export interface AndyRequestRecord {
   closed_at: string | null;
 }
 
-export type DispatchAttemptStatus = 'blocked' | 'queued' | 'failed' | 'superseded';
+export type DispatchAttemptStatus =
+  | 'blocked'
+  | 'queued'
+  | 'failed'
+  | 'superseded';
 
 export interface DispatchAttemptRecord {
   attempt_id: string;
@@ -994,7 +998,10 @@ function isTerminalWorkerRunStatus(status: WorkerRunStatus): boolean {
 
 /** Status set where a duplicate dispatch/execution should be blocked. */
 const NON_RETRYABLE_WORKER_STATUSES: Set<string> = new Set([
-  'queued', 'running', 'review_requested', 'done',
+  'queued',
+  'running',
+  'review_requested',
+  'done',
 ]);
 
 export function isNonRetryableWorkerStatus(status: string): boolean {
@@ -1008,16 +1015,20 @@ function canTransitionWorkerRunStatus(
   if (current === next) return true;
   switch (current) {
     case 'queued':
-      return next === 'running'
-        || next === 'review_requested'
-        || next === 'done'
-        || next === 'failed'
-        || next === 'failed_contract';
+      return (
+        next === 'running' ||
+        next === 'review_requested' ||
+        next === 'done' ||
+        next === 'failed' ||
+        next === 'failed_contract'
+      );
     case 'running':
-      return next === 'review_requested'
-        || next === 'done'
-        || next === 'failed'
-        || next === 'failed_contract';
+      return (
+        next === 'review_requested' ||
+        next === 'done' ||
+        next === 'failed' ||
+        next === 'failed_contract'
+      );
     case 'review_requested':
       return next === 'done';
     case 'done':
@@ -1089,7 +1100,12 @@ export function insertWorkerRun(
   db.prepare(
     `INSERT INTO worker_runs (run_id, group_folder, lane_id, status, phase, started_at, retry_count)
      VALUES (?, ?, ?, 'queued', 'queued', ?, 0)`,
-  ).run(runId, groupFolder, metadata?.lane_id ?? groupFolder, new Date().toISOString());
+  ).run(
+    runId,
+    groupFolder,
+    metadata?.lane_id ?? groupFolder,
+    new Date().toISOString(),
+  );
   if (metadata) updateWorkerRunDispatchMetadata(runId, metadata);
   return 'new';
 }
@@ -1197,7 +1213,9 @@ export function updateWorkerRunLifecycle(
   if (fields.length === 0) return;
 
   values.push(runId);
-  db.prepare(`UPDATE worker_runs SET ${fields.join(', ')} WHERE run_id = ?`).run(...values);
+  db.prepare(
+    `UPDATE worker_runs SET ${fields.join(', ')} WHERE run_id = ?`,
+  ).run(...values);
 }
 
 function getWorkerFailureReason(errorDetails: string | null): string | null {
@@ -1248,9 +1266,10 @@ const COMPLETION_RECOVERABLE_FAILURE_REASONS = new Set([
   'active_status_with_completed_at',
 ]);
 
-export function recoverWorkerRunForCompletionAccept(
-  runId: string,
-): { recovered: boolean; reason: string | null } {
+export function recoverWorkerRunForCompletionAccept(runId: string): {
+  recovered: boolean;
+  reason: string | null;
+} {
   return recoverWorkerRunForCompletionReason(
     runId,
     COMPLETION_RECOVERABLE_FAILURE_REASONS,
@@ -1349,10 +1368,16 @@ export function recoverWorkerRunFromNoContainerFailure(runId: string): boolean {
   return result.recovered;
 }
 
-export function updateWorkerRunStatus(runId: string, status: WorkerRunStatus): void {
+export function updateWorkerRunStatus(
+  runId: string,
+  status: WorkerRunStatus,
+): void {
   const current = getWorkerRun(runId);
   if (!current) {
-    logger.warn({ runId, status }, 'Ignored worker status update for unknown run');
+    logger.warn(
+      { runId, status },
+      'Ignored worker status update for unknown run',
+    );
     return;
   }
 
@@ -1397,7 +1422,10 @@ export function updateWorkerRunStatus(runId: string, status: WorkerRunStatus): v
   }
 }
 
-export function requeueWorkerRunForReplay(runId: string, reason: string): boolean {
+export function requeueWorkerRunForReplay(
+  runId: string,
+  reason: string,
+): boolean {
   const run = getWorkerRun(runId);
   if (!run) return false;
   if (isTerminalWorkerRunStatus(run.status as WorkerRunStatus)) return false;
@@ -1512,44 +1540,46 @@ export function completeWorkerRun(
   );
 }
 
-export function getWorkerRun(runId: string): {
-  run_id: string;
-  group_folder: string;
-  lane_id: string | null;
-  status: string;
-  phase: string | null;
-  started_at: string;
-  completed_at: string | null;
-  retry_count: number;
-  result_summary: string | null;
-  error_details: string | null;
-  branch_name: string | null;
-  pr_url: string | null;
-  commit_sha: string | null;
-  files_changed: string | null;
-  test_summary: string | null;
-  risk_summary: string | null;
-  dispatch_repo: string | null;
-  dispatch_branch: string | null;
-  request_id: string | null;
-  context_intent: string | null;
-  dispatch_payload: string | null;
-  parent_run_id: string | null;
-  dispatch_session_id: string | null;
-  selected_session_id: string | null;
-  effective_session_id: string | null;
-  session_selection_source: string | null;
-  session_resume_status: string | null;
-  session_resume_error: string | null;
-  last_heartbeat_at: string | null;
-  spawn_acknowledged_at: string | null;
-  active_container_name: string | null;
-  no_container_since: string | null;
-  expects_followup_container: number | null;
-  supervisor_owner: string | null;
-  lease_expires_at: string | null;
-  recovered_from_reason: string | null;
-} | undefined {
+export function getWorkerRun(runId: string):
+  | {
+      run_id: string;
+      group_folder: string;
+      lane_id: string | null;
+      status: string;
+      phase: string | null;
+      started_at: string;
+      completed_at: string | null;
+      retry_count: number;
+      result_summary: string | null;
+      error_details: string | null;
+      branch_name: string | null;
+      pr_url: string | null;
+      commit_sha: string | null;
+      files_changed: string | null;
+      test_summary: string | null;
+      risk_summary: string | null;
+      dispatch_repo: string | null;
+      dispatch_branch: string | null;
+      request_id: string | null;
+      context_intent: string | null;
+      dispatch_payload: string | null;
+      parent_run_id: string | null;
+      dispatch_session_id: string | null;
+      selected_session_id: string | null;
+      effective_session_id: string | null;
+      session_selection_source: string | null;
+      session_resume_status: string | null;
+      session_resume_error: string | null;
+      last_heartbeat_at: string | null;
+      spawn_acknowledged_at: string | null;
+      active_container_name: string | null;
+      no_container_since: string | null;
+      expects_followup_container: number | null;
+      supervisor_owner: string | null;
+      lease_expires_at: string | null;
+      recovered_from_reason: string | null;
+    }
+  | undefined {
   return db
     .prepare(
       `SELECT run_id, group_folder, lane_id, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, request_id, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
@@ -1579,9 +1609,8 @@ export function getWorkerRuns(options?: {
     params.push(...options.statuses);
   }
 
-  const where = whereClauses.length > 0
-    ? `WHERE ${whereClauses.join(' AND ')}`
-    : '';
+  const where =
+    whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
   const limit = Math.max(1, Math.min(options?.limit ?? 50, 500));
 
   params.push(limit);
@@ -1602,8 +1631,9 @@ export function getLatestReusableWorkerSession(
   repo: string,
   branch: string,
 ): WorkerRunRecord | undefined {
-  return db.prepare(
-    `SELECT run_id, group_folder, lane_id, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, request_id, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+  return db
+    .prepare(
+      `SELECT run_id, group_folder, lane_id, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, request_id, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
      FROM worker_runs
      WHERE group_folder = ?
        AND dispatch_repo = ?
@@ -1612,35 +1642,50 @@ export function getLatestReusableWorkerSession(
        AND status IN ('review_requested', 'done')
      ORDER BY started_at DESC
      LIMIT 1`,
-  ).get(groupFolder, repo, branch) as WorkerRunRecord | undefined;
+    )
+    .get(groupFolder, repo, branch) as WorkerRunRecord | undefined;
 }
 
-export function findWorkerRunByEffectiveSessionId(sessionId: string): WorkerRunRecord | undefined {
-  return db.prepare(
-    `SELECT run_id, group_folder, lane_id, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, request_id, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
+export function findWorkerRunByEffectiveSessionId(
+  sessionId: string,
+): WorkerRunRecord | undefined {
+  return db
+    .prepare(
+      `SELECT run_id, group_folder, lane_id, status, phase, started_at, completed_at, retry_count, result_summary, error_details, branch_name, pr_url, commit_sha, files_changed, test_summary, risk_summary, dispatch_repo, dispatch_branch, request_id, context_intent, dispatch_payload, parent_run_id, dispatch_session_id, selected_session_id, effective_session_id, session_selection_source, session_resume_status, session_resume_error, last_heartbeat_at, spawn_acknowledged_at, active_container_name, no_container_since, expects_followup_container, supervisor_owner, lease_expires_at, recovered_from_reason
      FROM worker_runs
      WHERE effective_session_id = ?
      ORDER BY started_at DESC
      LIMIT 1`,
-  ).get(sessionId) as WorkerRunRecord | undefined;
+    )
+    .get(sessionId) as WorkerRunRecord | undefined;
 }
 
 // --- Per-message idempotency ---
 
-export function isMessageProcessed(chatJid: string, messageId: string): boolean {
-  const row = db.prepare(
-    `SELECT 1 FROM processed_messages WHERE chat_jid = ? AND message_id = ?`,
-  ).get(chatJid, messageId);
+export function isMessageProcessed(
+  chatJid: string,
+  messageId: string,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM processed_messages WHERE chat_jid = ? AND message_id = ?`,
+    )
+    .get(chatJid, messageId);
   return !!row;
 }
 
 /** Return the set of messageIds (from the given list) that have already been processed. */
-export function getProcessedMessageIds(chatJid: string, messageIds: string[]): Set<string> {
+export function getProcessedMessageIds(
+  chatJid: string,
+  messageIds: string[],
+): Set<string> {
   if (messageIds.length === 0) return new Set();
   const placeholders = messageIds.map(() => '?').join(',');
-  const rows = db.prepare(
-    `SELECT message_id FROM processed_messages WHERE chat_jid = ? AND message_id IN (${placeholders})`,
-  ).all(chatJid, ...messageIds) as Array<{ message_id: string }>;
+  const rows = db
+    .prepare(
+      `SELECT message_id FROM processed_messages WHERE chat_jid = ? AND message_id IN (${placeholders})`,
+    )
+    .all(chatJid, ...messageIds) as Array<{ message_id: string }>;
   return new Set(rows.map((r) => r.message_id));
 }
 
@@ -1688,9 +1733,9 @@ export function createAndyRequestIfAbsent(input: {
   intent: AndyRequestIntent;
   state?: AndyRequestState;
 }): { request_id: string; created: boolean } {
-  const existing = db.prepare(
-    `SELECT request_id FROM andy_requests WHERE user_message_id = ?`,
-  ).get(input.user_message_id) as { request_id: string } | undefined;
+  const existing = db
+    .prepare(`SELECT request_id FROM andy_requests WHERE user_message_id = ?`)
+    .get(input.user_message_id) as { request_id: string } | undefined;
   if (existing) {
     return { request_id: existing.request_id, created: false };
   }
@@ -1728,41 +1773,58 @@ export function createAndyRequestIfAbsent(input: {
   return { request_id: input.request_id, created: true };
 }
 
-export function getAndyRequestByMessageId(messageId: string): AndyRequestRecord | undefined {
-  return db.prepare(
-    `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
+export function getAndyRequestByMessageId(
+  messageId: string,
+): AndyRequestRecord | undefined {
+  return db
+    .prepare(
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE user_message_id = ?`,
-  ).get(messageId) as AndyRequestRecord | undefined;
+    )
+    .get(messageId) as AndyRequestRecord | undefined;
 }
 
-export function getAndyRequestById(requestId: string): AndyRequestRecord | undefined {
-  return db.prepare(
-    `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
+export function getAndyRequestById(
+  requestId: string,
+): AndyRequestRecord | undefined {
+  return db
+    .prepare(
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE request_id = ?`,
-  ).get(requestId) as AndyRequestRecord | undefined;
+    )
+    .get(requestId) as AndyRequestRecord | undefined;
 }
 
-export function getLatestAndyRequestForChat(chatJid: string): AndyRequestRecord | undefined {
-  return db.prepare(
-    `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
+export function getLatestAndyRequestForChat(
+  chatJid: string,
+): AndyRequestRecord | undefined {
+  return db
+    .prepare(
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE chat_jid = ?
      ORDER BY updated_at DESC
      LIMIT 1`,
-  ).get(chatJid) as AndyRequestRecord | undefined;
+    )
+    .get(chatJid) as AndyRequestRecord | undefined;
 }
 
-export function listActiveAndyRequests(chatJid: string, limit = 5): AndyRequestRecord[] {
+export function listActiveAndyRequests(
+  chatJid: string,
+  limit = 5,
+): AndyRequestRecord[] {
   const boundedLimit = Math.max(1, Math.min(limit, 20));
-  return db.prepare(
-    `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
+  return db
+    .prepare(
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE chat_jid = ? AND state NOT IN ('completed', 'failed', 'cancelled')
      ORDER BY updated_at DESC
      LIMIT ?`,
-  ).all(chatJid, boundedLimit) as AndyRequestRecord[];
+    )
+    .all(chatJid, boundedLimit) as AndyRequestRecord[];
 }
 
 export function updateAndyRequestState(
@@ -1781,14 +1843,7 @@ export function updateAndyRequestState(
            ELSE NULL
          END
      WHERE request_id = ?`,
-  ).run(
-    state,
-    lastStatusText ?? null,
-    now,
-    state,
-    now,
-    requestId,
-  );
+  ).run(state, lastStatusText ?? null, now, state, now, requestId);
 }
 
 export function linkAndyRequestToWorkerRun(
@@ -1825,14 +1880,7 @@ export function updateAndyRequestByWorkerRun(
            ELSE NULL
          END
      WHERE worker_run_id = ?`,
-  ).run(
-    state,
-    lastStatusText ?? null,
-    now,
-    state,
-    now,
-    runId,
-  );
+  ).run(state, lastStatusText ?? null, now, state, now, runId);
 }
 
 export function setAndyRequestCoordinatorSession(
@@ -1892,22 +1940,30 @@ export function insertDispatchAttempt(input: {
   return attemptId;
 }
 
-export function listDispatchAttemptsForRequest(requestId: string): DispatchAttemptRecord[] {
-  return db.prepare(
-    `SELECT attempt_id, request_id, source_lane_id, target_lane_id, run_id, status, reason_code, reason_text, session_strategy, dispatch_payload, created_at, updated_at
+export function listDispatchAttemptsForRequest(
+  requestId: string,
+): DispatchAttemptRecord[] {
+  return db
+    .prepare(
+      `SELECT attempt_id, request_id, source_lane_id, target_lane_id, run_id, status, reason_code, reason_text, session_strategy, dispatch_payload, created_at, updated_at
      FROM dispatch_attempts
      WHERE request_id = ?
      ORDER BY created_at DESC`,
-  ).all(requestId) as DispatchAttemptRecord[];
+    )
+    .all(requestId) as DispatchAttemptRecord[];
 }
 
-export function listDispatchAttemptsForRun(runId: string): DispatchAttemptRecord[] {
-  return db.prepare(
-    `SELECT attempt_id, request_id, source_lane_id, target_lane_id, run_id, status, reason_code, reason_text, session_strategy, dispatch_payload, created_at, updated_at
+export function listDispatchAttemptsForRun(
+  runId: string,
+): DispatchAttemptRecord[] {
+  return db
+    .prepare(
+      `SELECT attempt_id, request_id, source_lane_id, target_lane_id, run_id, status, reason_code, reason_text, session_strategy, dispatch_payload, created_at, updated_at
      FROM dispatch_attempts
      WHERE run_id = ?
      ORDER BY created_at DESC`,
-  ).all(runId) as DispatchAttemptRecord[];
+    )
+    .all(runId) as DispatchAttemptRecord[];
 }
 
 // --- Worker steering events ---
@@ -1922,7 +1978,13 @@ export function insertSteeringEvent(event: {
   db.prepare(
     `INSERT OR IGNORE INTO worker_steering_events (steer_id, run_id, from_group, message, sent_at, status)
      VALUES (?, ?, ?, ?, ?, 'pending')`,
-  ).run(event.steer_id, event.run_id, event.from_group, event.message, event.sent_at);
+  ).run(
+    event.steer_id,
+    event.run_id,
+    event.from_group,
+    event.message,
+    event.sent_at,
+  );
   db.prepare(
     `UPDATE worker_runs SET steer_count = COALESCE(steer_count, 0) + 1 WHERE run_id = ?`,
   ).run(event.run_id);
@@ -1944,14 +2006,18 @@ export function updateWorkerRunProgress(
   ).run(summary, timestamp, runId);
 }
 
-export function getWorkerRunProgress(
-  runId: string,
-): { last_progress_summary: string | null; last_progress_at: string | null } | null {
+export function getWorkerRunProgress(runId: string): {
+  last_progress_summary: string | null;
+  last_progress_at: string | null;
+} | null {
   return db
     .prepare(
       `SELECT last_progress_summary, last_progress_at FROM worker_runs WHERE run_id = ?`,
     )
-    .get(runId) as { last_progress_summary: string | null; last_progress_at: string | null } | null;
+    .get(runId) as {
+    last_progress_summary: string | null;
+    last_progress_at: string | null;
+  } | null;
 }
 
 // --- JSON migration ---

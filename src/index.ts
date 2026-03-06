@@ -87,7 +87,12 @@ import { emitBridgeEvent } from './event-bridge.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, isJarvisWorkerFolder, NewMessage, RegisteredGroup } from './types.js';
+import {
+  Channel,
+  isJarvisWorkerFolder,
+  NewMessage,
+  RegisteredGroup,
+} from './types.js';
 import { logger } from './logger.js';
 import { WorkerRunSupervisor } from './worker-run-supervisor.js';
 
@@ -111,7 +116,11 @@ const MISSION_CORE_FOLDERS = new Set([
   'jarvis-worker-1',
   'jarvis-worker-2',
 ]);
-const ACTIVE_WORKER_RUN_STATUSES = ['queued', 'running', 'review_requested'] as const;
+const ACTIVE_WORKER_RUN_STATUSES = [
+  'queued',
+  'running',
+  'review_requested',
+] as const;
 const WORKER_RUN_STALE_MS = 2 * 60 * 60 * 1000;
 const WORKER_QUEUED_CURSOR_GRACE_MS = 10 * 60 * 1000; // Avoid false pre-spawn stale failures during normal queueing
 const WORKER_LEASE_TTL_MS = 90 * 1000;
@@ -121,7 +130,10 @@ const WORKER_SUPERVISOR_OWNER = `nanoclaw-${process.pid}`;
 const PROCESS_START_AT_MS = Date.now();
 const PROCESS_START_AT_ISO = new Date(PROCESS_START_AT_MS).toISOString();
 const andyBusyAckLastSentMs: Record<string, number> = {};
-const andyRetryNoticeState: Record<string, { sentAtMs: number; signature: string }> = {};
+const andyRetryNoticeState: Record<
+  string,
+  { sentAtMs: number; signature: string }
+> = {};
 const workerRunSupervisor = new WorkerRunSupervisor({
   hardTimeoutMs: WORKER_RUN_STALE_MS,
   queuedCursorGraceMs: WORKER_QUEUED_CURSOR_GRACE_MS,
@@ -165,7 +177,10 @@ function stripCodeFence(raw: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
-function sanitizeUserFacingOutput(group: RegisteredGroup, text: string): string {
+function sanitizeUserFacingOutput(
+  group: RegisteredGroup,
+  text: string,
+): string {
   if (group.folder !== ANDY_DEVELOPER_FOLDER) return text;
 
   const parsed = parseDispatchPayload(stripCodeFence(text));
@@ -213,7 +228,10 @@ function commitCursor(chatJid: string, timestamp: string): void {
   }
 }
 
-function maxTimestamp(a: string | undefined, b: string | undefined): string | undefined {
+function maxTimestamp(
+  a: string | undefined,
+  b: string | undefined,
+): string | undefined {
   if (!a) return b;
   if (!b) return a;
   return isAfterTimestamp(a, b) ? a : b;
@@ -238,8 +256,11 @@ function getDispatchBlocksForGroup(
   if (!fs.existsSync(errorDir)) return [];
 
   const rows: DispatchBlockSnapshotEntry[] = [];
-  const files = fs.readdirSync(errorDir)
-    .filter((name) => name.startsWith('dispatch-block-') && name.endsWith('.json'))
+  const files = fs
+    .readdirSync(errorDir)
+    .filter(
+      (name) => name.startsWith('dispatch-block-') && name.endsWith('.json'),
+    )
     .sort()
     .reverse();
 
@@ -247,12 +268,21 @@ function getDispatchBlocksForGroup(
     if (rows.length >= 25) break;
     try {
       const raw = fs.readFileSync(path.join(errorDir, file), 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<DispatchBlockSnapshotEntry> & { kind?: string };
+      const parsed = JSON.parse(raw) as Partial<DispatchBlockSnapshotEntry> & {
+        kind?: string;
+      };
       if (parsed.kind !== 'dispatch_block') continue;
-      if (!parsed.timestamp || !parsed.source_group || !parsed.target_jid || !parsed.reason_text) continue;
+      if (
+        !parsed.timestamp ||
+        !parsed.source_group ||
+        !parsed.target_jid ||
+        !parsed.reason_text
+      )
+        continue;
 
-      const include = isMain
-        || (group.folder === ANDY_DEVELOPER_FOLDER
+      const include =
+        isMain ||
+        (group.folder === ANDY_DEVELOPER_FOLDER
           ? parsed.source_group === ANDY_DEVELOPER_FOLDER
           : parsed.source_group === group.folder);
       if (!include) continue;
@@ -274,7 +304,10 @@ function getDispatchBlocksForGroup(
   return rows;
 }
 
-function buildWorkerRunsSnapshot(group: RegisteredGroup, isMain: boolean): WorkerRunsSnapshot {
+function buildWorkerRunsSnapshot(
+  group: RegisteredGroup,
+  isMain: boolean,
+): WorkerRunsSnapshot {
   let scope: WorkerRunsSnapshot['scope'] = 'group';
   let groupFolderLike: string | undefined;
 
@@ -372,22 +405,24 @@ function buildAndyPromptWorkerContext(snapshot: WorkerRunsSnapshot): string {
   const currentWindowMs = 60 * 60 * 1000;
   const currentWindowRuns = snapshot.recent.filter((r) => {
     const startedMs = Date.parse(r.started_at);
-    return Number.isFinite(startedMs) && (nowMs - startedMs) <= currentWindowMs;
+    return Number.isFinite(startedMs) && nowMs - startedMs <= currentWindowMs;
   });
   const currentFailures = snapshot.recent.filter((r) => {
     if (r.status !== 'failed' && r.status !== 'failed_contract') return false;
     const startedMs = Date.parse(r.started_at);
-    return Number.isFinite(startedMs) && (nowMs - startedMs) <= currentWindowMs;
+    return Number.isFinite(startedMs) && nowMs - startedMs <= currentWindowMs;
   }).length;
   const currentPasses = snapshot.recent.filter((r) => {
     if (r.status !== 'review_requested' && r.status !== 'done') return false;
     const startedMs = Date.parse(r.started_at);
-    return Number.isFinite(startedMs) && (nowMs - startedMs) <= currentWindowMs;
+    return Number.isFinite(startedMs) && nowMs - startedMs <= currentWindowMs;
   }).length;
-  const currentDispatchBlocks = (snapshot.dispatch_blocks ?? []).filter((entry) => {
-    const ts = Date.parse(entry.timestamp);
-    return Number.isFinite(ts) && (nowMs - ts) <= currentWindowMs;
-  });
+  const currentDispatchBlocks = (snapshot.dispatch_blocks ?? []).filter(
+    (entry) => {
+      const ts = Date.parse(entry.timestamp);
+      return Number.isFinite(ts) && nowMs - ts <= currentWindowMs;
+    },
+  );
   const workerLaneNames = Array.from(
     new Set(
       snapshot.recent
@@ -395,62 +430,80 @@ function buildAndyPromptWorkerContext(snapshot: WorkerRunsSnapshot): string {
         .filter((folder) => isJarvisWorkerFolder(folder)),
     ),
   ).sort();
-  const laneSummaryLines = workerLaneNames.length > 0
-    ? workerLaneNames.map((lane) => {
-      const laneRuns = currentWindowRuns.filter((r) => r.group_folder === lane);
-      const pass = laneRuns.filter((r) => r.status === 'review_requested' || r.status === 'done').length;
-      const fail = laneRuns.filter((r) => r.status === 'failed' || r.status === 'failed_contract').length;
-      const active = laneRuns.filter((r) => r.status === 'queued' || r.status === 'running').length;
-      return `- ${lane}: pass=${pass}, fail=${fail}, active=${active}, runs=${laneRuns.length}`;
-    }).join('\n')
-    : '- none';
+  const laneSummaryLines =
+    workerLaneNames.length > 0
+      ? workerLaneNames
+          .map((lane) => {
+            const laneRuns = currentWindowRuns.filter(
+              (r) => r.group_folder === lane,
+            );
+            const pass = laneRuns.filter(
+              (r) => r.status === 'review_requested' || r.status === 'done',
+            ).length;
+            const fail = laneRuns.filter(
+              (r) => r.status === 'failed' || r.status === 'failed_contract',
+            ).length;
+            const active = laneRuns.filter(
+              (r) => r.status === 'queued' || r.status === 'running',
+            ).length;
+            return `- ${lane}: pass=${pass}, fail=${fail}, active=${active}, runs=${laneRuns.length}`;
+          })
+          .join('\n')
+      : '- none';
 
-  const activeLines = snapshot.active.length > 0
-    ? snapshot.active
-      .slice(0, 8)
-      .map((r) => `- ${r.run_id} | ${r.group_folder} | ${r.status} | started ${r.started_at}`)
-      .join('\n')
-    : '- none';
+  const activeLines =
+    snapshot.active.length > 0
+      ? snapshot.active
+          .slice(0, 8)
+          .map(
+            (r) =>
+              `- ${r.run_id} | ${r.group_folder} | ${r.status} | started ${r.started_at}`,
+          )
+          .join('\n')
+      : '- none';
 
-  const recentLines = snapshot.recent.length > 0
-    ? snapshot.recent
-      .slice(0, 8)
-      .map((r) => {
-        const when = r.completed_at ?? r.started_at;
-        const summary = r.result_summary || r.error_details || '-';
-        return `- ${r.run_id} | ${r.group_folder} | ${r.status} | ${when} | ${summary}`;
-      })
-      .join('\n')
-    : '- none';
-  const blockLines = currentDispatchBlocks.length > 0
-    ? currentDispatchBlocks
-      .slice(0, 8)
-      .map((entry) => {
-        const runId = entry.run_id ? ` | run_id=${entry.run_id}` : '';
-        return `- ${entry.timestamp} | ${entry.source_group} -> ${entry.target_jid} | ${entry.reason_code}${runId} | ${entry.reason_text}`;
-      })
-      .join('\n')
-    : '- none';
-  const sessionLedgerLines = snapshot.recent.length > 0
-    ? snapshot.recent
-      .filter((r) => isJarvisWorkerFolder(r.group_folder))
-      .slice(0, 8)
-      .map((r) => {
-        const repo = r.dispatch_repo || '-';
-        const branch = r.dispatch_branch || '-';
-        const intent = r.context_intent || '-';
-        const selected = r.selected_session_id || '-';
-        const effective = r.effective_session_id || '-';
-        const source = r.session_selection_source || '-';
-        const resume = r.session_resume_status || '-';
-        const phase = r.phase || '-';
-        const heartbeat = r.last_heartbeat_at || '-';
-        const noContainer = r.no_container_since || '-';
-        const followup = r.expects_followup_container === 1 ? 'yes' : 'no';
-        return `- ${r.run_id} | ${r.group_folder} | ${repo}#${branch} | intent=${intent} | phase=${phase} | selected=${selected} | effective=${effective} | source=${source} | resume=${resume} | heartbeat=${heartbeat} | no_container_since=${noContainer} | expects_followup=${followup}`;
-      })
-      .join('\n')
-    : '- none';
+  const recentLines =
+    snapshot.recent.length > 0
+      ? snapshot.recent
+          .slice(0, 8)
+          .map((r) => {
+            const when = r.completed_at ?? r.started_at;
+            const summary = r.result_summary || r.error_details || '-';
+            return `- ${r.run_id} | ${r.group_folder} | ${r.status} | ${when} | ${summary}`;
+          })
+          .join('\n')
+      : '- none';
+  const blockLines =
+    currentDispatchBlocks.length > 0
+      ? currentDispatchBlocks
+          .slice(0, 8)
+          .map((entry) => {
+            const runId = entry.run_id ? ` | run_id=${entry.run_id}` : '';
+            return `- ${entry.timestamp} | ${entry.source_group} -> ${entry.target_jid} | ${entry.reason_code}${runId} | ${entry.reason_text}`;
+          })
+          .join('\n')
+      : '- none';
+  const sessionLedgerLines =
+    snapshot.recent.length > 0
+      ? snapshot.recent
+          .filter((r) => isJarvisWorkerFolder(r.group_folder))
+          .slice(0, 8)
+          .map((r) => {
+            const repo = r.dispatch_repo || '-';
+            const branch = r.dispatch_branch || '-';
+            const intent = r.context_intent || '-';
+            const selected = r.selected_session_id || '-';
+            const effective = r.effective_session_id || '-';
+            const source = r.session_selection_source || '-';
+            const resume = r.session_resume_status || '-';
+            const phase = r.phase || '-';
+            const heartbeat = r.last_heartbeat_at || '-';
+            const noContainer = r.no_container_since || '-';
+            const followup = r.expects_followup_container === 1 ? 'yes' : 'no';
+            return `- ${r.run_id} | ${r.group_folder} | ${repo}#${branch} | intent=${intent} | phase=${phase} | selected=${selected} | effective=${effective} | source=${source} | resume=${resume} | heartbeat=${heartbeat} | no_container_since=${noContainer} | expects_followup=${followup}`;
+          })
+          .join('\n')
+      : '- none';
 
   return [
     '<worker_status_source_of_truth>',
@@ -513,7 +566,8 @@ function extractWorkerRunContext(
     return {
       runId: payload.run_id,
       requiredFields: payload.output_contract.required_fields,
-      browserEvidenceRequired: payload.output_contract.browser_evidence_required,
+      browserEvidenceRequired:
+        payload.output_contract.browser_evidence_required,
       dispatchPayload: payload,
     };
   }
@@ -555,7 +609,9 @@ function buildWorkerDispatchPrompt(payload: DispatchPayload): string {
   const requiredFields = payload.output_contract.required_fields
     .map((field) => `- ${field}`)
     .join('\n');
-  const sessionFieldRule = payload.output_contract.required_fields.includes('session_id')
+  const sessionFieldRule = payload.output_contract.required_fields.includes(
+    'session_id',
+  )
     ? '- REQUIRED: include "session_id": "<current-session-id>" in completion output.'
     : '- OPTIONAL: include "session_id": "<current-session-id>" to help follow-up dispatch continuity.';
 
@@ -608,9 +664,10 @@ function buildWorkerCompletionRepairPrompt(
   outputBuffer: string,
 ): string {
   const requiredList = requiredFields.map((field) => `- ${field}`).join('\n');
-  const missingList = missingFields.length > 0
-    ? missingFields.map((field) => `- ${field}`).join('\n')
-    : '- unknown';
+  const missingList =
+    missingFields.length > 0
+      ? missingFields.map((field) => `- ${field}`).join('\n')
+      : '- unknown';
   const excerpt = outputBuffer.slice(-1600);
 
   return [
@@ -659,13 +716,16 @@ function selectMessagesForExecution(
   return messages;
 }
 
-
 function markBatchProcessed(
   chatJid: string,
   messages: Array<{ id: string }>,
   runId?: string,
 ): void {
-  markMessagesProcessed(chatJid, messages.map((m) => m.id), runId);
+  markMessagesProcessed(
+    chatJid,
+    messages.map((m) => m.id),
+    runId,
+  );
 }
 
 function shouldAllowNoCodeCompletion(runId: string): boolean {
@@ -702,7 +762,9 @@ function loadState(): void {
   registeredGroups = getAllRegisteredGroups();
   if (!RUNTIME_OPS_EXTENDED) {
     registeredGroups = Object.fromEntries(
-      Object.entries(registeredGroups).filter(([, group]) => isMissionCoreAllowedFolder(group.folder)),
+      Object.entries(registeredGroups).filter(([, group]) =>
+        isMissionCoreAllowedFolder(group.folder),
+      ),
     );
   }
   reconcileStaleWorkerRuns();
@@ -717,10 +779,7 @@ function loadState(): void {
 
 function saveState(): void {
   setRouterState('last_timestamp', lastCursor);
-  setRouterState(
-    'last_agent_timestamp',
-    JSON.stringify(lastAgentTimestamp),
-  );
+  setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -806,19 +865,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
   const sinceTimestamp = getEffectiveAgentCursor(chatJid);
-  const missedMessages = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const missedMessages = getMessagesSince(
+    chatJid,
+    sinceTimestamp,
+    ASSISTANT_NAME,
+  );
 
   if (missedMessages.length === 0) return true;
   const selectedMessages = selectMessagesForExecution(group, missedMessages);
 
   // Per-message idempotency: skip messages already processed (defense against cursor rollback replays)
-  const alreadyProcessed = getProcessedMessageIds(chatJid, selectedMessages.map((m) => m.id));
+  const alreadyProcessed = getProcessedMessageIds(
+    chatJid,
+    selectedMessages.map((m) => m.id),
+  );
   const messagesToProcess = selectedMessages.filter(
     (m) => !alreadyProcessed.has(m.id),
   );
   if (messagesToProcess.length === 0) {
     // All messages already processed — advance cursor without re-running agent
-    const advanceTimestamp = selectedMessages[selectedMessages.length - 1].timestamp;
+    const advanceTimestamp =
+      selectedMessages[selectedMessages.length - 1].timestamp;
     markCursorInFlight(chatJid, advanceTimestamp);
     commitInFlightCursor(chatJid);
     logger.debug(
@@ -827,7 +894,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     return true;
   }
-  const batchLastTimestamp = messagesToProcess[messagesToProcess.length - 1].timestamp;
+  const batchLastTimestamp =
+    messagesToProcess[messagesToProcess.length - 1].timestamp;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -837,28 +905,33 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
-  if (channel && await handleAndyFrontdeskMessages({
-    chatJid,
-    group,
-    messages: messagesToProcess,
-    channel,
-    runtime: {
-      markCursorInFlight,
-      clearInFlightCursor,
-      markBatchProcessed,
-      commitInFlightCursor,
-    },
-  })) {
+  if (
+    channel &&
+    (await handleAndyFrontdeskMessages({
+      chatJid,
+      group,
+      messages: messagesToProcess,
+      channel,
+      runtime: {
+        markCursorInFlight,
+        clearInFlightCursor,
+        markBatchProcessed,
+        commitInFlightCursor,
+      },
+    }))
+  ) {
     return true;
   }
 
-  const andyRequestsInBatch = group.folder === ANDY_DEVELOPER_FOLDER
-    ? getAndyRequestsForMessages(messagesToProcess)
-    : [];
+  const andyRequestsInBatch =
+    group.folder === ANDY_DEVELOPER_FOLDER
+      ? getAndyRequestsForMessages(messagesToProcess)
+      : [];
   if (andyRequestsInBatch.length > 0) {
-    const coordinatorText = messagesToProcess.length > 1
-      ? `Coordinator picked up ${messagesToProcess.length} pending message(s)`
-      : 'Coordinator is processing your request';
+    const coordinatorText =
+      messagesToProcess.length > 1
+        ? `Coordinator picked up ${messagesToProcess.length} pending message(s)`
+        : 'Coordinator is processing your request';
     markAndyRequestsCoordinatorActive(andyRequestsInBatch, coordinatorText);
   }
   const activeAndyRequestId = andyRequestsInBatch[0]?.requestId;
@@ -867,9 +940,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const basePrompt = workerRun
     ? buildWorkerDispatchPrompt(workerRun.dispatchPayload)
     : formatMessages(messagesToProcess);
-  const prompt = (!workerRun && group.folder === ANDY_DEVELOPER_FOLDER && activeAndyRequestId)
-    ? `${buildAndyFrontdeskContextBlock(chatJid, activeAndyRequestId)}\n\n${basePrompt}`
-    : basePrompt;
+  const prompt =
+    !workerRun && group.folder === ANDY_DEVELOPER_FOLDER && activeAndyRequestId
+      ? `${buildAndyFrontdeskContextBlock(chatJid, activeAndyRequestId)}\n\n${basePrompt}`
+      : basePrompt;
   let workerOutputBuffer = '';
 
   let workerSessionSelection: WorkerSessionSelection | null = null;
@@ -883,7 +957,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const existingRun = getWorkerRun(workerRun.runId);
     // IPC pre-queues andy-developer dispatches as status=queued before the
     // worker lane consumes the message. Allow that first execution pass.
-    if (existingRun && existingRun.status !== 'queued' && isNonRetryableWorkerStatus(existingRun.status)) {
+    if (
+      existingRun &&
+      existingRun.status !== 'queued' &&
+      isNonRetryableWorkerStatus(existingRun.status)
+    ) {
       markCursorInFlight(chatJid, batchLastTimestamp);
       commitInFlightCursor(chatJid);
       logger.warn(
@@ -897,7 +975,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
 
-    workerSessionSelection = selectWorkerSessionForDispatch(group.folder, workerRun.dispatchPayload);
+    workerSessionSelection = selectWorkerSessionForDispatch(
+      group.folder,
+      workerRun.dispatchPayload,
+    );
     if (!workerSessionSelection) {
       const queueState = insertWorkerRun(workerRun.runId, group.folder, {
         dispatch_repo: workerRun.dispatchPayload.repo,
@@ -954,8 +1035,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       session_selection_source: workerSessionSelection.source,
     } as const;
 
-    if (!existingRun || existingRun.status === 'failed' || existingRun.status === 'failed_contract') {
-      const insertState = insertWorkerRun(workerRun.runId, group.folder, dispatchMetadata);
+    if (
+      !existingRun ||
+      existingRun.status === 'failed' ||
+      existingRun.status === 'failed_contract'
+    ) {
+      const insertState = insertWorkerRun(
+        workerRun.runId,
+        group.folder,
+        dispatchMetadata,
+      );
       if (insertState === 'duplicate') {
         markCursorInFlight(chatJid, batchLastTimestamp);
         commitInFlightCursor(chatJid);
@@ -978,7 +1067,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       void emitBridgeEvent({
         event_type: 'worker_queued',
         summary: `[andy-dev] → queued ${workerRun.dispatchPayload.task_type || 'task'} (run: ${workerRun.runId.slice(0, 8)})`,
-        metadata: { agent: 'andy-developer', tier: 'andy-developer', run_id: workerRun.runId, group_folder: group.folder },
+        metadata: {
+          agent: 'andy-developer',
+          tier: 'andy-developer',
+          run_id: workerRun.runId,
+          group_folder: group.folder,
+        },
       });
       syncAndyRequestWithWorkerRun(
         workerRun.runId,
@@ -997,7 +1091,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         group.folder,
       );
     }
-
   }
 
   // Track messages currently being handled by this run without committing the
@@ -1037,7 +1130,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (workerRunMarkedRunning) return;
         workerRunMarkedRunning = true;
         workerSpawnContainerName = containerName;
-        workerRunSupervisor.markSpawnStarted(workerRun.runId, containerName, 'active');
+        workerRunSupervisor.markSpawnStarted(
+          workerRun.runId,
+          containerName,
+          'active',
+        );
         updateWorkerRunStatus(workerRun.runId, 'running');
         syncAndyRequestWithWorkerRun(
           workerRun.runId,
@@ -1047,7 +1144,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         void emitBridgeEvent({
           event_type: 'worker_started',
           summary: `[${group.folder}] started (run: ${workerRun.runId.slice(0, 8)})`,
-          metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+          metadata: {
+            agent: group.folder,
+            tier: 'worker',
+            run_id: workerRun.runId,
+            group_folder: group.folder,
+          },
         });
         refreshWorkerRunSnapshotsForGroups();
         logger.info(
@@ -1056,46 +1158,61 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         );
       }
     : undefined;
-  const runOutcome = await runAgent(group, prompt, chatJid, async (result) => {
-    if (workerRun) {
-      workerRunSupervisor.markHeartbeat(workerRun.runId);
-    }
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
+  const runOutcome = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    async (result) => {
       if (workerRun) {
-        workerOutputBuffer += `${raw}\n`;
+        workerRunSupervisor.markHeartbeat(workerRun.runId);
       }
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        const outboundText = sanitizeUserFacingOutput(group, text);
-        if (outboundText && channel) {
-          await channel.sendMessage(chatJid, outboundText);
-          outputSentToUser = true;
-          outputAckCursor = maxTimestamp(
-            outputAckCursor,
-            inFlightAgentTimestamp[chatJid] || batchLastTimestamp,
-          );
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        if (workerRun) {
+          workerOutputBuffer += `${raw}\n`;
         }
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          const outboundText = sanitizeUserFacingOutput(group, text);
+          if (outboundText && channel) {
+            await channel.sendMessage(chatJid, outboundText);
+            outputSentToUser = true;
+            outputAckCursor = maxTimestamp(
+              outputAckCursor,
+              inFlightAgentTimestamp[chatJid] || batchLastTimestamp,
+            );
+          }
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  }, sessionOverride, onSpawn, workerRun?.runId);
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+    sessionOverride,
+    onSpawn,
+    workerRun?.runId,
+  );
 
-  const workerSpawnFailedBeforeRunning = !!workerRun
-    && (runOutcome.status === 'error' || hadError)
-    && !workerRunMarkedRunning;
+  const workerSpawnFailedBeforeRunning =
+    !!workerRun &&
+    (runOutcome.status === 'error' || hadError) &&
+    !workerRunMarkedRunning;
 
   if (runOutcome.newSessionId) {
     runtimeEffectiveSessionId = runOutcome.newSessionId;
@@ -1110,7 +1227,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel?.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
   if (workerRun && workerRunMarkedRunning) {
-    workerRunSupervisor.markContainerExited(workerRun.runId, 'completion_validating');
+    workerRunSupervisor.markContainerExited(
+      workerRun.runId,
+      'completion_validating',
+    );
   }
 
   if (workerRun) {
@@ -1139,25 +1259,34 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const repairSessionOverride = runtimeEffectiveSessionId
         ? runtimeEffectiveSessionId
         : (workerSessionSelection?.selectedSessionId ?? null);
-      const repairOutcome = await runAgent(group, repairPrompt, chatJid, async (result) => {
-        workerRunSupervisor.markHeartbeat(workerRun.runId);
-        if (result.result) {
-          const raw = typeof result.result === 'string'
-            ? result.result
-            : JSON.stringify(result.result);
-          repairBuffer += `${raw}\n`;
-        }
-        if (result.status === 'error') {
-          repairHadError = true;
-        }
-      }, repairSessionOverride, (containerName: string) => {
-        repairSpawned = true;
-        workerRunSupervisor.markSpawnStarted(
-          workerRun.runId,
-          containerName,
-          'completion_repair_active',
-        );
-      }, workerRun.runId);
+      const repairOutcome = await runAgent(
+        group,
+        repairPrompt,
+        chatJid,
+        async (result) => {
+          workerRunSupervisor.markHeartbeat(workerRun.runId);
+          if (result.result) {
+            const raw =
+              typeof result.result === 'string'
+                ? result.result
+                : JSON.stringify(result.result);
+            repairBuffer += `${raw}\n`;
+          }
+          if (result.status === 'error') {
+            repairHadError = true;
+          }
+        },
+        repairSessionOverride,
+        (containerName: string) => {
+          repairSpawned = true;
+          workerRunSupervisor.markSpawnStarted(
+            workerRun.runId,
+            containerName,
+            'completion_repair_active',
+          );
+        },
+        workerRun.runId,
+      );
       if (repairSpawned) {
         workerRunSupervisor.markContainerExited(workerRun.runId, 'finalizing');
       }
@@ -1208,9 +1337,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
 
     if (
-      runtimeEffectiveSessionId !== undefined
-      || runtimeSessionResumeStatus !== undefined
-      || runtimeSessionResumeError !== undefined
+      runtimeEffectiveSessionId !== undefined ||
+      runtimeSessionResumeStatus !== undefined ||
+      runtimeSessionResumeError !== undefined
     ) {
       updateWorkerRunSessionMetadata(workerRun.runId, {
         effective_session_id: runtimeEffectiveSessionId ?? null,
@@ -1246,7 +1375,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         void emitBridgeEvent({
           event_type: 'worker_completed',
           summary: `[${group.folder}] ✓ review: ${completion.branch}`,
-          metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+          metadata: {
+            agent: group.folder,
+            tier: 'worker',
+            run_id: workerRun.runId,
+            group_folder: group.folder,
+          },
         });
         workerRunSupervisor.markTerminal(workerRun.runId);
         refreshWorkerRunSnapshotsForGroups();
@@ -1273,7 +1407,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         void emitBridgeEvent({
           event_type: 'worker_failed',
           summary: `[${group.folder}] ✗ contract: completion accept rejected`,
-          metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+          metadata: {
+            agent: group.folder,
+            tier: 'worker',
+            run_id: workerRun.runId,
+            group_folder: group.folder,
+          },
         });
         workerRunSupervisor.markTerminal(workerRun.runId);
         refreshWorkerRunSnapshotsForGroups();
@@ -1301,7 +1440,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         void emitBridgeEvent({
           event_type: 'worker_failed',
           summary: `[${group.folder}] ✗ container spawn failed`,
-          metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+          metadata: {
+            agent: group.folder,
+            tier: 'worker',
+            run_id: workerRun.runId,
+            group_folder: group.folder,
+          },
         });
         logger.warn(
           {
@@ -1339,7 +1483,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         void emitBridgeEvent({
           event_type: 'worker_failed',
           summary: `[${group.folder}] ✗ ${missingSummary ? `missing: ${missingSummary.slice(0, 80)}` : 'execution failed'}`,
-          metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+          metadata: {
+            agent: group.folder,
+            tier: 'worker',
+            run_id: workerRun.runId,
+            group_folder: group.folder,
+          },
         });
         logger.warn(
           {
@@ -1376,7 +1525,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       void emitBridgeEvent({
         event_type: 'worker_failed',
         summary: `[${group.folder}] ✗ contract: ${missingSummary ? missingSummary.slice(0, 80) : 'invalid completion'}`,
-        metadata: { agent: group.folder, tier: 'worker', run_id: workerRun.runId, group_folder: group.folder },
+        metadata: {
+          agent: group.folder,
+          tier: 'worker',
+          run_id: workerRun.runId,
+          group_folder: group.folder,
+        },
       });
       logger.warn(
         {
@@ -1392,7 +1546,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   if (!workerRun && andyRequestsInBatch.length > 0) {
-    const coordinatorSessionId = runOutcome.newSessionId ?? sessions[group.folder] ?? null;
+    const coordinatorSessionId =
+      runOutcome.newSessionId ?? sessions[group.folder] ?? null;
     for (const request of andyRequestsInBatch) {
       completeAndyCoordinatorRequest({
         requestId: request.requestId,
@@ -1411,12 +1566,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       markBatchProcessed(chatJid, messagesToProcess, workerRun?.runId);
       commitCursor(chatJid, outputAckCursor || batchLastTimestamp);
       clearInFlightCursor(chatJid);
-      logger.warn({ group: group.name }, 'Agent error after output was sent, skipping cursor rollback to prevent duplicates');
+      logger.warn(
+        { group: group.name },
+        'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
+      );
       return true;
     }
     // Keep durable cursor unchanged so retries can re-process these messages.
     clearInFlightCursor(chatJid);
-    logger.warn({ group: group.name }, 'Agent error, left durable cursor unchanged for retry');
+    logger.warn(
+      { group: group.name },
+      'Agent error, left durable cursor unchanged for retry',
+    );
     return false;
   }
 
@@ -1450,9 +1611,10 @@ async function runAgent(
   workerRunId?: string,
 ): Promise<RunAgentResult> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionId = sessionOverride === undefined
-    ? sessions[group.folder]
-    : sessionOverride ?? undefined;
+  const sessionId =
+    sessionOverride === undefined
+      ? sessions[group.folder]
+      : (sessionOverride ?? undefined);
   if (sessionId) {
     sessions[group.folder] = sessionId;
     setSession(group.folder, sessionId);
@@ -1488,9 +1650,10 @@ async function runAgent(
     workerRunsSnapshot = buildWorkerRunsSnapshot(group, isMain);
     writeWorkerRunsSnapshot(group.folder, workerRunsSnapshot);
   }
-  const effectivePrompt = (group.folder === ANDY_DEVELOPER_FOLDER && workerRunsSnapshot)
-    ? `${buildAndyPromptWorkerContext(workerRunsSnapshot)}\n\n${prompt}`
-    : prompt;
+  const effectivePrompt =
+    group.folder === ANDY_DEVELOPER_FOLDER && workerRunsSnapshot
+      ? `${buildAndyPromptWorkerContext(workerRunsSnapshot)}\n\n${prompt}`
+      : prompt;
 
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
@@ -1582,12 +1745,19 @@ async function startMessageLoop(): Promise<void> {
     try {
       reconcileStaleWorkerRuns();
       const now = Date.now();
-      if (now - lastWorkerSnapshotRefresh >= WORKER_SNAPSHOT_REFRESH_INTERVAL_MS) {
+      if (
+        now - lastWorkerSnapshotRefresh >=
+        WORKER_SNAPSHOT_REFRESH_INTERVAL_MS
+      ) {
         refreshWorkerRunSnapshotsForGroups();
         lastWorkerSnapshotRefresh = now;
       }
       const jids = Object.keys(registeredGroups);
-      const { messages, newCursor } = getNewMessages(jids, lastCursor, ASSISTANT_NAME);
+      const { messages, newCursor } = getNewMessages(
+        jids,
+        lastCursor,
+        ASSISTANT_NAME,
+      );
 
       if (messages.length > 0) {
         logger.info({ count: messages.length }, 'New messages');
@@ -1614,7 +1784,9 @@ async function startMessageLoop(): Promise<void> {
           const channel = findChannel(channels, chatJid);
           const syntheticWorker = isSyntheticWorkerGroup(group);
           if (!channel && !syntheticWorker) {
-            console.log(`Warning: no channel owns JID ${chatJid}, skipping messages`);
+            console.log(
+              `Warning: no channel owns JID ${chatJid}, skipping messages`,
+            );
             continue;
           }
 
@@ -1644,9 +1816,10 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const andyRequestsToSend = group.folder === ANDY_DEVELOPER_FOLDER
-            ? getAndyRequestsForMessages(messagesToSend)
-            : [];
+          const andyRequestsToSend =
+            group.folder === ANDY_DEVELOPER_FOLDER
+              ? getAndyRequestsForMessages(messagesToSend)
+              : [];
           if (andyRequestsToSend.length > 0) {
             markAndyRequestsCoordinatorActive(
               andyRequestsToSend,
@@ -1655,9 +1828,10 @@ async function startMessageLoop(): Promise<void> {
           }
           const activeRequestForSend = andyRequestsToSend[0]?.requestId;
           const baseFormatted = formatMessages(messagesToSend);
-          const formatted = (group.folder === ANDY_DEVELOPER_FOLDER && activeRequestForSend)
-            ? `${buildAndyFrontdeskContextBlock(chatJid, activeRequestForSend)}\n\n${baseFormatted}`
-            : baseFormatted;
+          const formatted =
+            group.folder === ANDY_DEVELOPER_FOLDER && activeRequestForSend
+              ? `${buildAndyFrontdeskContextBlock(chatJid, activeRequestForSend)}\n\n${baseFormatted}`
+              : baseFormatted;
 
           // Worker lanes must execute one dispatch per container run.
           // Never pipe additional dispatches into an active worker session.
@@ -1666,19 +1840,22 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          if (channel && await handleAndyFrontdeskMessages({
-            chatJid,
-            group,
-            messages: messagesToSend,
-            channel,
-            allowGreeting: false,
-            runtime: {
-              markCursorInFlight,
-              clearInFlightCursor,
-              markBatchProcessed,
-              commitInFlightCursor,
-            },
-          })) {
+          if (
+            channel &&
+            (await handleAndyFrontdeskMessages({
+              chatJid,
+              group,
+              messages: messagesToSend,
+              channel,
+              allowGreeting: false,
+              runtime: {
+                markCursorInFlight,
+                clearInFlightCursor,
+                markBatchProcessed,
+                commitInFlightCursor,
+              },
+            }))
+          ) {
             continue;
           }
 
@@ -1687,24 +1864,33 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            markCursorInFlight(chatJid, messagesToSend[messagesToSend.length - 1].timestamp);
-            // Show typing indicator while the container processes the piped message
-            channel?.setTyping?.(chatJid, true)?.catch((err) =>
-              logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+            markCursorInFlight(
+              chatJid,
+              messagesToSend[messagesToSend.length - 1].timestamp,
             );
+            // Show typing indicator while the container processes the piped message
+            channel
+              ?.setTyping?.(chatJid, true)
+              ?.catch((err) =>
+                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+              );
             // Immediate ack for simple greetings when Andy is busy
             if (
-              group.folder === ANDY_DEVELOPER_FOLDER
-              && channel
-              && isSimpleAndyGreeting(group, messagesToSend)
+              group.folder === ANDY_DEVELOPER_FOLDER &&
+              channel &&
+              isSimpleAndyGreeting(group, messagesToSend)
             ) {
               const lastAck = andyBusyAckLastSentMs[chatJid] ?? 0;
               if (Date.now() - lastAck > ANDY_BUSY_ACK_COOLDOWN_MS) {
                 andyBusyAckLastSentMs[chatJid] = Date.now();
-                channel.sendMessage(
-                  chatJid,
-                  `${ASSISTANT_NAME}: I'm working on something, I'll be with you shortly.`,
-                ).catch((err) => logger.warn({ chatJid, err }, 'Busy ack send failed'));
+                channel
+                  .sendMessage(
+                    chatJid,
+                    `${ASSISTANT_NAME}: I'm working on something, I'll be with you shortly.`,
+                  )
+                  .catch((err) =>
+                    logger.warn({ chatJid, err }, 'Busy ack send failed'),
+                  );
               }
             }
           } else {
@@ -1817,7 +2003,10 @@ async function main(): Promise<void> {
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
-    logger.info({ signal, shutdownDrainMs: SHUTDOWN_DRAIN_MS }, 'Shutdown signal received');
+    logger.info(
+      { signal, shutdownDrainMs: SHUTDOWN_DRAIN_MS },
+      'Shutdown signal received',
+    );
     await queue.shutdown(SHUTDOWN_DRAIN_MS);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -1849,11 +2038,14 @@ async function main(): Promise<void> {
       registeredGroups: () => registeredGroups,
       getSessions: () => sessions,
       queue,
-      onProcess: (groupJid, proc, containerName, groupFolder) => queue.registerProcess(groupJid, proc, containerName, groupFolder),
+      onProcess: (groupJid, proc, containerName, groupFolder) =>
+        queue.registerProcess(groupJid, proc, containerName, groupFolder),
       sendMessage: async (jid, rawText) => {
         const channel = findChannel(channels, jid);
         if (!channel) {
-          console.log(`Warning: no channel owns JID ${jid}, cannot send message`);
+          console.log(
+            `Warning: no channel owns JID ${jid}, cannot send message`,
+          );
           return;
         }
         const text = formatOutbound(rawText);
@@ -1891,7 +2083,8 @@ async function main(): Promise<void> {
     syncGroupMetadata: (force) =>
       whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
     getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) => writeGroupsSnapshot(gf, im, ag, rj),
+    writeGroupsSnapshot: (gf, im, ag, rj) =>
+      writeGroupsSnapshot(gf, im, ag, rj),
     options: {
       taskControlEnabled: ENABLE_SCHEDULER,
       workerSteeringEnabled: ENABLE_WORKER_STEERING,

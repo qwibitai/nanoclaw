@@ -351,10 +351,10 @@ export class WhatsAppChannel implements Channel {
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
     const alreadyPrefixed = text.startsWith(`${ASSISTANT_NAME}:`);
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      || alreadyPrefixed
-      ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+    const prefixed =
+      ASSISTANT_HAS_OWN_NUMBER || alreadyPrefixed
+        ? text
+        : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });

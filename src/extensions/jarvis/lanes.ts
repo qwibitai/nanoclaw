@@ -7,7 +7,10 @@ import {
   isJarvisWorkerFolder,
 } from '../../types.js';
 
-export type JarvisWorkerLaneId = Extract<LaneId, 'jarvis-worker-1' | 'jarvis-worker-2'>;
+export type JarvisWorkerLaneId = Extract<
+  LaneId,
+  'jarvis-worker-1' | 'jarvis-worker-2'
+>;
 
 export const MAIN_LANE_ID: LaneId = 'main';
 export const ANDY_DEVELOPER_LANE_ID: LaneId = 'andy-developer';
@@ -34,13 +37,17 @@ const LANE_ID_BY_SYNTHETIC_JID: Record<string, JarvisWorkerLaneId> = {
 };
 
 export function isJarvisLaneId(value: string): value is LaneId {
-  return value === 'main'
-    || value === 'andy-developer'
-    || value === 'jarvis-worker-1'
-    || value === 'jarvis-worker-2';
+  return (
+    value === 'main' ||
+    value === 'andy-developer' ||
+    value === 'jarvis-worker-1' ||
+    value === 'jarvis-worker-2'
+  );
 }
 
-export function isJarvisWorkerLaneId(value: string): value is JarvisWorkerLaneId {
+export function isJarvisWorkerLaneId(
+  value: string,
+): value is JarvisWorkerLaneId {
   return value === 'jarvis-worker-1' || value === 'jarvis-worker-2';
 }
 
@@ -52,7 +59,9 @@ export function getSyntheticLaneJid(laneId: LaneId): string | undefined {
   return SYNTHETIC_JID_BY_LANE_ID[laneId];
 }
 
-export function resolveLaneIdFromSyntheticJid(jid: string): JarvisWorkerLaneId | undefined {
+export function resolveLaneIdFromSyntheticJid(
+  jid: string,
+): JarvisWorkerLaneId | undefined {
   return LANE_ID_BY_SYNTHETIC_JID[jid];
 }
 
@@ -60,9 +69,15 @@ export function isSyntheticWorkerLaneJid(jid: string): boolean {
   return resolveLaneIdFromSyntheticJid(jid) !== undefined;
 }
 
-export function resolveLaneIdFromGroupFolder(folder: string | null | undefined): LaneId | undefined {
+export function resolveLaneIdFromGroupFolder(
+  folder: string | null | undefined,
+): LaneId | undefined {
   if (!folder) return undefined;
-  if (folder === MAIN_GROUP_FOLDER || folder === 'main' || folder === 'whatsapp_main') {
+  if (
+    folder === MAIN_GROUP_FOLDER ||
+    folder === 'main' ||
+    folder === 'whatsapp_main'
+  ) {
     return MAIN_LANE_ID;
   }
   if (folder === ANDY_DEVELOPER_LANE_ID) {
@@ -90,7 +105,9 @@ export function resolveLaneAddress(
   };
 }
 
-export function isInternalWorkerLaneGroup(group: RegisteredGroup | undefined): boolean {
+export function isInternalWorkerLaneGroup(
+  group: RegisteredGroup | undefined,
+): boolean {
   if (!group) return false;
   const laneId = resolveLaneIdFromGroupFolder(group.folder);
   return !!laneId && isJarvisWorkerLaneId(laneId);

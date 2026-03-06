@@ -22,9 +22,15 @@ interface RuntimeContainer {
 }
 
 /** Returns CLI args for a readonly bind mount. */
-export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
+export function readonlyMountArgs(
+  hostPath: string,
+  containerPath: string,
+): string[] {
   if (IS_APPLE_CONTAINER_RUNTIME) {
-    return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
+    return [
+      '--mount',
+      `type=bind,source=${hostPath},target=${containerPath},readonly`,
+    ];
   }
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
@@ -61,7 +67,9 @@ function parseContainersFromJson(output: string): RuntimeContainer[] {
           ? obj.state
           : '';
     const id =
-      obj.configuration && typeof obj.configuration === 'object' && typeof (obj.configuration as { id?: unknown }).id === 'string'
+      obj.configuration &&
+      typeof obj.configuration === 'object' &&
+      typeof (obj.configuration as { id?: unknown }).id === 'string'
         ? (obj.configuration as { id: string }).id
         : typeof obj.id === 'string'
           ? obj.id
@@ -156,9 +164,7 @@ function listContainers(): RuntimeContainer[] {
 }
 
 function isContainerRunning(name: string): boolean {
-  return listContainers().some(
-    (c) => c.id === name && c.state === 'running',
-  );
+  return listContainers().some((c) => c.id === name && c.state === 'running');
 }
 
 function formatErr(err: unknown): string {
@@ -183,7 +189,9 @@ export interface StopContainersByPrefixResult {
  * Stop a container and verify it is no longer running.
  * Escalates from graceful stop to SIGKILL/kill when needed.
  */
-export function stopContainerWithVerification(name: string): StopContainerResult {
+export function stopContainerWithVerification(
+  name: string,
+): StopContainerResult {
   const attempts: string[] = [];
   const commands = [
     stopContainer(name),
@@ -268,7 +276,10 @@ export function cleanupOrphans(): void {
       }
     }
 
-    logger.info({ count: orphans.length, names: orphans }, 'Stopped orphaned containers');
+    logger.info(
+      { count: orphans.length, names: orphans },
+      'Stopped orphaned containers',
+    );
   } catch (err) {
     logger.warn({ err }, 'Failed to clean up orphaned containers');
   }

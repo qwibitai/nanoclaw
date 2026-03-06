@@ -38,7 +38,6 @@ function phaseForRun(run: WorkerRunRecord): WorkerRunPhase {
   return raw as WorkerRunPhase;
 }
 
-
 export class WorkerRunSupervisor {
   constructor(private readonly config: WorkerRunSupervisorConfig) {}
 
@@ -46,14 +45,17 @@ export class WorkerRunSupervisor {
     return new Date(nowMs + this.config.leaseTtlMs).toISOString();
   }
 
-  private shouldSuppressQueuedCursorFailure(startedMs: number, nowMs: number): boolean {
+  private shouldSuppressQueuedCursorFailure(
+    startedMs: number,
+    nowMs: number,
+  ): boolean {
     const windowMs = Math.max(0, this.config.restartSuppressionWindowMs);
     if (windowMs === 0) return false;
 
     // Suppress stale cursor failures only during the startup grace window,
     // and only for runs created close to process startup time.
-    if (nowMs > (this.config.processStartAtMs + windowMs)) return false;
-    return startedMs >= (this.config.processStartAtMs - windowMs);
+    if (nowMs > this.config.processStartAtMs + windowMs) return false;
+    return startedMs >= this.config.processStartAtMs - windowMs;
   }
 
   markQueued(runId: string): void {
@@ -71,7 +73,11 @@ export class WorkerRunSupervisor {
     });
   }
 
-  markSpawnStarted(runId: string, containerName: string, phase: WorkerRunPhase): void {
+  markSpawnStarted(
+    runId: string,
+    containerName: string,
+    phase: WorkerRunPhase,
+  ): void {
     const nowMs = Date.now();
     updateWorkerRunLifecycle(runId, {
       phase,
@@ -170,14 +176,17 @@ export class WorkerRunSupervisor {
       if (run.status === 'queued') {
         const chatJid = input.resolveChatJid(run.group_folder);
         const cursor = chatJid ? input.lastAgentTimestamp[chatJid] : undefined;
-        const startupSuppression = this.shouldSuppressQueuedCursorFailure(startedMs, nowMs);
+        const startupSuppression = this.shouldSuppressQueuedCursorFailure(
+          startedMs,
+          nowMs,
+        );
         const spawnAcknowledged = !!toMs(run.spawn_acknowledged_at);
         if (
-          cursor
-          && run.started_at <= cursor
-          && ageMs >= this.config.queuedCursorGraceMs
-          && !startupSuppression
-          && !spawnAcknowledged
+          cursor &&
+          run.started_at <= cursor &&
+          ageMs >= this.config.queuedCursorGraceMs &&
+          !startupSuppression &&
+          !spawnAcknowledged
         ) {
           completeWorkerRun(
             run.run_id,
@@ -225,7 +234,10 @@ export class WorkerRunSupervisor {
             no_container_since: null,
             active_container_name: `prefix:${prefix}`,
             supervisor_owner: this.config.ownerId,
-            phase: phase === 'completion_repair_pending' ? 'completion_repair_active' : phase,
+            phase:
+              phase === 'completion_repair_pending'
+                ? 'completion_repair_active'
+                : phase,
           });
           changed = true;
         }
@@ -245,7 +257,12 @@ export class WorkerRunSupervisor {
           }),
         );
         logger.warn(
-          { runId: run.run_id, status: run.status, phase, startedAt: run.started_at },
+          {
+            runId: run.run_id,
+            status: run.status,
+            phase,
+            startedAt: run.started_at,
+          },
           'Auto-failed stale worker run',
         );
         changed = true;

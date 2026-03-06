@@ -38,7 +38,6 @@ const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 // Must match AGENT_RUNNER_LOG_PREFIX in container/agent-runner/src/index.ts
 const AGENT_RUNNER_LOG_PREFIX = '[agent-runner]';
 
-
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -130,7 +129,10 @@ function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
           fs.rmSync(dstPath, { force: true, recursive: true });
         }
       } catch (err) {
-        logger.warn({ err, dstPath }, 'Failed to inspect skill destination entry');
+        logger.warn(
+          { err, dstPath },
+          'Failed to inspect skill destination entry',
+        );
         continue;
       }
     }
@@ -143,7 +145,10 @@ function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
         srcReal.startsWith(`${dstReal}${path.sep}`) ||
         dstReal.startsWith(`${srcReal}${path.sep}`))
     ) {
-      logger.warn({ srcPath, dstPath, srcReal, dstReal }, 'Skipping overlapping skill copy');
+      logger.warn(
+        { srcPath, dstPath, srcReal, dstReal },
+        'Skipping overlapping skill copy',
+      );
       continue;
     }
 
@@ -217,14 +222,18 @@ function buildVolumeMounts(
   let settings: Record<string, unknown> = {};
   if (fs.existsSync(settingsFile)) {
     try {
-      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8')) as Record<string, unknown>;
+      settings = JSON.parse(fs.readFileSync(settingsFile, 'utf8')) as Record<
+        string,
+        unknown
+      >;
     } catch {
       // Corrupt settings file — start fresh
     }
   }
 
   // Ensure required env vars are present (existing values take precedence)
-  const existingEnv = (settings.env as Record<string, string> | undefined) ?? {};
+  const existingEnv =
+    (settings.env as Record<string, string> | undefined) ?? {};
   settings.env = {
     // Enable agent swarms (subagent orchestration)
     // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
@@ -241,18 +250,27 @@ function buildVolumeMounts(
   // Inject PreToolUse dispatch validation hook for andy-developer only.
   // The hook blocks invalid dispatch payloads before they leave the container.
   if (group.folder === 'andy-developer') {
-    const existingHooks = (settings.hooks as Record<string, unknown> | undefined) ?? {};
-    const existingPreToolUse = (existingHooks.PreToolUse as unknown[] | undefined) ?? [];
+    const existingHooks =
+      (settings.hooks as Record<string, unknown> | undefined) ?? {};
+    const existingPreToolUse =
+      (existingHooks.PreToolUse as unknown[] | undefined) ?? [];
     const validateHook = {
       matcher: 'mcp__nanoclaw__send_message',
-      hooks: [{ type: 'command', command: '/home/node/.claude/hooks/validate-dispatch.sh' }],
+      hooks: [
+        {
+          type: 'command',
+          command: '/home/node/.claude/hooks/validate-dispatch.sh',
+        },
+      ],
     };
     const alreadyPresent = existingPreToolUse.some(
       (h) => JSON.stringify(h) === JSON.stringify(validateHook),
     );
     settings.hooks = {
       ...existingHooks,
-      PreToolUse: alreadyPresent ? existingPreToolUse : [...existingPreToolUse, validateHook],
+      PreToolUse: alreadyPresent
+        ? existingPreToolUse
+        : [...existingPreToolUse, validateHook],
     };
   }
 
@@ -305,8 +323,18 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const groupAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-src',
+  );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
@@ -345,9 +373,10 @@ const DEFAULT_SECRETS = [
  * @param allowedSecrets - Optional list of env var names to read (defaults to all)
  */
 function readSecrets(allowedSecrets?: string[]): Record<string, string> {
-  const vars = allowedSecrets && allowedSecrets.length > 0
-    ? allowedSecrets
-    : DEFAULT_SECRETS;
+  const vars =
+    allowedSecrets && allowedSecrets.length > 0
+      ? allowedSecrets
+      : DEFAULT_SECRETS;
   return readEnvFile(vars);
 }
 
@@ -376,7 +405,6 @@ function buildContainerArgs(
       args.push('-e', 'HOME=/home/node');
     }
   }
-
 
   for (const mount of mounts) {
     if (mount.readonly) {
@@ -409,7 +437,8 @@ export async function runContainerAgent(
   // Those orphans can consume IPC input from /workspace/ipc/<group>/input
   // without forwarding output back to the current host process.
   try {
-    const { matched, stopped, failures } = stopRunningContainersByPrefix(groupPrefix);
+    const { matched, stopped, failures } =
+      stopRunningContainersByPrefix(groupPrefix);
     if (stopped.length > 0) {
       logger.info(
         { group: group.name, groupPrefix, stopped },
@@ -601,12 +630,15 @@ export async function runContainerAgent(
     let timedOut = false;
     let hadStreamingOutput = false;
     let timeoutReason: 'no_output_timeout' | 'hard_timeout' | null = null;
-    const configuredIdleTimeout = group.containerConfig?.idleTimeout || IDLE_TIMEOUT;
-    const requestedNoOutputTimeout = group.containerConfig?.noOutputTimeout || CONTAINER_NO_OUTPUT_TIMEOUT;
+    const configuredIdleTimeout =
+      group.containerConfig?.idleTimeout || IDLE_TIMEOUT;
+    const requestedNoOutputTimeout =
+      group.containerConfig?.noOutputTimeout || CONTAINER_NO_OUTPUT_TIMEOUT;
     const configuredNoOutputTimeout = isJarvisWorkerFolder(group.folder)
       ? Math.max(requestedNoOutputTimeout, WORKER_MIN_NO_OUTPUT_TIMEOUT_MS)
       : requestedNoOutputTimeout;
-    const configuredHardTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    const configuredHardTimeout =
+      group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     if (configuredNoOutputTimeout !== requestedNoOutputTimeout) {
       logger.info(
         {
@@ -621,7 +653,10 @@ export async function runContainerAgent(
     }
     // Grace period: hard timeout must be at least idle timeout + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
-    const hardTimeoutMs = Math.max(configuredHardTimeout, configuredIdleTimeout + 30_000);
+    const hardTimeoutMs = Math.max(
+      configuredHardTimeout,
+      configuredIdleTimeout + 30_000,
+    );
 
     const stopForTimeout = (reason: 'no_output_timeout' | 'hard_timeout') => {
       if (timedOut) return;
@@ -642,7 +677,10 @@ export async function runContainerAgent(
       });
     };
 
-    let hardTimeout = setTimeout(() => stopForTimeout('hard_timeout'), hardTimeoutMs);
+    let hardTimeout = setTimeout(
+      () => stopForTimeout('hard_timeout'),
+      hardTimeoutMs,
+    );
     let noOutputTimeout: ReturnType<typeof setTimeout> | null = null;
     if (configuredNoOutputTimeout > 0) {
       noOutputTimeout = setTimeout(
@@ -654,7 +692,10 @@ export async function runContainerAgent(
     // Reset the hard timeout whenever there's activity (streaming output)
     const resetHardTimeout = () => {
       clearTimeout(hardTimeout);
-      hardTimeout = setTimeout(() => stopForTimeout('hard_timeout'), hardTimeoutMs);
+      hardTimeout = setTimeout(
+        () => stopForTimeout('hard_timeout'),
+        hardTimeoutMs,
+      );
     };
 
     container.on('close', (code) => {
@@ -665,20 +706,23 @@ export async function runContainerAgent(
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(timeoutLog, [
-          `=== Container Run Log (TIMEOUT) ===`,
-          `Timestamp: ${new Date().toISOString()}`,
-          `Group: ${group.name}`,
-          `Container: ${containerName}`,
-          `Duration: ${duration}ms`,
-          `Exit Code: ${code}`,
-          `Timeout Reason: ${timeoutReason || 'unknown'}`,
-          `Configured Hard Timeout: ${configuredHardTimeout}ms`,
-          `Configured No-Output Timeout: ${configuredNoOutputTimeout}ms`,
-          `Configured Idle Timeout: ${configuredIdleTimeout}ms`,
-          `Effective Hard Timeout: ${hardTimeoutMs}ms`,
-          `Had Streaming Output: ${hadStreamingOutput}`,
-        ].join('\n'));
+        fs.writeFileSync(
+          timeoutLog,
+          [
+            `=== Container Run Log (TIMEOUT) ===`,
+            `Timestamp: ${new Date().toISOString()}`,
+            `Group: ${group.name}`,
+            `Container: ${containerName}`,
+            `Duration: ${duration}ms`,
+            `Exit Code: ${code}`,
+            `Timeout Reason: ${timeoutReason || 'unknown'}`,
+            `Configured Hard Timeout: ${configuredHardTimeout}ms`,
+            `Configured No-Output Timeout: ${configuredNoOutputTimeout}ms`,
+            `Configured Idle Timeout: ${configuredIdleTimeout}ms`,
+            `Effective Hard Timeout: ${hardTimeoutMs}ms`,
+            `Had Streaming Output: ${hadStreamingOutput}`,
+          ].join('\n'),
+        );
 
         // Timeout after output = idle cleanup, not failure.
         // The agent already sent its response; this is just the
@@ -708,9 +752,10 @@ export async function runContainerAgent(
         resolve({
           status: 'error',
           result: null,
-          error: timeoutReason === 'no_output_timeout'
-            ? `Container timed out (no_output_timeout after ${configuredNoOutputTimeout}ms)`
-            : `Container timed out (hard_timeout after ${hardTimeoutMs}ms)`,
+          error:
+            timeoutReason === 'no_output_timeout'
+              ? `Container timed out (no_output_timeout after ${configuredNoOutputTimeout}ms)`
+              : `Container timed out (hard_timeout after ${hardTimeoutMs}ms)`,
         });
         return;
       }
@@ -868,7 +913,10 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(hardTimeout);
       if (noOutputTimeout) clearTimeout(noOutputTimeout);
-      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
+      logger.error(
+        { group: group.name, containerName, error: err },
+        'Container spawn error',
+      );
       resolve({
         status: 'error',
         result: null,

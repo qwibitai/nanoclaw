@@ -149,7 +149,12 @@ describe('completeWorkerRun (legacy helper)', () => {
 
   it('stores error_details when provided', () => {
     insertWorkerRun('run-leg3', 'jarvis-worker-1');
-    completeWorkerRun('run-leg3', 'failed_contract', 'missing fields', '{"missing":["commit_sha"]}');
+    completeWorkerRun(
+      'run-leg3',
+      'failed_contract',
+      'missing fields',
+      '{"missing":["commit_sha"]}',
+    );
     const row = getWorkerRun('run-leg3');
     expect(row?.result_summary).toBe('missing fields');
     expect(row?.error_details).toBe('{"missing":["commit_sha"]}');
@@ -188,7 +193,12 @@ describe('worker run status transition guards', () => {
       test_summary: 'pass',
       risk_summary: 'low',
     });
-    completeWorkerRun('run-guard-3', 'failed_contract', 'bad contract', '{"reason":"x"}');
+    completeWorkerRun(
+      'run-guard-3',
+      'failed_contract',
+      'bad contract',
+      '{"reason":"x"}',
+    );
 
     const retryState = insertWorkerRun('run-guard-3', 'jarvis-worker-1');
     const row = getWorkerRun('run-guard-3');
@@ -364,10 +374,20 @@ describe('andy request tracking', () => {
       state: 'queued_for_coordinator',
     });
 
-    insertWorkerRun('run-link-1', 'jarvis-worker-1', { request_id: 'req-link-1' });
+    insertWorkerRun('run-link-1', 'jarvis-worker-1', {
+      request_id: 'req-link-1',
+    });
     linkAndyRequestToWorkerRun('req-link-1', 'run-link-1', 'jarvis-worker-1');
-    updateAndyRequestByWorkerRun('run-link-1', 'worker_running', 'worker started');
-    updateAndyRequestByWorkerRun('run-link-1', 'worker_review_requested', 'ready for review');
+    updateAndyRequestByWorkerRun(
+      'run-link-1',
+      'worker_running',
+      'worker started',
+    );
+    updateAndyRequestByWorkerRun(
+      'run-link-1',
+      'worker_review_requested',
+      'ready for review',
+    );
 
     const request = getAndyRequestById('req-link-1');
     expect(request?.worker_run_id).toBe('run-link-1');
@@ -412,7 +432,8 @@ describe('getWorkerRuns', () => {
 
 describe('dispatch payload parsing', () => {
   it('extracts run_id from JSON in message content', () => {
-    const content = 'Please work on this: {"run_id":"task-abc","task_type":"implement","input":"build X","repo":"openclaw-gurusharan/nanoclaw","branch":"jarvis-build-x","acceptance_tests":["npm run build"],"output_contract":{"required_fields":["run_id","branch","commit_sha","files_changed","test_result","risk","pr_url"]}}';
+    const content =
+      'Please work on this: {"run_id":"task-abc","task_type":"implement","input":"build X","repo":"openclaw-gurusharan/nanoclaw","branch":"jarvis-build-x","acceptance_tests":["npm run build"],"output_contract":{"required_fields":["run_id","branch","commit_sha","files_changed","test_result","risk","pr_url"]}}';
     const payload = parseDispatchPayload(content);
     expect(payload?.run_id).toBe('task-abc');
     expect(payload?.task_type).toBe('implement');
@@ -427,7 +448,9 @@ describe('dispatch payload parsing', () => {
   });
 
   it('parses standalone JSON object', () => {
-    const payload = parseDispatchPayload('{"run_id":"fix-42-1","task_type":"fix","input":"fix bug","repo":"openclaw-gurusharan/nanoclaw","branch":"jarvis-fix-42","acceptance_tests":["npm test"],"output_contract":{"required_fields":["run_id","branch","commit_sha","files_changed","test_result","risk","pr_skipped_reason"]},"priority":"high"}');
+    const payload = parseDispatchPayload(
+      '{"run_id":"fix-42-1","task_type":"fix","input":"fix bug","repo":"openclaw-gurusharan/nanoclaw","branch":"jarvis-fix-42","acceptance_tests":["npm test"],"output_contract":{"required_fields":["run_id","branch","commit_sha","files_changed","test_result","risk","pr_skipped_reason"]},"priority":"high"}',
+    );
     expect(payload?.run_id).toBe('fix-42-1');
     expect(payload?.priority).toBe('high');
   });
@@ -444,7 +467,15 @@ describe('dispatch payload validation', () => {
     branch: 'jarvis-feature-x',
     acceptance_tests: ['npm run build', 'npm test'],
     output_contract: {
-      required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
+      required_fields: [
+        'run_id',
+        'branch',
+        'commit_sha',
+        'files_changed',
+        'test_result',
+        'risk',
+        'pr_url',
+      ],
     },
   };
 
@@ -455,44 +486,68 @@ describe('dispatch payload validation', () => {
   });
 
   it('rejects empty run_id', () => {
-    const { valid, errors } = validateDispatchPayload({ ...validPayload, run_id: '' });
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      run_id: '',
+    });
     expect(valid).toBe(false);
     expect(errors.length).toBeGreaterThan(0);
   });
 
   it('rejects run_id with whitespace', () => {
-    const { valid } = validateDispatchPayload({ ...validPayload, run_id: 'has spaces' });
+    const { valid } = validateDispatchPayload({
+      ...validPayload,
+      run_id: 'has spaces',
+    });
     expect(valid).toBe(false);
   });
 
   it('rejects run_id longer than 64 chars', () => {
-    const { valid } = validateDispatchPayload({ ...validPayload, run_id: 'a'.repeat(65) });
+    const { valid } = validateDispatchPayload({
+      ...validPayload,
+      run_id: 'a'.repeat(65),
+    });
     expect(valid).toBe(false);
   });
 
   it('accepts request_id when valid', () => {
-    const { valid } = validateDispatchPayload({ ...validPayload, request_id: 'req-12345' });
+    const { valid } = validateDispatchPayload({
+      ...validPayload,
+      request_id: 'req-12345',
+    });
     expect(valid).toBe(true);
   });
 
   it('rejects request_id with whitespace', () => {
-    const { valid } = validateDispatchPayload({ ...validPayload, request_id: 'req bad' });
+    const { valid } = validateDispatchPayload({
+      ...validPayload,
+      request_id: 'req bad',
+    });
     expect(valid).toBe(false);
   });
 
   it('accepts run_id of exactly 64 chars', () => {
-    const { valid } = validateDispatchPayload({ ...validPayload, run_id: 'a'.repeat(64) });
+    const { valid } = validateDispatchPayload({
+      ...validPayload,
+      run_id: 'a'.repeat(64),
+    });
     expect(valid).toBe(true);
   });
 
   it('rejects repo not in owner/repo format', () => {
-    const { valid, errors } = validateDispatchPayload({ ...validPayload, repo: 'bad-format' });
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      repo: 'bad-format',
+    });
     expect(valid).toBe(false);
     expect(errors).toContain('repo must be in owner/repo format');
   });
 
   it('rejects non-jarvis branch names', () => {
-    const { valid, errors } = validateDispatchPayload({ ...validPayload, branch: 'feature-x' });
+    const { valid, errors } = validateDispatchPayload({
+      ...validPayload,
+      branch: 'feature-x',
+    });
     expect(valid).toBe(false);
     expect(errors).toContain('branch must match jarvis-<feature>');
   });
@@ -512,7 +567,9 @@ describe('dispatch payload validation', () => {
       base_branch: 'release branch',
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('base_branch must be a non-empty branch name when provided');
+    expect(errors).toContain(
+      'base_branch must be a non-empty branch name when provided',
+    );
   });
 
   it('rejects payload when output contract misses required fields', () => {
@@ -521,7 +578,11 @@ describe('dispatch payload validation', () => {
       output_contract: { required_fields: ['run_id', 'branch'] },
     });
     expect(valid).toBe(false);
-    expect(errors.some((e) => e.includes('output_contract.required_fields missing commit_sha'))).toBe(true);
+    expect(
+      errors.some((e) =>
+        e.includes('output_contract.required_fields missing commit_sha'),
+      ),
+    ).toBe(true);
   });
 
   it('requires session_id in required_fields when context_intent=continue', () => {
@@ -529,11 +590,21 @@ describe('dispatch payload validation', () => {
       ...validPayload,
       context_intent: 'continue',
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+        ],
       },
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('output_contract.required_fields must include session_id when context_intent is "continue"');
+    expect(errors).toContain(
+      'output_contract.required_fields must include session_id when context_intent is "continue"',
+    );
   });
 
   it('accepts continue intent when required_fields include session_id', () => {
@@ -541,7 +612,16 @@ describe('dispatch payload validation', () => {
       ...validPayload,
       context_intent: 'continue',
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'session_id'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'session_id',
+        ],
       },
     });
     expect(valid).toBe(true);
@@ -555,7 +635,9 @@ describe('dispatch payload validation', () => {
       session_id: 'sess-123',
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('session_id must not be provided when context_intent is "fresh"');
+    expect(errors).toContain(
+      'session_id must not be provided when context_intent is "fresh"',
+    );
   });
 
   it('accepts parent_run_id for follow-up lineage', () => {
@@ -572,7 +654,15 @@ describe('dispatch payload validation', () => {
       ...validPayload,
       ui_impacting: true,
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+        ],
       },
     });
     expect(valid).toBe(true);
@@ -584,7 +674,16 @@ describe('dispatch payload validation', () => {
       ...validPayload,
       ui_impacting: true,
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     });
     expect(valid).toBe(true);
@@ -595,9 +694,20 @@ describe('dispatch payload validation', () => {
     const payload = {
       ...validPayload,
       input: 'Fix dashboard sidebar UI spacing',
-      acceptance_tests: ['run chrome-devtools checks on http://127.0.0.1:3000/dashboard'],
+      acceptance_tests: [
+        'run chrome-devtools checks on http://127.0.0.1:3000/dashboard',
+      ],
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     };
     expect(requiresBrowserEvidence(payload)).toBe(false);
@@ -606,13 +716,25 @@ describe('dispatch payload validation', () => {
   it('rejects dispatch input that requests screenshot capture/analysis', () => {
     const { valid, errors } = validateDispatchPayload({
       ...validPayload,
-      input: 'Run browser tests and take a screenshot of dashboard for confirmation',
+      input:
+        'Run browser tests and take a screenshot of dashboard for confirmation',
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('input must not request screenshot capture/analysis; use text-based browser evidence');
+    expect(errors).toContain(
+      'input must not request screenshot capture/analysis; use text-based browser evidence',
+    );
   });
 
   it('rejects acceptance tests that include screenshot commands', () => {
@@ -621,11 +743,22 @@ describe('dispatch payload validation', () => {
       input: 'Validate dashboard via evaluate_script assertions',
       acceptance_tests: ['mcp chrome-devtools take_screenshot /dashboard'],
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('acceptance_tests must not include screenshot commands; use text-based checks');
+    expect(errors).toContain(
+      'acceptance_tests must not include screenshot commands; use text-based checks',
+    );
   });
 });
 
@@ -656,18 +789,22 @@ Done!
   });
 
   it('returns null for invalid JSON in block', () => {
-    expect(parseCompletionContract('<completion>not json</completion>')).toBeNull();
+    expect(
+      parseCompletionContract('<completion>not json</completion>'),
+    ).toBeNull();
   });
 
   it('parses contract with pr_skipped_reason instead of pr_url', () => {
-    const output = '<completion>{"run_id":"task-1","branch":"jarvis-b","commit_sha":"abc1234","files_changed":["README.md"],"pr_skipped_reason":"no changes","test_result":"ok","risk":"none"}</completion>';
+    const output =
+      '<completion>{"run_id":"task-1","branch":"jarvis-b","commit_sha":"abc1234","files_changed":["README.md"],"pr_skipped_reason":"no changes","test_result":"ok","risk":"none"}</completion>';
     const contract = parseCompletionContract(output);
     expect(contract?.pr_skipped_reason).toBe('no changes');
     expect(contract?.pr_url).toBeUndefined();
   });
 
   it('parses escaped completion body with literal \\n and escaped quotes', () => {
-    const output = '<completion>\\n{\\n  \\"run_id\\": \\"task-1\\",\\n  \\"branch\\": \\"jarvis-b\\",\\n  \\"commit_sha\\": \\"deadbeef\\",\\n  \\"files_changed\\": [\\"README.md\\"],\\n  \\"test_result\\": \\"ok\\",\\n  \\"risk\\": \\"low\\",\\n  \\"pr_skipped_reason\\": \\"no pr\\"\\n}\\n</completion>';
+    const output =
+      '<completion>\\n{\\n  \\"run_id\\": \\"task-1\\",\\n  \\"branch\\": \\"jarvis-b\\",\\n  \\"commit_sha\\": \\"deadbeef\\",\\n  \\"files_changed\\": [\\"README.md\\"],\\n  \\"test_result\\": \\"ok\\",\\n  \\"risk\\": \\"low\\",\\n  \\"pr_skipped_reason\\": \\"no pr\\"\\n}\\n</completion>';
     const contract = parseCompletionContract(output);
     expect(contract?.run_id).toBe('task-1');
     expect(contract?.branch).toBe('jarvis-b');
@@ -675,7 +812,8 @@ Done!
   });
 
   it('parses quoted completion block string', () => {
-    const output = '"<completion>{\\"run_id\\":\\"task-2\\",\\"branch\\":\\"jarvis-c\\",\\"commit_sha\\":\\"abc1234\\",\\"files_changed\\":[\\"a.ts\\"],\\"test_result\\":\\"pass\\",\\"risk\\":\\"low\\",\\"pr_skipped_reason\\":\\"n/a\\"}</completion>"';
+    const output =
+      '"<completion>{\\"run_id\\":\\"task-2\\",\\"branch\\":\\"jarvis-c\\",\\"commit_sha\\":\\"abc1234\\",\\"files_changed\\":[\\"a.ts\\"],\\"test_result\\":\\"pass\\",\\"risk\\":\\"low\\",\\"pr_skipped_reason\\":\\"n/a\\"}</completion>"';
     const contract = parseCompletionContract(output);
     expect(contract?.run_id).toBe('task-2');
     expect(contract?.branch).toBe('jarvis-c');
@@ -913,7 +1051,16 @@ describe('completion contract validation', () => {
       },
       {
         expectedRunId: 'task-1',
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     );
     expect(valid).toBe(false);
@@ -932,7 +1079,16 @@ describe('completion contract validation', () => {
         risk: 'low',
       },
       {
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'session_id'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'session_id',
+        ],
       },
     );
     expect(valid).toBe(false);
@@ -952,7 +1108,16 @@ describe('completion contract validation', () => {
         session_id: 'sess-abc-123',
       },
       {
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'session_id'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'session_id',
+        ],
       },
     );
     expect(valid).toBe(true);
@@ -977,7 +1142,16 @@ describe('completion contract validation', () => {
       },
       {
         expectedRunId: 'task-1',
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     );
     expect(valid).toBe(true);
@@ -1002,7 +1176,16 @@ describe('completion contract validation', () => {
       },
       {
         expectedRunId: 'task-1',
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     );
     expect(valid).toBe(false);
@@ -1022,12 +1205,23 @@ describe('completion contract validation', () => {
         browser_evidence: {
           base_url: 'http://127.0.0.1:3000/dashboard',
           tools_listed: ['chrome-devtools'],
-          execute_tool_evidence: ['take_screenshot /dashboard and compare pixels'],
+          execute_tool_evidence: [
+            'take_screenshot /dashboard and compare pixels',
+          ],
         },
       },
       {
         expectedRunId: 'task-1',
-        requiredFields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url', 'browser_evidence'],
+        requiredFields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+          'browser_evidence',
+        ],
       },
     );
     expect(valid).toBe(false);
@@ -1064,10 +1258,20 @@ describe('run_id contract invariants', () => {
       branch: 'jarvis-x',
       acceptance_tests: ['npm test'],
       output_contract: {
-        required_fields: ['run_id', 'branch', 'commit_sha', 'files_changed', 'test_result', 'risk', 'pr_url'],
+        required_fields: [
+          'run_id',
+          'branch',
+          'commit_sha',
+          'files_changed',
+          'test_result',
+          'risk',
+          'pr_url',
+        ],
       },
     });
     expect(valid).toBe(false);
-    expect(errors).toContain('run_id must be a non-empty string with no whitespace');
+    expect(errors).toContain(
+      'run_id must be a non-empty string with no whitespace',
+    );
   });
 });

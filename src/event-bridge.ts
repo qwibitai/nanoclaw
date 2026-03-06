@@ -13,11 +13,17 @@ const progressLastSummary = new Map<string, string>();
 function enrichMetadata(event: BridgeEvent): BridgeEvent {
   const tier = event.metadata?.tier as string | undefined;
   const agent = event.metadata?.agent as string | undefined;
-  const sourceLane = tier === 'andy-developer' ? 'andy-developer' : 'jarvis-worker';
-  const sourceLabel = tier === 'andy-developer' ? 'Andy Developer' : (agent ?? 'Jarvis Worker');
+  const sourceLane =
+    tier === 'andy-developer' ? 'andy-developer' : 'jarvis-worker';
+  const sourceLabel =
+    tier === 'andy-developer' ? 'Andy Developer' : (agent ?? 'Jarvis Worker');
   return {
     ...event,
-    metadata: { ...event.metadata, source_lane: sourceLane, source_label: sourceLabel },
+    metadata: {
+      ...event.metadata,
+      source_lane: sourceLane,
+      source_label: sourceLabel,
+    },
   };
 }
 
@@ -41,6 +47,9 @@ export async function emitBridgeEvent(event: BridgeEvent): Promise<void> {
       signal: AbortSignal.timeout(2000),
     });
   } catch {
-    logger.debug({ event_type: event.event_type }, 'event bridge emit failed (ignored)');
+    logger.debug(
+      { event_type: event.event_type },
+      'event bridge emit failed (ignored)',
+    );
   }
 }

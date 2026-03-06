@@ -38,10 +38,19 @@ import {
 } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { isJarvisWorkerFolder, RegisteredGroup, WorkerProgressEvent, WorkerSteerEvent } from './types.js';
+import {
+  isJarvisWorkerFolder,
+  RegisteredGroup,
+  WorkerProgressEvent,
+  WorkerSteerEvent,
+} from './types.js';
 
 export interface IpcDeps {
-  sendMessage: (jid: string, text: string, sourceGroup: string) => Promise<void>;
+  sendMessage: (
+    jid: string,
+    text: string,
+    sourceGroup: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroupMetadata?: (force: boolean) => Promise<void>;
@@ -83,7 +92,10 @@ function writeDispatchBlockEvent(
   const errorDir = path.join(ipcBaseDir, 'errors');
   fs.mkdirSync(errorDir, { recursive: true });
   const filename = `dispatch-block-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  fs.writeFileSync(path.join(errorDir, filename), JSON.stringify(event, null, 2));
+  fs.writeFileSync(
+    path.join(errorDir, filename),
+    JSON.stringify(event, null, 2),
+  );
 }
 
 function buildDispatchBlockedMessage(event: DispatchBlockEvent): string {
@@ -98,8 +110,9 @@ async function notifyDispatchBlocked(
 ): Promise<void> {
   writeDispatchBlockEvent(ipcBaseDir, event);
   recordBlockedDispatchAttempt(event);
-  const sourceJid = event.source_jid
-    ?? findGroupJidByFolder(registeredGroups, event.source_group);
+  const sourceJid =
+    event.source_jid ??
+    findGroupJidByFolder(registeredGroups, event.source_group);
   if (!sourceJid) return;
 
   try {
@@ -130,7 +143,11 @@ export function isIpcTargetAuthorized(
   targetChatJid: string,
   registeredGroups: Record<string, RegisteredGroup>,
 ): boolean {
-  return canIpcAccessTarget(sourceGroup, isMain, registeredGroups[targetChatJid]);
+  return canIpcAccessTarget(
+    sourceGroup,
+    isMain,
+    registeredGroups[targetChatJid],
+  );
 }
 
 function canIpcAccessTaskGroup(
@@ -140,7 +157,10 @@ function canIpcAccessTaskGroup(
 ): boolean {
   if (isMain) return true;
   if (taskGroupFolder === sourceGroup) return true;
-  if (sourceGroup === 'andy-developer' && isJarvisWorkerFolder(taskGroupFolder)) {
+  if (
+    sourceGroup === 'andy-developer' &&
+    isJarvisWorkerFolder(taskGroupFolder)
+  ) {
     return true;
   }
   return false;
@@ -162,7 +182,11 @@ function normalizeWorkerDispatchPayloadText(
   targetGroup: RegisteredGroup | undefined,
   text: string,
 ): { text: string; normalized: boolean } {
-  return normalizeJarvisWorkerDispatchPayloadText(sourceGroup, targetGroup, text);
+  return normalizeJarvisWorkerDispatchPayloadText(
+    sourceGroup,
+    targetGroup,
+    text,
+  );
 }
 
 export function validateAndyWorkerDispatchMessage(
@@ -197,7 +221,10 @@ function startProgressPoller(deps: IpcDeps): void {
       try {
         groupFolders = fs.readdirSync(ipcBaseDir).filter((f) => {
           try {
-            return fs.statSync(path.join(ipcBaseDir, f)).isDirectory() && isJarvisWorkerFolder(f);
+            return (
+              fs.statSync(path.join(ipcBaseDir, f)).isDirectory() &&
+              isJarvisWorkerFolder(f)
+            );
           } catch {
             return false;
           }
@@ -232,7 +259,10 @@ function startProgressPoller(deps: IpcDeps): void {
 
             let eventFiles: string[];
             try {
-              eventFiles = fs.readdirSync(runDir).filter((f) => f.endsWith('.json')).sort();
+              eventFiles = fs
+                .readdirSync(runDir)
+                .filter((f) => f.endsWith('.json'))
+                .sort();
             } catch {
               continue;
             }
@@ -243,12 +273,21 @@ function startProgressPoller(deps: IpcDeps): void {
             for (const file of eventFiles) {
               const filePath = path.join(runDir, file);
               try {
-                const event = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as WorkerProgressEvent;
+                const event = JSON.parse(
+                  fs.readFileSync(filePath, 'utf-8'),
+                ) as WorkerProgressEvent;
                 latestSummary = event.summary;
                 latestTimestamp = event.timestamp;
-                try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+                try {
+                  fs.unlinkSync(filePath);
+                } catch {
+                  /* ignore */
+                }
               } catch (err) {
-                logger.warn({ err, file, workerFolder }, 'Failed to process progress event file');
+                logger.warn(
+                  { err, file, workerFolder },
+                  'Failed to process progress event file',
+                );
               }
             }
 
@@ -257,16 +296,31 @@ function startProgressPoller(deps: IpcDeps): void {
               void emitBridgeEvent({
                 event_type: 'worker_progress',
                 summary: `[${workerFolder}] ↻ ${latestSummary}`,
-                metadata: { agent: workerFolder, tier: 'worker', run_id: runId, group_folder: workerFolder },
+                metadata: {
+                  agent: workerFolder,
+                  tier: 'worker',
+                  run_id: runId,
+                  group_folder: workerFolder,
+                },
               });
 
-              const andyJid = findGroupJidByFolder(registeredGroups, 'andy-developer');
+              const andyJid = findGroupJidByFolder(
+                registeredGroups,
+                'andy-developer',
+              );
               if (andyJid) {
                 const shortId = runId.length > 6 ? runId.slice(-6) : runId;
                 try {
-                  await deps.sendMessage(andyJid, `[${shortId}] ↻ ${latestSummary}`, 'nanoclaw-system');
+                  await deps.sendMessage(
+                    andyJid,
+                    `[${shortId}] ↻ ${latestSummary}`,
+                    'nanoclaw-system',
+                  );
                 } catch (err) {
-                  logger.warn({ err, runId }, 'Failed to send progress notification to andy-developer');
+                  logger.warn(
+                    { err, runId },
+                    'Failed to send progress notification to andy-developer',
+                  );
                 }
               }
             }
@@ -277,7 +331,9 @@ function startProgressPoller(deps: IpcDeps): void {
         if (fs.existsSync(steerDir)) {
           let ackedFiles: string[];
           try {
-            ackedFiles = fs.readdirSync(steerDir).filter((f) => f.endsWith('.acked.json'));
+            ackedFiles = fs
+              .readdirSync(steerDir)
+              .filter((f) => f.endsWith('.acked.json'));
           } catch {
             ackedFiles = [];
           }
@@ -290,10 +346,20 @@ function startProgressPoller(deps: IpcDeps): void {
                 acked_at: string;
               };
               ackSteeringEvent(ack.steer_id, ack.acked_at);
-              try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-              logger.debug({ steer_id: ack.steer_id, workerFolder }, 'Steering event acked');
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                /* ignore */
+              }
+              logger.debug(
+                { steer_id: ack.steer_id, workerFolder },
+                'Steering event acked',
+              );
             } catch (err) {
-              logger.warn({ err, file, workerFolder }, 'Failed to process steer ack file');
+              logger.warn(
+                { err, file, workerFolder },
+                'Failed to process steer ack file',
+              );
             }
           }
         }
@@ -320,13 +386,16 @@ export function startIpcWatcher(deps: IpcDeps): void {
   fs.mkdirSync(ipcBaseDir, { recursive: true });
   const runtimeOptions: IpcRuntimeOptions = {
     taskControlEnabled: deps.options?.taskControlEnabled ?? ENABLE_SCHEDULER,
-    workerSteeringEnabled: deps.options?.workerSteeringEnabled ?? ENABLE_WORKER_STEERING,
-    dynamicGroupRegistrationEnabled: deps.options?.dynamicGroupRegistrationEnabled
-      ?? ENABLE_DYNAMIC_GROUP_REGISTRATION,
+    workerSteeringEnabled:
+      deps.options?.workerSteeringEnabled ?? ENABLE_WORKER_STEERING,
+    dynamicGroupRegistrationEnabled:
+      deps.options?.dynamicGroupRegistrationEnabled ??
+      ENABLE_DYNAMIC_GROUP_REGISTRATION,
   };
-  const shouldProcessTaskDir = runtimeOptions.taskControlEnabled
-    || runtimeOptions.workerSteeringEnabled
-    || runtimeOptions.dynamicGroupRegistrationEnabled;
+  const shouldProcessTaskDir =
+    runtimeOptions.taskControlEnabled ||
+    runtimeOptions.workerSteeringEnabled ||
+    runtimeOptions.dynamicGroupRegistrationEnabled;
 
   const processIpcFiles = async () => {
     // Scan all group IPC directories (identity determined by directory)
@@ -362,7 +431,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
-                const canAccessTarget = canIpcAccessTarget(sourceGroup, isMain, targetGroup);
+                const canAccessTarget = canIpcAccessTarget(
+                  sourceGroup,
+                  isMain,
+                  targetGroup,
+                );
                 const normalizedDispatch = normalizeWorkerDispatchPayloadText(
                   sourceGroup,
                   targetGroup,
@@ -374,14 +447,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   targetGroup,
                   outboundText,
                 );
-                const queueDecision = (
+                const queueDecision =
                   canAccessTarget && dispatchValidation.valid
-                )
-                  ? queueAndyWorkerDispatchRun(sourceGroup, targetGroup, outboundText)
-                  : { allowSend: true };
+                    ? queueAndyWorkerDispatchRun(
+                        sourceGroup,
+                        targetGroup,
+                        outboundText,
+                      )
+                    : { allowSend: true };
 
-                if (canAccessTarget && dispatchValidation.valid && queueDecision.allowSend) {
-                  await deps.sendMessage(data.chatJid, outboundText, sourceGroup);
+                if (
+                  canAccessTarget &&
+                  dispatchValidation.valid &&
+                  queueDecision.allowSend
+                ) {
+                  await deps.sendMessage(
+                    data.chatJid,
+                    outboundText,
+                    sourceGroup,
+                  );
                   if (normalizedDispatch.normalized) {
                     logger.info(
                       { sourceGroup, targetFolder: targetGroup?.folder },
@@ -409,7 +493,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     : !dispatchValidation.valid
                       ? dispatchValidation.reason
                       : queueDecision.reason;
-                  const isDuplicateRunId = (reason || '').startsWith('duplicate run_id blocked:');
+                  const isDuplicateRunId = (reason || '').startsWith(
+                    'duplicate run_id blocked:',
+                  );
                   logger.warn(
                     {
                       chatJid: data.chatJid,
@@ -421,17 +507,18 @@ export function startIpcWatcher(deps: IpcDeps): void {
 
                   if (targetGroup && isJarvisWorkerFolder(targetGroup.folder)) {
                     const parsed = parseDispatchPayload(outboundText);
-                    const reasonCode: DispatchBlockEvent['reason_code'] = !canAccessTarget
-                      ? 'target_authorization_failed'
-                      : isDuplicateRunId
-                        ? 'duplicate_run_id'
-                      : !dispatchValidation.valid
-                        ? (
-                          dispatchValidation.reason?.includes('only andy-developer')
-                            ? 'unauthorized_source_lane'
-                            : 'invalid_dispatch_payload'
-                        )
-                        : 'duplicate_run_id';
+                    const reasonCode: DispatchBlockEvent['reason_code'] =
+                      !canAccessTarget
+                        ? 'target_authorization_failed'
+                        : isDuplicateRunId
+                          ? 'duplicate_run_id'
+                          : !dispatchValidation.valid
+                            ? dispatchValidation.reason?.includes(
+                                'only andy-developer',
+                              )
+                              ? 'unauthorized_source_lane'
+                              : 'invalid_dispatch_payload'
+                            : 'duplicate_run_id';
 
                     await notifyDispatchBlocked(
                       deps,
@@ -441,7 +528,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                         kind: 'dispatch_block',
                         timestamp: new Date().toISOString(),
                         source_group: sourceGroup,
-                        source_jid: findGroupJidByFolder(registeredGroups, sourceGroup),
+                        source_jid: findGroupJidByFolder(
+                          registeredGroups,
+                          sourceGroup,
+                        ),
                         target_jid: data.chatJid,
                         target_folder: targetGroup.folder,
                         reason_code: reasonCode,
@@ -509,7 +599,13 @@ export function startIpcWatcher(deps: IpcDeps): void {
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps, runtimeOptions);
+              await processTaskIpc(
+                data,
+                sourceGroup,
+                isMain,
+                deps,
+                runtimeOptions,
+              );
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
@@ -578,7 +674,10 @@ export async function processTaskIpc(
   switch (data.type) {
     case 'schedule_task':
       if (!runtimeOptions.taskControlEnabled) {
-        logger.warn({ sourceGroup }, 'schedule_task ignored: task control disabled');
+        logger.warn(
+          { sourceGroup },
+          'schedule_task ignored: task control disabled',
+        );
         break;
       }
       if (
@@ -610,8 +709,12 @@ export async function processTaskIpc(
           break;
         }
 
-        if (isJarvisWorkerFolder(targetFolder) && sourceGroup !== 'andy-developer') {
-          const reasonText = 'worker dispatch ownership violation: only andy-developer may schedule worker dispatch tasks';
+        if (
+          isJarvisWorkerFolder(targetFolder) &&
+          sourceGroup !== 'andy-developer'
+        ) {
+          const reasonText =
+            'worker dispatch ownership violation: only andy-developer may schedule worker dispatch tasks';
           logger.warn(
             { sourceGroup, targetFolder, reason: reasonText },
             'Unauthorized worker schedule_task attempt blocked',
@@ -631,8 +734,14 @@ export async function processTaskIpc(
           break;
         }
 
-        if (sourceGroup === 'andy-developer' && isJarvisWorkerFolder(targetFolder)) {
-          const workerValidation = validateAndyToWorkerPayload(targetFolder, data.prompt);
+        if (
+          sourceGroup === 'andy-developer' &&
+          isJarvisWorkerFolder(targetFolder)
+        ) {
+          const workerValidation = validateAndyToWorkerPayload(
+            targetFolder,
+            data.prompt,
+          );
           if (!workerValidation.valid) {
             logger.warn(
               { sourceGroup, targetFolder, reason: workerValidation.reason },
@@ -718,12 +827,18 @@ export async function processTaskIpc(
 
     case 'pause_task':
       if (!runtimeOptions.taskControlEnabled) {
-        logger.warn({ sourceGroup }, 'pause_task ignored: task control disabled');
+        logger.warn(
+          { sourceGroup },
+          'pause_task ignored: task control disabled',
+        );
         break;
       }
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)) {
+        if (
+          task &&
+          canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)
+        ) {
           updateTask(data.taskId, { status: 'paused' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -740,12 +855,18 @@ export async function processTaskIpc(
 
     case 'resume_task':
       if (!runtimeOptions.taskControlEnabled) {
-        logger.warn({ sourceGroup }, 'resume_task ignored: task control disabled');
+        logger.warn(
+          { sourceGroup },
+          'resume_task ignored: task control disabled',
+        );
         break;
       }
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)) {
+        if (
+          task &&
+          canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)
+        ) {
           updateTask(data.taskId, { status: 'active' });
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -762,12 +883,18 @@ export async function processTaskIpc(
 
     case 'cancel_task':
       if (!runtimeOptions.taskControlEnabled) {
-        logger.warn({ sourceGroup }, 'cancel_task ignored: task control disabled');
+        logger.warn(
+          { sourceGroup },
+          'cancel_task ignored: task control disabled',
+        );
         break;
       }
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)) {
+        if (
+          task &&
+          canIpcAccessTaskGroup(sourceGroup, isMain, task.group_folder)
+        ) {
           deleteTask(data.taskId);
           logger.info(
             { taskId: data.taskId, sourceGroup },
@@ -784,7 +911,10 @@ export async function processTaskIpc(
 
     case 'refresh_groups':
       if (!runtimeOptions.dynamicGroupRegistrationEnabled) {
-        logger.warn({ sourceGroup }, 'refresh_groups ignored: dynamic group registration disabled');
+        logger.warn(
+          { sourceGroup },
+          'refresh_groups ignored: dynamic group registration disabled',
+        );
         break;
       }
       // Only main group can request a refresh
@@ -816,7 +946,10 @@ export async function processTaskIpc(
 
     case 'register_group':
       if (!runtimeOptions.dynamicGroupRegistrationEnabled) {
-        logger.warn({ sourceGroup }, 'register_group ignored: dynamic group registration disabled');
+        logger.warn(
+          { sourceGroup },
+          'register_group ignored: dynamic group registration disabled',
+        );
         break;
       }
       // Only main group can register new groups
@@ -853,7 +986,10 @@ export async function processTaskIpc(
 
     case 'steer_worker': {
       if (!runtimeOptions.workerSteeringEnabled) {
-        logger.warn({ sourceGroup }, 'steer_worker ignored: worker steering disabled');
+        logger.warn(
+          { sourceGroup },
+          'steer_worker ignored: worker steering disabled',
+        );
         break;
       }
       const { run_id, message } = data;
@@ -864,29 +1000,53 @@ export async function processTaskIpc(
       }
 
       if (sourceGroup !== 'andy-developer') {
-        logger.warn({ sourceGroup }, 'steer_worker: unauthorized source (only andy-developer allowed)');
+        logger.warn(
+          { sourceGroup },
+          'steer_worker: unauthorized source (only andy-developer allowed)',
+        );
         break;
       }
 
       const workerRun = getWorkerRun(run_id);
       if (!workerRun) {
         logger.warn({ run_id }, 'steer_worker: run_id not found');
-        const andyJidNotFound = findGroupJidByFolder(registeredGroups, 'andy-developer');
+        const andyJidNotFound = findGroupJidByFolder(
+          registeredGroups,
+          'andy-developer',
+        );
         if (andyJidNotFound) {
           try {
-            await deps.sendMessage(andyJidNotFound, `✗ Steer failed: run_id \`${run_id}\` not found`, 'nanoclaw-system');
-          } catch { /* ignore */ }
+            await deps.sendMessage(
+              andyJidNotFound,
+              `✗ Steer failed: run_id \`${run_id}\` not found`,
+              'nanoclaw-system',
+            );
+          } catch {
+            /* ignore */
+          }
         }
         break;
       }
 
       if (workerRun.status !== 'running') {
-        logger.warn({ run_id, status: workerRun.status }, 'steer_worker: run is not active');
-        const andyJidInactive = findGroupJidByFolder(registeredGroups, 'andy-developer');
+        logger.warn(
+          { run_id, status: workerRun.status },
+          'steer_worker: run is not active',
+        );
+        const andyJidInactive = findGroupJidByFolder(
+          registeredGroups,
+          'andy-developer',
+        );
         if (andyJidInactive) {
           try {
-            await deps.sendMessage(andyJidInactive, `✗ Steer failed: \`${run_id}\` is not running (status: ${workerRun.status})`, 'nanoclaw-system');
-          } catch { /* ignore */ }
+            await deps.sendMessage(
+              andyJidInactive,
+              `✗ Steer failed: \`${run_id}\` is not running (status: ${workerRun.status})`,
+              'nanoclaw-system',
+            );
+          } catch {
+            /* ignore */
+          }
         }
         break;
       }
@@ -903,7 +1063,10 @@ export async function processTaskIpc(
 
       const steerDir = path.join(IPC_BASE_DIR, workerRun.group_folder, 'steer');
       fs.mkdirSync(steerDir, { recursive: true });
-      fs.writeFileSync(path.join(steerDir, `${run_id}.json`), JSON.stringify(steerEvent, null, 2));
+      fs.writeFileSync(
+        path.join(steerDir, `${run_id}.json`),
+        JSON.stringify(steerEvent, null, 2),
+      );
 
       insertSteeringEvent({
         steer_id: steerId,
@@ -915,19 +1078,38 @@ export async function processTaskIpc(
       void emitBridgeEvent({
         event_type: 'worker_steered',
         summary: `[andy-dev → ${workerRun.group_folder}] steer: ${message.slice(0, 80)}`,
-        metadata: { agent: workerRun.group_folder, tier: 'andy-developer', run_id, group_folder: workerRun.group_folder },
+        metadata: {
+          agent: workerRun.group_folder,
+          tier: 'andy-developer',
+          run_id,
+          group_folder: workerRun.group_folder,
+        },
       });
 
       const andyJid = findGroupJidByFolder(registeredGroups, 'andy-developer');
       if (andyJid) {
         try {
-          await deps.sendMessage(andyJid, `↗ Steering sent to ${run_id}`, 'nanoclaw-system');
+          await deps.sendMessage(
+            andyJid,
+            `↗ Steering sent to ${run_id}`,
+            'nanoclaw-system',
+          );
         } catch (err) {
-          logger.warn({ err, run_id }, 'Failed to send steer confirmation to andy-developer');
+          logger.warn(
+            { err, run_id },
+            'Failed to send steer confirmation to andy-developer',
+          );
         }
       }
 
-      logger.info({ run_id, steer_id: steerId, targetWorkerFolder: workerRun.group_folder }, 'Worker steering event dispatched');
+      logger.info(
+        {
+          run_id,
+          steer_id: steerId,
+          targetWorkerFolder: workerRun.group_folder,
+        },
+        'Worker steering event dispatched',
+      );
       break;
     }
 

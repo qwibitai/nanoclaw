@@ -137,7 +137,10 @@ export function recordQueuedDispatchAttempt(input: {
     run_id: input.runId,
     status: 'queued',
     reason_code: input.queueState === 'retry' ? 'retry' : null,
-    reason_text: input.queueState === 'retry' ? 'retry queued after terminal failure' : null,
+    reason_text:
+      input.queueState === 'retry'
+        ? 'retry queued after terminal failure'
+        : null,
     session_strategy: input.sessionStrategy,
     dispatch_payload: input.dispatchPayload,
   });

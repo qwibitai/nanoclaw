@@ -1,7 +1,36 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-06T18:09:55.006499+00:00",
+  "updated_at": "2026-03-06T18:37:17.284851+00:00",
   "incidents": [
+    {
+      "id": "incident-20260306T183606Z",
+      "title": "PR CI format check failed after Jarvis refactor",
+      "status": "open",
+      "severity": "medium",
+      "created_at": "2026-03-06T18:36:06.524378+00:00",
+      "updated_at": "2026-03-06T18:37:17.284665+00:00",
+      "summary": {
+        "symptom": "GitHub Actions CI run 22776655927 failed at npm run format:check on PR #21",
+        "suspected_cause": "Prettier formatting was not applied before commit on 18 src/*.ts files",
+        "impact": "Required CI check is red and the PR cannot merge",
+        "next_action": "Run npm run format:fix, rerun local gates, commit, and push to retrigger CI"
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "notes": [
+        {
+          "ts": "2026-03-06T18:36:06.524378+00:00",
+          "author": "user",
+          "text": "reported: GitHub Actions CI run 22776655927 failed at npm run format:check on PR #21"
+        },
+        {
+          "ts": "2026-03-06T18:37:17.284661+00:00",
+          "author": "codex",
+          "text": "Applied npm run format:fix plus direct prettier write for src/db.ts after CI run 22776655927 failed at format:check. Local rerun now passes: npm run format:check, npm run typecheck, npm test, npm run build. Awaiting GitHub rerun after push."
+        }
+      ]
+    },
     {
       "id": "incident-20260306T180837Z",
       "title": "WhatsApp session conflict after runtime restart",

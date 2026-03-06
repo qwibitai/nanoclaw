@@ -6,7 +6,11 @@ import {
   listActiveAndyRequests,
 } from '../../db.js';
 import { handleAndyFrontdeskMessages } from './frontdesk-service.js';
-import { type Channel, type NewMessage, type RegisteredGroup } from '../../types.js';
+import {
+  type Channel,
+  type NewMessage,
+  type RegisteredGroup,
+} from '../../types.js';
 
 const ANDY_GROUP: RegisteredGroup = {
   name: 'Andy Developer',
@@ -59,6 +63,8 @@ describe('frontdesk-service', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('There are no worker runs yet');
     expect(getAndyRequestByMessageId(STATUS_QUERY_MESSAGE.id)).toBeUndefined();
-    expect(listActiveAndyRequests(STATUS_QUERY_MESSAGE.chat_jid)).toHaveLength(0);
+    expect(listActiveAndyRequests(STATUS_QUERY_MESSAGE.chat_jid)).toHaveLength(
+      0,
+    );
   });
 });

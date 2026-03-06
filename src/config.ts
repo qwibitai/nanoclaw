@@ -40,12 +40,13 @@ export const MAIN_GROUP_FOLDER = 'main';
 
 export type RuntimeProfile = 'mission_core' | 'ops_extended';
 
-const rawRuntimeProfile = (process.env.NANOCLAW_RUNTIME_PROFILE || 'mission_core')
+const rawRuntimeProfile = (
+  process.env.NANOCLAW_RUNTIME_PROFILE || 'mission_core'
+)
   .trim()
   .toLowerCase();
-export const RUNTIME_PROFILE: RuntimeProfile = rawRuntimeProfile === 'ops_extended'
-  ? 'ops_extended'
-  : 'mission_core';
+export const RUNTIME_PROFILE: RuntimeProfile =
+  rawRuntimeProfile === 'ops_extended' ? 'ops_extended' : 'mission_core';
 export const RUNTIME_OPS_EXTENDED = RUNTIME_PROFILE === 'ops_extended';
 
 function envBool(value: string | undefined, fallback: boolean): boolean {
@@ -96,8 +97,7 @@ export const CONTAINER_PARSE_BUFFER_LIMIT = parseInt(
   process.env.CONTAINER_PARSE_BUFFER_LIMIT || '1048576',
   10,
 ); // 1MB default - prevents unbounded memory growth if markers are malformed
-export const CONTAINER_CPU_LIMIT =
-  process.env.CONTAINER_CPU_LIMIT || '2';
+export const CONTAINER_CPU_LIMIT = process.env.CONTAINER_CPU_LIMIT || '2';
 export const CONTAINER_MEMORY_LIMIT =
   process.env.CONTAINER_MEMORY_LIMIT || '4096M';
 export const IPC_POLL_INTERVAL = 1000;

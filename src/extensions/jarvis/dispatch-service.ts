@@ -6,7 +6,10 @@ import {
   isNonRetryableWorkerStatus,
   type WorkerRunDispatchMetadata,
 } from '../../db.js';
-import { parseDispatchPayload, validateDispatchPayload } from '../../dispatch-validator.js';
+import {
+  parseDispatchPayload,
+  validateDispatchPayload,
+} from '../../dispatch-validator.js';
 import { type RegisteredGroup, isJarvisWorkerFolder } from '../../types.js';
 import {
   ANDY_DEVELOPER_LANE_ID,
@@ -38,7 +41,11 @@ export interface DispatchBlockEvent {
 
 export type WorkerPayloadValidation =
   | { valid: true }
-  | { valid: false; reasonCode: DispatchBlockEvent['reason_code']; reason: string };
+  | {
+      valid: false;
+      reasonCode: DispatchBlockEvent['reason_code'];
+      reason: string;
+    };
 
 export interface WorkerDispatchQueueDecision {
   allowSend: boolean;
@@ -113,7 +120,11 @@ export function canJarvisDispatchToTarget(
 
   const sourceLaneId = resolveLaneIdFromGroupFolder(sourceGroup);
   const targetLaneId = resolveLaneIdFromGroupFolder(targetGroup.folder);
-  if (sourceLaneId === ANDY_DEVELOPER_LANE_ID && targetLaneId && isJarvisWorkerLaneId(targetLaneId)) {
+  if (
+    sourceLaneId === ANDY_DEVELOPER_LANE_ID &&
+    targetLaneId &&
+    isJarvisWorkerLaneId(targetLaneId)
+  ) {
     return true;
   }
 
@@ -147,7 +158,8 @@ function validateWorkerSessionRouting(
     if (!reusable?.effective_session_id) {
       return {
         valid: false,
-        reason: 'context_intent=continue requires a reusable prior session for this worker/repo/branch; provide session_id or use context_intent=fresh',
+        reason:
+          'context_intent=continue requires a reusable prior session for this worker/repo/branch; provide session_id or use context_intent=fresh',
       };
     }
   }
@@ -164,7 +176,8 @@ export function validateAndyToWorkerPayload(
     return {
       valid: false,
       reasonCode: 'invalid_dispatch_payload',
-      reason: 'andy-developer -> jarvis-worker requires strict JSON dispatch payload',
+      reason:
+        'andy-developer -> jarvis-worker requires strict JSON dispatch payload',
     };
   }
 
@@ -204,16 +217,19 @@ export function normalizeWorkerDispatchPayloadText(
   text: string,
 ): { text: string; normalized: boolean } {
   if (
-    sourceGroup !== ANDY_DEVELOPER_LANE_ID
-    || !targetGroup
-    || !isJarvisWorkerFolder(targetGroup.folder)
+    sourceGroup !== ANDY_DEVELOPER_LANE_ID ||
+    !targetGroup ||
+    !isJarvisWorkerFolder(targetGroup.folder)
   ) {
     return { text, normalized: false };
   }
 
   const payload = parseDispatchPayload(text);
   if (!payload) return { text, normalized: false };
-  if (!payload.output_contract || !Array.isArray(payload.output_contract.required_fields)) {
+  if (
+    !payload.output_contract ||
+    !Array.isArray(payload.output_contract.required_fields)
+  ) {
     return { text, normalized: false };
   }
 
@@ -236,7 +252,9 @@ export function normalizeWorkerDispatchPayloadText(
   }
 
   const after = Array.from(required);
-  const changed = after.length !== before.length || after.some((field) => !before.includes(field));
+  const changed =
+    after.length !== before.length ||
+    after.some((field) => !before.includes(field));
   if (!changed) return { text, normalized: false };
 
   const normalizedPayload = {
@@ -255,23 +273,26 @@ export function validateAndyWorkerDispatchMessage(
   text: string,
 ): { valid: boolean; reason?: string } {
   const parsed = parseDispatchPayload(text);
-  const isWorkerTarget = !!targetGroup && isJarvisWorkerFolder(targetGroup.folder);
+  const isWorkerTarget =
+    !!targetGroup && isJarvisWorkerFolder(targetGroup.folder);
 
   if (
-    sourceGroup === ANDY_DEVELOPER_LANE_ID
-    && targetGroup?.folder === ANDY_DEVELOPER_LANE_ID
-    && parsed
+    sourceGroup === ANDY_DEVELOPER_LANE_ID &&
+    targetGroup?.folder === ANDY_DEVELOPER_LANE_ID &&
+    parsed
   ) {
     return {
       valid: false,
-      reason: 'dispatch payload to andy-developer chat blocked; set target_group_jid to jarvis-worker-*',
+      reason:
+        'dispatch payload to andy-developer chat blocked; set target_group_jid to jarvis-worker-*',
     };
   }
 
   if (isWorkerTarget && sourceGroup !== ANDY_DEVELOPER_LANE_ID && parsed) {
     return {
       valid: false,
-      reason: 'worker dispatch ownership violation: only andy-developer may dispatch strict JSON contracts to jarvis-worker-* lanes',
+      reason:
+        'worker dispatch ownership violation: only andy-developer may dispatch strict JSON contracts to jarvis-worker-* lanes',
     };
   }
 
@@ -301,7 +322,8 @@ function buildWorkerDispatchMetadata(
   parsed: NonNullable<ReturnType<typeof parseDispatchPayload>>,
 ): WorkerRunDispatchMetadata {
   return {
-    lane_id: resolveLaneIdFromGroupFolder(targetGroup.folder) ?? targetGroup.folder,
+    lane_id:
+      resolveLaneIdFromGroupFolder(targetGroup.folder) ?? targetGroup.folder,
     dispatch_repo: parsed.repo,
     dispatch_branch: parsed.branch,
     request_id: parsed.request_id,
@@ -320,9 +342,9 @@ export function queueAndyWorkerDispatchRun(
   text: string,
 ): WorkerDispatchQueueDecision {
   if (
-    sourceGroup !== ANDY_DEVELOPER_LANE_ID
-    || !targetGroup
-    || !isJarvisWorkerFolder(targetGroup.folder)
+    sourceGroup !== ANDY_DEVELOPER_LANE_ID ||
+    !targetGroup ||
+    !isJarvisWorkerFolder(targetGroup.folder)
   ) {
     return { allowSend: true };
   }
@@ -331,7 +353,8 @@ export function queueAndyWorkerDispatchRun(
   if (!parsed) return { allowSend: true };
 
   const sourceLaneId = resolveLaneIdFromGroupFolder(sourceGroup) ?? sourceGroup;
-  const targetLaneId = resolveLaneIdFromGroupFolder(targetGroup.folder) ?? targetGroup.folder;
+  const targetLaneId =
+    resolveLaneIdFromGroupFolder(targetGroup.folder) ?? targetGroup.folder;
   const sessionStrategy = getDispatchSessionStrategy(parsed);
   const queueState = insertWorkerRun(
     parsed.run_id,
@@ -373,10 +396,14 @@ export function queueAndyWorkerDispatchRun(
   };
 }
 
-export function recordBlockedDispatchAttempt(event: DispatchBlockEvent): string | undefined {
-  const targetLaneId = resolveLaneIdFromGroupFolder(event.target_folder) ?? event.target_folder;
+export function recordBlockedDispatchAttempt(
+  event: DispatchBlockEvent,
+): string | undefined {
+  const targetLaneId =
+    resolveLaneIdFromGroupFolder(event.target_folder) ?? event.target_folder;
   if (!targetLaneId) return undefined;
-  const sourceLaneId = resolveLaneIdFromGroupFolder(event.source_group) ?? event.source_group;
+  const sourceLaneId =
+    resolveLaneIdFromGroupFolder(event.source_group) ?? event.source_group;
   return markAndyRequestDispatchBlocked({
     requestId: event.request_id,
     sourceLaneId,
@@ -384,6 +411,7 @@ export function recordBlockedDispatchAttempt(event: DispatchBlockEvent): string 
     runId: event.run_id,
     reasonCode: event.reason_code,
     reasonText: event.reason_text,
-    sessionStrategy: event.reason_code === 'duplicate_run_id' ? 'duplicate' : undefined,
+    sessionStrategy:
+      event.reason_code === 'duplicate_run_id' ? 'duplicate' : undefined,
   });
 }

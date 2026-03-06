@@ -255,7 +255,9 @@ describe('schedule_task authorization', () => {
     const attempts = listDispatchAttemptsForRequest('req-invalid-dispatch');
     expect(request?.worker_run_id).toBeNull();
     expect(request?.state).toBe('failed');
-    expect(request?.last_status_text).toContain('Dispatch blocked before worker queue');
+    expect(request?.last_status_text).toContain(
+      'Dispatch blocked before worker queue',
+    );
     expect(attempts).toHaveLength(1);
     expect(attempts[0].status).toBe('blocked');
     expect(attempts[0].source_lane_id).toBe('andy-developer');
