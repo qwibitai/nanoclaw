@@ -1,0 +1,305 @@
+#!/usr/bin/env bash
+# gamma-presenter — CLI tool for creating Gamma presentations via API
+# Usage:
+#   gamma-presenter create "Topic or content" [options]
+#   gamma-presenter status <generationId>
+#   gamma-presenter themes [search_query]
+#   gamma-presenter folders [search_query]
+#
+# Options for 'create':
+#   --format <presentation|document|webpage|social>  (default: presentation)
+#   --cards <number>          Number of cards (default: 10)
+#   --theme <themeId>         Theme ID (use 'themes' command to list)
+#   --tone <tone>             e.g. "professional, upbeat"
+#   --audience <audience>     e.g. "investors", "students"
+#   --language <code>         ISO code, e.g. "it" for Italian (default: en)
+#   --images <source>         aiGenerated|pexels|noImages (default: aiGenerated)
+#   --image-model <model>     e.g. flux-1-quick, imagen-3-pro (default: flux-1-quick)
+#   --image-style <style>     e.g. "minimal, corporate"
+#   --text-amount <amount>    brief|medium|detailed|extensive (default: medium)
+#   --text-mode <mode>        generate|condense|preserve (default: generate)
+#   --export <pdf|pptx>       Also export as PDF or PPTX
+#   --instructions <text>     Additional AI instructions
+#   --wait                    Poll until complete and return URL (default: true)
+#   --no-wait                 Return generationId immediately, don't poll
+
+set -euo pipefail
+
+# Config
+API_BASE="https://public-api.gamma.app/v1.0"
+API_KEY="${GAMMA_API_KEY:-}"
+
+# Load from .env files if not set
+if [ -z "$API_KEY" ]; then
+    for envfile in /root/nanoclaw/.env /root/.openclaw/secrets/.env.plaintext; do
+        if [ -f "$envfile" ]; then
+            key=$(grep '^GAMMA_API_KEY=' "$envfile" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+            if [ -n "$key" ]; then
+                API_KEY="$key"
+                break
+            fi
+        fi
+    done
+fi
+
+if [ -z "$API_KEY" ]; then
+    echo "ERROR: GAMMA_API_KEY not set. Add to /root/nanoclaw/.env or export GAMMA_API_KEY=sk-gamma-xxx"
+    exit 1
+fi
+
+# ── Helpers ──────────────────────────────────────────────────────
+
+api_get() {
+    curl -s --fail-with-body \
+        -H "X-API-KEY: $API_KEY" \
+        -H "Accept: application/json" \
+        "$API_BASE$1"
+}
+
+api_post() {
+    curl -s --fail-with-body \
+        -X POST \
+        -H "X-API-KEY: $API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$2" \
+        "$API_BASE$1"
+}
+
+poll_generation() {
+    local gen_id="$1"
+    local max_wait=300  # 5 min max
+    local waited=0
+
+    echo "Generating... (ID: $gen_id)" >&2
+
+    while [ $waited -lt $max_wait ]; do
+        local result
+        result=$(api_get "/generations/$gen_id")
+        local status
+        status=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "error")
+
+        if [ "$status" = "completed" ]; then
+            echo "$result"
+            return 0
+        elif [ "$status" = "pending" ] || [ "$status" = "processing" ]; then
+            sleep 5
+            waited=$((waited + 5))
+            echo "  Still generating... (${waited}s)" >&2
+        else
+            echo "ERROR: Generation failed with status: $status" >&2
+            echo "$result" >&2
+            return 1
+        fi
+    done
+
+    echo "ERROR: Generation timed out after ${max_wait}s" >&2
+    return 1
+}
+
+# ── Commands ─────────────────────────────────────────────────────
+
+cmd_create() {
+    local input_text=""
+    local format="presentation"
+    local cards=10
+    local theme_id=""
+    local tone=""
+    local audience=""
+    local language="en"
+    local images="aiGenerated"
+    local image_model="flux-1-quick"
+    local image_style=""
+    local text_amount="medium"
+    local text_mode="generate"
+    local export_as=""
+    local instructions=""
+    local wait_for_result=true
+
+    # Parse first positional arg as input text
+    if [ $# -gt 0 ] && [[ ! "$1" == --* ]]; then
+        input_text="$1"
+        shift
+    fi
+
+    # Parse options
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --format) format="$2"; shift 2 ;;
+            --cards) cards="$2"; shift 2 ;;
+            --theme) theme_id="$2"; shift 2 ;;
+            --tone) tone="$2"; shift 2 ;;
+            --audience) audience="$2"; shift 2 ;;
+            --language) language="$2"; shift 2 ;;
+            --images) images="$2"; shift 2 ;;
+            --image-model) image_model="$2"; shift 2 ;;
+            --image-style) image_style="$2"; shift 2 ;;
+            --text-amount) text_amount="$2"; shift 2 ;;
+            --text-mode) text_mode="$2"; shift 2 ;;
+            --export) export_as="$2"; shift 2 ;;
+            --instructions) instructions="$2"; shift 2 ;;
+            --wait) wait_for_result=true; shift ;;
+            --no-wait) wait_for_result=false; shift ;;
+            *)
+                if [ -z "$input_text" ]; then
+                    input_text="$1"
+                fi
+                shift ;;
+        esac
+    done
+
+    if [ -z "$input_text" ]; then
+        echo "ERROR: No input text provided. Usage: gamma-presenter create \"Your topic or content\""
+        exit 1
+    fi
+
+    # Build JSON payload
+    local payload
+    payload=$(python3 -c "
+import json, sys
+
+body = {
+    'inputText': '''$input_text''',
+    'textMode': '$text_mode',
+    'format': '$format',
+    'numCards': $cards,
+    'textOptions': {
+        'amount': '$text_amount',
+        'language': '$language',
+    },
+    'imageOptions': {
+        'source': '$images',
+        'model': '$image_model',
+    },
+}
+
+if '''$tone''':
+    body['textOptions']['tone'] = '''$tone'''
+if '''$audience''':
+    body['textOptions']['audience'] = '''$audience'''
+if '''$image_style''':
+    body['imageOptions']['style'] = '''$image_style'''
+if '''$theme_id''':
+    body['themeId'] = '''$theme_id'''
+if '''$export_as''':
+    body['exportAs'] = '''$export_as'''
+if '''$instructions''':
+    body['additionalInstructions'] = '''$instructions'''
+
+print(json.dumps(body))
+")
+
+    echo "Creating $format with $cards cards..." >&2
+    echo "Input: ${input_text:0:100}..." >&2
+
+    local response
+    response=$(api_post "/generations" "$payload")
+
+    local gen_id
+    gen_id=$(echo "$response" | python3 -c "import sys,json; print(json.load(sys.stdin).get('generationId',''))" 2>/dev/null || echo "")
+
+    if [ -z "$gen_id" ]; then
+        echo "ERROR: Failed to start generation"
+        echo "$response"
+        exit 1
+    fi
+
+    if [ "$wait_for_result" = true ]; then
+        local result
+        result=$(poll_generation "$gen_id")
+
+        # Extract URL
+        local url
+        url=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('gammaUrl',''))" 2>/dev/null || echo "")
+        local credits
+        credits=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin).get('credits',{}); print(f\"used={d.get('deducted',0)} remaining={d.get('remaining','?')}\")" 2>/dev/null || echo "")
+
+        echo ""
+        echo "DONE! Presentation ready."
+        echo "URL: $url"
+        echo "Credits: $credits"
+        echo ""
+        echo "$result"
+    else
+        echo "Generation started: $gen_id"
+        echo "Check status with: gamma-presenter status $gen_id"
+    fi
+}
+
+cmd_status() {
+    local gen_id="${1:-}"
+    if [ -z "$gen_id" ]; then
+        echo "ERROR: Usage: gamma-presenter status <generationId>"
+        exit 1
+    fi
+
+    local result
+    result=$(api_get "/generations/$gen_id")
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+cmd_themes() {
+    local query="${1:-}"
+    local url="/themes?limit=20"
+    if [ -n "$query" ]; then
+        url="/themes?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20"
+    fi
+
+    local result
+    result=$(api_get "$url")
+    echo "$result" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+themes = data if isinstance(data, list) else data.get('data', data.get('themes', [data]))
+for t in themes:
+    tid = t.get('id', '?')
+    name = t.get('name', '?')
+    colors = ', '.join(t.get('colorKeywords', [])[:3])
+    tone = ', '.join(t.get('toneKeywords', [])[:3])
+    print(f'  {tid}  {name}  (colors: {colors} | tone: {tone})')
+" 2>/dev/null || echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+cmd_folders() {
+    local query="${1:-}"
+    local url="/folders?limit=20"
+    if [ -n "$query" ]; then
+        url="/folders?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")&limit=20"
+    fi
+
+    local result
+    result=$(api_get "$url")
+    echo "$result" | python3 -m json.tool 2>/dev/null || echo "$result"
+}
+
+cmd_help() {
+    echo "gamma-presenter — Create presentations via Gamma API"
+    echo ""
+    echo "Commands:"
+    echo "  create \"topic\"    Create a new presentation"
+    echo "  status <id>       Check generation status"
+    echo "  themes [query]    List available themes"
+    echo "  folders [query]   List folders"
+    echo "  help              Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  gamma-presenter create \"AI in Healthcare\" --cards 12 --tone professional"
+    echo "  gamma-presenter create \"Company Q4 Results\" --format document --language it"
+    echo "  gamma-presenter create \"Social Media Strategy\" --format social --images pexels"
+    echo "  gamma-presenter themes professional"
+    echo ""
+    echo "See SKILL.md for full documentation."
+}
+
+# ── Main ─────────────────────────────────────────────────────────
+
+cmd="${1:-help}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+    create)  cmd_create "$@" ;;
+    status)  cmd_status "$@" ;;
+    themes)  cmd_themes "$@" ;;
+    folders) cmd_folders "$@" ;;
+    help|--help|-h) cmd_help ;;
+    *) echo "Unknown command: $cmd. Run 'gamma-presenter help' for usage."; exit 1 ;;
+esac
