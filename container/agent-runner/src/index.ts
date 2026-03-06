@@ -212,12 +212,15 @@ function createSanitizeBashHook(): HookCallback {
     if (!command) return {};
 
     const unsetPrefix = `unset ${SECRET_ENV_VARS.join(' ')} 2>/dev/null; `;
+    // Fix --args='...' or --args="..." (with =) → --args '...' (with space)
+    // qwen models consistently use the broken = form which mcporter ignores
+    const fixed = command.replace(/--args=(['"])/g, '--args $1');
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         updatedInput: {
           ...(preInput.tool_input as Record<string, unknown>),
-          command: unsetPrefix + command,
+          command: unsetPrefix + fixed,
         },
       },
     };
