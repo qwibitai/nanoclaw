@@ -192,14 +192,11 @@ export function getTraces(limit = 50, offset = 0): unknown[] {
     .prepare(
       `
     SELECT t.*,
-      COUNT(DISTINCT lc.id) AS llm_calls,
-      SUM(lc.input_tokens) AS total_input_tokens,
-      SUM(lc.output_tokens) AS total_output_tokens,
-      COUNT(DISTINCT tc.id) AS tool_calls
+      (SELECT COUNT(*) FROM llm_calls WHERE trace_id = t.id) AS llm_calls,
+      (SELECT SUM(input_tokens) FROM llm_calls WHERE trace_id = t.id) AS total_input_tokens,
+      (SELECT SUM(output_tokens) FROM llm_calls WHERE trace_id = t.id) AS total_output_tokens,
+      (SELECT COUNT(*) FROM tool_calls WHERE trace_id = t.id) AS tool_calls
     FROM traces t
-    LEFT JOIN llm_calls lc ON lc.trace_id = t.id
-    LEFT JOIN tool_calls tc ON tc.trace_id = t.id
-    GROUP BY t.id
     ORDER BY t.started_at DESC
     LIMIT ? OFFSET ?
   `,
@@ -230,12 +227,10 @@ export function getStats(): unknown {
     SELECT
       COUNT(*) AS total_traces,
       SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_traces,
-      SUM(lc.input_tokens) AS total_input_tokens,
-      SUM(lc.output_tokens) AS total_output_tokens,
-      COUNT(DISTINCT tc.id) AS total_tool_calls
+      (SELECT SUM(input_tokens) FROM llm_calls WHERE trace_id IN (SELECT id FROM traces WHERE started_at >= datetime('now', '-7 days'))) AS total_input_tokens,
+      (SELECT SUM(output_tokens) FROM llm_calls WHERE trace_id IN (SELECT id FROM traces WHERE started_at >= datetime('now', '-7 days'))) AS total_output_tokens,
+      (SELECT COUNT(*) FROM tool_calls WHERE trace_id IN (SELECT id FROM traces WHERE started_at >= datetime('now', '-7 days'))) AS total_tool_calls
     FROM traces t
-    LEFT JOIN llm_calls lc ON lc.trace_id = t.id
-    LEFT JOIN tool_calls tc ON tc.trace_id = t.id
     WHERE t.started_at >= datetime('now', '-7 days')
   `,
     )
