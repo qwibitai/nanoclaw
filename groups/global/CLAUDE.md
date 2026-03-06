@@ -41,8 +41,9 @@ Signale: "Teams", "Kanal", "Nachricht in Teams", "OneDrive", "SharePoint" → ms
 ⚠️ KRITISCH Teams-Workflow: NIEMALS nach Team-ID oder Kanal-ID fragen!
 Immer selbst ermitteln: list_teams → list_channels → list_channel_messages
 
-⚠️ KRITISCH: Emails IMMER nur als DRAFT erstellen (create_draft), NIEMALS direkt senden!
-Nur wenn Klaus explizit "sende die Email" sagt → send_draft erlaubt.
+⚠️ KRITISCH: Emails IMMER nur als DRAFT erstellen, NIEMALS direkt senden!
+MS365 → create_draft | GMX/Gmail → save_draft
+Nur wenn Klaus explizit "sende die Email" sagt → send_draft (MS365) bzw. send_email (GMX/Gmail) erlaubt.
 
 ## mcporter Beispiele
 
@@ -59,6 +60,9 @@ mcporter call email.list_emails --args '{"folder":"INBOX","limit":10,"account":"
 mcporter call email.list_folders --args '{}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien"}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien","account":"gmail"}'
+mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text..."}'
+mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","draft_folder":"Entwürfe"}'
+mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","account":"gmail","draft_folder":"[Gmail]/Drafts"}'
 
 # Wetter
 mcporter call weather.get_current_weather --args '{"city":"München"}'
