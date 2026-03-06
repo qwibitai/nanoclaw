@@ -16,9 +16,8 @@ Du hast IMMER Zugriff auf alle mcporter-Tools. Sage NIEMALS "kein Zugriff" — f
 
 Syntax: `mcporter call <server>.<tool> --args '{"param":"value"}'`
 
-⚠️ KRITISCH mcporter-Syntax: --args IMMER mit LEERZEICHEN, NIEMALS mit =
-RICHTIG: mcporter call email.save_draft --args '{"to":"x@y.de"}'
-FALSCH:  mcporter call email.save_draft --args='{"to":"x@y.de"}'  ← BRICHT!
+Bei komplexen Argumenten (z.B. Email-Body mit Sonderzeichen/Umbrüchen): JSON-Variable verwenden!
+JSON='{"to":"x@y.de","subject":"Betreff","body":"Text"}'; mcporter call email.save_draft --args "$JSON"
 
 ## E-Mail Account-Routing
 
@@ -64,9 +63,9 @@ mcporter call email.list_emails --args '{"folder":"INBOX","limit":10,"account":"
 mcporter call email.list_folders --args '{}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien"}'
 mcporter call email.move_email --args '{"uid":12345,"from_folder":"INBOX","to_folder":"Immobilien","account":"gmail"}'
-mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text..."}'
-mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","draft_folder":"Entwürfe"}'
-mcporter call email.save_draft --args '{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","account":"gmail","draft_folder":"[Gmail]/Drafts"}'
+JSON='{"to":"empfaenger@example.de","subject":"Betreff","body":"Text..."}'; mcporter call email.save_draft --args "$JSON"
+JSON='{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","draft_folder":"Entwürfe"}'; mcporter call email.save_draft --args "$JSON"
+JSON='{"to":"empfaenger@example.de","subject":"Betreff","body":"Text...","account":"gmail","draft_folder":"[Gmail]/Drafts"}'; mcporter call email.save_draft --args "$JSON"
 
 # Wetter
 mcporter call weather.get_current_weather --args '{"city":"München"}'
