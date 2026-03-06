@@ -36,3 +36,8 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Voice daemon
+porcupine/venv/
+porcupine/*.ppn
+porcupine/*.zip

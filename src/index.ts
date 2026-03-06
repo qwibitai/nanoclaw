@@ -1,4 +1,6 @@
+import { exec } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -41,6 +43,7 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import { textToSpeech } from './tts.js';
 import {
   isSenderAllowed,
   isTriggerAllowed,
@@ -62,6 +65,8 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+// Track chats where the last inbound batch contained a voice message
+const voiceChats = new Set<string>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -134,6 +139,15 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+function playAudioLocally(audio: Buffer): void {
+  const tmpFile = path.join(os.tmpdir(), `nanoclaw-play-${Date.now()}.ogg`);
+  fs.writeFileSync(tmpFile, audio);
+  exec(`/opt/homebrew/bin/ffplay -nodisp -autoexit -loglevel quiet "${tmpFile}"`, (err) => {
+    try { fs.unlinkSync(tmpFile); } catch {}
+    if (err) logger.warn({ err }, 'Local audio playback failed');
+  });
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -158,6 +172,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   if (missedMessages.length === 0) return true;
+
+  // Detect if the latest non-bot message was a voice message
+  // In self-chat, is_from_me is true for all messages, so check is_bot_message instead
+  const lastUserMsg = [...missedMessages].reverse().find((m) => !m.is_bot_message);
+  if (lastUserMsg && /^\[Voice:/.test(lastUserMsg.content)) {
+    voiceChats.add(chatJid);
+  } else {
+    voiceChats.delete(chatJid);
+  }
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -213,7 +236,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // If the user sent a voice message, reply with voice too
+        const isVoiceReply = voiceChats.has(chatJid) && !!channel.sendVoice;
+        logger.info({ chatJid, isVoiceReply, voiceChatsSize: voiceChats.size }, 'Sending response');
+        if (isVoiceReply) {
+          const audio = await textToSpeech(text);
+          if (audio) {
+            await channel.sendVoice!(chatJid, audio);
+            // Play audio locally on Mac
+            playAudioLocally(audio);
+          } else {
+            logger.warn({ chatJid }, 'TTS failed, falling back to text');
+            await channel.sendMessage(chatJid, text);
+          }
+        } else {
+          await channel.sendMessage(chatJid, text);
+        }
+        voiceChats.delete(chatJid);
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -409,6 +448,12 @@ async function startMessageLoop(): Promise<void> {
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
+
+          // Detect voice in piped messages too
+          const lastUserMsgPiped = [...messagesToSend].reverse().find((m) => !m.is_bot_message);
+          if (lastUserMsgPiped && /^\[Voice:/.test(lastUserMsgPiped.content)) {
+            voiceChats.add(chatJid);
+          }
 
           if (queue.sendMessage(chatJid, formatted)) {
             logger.debug(
