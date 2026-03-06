@@ -199,10 +199,10 @@ async function openTrace(id) {
       html += '<div class="tl-header"><span class="tl-name tool">🔧 '+ev.tool_name+sub+'</span>';
       html += '<span class="tl-dur">'+dur(ev.started_at,ev.finished_at)+'</span></div>';
       if (ev.input_preview) {
-        html += '<div class="tl-detail" style="color:#aaa">▶ '+ev.input_preview.replace(/</g,'&lt;').slice(0,400)+'</div>';
+        html += '<div class="tl-detail" style="color:#aaa;max-height:200px;overflow-y:auto;background:#0a0c14;padding:6px 8px;border-radius:4px;margin-top:4px">▶ '+ev.input_preview.replace(/</g,'&lt;')+'</div>';
       }
       if (ev.output_preview) {
-        html += '<div class="tl-detail">◀ '+ev.output_preview.replace(/</g,'&lt;').slice(0,300)+'</div>';
+        html += '<div class="tl-detail" style="max-height:200px;overflow-y:auto;background:#0a0c14;padding:6px 8px;border-radius:4px;margin-top:4px">◀ '+ev.output_preview.replace(/</g,'&lt;')+'</div>';
       }
       html += '</div></div>';
     }

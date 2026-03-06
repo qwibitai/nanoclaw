@@ -539,7 +539,7 @@ async function runQuery(
           tool_id: currentToolBlock.id,
           tool_name: currentToolBlock.name,
           is_subagent: currentToolBlock.isSubagent,
-          input_preview: currentToolBlock.inputBuf.slice(0, 500),
+          input_preview: currentToolBlock.inputBuf,
         });
         currentToolBlock = null;
       }
@@ -582,8 +582,8 @@ async function runQuery(
         for (const block of content) {
           if (block.type === 'tool_result') {
             const output = typeof block.content === 'string'
-              ? block.content.slice(0, 500)
-              : JSON.stringify(block.content ?? '').slice(0, 500);
+              ? block.content
+              : JSON.stringify(block.content ?? '');
             writeTrace({ type: 'tool_end', tool_id: block.tool_use_id, output });
           }
         }

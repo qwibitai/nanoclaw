@@ -55,7 +55,11 @@ export function initTraceDb(): void {
     CREATE INDEX IF NOT EXISTS idx_tool_trace ON tool_calls(trace_id);
   `);
   // Migrate existing DBs that lack input_preview column
-  try { db.exec('ALTER TABLE tool_calls ADD COLUMN input_preview TEXT'); } catch { /* already exists */ }
+  try {
+    db.exec('ALTER TABLE tool_calls ADD COLUMN input_preview TEXT');
+  } catch {
+    /* already exists */
+  }
   purgeOldTraces();
 }
 
@@ -172,7 +176,7 @@ export function endToolCall(
   if (rowId == null) return;
   db.prepare(
     'UPDATE tool_calls SET finished_at = ?, output_preview = ? WHERE id = ?',
-  ).run(new Date().toISOString(), outputPreview.slice(0, 500), rowId);
+  ).run(new Date().toISOString(), outputPreview, rowId);
   openToolCalls.get(traceId)?.delete(toolId);
 }
 
