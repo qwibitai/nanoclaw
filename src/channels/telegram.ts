@@ -1,8 +1,13 @@
 import https from 'https';
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InlineKeyboard } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { readEnvFile } from '../env.js';
+import {
+  readEnvFile,
+  getAllAvailableModels,
+  getModelsByProvider,
+  resolveModelConfig,
+} from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
@@ -80,9 +85,161 @@ export class TelegramChannel implements Channel {
       ctx.reply(`${ASSISTANT_NAME} is online.`);
     });
 
+    // Command to check current model setting
+    this.bot.command('modelinfo', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+      const override = group.containerConfig?.model;
+
+      if (override) {
+        const resolved = resolveModelConfig(override);
+        ctx.reply(
+          `Model: ${override}\nProvider: ${resolved?.provider.name || 'unknown'}\nDefault: ${process.env.ANTHROPIC_MODEL || 'SDK default'}`,
+        );
+      } else {
+        const available = getAllAvailableModels();
+        ctx.reply(
+          `Model: ${process.env.ANTHROPIC_MODEL || 'SDK default'} (from env)\nAvailable: ${available.join(', ') || 'none'}\nUse /model <name> to set one.`,
+        );
+      }
+    });
+
+    // Command to show models list with inline keyboard
+    this.bot.command('models', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const modelsByProvider = getModelsByProvider();
+      if (modelsByProvider.size === 0) {
+        ctx.reply('No providers configured.');
+        return;
+      }
+
+      const keyboard = new InlineKeyboard();
+
+      for (const [provider] of modelsByProvider) {
+        keyboard
+          .text(provider.toUpperCase(), `select_provider:${provider}`)
+          .row();
+      }
+
+      await ctx.reply('Select a provider:', { reply_markup: keyboard });
+    });
+
+    // Handle callback queries from inline keyboard
+    this.bot.on('callback_query:data', async (ctx) => {
+      const data = ctx.callbackQuery.data;
+      if (!data) return;
+
+      // Handle provider selection - show models for that provider
+      if (data.startsWith('select_provider:')) {
+        const provider = data.replace('select_provider:', '');
+        const modelsByProvider = getModelsByProvider();
+        const models = modelsByProvider.get(provider);
+
+        if (!models) {
+          await ctx.answerCallbackQuery({ text: 'Provider not found' });
+          return;
+        }
+
+        const keyboard = new InlineKeyboard();
+        for (const model of models) {
+          keyboard.text(model, `set_model:${provider}:${model}`).row();
+        }
+        keyboard.text('← Back', 'show_providers');
+
+        await ctx.editMessageText(`Select model (${provider}):`, {
+          reply_markup: keyboard,
+        });
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Handle back button - show providers
+      if (data === 'show_providers') {
+        const modelsByProvider = getModelsByProvider();
+        const keyboard = new InlineKeyboard();
+
+        for (const [provider] of modelsByProvider) {
+          keyboard.text(provider.toUpperCase(), `select_provider:${provider}`);
+        }
+
+        await ctx.editMessageText('Select a provider:', {
+          reply_markup: keyboard,
+        });
+        await ctx.answerCallbackQuery();
+        return;
+      }
+
+      // Handle model selection
+      if (data.startsWith('set_model:')) {
+        const parts = data.replace('set_model:', '').split(':');
+        if (parts.length < 2) return;
+
+        const provider = parts[0];
+        const model = parts.slice(1).join(':');
+
+        const chatJid = `tg:${ctx.chat?.id}`;
+        const group = this.opts.registeredGroups()[chatJid];
+
+        if (!group) {
+          await ctx.answerCallbackQuery({ text: 'Chat not registered' });
+          return;
+        }
+
+        this.opts.setGroupModel(chatJid, model);
+
+        // Edit the message to show selection
+        await ctx.editMessageText(`✓ Model set to: ${model} (${provider})`);
+        await ctx.answerCallbackQuery({ text: `Model set to ${model}` });
+      }
+    });
+
+    // Command to set/clear the model for this chat
+    this.bot.command('model', (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) {
+        ctx.reply('This chat is not registered.');
+        return;
+      }
+
+      const arg = ctx.match?.trim() || '';
+      if (!arg || arg === 'default') {
+        this.opts.setGroupModel(chatJid, null);
+        ctx.reply('Model reset to default.');
+        return;
+      }
+
+      // Validate model against available providers
+      const resolved = resolveModelConfig(arg);
+      if (!resolved) {
+        const available = getAllAvailableModels();
+        if (available.length > 0) {
+          ctx.reply(
+            `Unknown model: ${arg}\n\nAvailable models:\n${available.map((m) => `  • ${m}`).join('\n')}`,
+          );
+        } else {
+          ctx.reply(`Unknown model: ${arg}\n\nNo providers configured.`);
+        }
+        return;
+      }
+
+      this.opts.setGroupModel(chatJid, arg);
+      ctx.reply(`Model set to: ${arg} (via ${resolved.provider.name})`);
+    });
+
     // Telegram bot commands handled above — skip them in the general handler
     // so they don't also get stored as messages. All other /commands flow through.
-    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping']);
+    const TELEGRAM_BOT_COMMANDS = new Set(['chatid', 'ping', 'modelinfo', 'models', 'model']);
 
     this.bot.on('message:text', async (ctx) => {
       if (ctx.message.text.startsWith('/')) {

@@ -66,6 +66,8 @@ export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);
+
+export const TELEGRAM_SWARM_ENABLED = (process.env.TELEGRAM_SWARM_ENABLED || 'false') === 'true' || TELEGRAM_BOT_POOL.length > 0;
 ```
 
 ### Step 2: Add Bot Pool to Telegram Module

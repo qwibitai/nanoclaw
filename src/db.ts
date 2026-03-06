@@ -93,6 +93,13 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add model column to scheduled_tasks if it doesn't exist (per-task model override)
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN model TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(

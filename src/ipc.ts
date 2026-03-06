@@ -3,7 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE, SWARM_POLICY as CONFIG_SWARM_POLICY } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
@@ -70,41 +70,71 @@ export function startIpcWatcher(deps: IpcDeps): void {
           const messageFiles = fs
             .readdirSync(messagesDir)
             .filter((f) => f.endsWith('.json'));
+          // Group messages by chatJid for possible aggregation
+          const messagesByJid: Record<string, Array<{file: string; data: any}>> = {};
+
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
-                } else {
-                  logger.warn(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
-                  );
-                }
+                if (!messagesByJid[data.chatJid]) messagesByJid[data.chatJid] = [];
+                messagesByJid[data.chatJid].push({ file, data });
+              } else {
+                // Not a routable message — remove
+                fs.unlinkSync(filePath);
               }
-              fs.unlinkSync(filePath);
             } catch (err) {
-              logger.error(
-                { file, sourceGroup, err },
-                'Error processing IPC message',
-              );
+              logger.error({ file, sourceGroup, err }, 'Error processing IPC message');
               const errorDir = path.join(ipcBaseDir, 'errors');
               fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
-              );
+              fs.renameSync(filePath, path.join(errorDir, `${sourceGroup}-${file}`));
+            }
+          }
+
+          // Aggregation policy (default: synthesize)
+          const SWARM_POLICY = (process.env.SWARM_POLICY || CONFIG_SWARM_POLICY || 'synthesize').toLowerCase();
+
+          for (const chatJid of Object.keys(messagesByJid)) {
+            const entries = messagesByJid[chatJid];
+
+            // Authorization: verify this group can send to this chatJid
+            const targetGroup = registeredGroups[entries[0].data.chatJid];
+            if (!(isMain || (targetGroup && targetGroup.folder === sourceGroup))) {
+              for (const e of entries) {
+                logger.warn({ chatJid: e.data.chatJid, sourceGroup }, 'Unauthorized IPC message attempt blocked');
+                try { fs.unlinkSync(path.join(messagesDir, e.file)); } catch {}
+              }
+              continue;
+            }
+
+            if (SWARM_POLICY === 'send_all' || entries.length === 1) {
+              for (const e of entries) {
+                await deps.sendMessage(e.data.chatJid, e.data.text);
+                logger.info({ chatJid: e.data.chatJid, sourceGroup }, 'IPC message sent');
+                try { fs.unlinkSync(path.join(messagesDir, e.file)); } catch {}
+              }
+            } else if (SWARM_POLICY === 'synthesize') {
+              // Use dedicated synthesizer module for better, testable output.
+              try {
+                // Lazy import to avoid circular deps in tests
+                const { synthesizeMessages } = await import('./synthesizer.js');
+                const combinedList = entries.map((e) => e.data.text.trim());
+                const synthesized = await synthesizeMessages(combinedList);
+                await deps.sendMessage(chatJid, synthesized);
+                logger.info({ chatJid, sourceGroup, count: entries.length }, 'IPC synthesized message sent');
+              } catch (err) {
+                logger.error({ err }, 'Synthesizer failed; falling back to send_all');
+                for (const e of entries) { await deps.sendMessage(e.data.chatJid, e.data.text); }
+              } finally {
+                for (const e of entries) { try { fs.unlinkSync(path.join(messagesDir, e.file)); } catch {} }
+              }
+            } else {
+              // Fallback: send all
+              for (const e of entries) {
+                await deps.sendMessage(e.data.chatJid, e.data.text);
+                try { fs.unlinkSync(path.join(messagesDir, e.file)); } catch {}
+              }
             }
           }
         }
