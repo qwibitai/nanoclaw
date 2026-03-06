@@ -115,7 +115,7 @@ export function detectCodeDelivery(
       resolve(result);
     };
 
-    const pasteExtractor = new LineExtractor(PASTE_PROMPT_RE);
+    const pasteExtractor = new LineExtractor(PASTE_PROMPT_RE, { matchPartial: true });
     const check = setInterval(() => {
       // (a) Check stdout for paste prompt
       pasteExtractor.feed(outputRef.value);
@@ -295,15 +295,25 @@ export class UrlExtractor implements OutputExtractor {
 export class LineExtractor implements OutputExtractor {
   private processedUpTo = 0;
   private match: RegExpMatchArray | null = null;
+  private matchPartial: boolean;
 
-  constructor(private pattern: RegExp) {}
+  constructor(private pattern: RegExp, opts?: { matchPartial?: boolean }) {
+    this.matchPartial = opts?.matchPartial ?? false;
+  }
 
   feed(text: string): void {
     if (this.match) return;
     let remaining = text.slice(this.processedUpTo);
     while (remaining.length > 0) {
       const nl = remaining.indexOf('\n');
-      if (nl === -1) break;
+      if (nl === -1) {
+        if (this.matchPartial) {
+          const clean = remaining.replace(ANSI_RE_G, ' ');
+          const m = clean.match(this.pattern);
+          if (m) { this.match = m; return; }
+        }
+        break;
+      }
       const line = remaining.slice(0, nl).replace(ANSI_RE_G, ' ');
       remaining = remaining.slice(nl + 1);
       this.processedUpTo += nl + 1;
@@ -476,35 +486,9 @@ export const claudeProvider: CredentialProvider = {
 
   authOptions(_scope: string): AuthOption[] {
     return [
-      // --- API key (simplest, no container) ---
-      {
-        label: 'API key (paste directly)',
-        provider: this,
-        async run(ctx: AuthContext): Promise<FlowResult | null> {
-          await ctx.chat.send(
-            'Paste your Anthropic API key (starts with sk-ant-api).\n\n' +
-            '⚠️ Sending API keys via messaging channels may be insecure — ' +
-            'messages could be logged or visible to other group members. ' +
-            'Consider using OAuth options instead, or reply "cancel" to abort.',
-          );
-          const key = await ctx.chat.receive(IDLE_TIMEOUT - 30_000);
-          if (!key || isCancelReply(key)) return null;
-
-          const trimmed = key.trim();
-          if (!trimmed.startsWith('sk-ant-api')) {
-            await ctx.chat.send(
-              'Invalid key format — expected sk-ant-api prefix.',
-            );
-            return null;
-          }
-
-          return { auth_type: 'api_key', token: trimmed, expires_at: null };
-        },
-      },
-
       // --- Setup token (long-lived, requires browser) ---
       {
-        label: 'Setup token (1 year, requires browser)',
+        label: 'Setup token (1 year, requires subscription)',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(
@@ -547,7 +531,7 @@ export const claudeProvider: CredentialProvider = {
           }
 
           await ctx.chat.send(
-            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value (or reply "cancel" to abort):`,
+            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the result (or reply "cancel" to abort):`,
           );
 
           const codeState = await receiveOrContainerExit(ctx.chat, handle);
@@ -567,7 +551,7 @@ export const claudeProvider: CredentialProvider = {
           const result = await handle.wait();
           const allOutput = (output.value + result.stdout).replace(ANSI_RE_G, ' ');
 
-          const tokenMatch = allOutput.match(/sk-ant-oat01-\S+/);
+          const tokenMatch = allOutput.match(/sk-ant-\S+/);
           if (!tokenMatch) {
             await ctx.chat.send(
               'Failed to extract setup token from output. Check logs.',
@@ -586,7 +570,7 @@ export const claudeProvider: CredentialProvider = {
 
       // --- Auth login (auto-refreshes, requires browser) ---
       {
-        label: 'Auth login (auto-refreshes, requires browser)',
+        label: 'Auth login (safest, auto-refreshes, requires subscription)',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(
@@ -629,7 +613,7 @@ export const claudeProvider: CredentialProvider = {
           }
 
           await ctx.chat.send(
-            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the code#state value (or reply "cancel" to abort):`,
+            `Open this URL and authorize:\n${urlMatch[0]}\n\nThen paste the result (or reply "cancel" to abort):`,
           );
 
           const codeState = await receiveOrContainerExit(ctx.chat, handle);
@@ -678,6 +662,32 @@ export const claudeProvider: CredentialProvider = {
             token: credsContent,
             expires_at: parsed.expiresAt,
           };
+        },
+      },
+
+      // --- API key (simplest, no container, but leaks because of chat channel) ---
+      {
+        label: 'API key (not recommended, unsafe to share in chat)',
+        provider: this,
+        async run(ctx: AuthContext): Promise<FlowResult | null> {
+          await ctx.chat.send(
+            'Paste your Anthropic API key (starts with sk-ant-api).\n\n' +
+            '⚠️ Sending API keys via messaging channels may be insecure — ' +
+            'messages could be logged or visible to other group members. ' +
+            'Consider using other options instead.',
+          );
+          const key = await ctx.chat.receive(IDLE_TIMEOUT - 30_000);
+          if (!key || isCancelReply(key)) return null;
+
+          const trimmed = key.trim();
+          if (!trimmed.startsWith('sk-ant-api')) {
+            await ctx.chat.send(
+              'Invalid key format — expected sk-ant-api prefix.',
+            );
+            return null;
+          }
+
+          return { auth_type: 'api_key', token: trimmed, expires_at: null };
         },
       },
     ];

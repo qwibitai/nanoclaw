@@ -216,9 +216,9 @@ describe('claudeProvider', () => {
     it('returns 3 options', () => {
       const options = claudeProvider.authOptions('test');
       expect(options).toHaveLength(3);
-      expect(options[0].label).toContain('API key');
-      expect(options[1].label).toContain('Setup token');
-      expect(options[2].label).toContain('Auth login');
+      expect(options[0].label).toContain('Setup token');
+      expect(options[1].label).toContain('Auth login');
+      expect(options[2].label).toContain('API key');
     });
   });
 });
@@ -260,7 +260,7 @@ describe('waitForOutput', () => {
     );
 
     // Simulate output arriving all at once
-    output.value = 'Open this link:\nhttps://console.anthropic.com/oauth/authorize?code=abc123\n';
+    output.value = 'Open this link:\nhttps://console.anthropic.com/oauth/authorize?code=abc123\n\n';
 
     const match = await promise;
     expect(match).not.toBeNull();
@@ -284,7 +284,7 @@ describe('waitForOutput', () => {
     await new Promise((r) => setTimeout(r, 600));
 
     // Chunk 2: URL continues and completes with newline
-    output.value += '/authorize?code=abc123&state=xyz\n';
+    output.value += '/authorize?code=abc123&state=xyz\n\n';
 
     const match = await promise;
     expect(match).not.toBeNull();
@@ -334,7 +334,7 @@ describe('waitForOutput', () => {
 
     // Complete URL on first line, incomplete data on second line
     output.value =
-      'https://console.anthropic.com/oauth/authorize?id=full\npartial data no newline';
+      'https://console.anthropic.com/oauth/authorize?id=full\n\npartial data no newline';
 
     const match = await promise;
     expect(match).not.toBeNull();
@@ -432,7 +432,7 @@ describe('detectCodeDelivery', () => {
 
     const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
 
-    // Simulate paste prompt appearing
+    // Simulate paste prompt appearing (no trailing \n — it's a prompt)
     output.value = 'Opening browser...\nPaste code here if prompted > ';
 
     const result = await promise;
@@ -447,10 +447,10 @@ describe('detectCodeDelivery', () => {
 
     const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
 
-    // Simulate shim writing the URL file
+    // Simulate shim writing the OAuth URL (with encoded redirect_uri containing localhost port)
     fs.writeFileSync(
       path.join(sessionDir, '.oauth-url'),
-      'http://localhost:54321/callback?client_id=abc\n',
+      'https://console.anthropic.com/oauth/authorize?client_id=abc&redirect_uri=http%3A%2F%2Flocalhost%3A54321%2Fcallback\n',
     );
 
     const result = await promise;
@@ -463,10 +463,10 @@ describe('detectCodeDelivery', () => {
     const output = { value: '' };
     const handle = makeHandle();
 
-    // Write URL file before starting detection
+    // Write URL file before starting detection (gets cleaned up by detectCodeDelivery)
     fs.writeFileSync(
       path.join(sessionDir, '.oauth-url'),
-      'http://localhost:12345/callback\n',
+      'https://console.anthropic.com/oauth?redirect_uri=http%3A%2F%2Flocalhost%3A12345%2Fcallback\n',
     );
 
     const promise = detectCodeDelivery(output, sessionDir, 5000, handle);
