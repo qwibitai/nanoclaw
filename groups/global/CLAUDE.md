@@ -16,6 +16,10 @@ Du hast IMMER Zugriff auf alle mcporter-Tools. Sage NIEMALS "kein Zugriff" — f
 
 Syntax: `mcporter call <server>.<tool> --args '{"param":"value"}'`
 
+⚠️ KRITISCH mcporter-Syntax: --args IMMER mit LEERZEICHEN, NIEMALS mit =
+RICHTIG: mcporter call email.save_draft --args '{"to":"x@y.de"}'
+FALSCH:  mcporter call email.save_draft --args='{"to":"x@y.de"}'  ← BRICHT!
+
 ## E-Mail Account-Routing
 
 | Account | Wofür | Server |
