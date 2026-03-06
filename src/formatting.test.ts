@@ -3,11 +3,23 @@ import { describe, it, expect } from 'vitest';
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
 import {
   escapeXml,
+  findChannel,
   formatMessages,
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { NewMessage } from './types.js';
+import { Channel, NewMessage } from './types.js';
+
+function makeChannel(prefix: string): Channel {
+  return {
+    name: `${prefix}-channel`,
+    connect: async () => {},
+    sendMessage: async () => {},
+    isConnected: () => true,
+    ownsJid: (jid: string) => jid.startsWith(`${prefix}:`),
+    disconnect: async () => {},
+  };
+}
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -233,5 +245,32 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
     expect(shouldProcess(false, false, msgs)).toBe(true);
+  });
+});
+
+// --- findChannel ---
+
+describe('findChannel', () => {
+  const tg = makeChannel('tg');
+  const gh = makeChannel('gh');
+  const channels = [tg, gh];
+
+  it('returns the channel whose ownsJid matches', () => {
+    expect(findChannel(channels, 'tg:-1001234567890')).toBe(tg);
+    expect(findChannel(channels, 'gh:cmraible/seb')).toBe(gh);
+  });
+
+  it('returns undefined when no channel matches', () => {
+    expect(findChannel(channels, '12345@g.us')).toBeUndefined();
+    expect(findChannel(channels, 'unknown:foo')).toBeUndefined();
+  });
+
+  it('returns undefined for an empty channels array', () => {
+    expect(findChannel([], 'tg:123')).toBeUndefined();
+  });
+
+  it('returns the first matching channel when multiple could match', () => {
+    const tg2 = makeChannel('tg');
+    expect(findChannel([tg, tg2], 'tg:123')).toBe(tg);
   });
 });
