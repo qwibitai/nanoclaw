@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# NEO Trading Engine API — CLI wrapper for NanoClaw containers
+# Usage: neo_api <command> [args...]
+
+set -euo pipefail
+
+TRADE_API="http://localhost:9200"
+DB_HOST="localhost"
+DB_USER="openclaw"
+DB_NAME="openclaw"
+DB_PASS="localdev123"
+
+# Auth token: passed via NEO_TRADE_AUTH_TOKEN env var, or loaded from secrets
+AUTH_TOKEN="${NEO_TRADE_AUTH_TOKEN:-}"
+if [ -z "$AUTH_TOKEN" ] && [ -f /root/.openclaw/secrets/.env.plaintext ]; then
+    AUTH_TOKEN=$(grep "^NEO_TRADE_AUTH_TOKEN=" /root/.openclaw/secrets/.env.plaintext 2>/dev/null | cut -d= -f2 || true)
+fi
+
+cmd="${1:-help}"
+shift 2>/dev/null || true
+
+case "$cmd" in
+    health)
+        curl -sf "$TRADE_API/health" 2>/dev/null || echo '{"error": "Trade API unreachable"}'
+        ;;
+
+    status)
+        curl -sf "$TRADE_API/status" 2>/dev/null || echo '{"error": "Trade API unreachable"}'
+        ;;
+
+    positions)
+        curl -sf "$TRADE_API/positions" 2>/dev/null || echo '{"error": "Trade API unreachable"}'
+        ;;
+
+    balances)
+        curl -sf "$TRADE_API/balances" 2>/dev/null || echo '{"error": "Trade API unreachable"}'
+        ;;
+
+    opportunities)
+        # Query params: source, limit, hours, priority
+        # Usage: neo_api opportunities [source] [hours]
+        # Examples: neo_api opportunities telegram 12
+        #           neo_api opportunities gecko_trending
+        #           neo_api opportunities          (all sources, last 24h)
+        src="${1:-}"
+        hrs="${2:-24}"
+        query="?hours=$hrs&limit=30"
+        if [ -n "$src" ]; then
+            query="${query}&source=$src"
+        fi
+        curl -sf "$TRADE_API/opportunities/text${query}" 2>/dev/null || echo 'Trade API unreachable'
+        ;;
+
+    opportunities-json)
+        src="${1:-}"
+        hrs="${2:-24}"
+        query="?hours=$hrs&limit=30"
+        if [ -n "$src" ]; then
+            query="${query}&source=$src"
+        fi
+        curl -sf "$TRADE_API/opportunities${query}" 2>/dev/null || echo '{"error": "Trade API unreachable"}'
+        ;;
+
+    db)
+        query="$*"
+        if [ -z "$query" ]; then
+            echo "Usage: neo_api db \"SELECT ...\""
+            exit 1
+        fi
+        # Block dangerous queries
+        lower_query=$(echo "$query" | tr '[:upper:]' '[:lower:]')
+        case "$lower_query" in
+            *drop*|*delete*|*truncate*|*update*|*insert*|*alter*|*create*)
+                echo "ERROR: Write queries are not allowed. Use read-only SELECT queries."
+                exit 1
+                ;;
+        esac
+        PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -c "$query" 2>&1
+        ;;
+
+    trade)
+        if [ -z "$AUTH_TOKEN" ]; then
+            echo "ERROR: No auth token. Set NEO_TRADE_AUTH_TOKEN env var."
+            exit 1
+        fi
+        trade_cmd="$*"
+        if [ -z "$trade_cmd" ]; then
+            echo "Usage: neo_api trade \"!buy binance STEEM 20 USDC\""
+            exit 1
+        fi
+        curl -sf -X POST "$TRADE_API/trade" \
+            -H "Content-Type: application/json" \
+            -H "X-Auth-Token: $AUTH_TOKEN" \
+            -d "{\"command\": \"$trade_cmd\"}" 2>/dev/null \
+            || echo '{"error": "Trade API unreachable or auth failed"}'
+        ;;
+
+    help|*)
+        cat << 'HELP'
+NEO Trading Engine API
+
+Read-only (no auth):
+  neo_api health                  — Health check
+  neo_api status                  — Engine status + risk info
+  neo_api positions               — Open positions (CEX + DEX)
+  neo_api balances                — Balances (Binance, Coinbase, Solana)
+  neo_api opportunities           — All opportunities (last 24h)
+  neo_api opportunities telegram  — Telegram pump signals only
+  neo_api opportunities telegram 12 — Telegram signals, last 12h
+  neo_api opportunities-json      — Same as above, JSON format
+
+  Sources: telegram, gecko_trending, dexscreener, binance_volume,
+           coinbase_movers, cryptopanic
+
+Database (read-only):
+  neo_api db "SELECT ..."         — Run read-only SQL query
+
+  Useful queries:
+    neo_api db "SELECT * FROM neo_positions WHERE status='open'"
+    neo_api db "SELECT * FROM dex_positions WHERE status='open'"
+    neo_api db "SELECT * FROM neo_trades ORDER BY created_at DESC LIMIT 10"
+    neo_api db "SELECT * FROM neo_daily_pnl ORDER BY date DESC LIMIT 7"
+    neo_api db "SELECT * FROM portfolio_snapshots ORDER BY created_at DESC LIMIT 1"
+    neo_api db "SELECT * FROM neo_memory WHERE category='system'"
+
+Trade (auth required):
+  neo_api trade "!buy binance STEEM 20 USDC"
+  neo_api trade "!sell binance STEEM"
+  neo_api trade "!buy_sol <address> 0.1"
+  neo_api trade "!sell_sol <address>"
+HELP
+        ;;
+esac

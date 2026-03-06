@@ -1,0 +1,1 @@
+/root/neo-trading/scripts/send_discord.mjs

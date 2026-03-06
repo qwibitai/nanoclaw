@@ -26,6 +26,7 @@ import { RegisteredGroup, ScheduledTask } from './types.js';
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
   getSessions: () => Record<string, string>;
+  setSessions: (groupFolder: string, sessionId: string) => void;
   queue: GroupQueue;
   onProcess: (groupJid: string, proc: ChildProcess, containerName: string, groupFolder: string) => void;
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -111,7 +112,7 @@ async function runTask(
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
 
   // After the task produces a result, close the container promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
+  // Tasks are single-turn — no need to wait IDLE_TIMEOUT for the
   // query loop to time out. A short delay handles any final MCP calls.
   const TASK_CLOSE_DELAY_MS = 10000;
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -138,6 +139,10 @@ async function runTask(
       },
       (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
+        // Persist session for group context mode
+        if (task.context_mode === 'group' && streamedOutput.newSessionId) {
+          deps.setSessions(task.group_folder, streamedOutput.newSessionId);
+        }
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting)
@@ -155,6 +160,11 @@ async function runTask(
 
     if (closeTimer) clearTimeout(closeTimer);
 
+
+    // Persist session ID for group context mode
+    if (task.context_mode === 'group' && output.newSessionId) {
+      deps.setSessions(task.group_folder, output.newSessionId);
+    }
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {

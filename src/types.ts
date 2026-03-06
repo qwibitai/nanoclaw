@@ -30,6 +30,9 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  allowedOutputJids?: string[]; // Extra chatJids this group can post to via IPC
+  useHostWorker?: boolean; // Run claude -p on host instead of container (full filesystem access)
+  hostWorkerCwd?: string; // Working directory for host worker (default: /root)
 }
 
 export interface RegisteredGroup {

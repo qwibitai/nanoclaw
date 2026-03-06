@@ -25,6 +25,21 @@ import { RegisteredGroup } from './types.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+/**
+ * mkdir that also chowns to container user (1000:1000).
+ * NanoClaw runs as root but containers run as uid 1000 (node).
+ * Without chown, the container cannot write to mounted directories.
+ */
+function mkdirForContainer(dirPath: string, mode?: number): void {
+  fs.mkdirSync(dirPath, { recursive: true, ...(mode !== undefined ? { mode } : {}) });
+  try {
+    // 1000:1000 = node user inside the container
+    fs.chownSync(dirPath, 1000, 1000);
+  } catch {
+    // Ignore chown errors (e.g. on non-Linux or non-root)
+  }
+}
+
 
 export interface ContainerInput {
   prompt: string;
@@ -104,7 +119,9 @@ function buildVolumeMounts(
     group.folder,
     '.claude',
   );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
+  mkdirForContainer(groupSessionsDir, 0o777);
+  // SDK requires debug/ directory for diagnostics — pre-create with correct ownership
+  mkdirForContainer(path.join(groupSessionsDir, 'debug'), 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(settingsFile, JSON.stringify({
@@ -142,9 +159,9 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  mkdirForContainer(path.join(groupIpcDir, 'messages'));
+  mkdirForContainer(path.join(groupIpcDir, 'tasks'));
+  mkdirForContainer(path.join(groupIpcDir, 'input'));
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -191,6 +208,8 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+  // Enable host networking so containers can reach Trade API (localhost:9200) and PostgreSQL
+  args.push("--network", "host");
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -224,7 +243,7 @@ export async function runContainerAgent(
   const startTime = Date.now();
 
   const groupDir = resolveGroupFolderPath(group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
+  mkdirForContainer(groupDir);
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -255,7 +274,7 @@ export async function runContainerAgent(
   );
 
   const logsDir = path.join(groupDir, 'logs');
-  fs.mkdirSync(logsDir, { recursive: true });
+  mkdirForContainer(logsDir);
 
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
@@ -599,7 +618,7 @@ export function writeTasksSnapshot(
 ): void {
   // Write filtered tasks to the group's IPC directory
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
+  mkdirForContainer(groupIpcDir);
 
   // Main sees all tasks, others only see their own
   const filteredTasks = isMain
@@ -629,7 +648,7 @@ export function writeGroupsSnapshot(
   registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
-  fs.mkdirSync(groupIpcDir, { recursive: true });
+  mkdirForContainer(groupIpcDir);
 
   // Main sees all groups; others see nothing (they can't activate groups)
   const visibleGroups = isMain ? groups : [];
