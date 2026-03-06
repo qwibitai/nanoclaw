@@ -7,3 +7,9 @@ Thanks to everyone who has contributed to NanoClaw!
 - [pottertech](https://github.com/pottertech) — Skip Potter
 - [rgarcia](https://github.com/rgarcia) — Rafael
 - [AmaxGuan](https://github.com/AmaxGuan) — Lingfeng Guan
+- [happydog-intj](https://github.com/happydog-intj) — happy dog
+- [bindoon](https://github.com/bindoon) — 潕量
+- [taslim](https://github.com/taslim) — Taslim
+- [baijunjie](https://github.com/baijunjie) — BaiJunjie
+- [Michaelliv](https://github.com/Michaelliv) — Michael
+- [kk17](https://github.com/kk17) — Kyle Zhike Chen
