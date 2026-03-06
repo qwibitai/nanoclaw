@@ -1,7 +1,68 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-06T09:27:59.410Z",
+  "updated_at": "2026-03-06T15:30:00.000Z",
   "items": [
+    {
+      "id": "work-architecture-boundary-governance-1772821500000",
+      "title": "Add hard core-vs-extension boundary contract and guardrails",
+      "feature_id": "architecture-boundary-governance",
+      "status": "done",
+      "request": "Create a clear architecture contract that tells agents what core NanoClaw files are not supposed to carry Jarvis-specific logic, what can be extended, and enforce it with deterministic checks.",
+      "notes": [
+        "2026-03-06T18:25:00.000Z: Starting architecture-governance pass after identifying that current docs describe the boundary but do not constrain agents strongly enough.",
+        "2026-03-06T18:25:00.000Z: Planned outputs: root architecture contract, CLAUDE/AGENTS trigger update, docs index update, and deterministic architecture-boundary checker.",
+        "2026-03-06T18:40:00.000Z: Added the architecture boundary contract as the canonical ownership contract, wired retrieval through CLAUDE.md and AGENTS.md, updated docs/README.md and DOCS.md, and added scripts/check-architecture-boundary.sh backed by workflow-contract verification."
+      ],
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "scripts/check-architecture-boundary.sh",
+        ".claude/progress/feature-catalog.json",
+        ".claude/progress/feature-catalog.md"
+      ],
+      "created_at": "2026-03-06T18:25:00.000Z",
+      "updated_at": "2026-03-06T18:40:00.000Z"
+    },
+    {
+      "id": "work-architecture-boundary-doc-relocation-1772821547000",
+      "title": "Relocate architecture boundary contract into docs root",
+      "feature_id": "architecture-boundary-governance",
+      "status": "done",
+      "request": "Move the architecture boundary contract into docs/ alongside MISSION.md and update every trigger, inventory, and enforcement script to the new path.",
+      "notes": [
+        "2026-03-06T18:25:47.000Z: Starting contract relocation from repo root into docs/ so boundary guidance lives with the other top-level docs authorities.",
+        "2026-03-06T18:25:47.000Z: Scope includes CLAUDE/AGENTS/DOCS references, deterministic boundary checks, and feature catalog metadata.",
+        "2026-03-06T18:27:21.000Z: Moved the contract to docs/ARCHITECTURE.md, updated all architecture-boundary references and verification scripts, regenerated the feature catalog, and passed architecture-boundary/workflow-contract/mirror/tooling-governance checks."
+      ],
+      "evidence": [
+        "docs/ARCHITECTURE.md",
+        "scripts/check-architecture-boundary.sh",
+        "scripts/check-workflow-contracts.sh",
+        ".claude/progress/feature-catalog.json",
+        ".claude/progress/feature-catalog.md"
+      ],
+      "created_at": "2026-03-06T18:25:47.000Z",
+      "updated_at": "2026-03-06T18:27:21.000Z"
+    },
+    {
+      "id": "work-jarvis-extension-boundary-1772811000000",
+      "title": "Extract Jarvis extension boundary from core control loop",
+      "feature_id": "jarvis-extension-boundary",
+      "status": "testing",
+      "request": "Implement the planned Jarvis extension architecture: explicit extension modules, lane identity, dispatch-attempt state, and reduced Jarvis policy in core files.",
+      "notes": [
+        "2026-03-06T15:30:00.000Z: Start architecture extraction from src/index.ts, src/ipc.ts, and src/db.ts into explicit Jarvis extension modules.",
+        "2026-03-06T15:30:00.000Z: Constraints locked from plan: preserve single-process NanoClaw core, keep filesystem IPC/SQLite, use lane ids with synthetic @nanoclaw JID compatibility during migration.",
+        "2026-03-06T17:53:00.000Z: Implemented src/extensions/jarvis/* modules, additive DB schema for dispatch_attempts/lane ids, and rewired src/index.ts + src/ipc.ts to delegate Jarvis policy through the extension boundary.",
+        "2026-03-06T18:08:00.000Z: Local verification passed: npm run typecheck, focused Jarvis tests, npm test, npm run build, verify-worker-connectivity PASS, linkage-audit PASS.",
+        "2026-03-06T18:09:00.000Z: Live restarted-build validation is currently blocked by incident-20260306T180837Z (WhatsApp conflict type=replaced after restart)."
+      ],
+      "evidence": [
+        ".claude/progress/feature-catalog.json",
+        ".claude/progress/feature-catalog.md"
+      ],
+      "created_at": "2026-03-06T15:30:00.000Z",
+      "updated_at": "2026-03-06T18:09:00.000Z"
+    },
     {
       "id": "work-jarvis-worker-lifecycle-1772518124323",
       "title": "Dry run: dispatch retry",

@@ -12,11 +12,14 @@ vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_NO_OUTPUT_TIMEOUT: 720000, // 12min
+  CONTAINER_PARSE_BUFFER_LIMIT: 1048576,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   TIMEZONE: 'America/Los_Angeles',
+  WORKER_CONTAINER_IMAGE: 'nanoclaw-worker:latest',
+  WORKER_MIN_NO_OUTPUT_TIMEOUT_MS: 0,
 }));
 
 // Mock logger

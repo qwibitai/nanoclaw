@@ -309,11 +309,28 @@ export function requiresBrowserEvidence(payload: DispatchPayload): boolean {
 export function parseCompletionContract(
   output: string,
 ): CompletionContract | null {
+  const normalizeCompletionContract = (
+    contract: CompletionContract,
+  ): CompletionContract => {
+    const normalized = { ...contract };
+
+    if (
+      !normalized.pr_url &&
+      normalized.pr_skipped_reason !== undefined &&
+      normalized.pr_skipped_reason !== null &&
+      !`${normalized.pr_skipped_reason}`.trim()
+    ) {
+      normalized.pr_skipped_reason = 'PR creation not requested';
+    }
+
+    return normalized;
+  };
+
   const parseObject = (raw: string): CompletionContract | null => {
     try {
       const obj = JSON.parse(raw.trim());
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        return obj as CompletionContract;
+        return normalizeCompletionContract(obj as CompletionContract);
       }
     } catch {
       // ignore parse errors

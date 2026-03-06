@@ -4,9 +4,31 @@
 
 Jarvis extends NanoClaw with a worker execution tier while keeping NanoClaw core small and generic.
 
+Boundary ownership lives in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md). This file explains Jarvis behavior, not which layer is allowed to own it.
+
 - Core host orchestration remains in `src/index.ts`, `src/container-runner.ts`, `src/group-queue.ts`, `src/ipc.ts`, `src/db.ts`.
 - Workflow policy lives in docs/CLAUDE/skills, not in host-loop feature sprawl.
 - Worker execution uses OpenCode free-model containers.
+- Jarvis-specific behavior is now extracted under `src/extensions/jarvis/` instead of being re-implemented inline across core files.
+
+## Extension Boundary
+
+`src/extensions/jarvis/` is the only layer that should know about:
+
+- `andy-developer`
+- internal worker lanes
+- synthetic compatibility JIDs like `jarvis-worker-*@nanoclaw`
+- dispatch validation and lane authorization rules
+- Andy frontdesk request/status semantics
+
+Current modules:
+
+- `lanes.ts`: canonical lane IDs and synthetic JID compatibility mapping
+- `frontdesk-service.ts`: greeting/status/intake handling for Andy
+- `dispatch-service.ts`: worker dispatch validation, normalization, queueing, and blocked-attempt recording
+- `request-state-service.ts`: `andy_requests` transitions and request-to-run linkage
+
+Core files should call these modules, not re-own Jarvis workflow policy.
 
 ## Runtime Tiers
 
@@ -22,6 +44,7 @@ Jarvis extends NanoClaw with a worker execution tier while keeping NanoClaw core
 - Group folder prefix `jarvis-worker*` routes to `WORKER_CONTAINER_IMAGE` (`nanoclaw-worker:latest` by default).
 - Explicit `containerConfig.image` is supported; worker-mode behavior is only auto-applied for `nanoclaw-worker` images.
 - Non-worker groups keep Claude Agent SDK session behavior unchanged.
+- Synthetic worker JIDs remain a transport compatibility detail only. Canonical internal identity is the lane ID (`jarvis-worker-1`, `jarvis-worker-2`).
 
 ## Delegation Authorization
 
@@ -58,6 +81,7 @@ queued -> running -> review_requested
 
 `worker_runs` tracks:
 
+- lane identity (`lane_id`)
 - run state (`queued/running/review_requested/failed_contract/failed/done`)
 - retry count
 - completion artifacts (`branch_name`, `commit_sha`, `files_changed`, `test_summary`, `risk_summary`, `pr_url`)
@@ -66,6 +90,20 @@ queued -> running -> review_requested
 - real-time progress (`last_progress_summary`, `last_progress_at`, `steer_count`)
 
 `worker_steering_events` tracks each steer request (`steer_id`, `run_id`, `message`, `sent_at`, `acked_at`, `status`).
+
+`andy_requests` tracks:
+
+- source lane (`source_lane_id`)
+- user-facing request state
+- linkage to `worker_run_id`
+- coordinator session continuity
+
+`dispatch_attempts` tracks:
+
+- `request_id -> run_id` handoff attempts
+- source and target lane IDs
+- whether the attempt was `blocked` or `queued`
+- validator reason codes and normalized dispatch payload
 
 This keeps worker runs reproducible, review-auditable, and steerable in-flight.
 
@@ -80,6 +118,7 @@ Andy-developer can steer an in-flight worker by writing a `steer_worker` IPC tas
 | Concern | Location |
 |---------|----------|
 | Host primitives | `src/*` core files |
+| Jarvis extension policy | `src/extensions/jarvis/*` |
 | Dispatch contract | `src/dispatch-validator.ts` + `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` |
 | Worker runtime details | `docs/workflow/nanoclaw-jarvis-worker-runtime.md` |
 | Team operating model | `docs/operations/workflow-setup-responsibility-map.md` + lane `groups/*/CLAUDE.md` |

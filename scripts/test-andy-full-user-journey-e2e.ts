@@ -44,6 +44,7 @@ const REQUEST_ACK_TIMEOUT_MS = 30_000;
 const REQUEST_LINK_TIMEOUT_MS = 180_000;
 const RUN_TERMINAL_TIMEOUT_MS = 15 * 60_000;
 const MAX_STAGE_ATTEMPTS = 3;
+const TIMESTAMP_FLOOR_TOLERANCE_MS = 1_000;
 const RUN_TERMINAL_OK = new Set(['review_requested', 'done']);
 const RUN_TERMINAL_FAIL = new Set(['failed', 'failed_contract']);
 
@@ -121,7 +122,7 @@ async function waitForBotMessage(
     for (const row of rows) {
       if (baselineBotIds.has(row.id)) continue;
       const rowMs = Date.parse(row.timestamp);
-      if (!Number.isFinite(rowMs) || rowMs < minTsMs) continue;
+      if (!Number.isFinite(rowMs) || rowMs + TIMESTAMP_FLOOR_TOLERANCE_MS < minTsMs) continue;
       if (!predicate(row)) continue;
       baselineBotIds.add(row.id);
       return row;
@@ -183,7 +184,7 @@ async function waitForRunLinkOrDispatchBlock(
     for (const row of rows) {
       if (baselineBotIds.has(row.id)) continue;
       const rowMs = Date.parse(row.timestamp);
-      if (!Number.isFinite(rowMs) || rowMs < minTsMs) continue;
+      if (!Number.isFinite(rowMs) || rowMs + TIMESTAMP_FLOOR_TOLERANCE_MS < minTsMs) continue;
       baselineBotIds.add(row.id);
       if (/Dispatch blocked by validator/i.test(row.content)) {
         return { kind: 'dispatch_blocked', detail: row.content.replace(/\s+/g, ' ').slice(0, 260) };
@@ -203,6 +204,14 @@ function getWorkerRun(db: Database.Database, runId: string): WorkerRunRow | null
      WHERE run_id = ?`,
   ).get(runId) as WorkerRunRow | undefined;
   return row || null;
+}
+
+function clampLatencyMs(sentMs: number, replyTimestamp: string, label: string): number {
+  const raw = Date.parse(replyTimestamp) - sentMs;
+  if (!Number.isFinite(raw) || raw < -TIMESTAMP_FLOOR_TOLERANCE_MS) {
+    throw new Error(`${label} latency invalid: ${raw}`);
+  }
+  return Math.max(0, raw);
 }
 
 async function waitForWorkerRunTerminal(
@@ -245,8 +254,8 @@ async function askStatusAndValidateImmediate(
   if (!reply) {
     throw new Error(`status(${requestId}) did not get immediate reply <= ${IMMEDIATE_REPLY_MAX_MS}ms`);
   }
-  const latencyMs = Date.parse(reply.timestamp) - sentMs;
-  if (!Number.isFinite(latencyMs) || latencyMs < 0 || latencyMs > IMMEDIATE_REPLY_MAX_MS) {
+  const latencyMs = clampLatencyMs(sentMs, reply.timestamp, `status(${requestId})`);
+  if (latencyMs > IMMEDIATE_REPLY_MAX_MS) {
     throw new Error(`status(${requestId}) latency invalid: ${latencyMs}`);
   }
   const preview = reply.content.replace(/\s+/g, ' ').slice(0, 160);
@@ -274,8 +283,8 @@ async function askProgressAndValidateImmediate(
   if (!reply) {
     throw new Error(`progress query did not get immediate reply <= ${IMMEDIATE_REPLY_MAX_MS}ms`);
   }
-  const latencyMs = Date.parse(reply.timestamp) - sentMs;
-  if (!Number.isFinite(latencyMs) || latencyMs < 0 || latencyMs > IMMEDIATE_REPLY_MAX_MS) {
+  const latencyMs = clampLatencyMs(sentMs, reply.timestamp, 'progress');
+  if (latencyMs > IMMEDIATE_REPLY_MAX_MS) {
     throw new Error(`progress latency invalid: ${latencyMs}`);
   }
   const preview = reply.content.replace(/\s+/g, ' ').slice(0, 160);
@@ -316,8 +325,8 @@ async function runStage(
     if (!ack) {
       throw new Error(`${stage.name}: intake ack not received (attempt ${attempt})`);
     }
-    const ackLatencyMs = Date.parse(ack.timestamp) - sentMs;
-    if (!Number.isFinite(ackLatencyMs) || ackLatencyMs < 0 || ackLatencyMs > IMMEDIATE_REPLY_MAX_MS) {
+    const ackLatencyMs = clampLatencyMs(sentMs, ack.timestamp, `${stage.name} intake ack`);
+    if (ackLatencyMs > IMMEDIATE_REPLY_MAX_MS) {
       throw new Error(`${stage.name}: intake ack latency invalid ${ackLatencyMs} (attempt ${attempt})`);
     }
     console.log(`  [PASS] intake ack ${ackLatencyMs}ms, request_id=${request.request_id} (attempt ${attempt})`);

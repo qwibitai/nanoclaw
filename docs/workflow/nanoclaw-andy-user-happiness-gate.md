@@ -32,6 +32,8 @@ Run before declaring any Andy/Jarvis reliability fix complete, and before any bl
 
 - Status/greeting probes do not trigger unintended worker dispatches.
 - Status/greeting probes do not create `andy_requests` intake rows.
+- Natural status phrasing such as `@Andy what are you working on right now?` must be classified as status, not work intake.
+- If a follow-up dispatch is validator-blocked (for example `context_intent=continue` without reusable session), the blocked request must not remain `coordinator_active`.
 - Probe window must not introduce `running_without_container` regression failures.
 
 ### 4) Human Satisfaction Check (Required)
@@ -63,7 +65,10 @@ The `--user-confirmation` value in the gate command must explicitly confirm this
 Equivalent expanded form (for debugging):
 
 - `bash scripts/jarvis-ops.sh status`
+- `bash scripts/jarvis-ops.sh verify-worker-connectivity`
+- `bash scripts/jarvis-ops.sh linkage-audit`
 - `node --experimental-transform-types scripts/test-andy-user-e2e.ts`
+- `node --experimental-transform-types scripts/test-andy-full-user-journey-e2e.ts` when the fix touches dispatch/linkage/runtime behavior
 
 ## Probe Script
 
@@ -74,6 +79,11 @@ Equivalent expanded form (for debugging):
 - `@Andy what is the current progress` reply quality + latency
 - Internal guardrails for request/worker side effects
 - Baseline user-facing quality for no-ID status probing
+
+When the change touches Andy->worker dispatch, also require:
+
+- `scripts/test-andy-full-user-journey-e2e.ts` PASS
+- `bash scripts/jarvis-ops.sh linkage-audit` PASS after the journey completes
 
 ## Fail Handling
 

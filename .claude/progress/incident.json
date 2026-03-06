@@ -1,19 +1,19 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-06T06:56:46.456593+00:00",
+  "updated_at": "2026-03-06T18:09:55.006499+00:00",
   "incidents": [
     {
-      "id": "incident-20260304T173206Z",
-      "title": "Andy status check-in misclassified as work intake",
+      "id": "incident-20260306T180837Z",
+      "title": "WhatsApp session conflict after runtime restart",
       "status": "open",
-      "severity": "unknown",
-      "created_at": "2026-03-04T17:32:06.597235+00:00",
-      "updated_at": "2026-03-06T06:56:46.456434+00:00",
+      "severity": "high",
+      "created_at": "2026-03-06T18:08:37.562648+00:00",
+      "updated_at": "2026-03-06T18:09:55.006315+00:00",
       "summary": {
-        "symptom": "Andy status check-in misclassified as work intake",
-        "suspected_cause": "Andy frontdesk classified work-check-in phrasing ('are you doing any work?') as work_intake, generating a frontdesk request and model-aut...",
-        "impact": "User received contextually incorrect reply in andy-developer chat, reducing trust in frontdesk status behavior",
-        "next_action": "Deploy updated classifier/status filter and verify with live WhatsApp check-in phrases before resolve"
+        "symptom": "After restarting the rebuilt NanoClaw host, the WhatsApp socket repeatedly closes with conflict type=replaced every few seconds.",
+        "suspected_cause": "wa_conflict_churn",
+        "impact": "The new runtime cannot hold a stable WhatsApp session, so live Andy/user validation on the refactored build is blocked.",
+        "next_action": "Identify and stop the competing WhatsApp client/session, then rerun verify-worker-connectivity and Andy E2Es on the restarted build."
       },
       "evidence": {
         "bundle_count": 0
@@ -23,19 +23,58 @@
       },
       "notes": [
         {
-          "ts": "2026-03-06T06:54:21.392416+00:00",
+          "ts": "2026-03-06T18:08:37.562648+00:00",
           "author": "codex",
-          "text": "Added linkage-audit (stale/unlinked request detection) and pre-dispatch hard gate integration to reduce accidental work dispatch propagation from misclassified frontdesk traffic."
+          "text": "reported: After restarting the rebuilt NanoClaw host, the WhatsApp socket repeatedly closes with conflict type=replaced every few seconds."
         },
         {
-          "ts": "2026-03-06T06:56:42.367499+00:00",
+          "ts": "2026-03-06T18:09:55.006311+00:00",
           "author": "codex",
-          "text": "Historical context restored: regression probe on 2026-03-04 for '@Andy are you doing any work?' did not reproduce misclassification (status-style reply, no andy_request rows, no worker runs in probe window)."
+          "text": "During restarted-build validation on 2026-03-06, the new schema migrated successfully (dispatch_attempts table present) but WhatsApp remained unstable. Two NanoClaw host processes (PIDs 25950 and 26037) were found and duplicate processes were killed, yet conflict type=replaced continued, indicating a remaining competing WhatsApp session or supervisor-owned runtime outside this shell."
+        }
+      ]
+    },
+    {
+      "id": "incident-worker-connectivity-block-20260227",
+      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
+      "status": "open",
+      "severity": "high",
+      "created_at": "2026-02-27T13:02:09.098285+00:00",
+      "updated_at": "2026-03-06T15:19:53Z",
+      "summary": {
+        "symptom": "Synthetic worker lanes rejected IPC probe dispatches with 'No channel for JID', so fresh probe worker_runs were not created.",
+        "suspected_cause": "root_runtime_missing_internal_nanoclaw_dispatch",
+        "impact": "Live worker connectivity verification and Andy->worker validation were blocked.",
+        "next_action": "None; keep verify-worker-connectivity in the live gate."
+      },
+      "evidence": {
+        "bundle_count": 5,
+        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
+        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
+        "last_root_cause": "unknown",
+        "last_status": "pass",
+        "last_checked_at": "2026-03-06T15:19:53Z",
+        "non_zero_command_count": 2,
+        "debug_summary": "2026-03-06 verify-worker-connectivity PASS after root runtime restore: probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600 both reached review_requested with zero stale queued/running runs."
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-06T13:32:07.890419+00:00",
+          "author": "codex",
+          "text": "reopened by codex: 2026-03-06 live verify-worker-connectivity regression: probe deadlock fixed locally, but runtime still routes jarvis-worker-*@nanoclaw via external channel ownership only; IPC probe messages fail with 'No channel for JID' and no new probe worker_runs are created. | previous_resolution=Worker connectivity gate stabilized; live probe + acceptance gate now pass with review_requested terminals."
         },
         {
-          "ts": "2026-03-06T06:56:46.456431+00:00",
+          "ts": "2026-03-06T13:32:56.813764+00:00",
           "author": "codex",
-          "text": "Historical context restored: targeted phrase probe at 2026-03-04T18:55:25Z returned status-style reply with no intake request and no matched worker run token."
+          "text": "2026-03-06 live regression check on branch chore/update-1.2.8-docs: baseline preflight/status/reliability pass with no stale queued/running runs, but verify-worker-connectivity cannot create fresh probe worker_runs. Root cause split: (1) script deadlock fixed locally in scripts/jarvis-worker-probe.sh by skipping connectivity proof for probe pre-dispatch, and (2) live runtime still rejects IPC probe payloads for jarvis-worker-*@nanoclaw with 'No channel for JID', leaving probe JSON files in data/ipc/errors and zero new probe rows in worker_runs."
+        },
+        {
+          "ts": "2026-03-06T15:19:53Z",
+          "author": "codex",
+          "text": "Resolved on 2026-03-06 after restoring root-runtime synthetic worker dispatch support. Live verify-worker-connectivity PASS created fresh probe runs probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600, both reaching review_requested; no new 'No channel for JID' failures occurred on the current runtime."
         }
       ]
     },
@@ -45,22 +84,22 @@
       "status": "open",
       "severity": "medium",
       "created_at": "2026-03-04T11:08:50.813404+00:00",
-      "updated_at": "2026-03-06T06:56:37.967976+00:00",
+      "updated_at": "2026-03-06T15:19:53Z",
       "summary": {
-        "symptom": "Live Build App request created worker run and reached review_requested, but andy_requests.request_id=req-1772622326048-pprimary remained coordinator_active with empty worker_run_id.",
-        "suspected_cause": "andy_no_output_timeout_watchdog_mismatch",
-        "impact": "User task flow stalls: intake/status replies succeed but no worker run is linked and task eventually fails with dispatch-block notice.",
-        "next_action": "Run scripts/test-andy-full-user-journey-e2e.ts against live runtime and confirm request_id -> worker_run_id linkage remains stable with zero new no_output_timeout artifacts in trace window."
+        "symptom": "Andy requests could remain unlinked or stale when dispatch/linkage state drifted across coordinator, IPC, and worker runtime paths.",
+        "suspected_cause": "root_runtime_linkage_and_dispatch_state_drift",
+        "impact": "Active request tracking could show stale coordinator items and obscure actual worker progress.",
+        "next_action": "None; keep linkage-audit in the ops gate."
       },
       "evidence": {
         "bundle_count": 2,
         "last_bundle_dir": "data/diagnostics/incidents/incident-20260304T194337Z",
         "last_manifest_path": "data/diagnostics/incidents/incident-20260304T194337Z/manifest.json",
         "last_root_cause": "andy_no_output_timeout_watchdog_mismatch",
-        "last_status": "warn",
-        "last_checked_at": "2026-03-04T19:44:17.162443+00:00",
+        "last_status": "pass",
+        "last_checked_at": "2026-03-06T15:19:53Z",
         "non_zero_command_count": 1,
-        "debug_summary": "Patched src/container-runner.ts to restore noOutput/idle config, add explicit timeout reason logging, and reset no-output watchdog on worker heartbeat lines; added regression coverage in src/container-runner.test.ts."
+        "debug_summary": "2026-03-06 live full-journey PASS on current runtime: request req-1772809351646-pprimary linked to userflow-1772809350489-wppq3; blocked follow-up requests req-1772809619106-eprimary and req-1772810005251-nprimary now close as failed; retry requests link to worker_review_requested; linkage-audit PASS with no stale unlinked active requests."
       },
       "context": {
         "lane": "andy-developer",
@@ -68,34 +107,34 @@
       },
       "notes": [
         {
-          "ts": "2026-03-05T17:31:00.115691+00:00",
-          "author": "operator",
-          "text": "Applied Apple-container patch in src/container-runtime.ts (runtime bin default container, health/list command adaptation, readonly mount adaptation) with passing typecheck/tests/build. Post-restart verification still blocked because app exits with FATAL 'No channels connected': src/channels/index.ts has no channel imports and src/channels contains only registry files in current workspace, so launchd service stays spawnscheduled."
-        },
-        {
-          "ts": "2026-03-06T06:54:15.429019+00:00",
-          "author": "codex",
-          "text": "P0 prevention controls added: jarvis-pre-dispatch-gate (dispatch lint + stale-state gate), jarvis-auth-health, and completion contract lint routed via jarvis-ops to reduce no-output timeout/watchdog drift before dispatch."
-        },
-        {
           "ts": "2026-03-06T06:56:37.967972+00:00",
           "author": "codex",
           "text": "Historical context restored: 2026-03-05 root-cause isolation identified host no-output watchdog firing before final output when worker emitted heartbeat on stderr; prior fix path included container-runner watchdog reset on heartbeat and timeout-reason logging with regression test coverage."
+        },
+        {
+          "ts": "2026-03-06T13:32:19.836425+00:00",
+          "author": "codex",
+          "text": "2026-03-06 live verification blocked before request->worker linkage: verify-worker-connectivity initially deadlocked on probe self-check; after local patch to scripts/jarvis-worker-probe.sh to skip connectivity proof for probe pre-dispatch, live runtime still fails IPC probe send with 'No channel for JID: jarvis-worker-1@nanoclaw'. No new probe worker_runs inserted; linkage cannot be validated on current runtime."
+        },
+        {
+          "ts": "2026-03-06T15:19:53Z",
+          "author": "codex",
+          "text": "Resolved on 2026-03-06. Current-runtime full journey PASS validated request_id -> worker_run_id linkage across build/feature/customization flow. Latest evidence: req-1772809351646-pprimary -> userflow-1772809350489-wppq3, req-1772809688114-reretry2 -> userflow-1772809350489-wppq3-filter-v2, req-1772810060152-onretry2 -> userflow-1772809350489-wppq3-theme-v2. IPC dispatch-block handling now marks blocked first attempts failed instead of leaving stale coordinator_active rows, and linkage-audit PASS shows no stale unlinked active requests."
         }
       ]
     },
     {
-      "id": "incident-20260305T180540Z",
-      "title": "Andy-Developer fails after restart with ERR_FS_CP_EINVAL in buildVolumeMounts",
+      "id": "incident-20260304T173206Z",
+      "title": "Andy status check-in misclassified as work intake",
       "status": "open",
-      "severity": "medium",
-      "created_at": "2026-03-05T18:05:40.429157+00:00",
-      "updated_at": "2026-03-06T06:56:32.738853+00:00",
+      "severity": "unknown",
+      "created_at": "2026-03-04T17:32:06.597235+00:00",
+      "updated_at": "2026-03-06T15:19:53Z",
       "summary": {
-        "symptom": "Agent error: src and dest cannot be the same .../.claude/skills/.docs",
-        "suspected_cause": "skills sync attempted problematic symlink copies (.docs/self-path + symlink destination collisions) and Apple container runtime fails whe...",
-        "impact": "andy-developer agent failed to start containers and retried, causing no effective responses",
-        "next_action": "keep --user disabled for Apple container runtime and monitor live runs; address separate stale worker_runs record"
+        "symptom": "Natural-language status phrases such as 'what are you working on right now?' were treated as new work intake.",
+        "suspected_cause": "Andy progress query matcher missed the 'what are you working on' phrasing, so intake tracking ran before status handling.",
+        "impact": "Andy replied with intake-tracking text and created bogus frontdesk requests for status checks.",
+        "next_action": "None; keep the user-facing Andy E2E in the happiness gate."
       },
       "evidence": {
         "bundle_count": 0
@@ -105,10 +144,42 @@
       },
       "notes": [
         {
-          "ts": "2026-03-06T05:41:39.648923+00:00",
+          "ts": "2026-03-06T06:56:42.367499+00:00",
           "author": "codex",
-          "text": "Workflow update: scripts/qmd-session-sync.sh now auto-runs qmd embed when qmd status reports pending vectors; mirrored in docs/workflow/session-recall.md."
+          "text": "Historical context restored: regression probe on 2026-03-04 for '@Andy are you doing any work?' did not reproduce misclassification (status-style reply, no andy_request rows, no worker runs in probe window)."
         },
+        {
+          "ts": "2026-03-06T06:56:46.456431+00:00",
+          "author": "codex",
+          "text": "Historical context restored: targeted phrase probe at 2026-03-04T18:55:25Z returned status-style reply with no intake request and no matched worker run token."
+        },
+        {
+          "ts": "2026-03-06T15:19:53Z",
+          "author": "codex",
+          "text": "Resolved on 2026-03-06 by widening the progress-query classifier in src/index.ts to match 'what are you working on ...'. Live npx tsx scripts/test-andy-user-e2e.ts PASS on the exact phrase '@Andy what are you working on right now?' and DB verification showed zero andy_requests rows for the probe token 1772809335197-qlnns."
+        }
+      ]
+    },
+    {
+      "id": "incident-20260305T180540Z",
+      "title": "Andy-Developer fails after restart with ERR_FS_CP_EINVAL in buildVolumeMounts",
+      "status": "open",
+      "severity": "medium",
+      "created_at": "2026-03-05T18:05:40.429157+00:00",
+      "updated_at": "2026-03-06T15:19:53Z",
+      "summary": {
+        "symptom": "andy-developer could fail after restart during container volume staging with ERR_FS_CP_EINVAL/self-copy collisions.",
+        "suspected_cause": "container skill-sync/runtime staging drift in the old root runtime.",
+        "impact": "Restarted services could fail to spawn containers, breaking live Andy responses.",
+        "next_action": "None; continue to monitor through preflight/recover and live gates."
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
         {
           "ts": "2026-03-06T06:54:26.690371+00:00",
           "author": "codex",
@@ -118,6 +189,11 @@
           "ts": "2026-03-06T06:56:32.738850+00:00",
           "author": "codex",
           "text": "Historical context restored: post-fix runtime validation on pid 16298 showed andy-developer spawned container, produced output, and sent message; remaining reliability issue at that point was stale run userflow-1772654367569-bsprb (jarvis-worker-1, 2026-03-04)."
+        },
+        {
+          "ts": "2026-03-06T15:19:53Z",
+          "author": "codex",
+          "text": "Resolved on 2026-03-06. After npm run build + bash scripts/jarvis-ops.sh recover, preflight PASS on pid 19329 and the full Andy journey completed successfully. Tail inspection of the current-runtime log showed no fresh ERR_FS_CP_EINVAL or 'No channel for JID' entries after restart; only expected validator warnings for blocked continue-without-session dispatches."
         }
       ]
     },
@@ -435,59 +511,6 @@
         "resolved_by": "codex"
       },
       "resolved_at": "2026-03-04T11:11:32.555820+00:00"
-    },
-    {
-      "id": "incident-worker-connectivity-block-20260227",
-      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
-      "status": "resolved",
-      "severity": "high",
-      "created_at": "2026-02-27T13:02:09.098285+00:00",
-      "updated_at": "2026-03-04T11:11:32.354307+00:00",
-      "summary": {
-        "symptom": "Workers are not connected and I don't have access to restart them. To restart the push task: start worker containers manually via deployment system, then I will dispatch push task. Alternative: push branches manually from local environment.",
-        "suspected_cause": "unknown",
-        "impact": "Valid worker output can be produced after auto-fail, but DB status remains failed because failed->review_requested transition is blocked; Andy reports workers disconnected and re-dispatch loops",
-        "next_action": "Implement watchdog guard for in-flight worker processing/repair handoff and optionally track no-container elapsed separately; then re-run probe + real multi-step dispatch and confirm no invalid transition logs"
-      },
-      "evidence": {
-        "bundle_count": 5,
-        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
-        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
-        "last_root_cause": "unknown",
-        "last_status": "warn",
-        "last_checked_at": "2026-03-03T07:04:47.530612+00:00",
-        "non_zero_command_count": 2,
-        "debug_summary": "root_cause=unknown; messages=58; worker_runs=0; dispatch_blocks=0; non_zero_commands=2"
-      },
-      "context": {
-        "lane": "andy-developer"
-      },
-      "notes": [
-        {
-          "ts": "2026-03-03T18:24:15.264013+00:00",
-          "author": "operator",
-          "text": "2026-03-03 implementation validation: applied terminal-is-final race fix (no ungated completion fallback), probe watchdog moved to env-backed 180s with verify guard 240s. After daemon restart (pid 88861), verify-worker-connectivity still FAILS but reason shifted from stale_probe_run_watchdog to worker_execution_timeout (container no_output_timeout after 115000ms) for probe runs probe-jarvis-worker-1-1772561978-20667 and probe-jarvis-worker-2-1772562102-29270. No new 'falling back to ungated completion' or invalid completion transition logs for these runs."
-        },
-        {
-          "ts": "2026-03-04T09:35:02.357210+00:00",
-          "author": "codex",
-          "text": "2026-03-04 optimization workflow run: acceptance-gate failed at worker_connectivity (exit 127). Evidence: data/diagnostics/acceptance/acceptance-20260304T093428Z.json. Failure detail shows bash compatibility issue: mapfile command not found in scripts/jarvis-worker-probe.sh:83 and scripts/jarvis-verify-worker-connectivity.sh:152."
-        },
-        {
-          "ts": "2026-03-04T10:55:42.301499+00:00",
-          "author": "codex",
-          "text": "2026-03-04 fix applied: replaced mapfile usage in worker probe/connectivity scripts for bash 3 compatibility. Acceptance gate PASS with evidence data/diagnostics/acceptance/acceptance-20260304T105215Z.json (run outside sandbox to avoid permission artifacts)."
-        }
-      ],
-      "resolution": {
-        "summary": "Worker connectivity gate stabilized; live probe + acceptance gate now pass with review_requested terminals.",
-        "confirmed_by_user": "incidents which came out passed can be marked resolved",
-        "confirmed_at": "2026-03-04T11:11:32.354307+00:00",
-        "verification": "verify-worker-connectivity PASS and acceptance evidence data/diagnostics/acceptance/acceptance-20260304T105215Z.json",
-        "fix_reference": "scripts/jarvis-worker-probe.sh, scripts/jarvis-verify-worker-connectivity.sh, scripts/jarvis-acceptance-gate.sh",
-        "resolved_by": "codex"
-      },
-      "resolved_at": "2026-03-04T11:11:32.354307+00:00"
     }
   ]
 }

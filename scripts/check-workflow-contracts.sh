@@ -8,7 +8,7 @@ missing_refs=()
 errors=()
 
 collect_files=()
-collect_files+=("CLAUDE.md" "AGENTS.md" "DOCS.md" "docs/README.md")
+collect_files+=("docs/ARCHITECTURE.md" "CLAUDE.md" "AGENTS.md" "DOCS.md" "docs/README.md")
 collect_files+=(
   "docs/workflow/skill-routing-preflight.md"
   "docs/workflow/jarvis-dispatch-contract-discipline.md"
@@ -75,6 +75,10 @@ if [ ! -f "docs/workflow/nanoclaw-development-loop.md" ]; then
   errors+=("Missing canonical workflow doc: docs/workflow/nanoclaw-development-loop.md")
 fi
 
+if [ ! -f "docs/ARCHITECTURE.md" ]; then
+  errors+=("Missing architecture boundary contract: docs/ARCHITECTURE.md")
+fi
+
 if [ ! -f "docs/workflow/workflow-optimization-loop.md" ]; then
   errors+=("Missing optimization workflow doc: docs/workflow/workflow-optimization-loop.md")
 fi
@@ -107,6 +111,10 @@ if [ ! -x "scripts/workflow/slop-inventory.sh" ]; then
   errors+=("Missing executable slop inventory helper: scripts/workflow/slop-inventory.sh")
 fi
 
+if [ ! -x "scripts/check-architecture-boundary.sh" ]; then
+  errors+=("Missing executable architecture boundary checker: scripts/check-architecture-boundary.sh")
+fi
+
 if ! has_text 'docs/workflow/nanoclaw-development-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing development-loop trigger reference")
 fi
@@ -135,8 +143,26 @@ if ! has_text 'docs/operations/subagent-catalog.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing subagent-catalog trigger reference")
 fi
 
+if ! has_text 'docs/ARCHITECTURE.md' CLAUDE.md; then
+  errors+=("CLAUDE.md is missing architecture boundary trigger reference")
+fi
+
+if ! has_text 'docs/ARCHITECTURE.md' AGENTS.md; then
+  errors+=("AGENTS.md is missing architecture boundary reference")
+fi
+
 if has_text 'docs/nanoclaw-jarvis-dispatch-contract.md' docs/workflow/jarvis-dispatch-contract-discipline.md; then
   errors+=("jarvis-dispatch-contract-discipline.md still references deprecated path docs/nanoclaw-jarvis-dispatch-contract.md")
+fi
+
+if [ -x "scripts/check-architecture-boundary.sh" ]; then
+  boundary_output="$(bash scripts/check-architecture-boundary.sh 2>&1)" || {
+    errors+=("architecture-boundary-check failed:")
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      errors+=("  $line")
+    done <<<"$boundary_output"
+  }
 fi
 
 if [ "${#missing_refs[@]}" -gt 0 ]; then

@@ -8,6 +8,7 @@ Canonical classification for repository docs.
 - `CLAUDE.md`: compressed trigger index for agent runtime behavior
 - `DOCS.md`: top-level documentation classification (this file)
 - `docs/README.md`: curated landing page for `docs/`
+- `docs/ARCHITECTURE.md`: hard core-vs-extension boundary contract for agents and maintainers
 - `docs/MISSION.md`: mission statement and operating profile intent
 - `docs/CHANGELOG.md`: active changelog for current documentation era
 

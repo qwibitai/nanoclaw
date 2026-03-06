@@ -46,13 +46,37 @@ bash scripts/jarvis-ops.sh preflight
 bash scripts/jarvis-ops.sh status
 ```
 
+After recovery, inspect current-runtime evidence before deciding restart regressions still reproduce:
+
+```bash
+tail -n 500 logs/nanoclaw.log
+```
+
+Interpretation rule:
+
+- Old `ERR_FS_CP_EINVAL` or `No channel for JID` lines elsewhere in the historical log are not enough to reopen the incident.
+- Require a fresh post-restart occurrence or a current PID-scoped log hit.
+
 ## 2) Worker Connectivity + Dispatch Failures
 
 ```bash
 bash scripts/jarvis-ops.sh verify-worker-connectivity
+bash scripts/jarvis-ops.sh linkage-audit
 bash scripts/jarvis-ops.sh trace --lane andy-developer
 bash scripts/jarvis-ops.sh dispatch-lint --file /tmp/dispatch.json --target-folder jarvis-worker-1
 ```
+
+If the app is a customized fork using internal worker JIDs (`jarvis-worker-*@nanoclaw`):
+
+- Treat `No channel for JID: jarvis-worker-*@nanoclaw` as a root-runtime synthetic-dispatch regression, not a WhatsApp group-registration problem.
+- Check the canonical root runtime first (`src/index.ts`, `src/ipc.ts`) rather than assuming the worker-copy runtime is active.
+- Re-run `verify-worker-connectivity` and confirm fresh `probe-*` `worker_runs` reach `review_requested`.
+
+If the issue involves Andy follow-up dispatches:
+
+- A validator block for `context_intent=continue` without a reusable session is expected behavior.
+- The blocked request must transition terminal (`failed`) with reason text; only the retry request should remain active.
+- `bash scripts/jarvis-ops.sh linkage-audit` must pass after the full user journey.
 
 If connectivity remains unstable, capture evidence bundle:
 
@@ -116,8 +140,9 @@ A debug run is complete only when:
 
 1. Failing symptom is reproduced and explained with root cause.
 2. Relevant scripted checks pass (`preflight`, `status`, plus lane-specific checks).
-3. Evidence is captured (trace/bundle) for handoff.
-4. Incident state is updated if issue is non-trivial.
+3. For Andy/Jarvis dispatch issues, `verify-worker-connectivity` and `linkage-audit` both pass.
+4. Evidence is captured (trace/bundle) for handoff.
+5. Incident state is updated if issue is non-trivial.
 
 ## Legacy Docker Appendix (Fallback Only)
 

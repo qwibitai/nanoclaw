@@ -16,13 +16,17 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 
 NanoClaw baseline is the default. Jarvis docs apply only when working on the `jarvis-worker-*` execution tier.
 
-## Mission-Aligned Engineering Contract
+## Mission-Aligned Engineering Contract (Mirror)
 
-- Ground every task in [`docs/MISSION.md`](docs/MISSION.md) and make alignment explicit in reasoning and decisions.
-- Define requirements, constraints, invariants, and tradeoffs before implementation.
-- Prefer reliable, optimized, evidence-backed changes; do not ship patch fixes.
-- Use the best-matched internal skills/tools/docs first, then verify outcomes with concrete evidence.
-- Track incidents in `.claude/progress/incident.json` and feature/work items before closure or implementation.
+- Ground every task in `docs/MISSION.md` and make alignment explicit in reasoning and decisions.
+- Think from first principles: requirements, constraints, invariants, and tradeoffs before implementation choice.
+- Operate as an expert with a clear technical opinion on the correct mission-aligned path.
+- Prioritize reliability, optimization, and efficiency as core defaults.
+- Use the most relevant internal skills/tools first and verify outcomes with concrete evidence.
+- If a better mission-aligned approach exists, surface it proactively and reason with the user before execution.
+- Do not rely on assumptions when facts are retrievable; gather repo facts from code/docs and use DeepWiki for repository documentation when more context is required.
+- Any issue discovered during work must be logged/updated in `.claude/progress/incident.json` via the incident workflow before closure.
+- Any new feature request not already mapped must be feature-tracked and work-item tracked before implementation.
 
 ## Docs Index
 
@@ -40,6 +44,7 @@ BEFORE split-lane Claude/Codex worktrees or review fanout → read docs/workflow
 BEFORE defining subagent fanout for plan/review/verification → read docs/operations/subagent-catalog.md and docs/operations/subagent-routing.md
 BEFORE deciding Claude-vs-Codex execution adapter behavior → read docs/operations/claude-codex-adapter-matrix.md
 BEFORE changing core orchestrator/channel/IPC/scheduler behavior → read docs/reference/REQUIREMENTS.md, docs/reference/SPEC.md, docs/reference/SECURITY.md
+BEFORE changing core-vs-extension ownership or adding Jarvis-specific logic to shared runtime files → read docs/ARCHITECTURE.md
 BEFORE changing high-level orchestration methodology → read docs/architecture/harness-engineering-alignment.md
 BEFORE changing Jarvis architecture/state machine → read docs/architecture/nanoclaw-jarvis.md
 BEFORE finalizing Jarvis workflow/contract changes → read docs/workflow/nanoclaw-jarvis-acceptance-checklist.md
@@ -64,6 +69,7 @@ BEFORE debugging container/auth/session/mount issues → read docs/workflow/nano
 
 ## Key Files
 
+- `docs/ARCHITECTURE.md`: hard core-vs-extension ownership contract
 - `src/index.ts`: orchestrator state, message loop, agent invocation
 - `src/ipc.ts`: dispatch authorization and task processing
 - `src/container-runner.ts`: worker runtime staging, mounts, lifecycle

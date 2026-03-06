@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-06T09:22:35.021Z
+Generated: 2026-03-06T18:27:07.324Z
 Project: nanoclaw
 
 ## Features
@@ -56,18 +56,17 @@ Project: nanoclaw
   - src/dispatch-validator.ts
   - src/event-bridge.ts
   - src/ipc.ts
-- Tests (2):
+- Tests (3):
+  - src/extensions/jarvis/frontdesk-service.test.ts
   - src/ipc-auth.test.ts
   - src/jarvis-worker-dispatch.test.ts
 - Shared Files:
   - src/dispatch-validator.ts
+  - src/event-bridge.ts
   - src/ipc.ts
-- Validation Warnings:
-  - missing file: src/event-bridge.ts
-  - missing test: src/jarvis-worker-dispatch.test.ts
 - Suggested Verify:
   - npm run typecheck
-  - npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
+  - npx vitest run src/extensions/jarvis/frontdesk-service.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
 
 ### container-runtime - Container Runtime
 - Risk: high
@@ -83,10 +82,9 @@ Project: nanoclaw
   - src/container-runtime.test.ts
   - src/worker-run-supervisor.test.ts
 - Shared Files:
+  - src/container-runner.ts
+  - src/container-runtime.ts
   - src/worker-run-supervisor.ts
-- Validation Warnings:
-  - missing file: src/worker-run-supervisor.ts
-  - missing test: src/worker-run-supervisor.test.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts
@@ -116,6 +114,7 @@ Project: nanoclaw
 - Tests (1):
   - src/db.test.ts
 - Shared Files:
+  - src/db.ts
   - src/index.ts
 - Suggested Verify:
   - npm run typecheck
@@ -168,13 +167,93 @@ Project: nanoclaw
   - src/dispatch-validator.ts
   - src/ipc.ts
   - src/worker-run-supervisor.ts
-- Validation Warnings:
-  - missing file: src/worker-run-supervisor.ts
-  - missing test: src/jarvis-worker-dispatch.test.ts
-  - missing test: src/worker-run-supervisor.test.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts
+
+### forked-worker-runtime-restore - Forked Worker Runtime Restore
+- Risk: high
+- Summary: Root-runtime parity for synthetic worker dispatch, Andy linkage, and live worker recovery in the customized fork.
+- Keywords: fork, worker dispatch, synthetic worker, andy, request linkage, runtime restore
+- Files (11):
+  - scripts/jarvis-incident.sh
+  - scripts/jarvis-worker-probe.sh
+  - src/config.ts
+  - src/container-runner.ts
+  - src/container-runtime.ts
+  - src/db.ts
+  - src/event-bridge.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/types.ts
+  - src/worker-run-supervisor.ts
+- Tests (3):
+  - src/ipc-auth.test.ts
+  - src/jarvis-worker-dispatch.test.ts
+  - src/worker-run-supervisor.test.ts
+- Shared Files:
+  - scripts/jarvis-incident.sh
+  - scripts/jarvis-worker-probe.sh
+  - src/config.ts
+  - src/container-runner.ts
+  - src/container-runtime.ts
+  - src/db.ts
+  - src/event-bridge.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/types.ts
+  - src/worker-run-supervisor.ts
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts
+
+### jarvis-extension-boundary - Jarvis Extension Boundary
+- Risk: high
+- Summary: Explicit Jarvis extension modules, lane identity, and dispatch-attempt state extracted out of NanoClaw core control files.
+- Keywords: jarvis extension, lane id, dispatch attempts, andy frontdesk, synthetic worker, architecture
+- Files (11):
+  - docs/architecture/nanoclaw-jarvis.md
+  - docs/architecture/nanoclaw-system-architecture.md
+  - src/db.ts
+  - src/extensions/jarvis/dispatch-service.ts
+  - src/extensions/jarvis/frontdesk-service.ts
+  - src/extensions/jarvis/index.ts
+  - src/extensions/jarvis/lanes.ts
+  - src/extensions/jarvis/request-state-service.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/types.ts
+- Tests (2):
+  - src/ipc-auth.test.ts
+  - src/jarvis-worker-dispatch.test.ts
+- Shared Files:
+  - src/db.ts
+  - src/index.ts
+  - src/ipc.ts
+  - src/types.ts
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
+
+### architecture-boundary-governance - Architecture Boundary Governance
+- Risk: high
+- Summary: Hard boundary contract and deterministic checks that keep upstream NanoClaw core separate from Jarvis extension logic.
+- Keywords: architecture boundary, core vs extension, governance, enforcement, agent guardrails, jarvis customization
+- Files (8):
+  - .claude/progress/feature-catalog.seed.json
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/ARCHITECTURE.md
+  - docs/README.md
+  - scripts/check-architecture-boundary.sh
+  - scripts/check-workflow-contracts.sh
+- Tests (0):
+  - none
+- Shared Files:
+  - .claude/progress/feature-catalog.seed.json
+- Suggested Verify:
+  - npm run typecheck
 
 ### reliability-e2e - Reliability E2E Harness
 - Risk: medium
@@ -229,6 +308,8 @@ Project: nanoclaw
   - none
 - Shared Files:
   - scripts/jarvis-happiness-gate.sh
+  - scripts/jarvis-incident.sh
+  - scripts/jarvis-worker-probe.sh
 - Suggested Verify:
   - npm run typecheck
 
@@ -328,6 +409,8 @@ Project: nanoclaw
   - .claude/skills/feature-tracking/SKILL.md
 - Tests (0):
   - none
+- Shared Files:
+  - .claude/progress/feature-catalog.seed.json
 - Suggested Verify:
   - npm run typecheck
 

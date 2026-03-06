@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 
 root_dir = sys.argv[1]
@@ -315,13 +316,36 @@ def load_registry(path: str) -> dict:
     return normalize_registry(raw)
 
 
+def atomic_write_json(path: str, payload: dict) -> None:
+    ensure_parent(path)
+    dir_path = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".incident-write-",
+        suffix=".json.tmp",
+        dir=dir_path,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=True, indent=2)
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        with open(tmp_path, "r", encoding="utf-8") as f:
+            json.load(f)
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def save_registry(path: str, doc: dict) -> None:
     ensure_parent(path)
     normalized = normalize_registry(doc)
     normalized["updated_at"] = now_iso()
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(normalized, f, ensure_ascii=True, indent=2)
-        f.write("\n")
+    atomic_write_json(path, normalized)
 
 
 def find_incident(doc: dict, incident_id: str):
@@ -352,10 +376,7 @@ def output(payload: dict, args):
 
     json_out = getattr(args, "json_out", "")
     if json_out:
-        ensure_parent(json_out)
-        with open(json_out, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=True, indent=2)
-            f.write("\n")
+        atomic_write_json(json_out, payload)
 
 
 def shared_output_flags(p):

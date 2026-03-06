@@ -20,7 +20,7 @@ Use debugging modes that expose root cause quickly and deterministically.
 2. `bash scripts/jarvis-ops.sh incident-bundle --window-minutes 180 --lane andy-developer` to capture repeatable evidence.
 3. DB/source-of-truth checks (`andy_requests`, `worker_runs`, `dispatch-block` artifacts) before chat-text interpretation.
 4. E2E repro scripts (`scripts/test-andy-full-user-journey-e2e.ts`, `scripts/test-andy-user-e2e.ts`) to validate user-facing behavior and linkage.
-5. Deterministic validation reruns after fix (`verify-worker-connectivity`, acceptance gate, happiness gate when user-facing).
+5. Deterministic validation reruns after fix (`verify-worker-connectivity`, `linkage-audit`, acceptance gate, happiness gate when user-facing).
 
 ### Low-Signal Debugging (Avoid)
 
@@ -28,12 +28,15 @@ Use debugging modes that expose root cause quickly and deterministically.
 2. Declaring success from `reliability` pass/warn summaries alone.
 3. Parsing conversational ack text as primary truth when DB linkage fields exist.
 4. Treating sandbox permission artifacts as production runtime failures without out-of-sandbox confirmation.
+5. Grepping the entire historical log after restart and treating old failures as current-runtime regressions.
 
 ## Root Cause -> Exact Fix Patterns
 
 | Symptom Pattern | Root Cause | Fix Pattern | Verify |
 |----------------|------------|-------------|--------|
 | Dispatch blocked (`invalid dispatch payload`) and request remains `coordinator_active` without `worker_run_id` | Coordinator dispatched without required linkage field(s) | Inject required linkage field(s) at dispatch composition time; align dispatch docs + lint + tests with runtime contract | Full-user-journey E2E shows `request_id -> worker_run_id` linkage and no new dispatch-block artifacts |
+| `No channel for JID: jarvis-worker-*@nanoclaw` during probe or Andy->worker dispatch | Root runtime lost the fork-specific internal synthetic-worker send path and tried to route worker JIDs like external channels | Restore root `src/index.ts` + `src/ipc.ts` internal `@nanoclaw` dispatch handling; verify worker lanes are processed as synthetic internal groups | `verify-worker-connectivity` creates fresh `probe-*` rows and both lanes reach `review_requested` |
+| `Dispatch blocked by validator` with `context_intent=continue requires a reusable prior session...` and the original request stays `coordinator_active` | Follow-up dispatch had no reusable session and the blocked request was not transitioned terminal | Keep validator block, but mark blocked request `failed` with reason text so only the retry request remains active | Full-user-journey E2E shows blocked first attempt, linked retry request, and `linkage-audit` PASS with no stale unlinked active requests |
 | `verify-worker-connectivity` false-negative in transient runtime windows | Preflight signal too coarse/noisy | Split preflight behavior into deterministic checks with explicit failure detail and permission-context hints | `verify-worker-connectivity` PASS with preflight PASS; no recurrence in incident notes |
 | `failed_contract` from stale/duplicate completion blocks | Completion parser chooses wrong block | Parse and validate latest valid `<completion>` block and add regression test | Focused probe transitions to `review_requested` for both worker lanes |
 | Acceptance/connectivity gate fails on shell portability (`mapfile`/bash3 mismatch) | Script relies on non-portable shell features | Replace with bash3-safe `while read` patterns and retest gates | Acceptance gate PASS + connectivity PASS across runtime environment |
@@ -44,7 +47,7 @@ Use debugging modes that expose root cause quickly and deterministically.
 2. Extract concrete blocker artifacts (`dispatch-block-*`, failed run rows, or trace reason markers).
 3. Reproduce with full E2E + DB assertions, not chat-text assumptions.
 4. Patch the exact failing layer (`contract`, `composer`, `validator`, `parser`, or portability path).
-5. Re-verify with deterministic gates (`verify-worker-connectivity`, happiness gate when user-facing, acceptance gate).
+5. Re-verify with deterministic gates (`verify-worker-connectivity`, `linkage-audit`, happiness gate when user-facing, acceptance gate).
 
 ## 1) Container Runtime Health
 
@@ -66,6 +69,7 @@ If logs show `ERR_FS_CP_EINVAL` with `src and dest cannot be the same` under `.c
 1. confirm runtime is on latest `src/container-runner.ts`
 2. verify skill staging skips hidden entries (like `.docs`)
 3. restart NanoClaw service after build (`launchctl kickstart -k gui/$(id -u)/com.nanoclaw`)
+4. scope log review to the current runtime PID or a post-restart tail before deciding the issue still reproduces
 
 ## 2) Worker Build Failures
 

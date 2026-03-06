@@ -66,6 +66,7 @@
         "groups/andy-developer/docs/jarvis-dispatch.md"
       ],
       "tests": [
+        "src/extensions/jarvis/frontdesk-service.test.ts",
         "src/ipc-auth.test.ts",
         "src/jarvis-worker-dispatch.test.ts"
       ]
@@ -188,6 +189,94 @@
         "src/jarvis-worker-dispatch.test.ts",
         "src/worker-run-supervisor.test.ts"
       ]
+    },
+    {
+      "id": "forked-worker-runtime-restore",
+      "name": "Forked Worker Runtime Restore",
+      "summary": "Root-runtime parity for synthetic worker dispatch, Andy linkage, and live worker recovery in the customized fork.",
+      "risk": "high",
+      "keywords": [
+        "fork",
+        "worker dispatch",
+        "synthetic worker",
+        "andy",
+        "request linkage",
+        "runtime restore"
+      ],
+      "files": [
+        "src/index.ts",
+        "src/ipc.ts",
+        "src/db.ts",
+        "src/config.ts",
+        "src/types.ts",
+        "src/container-runner.ts",
+        "src/container-runtime.ts",
+        "src/event-bridge.ts",
+        "src/worker-run-supervisor.ts",
+        "scripts/jarvis-worker-probe.sh",
+        "scripts/jarvis-incident.sh"
+      ],
+      "tests": [
+        "src/ipc-auth.test.ts",
+        "src/jarvis-worker-dispatch.test.ts",
+        "src/worker-run-supervisor.test.ts"
+      ]
+    },
+    {
+      "id": "jarvis-extension-boundary",
+      "name": "Jarvis Extension Boundary",
+      "summary": "Explicit Jarvis extension modules, lane identity, and dispatch-attempt state extracted out of NanoClaw core control files.",
+      "risk": "high",
+      "keywords": [
+        "jarvis extension",
+        "lane id",
+        "dispatch attempts",
+        "andy frontdesk",
+        "synthetic worker",
+        "architecture"
+      ],
+      "files": [
+        "src/index.ts",
+        "src/ipc.ts",
+        "src/db.ts",
+        "src/types.ts",
+        "src/extensions/jarvis/index.ts",
+        "src/extensions/jarvis/lanes.ts",
+        "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/dispatch-service.ts",
+        "src/extensions/jarvis/request-state-service.ts",
+        "docs/architecture/nanoclaw-jarvis.md",
+        "docs/architecture/nanoclaw-system-architecture.md"
+      ],
+      "tests": [
+        "src/ipc-auth.test.ts",
+        "src/jarvis-worker-dispatch.test.ts"
+      ]
+    },
+    {
+      "id": "architecture-boundary-governance",
+      "name": "Architecture Boundary Governance",
+      "summary": "Hard boundary contract and deterministic checks that keep upstream NanoClaw core separate from Jarvis extension logic.",
+      "risk": "high",
+      "keywords": [
+        "architecture boundary",
+        "core vs extension",
+        "governance",
+        "enforcement",
+        "agent guardrails",
+        "jarvis customization"
+      ],
+      "files": [
+        "docs/ARCHITECTURE.md",
+        "CLAUDE.md",
+        "AGENTS.md",
+        "DOCS.md",
+        "docs/README.md",
+        "scripts/check-workflow-contracts.sh",
+        "scripts/check-architecture-boundary.sh",
+        ".claude/progress/feature-catalog.seed.json"
+      ],
+      "tests": []
     },
     {
       "id": "reliability-e2e",

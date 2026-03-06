@@ -218,7 +218,9 @@ PY
 
   if [ "$SKIP_LINT" -eq 0 ]; then
     if [ -x "scripts/jarvis-pre-dispatch-gate.sh" ]; then
-      if ! scripts/jarvis-pre-dispatch-gate.sh --file "$payload_file" --target-folder "$folder" --db "$DB_PATH" >/tmp/jarvis-probe-lint.out 2>&1; then
+      # Probes generate the connectivity evidence that normal dispatches consume,
+      # so requiring recent connectivity proof here deadlocks an empty window.
+      if ! scripts/jarvis-pre-dispatch-gate.sh --file "$payload_file" --target-folder "$folder" --db "$DB_PATH" --skip-connectivity >/tmp/jarvis-probe-lint.out 2>&1; then
         echo
         echo "[PROBE] $folder ($jid)"
         echo "  run_id: $run_id"

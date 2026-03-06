@@ -10,6 +10,7 @@
 - Before ending a session with in-progress work or blockers, follow `docs/workflow/session-recall.md` handoff flow (`qctx --close`).
 - Before changing session recall/sync/export behavior, follow `docs/workflow/session-recall.md`.
 - Before creating a new docs file or adding a new `CLAUDE.md` trigger, follow `docs/workflow/doc-creation-contract.md`.
+- Before changing core-vs-extension ownership or adding Jarvis-specific logic to shared runtime files, follow `docs/ARCHITECTURE.md`.
 - Run the task-start skill/MCP routing preflight defined by `CLAUDE.md` before ad-hoc implementation/debugging.
 - Before starting feature/bug/reliability implementation (default single-lane), follow `docs/workflow/nanoclaw-development-loop.md`.
 - Before changing workflow strategy/cadence based on external research, follow `docs/workflow/workflow-optimization-loop.md`.

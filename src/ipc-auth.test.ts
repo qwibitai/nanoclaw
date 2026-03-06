@@ -2,13 +2,22 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  createAndyRequestIfAbsent,
   createTask,
   getAllTasks,
+  getAndyRequestById,
+  getWorkerRun,
   getRegisteredGroup,
   getTaskById,
+  listDispatchAttemptsForRequest,
   setRegisteredGroup,
 } from './db.js';
-import { isIpcTargetAuthorized, processTaskIpc, IpcDeps } from './ipc.js';
+import {
+  isIpcTargetAuthorized,
+  processTaskIpc,
+  queueAndyWorkerDispatchRun,
+  IpcDeps,
+} from './ipc.js';
 import { RegisteredGroup } from './types.js';
 
 // Set up registered groups used across tests
@@ -163,7 +172,27 @@ describe('schedule_task authorization', () => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: 'delegate worker task',
+        prompt: JSON.stringify({
+          run_id: 'task-andy-worker-1',
+          request_id: 'req-andy-worker-1',
+          task_type: 'implement',
+          context_intent: 'fresh',
+          input: 'delegate worker task',
+          repo: 'openclaw-gurusharan/nanoclaw',
+          branch: 'jarvis-andy-worker-test',
+          acceptance_tests: ['npm test'],
+          output_contract: {
+            required_fields: [
+              'run_id',
+              'branch',
+              'commit_sha',
+              'files_changed',
+              'test_result',
+              'risk',
+              'pr_url',
+            ],
+          },
+        }),
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
         targetJid: 'jarvis-worker-1@nanoclaw',
@@ -176,6 +205,113 @@ describe('schedule_task authorization', () => {
     const allTasks = getAllTasks();
     expect(allTasks.length).toBe(1);
     expect(allTasks[0].group_folder).toBe('jarvis-worker-1');
+  });
+
+  it('marks andy request failed when worker dispatch is blocked before queueing', async () => {
+    createAndyRequestIfAbsent({
+      request_id: 'req-invalid-dispatch',
+      chat_jid: 'andy-developer@g.us',
+      source_group_folder: 'andy-developer',
+      user_message_id: 'msg-invalid-dispatch',
+      user_prompt: 'dispatch this work',
+      intent: 'work_intake',
+      state: 'queued_for_coordinator',
+    });
+
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: JSON.stringify({
+          run_id: 'task-invalid-dispatch',
+          request_id: 'req-invalid-dispatch',
+          task_type: 'implement',
+          context_intent: 'fresh',
+          input: 'delegate worker task',
+          repo: 'openclaw-gurusharan/nanoclaw',
+          branch: 'invalid-branch-name',
+          acceptance_tests: ['npm test'],
+          output_contract: {
+            required_fields: [
+              'run_id',
+              'branch',
+              'commit_sha',
+              'files_changed',
+              'test_result',
+              'risk',
+              'pr_url',
+            ],
+          },
+        }),
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        targetJid: 'jarvis-worker-1@nanoclaw',
+      },
+      'andy-developer',
+      false,
+      deps,
+    );
+
+    const request = getAndyRequestById('req-invalid-dispatch');
+    const attempts = listDispatchAttemptsForRequest('req-invalid-dispatch');
+    expect(request?.worker_run_id).toBeNull();
+    expect(request?.state).toBe('failed');
+    expect(request?.last_status_text).toContain('Dispatch blocked before worker queue');
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].status).toBe('blocked');
+    expect(attempts[0].source_lane_id).toBe('andy-developer');
+    expect(attempts[0].target_lane_id).toBe('jarvis-worker-1');
+  });
+
+  it('records queued dispatch attempts with canonical lane ids', () => {
+    createAndyRequestIfAbsent({
+      request_id: 'req-queued-dispatch',
+      chat_jid: 'andy-developer@g.us',
+      source_group_folder: 'andy-developer',
+      user_message_id: 'msg-queued-dispatch',
+      user_prompt: 'dispatch this work',
+      intent: 'work_intake',
+      state: 'queued_for_coordinator',
+    });
+
+    const decision = queueAndyWorkerDispatchRun(
+      'andy-developer',
+      groups['jarvis-worker-1@nanoclaw'],
+      JSON.stringify({
+        run_id: 'task-queued-dispatch',
+        request_id: 'req-queued-dispatch',
+        task_type: 'implement',
+        context_intent: 'fresh',
+        input: 'delegate worker task',
+        repo: 'openclaw-gurusharan/nanoclaw',
+        branch: 'jarvis-queued-dispatch',
+        acceptance_tests: ['npm test'],
+        output_contract: {
+          required_fields: [
+            'run_id',
+            'branch',
+            'commit_sha',
+            'files_changed',
+            'test_result',
+            'risk',
+            'pr_url',
+          ],
+        },
+      }),
+    );
+
+    const attempts = listDispatchAttemptsForRequest('req-queued-dispatch');
+    const request = getAndyRequestById('req-queued-dispatch');
+    const workerRun = getWorkerRun('task-queued-dispatch');
+
+    expect(decision.allowSend).toBe(true);
+    expect(decision.queueState).toBe('new');
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0].status).toBe('queued');
+    expect(attempts[0].source_lane_id).toBe('andy-developer');
+    expect(attempts[0].target_lane_id).toBe('jarvis-worker-1');
+    expect(request?.worker_run_id).toBe('task-queued-dispatch');
+    expect(request?.worker_group_folder).toBe('jarvis-worker-1');
+    expect(workerRun?.lane_id).toBe('jarvis-worker-1');
   });
 });
 
