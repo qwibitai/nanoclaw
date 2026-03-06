@@ -60,6 +60,11 @@ export function initTraceDb(): void {
   } catch {
     /* already exists */
   }
+  // On startup: close any traces that were left open by a previous crash/restart
+  db.prepare(
+    `UPDATE traces SET finished_at = ?, status = 'interrupted', error = 'Service restarted'
+     WHERE finished_at IS NULL`,
+  ).run(new Date().toISOString());
   purgeOldTraces();
 }
 
