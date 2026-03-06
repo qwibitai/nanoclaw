@@ -120,6 +120,7 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -267,6 +268,30 @@ export async function runContainerAgent(
   fs.mkdirSync(groupDir, { recursive: true });
 
   const mounts = buildVolumeMounts(group, input.isMain);
+
+  // When running as root (UID 0), writable mount directories are owned by root,
+  // but the container runs as `node` (UID 1000). chown them so the container can write.
+  if (process.getuid?.() === 0) {
+    for (const m of mounts) {
+      if (!m.readonly && fs.existsSync(m.hostPath)) {
+        try {
+          fs.chownSync(m.hostPath, 1000, 1000);
+          // Also chown immediate children (e.g. debug/, input/, messages/)
+          for (const child of fs.readdirSync(m.hostPath)) {
+            const childPath = path.join(m.hostPath, child);
+            try {
+              fs.chownSync(childPath, 1000, 1000);
+            } catch {
+              // skip files we can't chown (e.g. read-only)
+            }
+          }
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  }
+
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
