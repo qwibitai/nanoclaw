@@ -1,18 +1,22 @@
 /**
- * Web Chat Channel
- * Socket.IO + Express server for website live chat.
- * Serves static widget files and handles real-time messaging.
- * JID format: web:sheridan (one JID per business, multiple concurrent visitors)
+ * Web Channel — Socket.IO chat widget channel
+ * Receives inbound messages from website chat widgets, sends outbound via Socket.IO.
+ * JID format: web:{business} (e.g., web:snak-group)
+ *
+ * Widget connects with { business: 'snak-group' } in handshake query.
+ * Each socket is mapped to a session ID for reply routing.
  */
-import crypto from 'crypto';
 import http from 'http';
-import fs from 'fs';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
+
+import { Server as SocketIOServer, Socket } from 'socket.io';
 
 import {
+  ASSISTANT_NAME,
   WEB_CHANNEL_PORT,
   WEB_CHANNEL_ORIGINS,
-  ASSISTANT_NAME,
 } from '../config.js';
 import { logger } from '../logger.js';
 import {
@@ -23,214 +27,90 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
-// ── Rate Limiting ──────────────────────────────────────────────────
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const RATE_LIMIT_MAX_REQUESTS = 30;
-
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
-const rateLimitMap = new Map<string, RateLimitEntry>();
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now - entry.windowStart > RATE_LIMIT_WINDOW_MS * 2) {
-      rateLimitMap.delete(ip);
-    }
-  }
-}, 300_000);
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitMap.set(ip, { count: 1, windowStart: now });
-    return false;
-  }
-
-  entry.count++;
-  return entry.count > RATE_LIMIT_MAX_REQUESTS;
-}
-
-// ── Types ──────────────────────────────────────────────────────────
-
 export interface WebChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
-interface VisitorSession {
-  socketId: string;
-  visitorId: string;
-  ip: string;
-  connectedAt: string;
-}
-
-// ── Channel Implementation ─────────────────────────────────────────
-
 export class WebChannel implements Channel {
   name = 'web';
 
   private server: http.Server | null = null;
-  private io: any = null; // Socket.IO server instance
+  private io: SocketIOServer | null = null;
   private connected = false;
   private opts: WebChannelOpts;
 
-  /** Map visitorId → socket for outbound routing. */
-  private visitorSockets = new Map<string, any>();
+  /**
+   * Track active sockets by JID so we can send replies.
+   * Key: web:{business}, Value: Map<sessionId, Socket>
+   */
+  private socketsByJid = new Map<string, Map<string, Socket>>();
 
-  /** Map socket.id → visitorId for cleanup on disconnect. */
-  private socketToVisitor = new Map<string, string>();
-
-  /** Track last sender per JID for reply routing. */
-  private lastSenderByJid = new Map<string, string>();
-
-  /** Dedup processed message IDs. */
-  private processedMessageIds = new Set<string>();
-
-  /** Widget static files directory. */
-  private widgetDir: string;
+  /**
+   * Track the most recent session per JID for reply routing.
+   */
+  private lastSessionByJid = new Map<string, string>();
 
   constructor(opts: WebChannelOpts) {
     this.opts = opts;
-    this.widgetDir = path.resolve(process.cwd(), 'widget');
   }
 
   async connect(): Promise<void> {
-    // Dynamic import of socket.io (ESM)
-    const { Server } = await import('socket.io');
+    const widgetDir = path.resolve(process.cwd(), 'widget');
 
-    // Parse allowed origins
-    const origins = WEB_CHANNEL_ORIGINS
-      ? WEB_CHANNEL_ORIGINS.split(',').map((o) => o.trim())
-      : ['*'];
-
-    // Create HTTP server for static files + Socket.IO
     this.server = http.createServer((req, res) => {
-      const ip =
-        req.headers['x-forwarded-for']?.toString().split(',')[0].trim() ||
-        req.socket.remoteAddress ||
-        'unknown';
-
-      if (isRateLimited(ip)) {
-        res.writeHead(429, { 'Content-Type': 'application/json' });
-        res.end('{"error":"rate limited"}');
-        return;
-      }
-
-      // CORS headers
-      const origin = req.headers.origin || '';
-      if (origins.includes('*') || origins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin || '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-      }
-
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
-        res.end();
-        return;
-      }
-
       // Serve static widget files
-      if (req.method === 'GET' && req.url?.startsWith('/widget/')) {
-        this.serveStatic(req, res);
-        return;
-      }
+      if (req.method === 'GET' && req.url) {
+        const url = new URL(req.url, `http://localhost:${WEB_CHANNEL_PORT}`);
+        const filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+        const fullPath = path.join(widgetDir, filePath);
 
-      // Health check
-      if (req.method === 'GET' && req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            status: 'ok',
-            visitors: this.visitorSockets.size,
-          }),
-        );
-        return;
+        // Prevent path traversal
+        if (!fullPath.startsWith(widgetDir)) {
+          res.writeHead(403);
+          res.end('Forbidden');
+          return;
+        }
+
+        if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+          const ext = path.extname(fullPath).toLowerCase();
+          const mimeTypes: Record<string, string> = {
+            '.html': 'text/html',
+            '.js': 'application/javascript',
+            '.css': 'text/css',
+            '.png': 'image/png',
+            '.svg': 'image/svg+xml',
+          };
+          res.writeHead(200, {
+            'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+            'Access-Control-Allow-Origin': '*',
+          });
+          fs.createReadStream(fullPath).pipe(res);
+          return;
+        }
       }
 
       res.writeHead(200);
       res.end('ok');
     });
 
-    // Create Socket.IO server
-    this.io = new Server(this.server, {
+    this.io = new SocketIOServer(this.server, {
       cors: {
-        origin: origins.includes('*') ? true : origins,
+        origin: WEB_CHANNEL_ORIGINS.length > 0 ? WEB_CHANNEL_ORIGINS : '*',
         methods: ['GET', 'POST'],
       },
-      pingTimeout: 60000,
-      pingInterval: 25000,
+      serveClient: true,
     });
 
-    // Handle connections
-    this.io.on('connection', (socket: any) => {
-      const ip =
-        socket.handshake.headers['x-forwarded-for']?.split(',')[0].trim() ||
-        socket.handshake.address ||
-        'unknown';
+    this.io.on('connection', (socket) => this.handleConnection(socket));
 
-      if (isRateLimited(ip)) {
-        socket.disconnect(true);
-        return;
-      }
-
-      // Generate or restore visitor ID
-      const visitorId =
-        socket.handshake.auth?.visitorId || crypto.randomUUID();
-
-      logger.info(
-        { visitorId, socketId: socket.id, ip },
-        'Web chat visitor connected',
-      );
-
-      // Track the connection
-      this.visitorSockets.set(visitorId, socket);
-      this.socketToVisitor.set(socket.id, visitorId);
-
-      // Send visitor their ID (for reconnection)
-      socket.emit('session', { visitorId });
-
-      // Handle incoming messages
-      socket.on('message', (data: { text?: string }) => {
-        if (!data?.text?.trim()) return;
-
-        if (isRateLimited(ip)) {
-          socket.emit('error', { message: 'Too many messages, slow down' });
-          return;
-        }
-
-        this.handleInboundMessage(visitorId, data.text.trim(), ip);
-      });
-
-      // Handle disconnect
-      socket.on('disconnect', () => {
-        logger.debug({ visitorId }, 'Web chat visitor disconnected');
-        this.socketToVisitor.delete(socket.id);
-        // Keep visitorSockets entry for a while in case they reconnect
-        // Clean up after 5 minutes
-        setTimeout(() => {
-          const current = this.visitorSockets.get(visitorId);
-          if (current === socket) {
-            this.visitorSockets.delete(visitorId);
-          }
-        }, 300_000);
-      });
-    });
-
-    // Start listening
     await new Promise<void>((resolve) => {
       this.server!.listen(WEB_CHANNEL_PORT, () => {
         this.connected = true;
         logger.info(
-          { port: WEB_CHANNEL_PORT, origins },
-          'Web channel server listening',
+          { port: WEB_CHANNEL_PORT, origins: WEB_CHANNEL_ORIGINS },
+          'Web channel listening',
         );
         resolve();
       });
@@ -238,31 +118,28 @@ export class WebChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    // Find the visitor to send to
-    const visitorId = this.lastSenderByJid.get(jid);
-    if (!visitorId) {
-      logger.warn({ jid }, 'No visitor known for web reply');
+    const sessionId = this.lastSessionByJid.get(jid);
+    if (!sessionId) {
+      logger.warn({ jid }, 'No active web session for reply');
       return;
     }
 
-    const socket = this.visitorSockets.get(visitorId);
-    if (!socket?.connected) {
-      logger.warn(
-        { jid, visitorId },
-        'Visitor socket not connected for reply',
-      );
+    const socketsForJid = this.socketsByJid.get(jid);
+    const socket = socketsForJid?.get(sessionId);
+    if (!socket || !socket.connected) {
+      logger.warn({ jid, sessionId }, 'Web socket disconnected, cannot reply');
       return;
     }
 
-    // Parse structured content from Andy's response
-    // Andy can embed structured data using XML-like tags
-    const parsed = this.parseResponse(text);
-
-    socket.emit('message', parsed);
+    socket.emit('message', {
+      sender: ASSISTANT_NAME,
+      text,
+      timestamp: new Date().toISOString(),
+    });
 
     logger.info(
-      { jid, visitorId, length: text.length },
-      'Web message sent to visitor',
+      { jid, sessionId, length: text.length },
+      'Web message sent',
     );
   }
 
@@ -280,212 +157,90 @@ export class WebChannel implements Channel {
       this.io.close();
     }
     if (this.server) {
-      await new Promise<void>((resolve) =>
-        this.server!.close(() => resolve()),
-      );
+      await new Promise<void>((resolve) => this.server!.close(() => resolve()));
     }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    const visitorId = this.lastSenderByJid.get(jid);
-    if (!visitorId) return;
+    const sessionId = this.lastSessionByJid.get(jid);
+    if (!sessionId) return;
 
-    const socket = this.visitorSockets.get(visitorId);
-    if (!socket?.connected) return;
+    const socketsForJid = this.socketsByJid.get(jid);
+    const socket = socketsForJid?.get(sessionId);
+    if (!socket || !socket.connected) return;
 
-    socket.emit('typing', isTyping);
+    socket.emit('typing', { isTyping });
   }
 
-  // ── Inbound Message Handling ─────────────────────────────────────
+  // ── Connection handler ──────────────────────────────────────────
 
-  private handleInboundMessage(
-    visitorId: string,
-    text: string,
-    ip: string,
-  ): void {
-    const msgId = `web-${visitorId}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  private handleConnection(socket: Socket): void {
+    const business =
+      (socket.handshake.query.business as string) || 'default';
+    const jid = `web:${business}`;
+    const sessionId =
+      (socket.handshake.query.sessionId as string) ||
+      crypto.randomUUID();
 
-    // Dedup
-    if (this.processedMessageIds.has(msgId)) return;
-    this.processedMessageIds.add(msgId);
+    logger.info({ jid, sessionId }, 'Web client connected');
 
-    // Cap dedup set
-    if (this.processedMessageIds.size > 5000) {
-      const entries = [...this.processedMessageIds];
-      this.processedMessageIds = new Set(entries.slice(-2500));
+    // Track socket
+    if (!this.socketsByJid.has(jid)) {
+      this.socketsByJid.set(jid, new Map());
     }
+    this.socketsByJid.get(jid)!.set(sessionId, socket);
+    this.lastSessionByJid.set(jid, sessionId);
 
-    // Route to the sheridan web JID
-    const jid = 'web:sheridan';
-
-    // Track visitor for reply routing
-    this.lastSenderByJid.set(jid, visitorId);
-
-    const timestamp = new Date().toISOString();
+    // Send session ID back to client
+    socket.emit('session', { sessionId });
 
     // Update chat metadata
-    this.opts.onChatMetadata(jid, timestamp, 'Web Chat');
+    this.opts.onChatMetadata(jid, new Date().toISOString(), `Web: ${business}`);
 
-    // Only deliver to registered groups
-    const groups = this.opts.registeredGroups();
-    if (!groups[jid]) {
-      logger.warn({ jid }, 'Web JID not registered, message dropped');
-      return;
-    }
+    socket.on('message', (data: { text?: string; history?: string }) => {
+      const text = data?.text?.trim();
+      if (!text) return;
 
-    const newMsg: NewMessage = {
-      id: msgId,
-      chat_jid: jid,
-      sender: `visitor:${visitorId}`,
-      sender_name: `Web Visitor`,
-      content: text,
-      timestamp,
-      is_from_me: false,
-      is_bot_message: false,
-    };
+      // Only deliver to registered groups
+      const groups = this.opts.registeredGroups();
+      if (!groups[jid]) {
+        logger.warn({ jid }, 'Web message for unregistered group, ignoring');
+        return;
+      }
 
-    this.opts.onMessage(jid, newMsg);
-  }
+      this.lastSessionByJid.set(jid, sessionId);
 
-  // ── Response Parsing ─────────────────────────────────────────────
+      const msgId = `web-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
-  /**
-   * Parse Andy's response for structured content.
-   * Andy can include buttons, price breakdowns, and payment links using tags:
-   *
-   * <buttons>Book Now|Check Availability|Ask a Question</buttons>
-   * <payment-link url="https://..." label="Pay $250 Deposit">Pay Deposit</payment-link>
-   * <price-breakdown title="RV Camper — 3 Nights" total="$525.00" deposit="$250.00" balance="$275.00">
-   *   3 nights x $150/night = $450.00
-   *   Generator (3 nights x $100) = $300.00
-   * </price-breakdown>
-   */
-  private parseResponse(text: string): {
-    content: string;
-    buttons?: Array<{ label: string; value: string }>;
-    paymentLink?: string;
-    paymentLabel?: string;
-    priceBreakdown?: {
-      title: string;
-      items: Array<{ label: string; amount: string }>;
-      total: string;
-      deposit?: string;
-      balance?: string;
-    };
-  } {
-    const result: {
-      content: string;
-      buttons?: Array<{ label: string; value: string }>;
-      paymentLink?: string;
-      paymentLabel?: string;
-      priceBreakdown?: {
-        title: string;
-        items: Array<{ label: string; amount: string }>;
-        total: string;
-        deposit?: string;
-        balance?: string;
+      // If this is an escalation with FAQ history, prepend it
+      let content = text;
+      if (data.history) {
+        content = `[FAQ conversation history]\n${data.history}\n[End FAQ history]\n\n${text}`;
+      }
+
+      const newMsg: NewMessage = {
+        id: msgId,
+        chat_jid: jid,
+        sender: `visitor:${sessionId.slice(0, 8)}`,
+        sender_name: 'Website Visitor',
+        content,
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+        is_bot_message: false,
       };
-    } = { content: text };
 
-    // Extract price breakdown
-    const priceMatch = text.match(
-      /<price-breakdown\s+title="([^"]+)"\s+total="([^"]+)"(?:\s+deposit="([^"]+)")?(?:\s+balance="([^"]+)")?\s*>([\s\S]*?)<\/price-breakdown>/,
-    );
-    if (priceMatch) {
-      const lines = priceMatch[5]
-        .trim()
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean);
-      const items = lines.map((line) => {
-        // Parse "label = amount" or "label: amount"
-        const eqMatch = line.match(/^(.+?)\s*[=:]\s*(\$[\d,.]+)$/);
-        if (eqMatch) {
-          return { label: eqMatch[1].trim(), amount: eqMatch[2].trim() };
-        }
-        return { label: line, amount: '' };
-      });
-
-      result.priceBreakdown = {
-        title: priceMatch[1],
-        items,
-        total: priceMatch[2],
-        deposit: priceMatch[3] || undefined,
-        balance: priceMatch[4] || undefined,
-      };
-      result.content = result.content
-        .replace(/<price-breakdown[\s\S]*?<\/price-breakdown>/, '')
-        .trim();
-    }
-
-    // Extract buttons: <buttons>Label1|Label2|Label3</buttons>
-    const buttonsMatch = text.match(/<buttons>(.*?)<\/buttons>/s);
-    if (buttonsMatch) {
-      result.buttons = buttonsMatch[1]
-        .split('|')
-        .map((b) => b.trim())
-        .filter(Boolean)
-        .map((label) => ({ label, value: label }));
-      result.content = result.content
-        .replace(/<buttons>.*?<\/buttons>/s, '')
-        .trim();
-    }
-
-    // Extract payment link: <payment-link url="..." label="...">Text</payment-link>
-    const paymentMatch = text.match(
-      /<payment-link\s+url="([^"]+)"(?:\s+label="([^"]+)")?\s*>(.*?)<\/payment-link>/s,
-    );
-    if (paymentMatch) {
-      result.paymentLink = paymentMatch[1];
-      result.paymentLabel = paymentMatch[2] || paymentMatch[3] || 'Complete Payment';
-      result.content = result.content
-        .replace(/<payment-link[^>]*>.*?<\/payment-link>/s, '')
-        .trim();
-    }
-
-    return result;
-  }
-
-  // ── Static File Serving ──────────────────────────────────────────
-
-  private serveStatic(
-    req: http.IncomingMessage,
-    res: http.ServerResponse,
-  ): void {
-    const urlPath = req.url || '';
-    // Strip /widget/ prefix and decode
-    const fileName = decodeURIComponent(urlPath.replace('/widget/', ''));
-
-    // Security: prevent path traversal
-    const safeName = path.basename(fileName);
-    const filePath = path.join(this.widgetDir, safeName);
-
-    // Check file exists
-    if (!fs.existsSync(filePath)) {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
-    }
-
-    // Content type mapping
-    const ext = path.extname(safeName).toLowerCase();
-    const contentTypes: Record<string, string> = {
-      '.js': 'application/javascript',
-      '.css': 'text/css',
-      '.html': 'text/html',
-      '.png': 'image/png',
-      '.svg': 'image/svg+xml',
-    };
-
-    const contentType = contentTypes[ext] || 'application/octet-stream';
-
-    // Cache for 1 hour
-    res.writeHead(200, {
-      'Content-Type': contentType,
-      'Cache-Control': 'public, max-age=3600',
+      this.opts.onMessage(jid, newMsg);
     });
 
-    fs.createReadStream(filePath).pipe(res);
+    socket.on('disconnect', () => {
+      logger.info({ jid, sessionId }, 'Web client disconnected');
+      const socketsForJid = this.socketsByJid.get(jid);
+      if (socketsForJid) {
+        socketsForJid.delete(sessionId);
+        if (socketsForJid.size === 0) {
+          this.socketsByJid.delete(jid);
+        }
+      }
+    });
   }
-
 }

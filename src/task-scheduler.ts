@@ -15,6 +15,7 @@ import {
 import {
   ContainerOutput,
   runContainerAgent,
+  writeMessagesSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
 import {
@@ -75,6 +76,9 @@ async function runTask(
     });
     return;
   }
+
+  // Write messages snapshot so container can query cross-channel activity
+  writeMessagesSnapshot(task.group_folder);
 
   // Update tasks snapshot for container to read (filtered by group)
   const isMain = task.group_folder === MAIN_GROUP_FOLDER;
@@ -252,6 +256,21 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
               );
             }
           }
+        }
+
+        // Advance next_run BEFORE enqueueing to prevent the 60s scheduler poll
+        // from re-finding this task as "due" before it finishes executing.
+        if (currentTask.schedule_type === 'cron') {
+          try {
+            const preAdvanceNextRun = CronExpressionParser.parse(
+              currentTask.schedule_value,
+              { tz: TIMEZONE },
+            ).next().toISOString();
+            updateTask(currentTask.id, { next_run: preAdvanceNextRun });
+          } catch { /* runTask will handle the error */ }
+        } else if (currentTask.schedule_type === 'once') {
+          // Mark once-tasks as paused immediately to prevent double-fire
+          updateTask(currentTask.id, { status: 'paused' });
         }
 
         deps.queue.enqueueTask(currentTask.chat_jid, currentTask.id, () =>

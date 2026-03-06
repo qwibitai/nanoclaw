@@ -17,6 +17,7 @@ import fs from 'fs';
 
 const DB_PATHS = [
   '/workspace/extra/booking-data/bookings.db',
+  '/workspace/project/services/booking/data/bookings.db',
   path.join(process.cwd(), 'data', 'bookings.db'),
 ];
 

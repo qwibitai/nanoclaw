@@ -336,14 +336,16 @@ export class QuoChannel implements Channel {
         return;
       }
 
+      // Accept validation/ping payloads that don't match the message schema
       const result = WebhookPayloadSchema.safeParse(payload);
       if (!result.success) {
-        logger.warn(
-          { errors: result.error.issues },
-          'Quo webhook: payload validation failed',
+        // Respond 200 anyway — this may be a validation ping from Quo
+        logger.info(
+          { payload },
+          'Quo webhook: non-message payload (validation ping?), accepting',
         );
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end('{"error":"invalid payload"}');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"ok":true}');
         return;
       }
 

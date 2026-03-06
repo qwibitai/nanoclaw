@@ -113,15 +113,7 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.reconnectWithBackoff();
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
@@ -129,10 +121,14 @@ export class WhatsAppChannel implements Channel {
       } else if (connection === 'open') {
         this.connected = true;
         this.lastConnectedAt = new Date().toISOString();
+        this.reconnectAttempt = 0; // Reset backoff on successful connection
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
         this.sock.sendPresenceUpdate('available').catch(() => {});
+
+        // Start periodic presence pings to reduce 428 keepalive disconnects
+        this.startPresencePings();
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
@@ -321,6 +317,11 @@ export class WhatsAppChannel implements Channel {
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
+      // Cap queue at 100 messages to prevent memory leak during extended disconnects
+      if (this.outgoingQueue.length > 100) {
+        const dropped = this.outgoingQueue.shift();
+        logger.warn({ jid: dropped?.jid, queueSize: this.outgoingQueue.length }, 'Queue cap exceeded, dropped oldest message');
+      }
       logger.info(
         { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
         'WA disconnected, message queued',
@@ -348,8 +349,44 @@ export class WhatsAppChannel implements Channel {
     return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
   }
 
+  /**
+   * Reconnect with exponential backoff. Retries indefinitely, capping at 5 min.
+   */
+  private reconnectAttempt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private presenceTimer: ReturnType<typeof setInterval> | null = null;
+
+  private reconnectWithBackoff(): void {
+    this.reconnectAttempt++;
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt - 1), 300000); // 1s, 2s, 4s, ... 5min cap
+    logger.info(
+      { attempt: this.reconnectAttempt, delayMs: delay },
+      'Reconnecting with backoff...',
+    );
+    this.reconnectTimer = setTimeout(() => {
+      this.connectInternal().catch((err) => {
+        logger.error({ err, attempt: this.reconnectAttempt }, 'Reconnect failed, will retry');
+        this.reconnectWithBackoff();
+      });
+    }, delay);
+  }
+
+  /**
+   * Start periodic presence pings to reduce 428 keepalive disconnects.
+   */
+  private startPresencePings(): void {
+    if (this.presenceTimer) return;
+    this.presenceTimer = setInterval(() => {
+      if (this.connected) {
+        this.sock.sendPresenceUpdate('available').catch(() => {});
+      }
+    }, 5 * 60 * 1000); // Every 5 minutes
+  }
+
   async disconnect(): Promise<void> {
     this.connected = false;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.presenceTimer) clearInterval(this.presenceTimer);
     this.sock?.end(undefined);
   }
 
@@ -475,13 +512,22 @@ export class WhatsAppChannel implements Channel {
         'Flushing outgoing message queue',
       );
       while (this.outgoingQueue.length > 0) {
-        const item = this.outgoingQueue.shift()!;
-        // Send directly — queued items are already prefixed by sendMessage
-        await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info(
-          { jid: item.jid, length: item.text.length },
-          'Queued message sent',
-        );
+        const item = this.outgoingQueue[0]; // peek, don't shift yet
+        try {
+          await this.sock.sendMessage(item.jid, { text: item.text });
+          this.outgoingQueue.shift(); // only remove after successful send
+          logger.info(
+            { jid: item.jid, length: item.text.length },
+            'Queued message sent',
+          );
+        } catch (err) {
+          // Send failed — stop flushing, keep remaining messages for next reconnect
+          logger.warn(
+            { jid: item.jid, err, remaining: this.outgoingQueue.length },
+            'Queue flush failed, will retry on next reconnect',
+          );
+          break;
+        }
       }
     } finally {
       this.flushing = false;

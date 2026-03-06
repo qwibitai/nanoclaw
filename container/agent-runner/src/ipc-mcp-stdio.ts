@@ -301,6 +301,75 @@ server.tool(
   },
 );
 
+server.tool(
+  'query_messages',
+  `Query recent messages from any registered channel (WhatsApp, Quo SMS, Web Chat, Email).
+Reads from the messages snapshot file written by the host. Useful for daily digests and checking message activity.`,
+  {
+    channel: z.enum(['all', 'whatsapp', 'quo', 'web', 'email']).default('all').describe('Filter by channel type'),
+    hours: z.number().default(24).describe('How many hours back to look'),
+    limit: z.number().default(50).describe('Maximum messages to return'),
+  },
+  async (args) => {
+    // Read from the messages snapshot that the host writes before scheduled tasks
+    const snapshotPath = path.join(IPC_DIR, 'recent_messages.json');
+
+    try {
+      if (!fs.existsSync(snapshotPath)) {
+        return {
+          content: [{ type: 'text' as const, text: 'No recent messages snapshot available. The host writes this before scheduled tasks run.' }],
+        };
+      }
+
+      const snapshot = JSON.parse(fs.readFileSync(snapshotPath, 'utf-8'));
+      let messages = snapshot.messages || [];
+
+      // Filter by channel
+      if (args.channel !== 'all') {
+        const prefixMap: Record<string, string> = {
+          whatsapp: '@',
+          quo: 'quo:',
+          web: 'web:',
+          email: 'email:',
+        };
+        const prefix = prefixMap[args.channel];
+        if (prefix === '@') {
+          messages = messages.filter((m: { chat_jid: string }) =>
+            m.chat_jid.endsWith('@g.us') || m.chat_jid.endsWith('@s.whatsapp.net'));
+        } else {
+          messages = messages.filter((m: { chat_jid: string }) => m.chat_jid.startsWith(prefix));
+        }
+      }
+
+      // Filter by time
+      const cutoff = new Date(Date.now() - args.hours * 60 * 60 * 1000).toISOString();
+      messages = messages.filter((m: { timestamp: string }) => m.timestamp >= cutoff);
+
+      // Limit
+      messages = messages.slice(-args.limit);
+
+      if (messages.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: `No ${args.channel} messages in the last ${args.hours} hours.` }],
+        };
+      }
+
+      const formatted = messages.map((m: { chat_jid: string; sender_name: string; content: string; timestamp: string; is_bot_message: boolean }) =>
+        `[${m.timestamp}] ${m.chat_jid} | ${m.sender_name}: ${m.content.slice(0, 200)}${m.is_bot_message ? ' (bot)' : ''}`
+      ).join('\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `${messages.length} messages (${args.channel}, last ${args.hours}h):\n${formatted}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading messages: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

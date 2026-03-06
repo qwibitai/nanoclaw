@@ -13,6 +13,7 @@ interface QueuedTask {
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
+const MIN_SPAWN_COOLDOWN_MS = 10000; // Minimum 10s between container spawns per group
 
 interface GroupState {
   active: boolean;
@@ -23,6 +24,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  lastSpawnTime: number; // timestamp of last container spawn — for rate limiting
 }
 
 export class GroupQueue {
@@ -45,6 +47,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        lastSpawnTime: 0,
       };
       this.groups.set(groupJid, state);
     }
@@ -174,9 +177,19 @@ export class GroupQueue {
     reason: 'messages' | 'drain',
   ): Promise<void> {
     const state = this.getGroup(groupJid);
+
+    // Rate limit: enforce minimum cooldown between container spawns
+    const sinceLastSpawn = Date.now() - state.lastSpawnTime;
+    if (sinceLastSpawn < MIN_SPAWN_COOLDOWN_MS) {
+      const waitMs = MIN_SPAWN_COOLDOWN_MS - sinceLastSpawn;
+      logger.debug({ groupJid, waitMs }, 'Cooldown before next container spawn');
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+
     state.active = true;
     state.activeIsScheduledTask = false;
     state.pendingMessages = false;
+    state.lastSpawnTime = Date.now();
     this.activeCount++;
 
     logger.debug(

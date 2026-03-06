@@ -199,26 +199,13 @@ function createPreCompactHook(): HookCallback {
   };
 }
 
-// Secrets to strip from Bash tool subprocess environments.
-// These are needed by claude-code for API auth but should never
-// be visible to commands the agent runs.
-// NOTE: This list must stay in sync with readSecrets() in src/container-runner.ts.
+// Core API auth secrets to strip from Bash tool subprocess environments.
+// Only strip claude-code's own auth keys - these must never leak to tool commands.
+// Tool-specific secrets (Google, SMTP, IDDI, etc.) are intentionally left available
+// since tools read them from process.env to call external APIs.
 const SECRET_ENV_VARS = [
-  // Core auth
-  'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN',
-  // SMTP email
-  'SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM',
-  // Social media
-  'X_API_KEY', 'X_API_SECRET', 'X_ACCESS_TOKEN', 'X_ACCESS_SECRET',
-  'FB_PAGE_ID', 'FB_PAGE_ACCESS_TOKEN',
-  'LINKEDIN_ACCESS_TOKEN', 'LINKEDIN_PERSON_URN',
-  // Google APIs
-  'GOOGLE_SERVICE_ACCOUNT_KEY', 'GOOGLE_SPREADSHEET_ID',
-  'GOOGLE_CALENDAR_ID', 'GOOGLE_MAPS_API_KEY',
-  // Gmail
-  'GMAIL_USER_EMAIL',
-  // IDDI vending platform
-  'IDDI_BASE_URL', 'IDDI_EMAIL', 'IDDI_PASSWORD',
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
 ];
 
 function createSanitizeBashHook(): HookCallback {

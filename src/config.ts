@@ -16,16 +16,6 @@ const envConfig = readEnvFile([
   'QUO_SHERIDAN_NUMBER',
   'QUO_WEBHOOK_PORT',
   'GROQ_API_KEY',
-  'WEB_CHANNEL_PORT',
-  'WEB_CHANNEL_ORIGINS',
-  'SQUARE_ACCESS_TOKEN',
-  'SQUARE_LOCATION_ID',
-  'SQUARE_ENVIRONMENT',
-  'FB_PAGE_ACCESS_TOKEN',
-  'FB_APP_SECRET',
-  'FB_VERIFY_TOKEN',
-  'FB_PAGE_ID',
-  'FB_MESSENGER_PORT',
 ]);
 
 export const ASSISTANT_NAME =
@@ -111,13 +101,19 @@ export const MODEL_INTERACTIVE =
   process.env.MODEL_INTERACTIVE || 'claude-sonnet-4-6';
 // Per-query USD budget caps (0 = no cap)
 export const BUDGET_SCHEDULED = parseFloat(
-  process.env.BUDGET_SCHEDULED || '0.05',
+  process.env.BUDGET_SCHEDULED || '0.25',
 );
 export const BUDGET_SCHEDULED_HEAVY = parseFloat(
   process.env.BUDGET_SCHEDULED_HEAVY || '0.50',
 );
 export const BUDGET_INTERACTIVE = parseFloat(
   process.env.BUDGET_INTERACTIVE || '0.50',
+);
+
+// Daily spend cap — total estimated API cost across all containers per day.
+// 0 = no cap. Read from .env MAX_DAILY_SPEND_USD.
+export const MAX_DAILY_SPEND_USD = parseFloat(
+  process.env.MAX_DAILY_SPEND_USD || '0',
 );
 
 // --- Web Channel (Socket.IO chat widget) ---
@@ -137,82 +133,25 @@ export const WEB_CHANNEL_ORIGINS = (
 export const GROQ_API_KEY =
   process.env.GROQ_API_KEY || envConfig.GROQ_API_KEY || '';
 
-// --- Web Chat Channel ---
-export const WEB_CHANNEL_PORT = parseInt(
-  process.env.WEB_CHANNEL_PORT || envConfig.WEB_CHANNEL_PORT || '3200',
-  10,
-);
-export const WEB_CHANNEL_ORIGINS =
-  process.env.WEB_CHANNEL_ORIGINS ||
-  envConfig.WEB_CHANNEL_ORIGINS ||
-  'https://sheridanrentals.us,https://www.sheridanrentals.us,https://sheridantrailerrentals.us,https://www.sheridantrailerrentals.us';
-
-export const SQUARE_ACCESS_TOKEN =
-  process.env.SQUARE_ACCESS_TOKEN ||
-  envConfig.SQUARE_ACCESS_TOKEN ||
-  '';
-export const SQUARE_LOCATION_ID =
-  process.env.SQUARE_LOCATION_ID ||
-  envConfig.SQUARE_LOCATION_ID ||
-  '';
-export const SQUARE_ENVIRONMENT =
-  process.env.SQUARE_ENVIRONMENT ||
-  envConfig.SQUARE_ENVIRONMENT ||
-  'production';
+// --- Gmail IMAP Channel ---
+const imapConfig = readEnvFile([
+  'IMAP_HOST', 'IMAP_PORT', 'IMAP_USER', 'IMAP_PASS',
+  'EMAIL_SNAK_ADDRESS',
+]);
+export const IMAP_HOST = process.env.IMAP_HOST || imapConfig.IMAP_HOST || '';
+export const IMAP_PORT = parseInt(process.env.IMAP_PORT || imapConfig.IMAP_PORT || '993', 10);
+export const IMAP_USER = process.env.IMAP_USER || imapConfig.IMAP_USER || '';
+export const IMAP_PASS = process.env.IMAP_PASS || imapConfig.IMAP_PASS || '';
+export const EMAIL_SNAK_ADDRESS = process.env.EMAIL_SNAK_ADDRESS || imapConfig.EMAIL_SNAK_ADDRESS || '';
+export const GMAIL_POLL_INTERVAL = parseInt(process.env.GMAIL_POLL_INTERVAL || '60000', 10);
 
 // --- Facebook Messenger Channel ---
-export const FB_PAGE_ACCESS_TOKEN =
-  process.env.FB_PAGE_ACCESS_TOKEN ||
-  envConfig.FB_PAGE_ACCESS_TOKEN ||
-  '';
-export const FB_APP_SECRET =
-  process.env.FB_APP_SECRET ||
-  envConfig.FB_APP_SECRET ||
-  '';
-export const FB_VERIFY_TOKEN =
-  process.env.FB_VERIFY_TOKEN ||
-  envConfig.FB_VERIFY_TOKEN ||
-  '';
-export const FB_PAGE_ID =
-  process.env.FB_PAGE_ID ||
-  envConfig.FB_PAGE_ID ||
-  '';
-export const FB_MESSENGER_PORT = parseInt(
-  process.env.FB_MESSENGER_PORT || envConfig.FB_MESSENGER_PORT || '3300',
-  10,
-);
-
-// --- Gmail (IMAP) Channel ---
-const emailEnvConfig = readEnvFile([
-  'IMAP_HOST',
-  'IMAP_PORT',
-  'IMAP_USER',
-  'IMAP_PASS',
-  'EMAIL_SNAK_ADDRESS',
-  'EMAIL_SNAK_GROUP',
-  'GMAIL_POLL_INTERVAL',
+const fbConfig = readEnvFile([
+  'FB_APP_SECRET', 'FB_MESSENGER_PORT', 'FB_PAGE_ACCESS_TOKEN',
+  'FB_PAGE_ID', 'FB_VERIFY_TOKEN',
 ]);
-
-export const IMAP_HOST =
-  process.env.IMAP_HOST || emailEnvConfig.IMAP_HOST || '';
-export const IMAP_PORT = parseInt(
-  process.env.IMAP_PORT || emailEnvConfig.IMAP_PORT || '993',
-  10,
-);
-export const IMAP_USER =
-  process.env.IMAP_USER || emailEnvConfig.IMAP_USER || '';
-export const IMAP_PASS =
-  process.env.IMAP_PASS || emailEnvConfig.IMAP_PASS || '';
-export const EMAIL_SNAK_ADDRESS =
-  process.env.EMAIL_SNAK_ADDRESS || emailEnvConfig.EMAIL_SNAK_ADDRESS || '';
-export const EMAIL_SNAK_GROUP =
-  process.env.EMAIL_SNAK_GROUP || emailEnvConfig.EMAIL_SNAK_GROUP || 'snak-group';
-export const GMAIL_POLL_INTERVAL = parseInt(
-  process.env.GMAIL_POLL_INTERVAL || emailEnvConfig.GMAIL_POLL_INTERVAL || '90000',
-  10,
-);
-
-// --- Spend Protection ---
-export const MAX_DAILY_SPEND_USD = parseFloat(
-  process.env.MAX_DAILY_SPEND_USD || '10.00',
-);
+export const FB_APP_SECRET = process.env.FB_APP_SECRET || fbConfig.FB_APP_SECRET || '';
+export const FB_MESSENGER_PORT = parseInt(process.env.FB_MESSENGER_PORT || fbConfig.FB_MESSENGER_PORT || '3300', 10);
+export const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN || fbConfig.FB_PAGE_ACCESS_TOKEN || '';
+export const FB_PAGE_ID = process.env.FB_PAGE_ID || fbConfig.FB_PAGE_ID || '';
+export const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || fbConfig.FB_VERIFY_TOKEN || '';

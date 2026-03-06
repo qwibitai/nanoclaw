@@ -13,7 +13,6 @@ import {
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
-  MAX_DAILY_SPEND_USD
 } from './config.js';
 import { startHealthMonitor } from './health.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -31,6 +30,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
+  hasBotReplyAfter,
   getRouterState,
   getTaskById,
   initDatabase,
@@ -39,7 +39,6 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
-  getDailySpendUsd
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { CronExpressionParser } from 'cron-parser';
@@ -138,7 +137,9 @@ export function getAvailableGroups(): import('./container-runner.js').AvailableG
     .filter(
       (c) =>
         c.jid !== '__group_sync__' &&
-        (c.jid.endsWith('@g.us') || c.jid.startsWith('quo:')),
+        (c.jid.endsWith('@g.us') ||
+      c.jid.startsWith('quo:') ||
+      c.jid.startsWith('web:')),
     )
     .map((c) => ({
       jid: c.jid,
@@ -162,16 +163,6 @@ export function _setRegisteredGroups(
 async function processGroupMessages(chatJid: string): Promise<boolean> {
   const group = registeredGroups[chatJid];
   if (!group) return true;
-
-  // Daily spend circuit breaker: stop spawning containers if we've exceeded the limit
-  const dailySpend = getDailySpendUsd();
-  if (dailySpend >= MAX_DAILY_SPEND_USD) {
-    logger.warn(
-      { dailySpend: dailySpend.toFixed(2), limit: MAX_DAILY_SPEND_USD, group: group.name },
-      'Daily spend limit reached — skipping container spawn',
-    );
-    return true; // return true to prevent retries
-  }
 
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
 
@@ -425,10 +416,10 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
+            // DO NOT advance lastAgentTimestamp here — the active container's
+            // processGroupMessages() advances the cursor only after successful
+            // processing. Advancing here would lose messages if the container
+            // crashes before it processes the piped input.
             findChannel(chatJid)?.setTyping?.(chatJid, true);
           } else {
             // No active container — enqueue for a new one
@@ -448,34 +439,30 @@ async function startMessageLoop(): Promise<void> {
  * Handles crash between advancing lastTimestamp and processing messages.
  */
 function recoverPendingMessages(): void {
-  const staleThresholdMs = 10 * 60 * 1000; // 10 minutes
-  const now = Date.now();
-
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length === 0) continue;
-
-    // Filter out stale messages (older than 10 min = from a crash, not fresh queue)
-    const fresh = pending.filter(
-      (m) => now - new Date(m.timestamp).getTime() < staleThresholdMs,
-    );
-
-    if (fresh.length > 0) {
-      logger.info(
-        { group: group.name, freshCount: fresh.length, staleCount: pending.length - fresh.length },
-        'Recovery: found fresh unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    } else if (pending.length > 0) {
-      // All messages are stale — advance the cursor past them to prevent re-queue
-      const latestTimestamp = pending[pending.length - 1].timestamp;
-      lastAgentTimestamp[chatJid] = latestTimestamp;
-      setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
-      logger.info(
-        { group: group.name, skippedCount: pending.length, advancedTo: latestTimestamp },
-        'Recovery: skipped stale messages, advanced cursor',
-      );
+    if (pending.length > 0) {
+      // Check if bot already replied after the last pending user message.
+      // This prevents re-processing on repeated restarts where the cursor
+      // wasn't saved but the bot DID respond.
+      const lastPendingTs = pending[pending.length - 1].timestamp;
+      const botRepliedAfter = hasBotReplyAfter(chatJid, lastPendingTs, ASSISTANT_NAME);
+      if (botRepliedAfter) {
+        // Bot already handled these — just advance the cursor silently
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: bot already replied, advancing cursor',
+        );
+        lastAgentTimestamp[chatJid] = lastPendingTs;
+        saveState();
+      } else {
+        logger.info(
+          { group: group.name, pendingCount: pending.length },
+          'Recovery: found unprocessed messages',
+        );
+        queue.enqueueMessageCheck(chatJid);
+      }
     }
   }
 }
@@ -548,80 +535,6 @@ Keep the report concise. Only flag things that need attention.`,
       created_at: new Date().toISOString(),
     });
     logger.info({ nextRun: weeklyNext }, 'Seeded weekly dependency check task');
-  }
-
-  // Daily comprehensive digest (8am CT)
-  const DIGEST_TASK_ID = 'daily-digest-8am';
-  if (!getTaskById(DIGEST_TASK_ID)) {
-    const digestCron = '0 8 * * *';
-    const digestNext = CronExpressionParser.parse(digestCron, { tz: TIMEZONE })
-      .next()
-      .toISOString();
-    createTask({
-      id: DIGEST_TASK_ID,
-      group_folder: MAIN_GROUP_FOLDER,
-      chat_jid: mainJid,
-      prompt: `Generate the daily morning digest for Blayk. Cover BOTH businesses comprehensively:
-
-**SNAK GROUP (Vending):**
-- Check IDDI for yesterday's sales totals, any expiring products in the next 7 days, and low-stock alerts
-- Check Google Sheets for recent sales performance trends
-- Check the CRM pipeline: any new leads, pending deals, or deals needing follow-up
-- Check Gmail inbox for any unread customer emails about vending
-
-**SHERIDAN RENTALS (Trailers/RVs):**
-- Query the bookings database for today's pickups and returns
-- List upcoming reservations for the next 7 days
-- Flag any unpaid bookings or overdue payments
-- Check the 3 equipment calendars for availability gaps
-
-**ACROSS BOTH:**
-- Check Google Calendar for today's appointments
-- Summarize any unanswered Quo SMS messages from either business line
-- Note any unread Gmail messages requiring attention
-
-Format as a clean, scannable snapshot. Use sections with headers. Keep it concise but complete. If a data source is unavailable, note it briefly and move on.`,
-      schedule_type: 'cron',
-      schedule_value: digestCron,
-      context_mode: 'isolated',
-      next_run: digestNext,
-      status: 'active',
-      created_at: new Date().toISOString(),
-      model: 'claude-sonnet-4-6',
-      budget_usd: 0.50,
-    });
-    logger.info({ nextRun: digestNext }, 'Seeded daily digest task (8am CT)');
-  }
-
-  // Sam's Club weekly price update (Monday 10am CT)
-  const SAMS_TASK_ID = 'sams-club-weekly-prices';
-  if (!getTaskById(SAMS_TASK_ID)) {
-    const samsCron = '0 10 * * 1';
-    const samsNext = CronExpressionParser.parse(samsCron, { tz: TIMEZONE })
-      .next()
-      .toISOString();
-    createTask({
-      id: SAMS_TASK_ID,
-      group_folder: MAIN_GROUP_FOLDER,
-      chat_jid: mainJid,
-      prompt: `Run the weekly Sam's Club price update:
-
-1. Read the current product list from the Google Sheets pricing tab
-2. For each product, browse Sam's Club website to get the current price
-3. Update the Google Sheets pricing tab with current prices and the date checked
-4. Flag any significant price changes (>10% increase or decrease) from the previous week
-5. Summarize results: how many products checked, any price changes, any products not found
-
-Use browser automation to check Sam's Club prices. If a product page fails to load, note it and continue with the rest.`,
-      schedule_type: 'cron',
-      schedule_value: samsCron,
-      context_mode: 'isolated',
-      next_run: samsNext,
-      status: 'active',
-      created_at: new Date().toISOString(),
-      budget_usd: 0.50,
-    });
-    logger.info({ nextRun: samsNext }, 'Seeded Sam\'s Club weekly price update task');
   }
 }
 
@@ -778,41 +691,23 @@ async function main(): Promise<void> {
     channels.push(quo);
   }
 
-  // Create Web Chat channel
+  // Create Web channel (Socket.IO chat widget)
   {
-    const { WEB_CHANNEL_PORT } = await import("./config.js");
-    if (WEB_CHANNEL_PORT) {
-      const { WebChannel } = await import("./channels/web.js");
-      const web = new WebChannel({
-        onMessage: (chatJid, msg) => storeMessage(msg),
-        onChatMetadata: (chatJid, timestamp, name) =>
-          storeChatMetadata(chatJid, timestamp, name),
-        registeredGroups: () => registeredGroups,
-      });
-      channels.push(web);
-    }
+    const { WebChannel } = await import('./channels/web.js');
+    const web = new WebChannel({
+      onMessage: (chatJid, msg) => storeMessage(msg),
+      onChatMetadata: (chatJid, timestamp, name) =>
+        storeChatMetadata(chatJid, timestamp, name),
+      registeredGroups: () => registeredGroups,
+    });
+    channels.push(web);
   }
 
-  // Create Facebook Messenger channel if configured
+  // Create Gmail (IMAP) channel if IMAP is configured
   {
-    const { FB_PAGE_ACCESS_TOKEN } = await import("./config.js");
-    if (FB_PAGE_ACCESS_TOKEN) {
-      const { MessengerChannel } = await import("./channels/messenger.js");
-      const messenger = new MessengerChannel({
-        onMessage: (chatJid, msg) => storeMessage(msg),
-        onChatMetadata: (chatJid, timestamp, name) =>
-          storeChatMetadata(chatJid, timestamp, name),
-        registeredGroups: () => registeredGroups,
-      });
-      channels.push(messenger);
-    }
-  }
-
-  // Create Gmail (IMAP) channel if configured
-  {
-    const { IMAP_USER: imapUser } = await import("./config.js");
-    if (imapUser) {
-      const { GmailChannel } = await import("./channels/gmail.js");
+    const { IMAP_HOST, IMAP_USER } = await import('./config.js');
+    if (IMAP_HOST && IMAP_USER) {
+      const { GmailChannel } = await import('./channels/gmail.js');
       const gmail = new GmailChannel({
         onMessage: (chatJid, msg) => storeMessage(msg),
         onChatMetadata: (chatJid, timestamp, name) =>
@@ -825,6 +720,17 @@ async function main(): Promise<void> {
 
   // Connect all channels
   await Promise.all(channels.map((ch) => ch.connect()));
+
+  // Register web:snak-group JID if not already registered
+  if (!registeredGroups['web:snak-group']) {
+    registerGroup('web:snak-group', {
+      name: 'Snak Group Web Chat',
+      folder: 'snak-group',
+      trigger: '',
+      added_at: new Date().toISOString(),
+      requiresTrigger: false, // web chat always responds without trigger
+    });
+  }
 
   // Start health monitor
   startHealthMonitor({

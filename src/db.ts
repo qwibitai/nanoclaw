@@ -472,6 +472,39 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
+/**
+ * Check if the bot has already replied in a chat after a given timestamp.
+ * Used by crash recovery to avoid re-processing messages the bot already handled.
+ */
+export function hasBotReplyAfter(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+): boolean {
+  const sql = `
+    SELECT COUNT(*) as cnt FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND (is_bot_message = 1 OR content LIKE ?)
+    LIMIT 1
+  `;
+  const row = db
+    .prepare(sql)
+    .get(chatJid, sinceTimestamp, `${botPrefix}:%`) as { cnt: number };
+  return row.cnt > 0;
+}
+
+export function getRecentMessages(hours: number, limit: number): NewMessage[] {
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+  const sql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message
+    FROM messages
+    WHERE timestamp > ?
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `;
+  return db.prepare(sql).all(cutoff, limit) as NewMessage[];
+}
+
 /** Get the most recent non-bot sender for a given chat JID. */
 /**
  * Check if a message with this ID already exists in the database.
