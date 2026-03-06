@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import express from 'express';
 import http from 'http';
 
+import { ASSISTANT_NAME } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -33,6 +34,46 @@ function verifySignature(
     );
   } catch {
     return false;
+  }
+}
+
+/**
+ * Build a group folder name from a GitHub repo and issue/PR number.
+ * Format: github_{owner}-{repo}-{number}
+ * Truncates the repo portion if the result would exceed 64 chars.
+ */
+export function makeGitHubFolder(repo: string, number: number): string {
+  const prefix = 'github_';
+  const suffix = `-${number}`;
+  const maxRepoLen = 64 - prefix.length - suffix.length;
+  const sanitized = repo
+    .replace(/\//g, '-')
+    .replace(/[^A-Za-z0-9-]/g, '')
+    .slice(0, maxRepoLen);
+  return `${prefix}${sanitized}${suffix}`;
+}
+
+/**
+ * Extract the issue/PR number from a webhook payload.
+ * For check_suite events, uses the first associated pull request.
+ * Returns null if no number can be determined.
+ */
+function extractIssueNumber(event: string, payload: any): number | null {
+  switch (event) {
+    case 'issues':
+      return payload.issue?.number ?? null;
+    case 'issue_comment':
+      return payload.issue?.number ?? null;
+    case 'pull_request':
+      return payload.pull_request?.number ?? null;
+    case 'pull_request_review':
+      return payload.pull_request?.number ?? null;
+    case 'pull_request_review_comment':
+      return payload.pull_request?.number ?? null;
+    case 'check_suite':
+      return payload.check_suite?.pull_requests?.[0]?.number ?? null;
+    default:
+      return null;
   }
 }
 
@@ -110,24 +151,6 @@ function formatEvent(event: string, payload: any): string | null {
   }
 }
 
-/** Extract the issue or PR number from a webhook payload */
-function extractIssueNumber(event: string, payload: any): number | null {
-  switch (event) {
-    case 'issues':
-      return payload.issue?.number ?? null;
-    case 'issue_comment':
-      return payload.issue?.number ?? null;
-    case 'pull_request':
-      return payload.pull_request?.number ?? null;
-    case 'pull_request_review':
-      return payload.pull_request?.number ?? null;
-    case 'pull_request_review_comment':
-      return payload.pull_request?.number ?? null;
-    default:
-      return null;
-  }
-}
-
 export class GitHubChannel implements Channel {
   name = 'github';
 
@@ -138,8 +161,6 @@ export class GitHubChannel implements Channel {
   private token: string;
   /** If set, only process events from these GitHub usernames */
   private allowedSenders: Set<string> | null;
-  /** Tracks the most recent issue/PR number per JID for reply routing */
-  private replyTargets = new Map<string, number>();
 
   constructor(
     webhookSecret: string,
@@ -196,7 +217,6 @@ export class GitHubChannel implements Channel {
         return;
       }
 
-      const chatJid = `gh:${repo}`;
       const timestamp = new Date().toISOString();
       const senderName =
         payload.sender?.login || payload.sender?.id?.toString() || 'github';
@@ -210,13 +230,33 @@ export class GitHubChannel implements Channel {
         return;
       }
 
-      // Store chat metadata for discovery
-      this.opts.onChatMetadata(chatJid, timestamp, repo, 'github', false);
-
-      // Track the issue/PR number so sendMessage can reply to it
+      // Determine the JID: per-issue/PR if possible, otherwise repo-level
       const issueNumber = extractIssueNumber(event, payload);
-      if (issueNumber !== null) {
-        this.replyTargets.set(chatJid, issueNumber);
+      const chatJid = issueNumber ? `gh:${repo}#${issueNumber}` : `gh:${repo}`;
+
+      // Store chat metadata for discovery
+      const chatName = issueNumber ? `${repo}#${issueNumber}` : repo;
+      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'github', false);
+
+      // Auto-register group if not already registered
+      if (this.opts.registerGroup) {
+        const registered = this.opts.registeredGroups();
+        if (!registered[chatJid]) {
+          const folder = issueNumber
+            ? makeGitHubFolder(repo, issueNumber)
+            : `github_${repo
+                .replace(/\//g, '-')
+                .replace(/[^A-Za-z0-9-]/g, '')
+                .slice(0, 57)}`;
+          this.opts.registerGroup(chatJid, {
+            name: chatName,
+            folder,
+            trigger: `@${ASSISTANT_NAME}`,
+            added_at: timestamp,
+            requiresTrigger: false,
+          });
+          logger.info({ chatJid, folder }, 'Auto-registered GitHub group');
+        }
       }
 
       // Format the event into a human-readable message
@@ -235,7 +275,7 @@ export class GitHubChannel implements Channel {
       });
 
       logger.info(
-        { event, repo, deliveryId },
+        { event, repo, chatJid, deliveryId },
         'GitHub webhook event processed',
       );
     });
@@ -258,18 +298,19 @@ export class GitHubChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const match = jid.match(/^gh:(.+)$/);
+    // Parse JID: gh:owner/repo#123 or gh:owner/repo
+    const match = jid.match(/^gh:(.+?)(?:#(\d+))?$/);
     if (!match) {
       logger.error({ jid }, 'Invalid GitHub JID format');
       return;
     }
-    const repo = match[1]; // e.g. "owner/repo"
+    const repo = match[1];
+    const issueNumber = match[2] ? parseInt(match[2], 10) : null;
 
-    const issueNumber = this.replyTargets.get(jid);
     if (!issueNumber) {
       logger.warn(
         { jid },
-        'No reply target for GitHub JID — no issue/PR to comment on',
+        'GitHub JID has no issue/PR number — cannot post comment',
       );
       return;
     }

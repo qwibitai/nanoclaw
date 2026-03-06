@@ -17,7 +17,7 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
-import { GitHubChannel } from './github.js';
+import { GitHubChannel, makeGitHubFolder } from './github.js';
 import { ChannelOpts } from './registry.js';
 
 // --- Test helpers ---
@@ -64,6 +64,32 @@ async function sendWebhook(
     body,
   });
 }
+
+// --- makeGitHubFolder ---
+
+describe('makeGitHubFolder', () => {
+  it('creates folder from repo and number', () => {
+    expect(makeGitHubFolder('cmraible/seb', 42)).toBe('github_cmraible-seb-42');
+  });
+
+  it('strips non-alphanumeric characters', () => {
+    expect(makeGitHubFolder('org.name/repo.name', 1)).toBe(
+      'github_orgname-reponame-1',
+    );
+  });
+
+  it('truncates long repo names to fit 64-char limit', () => {
+    const longRepo = 'very-long-organization-name/very-long-repository-name';
+    const folder = makeGitHubFolder(longRepo, 12345);
+    expect(folder.length).toBeLessThanOrEqual(64);
+    expect(folder).toMatch(/^github_/);
+    expect(folder).toMatch(/-12345$/);
+  });
+
+  it('always starts with github_ prefix', () => {
+    expect(makeGitHubFolder('a/b', 1)).toMatch(/^github_/);
+  });
+});
 
 // --- Tests ---
 
@@ -174,10 +200,10 @@ describe('GitHubChannel', () => {
     });
   });
 
-  // --- Event formatting ---
+  // --- Per-issue/PR JID routing ---
 
   describe('issue events', () => {
-    it('processes issue opened', async () => {
+    it('routes issue events to per-issue JID', async () => {
       await sendWebhook(port, {
         event: 'issues',
         secret: SECRET,
@@ -194,16 +220,16 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#42',
         expect.any(String),
-        'cmraible/seb',
+        'cmraible/seb#42',
         'github',
         false,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#42',
         expect.objectContaining({
-          chat_jid: 'gh:cmraible/seb',
+          chat_jid: 'gh:cmraible/seb#42',
           sender: 'alice',
           sender_name: 'alice',
           content: expect.stringContaining('Issue opened: #42 "Bug report"'),
@@ -229,7 +255,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#42',
         expect.objectContaining({
           content: expect.stringContaining('Issue closed: #42'),
         }),
@@ -258,7 +284,7 @@ describe('GitHubChannel', () => {
   });
 
   describe('pull request events', () => {
-    it('processes PR opened', async () => {
+    it('routes PR events to per-PR JID', async () => {
       await sendWebhook(port, {
         event: 'pull_request',
         secret: SECRET,
@@ -276,8 +302,9 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#7',
         expect.objectContaining({
+          chat_jid: 'gh:cmraible/seb#7',
           content: expect.stringContaining('PR opened: #7 "New feature"'),
         }),
       );
@@ -301,7 +328,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#7',
         expect.objectContaining({
           content: expect.stringContaining('PR merged: #7 "New feature"'),
         }),
@@ -326,7 +353,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#7',
         expect.objectContaining({
           content: expect.stringContaining('PR closed: #7'),
         }),
@@ -335,7 +362,7 @@ describe('GitHubChannel', () => {
   });
 
   describe('issue comment events', () => {
-    it('processes new comment on issue', async () => {
+    it('routes comments to per-issue JID', async () => {
       await sendWebhook(port, {
         event: 'issue_comment',
         secret: SECRET,
@@ -356,7 +383,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#5',
         expect.objectContaining({
           content: expect.stringContaining(
             'New comment on Issue #5 "Question" by bob',
@@ -365,7 +392,7 @@ describe('GitHubChannel', () => {
       );
     });
 
-    it('processes new comment on PR', async () => {
+    it('routes PR comments to per-PR JID', async () => {
       await sendWebhook(port, {
         event: 'issue_comment',
         secret: SECRET,
@@ -387,7 +414,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#7',
         expect.objectContaining({
           content: expect.stringContaining('New comment on PR #7'),
         }),
@@ -420,7 +447,7 @@ describe('GitHubChannel', () => {
   });
 
   describe('PR review events', () => {
-    it('processes review approved', async () => {
+    it('routes review to per-PR JID', async () => {
       await sendWebhook(port, {
         event: 'pull_request_review',
         secret: SECRET,
@@ -442,7 +469,7 @@ describe('GitHubChannel', () => {
       });
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'gh:cmraible/seb',
+        'gh:cmraible/seb#7',
         expect.objectContaining({
           content: expect.stringContaining('review: approved by chris'),
         }),
@@ -473,7 +500,7 @@ describe('GitHubChannel', () => {
   });
 
   describe('check suite events', () => {
-    it('processes failed check suite', async () => {
+    it('routes failed check suite to PR JID when PR is associated', async () => {
       await sendWebhook(port, {
         event: 'check_suite',
         secret: SECRET,
@@ -484,6 +511,32 @@ describe('GitHubChannel', () => {
             conclusion: 'failure',
             head_branch: 'feat/test',
             url: 'https://api.github.com/repos/cmraible/seb/check-suites/1',
+            pull_requests: [{ number: 15 }],
+          },
+          sender: { login: 'github-actions[bot]' },
+        },
+      });
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'gh:cmraible/seb#15',
+        expect.objectContaining({
+          content: expect.stringContaining('Check suite failure on feat/test'),
+        }),
+      );
+    });
+
+    it('routes failed check suite to repo-level JID when no PR is associated', async () => {
+      await sendWebhook(port, {
+        event: 'check_suite',
+        secret: SECRET,
+        payload: {
+          action: 'completed',
+          repository: { full_name: 'cmraible/seb' },
+          check_suite: {
+            conclusion: 'failure',
+            head_branch: 'main',
+            url: 'https://api.github.com/repos/cmraible/seb/check-suites/1',
+            pull_requests: [],
           },
           sender: { login: 'github-actions[bot]' },
         },
@@ -492,7 +545,7 @@ describe('GitHubChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'gh:cmraible/seb',
         expect.objectContaining({
-          content: expect.stringContaining('Check suite failure on feat/test'),
+          content: expect.stringContaining('Check suite failure on main'),
         }),
       );
     });
@@ -508,6 +561,7 @@ describe('GitHubChannel', () => {
             conclusion: 'success',
             head_branch: 'main',
             url: 'https://api.github.com/repos/cmraible/seb/check-suites/1',
+            pull_requests: [],
           },
           sender: { login: 'github-actions[bot]' },
         },
@@ -534,10 +588,101 @@ describe('GitHubChannel', () => {
     });
   });
 
+  // --- Auto-registration ---
+
+  describe('auto-registration', () => {
+    it('auto-registers group on first event for an issue', async () => {
+      await sendWebhook(port, {
+        event: 'issues',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          issue: {
+            number: 42,
+            title: 'Bug report',
+            html_url: 'https://github.com/cmraible/seb/issues/42',
+          },
+          sender: { login: 'alice' },
+        },
+      });
+
+      expect(opts.registerGroup).toHaveBeenCalledWith(
+        'gh:cmraible/seb#42',
+        expect.objectContaining({
+          name: 'cmraible/seb#42',
+          folder: 'github_cmraible-seb-42',
+          trigger: '@Andy',
+          requiresTrigger: false,
+        }),
+      );
+    });
+
+    it('does not re-register already registered group', async () => {
+      const registeredGroups: Record<string, any> = {
+        'gh:cmraible/seb#42': {
+          name: 'cmraible/seb#42',
+          folder: 'github_cmraible-seb-42',
+          trigger: '@Andy',
+          added_at: '2024-01-01T00:00:00.000Z',
+        },
+      };
+      (opts.registeredGroups as any).mockReturnValue(registeredGroups);
+
+      await sendWebhook(port, {
+        event: 'issues',
+        secret: SECRET,
+        payload: {
+          action: 'opened',
+          repository: { full_name: 'cmraible/seb' },
+          issue: {
+            number: 42,
+            title: 'Bug report',
+            html_url: 'https://github.com/cmraible/seb/issues/42',
+          },
+          sender: { login: 'alice' },
+        },
+      });
+
+      expect(opts.registerGroup).not.toHaveBeenCalled();
+    });
+
+    it('auto-registers repo-level group for check_suite without PR', async () => {
+      await sendWebhook(port, {
+        event: 'check_suite',
+        secret: SECRET,
+        payload: {
+          action: 'completed',
+          repository: { full_name: 'cmraible/seb' },
+          check_suite: {
+            conclusion: 'failure',
+            head_branch: 'main',
+            url: 'https://api.github.com/repos/cmraible/seb/check-suites/1',
+            pull_requests: [],
+          },
+          sender: { login: 'github-actions[bot]' },
+        },
+      });
+
+      expect(opts.registerGroup).toHaveBeenCalledWith(
+        'gh:cmraible/seb',
+        expect.objectContaining({
+          name: 'cmraible/seb',
+          folder: 'github_cmraible-seb',
+          requiresTrigger: false,
+        }),
+      );
+    });
+  });
+
   // --- ownsJid ---
 
   describe('ownsJid', () => {
-    it('owns gh: JIDs', () => {
+    it('owns gh: JIDs with issue number', () => {
+      expect(channel.ownsJid('gh:cmraible/seb#42')).toBe(true);
+    });
+
+    it('owns gh: JIDs without issue number', () => {
       expect(channel.ownsJid('gh:cmraible/seb')).toBe(true);
     });
 
@@ -572,24 +717,7 @@ describe('GitHubChannel', () => {
   // --- sendMessage ---
 
   describe('sendMessage', () => {
-    it('posts a comment to the most recent issue/PR', async () => {
-      // First, send a webhook to set the reply target
-      await sendWebhook(port, {
-        event: 'issues',
-        secret: SECRET,
-        payload: {
-          action: 'opened',
-          repository: { full_name: 'cmraible/seb' },
-          issue: {
-            number: 42,
-            title: 'Test issue',
-            html_url: 'https://github.com/cmraible/seb/issues/42',
-          },
-          sender: { login: 'alice' },
-        },
-      });
-
-      // Mock fetch for the GitHub API call
+    it('posts a comment using issue number from JID', async () => {
       const originalFetch = globalThis.fetch;
       const mockFetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -599,9 +727,8 @@ describe('GitHubChannel', () => {
       globalThis.fetch = mockFetch as any;
 
       try {
-        await channel.sendMessage('gh:cmraible/seb', 'Hello from the bot!');
+        await channel.sendMessage('gh:cmraible/seb#42', 'Hello from the bot!');
 
-        // Find the call that went to api.github.com (not localhost webhook)
         const apiCall = mockFetch.mock.calls.find((c: any[]) =>
           c[0]?.toString().includes('api.github.com'),
         );
@@ -620,14 +747,14 @@ describe('GitHubChannel', () => {
       }
     });
 
-    it('warns when no reply target exists', async () => {
+    it('warns when JID has no issue number (repo-level)', async () => {
       const { logger: mockLogger } = await import('../logger.js');
 
-      await channel.sendMessage('gh:unknown/repo', 'Hello');
+      await channel.sendMessage('gh:cmraible/seb', 'Hello');
 
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        expect.objectContaining({ jid: 'gh:unknown/repo' }),
-        expect.stringContaining('No reply target'),
+        expect.objectContaining({ jid: 'gh:cmraible/seb' }),
+        expect.stringContaining('no issue/PR number'),
       );
     });
 
@@ -640,92 +767,6 @@ describe('GitHubChannel', () => {
         expect.objectContaining({ jid: 'invalid-jid' }),
         expect.stringContaining('Invalid GitHub JID'),
       );
-    });
-
-    it('updates reply target when new events arrive', async () => {
-      // Send issue event
-      await sendWebhook(port, {
-        event: 'issues',
-        secret: SECRET,
-        payload: {
-          action: 'opened',
-          repository: { full_name: 'cmraible/seb' },
-          issue: {
-            number: 10,
-            title: 'First issue',
-            html_url: 'https://github.com/cmraible/seb/issues/10',
-          },
-          sender: { login: 'alice' },
-        },
-      });
-
-      // Send another event for a different issue
-      await sendWebhook(port, {
-        event: 'issues',
-        secret: SECRET,
-        payload: {
-          action: 'opened',
-          repository: { full_name: 'cmraible/seb' },
-          issue: {
-            number: 20,
-            title: 'Second issue',
-            html_url: 'https://github.com/cmraible/seb/issues/20',
-          },
-          sender: { login: 'bob' },
-        },
-      });
-
-      const originalFetch = globalThis.fetch;
-      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
-      globalThis.fetch = mockFetch as any;
-
-      try {
-        await channel.sendMessage('gh:cmraible/seb', 'Reply');
-
-        const apiCall = mockFetch.mock.calls.find((c: any[]) =>
-          c[0]?.toString().includes('api.github.com'),
-        );
-        // Should target issue 20 (most recent)
-        expect(apiCall![0]).toContain('/issues/20/comments');
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
-    });
-
-    it('tracks PR numbers from pull_request events', async () => {
-      await sendWebhook(port, {
-        event: 'pull_request',
-        secret: SECRET,
-        payload: {
-          action: 'opened',
-          repository: { full_name: 'cmraible/seb' },
-          pull_request: {
-            number: 99,
-            title: 'Big PR',
-            html_url: 'https://github.com/cmraible/seb/pull/99',
-            merged: false,
-          },
-          sender: { login: 'alice' },
-        },
-      });
-
-      const originalFetch = globalThis.fetch;
-      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 201 });
-      globalThis.fetch = mockFetch as any;
-
-      try {
-        await channel.sendMessage('gh:cmraible/seb', 'PR comment');
-
-        const apiCall = mockFetch.mock.calls.find((c: any[]) =>
-          c[0]?.toString().includes('api.github.com'),
-        );
-        // GitHub API uses /issues/ endpoint for both issues and PRs
-        expect(apiCall![0]).toBe(
-          'https://api.github.com/repos/cmraible/seb/issues/99/comments',
-        );
-      } finally {
-        globalThis.fetch = originalFetch;
-      }
     });
   });
 });
