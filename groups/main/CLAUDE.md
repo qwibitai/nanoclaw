@@ -211,3 +211,28 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Train Runtime (Mounted Project)
+
+The Train project is mounted at:
+- `/workspace/extra/train`
+
+When users ask about workout logging/progression, operate from that repo and use JSON CLI commands:
+
+```bash
+cd /workspace/extra/train
+```
+
+Primary commands:
+- `node dist/cli.js plan today --json`
+- `node dist/cli.js log import --json` (JSON payload on stdin)
+- `node dist/cli.js history "<exercise?>" --last 7d --json`
+- `node dist/cli.js query e1rm "<exercise>" --json`
+- `node dist/cli.js query best-set "<exercise>" --reps <n> --json`
+
+Execution policy:
+- Prefer these commands over ad-hoc SQL.
+- Keep responses concise and user-facing.
+- If logging payload is ambiguous, ask one concise clarification question.
