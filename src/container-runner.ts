@@ -251,7 +251,7 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   deps?: HandlerDeps,
-  onReady?: (sendFn: (text: string) => boolean, closeFn: () => void) => void,
+  onReady?: (sendFn: (text: string) => Promise<boolean>, closeFn: () => void) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -387,24 +387,23 @@ export async function runContainerAgent(
     const initPromise = rpc.request('initialize', input);
     delete input.secrets;
 
-    Promise.resolve(initPromise).then(() => {
-      if (onReady) {
-        const sendFn = (text: string): boolean => {
-          if (!container.stdin.writable) return false;
-          rpc.notify('input', { text });
-          return true;
-        };
-        const closeFn = () => {
-          if (container.stdin.writable) {
-            rpc.notify('close', {});
-          } else {
-            logger.warn({ group: group.name }, 'stdin not writable on close, killing container');
-            container.kill();
-          }
-        };
-        onReady(sendFn, closeFn);
-      }
-    }).catch((err: unknown) => {
+    if (onReady) {
+      const sendFn = (text: string): Promise<boolean> => {
+        if (!container.stdin.writable) return Promise.resolve(false);
+        return Promise.resolve(rpc.request('input', { text })).then(() => true, () => false);
+      };
+      const closeFn = () => {
+        if (container.stdin.writable) {
+          rpc.notify('close', {});
+        } else {
+          logger.warn({ group: group.name }, 'stdin not writable on close, killing container');
+          container.kill();
+        }
+      };
+      onReady(sendFn, closeFn);
+    }
+
+    Promise.resolve(initPromise).catch((err: unknown) => {
       logger.error({ group: group.name, err }, 'Failed to initialize container');
     });
 

@@ -23,7 +23,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
-  sendFn: ((text: string) => boolean) | null;
+  sendFn: ((text: string) => Promise<boolean>) | null;
   closeFn: (() => void) | null;
   onPipedCallback: (() => void) | null;
 }
@@ -145,7 +145,7 @@ export class GroupQueue {
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
-  registerIpcFns(groupJid: string, sendFn: (text: string) => boolean, closeFn: () => void): void {
+  registerIpcFns(groupJid: string, sendFn: (text: string) => Promise<boolean>, closeFn: () => void): void {
     const state = this.getGroup(groupJid);
     state.sendFn = sendFn;
     state.closeFn = closeFn;
@@ -176,10 +176,14 @@ export class GroupQueue {
    * Send a follow-up message to the active container via JSON-RPC.
    * Returns true if the message was sent, false if no active container.
    */
-  sendMessage(groupJid: string, text: string): boolean {
+  async sendMessage(groupJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.sendFn || state.isTaskContainer) return false;
-    if (!state.sendFn(text)) return false;
+    try {
+      if (!await state.sendFn(text)) return false;
+    } catch {
+      return false;
+    }
     state.idleWaiting = false;
     state.onPipedCallback?.();
     return true;

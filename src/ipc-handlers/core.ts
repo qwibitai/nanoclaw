@@ -335,6 +335,25 @@ registerHandler(
   },
 );
 
+// --- list_groups ---
+registerHandler(
+  'list_groups',
+  async (
+    _params: Record<string, never>,
+    context: HandlerContext,
+    deps: HandlerDeps,
+  ) => {
+    if (!context.isMain) {
+      throw new JSONRPCErrorException(
+        'Only the main group can list available groups',
+        ERR_UNAUTHORIZED,
+      );
+    }
+
+    return { groups: deps.getAvailableGroups() };
+  },
+);
+
 // --- register_group ---
 registerHandler(
   'register_group',
@@ -383,6 +402,43 @@ registerHandler(
     logger.info(
       { jid: params.jid, folder: params.folder, sourceGroup: context.sourceGroup },
       'Group registered via JSON-RPC',
+    );
+    return { ok: true };
+  },
+);
+
+// --- unregister_group ---
+registerHandler(
+  'unregister_group',
+  async (
+    params: { jid: string },
+    context: HandlerContext,
+    deps: HandlerDeps,
+  ) => {
+    if (!context.isMain) {
+      throw new JSONRPCErrorException(
+        'Only the main group can unregister groups',
+        ERR_UNAUTHORIZED,
+      );
+    }
+
+    if (!params.jid) {
+      throw new JSONRPCErrorException(
+        'Missing required field: jid',
+        -32602,
+      );
+    }
+
+    if (!deps.unregisterGroup(params.jid)) {
+      throw new JSONRPCErrorException(
+        `Group not found or is the main group: ${params.jid}`,
+        -32602,
+      );
+    }
+
+    logger.info(
+      { jid: params.jid, sourceGroup: context.sourceGroup },
+      'Group unregistered via JSON-RPC',
     );
     return { ok: true };
   },

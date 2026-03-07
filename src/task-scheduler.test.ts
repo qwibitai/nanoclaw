@@ -48,6 +48,7 @@ describe('task scheduler', () => {
         sendMessage: async () => {},
         registeredGroups: () => ({}),
         registerGroup: () => {},
+        unregisterGroup: () => false,
         syncGroups: async () => {},
         getAvailableGroups: () => [],
       },

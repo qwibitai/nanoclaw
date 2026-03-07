@@ -76,6 +76,11 @@ beforeEach(() => {
       groups[jid] = group;
       setRegisteredGroup(jid, group);
     },
+    unregisterGroup: (jid) => {
+      if (!groups[jid]) return false;
+      delete groups[jid];
+      return true;
+    },
     syncGroups: async () => {},
     getAvailableGroups: () => [],
   };

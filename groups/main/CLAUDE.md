@@ -79,31 +79,9 @@ Key paths inside the container:
 
 ### Finding Available Groups
 
-Available groups are provided in `/workspace/ipc/available_groups.json`:
+Use the `list_available_groups` MCP tool to see all available groups ordered by most recent activity. It returns each group's JID, name, last activity time, and whether it's already registered.
 
-```json
-{
-  "groups": [
-    {
-      "jid": "120363336345536173@g.us",
-      "name": "Family Chat",
-      "lastActivity": "2026-01-31T12:00:00.000Z",
-      "isRegistered": false
-    }
-  ],
-  "lastSync": "2026-01-31T12:00:00.000Z"
-}
-```
-
-Groups are ordered by most recent activity. The list is synced from WhatsApp daily.
-
-If a group the user mentions isn't in the list, request a fresh sync:
-
-```bash
-echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
-```
-
-Then wait a moment and re-read `available_groups.json`.
+If a group the user mentions isn't in the list, the data may be stale. The tool reads from the local database — groups appear after they send messages.
 
 **Fallback**: Query the SQLite database directly:
 
@@ -221,14 +199,19 @@ Notes:
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
-4. The group folder and its files remain (don't delete them)
+Use the `unregister_group` MCP tool with the group's JID. The main group cannot be unregistered.
+
+The group folder and its files are preserved (not deleted).
 
 ### Listing Groups
 
-Read `/workspace/project/data/registered_groups.json` and format it nicely.
+Use the `list_available_groups` MCP tool to see all groups (registered and unregistered).
+
+To see only registered groups, query the read-only database:
+
+```bash
+sqlite3 /workspace/project/store/messages.db "SELECT jid, data FROM registered_groups"
+```
 
 ---
 
@@ -240,7 +223,7 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ## Scheduling for Other Groups
 
-When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:
+When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID (find it via `list_available_groups` or the SQLite `registered_groups` table):
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.

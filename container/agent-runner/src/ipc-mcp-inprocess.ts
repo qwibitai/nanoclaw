@@ -420,10 +420,73 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
       ),
 
       tool(
+        'list_available_groups',
+        'List all available groups/chats ordered by most recent activity. Use this to find group JIDs for registration. Main group only.',
+        {},
+        async () => {
+          if (!context.isMain) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: 'Only the main group can list available groups.',
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          try {
+            const response = await transport.sendRequest('list_groups', {});
+            const groups = response.groups;
+
+            if (!groups || groups.length === 0) {
+              return {
+                content: [
+                  { type: 'text' as const, text: 'No groups found.' },
+                ],
+              };
+            }
+
+            const formatted = groups
+              .map(
+                (g: {
+                  jid: string;
+                  name: string;
+                  lastActivity: string;
+                  isRegistered: boolean;
+                }) =>
+                  `- ${g.name} (${g.jid}) — last active: ${g.lastActivity}${g.isRegistered ? ' [registered]' : ''}`,
+              )
+              .join('\n');
+
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Available groups:\n${formatted}`,
+                },
+              ],
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: err instanceof Error ? err.message : String(err),
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+      ),
+
+      tool(
         'register_group',
         `Register a new chat/group so the agent can respond to messages there. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
+Use the list_available_groups tool to find the JID for a group. The folder name must be channel-prefixed: "{channel}_{group-name}" (e.g., "whatsapp_family-chat", "telegram_dev-team", "discord_general"). Use lowercase with hyphens for the group name part.`,
         {
           jid: z
             .string()
@@ -463,6 +526,53 @@ Use available_groups.json to find the JID for a group. The folder name must be c
                 {
                   type: 'text' as const,
                   text: `Group "${args.name}" registered. It will start receiving messages immediately.`,
+                },
+              ],
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: err instanceof Error ? err.message : String(err),
+                },
+              ],
+              isError: true,
+            };
+          }
+        },
+      ),
+
+      tool(
+        'unregister_group',
+        'Remove a registered group so the agent stops responding there. Main group only. The group folder and files are preserved.',
+        {
+          jid: z
+            .string()
+            .describe('The chat JID to unregister'),
+        },
+        async (args) => {
+          if (!context.isMain) {
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: 'Only the main group can unregister groups.',
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          try {
+            await transport.sendRequest('unregister_group', {
+              jid: args.jid,
+            });
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Group "${args.jid}" unregistered. It will no longer receive messages.`,
                 },
               ],
             };

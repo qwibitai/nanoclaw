@@ -452,6 +452,15 @@ export function deleteTask(id: string): void {
   db.prepare('DELETE FROM scheduled_tasks WHERE id = ?').run(id);
 }
 
+export function deleteTasksByGroupFolder(groupFolder: string): number {
+  // Delete child records first (FK constraint)
+  db.prepare(
+    'DELETE FROM task_run_logs WHERE task_id IN (SELECT id FROM scheduled_tasks WHERE group_folder = ?)',
+  ).run(groupFolder);
+  const result = db.prepare('DELETE FROM scheduled_tasks WHERE group_folder = ?').run(groupFolder);
+  return result.changes;
+}
+
 export function getDueTasks(): ScheduledTask[] {
   const now = new Date().toISOString();
   return db
@@ -596,6 +605,11 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
   );
+}
+
+export function deleteRegisteredGroup(jid: string): boolean {
+  const result = db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+  return result.changes > 0;
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {

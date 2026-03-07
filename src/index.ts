@@ -30,6 +30,8 @@ import {
   getRegisteredGroup,
   getRouterState,
   initDatabase,
+  deleteRegisteredGroup,
+  deleteTasksByGroupFolder,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -107,6 +109,18 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     { jid, name: group.name, folder: group.folder },
     'Group registered',
   );
+}
+
+function unregisterGroup(jid: string): boolean {
+  const group = registeredGroups[jid];
+  if (!group) return false;
+  if (group.isMain) return false;
+
+  delete registeredGroups[jid];
+  deleteRegisteredGroup(jid);
+  const cancelledTasks = deleteTasksByGroupFolder(group.folder);
+  logger.info({ jid, name: group.name, cancelledTasks }, 'Group unregistered');
+  return true;
 }
 
 /**
@@ -264,6 +278,7 @@ function buildHandlerDeps(): HandlerDeps {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
+    unregisterGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
         channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
@@ -405,24 +420,32 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
-          if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
-              { chatJid, count: messagesToSend.length },
-              'Piped messages to active container',
-            );
-            lastAgentTimestamp[chatJid] =
-              messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
-            // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
-          } else {
-            // No active container — enqueue for a new one
-            queue.enqueueMessageCheck(chatJid);
-          }
+          // Fire off sendMessage without awaiting — prevents one group's
+          // slow container startup from blocking message dispatch to others.
+          // Cursor advances in .then() once the container acks.
+          queue.sendMessage(chatJid, formatted).then(
+            (sent) => {
+              if (sent) {
+                logger.debug(
+                  { chatJid, count: messagesToSend.length },
+                  'Piped messages to active container',
+                );
+                lastAgentTimestamp[chatJid] =
+                  messagesToSend[messagesToSend.length - 1].timestamp;
+                saveState();
+                channel
+                  .setTyping?.(chatJid, true)
+                  ?.catch((err) =>
+                    logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                  );
+              } else {
+                queue.enqueueMessageCheck(chatJid);
+              }
+            },
+            () => {
+              queue.enqueueMessageCheck(chatJid);
+            },
+          );
         }
       }
     } catch (err) {

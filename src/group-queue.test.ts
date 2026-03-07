@@ -289,7 +289,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => Promise.resolve(true)), closeFn);
 
     // Enqueue a task while container is active but NOT idle
     const taskFn = vi.fn(async () => {});
@@ -326,7 +326,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => Promise.resolve(true)), closeFn);
     queue.notifyIdle('group1@g.us');
 
     // Enqueue a task — should preempt because container is idle
@@ -341,7 +341,7 @@ describe('GroupQueue', () => {
   });
 
   it('sendMessage resets idleWaiting so a subsequent task enqueue does not preempt', async () => {
-    const sendFn = vi.fn(() => true);
+    const sendFn = vi.fn(() => Promise.resolve(true));
     const closeFn = vi.fn();
     let resolveProcess: () => void;
 
@@ -367,7 +367,7 @@ describe('GroupQueue', () => {
     queue.notifyIdle('group1@g.us');
 
     // A new user message arrives — resets idleWaiting
-    queue.sendMessage('group1@g.us', 'hello');
+    await queue.sendMessage('group1@g.us', 'hello');
 
     // sendFn should have been called with the message
     expect(sendFn).toHaveBeenCalledWith('hello');
@@ -400,10 +400,10 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(() => true), vi.fn());
+    queue.registerIpcFns('group1@g.us', vi.fn(() => Promise.resolve(true)), vi.fn());
 
     // sendMessage should return false — user messages must not go to task containers
-    const result = queue.sendMessage('group1@g.us', 'hello');
+    const result = await queue.sendMessage('group1@g.us', 'hello');
     expect(result).toBe(false);
 
     resolveTask!();
@@ -434,7 +434,7 @@ describe('GroupQueue', () => {
       'container-1',
       'test-group',
     );
-    queue.registerIpcFns('group1@g.us', vi.fn(() => true), closeFn);
+    queue.registerIpcFns('group1@g.us', vi.fn(() => Promise.resolve(true)), closeFn);
 
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
