@@ -51,6 +51,7 @@ import {
   getAndyRequestById,
   getLatestAndyRequestForChat,
   getMessagesSince,
+  getLatestReusableWorkerSession,
   getNewMessages,
   getStoredMessage,
   getWorkerRuns,
@@ -2181,6 +2182,7 @@ function requestShutdown(signal: string, exitCode = 0): void {
 
 async function main(): Promise<void> {
   initDatabase();
+  setRouterState('process_start_at', PROCESS_START_AT_ISO);
   logger.info('Database initialized');
   const ownership = claimRuntimeOwnership();
   try {

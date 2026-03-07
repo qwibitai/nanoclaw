@@ -209,6 +209,60 @@
     "scripts/check-workflow-contracts.sh": [
       "architecture-boundary-governance"
     ],
+    "scripts/jarvis-incident.sh": [
+      "forked-worker-runtime-restore",
+      "ops-reliability-tooling"
+    ],
+    "scripts/jarvis-worker-probe.sh": [
+      "forked-worker-runtime-restore",
+      "ops-reliability-tooling"
+    ],
+    "docs/architecture/nanoclaw-jarvis.md": [
+      "jarvis-extension-boundary"
+    ],
+    "docs/architecture/nanoclaw-system-architecture.md": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/dispatch-service.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/frontdesk-service.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/index.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/lanes.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/request-state-service.ts": [
+      "jarvis-extension-boundary"
+    ],
+    ".claude/progress/feature-catalog.seed.json": [
+      "architecture-boundary-governance",
+      "feature-tracking-pipeline"
+    ],
+    "AGENTS.md": [
+      "architecture-boundary-governance"
+    ],
+    "CLAUDE.md": [
+      "architecture-boundary-governance"
+    ],
+    "DOCS.md": [
+      "architecture-boundary-governance"
+    ],
+    "docs/ARCHITECTURE.md": [
+      "architecture-boundary-governance"
+    ],
+    "docs/README.md": [
+      "architecture-boundary-governance"
+    ],
+    "scripts/check-architecture-boundary.sh": [
+      "architecture-boundary-governance"
+    ],
+    "scripts/check-workflow-contracts.sh": [
+      "architecture-boundary-governance"
+    ],
     "scripts/test-andy-full-user-journey-e2e.ts": [
       "reliability-e2e"
     ],

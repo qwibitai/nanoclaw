@@ -3,7 +3,6 @@
  * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
-import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
