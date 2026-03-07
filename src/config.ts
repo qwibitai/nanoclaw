@@ -6,7 +6,7 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'WEB_CHAT_PORT', 'WEB_CHAT_NAME', 'WEB_CHAT_PASSWORD', 'WEB_CHAT_USER', 'WEB_CHAT_BIND']);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -67,3 +67,9 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const WEB_CHAT_PORT = parseInt(process.env.WEB_CHAT_PORT || envConfig.WEB_CHAT_PORT || '3210', 10);
+export const WEB_CHAT_NAME = process.env.WEB_CHAT_NAME || envConfig.WEB_CHAT_NAME || ASSISTANT_NAME;
+export const WEB_CHAT_PASSWORD = process.env.WEB_CHAT_PASSWORD || envConfig.WEB_CHAT_PASSWORD || '';
+export const WEB_CHAT_USER = process.env.WEB_CHAT_USER || envConfig.WEB_CHAT_USER || 'admin';
+export const WEB_CHAT_BIND = process.env.WEB_CHAT_BIND || envConfig.WEB_CHAT_BIND || '127.0.0.1';

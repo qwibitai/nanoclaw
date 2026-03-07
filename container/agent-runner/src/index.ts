@@ -435,6 +435,8 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
         'mcp__google_drive__*',
+        'mcp__ollama__*',
+        'mcp__airtable__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -460,6 +462,17 @@ async function runQuery(
           env: {
             GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.config/google-drive-mcp/gcp-oauth.keys.json',
             GOOGLE_DRIVE_MCP_TOKEN_PATH: '/home/node/.config/google-drive-mcp/tokens.json',
+          },
+        },
+        ollama: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
+        },
+        airtable: {
+          command: 'npx',
+          args: ['-y', 'airtable-mcp-server'],
+          env: {
+            AIRTABLE_API_KEY: sdkEnv.AIRTABLE_API_KEY || '',
           },
         },
       },

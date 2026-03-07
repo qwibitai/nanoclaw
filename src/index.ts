@@ -50,6 +50,7 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { WEB_JID } from './channels/web.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -59,6 +60,9 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+// Wakeup signal: onMessage sets this to skip the POLL_INTERVAL sleep immediately
+let wakeLoop: (() => void) | null = null;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -433,7 +437,11 @@ async function startMessageLoop(): Promise<void> {
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+    // Sleep until next poll — or wake immediately if a message arrived
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, POLL_INTERVAL);
+      wakeLoop = () => { clearTimeout(timer); resolve(); wakeLoop = null; };
+    });
   }
 }
 
@@ -496,6 +504,8 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+      // Wake the message loop immediately — no need to wait for the next poll tick
+      wakeLoop?.();
     },
     onChatMetadata: (
       chatJid: string,
@@ -526,6 +536,19 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  // Auto-register web chat group if the web channel connected
+  const webChannel = channels.find((ch) => ch.name === 'web');
+  if (webChannel && !registeredGroups[WEB_JID]) {
+    registerGroup(WEB_JID, {
+      name: 'Web Chat',
+      folder: 'web',
+      trigger: ASSISTANT_NAME,
+      added_at: new Date().toISOString(),
+      requiresTrigger: false,
+    });
+    registeredGroups = getAllRegisteredGroups();
   }
 
   // Start subsystems (independently of connection handler)

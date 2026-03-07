@@ -56,6 +56,7 @@ You have full Google Workspace access via MCP tools. Use them directly — do NO
 - **Google Docs** (`mcp__google_drive__createGoogleDoc`, `readGoogleDoc`, `updateGoogleDoc`, etc.) — create and edit documents
 - **Google Sheets** (`mcp__google_drive__createGoogleSheet`, `getGoogleSheetContent`, `updateGoogleSheet`, etc.) — create and edit spreadsheets
 - **Google Calendar** (`mcp__google_drive__listCalendars`, `getCalendarEvents`, `createCalendarEvent`, `updateCalendarEvent`, `deleteCalendarEvent`) — manage calendar events
+- **Airtable** (`mcp__airtable__*`) — read/write records, manage bases and tables, search and filter data across all Airtable bases
 
 ## WhatsApp Formatting (and other messaging apps)
 
