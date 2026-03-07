@@ -8,7 +8,7 @@ adds:
 modifies:
   - src/channels/whatsapp.ts
   - src/channels/whatsapp.test.ts
-  - src/container-runner.ts
+  - src/process-runner.ts
   - src/index.ts
   - container/agent-runner/src/index.ts
 structured:

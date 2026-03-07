@@ -4,9 +4,9 @@
  *
  * Input protocol:
  *   Stdin: Full ContainerInput JSON (read until EOF, like before)
- *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
+ *   IPC:   Follow-up messages written as JSON files to $NANOCLAW_IPC_DIR/input/
  *          Files: {type:"message", text:"..."}.json — polled and consumed
- *          Sentinel: /workspace/ipc/input/_close — signals session end
+ *          Sentinel: $NANOCLAW_IPC_DIR/input/_close — signals session end
  *
  * Stdout protocol:
  *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
@@ -55,7 +55,7 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+const IPC_INPUT_DIR = path.join(process.env.NANOCLAW_IPC_DIR!, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
@@ -166,7 +166,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = path.join(process.env.NANOCLAW_GROUP_DIR!, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -392,17 +392,24 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = path.join(process.env.NANOCLAW_GLOBAL_DIR!, 'CLAUDE.md');
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
+  // Load IDENTITY.md and inject into system prompt
+  const identityPath = process.env.NANOCLAW_IDENTITY_PATH;
+  let identityContent: string | undefined;
+  if (identityPath && fs.existsSync(identityPath)) {
+    identityContent = fs.readFileSync(identityPath, 'utf-8');
+  }
+
+  // Discover additional directories passed via NANOCLAW_EXTRA_DIR
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
+  const extraBase = process.env.NANOCLAW_EXTRA_DIR;
+  if (extraBase && fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
       const fullPath = path.join(extraBase, entry);
       if (fs.statSync(fullPath).isDirectory()) {
@@ -417,13 +424,16 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: process.env.NANOCLAW_GROUP_DIR,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+      systemPrompt: (() => {
+        const parts = [identityContent, globalClaudeMd].filter(Boolean);
+        return parts.length > 0
+          ? { type: 'preset' as const, preset: 'claude_code' as const, append: parts.join('\n\n') }
+          : undefined;
+      })(),
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
@@ -432,8 +442,7 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*',
-        'mcp__ollama__*'
+        'mcp__nanoclaw__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -448,10 +457,6 @@ async function runQuery(
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
-        },
-        ollama: {
-          command: 'node',
-          args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
         },
       },
       hooks: {

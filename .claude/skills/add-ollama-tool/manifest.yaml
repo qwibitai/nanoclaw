@@ -7,7 +7,6 @@ adds:
   - scripts/ollama-watch.sh
 modifies:
   - container/agent-runner/src/index.ts
-  - src/container-runner.ts
 structured:
   npm_dependencies: {}
   env_additions:

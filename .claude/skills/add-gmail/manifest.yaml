@@ -7,7 +7,6 @@ adds:
   - src/channels/gmail.test.ts
 modifies:
   - src/channels/index.ts
-  - src/container-runner.ts
   - container/agent-runner/src/index.ts
 structured:
   npm_dependencies:

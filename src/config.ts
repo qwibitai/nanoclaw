@@ -6,7 +6,7 @@ import { getAssistantName } from './identity.js';
 
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
-// where needed (container-runner.ts) to avoid leaking to child processes.
+// in process-runner.ts to avoid leaking to child processes.
 const envConfig = readEnvFile(['ASSISTANT_HAS_OWN_NUMBER']);
 
 export const ASSISTANT_NAME = getAssistantName();
@@ -16,17 +16,9 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
 const HOME_DIR = process.env.HOME || os.homedir();
 
-// Mount security: allowlist stored OUTSIDE project root, never mounted into containers
-export const MOUNT_ALLOWLIST_PATH = path.join(
-  HOME_DIR,
-  '.config',
-  'nanoclaw',
-  'mount-allowlist.json',
-);
 export const SENDER_ALLOWLIST_PATH = path.join(
   HOME_DIR,
   '.config',
@@ -37,8 +29,6 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
-export const CONTAINER_IMAGE =
-  process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(
   process.env.CONTAINER_TIMEOUT || '1800000',
   10,

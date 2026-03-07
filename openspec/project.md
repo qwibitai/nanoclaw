@@ -10,7 +10,7 @@ NanoClaw 是一个个人 Claude AI 助手框架，允许通过消息平台（Wha
 - **Language**: TypeScript 5.7，ESM 模块（`"type": "module"`），编译目标 ES2022
 - **Build**: `tsc`（TypeScript 编译器），开发使用 `tsx` 热重载
 - **Database**: SQLite via `better-sqlite3`（存储消息、群组、任务、会话状态）
-- **Container Runtime**: Docker（默认）或 Apple Container（macOS 原生可选），镜像 `nanoclaw-agent:latest`
+- **Agent Runner**: Node.js 子进程，直接执行 `container/agent-runner/dist/index.js`，通过 `NANOCLAW_*` 环境变量传递路径
 - **AI Agent**: Claude Agent SDK，运行在容器内的 `container/agent-runner/`
 - **Scheduling**: `cron-parser` 解析 cron 表达式，支持 cron / interval / once 三种任务类型
 - **Validation**: `zod` v4 用于 schema 验证
@@ -36,7 +36,7 @@ NanoClaw 是一个个人 Claude AI 助手框架，允许通过消息平台（Wha
 
 - **渠道自注册（Channel Self-Registration）**：各渠道（WhatsApp、Telegram、Slack、Discord、Gmail）在 `src/channels/` 下实现 `Channel` 接口，通过 `src/channels/registry.ts` 在启动时自动注册
 - **消息队列（GroupQueue）**：每个群组有独立队列，保证同一群组的消息串行处理，不同群组并发执行（最多 `MAX_CONCURRENT_CONTAINERS` 个容器）
-- **容器隔离**：每个群组的 agent 在独立 Docker/Apple Container 容器中运行，挂载 `groups/{name}/` 目录作为工作区，容器外存有安全挂载白名单（`~/.config/nanoclaw/mount-allowlist.json`）
+- **进程隔离**：每个群组的 agent 以独立 Node.js 子进程运行，通过 `NANOCLAW_GROUP_DIR`、`NANOCLAW_IPC_DIR` 等环境变量访问群组目录，不依赖容器运行时
 - **IPC 通信**：容器通过 `data/ipc/{group}/` 目录下的文件系统 IPC 与宿主进程通信（`src/ipc.ts`）
 - **状态持久化**：消息游标、会话 ID、群组注册信息等通过 SQLite 持久化（`src/db.ts`）
 - **任务调度**：`src/task-scheduler.ts` 每分钟轮询待执行任务，支持 cron/interval/once，锚定任务计划时间防止漂移
@@ -66,16 +66,13 @@ NanoClaw 是一个个人 Claude AI 助手框架，允许通过消息平台（Wha
 
 ## Important Constraints
 
-- **安全挂载**：容器只能挂载白名单（`mount-allowlist.json`）中的目录；敏感路径（`.ssh`、`.gnupg` 等）被 blockedPatterns 阻止；非主群组默认只读
-- **secrets 不传给子进程**：API keys 等 secrets 只在 `container-runner.ts` 中读取并注入容器环境变量，不暴露给其他模块
-- **容器构建缓存**：buildkit 缓存激进，`--no-cache` 不足以使 COPY 步骤失效；需先 prune builder 再重建
+- **secrets 不写入环境变量**：API keys 等 secrets 只在 `process-runner.ts` 中读取并通过 stdin 注入子进程，不作为环境变量暴露
 - **Node.js >= 20**：项目要求 Node.js 20 或以上
 - **ESM 导入路径**：所有内部 import 必须使用 `.js` 扩展名
 
 ## External Dependencies
 
 - **Claude API / Claude Agent SDK**：AI 推理后端，运行在容器内的 agent-runner 中
-- **Docker / Apple Container**：容器运行时，用于隔离 agent 执行环境
 - **SQLite**（better-sqlite3）：本地数据库，存储所有状态数据，文件位于 `data/` 目录
 - **消息平台 SDK**（按已安装技能不同）：
   - WhatsApp：Baileys（或类似库）
