@@ -101,4 +101,11 @@ export const WHISPER_BIN =
     : path.join(HOME_DIR, '.local', 'bin', 'whisper-cli');
 export const WHISPER_MODEL =
   process.env.WHISPER_MODEL ||
-  path.join(HOME_DIR, '.local', 'share', 'whisper', 'models', 'ggml-base.en.bin');
+  path.join(
+    HOME_DIR,
+    '.local',
+    'share',
+    'whisper',
+    'models',
+    'ggml-base.en.bin',
+  );

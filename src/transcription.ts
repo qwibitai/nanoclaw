@@ -22,13 +22,24 @@ function getOpenAIKey(): string {
  * Convert AAC (raw ADTS, unsupported by Whisper) to 16kHz mono WAV.
  * Returns the WAV path and a cleanup function.
  */
-async function toWav(filePath: string): Promise<{ wavPath: string; cleanup: () => void }> {
+async function toWav(
+  filePath: string,
+): Promise<{ wavPath: string; cleanup: () => void }> {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.wav') {
     return { wavPath: filePath, cleanup: () => {} };
   }
   const tmpWav = path.join(os.tmpdir(), `nanoclaw-${Date.now()}.wav`);
-  await execFileAsync('ffmpeg', ['-i', filePath, '-ar', '16000', '-ac', '1', tmpWav, '-y']);
+  await execFileAsync('ffmpeg', [
+    '-i',
+    filePath,
+    '-ar',
+    '16000',
+    '-ac',
+    '1',
+    tmpWav,
+    '-y',
+  ]);
   return { wavPath: tmpWav, cleanup: () => fs.unlink(tmpWav, () => {}) };
 }
 
@@ -36,11 +47,13 @@ async function transcribeLocal(wavPath: string): Promise<string> {
   const outputTxt = wavPath + '.txt';
   try {
     await execFileAsync(WHISPER_BIN, [
-      '-m', WHISPER_MODEL,
-      '-f', wavPath,
+      '-m',
+      WHISPER_MODEL,
+      '-f',
+      wavPath,
       '--output-txt',
       '--no-prints',
-      '-nt',   // no timestamps in output
+      '-nt', // no timestamps in output
     ]);
     const text = fs.readFileSync(outputTxt, 'utf8').trim();
     return text;
@@ -53,8 +66,14 @@ async function transcribeOpenAI(wavPath: string): Promise<string> {
   const apiKey = getOpenAIKey();
   if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
   const openai = new OpenAI({ apiKey });
-  const file = await toFile(fs.createReadStream(wavPath), path.basename(wavPath));
-  const result = await openai.audio.transcriptions.create({ file, model: 'whisper-1' });
+  const file = await toFile(
+    fs.createReadStream(wavPath),
+    path.basename(wavPath),
+  );
+  const result = await openai.audio.transcriptions.create({
+    file,
+    model: 'whisper-1',
+  });
   return result.text;
 }
 

@@ -173,7 +173,12 @@ async function runTask(
     }
 
     if ((output.inputTokens || 0) + (output.outputTokens || 0) > 0) {
-      logTokenUsage(task.group_folder, task.chat_jid, output.inputTokens || 0, output.outputTokens || 0);
+      logTokenUsage(
+        task.group_folder,
+        task.chat_jid,
+        output.inputTokens || 0,
+        output.outputTokens || 0,
+      );
     }
 
     logger.info(

@@ -253,7 +253,13 @@ export class SignalChannel implements Channel {
         isGroup = false;
       }
 
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'signal', isGroup);
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'signal',
+        isGroup,
+      );
 
       const groups = this.opts.registeredGroups();
       if (groups[chatJid]) {

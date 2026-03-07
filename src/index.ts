@@ -319,9 +319,18 @@ async function runAgent(
     }
 
     if ((output.inputTokens || 0) + (output.outputTokens || 0) > 0) {
-      logTokenUsage(group.folder, chatJid, output.inputTokens || 0, output.outputTokens || 0);
+      logTokenUsage(
+        group.folder,
+        chatJid,
+        output.inputTokens || 0,
+        output.outputTokens || 0,
+      );
       logger.debug(
-        { group: group.name, inputTokens: output.inputTokens, outputTokens: output.outputTokens },
+        {
+          group: group.name,
+          inputTokens: output.inputTokens,
+          outputTokens: output.outputTokens,
+        },
         'Token usage logged',
       );
     }

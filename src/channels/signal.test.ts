@@ -59,7 +59,9 @@ import { SignalChannel, SignalChannelOpts } from './signal.js';
 
 // --- Test helpers ---
 
-function createTestOpts(overrides?: Partial<SignalChannelOpts>): SignalChannelOpts {
+function createTestOpts(
+  overrides?: Partial<SignalChannelOpts>,
+): SignalChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
@@ -544,7 +546,9 @@ describe('SignalChannel', () => {
       await connectChannel(channel);
       fakeSocket._writes.length = 0;
 
-      await expect(channel.setTyping('signal:+1555111111', true)).resolves.toBeUndefined();
+      await expect(
+        channel.setTyping('signal:+1555111111', true),
+      ).resolves.toBeUndefined();
       expect(fakeSocket._writes).toHaveLength(0);
     });
   });
