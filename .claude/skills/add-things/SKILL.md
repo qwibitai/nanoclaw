@@ -1,9 +1,11 @@
 ---
 name: add-things
-description: Add Things 3 task management to NanoClaw. The agent can list, search, add, update, complete, and delete todos in Things 3 via the things3-cli. Triggers on "add things", "things integration", "task management", or "Things 3 support".
+description: "macOS only. Add Things 3 task management to NanoClaw. The agent can list, search, add, update, complete, and delete todos in Things 3 via the things3-cli. Triggers on \"add things\", \"things integration\", \"task management\", or \"Things 3 support\"."
 ---
 
 # Add Things 3 Integration
+
+> **macOS only.** Things 3 is a macOS/iOS application. This skill requires the host system to be running macOS. It will not work on Linux.
 
 This skill adds Things 3 task management to NanoClaw. All operations run through the `things3-cli` binary on the macOS host via IPC — no direct database access or mounting required.
 
@@ -15,7 +17,13 @@ Read `.nanoclaw/state.yaml`. If `things` is in `applied_skills`, skip to Phase 3
 
 ### Check prerequisites
 
-1. **macOS only**: Things 3 runs on macOS. Confirm the user is on macOS.
+1. **macOS only**: Things 3 runs on macOS. Verify the host is macOS:
+
+```bash
+uname -s
+```
+
+If the output is not `Darwin`, stop and inform the user: **This skill is macOS-only and cannot be installed on this system.**
 
 2. **Things 3 installed**: Ask the user to confirm Things 3 is installed and running.
 
