@@ -6,13 +6,7 @@ import { logger } from './logger.js';
 export { CC_WEBHOOK_PATH } from './config.js';
 const MAX_BODY_BYTES = 1024 * 1024;
 
-const CC_EVENT_TYPES = [
-  'task_notification',
-  'task_review_ready',
-  'task_failed',
-  'pipeline_stalled',
-  'release_closed',
-] as const;
+const CC_EVENT_TYPES = ['review_ready', 'task_done', 'task_failed'] as const;
 
 export type CcEventType = (typeof CC_EVENT_TYPES)[number];
 
@@ -22,7 +16,11 @@ export interface CcWebhookDeps {
     payload: Record<string, unknown>,
     message: string,
   ) => void;
-  sendAdamWhatsApp: (message: string) => Promise<void>;
+  createMainSessionMessage: (
+    eventType: CcEventType,
+    payload: Record<string, unknown>,
+    message: string,
+  ) => void;
 }
 
 export interface CcWebhookServerOptions {
@@ -33,6 +31,9 @@ export interface CcWebhookServerOptions {
 }
 
 const VALID_EVENT_TYPES = new Set<string>(CC_EVENT_TYPES);
+const EVENT_ALIASES: Record<string, CcEventType> = {
+  task_review_ready: 'review_ready',
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -156,30 +157,7 @@ function extractDiffContext(payload: Record<string, unknown>): string {
   return stringifyContext(diff, 12000);
 }
 
-function buildTaskNotificationMessage(
-  payload: Record<string, unknown>,
-): string {
-  const taskId = extractTaskId(payload) || 'unknown';
-  const taskTitle = extractTaskTitle(payload) || 'unknown';
-  const summary = getFirstString(payload, [
-    ['summary'],
-    ['message'],
-    ['data', 'summary'],
-    ['data', 'message'],
-  ]);
-
-  const details = summary || stringifyContext(payload, 4000);
-
-  return [
-    `@${ASSISTANT_NAME}`,
-    `[CC task_notification | model: ${CC_HOOKS_MODEL}]`,
-    `Task: ${taskTitle} (${taskId})`,
-    'System event from Command Center. Assess whether follow-up action is required.',
-    `Context:\n${details}`,
-  ].join('\n\n');
-}
-
-function buildTaskReviewReadyMessage(payload: Record<string, unknown>): string {
+function buildReviewReadyMessage(payload: Record<string, unknown>): string {
   const taskId = extractTaskId(payload) || 'unknown';
   const taskTitle = extractTaskTitle(payload) || 'unknown';
   const prUrl = extractPrUrl(payload) || 'unknown';
@@ -187,11 +165,32 @@ function buildTaskReviewReadyMessage(payload: Record<string, unknown>): string {
 
   return [
     `@${ASSISTANT_NAME}`,
-    `[CC task_review_ready | model: ${CC_HOOKS_MODEL}]`,
+    `[CC review_ready | model: ${CC_HOOKS_MODEL}]`,
     `Task: ${taskTitle} (${taskId})`,
     `PR URL: ${prUrl}`,
     'Review Instructions:\n1. Review the diff for correctness, regressions, test coverage, and security impact.\n2. Report blocking issues first with concrete evidence from the diff.\n3. If ready, provide approval summary and merge recommendation.',
     `PR Diff Context:\n${diffContext}`,
+  ].join('\n\n');
+}
+
+function buildTaskDoneMessage(payload: Record<string, unknown>): string {
+  const taskId = extractTaskId(payload) || 'unknown';
+  const taskTitle = extractTaskTitle(payload) || 'unknown';
+  const summary = getFirstString(payload, [
+    ['message'],
+    ['summary'],
+    ['data', 'error'],
+    ['data', 'message'],
+    ['data', 'summary'],
+  ]);
+  const details = summary || stringifyContext(payload, 4000);
+
+  return [
+    `@${ASSISTANT_NAME}`,
+    `[CC task_done | model: ${CC_HOOKS_MODEL}]`,
+    `Task: ${taskTitle} (${taskId})`,
+    'Task finished in Command Center. Validate outcomes and follow up if additional work is needed.',
+    `Completion Context:\n${details}`,
   ].join('\n\n');
 }
 
@@ -219,9 +218,9 @@ function buildTaskFailedMessage(payload: Record<string, unknown>): string {
 
   return [
     `@${ASSISTANT_NAME}`,
-    `[CC task_failed | model: ${CC_HOOKS_MODEL}]`,
+    '[CC task_failed | route: main-session]',
     `Task: ${taskTitle} (${taskId})`,
-    'Investigation Instructions:\n1. Identify likely root cause from the failure context.\n2. Propose and apply the minimal safe fix.\n3. Retry the task workflow and report outcome.',
+    'Command Center reported a task failure. Notify Hal with a concise status and recommended next action.',
     `Failure Context:\n${contextText}`,
     retryHint ? `Retry Hint: ${retryHint}` : '',
   ]
@@ -229,69 +228,9 @@ function buildTaskFailedMessage(payload: Record<string, unknown>): string {
     .join('\n\n');
 }
 
-function buildPipelineStalledAlert(payload: Record<string, unknown>): string {
-  const pipeline = getFirstString(payload, [
-    ['pipeline'],
-    ['pipeline_name'],
-    ['pipelineName'],
-    ['data', 'pipeline'],
-    ['data', 'pipeline_name'],
-    ['data', 'pipelineName'],
-  ]);
-  const taskId = extractTaskId(payload);
-  const url = getFirstString(payload, [
-    ['url'],
-    ['pipeline_url'],
-    ['data', 'url'],
-    ['data', 'pipeline_url'],
-  ]);
-
-  const summary = [
-    'CC Alert: pipeline stalled',
-    pipeline ? `Pipeline: ${pipeline}` : '',
-    taskId ? `Task: ${taskId}` : '',
-    url ? `Link: ${url}` : '',
-  ]
-    .filter((line) => line.length > 0)
-    .join('\n');
-
-  return summary;
-}
-
-function buildReleaseClosedSummary(payload: Record<string, unknown>): string {
-  const release = getFirstString(payload, [
-    ['release'],
-    ['release_name'],
-    ['releaseName'],
-    ['version'],
-    ['data', 'release'],
-    ['data', 'release_name'],
-    ['data', 'releaseName'],
-    ['data', 'version'],
-  ]);
-  const summary = getFirstString(payload, [
-    ['summary'],
-    ['message'],
-    ['notes'],
-    ['data', 'summary'],
-    ['data', 'message'],
-    ['data', 'notes'],
-  ]);
-  const url = getFirstString(payload, [
-    ['url'],
-    ['release_url'],
-    ['data', 'url'],
-    ['data', 'release_url'],
-  ]);
-
-  return [
-    'CC Update: release closed',
-    release ? `Release: ${release}` : '',
-    summary ? `Summary: ${summary}` : '',
-    url ? `Link: ${url}` : '',
-  ]
-    .filter((line) => line.length > 0)
-    .join('\n');
+function normalizeCcEventType(eventType: string): CcEventType | null {
+  const normalized = EVENT_ALIASES[eventType] || eventType;
+  return VALID_EVENT_TYPES.has(normalized) ? (normalized as CcEventType) : null;
 }
 
 export function extractCcEventType(payload: unknown): CcEventType | null {
@@ -311,8 +250,9 @@ export function extractCcEventType(payload: unknown): CcEventType | null {
       ['data', 'name'],
     ]) || null;
 
-  if (directEvent && VALID_EVENT_TYPES.has(directEvent)) {
-    return directEvent as CcEventType;
+  if (directEvent) {
+    const normalized = normalizeCcEventType(directEvent);
+    if (normalized) return normalized;
   }
 
   const eventObj = asRecord(obj.event);
@@ -323,8 +263,9 @@ export function extractCcEventType(payload: unknown): CcEventType | null {
       ['event_type'],
       ['eventType'],
     ]);
-    if (nested && VALID_EVENT_TYPES.has(nested)) {
-      return nested as CcEventType;
+    if (nested) {
+      const normalized = normalizeCcEventType(nested);
+      if (normalized) return normalized;
     }
   }
 
@@ -396,36 +337,28 @@ export async function routeCcEvent(
   deps: CcWebhookDeps,
 ): Promise<void> {
   switch (eventType) {
-    case 'task_notification': {
+    case 'task_done': {
       deps.createHookSessionMessage(
         eventType,
         payload,
-        buildTaskNotificationMessage(payload),
+        buildTaskDoneMessage(payload),
       );
       return;
     }
-    case 'task_review_ready': {
+    case 'review_ready': {
       deps.createHookSessionMessage(
         eventType,
         payload,
-        buildTaskReviewReadyMessage(payload),
+        buildReviewReadyMessage(payload),
       );
       return;
     }
     case 'task_failed': {
-      deps.createHookSessionMessage(
+      deps.createMainSessionMessage(
         eventType,
         payload,
         buildTaskFailedMessage(payload),
       );
-      return;
-    }
-    case 'pipeline_stalled': {
-      await deps.sendAdamWhatsApp(buildPipelineStalledAlert(payload));
-      return;
-    }
-    case 'release_closed': {
-      await deps.sendAdamWhatsApp(buildReleaseClosedSummary(payload));
       return;
     }
   }

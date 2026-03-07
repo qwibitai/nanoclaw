@@ -48,3 +48,28 @@ NanoClaw MUST support long-running deployment through `launchd` using `com.nanoc
 #### Scenario: LaunchAgent keeps runtime alive
 - **WHEN** `com.nanoclaw.plist` is installed and loaded
 - **THEN** launchd runs the Node entrypoint from the project root at load time, keeps it alive, and writes stdout/stderr to project log files
+
+### Requirement: Command Center Webhook Endpoint
+NanoClaw MUST expose a Command Center webhook receiver at `POST /hooks/cc` that accepts JSON event payloads.
+
+#### Scenario: Valid webhook request accepted
+- **WHEN** Command Center sends a POST request to `/hooks/cc` with a JSON object body containing an event
+- **THEN** runtime parses the payload and acknowledges successful routing
+
+### Requirement: Command Center Hook Token Validation
+NanoClaw MUST authenticate Command Center webhook requests using the configured hook token.
+
+#### Scenario: Invalid token rejected
+- **WHEN** a webhook request does not include a valid token matching `CC_HOOK_TOKEN` (or its backward-compatible alias)
+- **THEN** runtime rejects the request and does not route the event
+
+### Requirement: Command Center Event-to-Session Routing
+NanoClaw MUST route Command Center lifecycle events to the correct session target.
+
+#### Scenario: Task failure routed to main session
+- **WHEN** the webhook event type is `task_failed`
+- **THEN** runtime stores a synthetic system message in the main session so Hal is notified
+
+#### Scenario: Task completion or review routed to hook session
+- **WHEN** the webhook event type is `task_done` or `review_ready`
+- **THEN** runtime stores a synthetic system message in the Command Center hook session

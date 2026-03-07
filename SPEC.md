@@ -22,7 +22,7 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 
 1. **Per-turn Hippocampus recall** — Before every agent invocation, query Hippocampus for relevant memories and inject into system prompt
 2. **Multi-model routing** — Main session uses Opus, heartbeat/hooks use Sonnet
-3. **CC integration** — Webhook receiver for task_notification, task_review_ready, task_failed events
+3. **CC integration** — Webhook receiver for task_done, review_ready, task_failed events
 4. **Existing tool ecosystem** — gog CLI, cc CLI, Twilio, Sentinel APIs
 5. **Workspace mounting** — `~/.openclaw/workspace/` for SOUL.md, AGENTS.md, MEMORY.md, daily notes
 
@@ -48,9 +48,9 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 - Endpoint: `POST /hooks/cc`
 - Validates `x-cc-webhook-token` / bearer token against runtime config
 - Routes events to appropriate session (main vs hook)
-- Events: task_notification, task_review_ready, task_failed, pipeline_stalled, release_closed
-- `task_review_ready` / `task_failed` create synthetic system messages in the hook session and trigger agent review/investigation flow
-- `pipeline_stalled` / `release_closed` send WhatsApp alerts/summaries to Adam
+- Events: task_done, review_ready, task_failed
+- `task_done` / `review_ready` create synthetic system messages in the hook session
+- `task_failed` creates a synthetic system message in the main session to notify Hal
 
 ### Session Management
 
@@ -80,11 +80,10 @@ Key Hippocampus settings in `src/config.ts`:
 - `HIPPOCAMPUS_TOP_K` — 10
 - `HIPPOCAMPUS_ENABLED` — default `true`
 - `DEEP_THINKING_SCHEDULE` — ["10:00", "18:00"]
-- `CC_WEBHOOK_TOKEN` — shared secret for Command Center webhook authentication
+- `CC_HOOK_TOKEN` — shared secret for Command Center webhook authentication (`CC_WEBHOOK_TOKEN` alias supported)
 - `CC_WEBHOOK_URL` — full runtime URL for Command Center to post events (`.../hooks/cc`)
 - `CC_HOOKS_GROUP_JID` — target group/session for synthetic hook messages
 - `CC_HOOKS_MODEL` — `sonnet` for webhook-driven hook session execution
-- `ADAM_WHATSAPP_JID` — Adam's WhatsApp JID for critical CC alerts
 
 Middleware behavior is fail-open: if Hippocampus is unavailable, the agent turn proceeds without recall injection.
 

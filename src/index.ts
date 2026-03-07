@@ -3,13 +3,12 @@ import { Server } from 'http';
 import path from 'path';
 
 import {
-  ADAM_WHATSAPP_JID,
   ASSISTANT_NAME,
+  CC_HOOK_TOKEN,
   CC_HOOKS_GROUP_JID,
   CC_HOOKS_MODEL,
   CC_WEBHOOK_HOST,
   CC_WEBHOOK_PORT,
-  CC_WEBHOOK_TOKEN,
   CC_WEBHOOK_URL,
   IDLE_TIMEOUT,
   NO_TRIGGER_REQUIRED_IN_DMS,
@@ -516,21 +515,18 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
-function createSyntheticCcMessage(
+function createSyntheticCcMessageForGroup(
+  groupJid: string,
+  sessionType: 'main' | 'hook',
   eventType: CcEventType,
   payload: Record<string, unknown>,
   message: string,
 ): void {
-  if (!CC_HOOKS_GROUP_JID) {
-    logger.warn({ eventType }, 'CC hook group JID is not configured');
-    return;
-  }
-
-  const group = registeredGroups[CC_HOOKS_GROUP_JID];
+  const group = registeredGroups[groupJid];
   if (!group) {
     logger.warn(
-      { eventType, hookGroupJid: CC_HOOKS_GROUP_JID },
-      'CC hook group is not registered; cannot enqueue synthetic message',
+      { eventType, sessionType, groupJid },
+      'CC target group is not registered; cannot enqueue synthetic message',
     );
     return;
   }
@@ -540,10 +536,10 @@ function createSyntheticCcMessage(
     .toString(36)
     .slice(2, 8)}`;
 
-  storeChatMetadata(CC_HOOKS_GROUP_JID, timestamp, group.name);
+  storeChatMetadata(groupJid, timestamp, group.name);
   storeMessage({
     id: messageId,
-    chat_jid: CC_HOOKS_GROUP_JID,
+    chat_jid: groupJid,
     sender: 'cc-webhook@runtime.local',
     sender_name: 'Command Center',
     content: message,
@@ -555,33 +551,61 @@ function createSyntheticCcMessage(
   logger.info(
     {
       eventType,
-      hookGroupJid: CC_HOOKS_GROUP_JID,
+      sessionType,
+      groupJid,
       model: CC_HOOKS_MODEL,
       payloadKeys: Object.keys(payload),
     },
-    'Stored synthetic CC webhook message in hook session',
+    'Stored synthetic CC webhook message',
   );
 }
 
-async function sendCcAlertToAdam(text: string): Promise<void> {
-  if (!ADAM_WHATSAPP_JID) {
-    logger.warn('ADAM_WHATSAPP_JID is not configured; skipping CC alert');
+function resolveMainGroupJid(): string | null {
+  for (const [chatJid, group] of Object.entries(registeredGroups)) {
+    if (group.isMain === true) {
+      return chatJid;
+    }
+  }
+  return null;
+}
+
+function createHookSessionCcMessage(
+  eventType: CcEventType,
+  payload: Record<string, unknown>,
+  message: string,
+): void {
+  if (!CC_HOOKS_GROUP_JID) {
+    logger.warn({ eventType }, 'CC hook group JID is not configured');
     return;
   }
 
-  const channel = findChannel(channels, ADAM_WHATSAPP_JID);
-  if (!channel) {
-    logger.warn(
-      { adamJid: ADAM_WHATSAPP_JID },
-      'No channel owns Adam JID, cannot send CC alert',
-    );
+  createSyntheticCcMessageForGroup(
+    CC_HOOKS_GROUP_JID,
+    'hook',
+    eventType,
+    payload,
+    message,
+  );
+}
+
+function createMainSessionCcMessage(
+  eventType: CcEventType,
+  payload: Record<string, unknown>,
+  message: string,
+): void {
+  const mainGroupJid = resolveMainGroupJid();
+  if (!mainGroupJid) {
+    logger.warn({ eventType }, 'Main group is not registered');
     return;
   }
 
-  const formatted = formatOutbound(text);
-  if (!formatted) return;
-
-  await channel.sendMessage(ADAM_WHATSAPP_JID, formatted);
+  createSyntheticCcMessageForGroup(
+    mainGroupJid,
+    'main',
+    eventType,
+    payload,
+    message,
+  );
 }
 
 async function main(): Promise<void> {
@@ -682,11 +706,11 @@ async function main(): Promise<void> {
 
   ccWebhookServer = startCcWebhookServer(
     {
-      createHookSessionMessage: createSyntheticCcMessage,
-      sendAdamWhatsApp: sendCcAlertToAdam,
+      createHookSessionMessage: createHookSessionCcMessage,
+      createMainSessionMessage: createMainSessionCcMessage,
     },
     {
-      token: CC_WEBHOOK_TOKEN,
+      token: CC_HOOK_TOKEN,
       host: CC_WEBHOOK_HOST,
       port: CC_WEBHOOK_PORT,
       webhookUrl: CC_WEBHOOK_URL,

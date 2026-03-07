@@ -12,14 +12,18 @@ import {
 
 describe('extractCcEventType', () => {
   it('extracts event type from direct payload field', () => {
+    expect(extractCcEventType({ event: 'review_ready' })).toBe('review_ready');
+  });
+
+  it('normalizes legacy task_review_ready event name', () => {
     expect(extractCcEventType({ event_type: 'task_review_ready' })).toBe(
-      'task_review_ready',
+      'review_ready',
     );
   });
 
   it('extracts event type from nested event object', () => {
-    expect(extractCcEventType({ event: { type: 'pipeline_stalled' } })).toBe(
-      'pipeline_stalled',
+    expect(extractCcEventType({ event: { type: 'task_done' } })).toBe(
+      'task_done',
     );
   });
 
@@ -29,23 +33,23 @@ describe('extractCcEventType', () => {
 });
 
 describe('routeCcEvent', () => {
-  it('routes task_review_ready to hook session with diff context', async () => {
+  it('routes review_ready to hook session with diff context', async () => {
     const createHookSessionMessage = vi.fn();
-    const sendAdamWhatsApp = vi.fn(async (_message: string) => {});
+    const createMainSessionMessage = vi.fn();
 
     await routeCcEvent(
-      'task_review_ready',
+      'review_ready',
       {
         task_id: 'task-123',
         task_title: 'Review checkout refactor',
         pr_url: 'https://example.com/pr/12',
         pr_diff: 'diff --git a/src/a.ts b/src/a.ts\n+const x = 1;',
       },
-      { createHookSessionMessage, sendAdamWhatsApp },
+      { createHookSessionMessage, createMainSessionMessage },
     );
 
     expect(createHookSessionMessage).toHaveBeenCalledTimes(1);
-    expect(sendAdamWhatsApp).not.toHaveBeenCalled();
+    expect(createMainSessionMessage).not.toHaveBeenCalled();
 
     const hookMessage = createHookSessionMessage.mock.calls[0]?.[2];
     expect(hookMessage).toContain(`@${ASSISTANT_NAME}`);
@@ -53,29 +57,49 @@ describe('routeCcEvent', () => {
     expect(hookMessage).toContain('diff --git a/src/a.ts b/src/a.ts');
   });
 
-  it('routes pipeline_stalled to WhatsApp alert', async () => {
+  it('routes task_done to hook session', async () => {
     const createHookSessionMessage = vi.fn();
-    const sendAdamWhatsApp = vi.fn(async (_message: string) => {});
+    const createMainSessionMessage = vi.fn();
 
     await routeCcEvent(
-      'pipeline_stalled',
+      'task_done',
       {
-        pipeline: 'deploy-main',
         task_id: 'task-999',
+        message: 'All checks passed and branch merged.',
       },
-      { createHookSessionMessage, sendAdamWhatsApp },
+      { createHookSessionMessage, createMainSessionMessage },
+    );
+
+    expect(createHookSessionMessage).toHaveBeenCalledTimes(1);
+    expect(createMainSessionMessage).not.toHaveBeenCalled();
+    expect(createHookSessionMessage.mock.calls[0]?.[2]).toContain('task_done');
+  });
+
+  it('routes task_failed to main session', async () => {
+    const createHookSessionMessage = vi.fn();
+    const createMainSessionMessage = vi.fn();
+
+    await routeCcEvent(
+      'task_failed',
+      {
+        task_id: 'task-err',
+        message: 'Unit tests failed in CI',
+      },
+      { createHookSessionMessage, createMainSessionMessage },
     );
 
     expect(createHookSessionMessage).not.toHaveBeenCalled();
-    expect(sendAdamWhatsApp).toHaveBeenCalledTimes(1);
-    expect(sendAdamWhatsApp.mock.calls[0]?.[0]).toContain('pipeline stalled');
+    expect(createMainSessionMessage).toHaveBeenCalledTimes(1);
+    expect(createMainSessionMessage.mock.calls[0]?.[2]).toContain(
+      'task_failed',
+    );
   });
 });
 
 describe('createCcWebhookHandler', () => {
   const deps = {
     createHookSessionMessage: vi.fn(),
-    sendAdamWhatsApp: vi.fn(async (_message: string) => {}),
+    createMainSessionMessage: vi.fn(),
   };
 
   let server: http.Server;
@@ -83,8 +107,7 @@ describe('createCcWebhookHandler', () => {
 
   beforeEach(async () => {
     deps.createHookSessionMessage.mockReset();
-    deps.sendAdamWhatsApp.mockReset();
-    deps.sendAdamWhatsApp.mockImplementation(async (_message: string) => {});
+    deps.createMainSessionMessage.mockReset();
 
     const handler = createCcWebhookHandler(deps, {
       token: 'secret-token',
@@ -116,7 +139,7 @@ describe('createCcWebhookHandler', () => {
         'content-type': 'application/json',
         'x-cc-webhook-token': 'wrong-token',
       },
-      body: JSON.stringify({ event_type: 'task_review_ready' }),
+      body: JSON.stringify({ event: 'review_ready' }),
     });
 
     expect(response.status).toBe(401);
@@ -131,7 +154,7 @@ describe('createCcWebhookHandler', () => {
         'x-cc-webhook-token': 'secret-token',
       },
       body: JSON.stringify({
-        event_type: 'task_review_ready',
+        event: 'review_ready',
         task_id: 'task-abc',
         pr_diff: 'diff --git a/file.ts b/file.ts\n+1',
       }),

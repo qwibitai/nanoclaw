@@ -18,6 +18,7 @@ const envConfig = readEnvFile([
   'OPENCLAW_AUTH_DIR',
   'HAL_ALLOWED_WHATSAPP_SENDER',
   'TZ',
+  'CC_HOOK_TOKEN',
   'CC_WEBHOOK_TOKEN',
   'CC_WEBHOOK_HOST',
   'CC_WEBHOOK_PORT',
@@ -108,8 +109,14 @@ export const CC_WEBHOOK_PORT = parseInt(
   process.env.CC_WEBHOOK_PORT || envConfig.CC_WEBHOOK_PORT || '8787',
   10,
 );
-export const CC_WEBHOOK_TOKEN =
-  process.env.CC_WEBHOOK_TOKEN || envConfig.CC_WEBHOOK_TOKEN || '';
+export const CC_HOOK_TOKEN =
+  process.env.CC_HOOK_TOKEN ||
+  envConfig.CC_HOOK_TOKEN ||
+  process.env.CC_WEBHOOK_TOKEN ||
+  envConfig.CC_WEBHOOK_TOKEN ||
+  '';
+// Backwards-compatible alias for older configs.
+export const CC_WEBHOOK_TOKEN = CC_HOOK_TOKEN;
 export const CC_HOOKS_GROUP_JID =
   process.env.CC_HOOKS_GROUP_JID || envConfig.CC_HOOKS_GROUP_JID || '';
 export const CC_HOOKS_MODEL =
