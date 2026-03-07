@@ -52,6 +52,40 @@ describe('task scheduler', () => {
     expect(task?.status).toBe('paused');
   });
 
+  it('pauses due tasks when group is not found to prevent retry churn', async () => {
+    createTask({
+      id: 'task-no-group',
+      group_folder: 'nonexistent-group',
+      chat_jid: 'test@g.us',
+      prompt: 'run',
+      schedule_type: 'once',
+      schedule_value: '2026-02-22T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: new Date(Date.now() - 60_000).toISOString(),
+      status: 'active',
+      created_at: '2026-02-22T00:00:00.000Z',
+    });
+
+    const enqueueTask = vi.fn(
+      (_groupJid: string, _taskId: string, fn: () => Promise<void>) => {
+        void fn();
+      },
+    );
+
+    startSchedulerLoop({
+      registeredGroups: () => ({}),
+      getSessions: () => ({}),
+      queue: { enqueueTask } as any,
+      onProcess: () => {},
+      sendMessage: async () => {},
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    const task = getTaskById('task-no-group');
+    expect(task?.status).toBe('paused');
+  });
+
   it('computeNextRun anchors interval tasks to scheduled time to prevent drift', () => {
     const scheduledTime = new Date(Date.now() - 2000).toISOString(); // 2s ago
     const task = {
