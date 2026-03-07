@@ -187,15 +187,66 @@ function buildUiHtml(assistantName: string, port: number): string {
     #send { background: #5B15EA; color: #fff; border: none; border-radius: 22px; padding: 10px 20px; font-size: 1rem; cursor: pointer; white-space: nowrap; }
     #send:hover { background: #4a10c5; }
     #send:disabled { opacity: .5; cursor: default; }
+    /* ── Inline mic button ── */
     #mic { background: none; border: 2px solid #5B15EA; border-radius: 50%; width: 42px; height: 42px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s; padding: 0; }
     #mic:hover { background: rgba(91,21,234,.1); }
     #mic.listening { background: #5B15EA; border-color: #5B15EA; animation: pulse 1.2s ease-in-out infinite; }
     #mic.listening svg { fill: white; }
+    /* ── Header voice-mode button ── */
+    #vm-toggle { margin-left: auto; background: rgba(255,255,255,.2); border: none; border-radius: 20px; color: #fff; padding: 6px 14px; font-size: .85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background .15s; }
+    #vm-toggle:hover { background: rgba(255,255,255,.35); }
+    #vm-toggle.active { background: #22c55e; }
+    /* ── Voice mode overlay ── */
+    #vm-overlay { display: none; position: fixed; inset: 0; background: linear-gradient(160deg,#1a0a3e 0%,#0d0520 100%); z-index: 100; flex-direction: column; align-items: center; justify-content: center; gap: 32px; }
+    #vm-overlay.show { display: flex; }
+    #vm-avatar-wrap { position: relative; display: flex; align-items: center; justify-content: center; width: 160px; height: 160px; }
+    #vm-ring1, #vm-ring2, #vm-ring3 { position: absolute; border-radius: 50%; border: 2px solid rgba(91,21,234,.5); animation: vmRing 2.4s ease-out infinite; }
+    #vm-ring1 { width: 100%; height: 100%; }
+    #vm-ring2 { width: 100%; height: 100%; animation-delay: .8s; }
+    #vm-ring3 { width: 100%; height: 100%; animation-delay: 1.6s; }
+    @keyframes vmRing { 0% { transform: scale(.6); opacity:.8; } 100% { transform: scale(1.6); opacity:0; } }
+    #vm-avatar { width: 110px; height: 110px; background: #5B15EA; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 40px rgba(91,21,234,.6); transition: box-shadow .3s; z-index: 1; }
+    #vm-avatar.speaking { box-shadow: 0 0 60px rgba(91,21,234,.9), 0 0 0 4px #5B15EA; animation: vmSpeak .5s ease-in-out infinite alternate; }
+    #vm-avatar.listening { box-shadow: 0 0 40px rgba(34,197,94,.6); }
+    @keyframes vmSpeak { from { transform: scale(1); } to { transform: scale(1.04); } }
+    #vm-status { color: rgba(255,255,255,.8); font-size: 1rem; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; min-height: 24px; }
+    #vm-transcript { color: rgba(255,255,255,.5); font-size: .9rem; font-style: italic; max-width: 340px; text-align: center; min-height: 20px; }
+    #vm-hangup { background: #ef4444; border: none; border-radius: 50%; width: 64px; height: 64px; cursor: pointer; display: flex; align-items: center; justify-content: center; margin-top: 8px; box-shadow: 0 4px 20px rgba(239,68,68,.4); transition: transform .1s, box-shadow .1s; }
+    #vm-hangup:hover { transform: scale(1.08); box-shadow: 0 6px 28px rgba(239,68,68,.6); }
     @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(91,21,234,.45); } 60% { box-shadow: 0 0 0 9px rgba(91,21,234,0); } }
   </style>
 </head>
 <body>
-  <header>${logoSvg} ${assistantName}</header>
+  <header>
+    ${logoSvg} ${assistantName}
+    <button id="vm-toggle" onclick="toggleVoiceMode()" title="Mode vocal avancé">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-1 18.93V22h2v-2.07A8 8 0 0 0 20 12h-2a6 6 0 0 1-12 0H4a8 8 0 0 0 7 7.93z"/></svg>
+      Voice
+    </button>
+  </header>
+
+  <!-- Advanced Voice Mode overlay -->
+  <div id="vm-overlay">
+    <div id="vm-avatar-wrap">
+      <div id="vm-ring1"></div><div id="vm-ring2"></div><div id="vm-ring3"></div>
+      <div id="vm-avatar">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 40" width="64" height="46">
+          <rect x="0" y="11" width="7" height="16" rx="3" fill="white"/>
+          <rect x="49" y="11" width="7" height="16" rx="3" fill="white"/>
+          <rect x="8" y="2" width="40" height="36" rx="9" fill="white"/>
+          <circle cx="21" cy="15" r="6" fill="#5B15EA"/>
+          <circle cx="35" cy="15" r="6" fill="#5B15EA"/>
+          <rect x="17" y="27" width="22" height="5" rx="2.5" fill="#5B15EA"/>
+        </svg>
+      </div>
+    </div>
+    <div id="vm-status">Prêt</div>
+    <div id="vm-transcript"></div>
+    <button id="vm-hangup" onclick="exitVoiceMode()" title="Raccrocher">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C11 21 3 13 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+    </button>
+  </div>
+
   <div id="messages"></div>
   <div class="typing" id="typing">${assistantName} is thinking…</div>
   <div id="form">
@@ -216,6 +267,11 @@ function buildUiHtml(assistantName: string, port: number): string {
     const sendBtn = document.getElementById('send');
     const micBtn = document.getElementById('mic');
     const typing = document.getElementById('typing');
+    const vmOverlay = document.getElementById('vm-overlay');
+    const vmAvatar = document.getElementById('vm-avatar');
+    const vmStatus = document.getElementById('vm-status');
+    const vmTranscript = document.getElementById('vm-transcript');
+    const vmToggle = document.getElementById('vm-toggle');
 
     // Resize textarea automatically
     input.addEventListener('input', () => {
@@ -254,21 +310,24 @@ function buildUiHtml(assistantName: string, port: number): string {
         });
       } catch (e) { appendMsg('Failed to send message.', '${assistantName}', false); }
       sendBtn.disabled = false;
-      input.focus();
+      if (!voiceMode) input.focus();
     }
 
-    // Voice input
+    // ─────────────────────────────────────────────────────────
+    // INLINE MIC (basic voice-to-text, text mode only)
+    // ─────────────────────────────────────────────────────────
     let recognition = null;
     let isListening = false;
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     function toggleMic() {
-      if (!SpeechRecognition) {
-        alert('Saisie vocale non supportée. Utilisez Chrome ou Edge.');
-        return;
-      }
+      if (!SpeechRecognition) { alert('Saisie vocale non supportée. Utilisez Chrome ou Edge.'); return; }
       if (isListening) { recognition.stop(); return; }
+      startRecognition(false);
+    }
 
+    function startRecognition(vmMode) {
+      if (!SpeechRecognition) return;
       recognition = new SpeechRecognition();
       recognition.lang = navigator.language || 'fr-FR';
       recognition.continuous = false;
@@ -276,47 +335,161 @@ function buildUiHtml(assistantName: string, port: number): string {
 
       recognition.onstart = () => {
         isListening = true;
-        micBtn.classList.add('listening');
-        micBtn.title = 'Écoute… (cliquer pour arrêter)';
+        if (!vmMode) { micBtn.classList.add('listening'); micBtn.title = 'Écoute… (cliquer pour arrêter)'; }
+        else { vmAvatar.classList.add('listening'); vmStatus.textContent = 'Écoute…'; vmTranscript.textContent = ''; }
         input.placeholder = '🎙 Écoute en cours…';
       };
 
       recognition.onresult = (e) => {
         const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
         input.value = transcript;
+        if (vmMode) vmTranscript.textContent = transcript;
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
       };
 
       recognition.onend = () => {
         isListening = false;
-        micBtn.classList.remove('listening');
-        micBtn.title = 'Saisie vocale';
-        input.placeholder = 'Message ${assistantName}…';
-        if (input.value.trim()) send();
+        if (!vmMode) {
+          micBtn.classList.remove('listening');
+          micBtn.title = 'Saisie vocale';
+          input.placeholder = 'Message ${assistantName}…';
+          if (input.value.trim()) send();
+        } else {
+          vmAvatar.classList.remove('listening');
+          input.placeholder = 'Message ${assistantName}…';
+          if (input.value.trim()) {
+            vmStatus.textContent = 'Réflexion…';
+            vmTranscript.textContent = input.value;
+            send();
+          } else if (voiceMode) {
+            // Nothing heard — restart listening
+            setTimeout(() => { if (voiceMode) startRecognition(true); }, 600);
+          }
+        }
       };
 
       recognition.onerror = (e) => {
-        if (e.error !== 'aborted') console.warn('Speech error:', e.error);
+        if (e.error !== 'aborted' && e.error !== 'no-speech') console.warn('Speech error:', e.error);
         isListening = false;
-        micBtn.classList.remove('listening');
-        micBtn.title = 'Saisie vocale';
+        vmAvatar.classList.remove('listening');
+        if (!vmMode) { micBtn.classList.remove('listening'); micBtn.title = 'Saisie vocale'; }
         input.placeholder = 'Message ${assistantName}…';
+        if (vmMode && voiceMode) setTimeout(() => { if (voiceMode) startRecognition(true); }, 800);
       };
 
       recognition.start();
     }
 
+    // ─────────────────────────────────────────────────────────
+    // ADVANCED VOICE MODE (listen → send → speak → listen)
+    // ─────────────────────────────────────────────────────────
+    let voiceMode = false;
+    let currentUtterance = null;
+
+    function stripMarkdown(text) {
+      return text
+        .replace(/\`\`\`[\s\S]*?\`\`\`/g, '.')
+        .replace(/\`[^\`]+\`/g, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/^#{1,6}\s+/gm, '')
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/^[-*+]\s/gm, '')
+        .replace(/\n{2,}/g, '. ')
+        .trim();
+    }
+
+    function getBestVoice() {
+      const voices = speechSynthesis.getVoices();
+      const lang = navigator.language || 'fr-FR';
+      const prefix = lang.split('-')[0];
+      return voices.find(v => v.lang === lang && v.localService)
+          || voices.find(v => v.lang.startsWith(prefix) && v.localService)
+          || voices.find(v => v.lang.startsWith(prefix))
+          || voices[0];
+    }
+
+    function speakText(text, onDone) {
+      speechSynthesis.cancel();
+      const clean = stripMarkdown(text);
+      if (!clean) { onDone?.(); return; }
+
+      // Split into sentences for more natural delivery
+      const sentences = clean.match(/[^.!?]+[.!?]*/g) || [clean];
+      let i = 0;
+
+      function speakNext() {
+        if (i >= sentences.length || !voiceMode) { onDone?.(); return; }
+        const utt = new SpeechSynthesisUtterance(sentences[i++].trim());
+        utt.voice = getBestVoice();
+        utt.lang = navigator.language || 'fr-FR';
+        utt.rate = 1.05;
+        utt.pitch = 1;
+        utt.onend = speakNext;
+        utt.onerror = () => onDone?.();
+        currentUtterance = utt;
+        speechSynthesis.speak(utt);
+      }
+      speakNext();
+    }
+
+    function toggleVoiceMode() {
+      if (voiceMode) exitVoiceMode(); else enterVoiceMode();
+    }
+
+    function enterVoiceMode() {
+      if (!SpeechRecognition) { alert('Mode vocal non supporté. Utilisez Chrome ou Edge.'); return; }
+      voiceMode = true;
+      vmToggle.classList.add('active');
+      vmToggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C11 21 3 13 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg> Fin';
+      vmOverlay.classList.add('show');
+      // Pre-load voices
+      speechSynthesis.getVoices();
+      setTimeout(() => { if (voiceMode) startRecognition(true); }, 400);
+    }
+
+    function exitVoiceMode() {
+      voiceMode = false;
+      vmToggle.classList.remove('active');
+      vmToggle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1a4 4 0 0 1 4 4v7a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-1 18.93V22h2v-2.07A8 8 0 0 0 20 12h-2a6 6 0 0 1-12 0H4a8 8 0 0 0 7 7.93z"/></svg> Voice';
+      recognition?.stop();
+      speechSynthesis.cancel();
+      vmOverlay.classList.remove('show');
+      vmAvatar.classList.remove('speaking', 'listening');
+      vmStatus.textContent = 'Prêt';
+      vmTranscript.textContent = '';
+      input.focus();
+    }
+
+    // ─────────────────────────────────────────────────────────
     // SSE connection
+    // ─────────────────────────────────────────────────────────
     const es = new EventSource('/events');
     es.onmessage = (e) => {
       const data = JSON.parse(e.data);
       if (data.type === 'message') {
         typing.style.display = 'none';
         appendMsg(data.text, data.sender, false);
+        if (voiceMode) {
+          vmAvatar.classList.remove('listening');
+          vmAvatar.classList.add('speaking');
+          vmStatus.textContent = 'Répond…';
+          vmTranscript.textContent = '';
+          speakText(data.text, () => {
+            vmAvatar.classList.remove('speaking');
+            if (voiceMode) {
+              vmStatus.textContent = 'Écoute…';
+              setTimeout(() => { if (voiceMode) startRecognition(true); }, 300);
+            }
+          });
+        }
       } else if (data.type === 'typing') {
         typing.style.display = data.isTyping ? 'block' : 'none';
-        if (data.isTyping) messages.scrollTop = messages.scrollHeight;
+        if (data.isTyping) {
+          messages.scrollTop = messages.scrollHeight;
+          if (voiceMode) { vmStatus.textContent = 'Réflexion…'; vmTranscript.textContent = ''; }
+        }
       }
     };
     es.onerror = () => console.warn('SSE reconnecting…');
