@@ -76,26 +76,6 @@ export interface CustomModification {
   patch_file: string;
 }
 
-export interface UpdatePreview {
-  currentVersion: string;
-  newVersion: string;
-  filesChanged: string[];
-  filesDeleted: string[];
-  conflictRisk: string[];
-  customPatchesAtRisk: string[];
-}
-
-export interface UpdateResult {
-  success: boolean;
-  previousVersion: string;
-  newVersion: string;
-  mergeConflicts?: string[];
-  backupPending?: boolean;
-  customPatchFailures?: string[];
-  skillReapplyResults?: Record<string, boolean>;
-  error?: string;
-}
-
 export interface UninstallResult {
   success: boolean;
   skill: string;
