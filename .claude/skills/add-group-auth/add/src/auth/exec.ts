@@ -38,7 +38,7 @@ export function execInContainer(
   opts: ExecContainerOpts = {},
 ): ExecHandle {
   const authIpcDir = path.join(sessionDir, 'auth-ipc');
-  fs.mkdirSync(authIpcDir, { recursive: true });
+  fs.mkdirSync(authIpcDir, { recursive: true, mode: 0o777 });
 
   const containerName = `nanoclaw-auth-${Date.now()}`;
   const args: string[] = [
