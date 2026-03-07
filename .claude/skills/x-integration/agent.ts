@@ -1,7 +1,7 @@
 /**
  * X Integration - MCP Tool Definitions (Agent/Container Side)
  *
- * These tools run inside the container and communicate with the host via IPC.
+ * These tools run inside the container and communicate with the host via JSON-RPC.
  * The host-side implementation is in host.ts.
  *
  * Note: This file is compiled in the container, not on the host.
@@ -11,45 +11,7 @@
 // @ts-ignore - SDK available in container environment only
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import fs from 'fs';
-import path from 'path';
-
-// IPC directories (inside container)
-const IPC_DIR = '/workspace/ipc';
-const TASKS_DIR = path.join(IPC_DIR, 'tasks');
-const RESULTS_DIR = path.join(IPC_DIR, 'x_results');
-
-function writeIpcFile(dir: string, data: object): string {
-  fs.mkdirSync(dir, { recursive: true });
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`;
-  const filepath = path.join(dir, filename);
-  const tempPath = `${filepath}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
-  fs.renameSync(tempPath, filepath);
-  return filename;
-}
-
-async function waitForResult(requestId: string, maxWait = 60000): Promise<{ success: boolean; message: string }> {
-  const resultFile = path.join(RESULTS_DIR, `${requestId}.json`);
-  const pollInterval = 1000;
-  let elapsed = 0;
-
-  while (elapsed < maxWait) {
-    if (fs.existsSync(resultFile)) {
-      try {
-        const result = JSON.parse(fs.readFileSync(resultFile, 'utf-8'));
-        fs.unlinkSync(resultFile);
-        return result;
-      } catch (err) {
-        return { success: false, message: `Failed to read result: ${err}` };
-      }
-    }
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
-    elapsed += pollInterval;
-  }
-
-  return { success: false, message: 'Request timed out' };
-}
+import type { JsonRpcTransport } from '../../jsonrpc-transport.js';
 
 export interface SkillToolsContext {
   groupFolder: string;
@@ -59,8 +21,23 @@ export interface SkillToolsContext {
 /**
  * Create X integration MCP tools
  */
-export function createXTools(ctx: SkillToolsContext) {
-  const { groupFolder, isMain } = ctx;
+const X_REQUEST_TIMEOUT_MS = 60_000;
+
+function sendWithTimeout(transport: JsonRpcTransport, method: string, params?: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`X tool '${method}' timed out after ${X_REQUEST_TIMEOUT_MS / 1000}s`)),
+      X_REQUEST_TIMEOUT_MS
+    );
+    Promise.resolve(transport.sendRequest(method, params)).then(
+      (result) => { clearTimeout(timer); resolve(result); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+export function createXTools(ctx: SkillToolsContext, transport: JsonRpcTransport) {
+  const { isMain } = ctx;
 
   return [
     tool(
@@ -87,20 +64,18 @@ Make sure the content is appropriate and within X's character limit (280 chars f
           };
         }
 
-        const requestId = `xpost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
-          type: 'x_post',
-          requestId,
-          content: args.content,
-          groupFolder,
-          timestamp: new Date().toISOString()
-        });
-
-        const result = await waitForResult(requestId);
-        return {
-          content: [{ type: 'text', text: result.message }],
-          isError: !result.success
-        };
+        try {
+          const result = await sendWithTimeout(transport, 'x_post', { content: args.content }) as { success: boolean; message: string };
+          return {
+            content: [{ type: 'text', text: result.message }],
+            isError: !result.success
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text', text: `X post failed: ${err.message}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -120,20 +95,18 @@ Provide the tweet URL or tweet ID to like.`,
           };
         }
 
-        const requestId = `xlike-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
-          type: 'x_like',
-          requestId,
-          tweetUrl: args.tweet_url,
-          groupFolder,
-          timestamp: new Date().toISOString()
-        });
-
-        const result = await waitForResult(requestId);
-        return {
-          content: [{ type: 'text', text: result.message }],
-          isError: !result.success
-        };
+        try {
+          const result = await sendWithTimeout(transport, 'x_like', { tweetUrl: args.tweet_url }) as { success: boolean; message: string };
+          return {
+            content: [{ type: 'text', text: result.message }],
+            isError: !result.success
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text', text: `X like failed: ${err.message}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -154,21 +127,18 @@ Provide the tweet URL and your reply content.`,
           };
         }
 
-        const requestId = `xreply-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
-          type: 'x_reply',
-          requestId,
-          tweetUrl: args.tweet_url,
-          content: args.content,
-          groupFolder,
-          timestamp: new Date().toISOString()
-        });
-
-        const result = await waitForResult(requestId);
-        return {
-          content: [{ type: 'text', text: result.message }],
-          isError: !result.success
-        };
+        try {
+          const result = await sendWithTimeout(transport, 'x_reply', { tweetUrl: args.tweet_url, content: args.content }) as { success: boolean; message: string };
+          return {
+            content: [{ type: 'text', text: result.message }],
+            isError: !result.success
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text', text: `X reply failed: ${err.message}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -188,20 +158,18 @@ Provide the tweet URL to retweet.`,
           };
         }
 
-        const requestId = `xretweet-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
-          type: 'x_retweet',
-          requestId,
-          tweetUrl: args.tweet_url,
-          groupFolder,
-          timestamp: new Date().toISOString()
-        });
-
-        const result = await waitForResult(requestId);
-        return {
-          content: [{ type: 'text', text: result.message }],
-          isError: !result.success
-        };
+        try {
+          const result = await sendWithTimeout(transport, 'x_retweet', { tweetUrl: args.tweet_url }) as { success: boolean; message: string };
+          return {
+            content: [{ type: 'text', text: result.message }],
+            isError: !result.success
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text', text: `X retweet failed: ${err.message}` }],
+            isError: true
+          };
+        }
       }
     ),
 
@@ -222,21 +190,18 @@ Retweet with your own comment added.`,
           };
         }
 
-        const requestId = `xquote-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        writeIpcFile(TASKS_DIR, {
-          type: 'x_quote',
-          requestId,
-          tweetUrl: args.tweet_url,
-          comment: args.comment,
-          groupFolder,
-          timestamp: new Date().toISOString()
-        });
-
-        const result = await waitForResult(requestId);
-        return {
-          content: [{ type: 'text', text: result.message }],
-          isError: !result.success
-        };
+        try {
+          const result = await sendWithTimeout(transport, 'x_quote', { tweetUrl: args.tweet_url, comment: args.comment }) as { success: boolean; message: string };
+          return {
+            content: [{ type: 'text', text: result.message }],
+            isError: !result.success
+          };
+        } catch (err: any) {
+          return {
+            content: [{ type: 'text', text: `X quote failed: ${err.message}` }],
+            isError: true
+          };
+        }
       }
     )
   ];

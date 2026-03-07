@@ -8,12 +8,12 @@ Added a volume mount for Gmail OAuth credentials (`~/.gmail-mcp/`) so the Gmail 
 ### buildVolumeMounts()
 - Added: Gmail credentials mount after the `.claude` sessions mount:
   ```
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  const gmailDir = path.join(os.homedir(), '.gmail-mcp');
   if (fs.existsSync(gmailDir)) {
     mounts.push({
       hostPath: gmailDir,
       containerPath: '/home/node/.gmail-mcp',
-      readonly: false,  // MCP may need to refresh OAuth tokens
+      readonly: false,
     });
   }
   ```
@@ -26,12 +26,13 @@ Added a volume mount for Gmail OAuth credentials (`~/.gmail-mcp/`) so the Gmail 
 
 ## Invariants
 - All existing mounts are unchanged
-- Mount ordering is preserved (Gmail added after session mounts, before additional mounts)
-- The `buildContainerArgs`, `runContainerAgent`, and all other functions are untouched
+- Mount ordering is preserved (Gmail added after session mounts, before agent-runner copy)
+- The JSON-RPC handler registration, `buildContainerArgs`, `runContainerAgent`, and all other functions are untouched
 - Additional mount validation via `validateAdditionalMounts` is unchanged
+- Secrets passed via JSON-RPC initialize request (not mounted as files)
 
 ## Must-keep
-- All existing volume mounts (project root, group dir, global, sessions, IPC, agent-runner, additional)
+- All existing volume mounts (project root, group dir, global, sessions, agent-runner, additional)
 - The mount security model (allowlist validation for additional mounts)
-- The `readSecrets` function and stdin-based secret passing
-- Container lifecycle (spawn, timeout, output parsing)
+- The `readSecrets` function and JSON-RPC-based secret passing
+- Container lifecycle (spawn, JSON-RPC server/client, timeout, output handling)

@@ -1,19 +1,17 @@
 /**
- * X Integration IPC Handler
+ * X Integration - JSON-RPC Handler Registration (Host Side)
  *
- * Handles all x_* IPC messages from container agents.
- * This is the entry point for X integration in the host process.
+ * Registers handlers for all x_* JSON-RPC methods.
+ * Each handler spawns a Playwright script subprocess.
  */
 
 import { spawn } from 'child_process';
-import fs from 'fs';
 import path from 'path';
-import pino from 'pino';
+import { JSONRPCErrorException } from 'json-rpc-2.0';
+import { registerHandler, type HandlerContext } from '../../../src/ipc-handlers/registry.js';
+import { logger } from '../../../src/logger.js';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: { target: 'pino-pretty', options: { colorize: true } }
-});
+const ERR_UNAUTHORIZED = -32000;
 
 interface SkillResult {
   success: boolean;
@@ -21,10 +19,8 @@ interface SkillResult {
   data?: unknown;
 }
 
-// Run a skill script as subprocess
 async function runScript(script: string, args: object): Promise<SkillResult> {
   const scriptPath = path.join(process.cwd(), '.claude', 'skills', 'x-integration', 'scripts', `${script}.ts`);
-
   return new Promise((resolve) => {
     const proc = spawn('npx', ['tsx', scriptPath], {
       cwd: process.cwd(),
@@ -63,97 +59,62 @@ async function runScript(script: string, args: object): Promise<SkillResult> {
   });
 }
 
-// Write result to IPC results directory
-function writeResult(dataDir: string, sourceGroup: string, requestId: string, result: SkillResult): void {
-  const resultsDir = path.join(dataDir, 'ipc', sourceGroup, 'x_results');
-  fs.mkdirSync(resultsDir, { recursive: true });
-  fs.writeFileSync(path.join(resultsDir, `${requestId}.json`), JSON.stringify(result));
-}
-
-/**
- * Handle X integration IPC messages
- *
- * @returns true if message was handled, false if not an X message
- */
-export async function handleXIpc(
-  data: Record<string, unknown>,
-  sourceGroup: string,
-  isMain: boolean,
-  dataDir: string
-): Promise<boolean> {
-  const type = data.type as string;
-
-  // Only handle x_* types
-  if (!type?.startsWith('x_')) {
-    return false;
+// --- x_post ---
+registerHandler('x_post', async (params: { content: string }, context: HandlerContext) => {
+  if (!context.isMain) {
+    throw new JSONRPCErrorException('Only the main group can use X integration', ERR_UNAUTHORIZED);
   }
-
-  // Only main group can use X integration
-  if (!isMain) {
-    logger.warn({ sourceGroup, type }, 'X integration blocked: not main group');
-    return true;
+  if (!params.content) {
+    throw new JSONRPCErrorException('Missing content', -32602);
   }
+  logger.info({ type: 'x_post', sourceGroup: context.sourceGroup }, 'Processing X post request');
+  return await runScript('post', { content: params.content });
+});
 
-  const requestId = data.requestId as string;
-  if (!requestId) {
-    logger.warn({ type }, 'X integration blocked: missing requestId');
-    return true;
+// --- x_like ---
+registerHandler('x_like', async (params: { tweetUrl: string }, context: HandlerContext) => {
+  if (!context.isMain) {
+    throw new JSONRPCErrorException('Only the main group can use X integration', ERR_UNAUTHORIZED);
   }
-
-  logger.info({ type, requestId }, 'Processing X request');
-
-  let result: SkillResult;
-
-  switch (type) {
-    case 'x_post':
-      if (!data.content) {
-        result = { success: false, message: 'Missing content' };
-        break;
-      }
-      result = await runScript('post', { content: data.content });
-      break;
-
-    case 'x_like':
-      if (!data.tweetUrl) {
-        result = { success: false, message: 'Missing tweetUrl' };
-        break;
-      }
-      result = await runScript('like', { tweetUrl: data.tweetUrl });
-      break;
-
-    case 'x_reply':
-      if (!data.tweetUrl || !data.content) {
-        result = { success: false, message: 'Missing tweetUrl or content' };
-        break;
-      }
-      result = await runScript('reply', { tweetUrl: data.tweetUrl, content: data.content });
-      break;
-
-    case 'x_retweet':
-      if (!data.tweetUrl) {
-        result = { success: false, message: 'Missing tweetUrl' };
-        break;
-      }
-      result = await runScript('retweet', { tweetUrl: data.tweetUrl });
-      break;
-
-    case 'x_quote':
-      if (!data.tweetUrl || !data.comment) {
-        result = { success: false, message: 'Missing tweetUrl or comment' };
-        break;
-      }
-      result = await runScript('quote', { tweetUrl: data.tweetUrl, comment: data.comment });
-      break;
-
-    default:
-      return false;
+  if (!params.tweetUrl) {
+    throw new JSONRPCErrorException('Missing tweetUrl', -32602);
   }
+  logger.info({ type: 'x_like', sourceGroup: context.sourceGroup }, 'Processing X like request');
+  return await runScript('like', { tweetUrl: params.tweetUrl });
+});
 
-  writeResult(dataDir, sourceGroup, requestId, result);
-  if (result.success) {
-    logger.info({ type, requestId }, 'X request completed');
-  } else {
-    logger.error({ type, requestId, message: result.message }, 'X request failed');
+// --- x_reply ---
+registerHandler('x_reply', async (params: { tweetUrl: string; content: string }, context: HandlerContext) => {
+  if (!context.isMain) {
+    throw new JSONRPCErrorException('Only the main group can use X integration', ERR_UNAUTHORIZED);
   }
-  return true;
-}
+  if (!params.tweetUrl || !params.content) {
+    throw new JSONRPCErrorException('Missing tweetUrl or content', -32602);
+  }
+  logger.info({ type: 'x_reply', sourceGroup: context.sourceGroup }, 'Processing X reply request');
+  return await runScript('reply', { tweetUrl: params.tweetUrl, content: params.content });
+});
+
+// --- x_retweet ---
+registerHandler('x_retweet', async (params: { tweetUrl: string }, context: HandlerContext) => {
+  if (!context.isMain) {
+    throw new JSONRPCErrorException('Only the main group can use X integration', ERR_UNAUTHORIZED);
+  }
+  if (!params.tweetUrl) {
+    throw new JSONRPCErrorException('Missing tweetUrl', -32602);
+  }
+  logger.info({ type: 'x_retweet', sourceGroup: context.sourceGroup }, 'Processing X retweet request');
+  return await runScript('retweet', { tweetUrl: params.tweetUrl });
+});
+
+// --- x_quote ---
+registerHandler('x_quote', async (params: { tweetUrl: string; comment: string }, context: HandlerContext) => {
+  if (!context.isMain) {
+    throw new JSONRPCErrorException('Only the main group can use X integration', ERR_UNAUTHORIZED);
+  }
+  if (!params.tweetUrl || !params.comment) {
+    throw new JSONRPCErrorException('Missing tweetUrl or comment', -32602);
+  }
+  logger.info({ type: 'x_quote', sourceGroup: context.sourceGroup }, 'Processing X quote request');
+  return await runScript('quote', { tweetUrl: params.tweetUrl, comment: params.comment });
+});

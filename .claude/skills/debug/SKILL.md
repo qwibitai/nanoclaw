@@ -19,7 +19,6 @@ src/container-runner.ts               container/agent-runner/
     │                                      │
     ├── data/env/env ──────────────> /workspace/env-dir/env
     ├── groups/{folder} ───────────> /workspace/group
-    ├── data/ipc/{folder} ────────> /workspace/ipc
     ├── data/sessions/{folder}/.claude/ ──> /home/node/.claude/ (isolated per-group)
     └── (main only) project root ──> /workspace/project
 ```
@@ -115,15 +114,9 @@ docker run --rm --entrypoint /bin/bash nanoclaw-agent:latest -c 'ls -la /workspa
 Expected structure:
 ```
 /workspace/
-├── env-dir/env           # Environment file (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)
 ├── group/                # Current group folder (cwd)
 ├── project/              # Project root (main channel only)
 ├── global/               # Global CLAUDE.md (non-main only)
-├── ipc/                  # Inter-process communication
-│   ├── messages/         # Outgoing WhatsApp messages
-│   ├── tasks/            # Scheduled task commands
-│   ├── current_tasks.json    # Read-only: scheduled tasks visible to this group
-│   └── available_groups.json # Read-only: WhatsApp groups for activation (main only)
 └── extra/                # Additional custom mounts
 ```
 
@@ -188,7 +181,6 @@ echo '{"prompt":"What is 2+2?","groupFolder":"test","chatJid":"test@g.us","isMai
   docker run -i \
   -v $(pwd)/data/env:/workspace/env-dir:ro \
   -v $(pwd)/groups/test:/workspace/group \
-  -v $(pwd)/data/ipc:/workspace/ipc \
   nanoclaw-agent:latest
 ```
 
@@ -290,30 +282,13 @@ grep "Session initialized" logs/nanoclaw.log | tail -5
 
 ## IPC Debugging
 
-The container communicates back to the host via files in `/workspace/ipc/`:
+The container communicates with the host via JSON-RPC 2.0 over stdio. IPC calls (message sending, task scheduling, group registration) are exposed as MCP tools inside the container.
 
-```bash
-# Check pending messages
-ls -la data/ipc/messages/
-
-# Check pending task operations
-ls -la data/ipc/tasks/
-
-# Read a specific IPC file
-cat data/ipc/messages/*.json
-
-# Check available groups (main channel only)
-cat data/ipc/main/available_groups.json
-
-# Check current tasks snapshot
-cat data/ipc/{groupFolder}/current_tasks.json
-```
-
-**IPC file types:**
-- `messages/*.json` - Agent writes: outgoing WhatsApp messages
-- `tasks/*.json` - Agent writes: task operations (schedule, pause, resume, cancel, refresh_groups)
-- `current_tasks.json` - Host writes: read-only snapshot of scheduled tasks
-- `available_groups.json` - Host writes: read-only list of WhatsApp groups (main only)
+To debug IPC issues:
+- Check container logs in `groups/{folder}/logs/container-*.log` for JSON-RPC errors
+- Enable `LOG_LEVEL=debug` to see all JSON-RPC messages in the host logs
+- The `list_available_groups` MCP tool (main only) queries groups from the database
+- The `list_tasks` MCP tool shows scheduled tasks
 
 ## Quick Diagnostic Script
 

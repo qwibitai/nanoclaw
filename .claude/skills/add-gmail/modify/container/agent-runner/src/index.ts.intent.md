@@ -6,7 +6,7 @@ Added Gmail MCP server to the agent's available tools so it can read and send em
 ## Key sections
 
 ### mcpServers (inside runQuery → query() call)
-- Added: `gmail` MCP server alongside the existing `nanoclaw` server:
+- Added: `gmail` MCP server alongside the existing in-process `nanoclaw` server:
   ```
   gmail: {
     command: 'npx',
@@ -18,15 +18,15 @@ Added Gmail MCP server to the agent's available tools so it can read and send em
 - Added: `'mcp__gmail__*'` to allow all Gmail MCP tools
 
 ## Invariants
-- The `nanoclaw` MCP server configuration is unchanged
+- The in-process `nanoclaw` MCP server configuration is unchanged
 - All existing allowed tools are preserved
-- The query loop, IPC handling, MessageStream, and all other logic is untouched
+- The query loop, JSON-RPC transport, MessageStream, and all other logic is untouched
 - Hooks (PreCompact, sanitize Bash) are unchanged
-- Output protocol (markers) is unchanged
+- JSON-RPC transport initialization and drain loop unchanged
 
 ## Must-keep
-- The `nanoclaw` MCP server with its environment variables
+- The in-process `nanoclaw` MCP server creation
 - All existing allowedTools entries
 - The hook system (PreCompact, PreToolUse sanitize)
-- The IPC input/close sentinel handling
+- JSON-RPC transport initialization and drain loop
 - The MessageStream class and query loop

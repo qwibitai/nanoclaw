@@ -5,7 +5,7 @@ description: Add Ollama MCP server so the container agent can call local models 
 
 # Add Ollama Integration
 
-This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models.
+This skill adds an in-process MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models. Status notifications are sent via JSON-RPC IPC, and macOS notifications appear automatically.
 
 Tools added:
 - `ollama_list_models` — lists installed Ollama models
@@ -56,15 +56,17 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
 ```
 
 This deterministically:
-- Adds `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
-- Adds `scripts/ollama-watch.sh` (macOS notification watcher)
+- Adds `container/agent-runner/src/ollama-mcp-inprocess.ts` (in-process Ollama MCP server)
+- Adds `src/ipc-handlers/ollama.ts` (host-side status handler with macOS notifications)
 - Three-way merges Ollama MCP config into `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
-- Three-way merges `[OLLAMA]` log surfacing into `src/container-runner.ts`
+- Three-way merges `[OLLAMA]` log removal from `src/container-runner.ts`
+- Three-way merges Ollama handler import into `src/ipc-handlers/index.ts`
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
 - `modify/container/agent-runner/src/index.ts.intent.md` — what changed and invariants
 - `modify/src/container-runner.ts.intent.md` — what changed and invariants
+- `modify/src/ipc-handlers/index.ts.intent.md` — what changed and invariants
 
 ### Copy to per-group agent-runner
 
@@ -72,8 +74,10 @@ Existing groups have a cached copy of the agent-runner source. Copy the new file
 
 ```bash
 for dir in data/sessions/*/agent-runner-src; do
-  cp container/agent-runner/src/ollama-mcp-stdio.ts "$dir/"
+  cp container/agent-runner/src/ollama-mcp-inprocess.ts "$dir/"
   cp container/agent-runner/src/index.ts "$dir/"
+  # Remove old stdio file if present
+  rm -f "$dir/ollama-mcp-stdio.ts"
 done
 ```
 
@@ -113,24 +117,13 @@ Tell the user:
 >
 > The agent should use `ollama_list_models` to find available models, then `ollama_generate` to get a response.
 
-### Monitor activity (optional)
+### Notifications
 
-Run the watcher script for macOS notifications when Ollama is used:
+macOS notifications appear automatically:
+- **Submarine** sound when generation starts
+- **Glass** sound when generation completes
 
-```bash
-./scripts/ollama-watch.sh
-```
-
-### Check logs if needed
-
-```bash
-tail -f logs/nanoclaw.log | grep -i ollama
-```
-
-Look for:
-- `Agent output: ... Ollama ...` — agent used Ollama successfully
-- `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
-- `[OLLAMA] <<< Done` — generation completed
+Activity is also logged at info level in `logs/nanoclaw.log`.
 
 ## Troubleshooting
 
