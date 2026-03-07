@@ -9,7 +9,6 @@ import './feishu.js';
 // gmail
 
 // slack
-import './slack.js';
 
 // telegram
 

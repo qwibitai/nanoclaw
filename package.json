@@ -20,6 +20,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@slack/bolt": "^4.6.0",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
