@@ -41,6 +41,7 @@ export interface ContainerInput {
   assistantName?: string;
   model?: string;
   secrets?: Record<string, string>;
+  tools?: string[];
 }
 
 export interface ContainerOutput {
@@ -156,19 +157,19 @@ function buildVolumeMounts(
     }
   }
 
-  // Write global .mcp.json for MCP servers available to all containers
+  // Write .mcp.json — only include tools allowed by group config
+  const tools = group.containerConfig?.tools;
   const mcpJsonPath = path.join(groupSessionsDir, '.mcp.json');
-  const globalMcpConfig = {
-    mcpServers: {
-      granola: {
-        type: 'http',
-        url: 'https://mcp.granola.ai/mcp',
-      },
-    },
-  };
+  const mcpServers: Record<string, unknown> = {};
+  if (!tools || tools.includes('granola')) {
+    mcpServers.granola = {
+      type: 'http',
+      url: 'https://mcp.granola.ai/mcp',
+    };
+  }
   fs.writeFileSync(
     mcpJsonPath,
-    JSON.stringify(globalMcpConfig, null, 2) + '\n',
+    JSON.stringify({ mcpServers }, null, 2) + '\n',
   );
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -188,39 +189,103 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directories (for Gmail MCP inside the container)
-  // Mounts primary (~/.gmail-mcp) and additional accounts (~/.gmail-mcp-*)
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
-  }
-  try {
-    for (const entry of fs.readdirSync(homeDir)) {
-      if (!entry.startsWith('.gmail-mcp-')) continue;
-      const dir = path.join(homeDir, entry);
-      if (!fs.statSync(dir).isDirectory()) continue;
-      mounts.push({
-        hostPath: dir,
-        containerPath: `/home/node/${entry}`,
-        readonly: false,
-      });
+  // Gmail credentials — gated by tools config
+  const gmailEnabled = !tools || tools.some(t => t === 'gmail' || t.startsWith('gmail:'));
+  if (gmailEnabled) {
+    // Check for account-specific restriction (e.g. 'gmail:illysium')
+    const gmailAccounts = tools
+      ?.filter(t => t.startsWith('gmail:'))
+      .map(t => t.split(':')[1]);
+    const accountSpecific = gmailAccounts && gmailAccounts.length > 0 && !tools!.includes('gmail');
+
+    if (accountSpecific) {
+      // Mount only the specified account's credentials as /home/node/.gmail-mcp
+      // so the Gmail MCP server finds it at its default location
+      const accountDir = path.join(homeDir, `.gmail-mcp-${gmailAccounts[0]}`);
+      if (fs.existsSync(accountDir)) {
+        mounts.push({
+          hostPath: accountDir,
+          containerPath: '/home/node/.gmail-mcp',
+          readonly: false,
+        });
+      }
+    } else {
+      // All accounts: mount primary and all additional accounts
+      const gmailDir = path.join(homeDir, '.gmail-mcp');
+      if (fs.existsSync(gmailDir)) {
+        mounts.push({
+          hostPath: gmailDir,
+          containerPath: '/home/node/.gmail-mcp',
+          readonly: false,
+        });
+      }
+      try {
+        for (const entry of fs.readdirSync(homeDir)) {
+          if (!entry.startsWith('.gmail-mcp-')) continue;
+          const dir = path.join(homeDir, entry);
+          if (!fs.statSync(dir).isDirectory()) continue;
+          mounts.push({
+            hostPath: dir,
+            containerPath: `/home/node/${entry}`,
+            readonly: false,
+          });
+        }
+      } catch {
+        // ignore readdir errors
+      }
     }
-  } catch {
-    // ignore readdir errors
   }
 
-  // Google Calendar MCP credentials directory
-  const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
-  fs.mkdirSync(calendarDir, { recursive: true });
-  mounts.push({
-    hostPath: calendarDir,
-    containerPath: '/home/node/.config/google-calendar-mcp',
-    readonly: false, // MCP needs to store/refresh OAuth tokens
-  });
+  // Google Calendar MCP credentials — gated by tools config
+  if (!tools || tools.includes('calendar')) {
+    const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+    fs.mkdirSync(calendarDir, { recursive: true });
+    mounts.push({
+      hostPath: calendarDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false,
+    });
+  }
+
+  // Snowflake credentials — gated by tools config
+  if (!tools || tools.includes('snowflake')) {
+    const snowflakeDir = path.join(homeDir, '.snowflake');
+    if (fs.existsSync(snowflakeDir)) {
+      // Write a container-specific connections.toml with adjusted key paths
+      // since the host paths (/root/.snowflake/keys/...) map to /home/node/.snowflake/keys/... in-container
+      const origToml = path.join(snowflakeDir, 'connections.toml');
+      if (fs.existsSync(origToml)) {
+        const tomlContent = fs.readFileSync(origToml, 'utf-8')
+          .replace(/\/root\/\.snowflake\//g, '/home/node/.snowflake/');
+        const containerTomlDir = path.join(
+          DATA_DIR,
+          'sessions',
+          group.folder,
+          'snowflake',
+        );
+        fs.mkdirSync(containerTomlDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(containerTomlDir, 'connections.toml'),
+          tomlContent,
+        );
+        // Mount the rewritten toml
+        mounts.push({
+          hostPath: containerTomlDir,
+          containerPath: '/home/node/.snowflake',
+          readonly: true,
+        });
+      }
+      // Mount key files (subdirectories)
+      const keysDir = path.join(snowflakeDir, 'keys');
+      if (fs.existsSync(keysDir)) {
+        mounts.push({
+          hostPath: keysDir,
+          containerPath: '/home/node/.snowflake/keys',
+          readonly: true,
+        });
+      }
+    }
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -395,6 +460,8 @@ export async function runContainerAgent(
 
     // Pass secrets via stdin (never written to disk or mounted as files)
     input.secrets = readSecrets();
+    // Pass tools restriction so agent-runner can gate MCP servers
+    input.tools = group.containerConfig?.tools;
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
     // Remove secrets from input so they don't appear in logs

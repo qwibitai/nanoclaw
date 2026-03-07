@@ -31,6 +31,11 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   model?: string; // Default model for this group (e.g. "claude-sonnet-4-6")
+  // Integrations available inside this group's container.
+  // Undefined = all tools (backwards compatible).
+  // Supported: 'gmail', 'gmail:<account>' (e.g. 'gmail:illysium'), 'calendar', 'granola', 'snowflake'
+  // Account-specific gmail mounts only that account's credentials as the default.
+  tools?: string[];
 }
 
 export interface RegisteredGroup {

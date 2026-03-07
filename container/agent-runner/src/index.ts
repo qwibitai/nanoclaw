@@ -29,6 +29,7 @@ interface ContainerInput {
   assistantName?: string;
   model?: string;
   secrets?: Record<string, string>;
+  tools?: string[];
 }
 
 interface ContainerOutput {
@@ -349,6 +350,62 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+function isToolEnabled(tools: string[] | undefined, name: string): boolean {
+  if (!tools) return true;
+  return tools.some(t => t === name || t.startsWith(name + ':'));
+}
+
+function buildAllowedTools(tools: string[] | undefined): string[] {
+  const allowed = [
+    'Bash',
+    'Read', 'Write', 'Edit', 'Glob', 'Grep',
+    'WebSearch', 'WebFetch',
+    'Task', 'TaskOutput', 'TaskStop',
+    'TeamCreate', 'TeamDelete', 'SendMessage',
+    'TodoWrite', 'ToolSearch', 'Skill',
+    'NotebookEdit',
+    'mcp__nanoclaw__*',
+  ];
+  if (isToolEnabled(tools, 'gmail')) allowed.push('mcp__gmail__*');
+  if (isToolEnabled(tools, 'granola')) allowed.push('mcp__granola__*');
+  if (isToolEnabled(tools, 'calendar')) allowed.push('mcp__google-calendar__*');
+  return allowed;
+}
+
+function buildMcpServers(
+  containerInput: ContainerInput,
+  mcpServerPath: string,
+) {
+  const tools = containerInput.tools;
+  const servers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+      },
+    },
+  };
+  if (isToolEnabled(tools, 'gmail')) {
+    servers.gmail = {
+      command: 'npx',
+      args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+    };
+  }
+  if (isToolEnabled(tools, 'calendar')) {
+    servers['google-calendar'] = {
+      command: 'npx',
+      args: ['-y', '@cocal/google-calendar-mcp'],
+      env: {
+        GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+      },
+    };
+  }
+  return servers;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -425,45 +482,12 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        'Bash',
-        'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
-        'Task', 'TaskOutput', 'TaskStop',
-        'TeamCreate', 'TeamDelete', 'SendMessage',
-        'TodoWrite', 'ToolSearch', 'Skill',
-        'NotebookEdit',
-        'mcp__nanoclaw__*',
-        'mcp__gmail__*',
-        'mcp__granola__*',
-        'mcp__google-calendar__*',
-      ],
+      allowedTools: buildAllowedTools(containerInput.tools),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
-      mcpServers: {
-        nanoclaw: {
-          command: 'node',
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          },
-        },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-        },
-        'google-calendar': {
-          command: 'npx',
-          args: ['-y', '@cocal/google-calendar-mcp'],
-          env: {
-            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-          },
-        },
-      },
+      mcpServers: buildMcpServers(containerInput, mcpServerPath),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
