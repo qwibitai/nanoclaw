@@ -384,6 +384,7 @@ export async function runContainerAgent(
     // Send initialize request with ContainerInput (including secrets).
     // Delete secrets from `input` immediately so they can't leak into
     // log output if the container exits before the promise resolves.
+    const INIT_TIMEOUT_MS = 60_000;
     input.secrets = readSecrets();
     const initPromise = rpc.request('initialize', input);
     delete input.secrets;
@@ -404,9 +405,27 @@ export async function runContainerAgent(
       onReady(sendFn, closeFn);
     }
 
-    Promise.resolve(initPromise).catch((err: unknown) => {
-      logger.error({ group: group.name, err }, 'Failed to initialize container');
-    });
+    // Fail fast if the container doesn't respond to initialize within the timeout.
+    // Without this, a stuck container startup silently waits for the full 30min hard timeout.
+    let initTimer: ReturnType<typeof setTimeout>;
+    Promise.race([
+      initPromise,
+      new Promise<never>((_, reject) => {
+        initTimer = setTimeout(
+          () => reject(new Error(`Container init timed out after ${INIT_TIMEOUT_MS}ms`)),
+          INIT_TIMEOUT_MS,
+        );
+      }),
+    ])
+      .then(() => clearTimeout(initTimer))
+      .catch((err: unknown) => {
+        clearTimeout(initTimer);
+        logger.error(
+          { group: group.name, err },
+          'Failed to initialize container, killing',
+        );
+        container.kill();
+      });
 
     container.stderr.on('data', (data) => {
       const chunk = data.toString();
