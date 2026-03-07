@@ -72,6 +72,20 @@ When Dave says he has a new project to add:
 5. Update the "Dave's Projects" table above (in `/workspace/project/groups/global/CLAUDE.md`)
 6. Tell Dave the group is ready and he can map a channel to it (e.g., a new Discord channel or Slack channel)
 
+## Snowflake
+
+If `~/.snowflake/connections.toml` exists, you have Snowflake access via the `snow` CLI. Use it to run queries:
+
+```bash
+snow sql -q "SELECT ..." -c <connection_name>
+```
+
+Available connections are listed in `~/.snowflake/connections.toml`. Common ones:
+- `sunday` — Sunday/Prairie-Dev warehouse
+- `apollo`, `apollo_wgs`, `xzo_dev`, `xzo_prod` — XZO/Illysium warehouses
+
+Always specify `-c <connection>` to pick the right database. If unsure which connection to use, check `cat ~/.snowflake/connections.toml`.
+
 ## GitHub Workflow
 
 When asked to make code changes or open PRs:

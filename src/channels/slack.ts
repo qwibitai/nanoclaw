@@ -44,6 +44,9 @@ export class SlackChannel implements Channel {
   // thread_ts is the message's own ts (starts a new thread).
   private replyThreadTs = new Map<string, string>();
 
+  // Track the ts of the last user message per channel for reaction emoji.
+  private lastUserMessageTs = new Map<string, string>();
+
   private opts: SlackChannelOpts;
 
   constructor(opts: SlackChannelOpts) {
@@ -111,24 +114,20 @@ export class SlackChannel implements Channel {
           'unknown';
       }
 
-      // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
-      // Slack encodes @mentions as <@U12345>, which won't match TRIGGER_PATTERN
-      // (e.g., ^@<ASSISTANT_NAME>\b), so we prepend the trigger when the bot is @mentioned.
       let content = msg.text;
-      if (this.botUserId && !isBotMessage) {
-        const mentionPattern = `<@${this.botUserId}>`;
-        if (
-          content.includes(mentionPattern) &&
-          !TRIGGER_PATTERN.test(content)
-        ) {
-          content = `@${ASSISTANT_NAME} ${content}`;
-        }
-      }
+
+      // Check for bot mention in the raw message BEFORE wrapping with thread
+      // context, so old @mentions in the thread history don't false-trigger.
+      const hasBotMention =
+        !!this.botUserId &&
+        !isBotMessage &&
+        content.includes(`<@${this.botUserId}>`);
 
       // Track which thread to reply in. For threaded messages, reply in the
       // same thread. For top-level messages, reply as a thread on that message.
       if (!isBotMessage) {
         this.replyThreadTs.set(jid, threadTs || msg.ts);
+        this.lastUserMessageTs.set(jid, msg.ts);
       }
 
       // If the message is inside a thread, fetch thread history so the agent
@@ -142,6 +141,14 @@ export class SlackChannel implements Channel {
         if (threadContext) {
           content = `[Thread context]\n${threadContext}\n[Latest message]\n${content}`;
         }
+      }
+
+      // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
+      // Prepend @AssistantName so the trigger pattern (^@Claw\b) matches.
+      // Uses the pre-wrapping bot mention check to avoid false positives
+      // from old mentions in thread context.
+      if (hasBotMention && !TRIGGER_PATTERN.test(content)) {
+        content = `@${ASSISTANT_NAME} ${content}`;
       }
 
       this.opts.onMessage(jid, {
@@ -235,11 +242,31 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
-  // Slack does not expose a typing indicator API for bots.
-  // This no-op satisfies the Channel interface so the orchestrator
-  // doesn't need channel-specific branching.
-  async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
-    // no-op: Slack Bot API has no typing indicator endpoint
+  // Slack doesn't have a typing indicator API for bots.
+  // Instead, add/remove a reaction emoji on the triggering message
+  // so the user knows the bot is processing.
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    const messageTs = this.lastUserMessageTs.get(jid);
+    if (!messageTs) return;
+
+    try {
+      if (isTyping) {
+        await this.app.client.reactions.add({
+          channel: channelId,
+          timestamp: messageTs,
+          name: 'eyes',
+        });
+      } else {
+        await this.app.client.reactions.remove({
+          channel: channelId,
+          timestamp: messageTs,
+          name: 'eyes',
+        });
+      }
+    } catch {
+      // ignore — reaction may already exist or be removed
+    }
   }
 
   /**
@@ -365,8 +392,10 @@ export class SlackChannel implements Channel {
   }
 
   /**
-   * Convert @Name mentions in outbound text to Slack <@USER_ID> format.
-   * Matches against cached real_name and display_name (case-insensitive).
+   * Convert name mentions in outbound text to Slack <@USER_ID> format.
+   * Matches both "@Name" and plain "Name" against cached real_name and
+   * display_name (case-insensitive). Only matches at word boundaries
+   * and skips the bot's own name and already-converted mentions.
    */
   private replaceMentions(text: string): string {
     if (this.userIdByName.size === 0) return text;
@@ -376,9 +405,12 @@ export class SlackChannel implements Channel {
     );
     let result = text;
     for (const [name, userId] of names) {
-      // Match @Name or @name (case-insensitive, word boundary)
+      if (userId === this.botUserId) continue;
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Match @Name or plain Name with word boundaries on both sides.
+      // Negative lookbehind prevents matching inside <@U...> slack mentions.
       const pattern = new RegExp(
-        `@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+        `(?<!<)@?\\b${escaped}\\b`,
         'gi',
       );
       result = result.replace(pattern, `<@${userId}>`);
