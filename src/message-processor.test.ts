@@ -63,6 +63,7 @@ const mockQueue = {
   closeStdin: vi.fn(),
   notifyIdle: vi.fn(),
   enqueueMessageCheck: vi.fn(),
+  registerOnPiped: vi.fn(),
 };
 
 function createDeps(
@@ -87,6 +88,7 @@ beforeEach(() => {
   mockRunAgent.mockReset();
   mockQueue.closeStdin.mockClear();
   mockQueue.notifyIdle.mockClear();
+  mockQueue.registerOnPiped.mockClear();
   mockQueue.enqueueMessageCheck.mockClear();
 });
 

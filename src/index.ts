@@ -173,6 +173,7 @@ function buildProcessorDeps(): MessageProcessorDeps {
       closeStdin: (chatJid) => queue.closeStdin(chatJid),
       notifyIdle: (chatJid) => queue.notifyIdle(chatJid),
       enqueueMessageCheck: (chatJid) => queue.enqueueMessageCheck(chatJid),
+      registerOnPiped: (chatJid, cb) => queue.registerOnPiped(chatJid, cb),
     },
     assistantName: ASSISTANT_NAME,
     triggerPattern: TRIGGER_PATTERN,

@@ -28,7 +28,9 @@ export interface MessageProcessorDeps {
     closeStdin: (chatJid: string) => void;
     notifyIdle: (chatJid: string) => void;
     enqueueMessageCheck: (chatJid: string) => void;
+    registerOnPiped: (chatJid: string, callback: () => void) => void;
   };
+
   assistantName: string;
   triggerPattern: RegExp;
   idleTimeout: number;
@@ -103,6 +105,18 @@ export async function processGroupMessages(
       deps.queue.closeStdin(chatJid);
     }, deps.idleTimeout);
   };
+
+  const cancelIdleTimer = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+
+  // Cancel idle timer when a follow-up message is piped to the container,
+  // since the agent is no longer idle. A fresh timer starts when the agent
+  // finishes the next query and emits another success.
+  deps.queue.registerOnPiped(chatJid, cancelIdleTimer);
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
