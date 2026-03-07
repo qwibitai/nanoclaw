@@ -19,11 +19,7 @@ vi.mock('./sender-allowlist.js', () => ({
   })),
 }));
 
-import {
-  _initTestDatabase,
-  storeChatMetadata,
-  storeMessage,
-} from './db.js';
+import { _initTestDatabase, storeChatMetadata, storeMessage } from './db.js';
 import {
   processGroupMessages,
   recoverPendingMessages,
@@ -216,7 +212,11 @@ describe('processGroupMessages', () => {
       async (_group, _prompt, _chatJid, onOutput) => {
         if (onOutput) {
           await onOutput({ status: 'success', result: 'partial reply' });
-          await onOutput({ status: 'error', result: null, error: 'late error' });
+          await onOutput({
+            status: 'error',
+            result: null,
+            error: 'late error',
+          });
         }
         return 'error';
       },

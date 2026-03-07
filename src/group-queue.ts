@@ -145,7 +145,11 @@ export class GroupQueue {
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
-  registerIpcFns(groupJid: string, sendFn: (text: string) => Promise<boolean>, closeFn: () => void): void {
+  registerIpcFns(
+    groupJid: string,
+    sendFn: (text: string) => Promise<boolean>,
+    closeFn: () => void,
+  ): void {
     const state = this.getGroup(groupJid);
     state.sendFn = sendFn;
     state.closeFn = closeFn;
@@ -180,7 +184,7 @@ export class GroupQueue {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.sendFn || state.isTaskContainer) return false;
     try {
-      if (!await state.sendFn(text)) return false;
+      if (!(await state.sendFn(text))) return false;
     } catch {
       return false;
     }

@@ -3,10 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-} from './container-runner.js';
+import { ContainerOutput, runContainerAgent } from './container-runner.js';
 import { HandlerDeps } from './ipc-handlers/registry.js';
 import {
   getDueTasks,
@@ -182,7 +179,8 @@ async function runTask(
         }
       },
       deps.handlerDeps,
-      (sendFn, closeFn) => deps.queue.registerIpcFns(task.chat_jid, sendFn, closeFn),
+      (sendFn, closeFn) =>
+        deps.queue.registerIpcFns(task.chat_jid, sendFn, closeFn),
     );
 
     if (closeTimer) clearTimeout(closeTimer);

@@ -7,7 +7,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { JSONRPCServerAndClient, JSONRPCServer, JSONRPCClient } from 'json-rpc-2.0';
+import {
+  JSONRPCServerAndClient,
+  JSONRPCServer,
+  JSONRPCClient,
+} from 'json-rpc-2.0';
 
 // NUL byte prefix for JSON-RPC framing — must match container-side transport
 const RPC_PREFIX = '\0';
@@ -23,7 +27,11 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { getRegisteredHandlers, HandlerContext, HandlerDeps } from './ipc-handlers/registry.js';
+import {
+  getRegisteredHandlers,
+  HandlerContext,
+  HandlerDeps,
+} from './ipc-handlers/registry.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -252,7 +260,10 @@ export async function runContainerAgent(
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
   deps?: HandlerDeps,
-  onReady?: (sendFn: (text: string) => Promise<boolean>, closeFn: () => void) => void,
+  onReady?: (
+    sendFn: (text: string) => Promise<boolean>,
+    closeFn: () => void,
+  ) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -308,7 +319,9 @@ export async function runContainerAgent(
     const rpcServer = new JSONRPCServer();
     const rpcClient = new JSONRPCClient((jsonRPCMessage) => {
       if (container.stdin.writable) {
-        container.stdin.write(RPC_PREFIX + JSON.stringify(jsonRPCMessage) + '\n');
+        container.stdin.write(
+          RPC_PREFIX + JSON.stringify(jsonRPCMessage) + '\n',
+        );
       }
     });
     const rpc = new JSONRPCServerAndClient(rpcServer, rpcClient);
@@ -373,7 +386,10 @@ export async function runContainerAgent(
             const parsed = JSON.parse(line.slice(RPC_PREFIX.length));
             rpc.receiveAndSend(parsed);
           } catch {
-            logger.debug({ container: group.folder }, line.slice(RPC_PREFIX.length));
+            logger.debug(
+              { container: group.folder },
+              line.slice(RPC_PREFIX.length),
+            );
           }
         } else if (line.trim()) {
           logger.debug({ container: group.folder }, line);
@@ -392,13 +408,19 @@ export async function runContainerAgent(
     if (onReady) {
       const sendFn = (text: string): Promise<boolean> => {
         if (!container.stdin.writable) return Promise.resolve(false);
-        return Promise.resolve(rpc.request('input', { text })).then(() => true, () => false);
+        return Promise.resolve(rpc.request('input', { text })).then(
+          () => true,
+          () => false,
+        );
       };
       const closeFn = () => {
         if (container.stdin.writable) {
           rpc.notify('close', {});
         } else {
-          logger.warn({ group: group.name }, 'stdin not writable on close, killing container');
+          logger.warn(
+            { group: group.name },
+            'stdin not writable on close, killing container',
+          );
           container.kill();
         }
       };
@@ -412,7 +434,10 @@ export async function runContainerAgent(
       initPromise,
       new Promise<never>((_, reject) => {
         initTimer = setTimeout(
-          () => reject(new Error(`Container init timed out after ${INIT_TIMEOUT_MS}ms`)),
+          () =>
+            reject(
+              new Error(`Container init timed out after ${INIT_TIMEOUT_MS}ms`),
+            ),
           INIT_TIMEOUT_MS,
         );
       }),

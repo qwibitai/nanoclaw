@@ -457,7 +457,9 @@ export function deleteTasksByGroupFolder(groupFolder: string): number {
   db.prepare(
     'DELETE FROM task_run_logs WHERE task_id IN (SELECT id FROM scheduled_tasks WHERE group_folder = ?)',
   ).run(groupFolder);
-  const result = db.prepare('DELETE FROM scheduled_tasks WHERE group_folder = ?').run(groupFolder);
+  const result = db
+    .prepare('DELETE FROM scheduled_tasks WHERE group_folder = ?')
+    .run(groupFolder);
   return result.changes;
 }
 
@@ -608,7 +610,9 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
 }
 
 export function deleteRegisteredGroup(jid: string): boolean {
-  const result = db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
+  const result = db
+    .prepare('DELETE FROM registered_groups WHERE jid = ?')
+    .run(jid);
   return result.changes > 0;
 }
 

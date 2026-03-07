@@ -16,7 +16,11 @@ export interface HandlerDeps {
   getAvailableGroups: () => AvailableGroup[];
 }
 
-export type Handler = (params: any, context: HandlerContext, deps: HandlerDeps) => Promise<any>;
+export type Handler = (
+  params: any,
+  context: HandlerContext,
+  deps: HandlerDeps,
+) => Promise<any>;
 
 const registry = new Map<string, Handler>();
 

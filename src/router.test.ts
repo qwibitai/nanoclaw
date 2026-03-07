@@ -83,9 +83,9 @@ describe('stripInternalTags', () => {
 
 describe('formatOutbound', () => {
   it('strips internal tags from outbound text', () => {
-    expect(
-      formatOutbound('visible <internal>hidden</internal> text'),
-    ).toBe('visible  text');
+    expect(formatOutbound('visible <internal>hidden</internal> text')).toBe(
+      'visible  text',
+    );
   });
 
   it('returns empty string for internal-only text', () => {

@@ -13,10 +13,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  ContainerOutput,
-  runContainerAgent,
-} from './container-runner.js';
+import { ContainerOutput, runContainerAgent } from './container-runner.js';
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
@@ -157,8 +154,6 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
-
-
 function buildProcessorDeps(): MessageProcessorDeps {
   return {
     registeredGroups: () => registeredGroups,
@@ -194,7 +189,9 @@ function buildHandlerDeps(): HandlerDeps {
     unregisterGroup,
     syncGroups: async (force: boolean) => {
       await Promise.all(
-        channels.filter((ch) => ch.syncGroups).map((ch) => ch.syncGroups!(force)),
+        channels
+          .filter((ch) => ch.syncGroups)
+          .map((ch) => ch.syncGroups!(force)),
       );
     },
     getAvailableGroups,
@@ -337,8 +334,7 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           // Advance optimistic cursor immediately to prevent re-sends
-          const newCursor =
-            messagesToSend[messagesToSend.length - 1].timestamp;
+          const newCursor = messagesToSend[messagesToSend.length - 1].timestamp;
           pendingSendCursor.set(chatJid, newCursor);
 
           // Fire off sendMessage without awaiting — prevents one group's
@@ -351,7 +347,10 @@ async function startMessageLoop(): Promise<void> {
                   'Piped messages to active container',
                 );
                 // Only advance confirmed cursor forward, never backwards
-                if (!lastAgentTimestamp[chatJid] || newCursor > lastAgentTimestamp[chatJid]) {
+                if (
+                  !lastAgentTimestamp[chatJid] ||
+                  newCursor > lastAgentTimestamp[chatJid]
+                ) {
                   lastAgentTimestamp[chatJid] = newCursor;
                   saveState();
                 }
@@ -362,7 +361,10 @@ async function startMessageLoop(): Promise<void> {
                 channel
                   .setTyping?.(chatJid, true)
                   ?.catch((err) =>
-                    logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+                    logger.warn(
+                      { chatJid, err },
+                      'Failed to set typing indicator',
+                    ),
                   );
               } else {
                 // Send failed (no active container) — clear optimistic

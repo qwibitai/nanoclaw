@@ -2,10 +2,7 @@ import path from 'path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  isValidGroupFolder,
-  resolveGroupFolderPath,
-} from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 
 describe('group folder validation', () => {
   it('accepts normal group folder names', () => {

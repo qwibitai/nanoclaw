@@ -1,10 +1,7 @@
 import { getMessagesSince } from './db.js';
 import { logger } from './logger.js';
 import { formatMessages } from './router.js';
-import {
-  isTriggerAllowed,
-  loadSenderAllowlist,
-} from './sender-allowlist.js';
+import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
 import type { Channel, RegisteredGroup } from './types.js';
 
 export interface AgentOutput {
@@ -181,7 +178,11 @@ export function recoverPendingMessages(deps: MessageProcessorDeps): void {
   const groups = deps.registeredGroups();
   for (const [chatJid, group] of Object.entries(groups)) {
     const sinceTimestamp = deps.getAgentCursor(chatJid);
-    const pending = getMessagesSince(chatJid, sinceTimestamp, deps.assistantName);
+    const pending = getMessagesSince(
+      chatJid,
+      sinceTimestamp,
+      deps.assistantName,
+    );
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },

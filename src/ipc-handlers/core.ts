@@ -6,7 +6,6 @@ import { TIMEZONE } from '../config.js';
 // Application-level JSON-RPC error codes (reserved range: -32000 to -32099)
 const ERR_UNAUTHORIZED = -32000;
 
-
 import {
   createTask,
   deleteTask,
@@ -33,7 +32,10 @@ registerHandler(
     const registeredGroups = deps.registeredGroups();
     const targetGroup = registeredGroups[params.chatJid];
 
-    if (!context.isMain && (!targetGroup || targetGroup.folder !== context.sourceGroup)) {
+    if (
+      !context.isMain &&
+      (!targetGroup || targetGroup.folder !== context.sourceGroup)
+    ) {
       logger.warn(
         { chatJid: params.chatJid, sourceGroup: context.sourceGroup },
         'Unauthorized message attempt blocked',
@@ -152,10 +154,7 @@ registerHandler(
 // --- list_tasks ---
 registerHandler(
   'list_tasks',
-  async (
-    _params: Record<string, never>,
-    context: HandlerContext,
-  ) => {
+  async (_params: Record<string, never>, context: HandlerContext) => {
     const allTasks = getAllTasks();
 
     const filteredTasks = context.isMain
@@ -179,10 +178,7 @@ registerHandler(
 // --- pause_task ---
 registerHandler(
   'pause_task',
-  async (
-    params: { taskId: string },
-    context: HandlerContext,
-  ) => {
+  async (params: { taskId: string }, context: HandlerContext) => {
     const task = getTaskById(params.taskId);
     if (!task) {
       throw new JSONRPCErrorException(
@@ -209,10 +205,7 @@ registerHandler(
 // --- resume_task ---
 registerHandler(
   'resume_task',
-  async (
-    params: { taskId: string },
-    context: HandlerContext,
-  ) => {
+  async (params: { taskId: string }, context: HandlerContext) => {
     const task = getTaskById(params.taskId);
     if (!task) {
       throw new JSONRPCErrorException(
@@ -308,10 +301,7 @@ registerHandler(
 // --- cancel_task ---
 registerHandler(
   'cancel_task',
-  async (
-    params: { taskId: string },
-    context: HandlerContext,
-  ) => {
+  async (params: { taskId: string }, context: HandlerContext) => {
     const task = getTaskById(params.taskId);
     if (!task) {
       throw new JSONRPCErrorException(
@@ -400,7 +390,11 @@ registerHandler(
     });
 
     logger.info(
-      { jid: params.jid, folder: params.folder, sourceGroup: context.sourceGroup },
+      {
+        jid: params.jid,
+        folder: params.folder,
+        sourceGroup: context.sourceGroup,
+      },
       'Group registered via JSON-RPC',
     );
     return { ok: true };
@@ -423,10 +417,7 @@ registerHandler(
     }
 
     if (!params.jid) {
-      throw new JSONRPCErrorException(
-        'Missing required field: jid',
-        -32602,
-      );
+      throw new JSONRPCErrorException('Missing required field: jid', -32602);
     }
 
     if (!deps.unregisterGroup(params.jid)) {
