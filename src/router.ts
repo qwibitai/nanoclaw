@@ -19,11 +19,9 @@ export function formatMessages(
     return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
   });
 
-  // Plain-text date header with override instruction.
-  // LLMs ignore XML attributes and compute day-of-week themselves (often wrong).
-  // Resumed sessions compound this: the model sees its own prior "today is Friday"
-  // statements and prioritizes self-consistency over the new header. The explicit
-  // override instruction breaks that bias.
+  // Plain-text date header with a reason to override stale history.
+  // In resumed sessions the model's own prior date statements create
+  // self-consistency bias — "outdated" gives it a reason to self-correct.
   const now = new Date();
   const currentDateTime = now.toLocaleString('en-US', {
     timeZone: timezone,
@@ -37,7 +35,7 @@ export function formatMessages(
   });
   const header =
     `Current date and time: ${currentDateTime} (${timezone}). ` +
-    `This is the authoritative timestamp — disregard any conflicting dates in prior messages.`;
+    `If prior messages mention a different date, they are outdated.`;
 
   return `${header}\n\n<messages>\n${lines.join('\n')}\n</messages>`;
 }
