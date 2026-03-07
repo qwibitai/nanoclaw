@@ -2,7 +2,7 @@
   "schema_version": 1,
   "project": "nanoclaw",
   "maintainer": "andy-developer",
-  "generated_at": "2026-03-07T20:57:20.238Z",
+  "generated_at": "2026-03-07T21:13:31.610Z",
   "source_seed": ".claude/progress/feature-catalog.seed.json",
   "stats": {
     "feature_count": 27,
@@ -621,7 +621,7 @@
         "npm run typecheck",
         "npx vitest run src/group-folder.test.ts src/group-queue.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "whatsapp-channel",
@@ -654,7 +654,7 @@
         "npm run typecheck",
         "npx vitest run src/channels/whatsapp.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "ipc-dispatch-contract",
@@ -690,7 +690,7 @@
         "npm run typecheck",
         "npx vitest run src/extensions/jarvis/frontdesk-service.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "container-runtime",
@@ -725,7 +725,7 @@
         "npm run typecheck",
         "npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "runtime-ownership-isolation",
@@ -774,7 +774,7 @@
         "npm run typecheck",
         "npx vitest run src/channels/whatsapp.test.ts src/db.test.ts src/runtime-ownership.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "task-scheduling",
@@ -802,7 +802,7 @@
         "npm run typecheck",
         "npx vitest run src/task-scheduler.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "database-state",
@@ -831,7 +831,7 @@
         "npm run typecheck",
         "npx vitest run src/db.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "config-env",
@@ -856,7 +856,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "routing-formatting",
@@ -886,7 +886,7 @@
         "npm run typecheck",
         "npx vitest run src/formatting.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "jarvis-worker-lifecycle",
@@ -924,7 +924,7 @@
         "npm run typecheck",
         "npx vitest run src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "forked-worker-runtime-restore",
@@ -976,7 +976,7 @@
         "npm run typecheck",
         "npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "jarvis-extension-boundary",
@@ -1031,7 +1031,7 @@
         "npm run typecheck",
         "npx vitest run src/extensions/jarvis/lane-control-service.test.ts src/group-queue.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "andy-review-ownership",
@@ -1080,7 +1080,7 @@
         "npm run typecheck",
         "npx vitest run src/db.test.ts src/extensions/jarvis/frontdesk-service.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "andy-request-admin-cleanup",
@@ -1113,7 +1113,7 @@
         "npm run typecheck",
         "npx vitest run src/jarvis-reconcile-stale-andy-requests.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "architecture-boundary-governance",
@@ -1152,7 +1152,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "docs-topology-cleanup",
@@ -1244,7 +1244,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "reliability-e2e",
@@ -1271,7 +1271,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "observability-logging",
@@ -1300,7 +1300,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "ops-reliability-tooling",
@@ -1347,7 +1347,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "skills-engine-lifecycle",
@@ -1392,7 +1392,7 @@
         "npm run typecheck",
         "npx vitest run skills-engine/__tests__/apply.test.ts skills-engine/__tests__/rebase.test.ts skills-engine/__tests__/uninstall.test.ts skills-engine/__tests__/update.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "agent-runner-mcp",
@@ -1419,7 +1419,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "worker-runtime-lane",
@@ -1448,7 +1448,7 @@
         "npm run typecheck",
         "npx vitest run container/worker/runner/src/lib.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "core-skill-workflows",
@@ -1482,7 +1482,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "feature-tracking-pipeline",
@@ -1515,7 +1515,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "project-skill-delivery-pipeline",
@@ -1551,7 +1551,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "github-collaboration-control-plane",
@@ -1605,7 +1605,7 @@
         "npm run typecheck",
         "npx vitest run setup/github-project-sync.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     },
     {
       "id": "channel-extension-skills",
@@ -1646,7 +1646,7 @@
         "npm run typecheck",
         "npx vitest run .claude/skills/add-discord/tests/discord.test.ts .claude/skills/add-gmail/tests/gmail.test.ts .claude/skills/add-slack/tests/slack.test.ts .claude/skills/add-telegram/tests/telegram.test.ts .claude/skills/add-voice-transcription/tests/voice-transcription.test.ts"
       ],
-      "generated_at": "2026-03-07T20:57:20.238Z"
+      "generated_at": "2026-03-07T21:13:31.610Z"
     }
   ]
 }

@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-07T20:57:20.238Z
+Generated: 2026-03-07T21:13:31.610Z
 Project: nanoclaw
 
 ## Features
