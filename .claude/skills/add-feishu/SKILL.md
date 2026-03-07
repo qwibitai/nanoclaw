@@ -163,7 +163,34 @@ Wait for the user to provide the chat ID (format: `feishu:oc_xxxxxxxxxxxxxxxx`).
 
 Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
 
-For a main chat (responds to all messages):
+**Before registering a main chat**, check if there is already a main group:
+
+```bash
+sqlite3 store/messages.db "SELECT jid, name, folder FROM registered_groups WHERE is_main = 1;"
+```
+
+#### Case 1: No existing main group (first-time setup)
+
+Use `folder: "main"` to reuse the project's built-in template directory (`groups/main/`), which includes the pre-configured CLAUDE.md with management instructions:
+
+```typescript
+registerGroup("feishu:<chat-id>", {
+  name: "<chat-name>",
+  folder: "main",
+  trigger: `@${ASSISTANT_NAME}`,
+  added_at: new Date().toISOString(),
+  requiresTrigger: false,
+  isMain: true,
+});
+```
+
+Then update `groups/main/CLAUDE.md` to use Feishu formatting (standard Markdown) instead of WhatsApp formatting.
+
+#### Case 2: Main group already exists (adding a second main channel)
+
+Ask the user: do they want Feishu as an additional main channel (with admin privileges), or as a regular chat?
+
+**As additional main channel** — uses a separate workspace with independent memory:
 
 ```typescript
 registerGroup("feishu:<chat-id>", {
@@ -176,7 +203,9 @@ registerGroup("feishu:<chat-id>", {
 });
 ```
 
-For additional chats (trigger-only):
+Create `groups/feishu_main/CLAUDE.md` with Feishu-specific content and management instructions (copy the admin sections from the existing main group's CLAUDE.md).
+
+#### Case 3: Regular chat (no admin privileges)
 
 ```typescript
 registerGroup("feishu:<chat-id>", {
