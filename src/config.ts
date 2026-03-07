@@ -9,6 +9,10 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'HIPPOCAMPUS_API_URL',
+  'HIPPOCAMPUS_BUDGET_TOKENS',
+  'HIPPOCAMPUS_TOP_K',
+  'HIPPOCAMPUS_ENABLED',
   'NO_TRIGGER_REQUIRED_IN_DMS',
   'HAL_WORKSPACE_DIR',
   'OPENCLAW_AUTH_DIR',
@@ -135,3 +139,31 @@ export const TRIGGER_PATTERN = new RegExp(
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Defaults to Hal's home timezone; can be overridden via TZ.
 export const TIMEZONE = process.env.TZ || envConfig.TZ || 'America/Los_Angeles';
+
+const DEFAULT_HIPPOCAMPUS_PORT =
+  process.env.HIPPOCAMPUS_PORT || process.env.PORT || '8000';
+
+export const HIPPOCAMPUS_API_URL =
+  process.env.HIPPOCAMPUS_API_URL ||
+  envConfig.HIPPOCAMPUS_API_URL ||
+  `http://localhost:${DEFAULT_HIPPOCAMPUS_PORT}`;
+export const HIPPOCAMPUS_BUDGET_TOKENS = Math.max(
+  256,
+  parseInt(
+    process.env.HIPPOCAMPUS_BUDGET_TOKENS ||
+      envConfig.HIPPOCAMPUS_BUDGET_TOKENS ||
+      '4096',
+    10,
+  ) || 4096,
+);
+export const HIPPOCAMPUS_TOP_K = Math.max(
+  1,
+  parseInt(
+    process.env.HIPPOCAMPUS_TOP_K || envConfig.HIPPOCAMPUS_TOP_K || '10',
+    10,
+  ) || 10,
+);
+export const HIPPOCAMPUS_ENABLED =
+  (process.env.HIPPOCAMPUS_ENABLED ||
+    envConfig.HIPPOCAMPUS_ENABLED ||
+    'true') !== 'false';

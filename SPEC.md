@@ -39,9 +39,8 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 
 - On each inbound message: extract query terms from message + recent context
 - Call Hippocampus embedding API to find relevant memories
-- Score and rank using 5-factor model (similarity, importance, recency, emotional, retrieval)
 - Inject top-K memories into system prompt (budget: ~4K tokens)
-- On session end: extract episodes for consolidation
+- On idle timeout/session end: extract episodes for consolidation
 
 ### CC Webhook Receiver (src/cc-hooks.ts) — NEW
 
@@ -68,7 +67,7 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 
 ## Configuration
 
-No config files — code changes only (NanoClaw philosophy). Key constants in `src/config.ts`:
+Key Hippocampus settings in `src/config.ts`:
 
 - `ASSISTANT_NAME` — "Hal"
 - `NO_TRIGGER_REQUIRED_IN_DMS` — true (always respond in DMs, trigger still required in groups unless overridden)
@@ -76,14 +75,18 @@ No config files — code changes only (NanoClaw philosophy). Key constants in `s
 - `OPENCLAW_AUTH_DIR` — `~/.openclaw/store/auth` (reuse existing WhatsApp credentials)
 - `HAL_WORKSPACE_DIR` — `~/.openclaw/workspace` (mount SOUL.md, AGENTS.md, MEMORY.md)
 - `HAL_ALLOWED_WHATSAPP_SENDER` — `19493969849@s.whatsapp.net` (Adam allowlist)
+- `HIPPOCAMPUS_API_URL` — defaults to `http://localhost:${HIPPOCAMPUS_PORT || PORT || 8000}`
 - `HIPPOCAMPUS_BUDGET_TOKENS` — 4096
 - `HIPPOCAMPUS_TOP_K` — 10
+- `HIPPOCAMPUS_ENABLED` — default `true`
 - `DEEP_THINKING_SCHEDULE` — ["10:00", "18:00"]
 - `CC_WEBHOOK_TOKEN` — shared secret for Command Center webhook authentication
 - `CC_WEBHOOK_URL` — full runtime URL for Command Center to post events (`.../hooks/cc`)
 - `CC_HOOKS_GROUP_JID` — target group/session for synthetic hook messages
 - `CC_HOOKS_MODEL` — `sonnet` for webhook-driven hook session execution
 - `ADAM_WHATSAPP_JID` — Adam's WhatsApp JID for critical CC alerts
+
+Middleware behavior is fail-open: if Hippocampus is unavailable, the agent turn proceeds without recall injection.
 
 ## Migration Plan
 
@@ -100,7 +103,7 @@ No config files — code changes only (NanoClaw philosophy). Key constants in `s
 
 - Build hippocampus.ts middleware
 - Per-turn memory injection in agent loop
-- Episode extraction on session boundaries
+- Episode extraction on conversation boundaries (idle timeout, shutdown)
 
 ### Phase 3: Full Migration
 

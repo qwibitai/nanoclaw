@@ -52,6 +52,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
+import { extractEpisodeAtBoundary, injectRecallBlock } from './hippocampus.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -191,6 +192,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
+  const promptWithRecall = await injectRecallBlock({
+    prompt,
+    messages: missedMessages,
+    chatJid,
+    groupFolder: group.folder,
+    sessionId: sessions[group.folder],
+  });
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
@@ -214,6 +222,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Idle timeout, closing container stdin',
       );
+      void extractEpisodeAtBoundary({
+        chatJid,
+        groupFolder: group.folder,
+        boundary: 'idle_timeout',
+        sessionId: sessions[group.folder],
+        messages: missedMessages,
+      });
       queue.closeStdin(chatJid);
     }, IDLE_TIMEOUT);
   };
@@ -228,7 +243,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(
     group,
-    prompt,
+    promptWithRecall,
     chatJid,
     model,
     async (result) => {
@@ -443,8 +458,15 @@ async function startMessageLoop(): Promise<void> {
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend, TIMEZONE);
+          const formattedWithRecall = await injectRecallBlock({
+            prompt: formatted,
+            messages: messagesToSend,
+            chatJid,
+            groupFolder: group.folder,
+            sessionId: sessions[group.folder],
+          });
 
-          if (queue.sendMessage(chatJid, formatted)) {
+          if (queue.sendMessage(chatJid, formattedWithRecall)) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -568,9 +590,23 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
 
+  const extractSessionEndEpisodes = async () => {
+    const extractionJobs = Object.entries(registeredGroups).map(
+      ([chatJid, group]) =>
+        extractEpisodeAtBoundary({
+          chatJid,
+          groupFolder: group.folder,
+          boundary: 'session_end',
+          sessionId: sessions[group.folder],
+        }),
+    );
+    await Promise.allSettled(extractionJobs);
+  };
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    await extractSessionEndEpisodes();
     if (ccWebhookServer) {
       await new Promise<void>((resolve, reject) => {
         ccWebhookServer!.close((err) => {
