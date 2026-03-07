@@ -8,9 +8,7 @@ import {
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
-import { initCredentialStore, importEnvToDefault, resolveSecrets } from './auth/index.js';
-import { isAuthError } from './auth/providers/claude.js';
-import { runReauth } from './auth/reauth.js';
+import { initCredentialStore, importEnvToDefault, createAuthGuard } from './auth/index.js';
 import type { ChatIO } from './auth/types.js';
 import './channels/index.js';
 import {
@@ -193,15 +191,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  // Check if credentials are available before processing
-  const secrets = resolveSecrets(group);
-  let reauthFailed = false;
-  if (Object.keys(secrets).length === 0) {
-    logger.warn({ group: group.name }, 'No credentials available, starting reauth');
-    const chat = createChatIO(channel, chatJid);
-    const ok = await runReauth(group.folder, chat, 'No credentials configured');
-    if (!ok) reauthFailed = true;
-  }
+  const guard = createAuthGuard(
+    group,
+    () => createChatIO(channel, chatJid),
+    () => queue.closeStdin(chatJid),
+  );
+  const credentialsOk = await guard.preCheck();
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
@@ -212,8 +207,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // Advance cursor past trigger messages so they don't re-trigger reauth
-  if (reauthFailed) {
+  // If reauth failed, advance cursor so trigger messages don't re-trigger
+  if (!credentialsOk) {
     lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
     saveState();
     return true;
@@ -261,7 +256,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
-  let streamedAuthError: string | null = null;
 
   const agentResult = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -285,39 +279,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (result.status === 'error') {
       hadError = true;
     }
-    if (typeof result.error === 'string' && isAuthError(result.error)) {
-      streamedAuthError = result.error;
-    } else if (typeof result.result === 'string' && isAuthError(result.result)) {
-      // This condition is a hack, because Claude doesnt mark errors in stream
-      streamedAuthError = result.result;
-    }
-    // Kill the container immediately on auth error — it will just retry forever
-    if (streamedAuthError) {
-      queue.closeStdin(chatJid);
-    }
+    guard.onStreamResult(result);
   });
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (agentResult.status === 'error' || hadError) {
-    // Check if this is an auth error — trigger reauth
-    if (agentResult.error && isAuthError(agentResult.error)) {
-      streamedAuthError = agentResult.error;
-    }
-    if (streamedAuthError) {
-      const authErrorText = streamedAuthError;
-      streamedAuthError = null;
-      
-      logger.warn({ group: group.name }, 'Auth error detected, starting reauth');
-      const chat = createChatIO(channel, chatJid);
-      const ok = await runReauth(group.folder, chat, `Agent failed: ${authErrorText}`);
-      if (!ok) return true; // Reauth failed/cancelled — stop retrying
-      // Snapshot cursor before reauth was taken at line 220 (last original msg).
-      // If reauth was invasive, advanceCursor moved it further — nothing to retry.
-      // If transparent, cursor is unchanged — roll back and retry.
-      const cursorAfterReauth = lastAgentTimestamp[chatJid];
-      if (cursorAfterReauth !== lastOriginalTs) return true;
+    const authResult = await guard.handleAuthError(agentResult.error);
+    if (authResult === 'reauth-failed') return true;
+    if (authResult === 'reauth-ok') {
+      // If reauth consumed messages (advanceCursor moved past original), don't retry
+      if (lastAgentTimestamp[chatJid] !== lastOriginalTs) return true;
       lastAgentTimestamp[chatJid] = previousCursor;
       saveState();
       return false;
