@@ -5,6 +5,9 @@
 
 // gmail
 
+// qq
+import './qq.js';
+
 // slack
 
 // telegram
