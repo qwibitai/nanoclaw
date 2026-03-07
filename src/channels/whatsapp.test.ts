@@ -306,6 +306,34 @@ describe('WhatsAppChannel', () => {
   // --- QR code and auth ---
 
   describe('authentication', () => {
+    it('requests pairing code for headless auth without waiting for QR updates', async () => {
+      vi.useFakeTimers();
+
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      // Start connect but don't await (it resolves only after connection open)
+      channel.connect().catch(() => {});
+
+      // Flush microtasks so connectInternal completes and pairing timer is scheduled
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Pairing code request is delayed by 3 seconds
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fakeSocket.requestPairingCode).toHaveBeenCalledWith('14155551234');
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/pairing-code.txt',
+        '123-456',
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/auth-status.txt',
+        'pairing_code:123-456',
+      );
+      vi.useRealTimers();
+    });
+
     it('writes QR data and pairing code artifacts for headless auth', async () => {
       vi.useFakeTimers();
 
@@ -401,6 +429,29 @@ describe('WhatsAppChannel', () => {
 
       triggerDisconnect(428);
       expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
+    });
+
+    it('caps reconnect backoff delay at max bound', async () => {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      const expectedDelays = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
+      for (const delay of expectedDelays) {
+        triggerDisconnect(428);
+        expect(setTimeoutSpy).toHaveBeenLastCalledWith(
+          expect.any(Function),
+          delay,
+        );
+
+        const timer = (channel as any).reconnectTimer;
+        if (timer) {
+          clearTimeout(timer);
+          (channel as any).reconnectTimer = null;
+        }
+      }
     });
   });
 

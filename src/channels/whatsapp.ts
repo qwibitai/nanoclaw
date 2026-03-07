@@ -135,6 +135,11 @@ export class WhatsAppChannel implements Channel {
       browser: Browsers.macOS('Chrome'),
     });
 
+    // Request pairing code for headless flows even when QR updates are absent.
+    if (WHATSAPP_PAIRING_PHONE && !state.creds.registered) {
+      this.requestPairingCode();
+    }
+
     this.sock.ev.on('connection.update', (update) => {
       const { connection, lastDisconnect, qr } = update;
 
