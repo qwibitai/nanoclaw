@@ -16,7 +16,7 @@ Project-level orchestration skill for disciplined feature delivery.
 
 ## Issue Pipeline (runtime/reliability incidents)
 
-1. Docs-first incident workflow: `docs/workflow/nanoclaw-jarvis-debug-loop.md` + `.claude/progress/incident.json`
+1. Docs-first incident workflow: `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md` + `.claude/progress/incident.json`
 2. `/debug` for runtime/container/auth root-cause
 3. `feature-tracking` to map fix ownership
 4. `nanoclaw-implementation` for minimal fix

@@ -4,9 +4,31 @@ Reusable operating workflow for projects where multiple agents contribute to the
 
 Use this to eliminate siloed execution by making GitHub the shared planning, ownership, and governance layer.
 
-For ongoing day-to-day agent use of the configured Discussions/Issues/Project surfaces in this repository, use `docs/workflow/github-agent-collaboration-loop.md`.
+For ongoing day-to-day agent use of the configured Discussions/Issues/Project surfaces in this repository, use `docs/workflow/github/github-agent-collaboration-loop.md`.
 
 Mission anchor: `docs/MISSION.md`.
+
+## Owns
+
+This document owns the reusable setup shape for a multi-agent GitHub collaboration stack:
+
+1. what GitHub surfaces should exist
+2. what baseline schema and workflow assets they need
+3. what a portable rollout checklist looks like for this repo or another repo
+
+## Does Not Own
+
+This document does not own:
+
+1. day-to-day usage of Discussions, Issues, and Project items after the system exists
+2. GitHub-hosted workflow auth, review policy, or merge policy details
+3. the decision of whether a concern belongs on GitHub or should stay local
+
+Use instead:
+
+1. `docs/workflow/github/github-agent-collaboration-loop.md` for daily operation
+2. `docs/workflow/github/nanoclaw-github-control-plane.md` for governance workflows and auth
+3. `docs/workflow/github/github-offload-boundary-loop.md` for GitHub-vs-local placement decisions
 
 ## Objective
 
@@ -25,14 +47,16 @@ Use when any of these are true:
 3. PR review quality is inconsistent because ownership is unclear.
 4. Operators spend time manually reconciling status across tools.
 
-Do not use this as the primary day-to-day operating reference once the board and categories already exist; use `docs/workflow/github-agent-collaboration-loop.md` for that.
+Do not use this as the primary day-to-day operating reference once the board and categories already exist; use `docs/workflow/github/github-agent-collaboration-loop.md` for that.
 
 ## Core Principle
 
 GitHub is the system of record for work coordination.
 Agent memory is transient; Issue/Project state is durable.
 
-## Three-Layer Model
+This principle is about setup intent. For operational rules like promotion, ownership, or Project status handling, defer to `docs/workflow/github/github-agent-collaboration-loop.md`.
+
+## Collaboration Stack Shape
 
 Use GitHub with a strict separation of purpose:
 
@@ -40,7 +64,7 @@ Use GitHub with a strict separation of purpose:
 2. Issues for committed work with scope, owner, and deterministic acceptance criteria.
 3. Project for execution state only.
 
-Project rule:
+Baseline Project rule:
 
 1. Use Issue cards only.
 2. Do not add PRs as first-class Project cards.
@@ -67,7 +91,7 @@ Project rule:
 2. Auto-correct lanes (metadata drift, generated artifacts) run as bot PRs.
 3. Runtime/stateful recovery and incident loops stay in local lanes.
 
-## Standard Workflow
+## Rollout Workflow
 
 ### Phase 1: Exploration and Intake
 
@@ -82,7 +106,7 @@ Project rule:
 4. Add labels: `lane:*`, `priority:*`, `risk:*`, optional `agent:*`.
 5. If large, create sub-issues and link dependencies (`blocked-by`).
 
-### Phase 2: Planning
+### Phase 2: Board and Schema Setup
 
 1. Add each Issue to Project v2.
 2. Set required fields:
@@ -96,28 +120,24 @@ Project rule:
    - `Review Lane`
 3. Keep only one active owner per Issue.
 
-### Phase 3: Execution
+### Phase 3: Repo Workflow Setup
 
-1. Agent claims Issue (`Agent` field + assignee + `In Progress`).
-2. Agent opens PR linked to one primary Issue (`Fixes #<id>`).
-3. PR template requires:
-   - linked Issue
-   - scope summary
-   - test evidence
-   - risk notes
+1. Ensure issue forms and PR templates exist.
+2. Ensure label taxonomy exists.
+3. Ensure intake and Project sync workflows exist.
+4. Ensure the repo can support an Issue-first board before agents begin using it.
 
-### Phase 4: Governance and Merge
+### Phase 4: Governance Integration
 
 1. Rulesets require PR + required checks + conversation resolution.
 2. CODEOWNERS required for critical paths.
 3. Use auto-merge for compliant PRs.
 4. Use merge queue when parallel PR pressure rises.
 
-### Phase 5: Closeout
+### Phase 5: Handoff to Day-to-Day Operation
 
-1. PR merge auto-closes linked Issue.
-2. Project item moves to `Done` automatically.
-3. If follow-up discovered, open new Issue (do not hide in PR comments).
+1. Once the board, fields, templates, and workflows exist, switch day-to-day usage to `docs/workflow/github/github-agent-collaboration-loop.md`.
+2. Keep this doc as the setup and portability reference, not the active operator playbook.
 
 ## Discussion Taxonomy
 

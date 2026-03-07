@@ -16,8 +16,8 @@ Use this skill for runtime/auth/container/session failures.
 ## Required References
 
 1. `docs/troubleshooting/DEBUG_CHECKLIST.md`
-2. `docs/workflow/nanoclaw-container-debugging.md`
-3. `docs/workflow/nanoclaw-jarvis-debug-loop.md`
+2. `docs/workflow/runtime/nanoclaw-container-debugging.md`
+3. `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`
 
 ## Core Workflow
 
@@ -71,5 +71,5 @@ When using this skill, report:
 
 ## Notes
 
-- For incident lifecycle operations, use docs-first workflow (`docs/workflow/nanoclaw-jarvis-debug-loop.md`) and update `.claude/progress/incident.json`.
+- For incident lifecycle operations, use docs-first workflow (`docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`) and update `.claude/progress/incident.json`.
 - Docker commands are legacy fallback only; default runtime debugging stays on `container` + `jarvis-ops`.

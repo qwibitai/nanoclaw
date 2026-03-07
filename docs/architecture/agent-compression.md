@@ -2,8 +2,8 @@
 
 Historical template/reference material for compression strategy.
 Repository-specific authoritative rules are:
-- `docs/workflow/nanoclaw-root-claude-compression.md` (root `CLAUDE.md`)
-- `docs/workflow/andy-compression-loop.md` (Andy lane docs)
+- `docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md` (root `CLAUDE.md`)
+- `docs/workflow/docs-discipline/andy-compression-loop.md` (Andy lane docs)
 
 For a Codex-based harness, you want to keep the *same* progressive-disclosure pattern but tune the rule around three Codex realities: harness-first architecture, repo-as-system-of-record, and AGENTS.md as a compressed “map”, not a manual. [nngroup](https://www.nngroup.com/articles/progressive-disclosure/)
 
@@ -127,11 +127,11 @@ Any details beyond these bullets go in their respective docs and are only linked
 Instead of a long “index section”, AGENTS.md uses **short, imperative index lines** that Codex sees every turn:
 
 ```text
-BEFORE any non-trivial change → read /docs/architecture/nanoclaw-system-architecture.md and /docs/workflow/nanoclaw-development-loop.md
+BEFORE any non-trivial change → read /docs/architecture/nanoclaw-system-architecture.md and /docs/workflow/delivery/nanoclaw-development-loop.md
 Design / UX / product questions → read /docs/MISSION.md and /docs/architecture/nanoclaw-system-architecture.md
-Reliability / SLOs / incidents → read /docs/workflow/nanoclaw-jarvis-debug-loop.md and /docs/troubleshooting/DEBUG_CHECKLIST.md
+Reliability / SLOs / incidents → read /docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md and /docs/troubleshooting/DEBUG_CHECKLIST.md
 Security / auth / data-handling → read /docs/reference/SECURITY.md
-New feature or large refactor → read /docs/workflow/nanoclaw-development-loop.md and /docs/workflow/unified-codex-claude-loop.md
+New feature or large refactor → read /docs/workflow/delivery/nanoclaw-development-loop.md and /docs/workflow/delivery/unified-codex-claude-loop.md
 Understanding existing decisions → read /docs/README.md and /docs/architecture/nanoclaw-jarvis.md
 Framework-specific APIs not in training data → read /docs/reference/REQUIREMENTS.md and /docs/reference/SPEC.md
 ```
@@ -147,7 +147,7 @@ To align with eval results like Vercel’s:
 ```text
 IMPORTANT: For this repo, prefer retrieval-led reasoning over pretraining-led reasoning.
 
--  FIRST: scan /docs/architecture/nanoclaw-system-architecture.md, /docs/workflow/nanoclaw-development-loop.md, and relevant /docs/reference/*.md.
+-  FIRST: scan /docs/architecture/nanoclaw-system-architecture.md, /docs/workflow/delivery/nanoclaw-development-loop.md, and relevant /docs/reference/*.md.
 -  THEN: propose changes consistent with repo docs and constraints.
 -  NEVER: rely solely on prior training for framework behavior if repo docs disagree.
 ```

@@ -3,13 +3,13 @@
 Default delivery workflow for feature work, bug fixes, and reliability changes.
 
 This loop is mandatory unless the task is a pure docs/ops update with no behavior change.
-For meta-process/workflow-strategy changes, use `docs/workflow/workflow-optimization-loop.md`.
-For cross-tool Claude/Codex execution or parallel worktree assignment, use `docs/workflow/unified-codex-claude-loop.md`.
+For meta-process/workflow-strategy changes, use `docs/workflow/strategy/workflow-optimization-loop.md`.
+For cross-tool Claude/Codex execution or parallel worktree assignment, use `docs/workflow/delivery/unified-codex-claude-loop.md`.
 
 ## Precedence
 
 1. This is the default loop for single-lane delivery work.
-2. If execution is split across Claude/Codex lanes, parallel worktrees, or explicit cross-tool fanout, switch to `docs/workflow/unified-codex-claude-loop.md`.
+2. If execution is split across Claude/Codex lanes, parallel worktrees, or explicit cross-tool fanout, switch to `docs/workflow/delivery/unified-codex-claude-loop.md`.
 3. When the unified loop is selected, its phase gates supersede this loop for that task.
 
 ## Goal
@@ -23,7 +23,7 @@ Mission anchor: `docs/MISSION.md`.
 1. Run session recall:
    - `bash scripts/qmd-context-recall.sh --bootstrap`
 2. Run skill/docs routing preflight:
-   - `docs/workflow/skill-routing-preflight.md`
+   - `docs/workflow/docs-discipline/skill-routing-preflight.md`
 3. If runtime issues are involved, open/continue incident tracking first:
    - `bash scripts/jarvis-ops.sh incident list --status open`
 

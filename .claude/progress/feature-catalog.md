@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-07T19:58:58.918Z
+Generated: 2026-03-07T20:36:24.161Z
 Project: nanoclaw
 
 ## Features
@@ -43,8 +43,6 @@ Project: nanoclaw
   - src/channels/whatsapp.ts
   - src/config.ts
   - src/types.ts
-- Validation Warnings:
-  - missing file: src/whatsapp-auth.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/channels/whatsapp.test.ts
@@ -99,7 +97,7 @@ Project: nanoclaw
 - Files (11):
   - docs/architecture/nanoclaw-system-architecture.md
   - docs/reference/SPEC.md
-  - docs/workflow/nanoclaw-container-debugging.md
+  - docs/workflow/runtime/nanoclaw-container-debugging.md
   - launchd/com.nanoclaw.plist
   - scripts/jarvis-preflight.sh
   - scripts/jarvis-reliability.sh
@@ -114,6 +112,7 @@ Project: nanoclaw
   - src/runtime-ownership.test.ts
 - Shared Files:
   - docs/architecture/nanoclaw-system-architecture.md
+  - docs/workflow/runtime/nanoclaw-container-debugging.md
   - scripts/jarvis-preflight.sh
   - scripts/jarvis-reliability.sh
   - src/channels/whatsapp.ts
@@ -288,7 +287,7 @@ Project: nanoclaw
 - Keywords: andy review, review requested, review trigger, direct patch, rework lineage, request state
 - Files (11):
   - docs/architecture/nanoclaw-jarvis.md
-  - docs/workflow/nanoclaw-jarvis-dispatch-contract.md
+  - docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
   - groups/andy-developer/CLAUDE.md
   - groups/andy-developer/docs/github.md
   - groups/andy-developer/docs/jarvis-dispatch.md
@@ -304,6 +303,7 @@ Project: nanoclaw
   - src/jarvis-worker-dispatch.test.ts
 - Shared Files:
   - docs/architecture/nanoclaw-jarvis.md
+  - docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
   - groups/andy-developer/CLAUDE.md
   - groups/andy-developer/docs/jarvis-dispatch.md
   - src/db.ts
@@ -352,6 +352,82 @@ Project: nanoclaw
   - CLAUDE.md
   - DOCS.md
   - docs/README.md
+  - scripts/check-workflow-contracts.sh
+- Suggested Verify:
+  - npm run typecheck
+
+### docs-topology-cleanup - Docs Topology Cleanup
+- Risk: medium
+- Summary: Physical docs reorganization, canonical ownership cleanup, and reference migration across root docs, group mirrors, and workflow checks.
+- Keywords: docs cleanup, workflow subfolders, reference migration, doc topology, docs governance, mission runtime profiles, archive cleanup
+- Files (50):
+  - .claude/progress/feature-catalog.seed.json
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/architecture/mission-runtime-profiles.md
+  - docs/archives/debug-known-issues-2026-02.md
+  - docs/archives/worker-dispatch-root-cause-2026-02-24.md
+  - docs/operations/skills-vs-docs-map.md
+  - docs/operations/subagent-routing.md
+  - docs/operations/update-requirements-matrix.md
+  - docs/operations/upstream-sync-policy.md
+  - docs/operations/workflow-setup-responsibility-map.md
+  - docs/README.md
+  - docs/troubleshooting/DEBUG_CHECKLIST.md
+  - docs/workflow/delivery/claude-cli-resume-consult-lane.md
+  - docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
+  - docs/workflow/delivery/nanoclaw-development-loop.md
+  - docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md
+  - docs/workflow/delivery/unified-codex-claude-loop.md
+  - docs/workflow/docs-discipline/andy-compression-loop.md
+  - docs/workflow/docs-discipline/doc-creation-contract.md
+  - docs/workflow/docs-discipline/docs-pruning-loop.md
+  - docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md
+  - docs/workflow/docs-discipline/skill-routing-preflight.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/github-multi-agent-collaboration-loop.md
+  - docs/workflow/github/github-offload-boundary-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/runtime/jarvis-dispatch-contract-discipline.md
+  - docs/workflow/runtime/nanoclaw-container-debugging.md
+  - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
+  - docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
+  - docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md
+  - docs/workflow/runtime/session-recall.md
+  - docs/workflow/strategy/weekly-slop-optimization-loop.md
+  - docs/workflow/strategy/workflow-optimization-loop.md
+  - groups/andy-developer/docs/review-handoff.md
+  - groups/jarvis-worker-1/AGENTS.md
+  - groups/jarvis-worker-1/CLAUDE.md
+  - groups/jarvis-worker-1/DOCS.md
+  - groups/jarvis-worker-1/docs/architecture/harness-engineering-alignment.md
+  - groups/jarvis-worker-1/docs/architecture/nanoclaw-jarvis.md
+  - groups/jarvis-worker-1/docs/architecture/nanoclaw-system-architecture.md
+  - groups/jarvis-worker-1/docs/operations/runtime-vs-prebaked-boundary.md
+  - groups/jarvis-worker-1/docs/operations/update-requirements-matrix.md
+  - groups/jarvis-worker-1/docs/operations/workflow-setup-responsibility-map.md
+  - groups/jarvis-worker-1/docs/README.md
+  - groups/jarvis-worker-1/scripts/jarvis-happiness-gate.sh
+  - groups/jarvis-worker-1/scripts/test-andy-user-e2e.ts
+  - scripts/check-workflow-contracts.sh
+- Tests (0):
+  - none
+- Shared Files:
+  - .claude/progress/feature-catalog.seed.json
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/operations/workflow-setup-responsibility-map.md
+  - docs/README.md
+  - docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/github-multi-agent-collaboration-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/runtime/nanoclaw-container-debugging.md
+  - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
+  - docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
+  - scripts/check-workflow-contracts.sh
 - Suggested Verify:
   - npm run typecheck
 
@@ -420,16 +496,15 @@ Project: nanoclaw
 - Risk: high
 - Summary: Deterministic apply/rebase/update/uninstall pipeline for skill-based customization.
 - Keywords: skills, apply, rebase, update, drift, manifest
-- Files (16):
+- Files (15):
   - scripts/apply-skill.ts
   - scripts/fix-skill-drift.ts
-  - scripts/post-update.ts
-  - scripts/rebase.ts
   - scripts/run-migrations.ts
   - scripts/uninstall-skill.ts
   - scripts/update-core.ts
   - scripts/validate-all-skills.ts
   - skills-engine/apply.ts
+  - skills-engine/backup.ts
   - skills-engine/index.ts
   - skills-engine/manifest.ts
   - skills-engine/rebase.ts
@@ -442,9 +517,6 @@ Project: nanoclaw
   - skills-engine/__tests__/rebase.test.ts
   - skills-engine/__tests__/uninstall.test.ts
   - skills-engine/__tests__/update.test.ts
-- Validation Warnings:
-  - missing file: scripts/post-update.ts
-  - missing file: scripts/rebase.ts
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run skills-engine/__tests__/apply.test.ts skills-engine/__tests__/rebase.test.ts skills-engine/__tests__/uninstall.test.ts skills-engine/__tests__/update.test.ts
@@ -487,14 +559,14 @@ Project: nanoclaw
   - .claude/skills/customize/SKILL.md
   - .claude/skills/debug/SKILL.md
   - .claude/skills/get-qodo-rules/SKILL.md
-  - .claude/skills/incident-debugger/SKILL.md
   - .claude/skills/qodo-pr-resolver/SKILL.md
   - .claude/skills/setup/SKILL.md
   - .claude/skills/update/SKILL.md
+  - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
 - Tests (0):
   - none
-- Validation Warnings:
-  - missing file: .claude/skills/incident-debugger/SKILL.md
+- Shared Files:
+  - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
 - Suggested Verify:
   - npm run typecheck
 
@@ -527,12 +599,13 @@ Project: nanoclaw
   - .claude/skills/nanoclaw-orchestrator/SKILL.md
   - .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts
   - .claude/skills/nanoclaw-testing/SKILL.md
-  - docs/workflow/nanoclaw-andy-user-happiness-gate.md
+  - docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
   - scripts/jarvis-happiness-gate.sh
   - scripts/test-andy-user-e2e.ts
 - Tests (0):
   - none
 - Shared Files:
+  - docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
   - scripts/jarvis-happiness-gate.sh
   - scripts/test-andy-user-e2e.ts
 - Suggested Verify:
@@ -555,9 +628,9 @@ Project: nanoclaw
   - DOCS.md
   - docs/operations/workflow-setup-responsibility-map.md
   - docs/README.md
-  - docs/workflow/github-agent-collaboration-loop.md
-  - docs/workflow/github-multi-agent-collaboration-loop.md
-  - docs/workflow/nanoclaw-github-control-plane.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/github-multi-agent-collaboration-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
   - scripts/workflow/github-project-sync.js
   - setup/github-project-sync.test.ts
 - Tests (1):
@@ -567,9 +640,11 @@ Project: nanoclaw
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
+  - docs/operations/workflow-setup-responsibility-map.md
   - docs/README.md
-- Validation Warnings:
-  - missing file: docs/workflow/github-agent-collaboration-loop.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/github-multi-agent-collaboration-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run setup/github-project-sync.test.ts

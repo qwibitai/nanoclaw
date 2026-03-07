@@ -33,7 +33,7 @@
         "confirmed_by_user": "",
         "confirmed_at": "2026-03-07T17:49:30Z",
         "verification": "npm run build PASS; npm test -- --run src/extensions/jarvis/frontdesk-service.test.ts src/extensions/jarvis/lane-control-service.test.ts src/jarvis-worker-dispatch.test.ts src/db.test.ts PASS; npm test PASS (518 tests); bash scripts/jarvis-ops.sh preflight PASS after runtime recovery; bash scripts/jarvis-ops.sh verify-worker-connectivity PASS; bash scripts/jarvis-ops.sh acceptance-gate PASS; bash scripts/jarvis-ops.sh happiness-gate --user-confirmation 'review ownership live user-POV run completed by Codex after runtime recovery' PASS",
-        "fix_reference": "src/index.ts, src/extensions/jarvis/request-state-service.ts, src/extensions/jarvis/frontdesk-service.ts, src/extensions/jarvis/lane-control-service.ts, groups/andy-developer/CLAUDE.md, groups/andy-developer/docs/jarvis-dispatch.md, groups/andy-developer/docs/github.md, groups/jarvis-worker-*/docs/workflow/worker-skill-policy.md, docs/architecture/nanoclaw-jarvis.md, docs/workflow/nanoclaw-jarvis-dispatch-contract.md",
+        "fix_reference": "src/index.ts, src/extensions/jarvis/request-state-service.ts, src/extensions/jarvis/frontdesk-service.ts, src/extensions/jarvis/lane-control-service.ts, groups/andy-developer/CLAUDE.md, groups/andy-developer/docs/jarvis-dispatch.md, groups/andy-developer/docs/github.md, groups/jarvis-worker-*/docs/workflow/worker-skill-policy.md, docs/architecture/nanoclaw-jarvis.md, docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md",
         "resolved_by": "codex"
       },
       "resolved_at": "2026-03-07T17:49:30Z"

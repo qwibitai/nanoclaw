@@ -80,8 +80,8 @@ Andy-developer can steer an in-flight worker by writing a `steer_worker` IPC tas
 | Concern | Location |
 |---------|----------|
 | Host primitives | `src/*` core files |
-| Dispatch contract | `src/dispatch-validator.ts` + `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` |
-| Worker runtime details | `docs/workflow/nanoclaw-jarvis-worker-runtime.md` |
+| Dispatch contract | `src/dispatch-validator.ts` + `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` |
+| Worker runtime details | `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md` |
 | Team operating model | `docs/operations/workflow-setup-responsibility-map.md` + lane `groups/*/CLAUDE.md` |
 
 ## Non-Goals

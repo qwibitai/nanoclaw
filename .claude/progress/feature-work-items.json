@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-07T20:00:28.588Z",
+  "updated_at": "2026-03-07T20:36:53.759Z",
   "items": [
     {
       "id": "work-architecture-boundary-governance-1772821500000",
@@ -292,12 +292,51 @@
         "2026-03-07T20:00:28.588Z: Added the canonical GitHub agent collaboration workflow doc, linked it from CLAUDE.md and AGENTS.md, updated docs inventory/landing pages, and passed workflow/mirror/tooling checks."
       ],
       "evidence": [
-        "docs/workflow/github-agent-collaboration-loop.md",
+        "docs/workflow/github/github-agent-collaboration-loop.md",
         "CLAUDE.md",
         "AGENTS.md"
       ],
       "created_at": "2026-03-07T19:58:43.539Z",
       "updated_at": "2026-03-07T20:00:28.588Z"
+    },
+    {
+      "id": "work-docs-topology-cleanup-1772914781826",
+      "title": "Reorganize docs topology and migrate references",
+      "feature_id": "docs-topology-cleanup",
+      "status": "done",
+      "request": "Implement the docs cleanup plan: workflow subfolders, mission profile merge, GitHub control-plane extraction, troubleshooting/archive cleanup, and repo-wide reference migration.",
+      "notes": [
+        "2026-03-07T20:19:46.801Z: Started docs topology cleanup: feature mapped, workflow docs will move into subfolders, mission profile docs will merge, and references will be migrated repo-wide.",
+        "2026-03-07T20:29:09.689Z: Docs topology cleanup implemented; workflow docs moved into subfolders, runtime profile docs merged, debug history archived, and reference migration completed. Running final verification and touch-set checks.",
+        "2026-03-07T20:29:16.464Z: Verification passed: bash scripts/check-workflow-contracts.sh, bash scripts/check-claude-codex-mirror.sh, bash scripts/check-tooling-governance.sh, and touch-set check for docs-topology-cleanup with explicit rename/mirror allowances. Feature catalog rebuilt against the new doc layout; strict validator still reports four pre-existing missing references outside this cleanup scope."
+      ],
+      "evidence": [
+        ".claude/progress/feature-catalog.md"
+      ],
+      "created_at": "2026-03-07T20:19:41.826Z",
+      "updated_at": "2026-03-07T20:29:16.464Z"
+    },
+    {
+      "id": "work-feature-tracking-pipeline-1772915699987",
+      "title": "Clear stale catalog and skill path references",
+      "feature_id": "feature-tracking-pipeline",
+      "status": "done",
+      "request": "Remove stale feature-catalog references, restore the missing WhatsApp auth entrypoint, and align worker mirror docs with the current docs-first incident workflow.",
+      "notes": [
+        "2026-03-07T20:35:03.984Z: Tracing stale feature-catalog references and worker mirror drift; root WhatsApp auth entrypoint is missing while update and incident skill references are stale.",
+        "2026-03-07T20:36:29.054Z: Restored root src/whatsapp-auth.ts, removed stale wrapper references from the feature catalog, and aligned worker mirror incident routing with the current docs-first debug workflow.",
+        "2026-03-07T20:36:53.759Z: Verification passed: feature catalog rebuilt with missing_refs=0, strict catalog validation PASS, claude-codex mirror check PASS, and npm run build PASS after restoring the root WhatsApp auth entrypoint and removing stale skill-wrapper references."
+      ],
+      "evidence": [
+        ".claude/progress/feature-catalog.seed.json",
+        "src/whatsapp-auth.ts",
+        "groups/jarvis-worker-1/CLAUDE.md",
+        ".claude/progress/feature-catalog.json",
+        ".claude/skills/update/SKILL.md",
+        "groups/jarvis-worker-1/docs/operations/skills-vs-docs-map.md"
+      ],
+      "created_at": "2026-03-07T20:34:59.987Z",
+      "updated_at": "2026-03-07T20:36:53.759Z"
     }
   ]
 }

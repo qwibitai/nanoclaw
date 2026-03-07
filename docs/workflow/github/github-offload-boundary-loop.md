@@ -7,6 +7,28 @@ Canonical decision workflow for placing automation between:
 
 Mission anchor: `docs/MISSION.md`.
 
+## Owns
+
+This document owns placement decisions between GitHub and local execution lanes:
+
+1. what belongs in GitHub-native automation
+2. what should remain in stateful local lanes
+3. when a hybrid split is appropriate
+
+## Does Not Own
+
+This document does not own:
+
+1. the setup shape of the GitHub collaboration stack
+2. the daily operating rules for Discussions, Issues, and Project items
+3. the detailed governance policy for specific `.github/workflows/*`
+
+Use instead:
+
+1. `docs/workflow/github/github-multi-agent-collaboration-loop.md` for stack setup
+2. `docs/workflow/github/github-agent-collaboration-loop.md` for daily GitHub collaboration behavior
+3. `docs/workflow/github/nanoclaw-github-control-plane.md` for workflow/review/auth policy
+
 ## Objective
 
 Maximize delivery reliability and throughput by offloading deterministic governance to GitHub while keeping context-heavy and runtime-local work in NanoClaw lanes.
@@ -25,6 +47,8 @@ Keep local when the task requires:
 2. Cross-channel runtime state (WhatsApp/Jarvis worker behavior).
 3. Incident triage and adaptive debugging decisions.
 4. Human confirmation gates tied to operator/user intent.
+
+This is a placement rule only. After deciding that something belongs on GitHub, use the other GitHub workflow docs to decide how it is represented and governed.
 
 ## Placement Matrix
 
@@ -111,7 +135,7 @@ Adopt incrementally with measured reliability impact.
 
 1. Track queue latency, rerun rates, and flaky-check frequency.
 2. Keep only high-signal required checks; demote noisy/non-blocking checks.
-3. Review offload boundaries monthly via `docs/workflow/workflow-optimization-loop.md`.
+3. Review offload boundaries monthly via `docs/workflow/strategy/workflow-optimization-loop.md`.
 
 ## Repository Application Guidance
 
@@ -150,7 +174,7 @@ Adopt or expand GitHub offload only if all remain healthy:
 3. Merge throughput does not degrade materially.
 4. Operator burden decreases or stays neutral.
 
-Use `docs/workflow/workflow-optimization-loop.md` decision gate for pilot/adopt/reject outcomes.
+Use `docs/workflow/strategy/workflow-optimization-loop.md` decision gate for pilot/adopt/reject outcomes.
 
 ## Anti-Patterns
 

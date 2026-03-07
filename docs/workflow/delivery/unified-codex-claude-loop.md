@@ -7,7 +7,7 @@ Select this loop for non-trivial feature, bug-fix, or reliability work only when
 ## Precedence
 
 1. Use this loop when work is intentionally split across Claude/Codex lanes, parallel worktrees, or review fanout.
-2. For single-lane delivery without cross-tool topology, use `docs/workflow/nanoclaw-development-loop.md`.
+2. For single-lane delivery without cross-tool topology, use `docs/workflow/delivery/nanoclaw-development-loop.md`.
 3. Once selected for a task, this loop supersedes the default development loop phases.
 
 ## Objective

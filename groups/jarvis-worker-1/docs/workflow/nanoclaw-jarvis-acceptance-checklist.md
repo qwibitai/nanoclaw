@@ -39,8 +39,8 @@ Use this checklist before marking NanoClaw-Jarvis integration complete.
 ## Documentation
 
 - [x] `docs/architecture/nanoclaw-jarvis.md` updated as architecture source of truth.
-- [x] `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` added.
-- [x] `docs/workflow/nanoclaw-jarvis-worker-runtime.md` added.
+- [x] `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` added.
+- [x] `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md` added.
 - [x] Root `CLAUDE.md` updated with compressed trigger-based docs index.
 
 ## Verification

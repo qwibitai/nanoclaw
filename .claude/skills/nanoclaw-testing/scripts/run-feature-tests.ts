@@ -277,7 +277,7 @@ function main(): void {
           'bash scripts/jarvis-ops.sh happiness-gate --user-confirmation \"manual User POV runbook completed\"',
       });
       manualChecks.push(
-        'Complete docs/workflow/nanoclaw-andy-user-happiness-gate.md User POV Runbook and confirm human satisfaction.',
+        'Complete docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md User POV Runbook and confirm human satisfaction.',
       );
     }
   }

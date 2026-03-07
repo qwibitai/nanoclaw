@@ -16,13 +16,13 @@ docs/
 ## Start Points
 
 - Architecture first: `docs/architecture/nanoclaw-system-architecture.md`
-- Mission baseline profile: `docs/architecture/mission-core-profile.md`
-- Optional ops profile: `docs/architecture/mission-optional-features.md`
+- Mission baseline profile: `docs/architecture/mission-runtime-profiles.md`
+- Optional ops profile: `docs/architecture/mission-runtime-profiles.md`
 - Architecture optimization plan: `docs/architecture/nanoclaw-architecture-optimization-plan.md`
-- Workflow contract: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
-- Runtime behavior: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
-- GitHub control-plane: `docs/workflow/nanoclaw-github-control-plane.md`
-- User review readiness gate: `docs/workflow/nanoclaw-github-control-plane.md` (QA handoff section) + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
+- Workflow contract: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
+- Runtime behavior: `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
+- GitHub control-plane: `docs/workflow/github/nanoclaw-github-control-plane.md`
+- User review readiness gate: `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md` + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
 - Ops scripts quick entrypoint: `scripts/jarvis-ops.sh` (`preflight`, `reliability`, `status`, `trace`, `verify-worker-connectivity`, `dispatch-lint`, `db-doctor`, `incident`, `probe`, `hotspots`, `incident-bundle`, `recover`, `smoke`, `watch`)
 - Operational ownership: `docs/operations/roles-classification.md`
 - Workflow setup + update ownership: `docs/operations/workflow-setup-responsibility-map.md`

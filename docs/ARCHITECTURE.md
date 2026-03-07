@@ -120,4 +120,4 @@ If a change introduces any of the following, it belongs in the Jarvis extension 
 - `docs/architecture/nanoclaw-system-architecture.md`
 - `docs/architecture/nanoclaw-jarvis.md`
 - `docs/reference/REQUIREMENTS.md`
-- `docs/workflow/nanoclaw-development-loop.md`
+- `docs/workflow/delivery/nanoclaw-development-loop.md`

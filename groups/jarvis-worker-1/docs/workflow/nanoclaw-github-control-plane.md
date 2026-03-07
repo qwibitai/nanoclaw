@@ -55,48 +55,8 @@ Andy-developer should choose the minimum bundle that satisfies reliability and g
 - Allow Andy-developer push only for control-plane/admin branches and worker branch seeding.
 - Do not bypass branch protection except for explicit emergency procedure.
 
-## Fork Auth and Sync Workflow (Andy Analysis)
+## Related Operational Routing
 
-Use this when Andy analysis must read `openclaw-gurusharan/nanoclaw` `main`.
-
-1. Verify remote mapping and normalize alias names.
-   - `git remote -v`
-   - Expected:
-     - `origin` -> `https://github.com/ingpoc/nanoclaw.git`
-     - `nanoclaw` -> `https://github.com/openclaw-gurusharan/nanoclaw.git`
-     - `upstream` -> `https://github.com/qwibitai/nanoclaw`
-   - If old alias exists, rename once:
-     - `git remote rename openclaw nanoclaw`
-2. Verify active GitHub CLI account and switch before pushing.
-   - `gh auth status -h github.com`
-   - `gh auth switch -h github.com -u openclaw-gurusharan`
-   - If tokens are invalid:
-     - `gh auth login -h github.com --git-protocol https --web`
-     - `gh auth switch -h github.com -u openclaw-gurusharan`
-3. Sync code to fork.
-   - Preferred (policy-safe): push branch and merge via PR into `main`.
-     - `git push -u nanoclaw <branch>`
-     - `gh pr create --repo openclaw-gurusharan/nanoclaw --base main --head <branch>`
-   - Emergency/admin-only direct update (if explicitly allowed):
-     - `git push nanoclaw <branch>:main`
-4. Confirm `main` contains expected commit.
-   - `git ls-remote --heads nanoclaw main`
-   - `git log --oneline -n 1`
-
-Troubleshooting:
-- `permission denied` on push usually means wrong active account or missing write permission to target branch.
-- If `gh auth switch` fails, re-run `gh auth status -h github.com` and refresh auth with `gh auth login`.
-
-## User QA Handoff Gate (Andy-Owned)
-
-When work is marked ready for user testing:
-
-1. Andy reviews worker completion and explicitly approves branch/commit.
-2. Andy syncs approved branch/commit into `NanoClawWorkspace` (clone first if repo missing).
-3. Andy runs local preflight (`build` + `server start/health`) and records outcomes.
-4. Andy verifies no duplicate same-lane running containers before handoff:
-   - `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
-5. Andy confirms preflight was executed on the same approved branch/commit under test.
-6. Andy sends handoff block with repo path, branch/commit, and user-run install/start/health/stop commands.
-
-If preflight fails or lane state is inconsistent, do not mark ready; return blocker/rework path first.
+- Fork auth and sync procedure: `docs/operations/upstream-sync-policy.md`
+- User QA handoff and user-facing readiness: `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md`
+- GitHub governance task routing: `docs/operations/subagent-routing.md`

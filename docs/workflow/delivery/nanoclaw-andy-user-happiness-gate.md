@@ -51,6 +51,19 @@ Run before declaring any Andy/Jarvis reliability fix complete, and before any bl
 3. Fix issue, rerun probe, and only continue when all checks pass.
 4. Add or update incident note with probe evidence before closing incident.
 
+## User QA Handoff Gate
+
+When work is marked ready for user testing:
+
+1. Andy reviews worker completion and explicitly approves branch/commit.
+2. Andy syncs the approved branch/commit into `NanoClawWorkspace` or the active local test workspace.
+3. Andy runs local preflight on that same branch/commit and records outcomes.
+4. Andy verifies there are no duplicate same-lane running containers before handoff.
+5. Andy confirms the preflight was executed on the exact branch/commit being handed off.
+6. Andy sends the user handoff block with repo path, branch/commit, and local startup/health/stop commands.
+
+If preflight fails or lane state is inconsistent, do not mark the work ready for user testing.
+
 ## User POV Runbook (Required)
 
 Run this manual sequence at least once per release candidate:
