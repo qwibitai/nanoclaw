@@ -1,8 +1,16 @@
 import fs from 'fs';
+import { Server } from 'http';
 import path from 'path';
 
 import {
+  ADAM_WHATSAPP_JID,
   ASSISTANT_NAME,
+  CC_HOOKS_GROUP_JID,
+  CC_HOOKS_MODEL,
+  CC_WEBHOOK_HOST,
+  CC_WEBHOOK_PORT,
+  CC_WEBHOOK_TOKEN,
+  CC_WEBHOOK_URL,
   IDLE_TIMEOUT,
   NO_TRIGGER_REQUIRED_IN_DMS,
   POLL_INTERVAL,
@@ -24,6 +32,7 @@ import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
+import { CcEventType, startCcWebhookServer } from './cc-hooks.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -62,6 +71,7 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let ccWebhookServer: Server | null = null;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -211,33 +221,46 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  const model =
+    chatJid === CC_HOOKS_GROUP_JID && CC_HOOKS_MODEL
+      ? CC_HOOKS_MODEL
+      : undefined;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    model,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        logger.info(
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
+        );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
@@ -269,6 +292,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  model?: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
@@ -319,6 +343,7 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
+        model,
         assistantName: ASSISTANT_NAME,
       },
       (proc, containerName) =>
@@ -469,6 +494,74 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+function createSyntheticCcMessage(
+  eventType: CcEventType,
+  payload: Record<string, unknown>,
+  message: string,
+): void {
+  if (!CC_HOOKS_GROUP_JID) {
+    logger.warn({ eventType }, 'CC hook group JID is not configured');
+    return;
+  }
+
+  const group = registeredGroups[CC_HOOKS_GROUP_JID];
+  if (!group) {
+    logger.warn(
+      { eventType, hookGroupJid: CC_HOOKS_GROUP_JID },
+      'CC hook group is not registered; cannot enqueue synthetic message',
+    );
+    return;
+  }
+
+  const timestamp = new Date().toISOString();
+  const messageId = `cc-${eventType}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+
+  storeChatMetadata(CC_HOOKS_GROUP_JID, timestamp, group.name);
+  storeMessage({
+    id: messageId,
+    chat_jid: CC_HOOKS_GROUP_JID,
+    sender: 'cc-webhook@runtime.local',
+    sender_name: 'Command Center',
+    content: message,
+    timestamp,
+    is_from_me: true,
+    is_bot_message: false,
+  });
+
+  logger.info(
+    {
+      eventType,
+      hookGroupJid: CC_HOOKS_GROUP_JID,
+      model: CC_HOOKS_MODEL,
+      payloadKeys: Object.keys(payload),
+    },
+    'Stored synthetic CC webhook message in hook session',
+  );
+}
+
+async function sendCcAlertToAdam(text: string): Promise<void> {
+  if (!ADAM_WHATSAPP_JID) {
+    logger.warn('ADAM_WHATSAPP_JID is not configured; skipping CC alert');
+    return;
+  }
+
+  const channel = findChannel(channels, ADAM_WHATSAPP_JID);
+  if (!channel) {
+    logger.warn(
+      { adamJid: ADAM_WHATSAPP_JID },
+      'No channel owns Adam JID, cannot send CC alert',
+    );
+    return;
+  }
+
+  const formatted = formatOutbound(text);
+  if (!formatted) return;
+
+  await channel.sendMessage(ADAM_WHATSAPP_JID, formatted);
+}
+
 async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initDatabase();
@@ -478,6 +571,20 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (ccWebhookServer) {
+      await new Promise<void>((resolve, reject) => {
+        ccWebhookServer!.close((err) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      }).catch((err) => {
+        logger.warn({ err }, 'Failed to close CC webhook server cleanly');
+      });
+      ccWebhookServer = null;
+    }
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -536,6 +643,23 @@ async function main(): Promise<void> {
     logger.fatal('No channels connected');
     process.exit(1);
   }
+
+  ccWebhookServer = startCcWebhookServer(
+    {
+      createHookSessionMessage: createSyntheticCcMessage,
+      sendAdamWhatsApp: sendCcAlertToAdam,
+    },
+    {
+      token: CC_WEBHOOK_TOKEN,
+      host: CC_WEBHOOK_HOST,
+      port: CC_WEBHOOK_PORT,
+      webhookUrl: CC_WEBHOOK_URL,
+    },
+  );
+  logger.info(
+    { webhookUrl: CC_WEBHOOK_URL },
+    'Configure Command Center webhook to runtime endpoint',
+  );
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({

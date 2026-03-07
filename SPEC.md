@@ -46,8 +46,12 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 ### CC Webhook Receiver (src/cc-hooks.ts) — NEW
 
 - HTTP endpoint for CC task lifecycle events
+- Endpoint: `POST /hooks/cc`
+- Validates `x-cc-webhook-token` / bearer token against runtime config
 - Routes events to appropriate session (main vs hook)
 - Events: task_notification, task_review_ready, task_failed, pipeline_stalled, release_closed
+- `task_review_ready` / `task_failed` create synthetic system messages in the hook session and trigger agent review/investigation flow
+- `pipeline_stalled` / `release_closed` send WhatsApp alerts/summaries to Adam
 
 ### Session Management
 
@@ -75,6 +79,11 @@ No config files — code changes only (NanoClaw philosophy). Key constants in `s
 - `HIPPOCAMPUS_BUDGET_TOKENS` — 4096
 - `HIPPOCAMPUS_TOP_K` — 10
 - `DEEP_THINKING_SCHEDULE` — ["10:00", "18:00"]
+- `CC_WEBHOOK_TOKEN` — shared secret for Command Center webhook authentication
+- `CC_WEBHOOK_URL` — full runtime URL for Command Center to post events (`.../hooks/cc`)
+- `CC_HOOKS_GROUP_JID` — target group/session for synthetic hook messages
+- `CC_HOOKS_MODEL` — `sonnet` for webhook-driven hook session execution
+- `ADAM_WHATSAPP_JID` — Adam's WhatsApp JID for critical CC alerts
 
 ## Migration Plan
 

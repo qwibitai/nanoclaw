@@ -14,6 +14,13 @@ const envConfig = readEnvFile([
   'OPENCLAW_AUTH_DIR',
   'HAL_ALLOWED_WHATSAPP_SENDER',
   'TZ',
+  'CC_WEBHOOK_TOKEN',
+  'CC_WEBHOOK_HOST',
+  'CC_WEBHOOK_PORT',
+  'CC_WEBHOOK_BASE_URL',
+  'CC_HOOKS_GROUP_JID',
+  'CC_HOOKS_MODEL',
+  'ADAM_WHATSAPP_JID',
 ]);
 
 export const ASSISTANT_NAME =
@@ -91,6 +98,30 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
 );
+export const CC_WEBHOOK_HOST =
+  process.env.CC_WEBHOOK_HOST || envConfig.CC_WEBHOOK_HOST || '0.0.0.0';
+export const CC_WEBHOOK_PORT = parseInt(
+  process.env.CC_WEBHOOK_PORT || envConfig.CC_WEBHOOK_PORT || '8787',
+  10,
+);
+export const CC_WEBHOOK_TOKEN =
+  process.env.CC_WEBHOOK_TOKEN || envConfig.CC_WEBHOOK_TOKEN || '';
+export const CC_HOOKS_GROUP_JID =
+  process.env.CC_HOOKS_GROUP_JID || envConfig.CC_HOOKS_GROUP_JID || '';
+export const CC_HOOKS_MODEL =
+  process.env.CC_HOOKS_MODEL || envConfig.CC_HOOKS_MODEL || 'sonnet';
+export const ADAM_WHATSAPP_JID =
+  process.env.ADAM_WHATSAPP_JID || envConfig.ADAM_WHATSAPP_JID || '';
+export const CC_WEBHOOK_PATH = '/hooks/cc';
+
+const ccWebhookBaseUrl =
+  process.env.CC_WEBHOOK_BASE_URL || envConfig.CC_WEBHOOK_BASE_URL;
+const defaultWebhookBase = `http://localhost:${CC_WEBHOOK_PORT}`;
+const normalizedWebhookBase = (ccWebhookBaseUrl || defaultWebhookBase).replace(
+  /\/$/,
+  '',
+);
+export const CC_WEBHOOK_URL = `${normalizedWebhookBase}${CC_WEBHOOK_PATH}`;
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

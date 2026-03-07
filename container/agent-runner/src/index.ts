@@ -31,6 +31,7 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  model?: string;
   assistantName?: string;
   secrets?: Record<string, string>;
 }
@@ -528,6 +529,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
       ],
       env: sdkEnv,
+      model: containerInput.model,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
