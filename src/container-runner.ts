@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,7 +12,10 @@ import {
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
+  HOST_TOOLS_CONTAINER_PATH,
   IDLE_TIMEOUT,
+  OPENCLAW_WORKSPACE_CONTAINER_PATH,
+  OPENCLAW_WORKSPACE_DIR,
   TIMEZONE,
 } from './config.js';
 import { readEnvFile } from './env.js';
@@ -52,6 +55,52 @@ interface VolumeMount {
   hostPath: string;
   containerPath: string;
   readonly: boolean;
+}
+
+const TOOL_NAMES = ['cc', 'gog'] as const;
+const resolvedToolPaths = new Map<string, string | null>();
+
+function resolveHostToolPath(tool: (typeof TOOL_NAMES)[number]): string | null {
+  const cached = resolvedToolPaths.get(tool);
+  if (cached !== undefined) return cached;
+
+  const envKey = tool === 'cc' ? 'HOST_CC_CLI_PATH' : 'HOST_GOG_CLI_PATH';
+  const overridePath = process.env[envKey];
+  if (overridePath && fs.existsSync(overridePath)) {
+    const resolved = fs.realpathSync(overridePath);
+    resolvedToolPaths.set(tool, resolved);
+    return resolved;
+  }
+
+  try {
+    const toolPath = execSync(`command -v ${tool}`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (toolPath && fs.existsSync(toolPath)) {
+      const resolved = fs.realpathSync(toolPath);
+      resolvedToolPaths.set(tool, resolved);
+      return resolved;
+    }
+  } catch {
+    // Tool is optional; skip when unavailable.
+  }
+
+  resolvedToolPaths.set(tool, null);
+  return null;
+}
+
+function tryMountOptionalFile(
+  mounts: VolumeMount[],
+  hostPath: string,
+  containerPath: string,
+): void {
+  if (!fs.existsSync(hostPath)) return;
+  mounts.push({
+    hostPath,
+    containerPath,
+    readonly: true,
+  });
 }
 
 function buildVolumeMounts(
@@ -196,6 +245,26 @@ function buildVolumeMounts(
     containerPath: '/app/src',
     readonly: false,
   });
+
+  // Shared OpenClaw workspace files (SOUL.md, AGENTS.md, MEMORY.md, etc.)
+  if (fs.existsSync(OPENCLAW_WORKSPACE_DIR)) {
+    mounts.push({
+      hostPath: OPENCLAW_WORKSPACE_DIR,
+      containerPath: OPENCLAW_WORKSPACE_CONTAINER_PATH,
+      readonly: true,
+    });
+  }
+
+  // Host CLIs for task orchestration integrations.
+  for (const toolName of TOOL_NAMES) {
+    const toolPath = resolveHostToolPath(toolName);
+    if (!toolPath) continue;
+    tryMountOptionalFile(
+      mounts,
+      toolPath,
+      `${HOST_TOOLS_CONTAINER_PATH}/${toolName}`,
+    );
+  }
 
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {

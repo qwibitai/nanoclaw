@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
+  NO_TRIGGER_REQUIRED_IN_DMS,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -64,6 +65,15 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+function requiresTrigger(chatJid: string, group: RegisteredGroup): boolean {
+  if (group.isMain === true) return false;
+  if (group.requiresTrigger === false) return false;
+  if (NO_TRIGGER_REQUIRED_IN_DMS && chatJid.endsWith('@s.whatsapp.net')) {
+    return false;
+  }
+  return true;
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -150,8 +160,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return true;
   }
 
-  const isMainGroup = group.isMain === true;
-
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
   const missedMessages = getMessagesSince(
     chatJid,
@@ -161,8 +169,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  // For trigger-required chats, check trigger + sender allowlist.
+  if (requiresTrigger(chatJid, group)) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
@@ -384,8 +392,7 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
-          const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+          const needsTrigger = requiresTrigger(chatJid, group);
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as

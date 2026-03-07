@@ -7,7 +7,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
+import { OPENCLAW_AUTH_DIR, STORE_DIR } from '../src/config.js';
 import { logger } from '../src/logger.js';
 import { commandExists, getPlatform, isHeadless, isWSL } from './platform.js';
 import { emitStatus } from './status.js';
@@ -43,7 +43,12 @@ export async function run(_args: string[]): Promise<void> {
   const hasEnv = fs.existsSync(path.join(projectRoot, '.env'));
 
   const authDir = path.join(projectRoot, 'store', 'auth');
-  const hasAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+  const hasLocalAuth =
+    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+  const hasOpenClawAuth =
+    fs.existsSync(OPENCLAW_AUTH_DIR) &&
+    fs.readdirSync(OPENCLAW_AUTH_DIR).length > 0;
+  const hasAuth = hasLocalAuth || hasOpenClawAuth;
 
   let hasRegisteredGroups = false;
   // Check JSON file first (pre-migration)
@@ -74,6 +79,8 @@ export async function run(_args: string[]): Promise<void> {
       docker,
       hasEnv,
       hasAuth,
+      hasLocalAuth,
+      hasOpenClawAuth,
       hasRegisteredGroups,
     },
     'Environment check complete',

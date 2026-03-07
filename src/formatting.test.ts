@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from './config.js';
+import {
+  ASSISTANT_NAME,
+  NO_TRIGGER_REQUIRED_IN_DMS,
+  TRIGGER_PATTERN,
+} from './config.js';
 import {
   escapeXml,
   formatMessages,
@@ -209,48 +213,66 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   // Replicates the exact logic from processGroupMessages and startMessageLoop:
   //   if (!isMainGroup && group.requiresTrigger !== false) { check trigger }
   function shouldRequireTrigger(
+    chatJid: string,
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
   ): boolean {
-    return !isMainGroup && requiresTrigger !== false;
+    if (isMainGroup) return false;
+    if (requiresTrigger === false) return false;
+    if (NO_TRIGGER_REQUIRED_IN_DMS && chatJid.endsWith('@s.whatsapp.net')) {
+      return false;
+    }
+    return true;
   }
 
   function shouldProcess(
+    chatJid: string,
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
     messages: NewMessage[],
   ): boolean {
-    if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
+    if (!shouldRequireTrigger(chatJid, isMainGroup, requiresTrigger))
+      return true;
     return messages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
   }
 
   it('main group always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, undefined, msgs)).toBe(true);
+    expect(shouldProcess('main@s.whatsapp.net', true, undefined, msgs)).toBe(
+      true,
+    );
   });
 
   it('main group processes even with requiresTrigger=true', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, true, msgs)).toBe(true);
+    expect(shouldProcess('main@s.whatsapp.net', true, true, msgs)).toBe(true);
   });
 
   it('non-main group with requiresTrigger=undefined requires trigger (defaults to true)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, undefined, msgs)).toBe(false);
+    expect(shouldProcess('group@g.us', false, undefined, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true requires trigger', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, true, msgs)).toBe(false);
+    expect(shouldProcess('group@g.us', false, true, msgs)).toBe(false);
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
     const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
-    expect(shouldProcess(false, true, msgs)).toBe(true);
+    expect(shouldProcess('group@g.us', false, true, msgs)).toBe(true);
   });
 
   it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
     const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, false, msgs)).toBe(true);
+    expect(shouldProcess('group@g.us', false, false, msgs)).toBe(true);
+  });
+
+  it('non-main DM does not require trigger when DM trigger bypass is enabled', () => {
+    const msgs = [makeMsg({ content: 'hello no trigger' })];
+    const expected = NO_TRIGGER_REQUIRED_IN_DMS ? true : false;
+    expect(shouldProcess('123@s.whatsapp.net', false, true, msgs)).toBe(
+      expected,
+    );
   });
 });

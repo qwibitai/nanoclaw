@@ -29,12 +29,14 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 ## Components
 
 ### Message Loop (src/index.ts)
+
 - Polls SQLite for new messages
 - Resolves memory context via Hippocampus before agent invocation
 - Routes to appropriate model based on session type
 - Handles CC webhook events as system messages
 
 ### Hippocampus Middleware (src/hippocampus.ts) — NEW
+
 - On each inbound message: extract query terms from message + recent context
 - Call Hippocampus embedding API to find relevant memories
 - Score and rank using 5-factor model (similarity, importance, recency, emotional, retrieval)
@@ -42,16 +44,19 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 - On session end: extract episodes for consolidation
 
 ### CC Webhook Receiver (src/cc-hooks.ts) — NEW
+
 - HTTP endpoint for CC task lifecycle events
 - Routes events to appropriate session (main vs hook)
 - Events: task_notification, task_review_ready, task_failed, pipeline_stalled, release_closed
 
 ### Session Management
+
 - **main** — Opus, Adam-facing, only wakes for DMs + critical events
 - **heartbeat** — Sonnet, 30-min cron, read-only monitoring
 - **hooks** — Sonnet, CC task reviews and deploy notifications
 
 ### Deep Thinking Sessions — NEW
+
 - 2x daily scheduled tasks (10 AM, 6 PM PT)
 - High reasoning effort (extended thinking)
 - Seeded with: relevant memories, current task board state, recent decisions
@@ -62,8 +67,11 @@ Single Node.js process on host. Agents execute in isolated Linux containers via 
 No config files — code changes only (NanoClaw philosophy). Key constants in `src/config.ts`:
 
 - `ASSISTANT_NAME` — "Hal"
-- `TRIGGER_PATTERN` — disabled (always respond in DMs)
+- `NO_TRIGGER_REQUIRED_IN_DMS` — true (always respond in DMs, trigger still required in groups unless overridden)
 - `TIMEZONE` — "America/Los_Angeles"
+- `OPENCLAW_AUTH_DIR` — `~/.openclaw/store/auth` (reuse existing WhatsApp credentials)
+- `HAL_WORKSPACE_DIR` — `~/.openclaw/workspace` (mount SOUL.md, AGENTS.md, MEMORY.md)
+- `HAL_ALLOWED_WHATSAPP_SENDER` — `19493969849@s.whatsapp.net` (Adam allowlist)
 - `HIPPOCAMPUS_BUDGET_TOKENS` — 4096
 - `HIPPOCAMPUS_TOP_K` — 10
 - `DEEP_THINKING_SCHEDULE` — ["10:00", "18:00"]
@@ -71,17 +79,22 @@ No config files — code changes only (NanoClaw philosophy). Key constants in `s
 ## Migration Plan
 
 ### Phase 1: WhatsApp Parity
+
 - Wire WhatsApp channel with existing credentials
 - Mount workspace for personality files
 - Wire existing tools (exec, web, gog, cc)
 - Run alongside OpenClaw (different trigger or hot-switchover)
+- Reproducible runtime verification:
+  - `npm run test:whatsapp-runtime` (boots WhatsApp channel test harness, verifies connect + inbound DM + response)
 
 ### Phase 2: Hippocampus Integration
+
 - Build hippocampus.ts middleware
 - Per-turn memory injection in agent loop
 - Episode extraction on session boundaries
 
 ### Phase 3: Full Migration
+
 - CC webhook integration
 - Deep thinking sessions
 - Multi-model routing
@@ -90,7 +103,7 @@ No config files — code changes only (NanoClaw philosophy). Key constants in `s
 ## Data
 
 - **SQLite** — Message queue, session state, task schedules
-- **Workspace** — `~/.openclaw/workspace/` (SOUL.md, AGENTS.md, MEMORY.md, memory/*.md)
+- **Workspace** — `~/.openclaw/workspace/` (SOUL.md, AGENTS.md, MEMORY.md, memory/\*.md)
 - **Hippocampus** — Embedding store + episode database (existing)
 - **Groups dir** — Per-chat isolated filesystems
 

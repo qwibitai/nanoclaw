@@ -11,7 +11,7 @@ import path from 'path';
 
 import Database from 'better-sqlite3';
 
-import { STORE_DIR } from '../src/config.js';
+import { OPENCLAW_AUTH_DIR, STORE_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
 import {
@@ -118,7 +118,12 @@ export async function run(_args: string[]): Promise<void> {
 
   // WhatsApp: check for auth credentials on disk
   const authDir = path.join(projectRoot, 'store', 'auth');
-  if (fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0) {
+  const hasLocalWhatsAppAuth =
+    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+  const hasOpenClawWhatsAppAuth =
+    fs.existsSync(OPENCLAW_AUTH_DIR) &&
+    fs.readdirSync(OPENCLAW_AUTH_DIR).length > 0;
+  if (hasLocalWhatsAppAuth || hasOpenClawWhatsAppAuth) {
     channelAuth.whatsapp = 'authenticated';
   }
 

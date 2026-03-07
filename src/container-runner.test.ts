@@ -13,7 +13,10 @@ vi.mock('./config.js', () => ({
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  HOST_TOOLS_CONTAINER_PATH: '/workspace/host-tools',
   IDLE_TIMEOUT: 1800000, // 30min
+  OPENCLAW_WORKSPACE_CONTAINER_PATH: '/workspace/openclaw-workspace',
+  OPENCLAW_WORKSPACE_DIR: '/tmp/openclaw-workspace',
   TIMEZONE: 'America/Los_Angeles',
 }));
 
@@ -40,6 +43,7 @@ vi.mock('fs', async () => {
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      realpathSync: vi.fn((p: unknown) => String(p)),
       copyFileSync: vi.fn(),
     },
   };
@@ -82,6 +86,11 @@ vi.mock('child_process', async () => {
         return new EventEmitter();
       },
     ),
+    execSync: vi.fn((cmd: string) => {
+      if (cmd.includes('command -v cc')) return '/usr/local/bin/cc\n';
+      if (cmd.includes('command -v gog')) return '/usr/local/bin/gog\n';
+      return '';
+    }),
   };
 });
 
