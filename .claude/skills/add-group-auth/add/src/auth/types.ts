@@ -42,6 +42,8 @@ export interface CredentialProvider {
 /** A single auth method offered by a provider. */
 export interface AuthOption {
   label: string;
+  /** Extra explanatory text shown below the label in the menu. */
+  description?: string;
   provider: CredentialProvider;
   run(ctx: AuthContext): Promise<FlowResult | null>;
 }

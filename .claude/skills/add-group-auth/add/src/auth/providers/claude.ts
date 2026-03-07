@@ -496,6 +496,7 @@ export const claudeProvider: CredentialProvider = {
       // --- Setup token (long-lived, requires browser) ---
       {
         label: 'Setup token (1 year, requires subscription)',
+        description: 'Generates a long-lived OAuth token via `claude setup-token`. Opens a browser for one-time authorization. Token is valid for ~1 year.',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(
@@ -574,6 +575,7 @@ export const claudeProvider: CredentialProvider = {
       // --- Auth login (auto-refreshes, requires browser) ---
       {
         label: 'Auth login (safest, requires subscription)',
+        description: 'Standard OAuth login via `claude auth login`. Stores refreshable credentials. Safest option — tokens auto-refresh and can be revoked.',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(
@@ -669,6 +671,7 @@ export const claudeProvider: CredentialProvider = {
       // --- API key (simplest, no container, but leaks because of chat channel) ---
       {
         label: 'API key (not recommended, unsafe to share in chat)',
+        description: 'Paste an Anthropic API key (sk-ant-api...) directly. Simplest but least secure — the key is visible in chat history to anyone in the group.',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
           await ctx.chat.send(

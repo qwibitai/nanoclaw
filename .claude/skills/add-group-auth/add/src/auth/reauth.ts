@@ -8,6 +8,9 @@ import { getAllProviders } from './registry.js';
 import { execInContainer, authSessionDir } from './exec.js';
 import type { AuthContext, AuthExecOpts, AuthOption, ChatIO, ExecHandle } from './types.js';
 
+/** Prefix for all scripted reauth messages. */
+const REAUTH_PREFIX = '🔑🤖';
+
 /**
  * Run the interactive reauth flow for a given scope.
  * Returns true if credentials were successfully obtained.
@@ -25,38 +28,53 @@ export async function runReauth(
   }
 
   if (allOptions.length === 0) {
-    await chat.send('No auth providers registered.');
+    await chat.send(`${REAUTH_PREFIX} No auth providers registered.`);
     return false;
   }
 
-  // Build numbered menu
-  const lines = allOptions.map(
-    (opt, i) => `${i + 1}. ${opt.label} — ${opt.provider.displayName}`,
-  );
-  lines.push(`${allOptions.length + 1}. Cancel`);
+  // Build numbered menu — each option separated by blank line
+  const optionBlocks: string[] = [];
+  for (let i = 0; i < allOptions.length; i++) {
+    const opt = allOptions[i];
+    let block = `${i + 1}. *${opt.label}*`;
+    if (opt.description) {
+      block += `\n   ${opt.description}`;
+    }
+    optionBlocks.push(block);
+  }
+  optionBlocks.push(`${allOptions.length + 1}. Cancel`);
+
+  const scopeNote = scope === 'default'
+    ? '⚠️ This will change the *default* credentials used by all groups that don\'t have their own.'
+    : `Group: *${scope}*`;
 
   await chat.send(
     [
-      `⚠️ *Authentication required* (${scope})`,
+      `${REAUTH_PREFIX} *Authentication required*`,
       ``,
+      scopeNote,
       `Reason: ${reason}`,
       ``,
-      `Valid credentials are needed to process messages. This is a scripted dialog — reply with a number only:`,
+      `Choose an authentication method:`,
       ``,
-      ...lines,
+      ...optionBlocks.flatMap((block, i) =>
+        i === 0 ? [block] : ['', block],
+      ),
+      ``,
+      `_Scripted dialog — reply with a number only._`,
     ].join('\n'),
   );
 
   const reply = await chat.receive(120_000);
   if (!reply) {
-    await chat.send('Timed out. Skipping authentication.');
+    await chat.send(`${REAUTH_PREFIX} Timed out. Skipping authentication.`);
     return false;
   }
   chat.advanceCursor();
 
   const choice = parseInt(reply.trim(), 10);
   if (isNaN(choice) || choice < 1 || choice > allOptions.length) {
-    await chat.send('Cancelled.');
+    await chat.send(`${REAUTH_PREFIX} Cancelled.`);
     return false;
   }
 
@@ -70,18 +88,18 @@ export async function runReauth(
         mounts: opts?.mounts,
       });
     },
-    chat,
+    chat: prefixedChat(chat),
   };
 
   try {
     const result = await selected.run(ctx);
     if (!result) {
-      await chat.send('Auth flow cancelled or failed.');
+      await chat.send(`${REAUTH_PREFIX} Auth flow cancelled or failed.`);
       return false;
     }
 
     selected.provider.storeResult(scope, result);
-    await chat.send(`Credentials stored for ${selected.provider.displayName}.`);
+    await chat.send(`${REAUTH_PREFIX} Credentials stored for ${selected.provider.displayName}.`);
     logger.info(
       { scope, provider: selected.provider.service },
       'Reauth completed',
@@ -92,7 +110,16 @@ export async function runReauth(
       { scope, provider: selected.provider.service, err },
       'Reauth flow error',
     );
-    await chat.send(`Auth flow error: ${err instanceof Error ? err.message : String(err)}`);
+    await chat.send(`${REAUTH_PREFIX} Auth flow error: ${err instanceof Error ? err.message : String(err)}`);
     return false;
   }
+}
+
+/** Wrap a ChatIO so all outgoing messages get the reauth prefix. */
+function prefixedChat(chat: ChatIO): ChatIO {
+  return {
+    send: (text: string) => chat.send(`${REAUTH_PREFIX} ${text}`),
+    receive: (timeoutMs?: number) => chat.receive(timeoutMs),
+    advanceCursor: () => chat.advanceCursor(),
+  };
 }
