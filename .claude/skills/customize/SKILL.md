@@ -51,7 +51,7 @@ Questions to ask:
 - Which groups should have access?
 
 Implementation:
-1. Add MCP server config to the container settings (see `src/container-runner.ts` for how MCP servers are mounted)
+1. If the MCP server needs filesystem access, add an `additionalMounts` entry to the group's `containerConfig` in the database (see `src/process-runner.ts` for how mounts are passed to the agent process)
 2. Document available tools in `groups/CLAUDE.md`
 
 ### Changing Assistant Behavior
