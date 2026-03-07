@@ -30,6 +30,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  model?: string; // Default model for this group (e.g. "claude-sonnet-4-6")
 }
 
 export interface RegisteredGroup {

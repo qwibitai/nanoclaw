@@ -3,7 +3,10 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DEFAULT_MODEL,
   IDLE_TIMEOUT,
+  MODEL_ALIASES,
+  MODEL_OVERRIDE_PATTERN,
   POLL_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -62,6 +65,44 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+/**
+ * Extract a per-message model override from raw message content.
+ * Looks for "use opus", "use sonnet", "use haiku" in any message.
+ * Returns the full model ID or undefined.
+ */
+function extractModelOverride(messages: NewMessage[]): string | undefined {
+  for (const msg of messages) {
+    const match = MODEL_OVERRIDE_PATTERN.exec(msg.content);
+    if (match) {
+      const alias = match[1].toLowerCase();
+      return MODEL_ALIASES[alias];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Resolve a model alias (e.g. "opus") to a full model ID.
+ * Passes through full IDs unchanged.
+ */
+function resolveAlias(model: string): string {
+  return MODEL_ALIASES[model.toLowerCase()] || model;
+}
+
+/**
+ * Resolve the model for a container run.
+ * Priority: per-message override > per-group config > global default.
+ */
+function resolveModel(
+  group: RegisteredGroup,
+  messageOverride?: string,
+): string {
+  if (messageOverride) return messageOverride; // already resolved from alias
+  const groupModel = group.containerConfig?.model;
+  if (groupModel) return resolveAlias(groupModel);
+  return DEFAULT_MODEL;
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -170,6 +211,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  const modelOverride = extractModelOverride(missedMessages);
+  const model = resolveModel(group, modelOverride);
   const prompt = formatMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -202,7 +245,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, model, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw =
@@ -259,6 +302,7 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  model?: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
@@ -310,6 +354,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        model,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),

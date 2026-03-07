@@ -39,6 +39,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   secrets?: Record<string, string>;
 }
 
@@ -113,27 +114,46 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
+  const requiredEnv: Record<string, string> = {
+    // Enable agent swarms (subagent orchestration)
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    // Load CLAUDE.md from additional mounted directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Enable Claude's memory feature (persists user preferences between sessions)
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+    // Always use high effort (maximum reasoning depth)
+    CLAUDE_CODE_EFFORT_LEVEL: 'high',
+  };
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
       settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
+      JSON.stringify({ env: requiredEnv }, null, 2) + '\n',
     );
+  } else {
+    // Ensure required env vars are present in existing settings
+    try {
+      const settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+      let changed = false;
+      if (!settings.env) settings.env = {};
+      for (const [key, value] of Object.entries(requiredEnv)) {
+        if (settings.env[key] !== value) {
+          settings.env[key] = value;
+          changed = true;
+        }
+      }
+      if (changed) {
+        fs.writeFileSync(
+          settingsFile,
+          JSON.stringify(settings, null, 2) + '\n',
+        );
+      }
+    } catch {
+      // If settings file is corrupted, recreate it
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify({ env: requiredEnv }, null, 2) + '\n',
+      );
+    }
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -153,7 +173,8 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
+  // Gmail credentials directories (for Gmail MCP inside the container)
+  // Mounts primary (~/.gmail-mcp) and additional accounts (~/.gmail-mcp-*)
   const gmailDir = path.join(homeDir, '.gmail-mcp');
   if (fs.existsSync(gmailDir)) {
     mounts.push({
@@ -161,6 +182,20 @@ function buildVolumeMounts(
       containerPath: '/home/node/.gmail-mcp',
       readonly: false, // MCP may need to refresh OAuth tokens
     });
+  }
+  try {
+    for (const entry of fs.readdirSync(homeDir)) {
+      if (!entry.startsWith('.gmail-mcp-')) continue;
+      const dir = path.join(homeDir, entry);
+      if (!fs.statSync(dir).isDirectory()) continue;
+      mounts.push({
+        hostPath: dir,
+        containerPath: `/home/node/${entry}`,
+        readonly: false,
+      });
+    }
+  } catch {
+    // ignore readdir errors
   }
 
   // Per-group IPC namespace: each group gets its own IPC directory
@@ -217,7 +252,7 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
 }
 
 function buildContainerArgs(

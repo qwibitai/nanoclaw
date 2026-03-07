@@ -58,6 +58,21 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Default model for the agent container. Per-group overrides live in
+// ContainerConfig.model; per-message overrides via "use opus/sonnet/haiku".
+export const DEFAULT_MODEL =
+  process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
+
+// Map short aliases to full model IDs
+export const MODEL_ALIASES: Record<string, string> = {
+  opus: 'claude-opus-4-6',
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5-20251001',
+};
+
+// Pattern to detect "use <model>" in a message (e.g., "use opus to research X")
+export const MODEL_OVERRIDE_PATTERN = /\buse\s+(opus|sonnet|haiku)\b/i;
+
 export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',

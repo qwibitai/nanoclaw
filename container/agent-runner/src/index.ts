@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  model?: string;
   secrets?: Record<string, string>;
 }
 
@@ -518,6 +519,12 @@ async function main(): Promise<void> {
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+  }
+
+  // Set model for this container run (per-message override > per-group > global default)
+  if (containerInput.model) {
+    sdkEnv['CLAUDE_CODE_USE_MODEL'] = containerInput.model;
+    log(`Using model: ${containerInput.model}`);
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
