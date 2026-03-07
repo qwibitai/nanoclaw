@@ -114,7 +114,17 @@ Each skill will:
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
-**Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
+**Yes:** Collect paths and permissions. Each entry in `allowedRoots` must be an `AllowedRoot` object with `path`, `allowReadWrite`, and optional `description` fields — NOT a plain string.
+
+Example with two read-write directories:
+```
+npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[{"path":"/Users/alice/projects","allowReadWrite":true,"description":"Dev projects"},{"path":"/Users/alice/docs","allowReadWrite":false,"description":"Read-only docs"}],"blockedPatterns":[],"nonMainReadOnly":true}'
+```
+
+Then register the mounts on the group by updating `container_config` in the DB. Container paths must be **relative** (they get prefixed with `/workspace/extra/`):
+```
+sqlite3 store/messages.db "UPDATE registered_groups SET container_config = '{\"additionalMounts\":[{\"hostPath\":\"/Users/alice/projects\",\"containerPath\":\"projects\"},{\"hostPath\":\"/Users/alice/docs\",\"containerPath\":\"docs\"}]}' WHERE is_main = 1"
+```
 
 ## 7. Start Service
 
