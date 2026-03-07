@@ -28,6 +28,7 @@ After any non-trivial runtime or contract change:
 3. `bash scripts/check-workflow-contracts.sh`
 4. `bash scripts/check-claude-codex-mirror.sh`
 5. `bash scripts/check-tooling-governance.sh`
-6. `bash scripts/jarvis-ops.sh acceptance-gate`
-7. `./container/worker/build.sh` (if worker runtime/image path touched)
-8. `npx tsx scripts/test-worker-e2e.ts` (if delegation/worker path touched)
+6. `bash scripts/check-docs-hygiene.sh` (if docs were added, renamed, deleted, or materially restructured)
+7. `bash scripts/jarvis-ops.sh acceptance-gate`
+8. `./container/worker/build.sh` (if worker runtime/image path touched)
+9. `npx tsx scripts/test-worker-e2e.ts` (if delegation/worker path touched)

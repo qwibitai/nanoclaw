@@ -115,6 +115,10 @@ if [ ! -x "scripts/check-architecture-boundary.sh" ]; then
   errors+=("Missing executable architecture boundary checker: scripts/check-architecture-boundary.sh")
 fi
 
+if [ ! -x "scripts/check-docs-hygiene.sh" ]; then
+  errors+=("Missing executable docs hygiene checker: scripts/check-docs-hygiene.sh")
+fi
+
 if ! has_text 'docs/workflow/delivery/nanoclaw-development-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing development-loop trigger reference")
 fi
@@ -162,6 +166,16 @@ if [ -x "scripts/check-architecture-boundary.sh" ]; then
       [ -n "$line" ] || continue
       errors+=("  $line")
     done <<<"$boundary_output"
+  }
+fi
+
+if [ -x "scripts/check-docs-hygiene.sh" ]; then
+  docs_hygiene_output="$(bash scripts/check-docs-hygiene.sh 2>&1)" || {
+    errors+=("docs-hygiene-check failed:")
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      errors+=("  $line")
+    done <<<"$docs_hygiene_output"
   }
 fi
 

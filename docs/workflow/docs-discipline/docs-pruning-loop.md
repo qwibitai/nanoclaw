@@ -39,4 +39,5 @@ Before finishing docs changes:
 - `rg -n \"<deleted-or-renamed-doc>\" .` returns no stale references
 - Root `CLAUDE.md` remains concise and index-like
 - `bash scripts/check-workflow-contracts.sh` passes
+- `bash scripts/check-docs-hygiene.sh` passes
 - `bash scripts/check-claude-codex-mirror.sh` passes (for cross-tool workflow docs/policy edits)

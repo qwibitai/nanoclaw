@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-07T20:39:29.760Z
+Generated: 2026-03-07T20:57:20.238Z
 Project: nanoclaw
 
 ## Features
@@ -360,7 +360,8 @@ Project: nanoclaw
 - Risk: medium
 - Summary: Physical docs reorganization, canonical ownership cleanup, and reference migration across root docs, group mirrors, and workflow checks.
 - Keywords: docs cleanup, workflow subfolders, reference migration, doc topology, docs governance, mission runtime profiles, archive cleanup
-- Files (50):
+- Files (52):
+  - .claude/hooks/posttool-workflow-sync-check.sh
   - .claude/progress/feature-catalog.seed.json
   - AGENTS.md
   - CLAUDE.md
@@ -410,6 +411,7 @@ Project: nanoclaw
   - groups/jarvis-worker-1/docs/README.md
   - groups/jarvis-worker-1/scripts/jarvis-happiness-gate.sh
   - groups/jarvis-worker-1/scripts/test-andy-user-e2e.ts
+  - scripts/check-docs-hygiene.sh
   - scripts/check-workflow-contracts.sh
 - Tests (0):
   - none

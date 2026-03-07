@@ -184,6 +184,7 @@ Before finishing:
 1. `bash scripts/check-workflow-contracts.sh`
 2. `bash scripts/check-claude-codex-mirror.sh`
 3. `bash scripts/check-tooling-governance.sh`
-4. `rg -n "<new-doc-name>|<new-trigger-target>" .` to confirm intended references
+4. `bash scripts/check-docs-hygiene.sh`
+5. `rg -n "<new-doc-name>|<new-trigger-target>" .` to confirm intended references
 
 The new doc is complete only when it reduces ambiguity instead of creating a second authority surface.

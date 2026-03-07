@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-07T20:36:53.759Z",
+  "updated_at": "2026-03-07T20:57:46.404Z",
   "items": [
     {
       "id": "work-architecture-boundary-governance-1772821500000",
@@ -337,6 +337,28 @@
       ],
       "created_at": "2026-03-07T20:34:59.987Z",
       "updated_at": "2026-03-07T20:36:53.759Z"
+    },
+    {
+      "id": "work-docs-topology-cleanup-1772916889257",
+      "title": "Add docs hygiene enforcement linter",
+      "feature_id": "docs-topology-cleanup",
+      "status": "done",
+      "request": "Add a ratcheting docs hygiene checker for doc add/update/delete flows, integrate it into hooks/checks, and document the enforcement path without breaking legacy docs on day one.",
+      "notes": [
+        "2026-03-07T20:54:53.854Z: Measured current docs-contract coverage; most active docs are legacy and would fail a blanket template lint, so enforcement needs a ratchet: strict for new docs and changed docs that opt into the contract, plus hard checks for doc path churn and stale references.",
+        "2026-03-07T20:57:40.406Z: Implemented a ratcheting docs hygiene checker, wired it into workflow checks and the posttool hook, and updated the docs-discipline contracts to require it. check-docs-hygiene, workflow-contracts, and claude-codex-mirror pass; tooling-governance still reports a pre-existing permissions budget overage unrelated to this change.",
+        "2026-03-07T20:57:46.404Z: Docs hygiene enforcement is in place. The ratchet now blocks malformed new active docs and stale doc-path churn while allowing legacy docs to migrate incrementally. Residual tooling-governance failure is pre-existing and outside this work scope: permissions.allow entries and wildcard permissions exceed the current budget in .claude/settings.local.json."
+      ],
+      "evidence": [
+        "scripts/check-docs-hygiene.sh",
+        "scripts/check-workflow-contracts.sh",
+        ".claude/hooks/posttool-workflow-sync-check.sh",
+        "docs/workflow/docs-discipline/doc-creation-contract.md",
+        "docs/workflow/docs-discipline/docs-pruning-loop.md",
+        ".claude/progress/feature-catalog.json"
+      ],
+      "created_at": "2026-03-07T20:54:49.257Z",
+      "updated_at": "2026-03-07T20:57:46.404Z"
     }
   ]
 }

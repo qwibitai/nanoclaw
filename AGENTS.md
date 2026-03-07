@@ -36,6 +36,8 @@
 - Do not rely on assumptions when facts are retrievable; gather repo facts from code/docs and use DeepWiki for repository documentation when more context is required.
 - Any issue discovered during work must be logged/updated in `.claude/progress/incident.json` via the incident workflow before closure.
 - Any new feature request not already mapped must be feature-tracked and work-item tracked before implementation.
+- For GitHub CLI or remote git operations that depend on auth, branch mutation, or networked GitHub state (`gh auth`, `gh pr *`, `gh repo *`, `gh api`, `git fetch`, `git pull`, `git push`, `git merge` against remotes), request escalated execution directly instead of spending a first attempt inside the sandbox.
+- For this repository, treat `origin` (`https://github.com/ingpoc/nanoclaw.git`) as the only push/PR remote. Treat `upstream` (`https://github.com/qwibitai/nanoclaw.git`) as fetch-only and never try to push there.
 
 ## Skill Routing Mirror
 

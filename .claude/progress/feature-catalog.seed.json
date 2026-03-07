@@ -433,6 +433,8 @@
         "groups/jarvis-worker-1/docs/operations/workflow-setup-responsibility-map.md",
         "groups/jarvis-worker-1/scripts/jarvis-happiness-gate.sh",
         "groups/jarvis-worker-1/scripts/test-andy-user-e2e.ts",
+        ".claude/hooks/posttool-workflow-sync-check.sh",
+        "scripts/check-docs-hygiene.sh",
         "scripts/check-workflow-contracts.sh",
         ".claude/progress/feature-catalog.seed.json"
       ],

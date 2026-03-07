@@ -2,6 +2,12 @@
 
 This policy defines how to sync from `upstream/main` while preserving local branch behavior.
 
+Remote boundary for this repo:
+
+- `origin` = `https://github.com/ingpoc/nanoclaw.git` and is the only allowed push/PR target.
+- `upstream` = `https://github.com/qwibitai/nanoclaw.git` and is fetch-only.
+- Never push to `upstream`.
+
 ## Required Cadence
 
 - Perform a daily pull/fetch from `upstream/main` (nanoclaw mainline).
@@ -46,6 +52,8 @@ After each daily sync:
 
 Use this when Andy analysis must read or push to `openclaw-gurusharan/nanoclaw` `main`.
 
+Do not reinterpret this section as permission to push to `upstream`. The `upstream` remote remains read-only in this repo.
+
 1. Verify remote mapping and normalize alias names.
    - `git remote -v`
    - Expected:
@@ -60,6 +68,7 @@ Use this when Andy analysis must read or push to `openclaw-gurusharan/nanoclaw` 
    - If tokens are invalid:
      - `gh auth login -h github.com --git-protocol https --web`
      - `gh auth switch -h github.com -u openclaw-gurusharan`
+   - In Codex/harness sessions, request escalated execution directly for `gh` and remote git commands instead of probing the sandbox first. Git may still push through stored credentials while `gh` fails on isolated token/keychain state, so treat auth-sensitive GitHub operations as out-of-sandbox by default.
 3. Sync code to the fork.
    - Preferred: push a branch and merge via PR into `main`
    - Emergency/admin-only: direct update to `main` only if explicitly allowed
