@@ -22,6 +22,16 @@ This is a "record first, automate later" change: today's session captures the me
 - `things-sync`: Will eventually be modified to support the automated workflow (not changed today, but informed by today's recording)
 - `obsidian-sync`: Will eventually be modified to support automated note routing (not changed today, but informed by today's recording)
 
+## Constraint Format
+
+Constraints use **Gherkin format** (Given/When/Then) where appropriate. This applies across OpenSpec, not just this change.
+
+**When to use Gherkin:** Behavioral rules that describe scenarios — ingestion, processing, routing, lifecycle transitions. Anything that has an input state, an action, and an expected outcome.
+
+**When plain prose is fine:** Simple declarations (e.g. "daily notes are append-only") that don't benefit from scenario decomposition.
+
+**Rationale:** Gherkin is the dominant standard for behavioral specifications (since Cucumber ~2008). It's human-readable, unambiguous, and directly testable — a future routing agent can be verified against these scenarios. Nothing better has replaced it for this purpose.
+
 ## Constraints
 
 - **Daily notes are append-only** — never rewrite or modify existing content in a daily note. Only append to the end, and always note when and what was appended.
@@ -103,7 +113,7 @@ These are the live objects and their last known states, so context survives acro
 | Fleeting Notes (vault) | `~/Documents/vvault/Fleeting/2026/03/07/` | 5 new notes created from Things Today |
 | Daily Note | `~/Documents/vvault/0a. Daily Notes/2026/03-March/2026-03-07-Saturday.md` | Morning check-in + snapshot with [[*]] links to fleeting notes |
 | Session Log | `openspec/changes/fleeting-notes-automation/session-log.md` | Stage 1 complete, Stage 2 in progress |
-| Claude Code Session | `a4bb68de-bf1d-4e8f-b990-7003398142e6` | Active |
+| Claude Code Session | `4850cbd1-dd77-4eb8-9150-42bc1a8952d2` (Session 3, continuation) | Active |
 
 ## To-Do Architecture (Zettelkasten-aligned)
 
@@ -112,25 +122,50 @@ These are the live objects and their last known states, so context survives acro
 | Ahrens Category | System Category | Location |
 |-----------------|----------------|----------|
 | Fleeting note | Fleeting note | `Fleeting/{year}/{month}/{day}/{slug}.md` |
-| Permanent note | Permanent note (insight) | `2. Areas/{topic}/{slug}.md` |
-| Project note | To-do / project-scoped note | `{project}/notes/{year}/{month}/{day}/{slug}.md` |
-| Literature note | Literature note (source material) | `2. Areas/{topic}/literature/{author-slug}.md` |
+| Permanent note | Permanent note (insight) | `1. Projects/{project}/{slug}.md` |
+| Project note | To-do / project-scoped note | `1. Projects/{project}/notes/{year}/{month}/{day}/{slug}.md` |
+| Literature note | Literature note (source material) | `1. Projects/{project}/literature/{author-slug}.md` |
+
+### Project-Level Objects
+
+Beyond notes, each project can have several operational files that serve different purposes:
+
+| Object | File | Purpose | Content |
+|--------|------|---------|---------|
+| To-dos | `todos.md` | Actionable tasks | Tasks plugin query block + `#task` items |
+| Notes index | `notes.md` | Index of project notes | Links to notes in `notes/` directory |
+| Ideas | `ideas.md` | Raw ideas not yet actionable | Date-grouped entries with source links |
+| Drafts | `drafts/{year}/{month}/{date}-{slug}/` | Multi-file creative artifacts | `draft.md` (main text) + supporting files |
+
+**Relationship between objects:**
+- **Project notes** (`notes/`) are the primary unit — one note per fleeting note routed to the project. They can contain `#task` items (collected by `todos.md`).
+- **Ideas** (`ideas.md`) are lighter than project notes — single-line entries for captures that aren't actionable yet. Ideas can be promoted to project notes (when developed) or todos (when actionable).
+- **Drafts** (`drafts/`) are for long-form creative work (articles, papers). Each draft gets its own directory. A project note references the draft and serves as the metadata/context layer.
+- **Notes index** (`notes.md`) provides a human-curated view of what's in the project — not auto-generated, but maintained as notes are added.
+
+Not every project needs all of these. Create them as needed:
+- `todos.md` — created when the first `#task` is routed to the project
+- `ideas.md` — created when the first idea is captured
+- `drafts/` — created when the first creative artifact needs its own directory
+- `notes.md` — created when the project has enough notes to benefit from an index
 
 ### Conversion Paths
 
-Fleeting notes convert via two paths (or both, or discard):
+Fleeting notes convert via these paths (or combinations, or discard):
 
 1. **Fleeting -> permanent note** (insight worth keeping) — rewrite in own words, link to slip-box
    - **Constraint:** AI cannot create permanent notes alone. User must provide brain dump or confirm AI's proposed rewrite.
-   - Permanent notes live in `2. Areas/{topic}/` — organized by topic, not project. They outlive any project.
+   - Permanent notes live in `1. Projects/{project}/` — organized by project. All project content consolidated under `1. Projects/`.
 2. **Fleeting -> permanent note + literature note** (insight from a source) — both are created:
-   - Literature note: selective paraphrase at top (your reading), full source text below (preservation against link rot). Lives in `2. Areas/{topic}/literature/`.
-   - Permanent note: your atomic insight, links to the literature note. Lives in `2. Areas/{topic}/`.
+   - Literature note: selective paraphrase at top (your reading), full source text below (preservation against link rot). Lives in `1. Projects/{project}/literature/`.
+   - Permanent note: your atomic insight, links to the literature note. Lives in `1. Projects/{project}/`.
    - Fleeting note frontmatter gets both `converted_to:` and `literature_note:` links.
 3. **Fleeting -> project note / to-do** (action item) — create project note in `{project}/notes/{year}/{month}/{day}/{slug}.md`, add `#task` to the project note (collected by `todos.md` query block)
-4. **Fleeting -> retired** (no action needed) — mark `status: retired`, no destination created
+4. **Fleeting -> idea log entry** (not yet actionable) — add entry to `{project}/ideas.md` with date and source link
+5. **Fleeting -> draft** (creative artifact) — create draft directory in `{project}/drafts/{year}/{month}/{date}-{slug}/`, create project note referencing the draft, reference in `notes.md`
+6. **Fleeting -> retired** (no action needed) — mark `status: retired`, no destination created
 
-Paths 1-3 mark the fleeting note as `status: completed` and add `converted_to:` frontmatter linking to the destination.
+Paths 1-5 mark the fleeting note as `status: completed` and add `converted_to:` frontmatter linking to the destination.
 
 ### Processing Constraint
 
@@ -138,8 +173,11 @@ AI **proposes** routing decisions but does not execute them automatically. The u
 
 ### Things Ingestion (future change)
 
-- **Long-term:** Things Today is the sole ingestion source. No other Things views are used.
-- **Completion model:** When a note is ingested and routed, it gets marked as **completed in Things** (not moved to an "ingested" list). This replaces the current NanoClaw ingestion setup that moves notes to an ingested state.
+- **Long-term:** Things Today is the sole ingestion source. No other Things views or project headings are used.
+- **One-time cleanup (2026-03-07):** ALL items across ALL projects/areas in the Things "Ingested" heading were processed through the fleeting notes pipeline as a one-time cleanup. This covered @nanoclaw, @mary, @today, @ei, @consulting, @systems, and @class tags. Going forward, only Things Today feeds the pipeline — no more batch processing from project headings or Ingested lists.
+- **Completion model:** When a note is ingested as a fleeting note in Obsidian, the Things item MUST be marked as **completed in Things** (not moved to an "ingested" list). The fleeting note file becomes the source of truth; the Things item is just an origin record. This replaces the current NanoClaw ingestion setup that moves notes to an ingested state.
+- **Three places:** Things (capture source) → Obsidian fleeting note (ground truth) → Obsidian daily note (summary surface). Completion in Things happens at ingestion time, not at routing time.
+- **Auth requirement:** `things update --id <UUID> --completed` requires a Things auth token. Set `THINGS_AUTH_TOKEN` or run `things auth`.
 - Current `things-sync.ts` will need to be updated to use this model.
 
 ### Literature Notes
@@ -154,7 +192,7 @@ Literature notes preserve the original source material. Structure:
 ### Permanent Notes
 
 Permanent notes capture YOUR insight — atomic, in your own words, standing alone without context. They:
-- Live in `2. Areas/{topic}/` (organized by topic, not project — they outlive projects)
+- Live in `1. Projects/{project}/` (consolidated under projects — all project content in one place)
 - Body is **only your text** — no source links, no references, no citations in the body
 - Connection to literature notes lives in frontmatter (`literature:` field) — machine-readable, body stays clean
 - Link to other permanent notes (future: agent proposes connections based on semantic similarity)
@@ -193,9 +231,42 @@ A dedicated agent that handles fleeting note routing. It:
 - Could incorporate the AI pre-processing step (check repos, assess feasibility) as part of its routing proposal
 - Operates on its own cadence (e.g. when new fleeting notes arrive)
 
+### Image Ingestion (future)
+
+Fleeting notes may include images (screenshots, photos, scanned documents). The pipeline should support:
+- **Capture:** Images attached to Things items or pasted into fleeting notes
+- **Storage:** Images stored alongside the fleeting note file (same directory or a shared attachments directory)
+- **Obsidian rendering:** Use `![[image-name.png]]` embed syntax in the fleeting note body
+- **Processing:** When routing a fleeting note with images, images travel with the note to the destination (project note, permanent note)
+- **Obsidian settings:** Configure attachment folder in Obsidian settings (Settings > Files & Links > Default location for new attachments). Options: vault root, same folder as current file, or specified folder.
+
+This was requested during routing session 006 (2026-03-07) when a Telegram discussion screenshot needed to be part of a literature note.
+
 ### Connection Agent (future)
 
-An agent that periodically scans permanent notes and proposes `[[links]]` between them based on semantic similarity. This builds the slip-box's web of connections — the core value of Zettelkasten. The agent proposes; the user confirms.
+An agent that monitors the slip-box and proposes connections between permanent notes. This is the core value engine of Zettelkasten — without connections, permanent notes are just files.
+
+**Responsibilities:**
+1. **Monitor** — watch for new/updated permanent notes across all `1. Projects/` directories
+2. **Propose links** — scan existing permanent notes for semantic similarity, shared tags, or thematic overlap, and propose `[[links]]` between them (via `related:` frontmatter)
+3. **Communicate proposals** — surface proposed connections to the user through a dedicated channel (daily note section, Telegram notification, or Obsidian sidebar). The user must see what's being proposed and why.
+4. **Track state** — maintain a record of which notes have been analyzed, which proposals were accepted/rejected, and which connections exist. Avoid re-proposing rejected links.
+
+**Communication system:**
+- Proposals should show: source note, target note, reason for connection (shared theme, overlapping tags, semantic similarity score)
+- The user needs a single place to review and accept/reject proposed links (similar to how routing decisions work in the daily note)
+- Accepted links get written to both notes' `related:` frontmatter
+- Rejected links get recorded so they're not re-proposed
+
+**Triggers:**
+- New permanent note created → scan for connections to existing notes
+- Periodic sweep (e.g., weekly) → re-scan all notes for missed connections
+- User requests → "what connects to this note?"
+
+**Implementation notes:**
+- Could use embeddings for semantic search across permanent notes
+- Tag registry (`2. Areas/tags.md`) provides a structured signal for grouping (vault-level, not project-specific)
+- The agent proposes; the user confirms. No automatic link creation.
 
 ### Reconciliation (future)
 

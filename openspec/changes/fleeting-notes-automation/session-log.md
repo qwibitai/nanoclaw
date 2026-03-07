@@ -2,7 +2,12 @@
 
 Session: 2026-03-07
 Plan: [plan-2026-03-07T0912-recording-architecture.md](plans/plan-2026-03-07T0912-recording-architecture.md)
-Raw transcript: `~/.claude/projects/-Users-nanoclaw-Documents-nanoclaw/a4bb68de-bf1d-4e8f-b990-7003398142e6.jsonl`
+Raw transcripts:
+- Session 1a: `~/.claude/projects/-Users-nanoclaw-Documents-nanoclaw/a4bb68de-bf1d-4e8f-b990-7003398142e6.jsonl` (09:18 — initial snapshot)
+- Session 1b: `~/.claude/projects/-Users-nanoclaw-Documents-nanoclaw/5c6866ca-8e7b-49ee-bd7c-cc272bd60ace.jsonl` (09:25 — recording plan execution)
+- Session 1c: `~/.claude/projects/-Users-nanoclaw-Documents-nanoclaw/8820d29e-9f5d-46fa-bc65-3455eaedc865.jsonl` (10:32 — skills test + daily note append + constraints)
+- Session 2: `~/.claude/projects/-Users-nanoclaw-Documents-nanoclaw/4850cbd1-dd77-4eb8-9150-42bc1a8952d2.jsonl` (afternoon — to-do architecture, routing, Chat feature)
+- Session 3 (continuation of 2): same transcript file as Session 2 (context overflow → new conversation)
 
 ---
 
@@ -234,15 +239,262 @@ This was the first test of the propose → human response → execute flow.
 
 ---
 
-## Stage 4: Integrate
+### Action 3g: Fix Things CLI Full Disk Access
 
-*(pending — future automation of the conversion pipeline)*
+- Things CLI lost database access mid-session (macOS FDA restriction)
+- Root cause: Claude Code process didn't have FDA; `ls` works (metadata) but `cp`/`open` fail (content)
+- Fix: added `/bin/zsh` to Full Disk Access in System Settings, then restarted Claude Code
+- Updated all 11 fleeting notes with correct Things UUIDs (previously set to "unknown")
+
+### Action 3h: Per-item action controls
+
+Updated daily note format spec with interactive controls per unprocessed item:
+- `- [ ] Accept` — execute proposal as-is
+- `- [ ] Retire` — retire the note
+- `**Response:**` — per-item free-text override
+- `**Bulk Response:**` — covers all items without individual actions
+- Priority: Response > Accept > Retire > Bulk Response
+- Spec rule: always use 4-space indentation for sub-content (prevents misalignment on items 10+)
+
+### Action 3i: Process routing session 002
+
+All 11 NanoClaw items accepted via checkboxes:
+- 9 retired (already in todo.md or being implemented this session)
+- 2 project notes created: `planning-suggestor-agent.md`, `things-today-daily-sync.md`
+- Routing session 002 created with full decision table
+- Tasks query block added to AI Assistant `todo.md`
+
+### Action 3j: One-time cleanup of ALL Things Ingested items
+
+Processing all items in Things "Ingested" heading — not just NanoClaw, but all @tags. This is a one-time cleanup establishing the new fleeting notes pipeline as the canonical process. Going forward, only Things Today feeds the pipeline.
+
+New items found (14, beyond NanoClaw):
+- @mary (2 items) — no project registered
+- @today (3 items) — stale daily task lists
+- @ei (3 items) — no project registered
+- @consulting (1 item) — no project registered
+- @systems (4 items) — no project registered
+- @class (2 items) — maps to AI Business & Society
+
+Plus 1 remaining @nanoclaw item (notes-in-context) and the already-created @mary touch note = 16 total unprocessed.
+
+All 16 fleeting notes created, added to daily note with proposals and per-item controls. Awaiting user routing decisions.
+
+### Decisions (continued):
+36. One-time cleanup: ALL Things Ingested items go through fleeting notes pipeline, regardless of @tag
+37. Going forward, only Things Today is the ingestion source (Ingested heading is legacy)
+38. Unregistered @tags (@mary, @today, @ei, @consulting, @systems) flagged in proposals — user decides project/area
+39. Fleeting note ingestion MUST preserve both Things title AND notes fields — use `--format json` to capture both (table view omits notes)
+40. Constraints use Gherkin format (Given/When/Then) where appropriate for behavioral rules
+
+### Action 3k: Process routing session 003
+
+9 items routed from the cross-project Ingested cleanup:
+- 2 new projects created: **K** (personal/relationship) and **Lab Journal** (writing/insights)
+- 1 permanent note: "things that make me happy" in `2. Areas/K/` (from 2 @mary fleeting notes)
+- 1 permanent note: "ai-code-production-illusion" in `2. Areas/Lab Journal/Economic Insights/`
+- 1 project note + #task: agent-context-requirements in NanoClaw
+- 1 project note + 2 #tasks: intimate-todos in K
+- 4 retired: @today exam, @today notes capture, @ei reply to Adam, @ei aggregate AI impacts
+- 7 items remain unprocessed: 1 @consulting, 4 @systems, 2 @class
+
+### Decisions (continued):
+41. New project "K" registered — routes @mary, @k tags
+42. New project "Lab Journal" registered — routes @lab, @journal, @writing. Has "Economic Insights" subfolder
+43. Multiple fleeting notes can combine into a single permanent note (e.g. items 2+3 → "things that make me happy")
+44. New feature spec: **Chat field** — separate from Response, for when user wants LLM conversation before routing. Note stays unprocessed, conversation appended to fleeting note file. Spec written in Gherkin.
 
 ---
 
-## Stage 5: Clean Up
+## Stage 4: Complete Processing (2026-03-07 ~afternoon, Session 3)
 
-*(pending)*
+### Session context
+Continuation of Session 2 (context overflow). Resumed processing the final 8 unprocessed items and completing the one-time cleanup.
+
+### Action 4a: Routing session 004 — final 8 items
+
+Processed the remaining unprocessed items from the one-time cleanup:
+
+| Item | Action | Destination |
+|------|--------|-------------|
+| @ei Microsoft code output | Accept | Permanent note in Lab Journal/Economic Insights |
+| @consulting AI in Europe | Response | AI Productivity: permanent note + literature note (ECB article via WebFetch) |
+| @systems nvidia grounding mantra | Response | Manager Engineer Workshop: permanent note |
+| @systems hypothesis completion | Response | Networking: #task (reach out to Sophia Kazinnik) |
+| @systems grounding comparison | Retire | — |
+| @systems target system hypothesis | Response | Manager Engineer Workshop: #task |
+| @class final exam question | Retire | — |
+| @class tell this to students | Retire | — |
+
+New projects created and registered:
+- **AI Productivity** — routes @consulting, @ai_productivity
+- **Manager Engineer Workshop** — routes @systems, @workshop_me
+
+### Action 4b: Things lifecycle spec + completion
+
+- Added Things lifecycle constraint to `specs/daily-note-format.md` (Gherkin format): Things items MUST be marked completed when ingested as fleeting notes
+- Updated `proposal.md` with three-place model: Things → fleeting note → daily note
+- Marked all 29 previously-routed Things items as completed using `THINGS_AUTH_TOKEN` from `.env`
+
+### Action 4c: NanoClaw Ingested cleanup
+
+Discovered 6 more items under NanoClaw's "Ingested" heading in Things (plus 1 @onto test):
+- 3 with content: @labjournal (long voice note on automated research), @test (sync test), @download (guides/roles)
+- 3 empty "New To-Do" placeholders
+- All 7 marked completed in Things
+- 3 real items ingested as fleeting notes and added to daily note
+
+### Action 4d: Routing session 005 — Chat interactions + retire
+
+Item 2 (@test) retired. Items 1 and 3 used the **Chat** feature:
+
+**@labjournal automated research constraints:**
+- User asked for Lab Journal article draft directory structure
+- LLM proposed `drafts/{year}/{month}/{date}-{slug}/` with `draft.md` per article
+- User accepted via Response, asked for project note + reference in notes.md
+- Created: draft directory, project note, `notes.md` index
+
+**@download guides for role assignment:**
+- User proposed **idea logs** (`ideas.md`) as a new object type for projects
+- LLM proposed structure with date-grouped entries and promotion paths
+- User accepted via Response, asked for idea log entry in NanoClaw
+- Created: `1. Projects/AI Assistant/ideas.md` with first entry
+
+### Action 4e: Document new object types
+
+Updated proposal with **Project-Level Objects** section:
+
+| Object | File | Purpose |
+|--------|------|---------|
+| To-dos | `todos.md` | Actionable tasks (Tasks plugin query) |
+| Notes index | `notes.md` | Human-curated index of project notes |
+| Ideas | `ideas.md` | Raw ideas not yet actionable |
+| Drafts | `drafts/{year}/{month}/{date}-{slug}/` | Multi-file creative artifacts |
+
+Two new conversion paths added:
+- **Fleeting -> idea log entry** (path 4)
+- **Fleeting -> draft** (path 5)
+
+### Decisions (continued from Stage 3):
+45. New project "AI Productivity" registered — routes @consulting, @ai_productivity
+46. New project "Manager Engineer Workshop" registered — routes @systems, @workshop_me
+47. Things items MUST be completed at ingestion time (not routing time) — fleeting note becomes source of truth
+48. THINGS_AUTH_TOKEN in `.env` — required for `things update --completed`
+49. **Idea logs** (`ideas.md`) — new project-level object for raw ideas not yet actionable
+50. **Drafts** (`drafts/{year}/{month}/{date}-{slug}/`) — new project-level object for long-form creative work
+51. **Notes index** (`notes.md`) — human-curated index of project notes
+52. Project-level objects created on demand (not all projects need all objects)
+53. Ideas can be promoted to project notes (when developed) or todos (when actionable)
+54. Chat feature tested end-to-end: user chats → LLM responds in fleeting note → user gives routing decision → executed
+
+### Action 4f: Things Today batch processing — batch 1 (30 items)
+
+Ingested 30 items from Things Today as fleeting notes in `Fleeting/` and added to daily note with AI routing proposals. User processed all 30:
+
+- **22 Retired** — stale items (old date plans, completed chores, expired networking tasks)
+- **2 Accepted:**
+  - Casey (2026-02-23) → permanent note `2. Areas/K/reconnection-communication.md`
+  - Talk to Dubravka about Scott (2026-02-26) → Networking #task `1. Projects/Networking/notes/2026/02/26/talk-to-dubravka-about-scott.md`
+- **3 Responses:**
+  - Resubmit pro and pet insurance → created **Chores** project + project note with #task
+  - Harness engineering → Lab Journal literature note + permanent note (Economic Insights). OpenAI URL 403'd — needs manual content.
+  - Engineering harness → separate literature note (Telegram discussion). User requested image ingestion capability in specs.
+- **3 Chats** (stay in Unprocessed, awaiting user follow-up):
+  - Mary → LLM found "Things That Make Me Happy" note, proposed linking
+  - CJ → LLM proposed self-expression permanent note + #self-expression tag + tag registry concept
+  - C superbill → LLM confirmed project note → todo flow is documented, offered to route to Chores
+
+Routing session 006 created. 27 items moved to Routed in daily note. 3 Chat items remain in Unprocessed.
+
+### New objects created in batch 1:
+- **Project: Chores** — registered in `registry.md`, `todos.md` created
+- **Project note:** `1. Projects/Chores/notes/2026/02/17/resubmit-pro-pet-insurance.md`
+- **Permanent note:** `2. Areas/K/reconnection-communication.md`
+- **Permanent note:** `2. Areas/Lab Journal/Economic Insights/harness-engineering-spring-2026.md`
+- **Literature note:** `2. Areas/Lab Journal/literature/openai-harness-engineering.md` (needs manual content — 403)
+- **Literature note:** `2. Areas/Lab Journal/literature/telegram-engineering-harness-discussion.md` (needs manual content)
+- **Project note:** `1. Projects/Networking/notes/2026/02/26/talk-to-dubravka-about-scott.md`
+- **Updated:** `1. Projects/Lab Journal/notes.md` with Literature & Permanent Notes section
+
+### Decisions (continued):
+55. New project "Chores" registered — routes @chores, @personal, personal chores, insurance, pills, errands
+56. Routing proposal generation is mandatory at ingestion time — never deferred. Spec added to `daily-note-format.md` with Gherkin scenarios.
+57. Image ingestion capability requested — future feature for images in fleeting notes workflow. Added to proposal.
+58. Tag registry concept introduced — vault-level `2. Areas/tags.md` similar to project registry (not yet implemented, awaiting user confirmation)
+59. 22 fleeting notes bulk-retired via frontmatter update (`status: retired` + `routing_session:` link)
+
+---
+
+## Stage 5: Full Ingestion + Vault Restructure (2026-03-07, Sessions 4-5)
+
+### Session context
+Continuation across Sessions 4 and 5 (context overflows). Completed full Things Today ingestion, vault restructure, and pipeline integrity audit.
+
+### Action 5a: Vault restructure — Areas → Projects merge
+
+Consolidated all registered project content from `2. Areas/` into `1. Projects/`:
+- K, Lab Journal, AI Productivity, AI Safety, Manager Engineer Workshop all moved
+- Removed redundant `area:` fields from registry
+- All `vault:` fields now point to `1. Projects/{project}/`
+- Updated proposal.md note type mappings accordingly
+- Deleted empty `2. Areas/` subdirectories after confirming content existed in `1. Projects/`
+
+### Action 5b: Ingest remaining Things Today (51 items)
+
+Ingested all remaining Things Today items as fleeting notes across `Fleeting/2026/02/14/` through `Fleeting/2026/03/03/`:
+- All 51 created with frontmatter: `source: things`, `created: {date}`, `things_uuid: {uuid}`
+- All 51 marked completed in Things using `THINGS_AUTH_TOKEN`
+- Added to daily note with AI routing proposals following format spec
+
+**Issues encountered and fixed:**
+- Things CLI `status` field is integer (`0`) not string (`'incomplete'`) — filter adjusted
+- Things DB dates are Unix timestamps, not Core Data epoch — removed `+ 978307200` offset
+- Bold markdown rendering broken by trailing spaces (`**title **`) — fixed 35 instances via regex
+- Daily note format non-compliance (twice): 3-space → 4-space indentation, `|*` → `|f-note` aliases, truncated Notes → Summary for >2 lines, bare proposals → "Project {name}. {path} — {description}"
+
+### Action 5c: Process all routing decisions
+
+User processed all 51 items:
+- **7 Accepted** → project notes with #tasks
+- **6 Responses** → custom routing (literature notes, idea log entries, permanent notes)
+- **37 Retired** → stale items marked retired
+- **1 Skipped** (item 25 — missing from numbering)
+
+**New objects created:**
+- 2 Chores #tasks (resubmit reimbursement, buy printer toner)
+- 3 AI Productivity literature notes (AI fuck-ups, Shanselman, Fed productivity)
+- 1 Innovation #task (start inno repo checks)
+- 1 Lab Journal #task (visual intent)
+- 1 Workshop #task (process Poldrack) + new Workshop directory
+- 1 K #task (prostate massager)
+- 3 Lab Journal idea entries, 2 NanoClaw idea entries
+- Innovation `todos.md`, Workshop `todos.md`
+- 2 permanent notes from prior batch remainders (AI bitter lesson, being mean)
+
+### Action 5d: Pipeline integrity audit
+
+**Statistics:**
+- 159 total fleeting notes: 49 completed, 101 retired, 0 raw (9 from legacy)
+- 13 projects with new content this session
+
+**Issues found:**
+- 8 orphan notes: `status: completed` but missing `converted_to:` — root cause: earlier sessions marked status without adding link field. Fixed retroactively.
+- 1 case-sensitivity issue: Innovation `Notes/` (capital N) vs wiki link `notes/`. Works on macOS, would break on Linux.
+
+**Countermeasures added to `specs/daily-note-format.md`:**
+- Gherkin scenarios for orphan detection, raw-note-remaining check, case-consistent paths
+- Known issue documented with date and root cause
+
+### Action 5e: New project registered
+
+- **AI Safety** — `1. Projects/AI Safety/`, routes @ai_safety, @safety
+
+### Decisions (continued):
+60. All registered projects consolidated under `1. Projects/` — no separate `2. Areas/` for project content
+61. Permanent notes now at `1. Projects/{project}/{slug}.md` (not `2. Areas/`)
+62. Literature notes now at `1. Projects/{project}/literature/{slug}.md`
+63. Integrity checks: orphan detection, case-sensitivity, bidirectional links — run after every batch
+64. Known issue tracking format: date, count, root cause, fix status in spec files
 
 ---
 

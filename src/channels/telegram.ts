@@ -215,8 +215,9 @@ export class TelegramChannel implements Channel {
       const chunks =
         text.length <= MAX_LENGTH
           ? [text]
-          : Array.from({ length: Math.ceil(text.length / MAX_LENGTH) }, (_, i) =>
-              text.slice(i * MAX_LENGTH, (i + 1) * MAX_LENGTH),
+          : Array.from(
+              { length: Math.ceil(text.length / MAX_LENGTH) },
+              (_, i) => text.slice(i * MAX_LENGTH, (i + 1) * MAX_LENGTH),
             );
 
       for (const chunk of chunks) {
