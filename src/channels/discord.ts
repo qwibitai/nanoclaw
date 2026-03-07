@@ -39,6 +39,7 @@ export class DiscordChannel implements Channel {
     this.client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMembers,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.DirectMessages,
@@ -190,6 +191,47 @@ export class DiscordChannel implements Channel {
     });
   }
 
+  /**
+   * Convert @Name mentions in outbound text to Discord <@USER_ID> format.
+   * Uses the guild member cache from the target channel.
+   */
+  private async replaceMentions(
+    text: string,
+    channel: TextChannel,
+  ): Promise<string> {
+    if (!channel.guild) return text;
+    try {
+      // Ensure guild members are cached
+      await channel.guild.members.fetch();
+      const members = channel.guild.members.cache;
+      // Build name→id map, longest names first to avoid partial matches
+      const nameMap: Array<[string, string]> = [];
+      for (const [, member] of members) {
+        if (member.user.bot) continue;
+        nameMap.push([member.displayName.toLowerCase(), member.id]);
+        if (member.user.username.toLowerCase() !== member.displayName.toLowerCase()) {
+          nameMap.push([member.user.username.toLowerCase(), member.id]);
+        }
+        if (member.user.globalName && member.user.globalName.toLowerCase() !== member.displayName.toLowerCase()) {
+          nameMap.push([member.user.globalName.toLowerCase(), member.id]);
+        }
+      }
+      nameMap.sort((a, b) => b[0].length - a[0].length);
+      let result = text;
+      for (const [name, userId] of nameMap) {
+        const pattern = new RegExp(
+          `@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`,
+          'gi',
+        );
+        result = result.replace(pattern, `<@${userId}>`);
+      }
+      return result;
+    } catch (err) {
+      logger.debug({ err }, 'Failed to resolve Discord mentions');
+      return text;
+    }
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
@@ -206,6 +248,7 @@ export class DiscordChannel implements Channel {
       }
 
       const textChannel = channel as TextChannel;
+      text = await this.replaceMentions(text, textChannel);
 
       // Discord has a 2000 character limit per message — split if needed
       const MAX_LENGTH = 2000;
