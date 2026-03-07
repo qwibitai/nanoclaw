@@ -910,7 +910,7 @@ export async function getAvailabilityBusySlots(
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT dates FROM bookings WHERE equipment = ? AND status IN ('pending', 'confirmed')`,
+      `SELECT dates FROM bookings WHERE equipment = ? AND status = 'confirmed'`,
     ).all(equipmentKey) as { dates: string }[];
 
     for (const row of rows) {
