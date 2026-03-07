@@ -366,7 +366,11 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
     'NotebookEdit',
     'mcp__nanoclaw__*',
   ];
-  if (isToolEnabled(tools, 'gmail')) allowed.push('mcp__gmail__*');
+  if (isToolEnabled(tools, 'gmail')) {
+    allowed.push('mcp__gmail__*');
+    // Also allow additional Gmail account MCP servers (gmail-sunday, gmail-illysium, etc.)
+    allowed.push('mcp__gmail-*__*');
+  }
   if (isToolEnabled(tools, 'granola')) allowed.push('mcp__granola__*');
   if (isToolEnabled(tools, 'calendar')) allowed.push('mcp__google-calendar__*');
   return allowed;
@@ -389,10 +393,35 @@ function buildMcpServers(
     },
   };
   if (isToolEnabled(tools, 'gmail')) {
+    // Primary account
+    const primaryDir = '/home/node/.gmail-mcp';
     servers.gmail = {
       command: 'npx',
       args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+      env: {
+        GMAIL_OAUTH_PATH: `${primaryDir}/gcp-oauth.keys.json`,
+        GMAIL_CREDENTIALS_PATH: `${primaryDir}/credentials.json`,
+      },
     };
+    // Additional accounts: mount dirs like /home/node/.gmail-mcp-sunday
+    try {
+      const entries = fs.readdirSync('/home/node');
+      for (const entry of entries) {
+        if (!entry.startsWith('.gmail-mcp-')) continue;
+        const accountName = entry.replace('.gmail-mcp-', '');
+        const dir = `/home/node/${entry}`;
+        servers[`gmail-${accountName}`] = {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+          env: {
+            GMAIL_OAUTH_PATH: `${dir}/gcp-oauth.keys.json`,
+            GMAIL_CREDENTIALS_PATH: `${dir}/credentials.json`,
+          },
+        };
+      }
+    } catch {
+      // ignore readdir errors
+    }
   }
   if (isToolEnabled(tools, 'calendar')) {
     servers['google-calendar'] = {
