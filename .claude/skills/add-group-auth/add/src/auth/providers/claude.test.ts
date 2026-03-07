@@ -261,7 +261,19 @@ describe('isAuthError / classifyAuthError', () => {
   it('does not match partial or embedded errors', () => {
     expect(isAuthError('prefix ' + apiError(401, 'authentication_error', 'test'))).toBe(false);
     expect(isAuthError(apiError(401, 'authentication_error', 'test') + ' suffix')).toBe(false);
-    expect(isAuthError('API Error: 401 {not valid json')).toBe(false);
+  });
+
+  it('rejects invalid JSON body', () => {
+    expect(isAuthError('Failed to authenticate. API Error: 401 {not valid json')).toBe(false);
+  });
+
+  it('rejects valid JSON with wrong structure', () => {
+    expect(isAuthError('Failed to authenticate. API Error: 401 {"foo":"bar"}')).toBe(false);
+    expect(isAuthError('Failed to authenticate. API Error: 401 {"type":"error","error":{}}')).toBe(false);
+  });
+
+  it('matches with trailing whitespace', () => {
+    expect(isAuthError(apiError(401, 'authentication_error', 'test') + '  \n')).toBe(true);
   });
 
   it('returns false for non-API errors', () => {
@@ -351,7 +363,7 @@ describe('waitForPattern', () => {
 
     const match = await promise;
     expect(match).not.toBeNull();
-    expect(match![0]).toBe('https://example.com/ path?q=1');
+    expect(match![0]).toBe('https://example.com/path?q=1');
   });
 });
 
@@ -562,13 +574,13 @@ describe('deliverCode', () => {
   it('returns error for callback with port mismatch', async () => {
     const handle = { onStdout: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() }, wait: vi.fn(), kill: vi.fn() } as any;
     const result = await deliverCode(
-      'http://localhost:99999/callback?code=c&state=s',
+      'http://localhost:54321/callback?code=c&state=s',
       { method: 'callback' as const, callbackPort: 12345 },
       handle,
     );
     expect(result.ok).toBe(false);
     expect(result.error).toContain('Port mismatch');
-    expect(result.error).toContain('99999');
+    expect(result.error).toContain('54321');
     expect(result.error).toContain('12345');
   });
 });

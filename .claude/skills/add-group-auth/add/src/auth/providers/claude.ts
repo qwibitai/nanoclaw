@@ -48,25 +48,31 @@ export interface AuthErrorInfo {
 }
 
 /**
- * Extract HTTP status code from structured SDK error:
+ * Strict matcher for Claude SDK auth errors.
+ * Expected format:
  *   Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid bearer token"},"request_id":"req_..."}
  */
-const API_ERROR_RE = /API Error:\s*(\d{3})\s*(\{.+)/;
+const API_ERROR_RE = /^Failed to authenticate\. API Error:\s*(\d{3})\s*(\{.*\})$/;
 
 /** HTTP status codes that mean credentials should be replaced. */
 const AUTH_STATUS_CODES = new Set([401, 403]);
 
 function parseApiError(error: string): AuthErrorInfo | null {
-  const m = API_ERROR_RE.exec(error);
+  const m = API_ERROR_RE.exec(error.trim());
   if (!m) return null;
   const code = parseInt(m[1], 10);
   if (!AUTH_STATUS_CODES.has(code)) return null;
-  let message = `HTTP ${code}`;
+
+  let body: any;
   try {
-    const body = JSON.parse(m[2]);
-    const errMsg: string = body?.error?.message;
-    if (errMsg) message = errMsg;
-  } catch { /* use default message */ }
+    body = JSON.parse(m[2]);
+  } catch {
+    return null; // JSON must be valid
+  }
+
+  if (body?.type !== 'error' || !body?.error?.type) return null;
+
+  const message = body.error.message || `HTTP ${code}`;
   return { code, message };
 }
 

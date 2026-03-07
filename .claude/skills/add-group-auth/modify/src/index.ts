@@ -273,7 +273,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       resetIdleTimer();
     }
 
-    streamedAuthError = null;
     queue.notifyIdle(chatJid);
     if (result.status === 'error') {
       hadError = true;
@@ -283,6 +282,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     } else if (typeof result.result === 'string' && isAuthError(result.result)) {
       // This condition is a hack, because Claude doesnt mark errors in stream
       streamedAuthError = result.result;
+    }
+    // Kill the container immediately on auth error — it will just retry forever
+    if (streamedAuthError) {
+      queue.closeStdin(chatJid);
     }
   });
 
