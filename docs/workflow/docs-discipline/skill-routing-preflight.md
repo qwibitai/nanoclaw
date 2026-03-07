@@ -27,8 +27,8 @@ Do not start ad-hoc edits/debug loops before this check.
 
 - Feature or behavior change: use the most specific `/add-*` skill, otherwise `/customize`.
 - Container/auth/runtime failures: `/debug`.
-- Incident lifecycle work: docs-first via `docs/workflow/nanoclaw-jarvis-debug-loop.md`, `docs/workflow/nanoclaw-container-debugging.md`, and `.claude/progress/incident.json`.
-- Cross-tool Claude/Codex execution policy, worktrees, or subagent fanout: docs-first via `docs/workflow/unified-codex-claude-loop.md`, `docs/operations/claude-codex-adapter-matrix.md`, and `docs/operations/subagent-catalog.md`.
+- Incident lifecycle work: docs-first via `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`, `docs/workflow/runtime/nanoclaw-container-debugging.md`, and `.claude/progress/incident.json`.
+- Cross-tool Claude/Codex execution policy, worktrees, or subagent fanout: docs-first via `docs/workflow/delivery/unified-codex-claude-loop.md`, `docs/operations/claude-codex-adapter-matrix.md`, and `docs/operations/subagent-catalog.md`.
 - Setup, upstream sync, and Apple Container migration: `/setup`, `/update`, `/convert-to-apple-container`.
 
 ## MCP Reliability Loop (Mandatory)

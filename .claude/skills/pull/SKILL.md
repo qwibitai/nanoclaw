@@ -18,6 +18,7 @@ description:
 3. Confirm remotes and branches:
    - Ensure the `origin` remote exists.
    - Ensure the current branch is the one to receive the merge.
+   - In Codex/harness sessions, request escalated execution directly for remote `git fetch`, `git pull`, and `git merge` operations instead of probing the sandbox first.
 4. Fetch latest refs:
    - `git fetch origin`
 5. Sync the remote feature branch first:

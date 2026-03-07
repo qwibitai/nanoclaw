@@ -5,6 +5,29 @@ Defines who changes GitHub governance and how those changes are shipped.
 For cross-domain ownership and update-location mapping, see
 `docs/operations/workflow-setup-responsibility-map.md`.
 
+## Owns
+
+This document owns GitHub-hosted governance for this repository:
+
+1. workflow auth and secrets expectations
+2. PR review automation policy
+3. CI failure feedback loops
+4. merge policy, required validation, and governance branch guardrails
+
+## Does Not Own
+
+This document does not own:
+
+1. day-to-day use of Discussions, Issues, and the Project board
+2. the reusable multi-agent board/category/template rollout shape
+3. the decision of whether a concern belongs on GitHub or should stay local
+
+Use instead:
+
+1. `docs/workflow/github/github-agent-collaboration-loop.md` for daily GitHub collaboration behavior
+2. `docs/workflow/github/github-multi-agent-collaboration-loop.md` for setup shape and rollout
+3. `docs/workflow/github/github-offload-boundary-loop.md` for GitHub-vs-local placement
+
 ## Responsibility Split
 
 - `Andy-developer` (Claude Code lane):
@@ -17,16 +40,13 @@ For cross-domain ownership and update-location mapping, see
   - implements product code changes from dispatch contracts
   - does not own branch protection/workflow governance by default
 
-## Project and Discussion Control Plane
+## Collaboration Surface Governance Boundary
 
-- The GitHub Project is an Issue-first execution board, not an ideation board.
-- PRs should not appear as first-class Project cards; use the Project `Linked pull requests` field on the Issue card instead.
-- Discussions are the durable home for workflow debates, mission-aligned feature ideas, upstream NanoClaw evaluation, Claude/Codex collaboration design, and SDK/tooling opportunity review.
-- Day-to-day agent behavior on those surfaces is defined by `docs/workflow/github-agent-collaboration-loop.md`.
 - This repository ships two project workflows:
   - `.github/workflows/project-intake-sync.yml` for Issue intake + default field initialization
   - `.github/workflows/project-status-sync.yml` for status sync from Issue/PR lifecycle
 - Discussion category taxonomy is only partially repo-configurable. The repository ships templates for the default GitHub categories (`General`, `Ideas`, `Q&A`), and any rename to the preferred collaboration taxonomy is a one-time GitHub UI admin action.
+- The operating rules for how agents use those surfaces are intentionally not repeated here; they belong in `docs/workflow/github/github-agent-collaboration-loop.md`.
 
 ## Merge Policy
 
@@ -105,57 +125,8 @@ Use this when installing GitHub Apps that auto-open workflow PRs.
 3. Reject duplicated workflows, broader-than-needed trigger surfaces, or auth changes that conflict with the repository's chosen secret model.
 4. Land the curated change on the main control-plane PR/branch, then close the generated bootstrap PR as redundant.
 
-## Fork Auth and Sync Workflow (Andy Analysis)
+## Related Operational Routing
 
-Use this when Andy analysis must read `openclaw-gurusharan/nanoclaw` `main`.
-
-1. Verify remote mapping and normalize alias names.
-   - `git remote -v`
-   - Expected:
-     - `origin` -> `https://github.com/ingpoc/nanoclaw.git`
-     - `nanoclaw` -> `https://github.com/openclaw-gurusharan/nanoclaw.git`
-     - `upstream` -> `https://github.com/qwibitai/nanoclaw`
-   - If old alias exists, rename once:
-     - `git remote rename openclaw nanoclaw`
-2. Verify active GitHub CLI account and switch before pushing.
-   - `gh auth status -h github.com`
-   - `gh auth switch -h github.com -u openclaw-gurusharan`
-   - If tokens are invalid:
-     - `gh auth login -h github.com --git-protocol https --web`
-     - `gh auth switch -h github.com -u openclaw-gurusharan`
-3. Sync code to fork.
-   - Preferred (policy-safe): push branch and merge via PR into `main`.
-     - `git push -u nanoclaw <branch>`
-     - `gh pr create --repo openclaw-gurusharan/nanoclaw --base main --head <branch>`
-   - Emergency/admin-only direct update (if explicitly allowed):
-     - `git push nanoclaw <branch>:main`
-4. Confirm `main` contains expected commit.
-   - `git ls-remote --heads nanoclaw main`
-   - `git log --oneline -n 1`
-
-Troubleshooting:
-- `permission denied` on push usually means wrong active account or missing write permission to target branch.
-- If `gh auth switch` fails, re-run `gh auth status -h github.com` and refresh auth with `gh auth login`.
-
-## User QA Handoff Gate (Andy-Owned)
-
-When work is marked ready for user testing:
-
-1. Andy reviews worker completion and explicitly approves branch/commit.
-2. Andy syncs approved branch/commit into `NanoClawWorkspace` (clone first if repo missing).
-3. Andy runs local preflight (`build` + `server start/health`) and records outcomes.
-4. Andy verifies no duplicate same-lane running containers before handoff:
-   - `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
-5. Andy confirms preflight was executed on the same approved branch/commit under test.
-6. Andy sends handoff block with repo path, branch/commit, and user-run install/start/health/stop commands.
-
-If preflight fails or lane state is inconsistent, do not mark ready; return blocker/rework path first.
-
-## Agent Routing
-
-| Step | Agent | Mode | Notes |
-|------|-------|------|-------|
-| Policy decisions | opus | — | Governance changes require judgment |
-| Workflow YAML reads | scout | fg | Scan `.github/workflows/` for drift |
-| Drift detection | scout | fg | Compare current vs expected governance state |
-| CI status checks | verifier | fg | `gh run list` exit codes |
+- Fork auth and sync procedure: `docs/operations/upstream-sync-policy.md`
+- User QA handoff and user-facing readiness: `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md`
+- GitHub governance task routing: `docs/operations/subagent-routing.md`

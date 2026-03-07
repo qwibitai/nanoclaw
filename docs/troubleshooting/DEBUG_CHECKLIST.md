@@ -1,113 +1,14 @@
 # NanoClaw Debug Checklist
+Use this file as the active operational checklist for Apple Container runtime debugging.
 
-## Known Issues (2026-02-08)
+Historical fixed-issue notes were moved to:
 
-### 1. [FIXED] Resume branches from stale tree position
+- `docs/archives/debug-known-issues-2026-02.md`
 
-When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
+For the full runtime debug workflow, use:
 
-### 2. [FIXED 2026-02-28] Timeout model separation (idle vs no-output vs hard timeout)
-
-The runtime now separates three timeout paths:
-
-- `IDLE_TIMEOUT` (default `300000`) closes stdin after inactivity.
-- `CONTAINER_NO_OUTPUT_TIMEOUT` (default `720000`) fails fast when no streamed output appears.
-- `CONTAINER_TIMEOUT` (default `1800000`) remains the hard safety timeout.
-
-Timeout logs now include reason codes (`no_output_timeout` or `hard_timeout`) and effective timeout values for triage.
-
-### 3. Cursor advanced before agent succeeds
-
-`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
-
-### 4. [FIXED 2026-02-22] Skill sync crash (`ERR_FS_CP_EINVAL`)
-
-Symptom:
-
-- Group receives messages but does not reply.
-- Log shows:
-  - `Agent error`
-  - `src and dest cannot be the same .../.claude/skills/.docs`
-
-Cause:
-
-- Hidden skill metadata (for example `.docs`) from symlinked skill sources can create copy collisions during per-group skill staging.
-
-Fix:
-
-- Skill staging now skips hidden entries and guards against overlapping source/destination paths in `src/container-runner.ts`.
-- Runtime now copies real skill files into `data/sessions/<group>/.claude/skills` (not symlink mount passthrough).
-
-Verification:
-
-1. `npm run build`
-2. `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-3. confirm log shows `Spawning container agent` followed by `Message sent` without repeated `ERR_FS_CP_EINVAL`.
-
-### 5. Claude subscription quota hit (model responds but task does not progress)
-
-Symptom:
-
-- Group replies with `You've hit your limit ...` (or equivalent quota text).
-
-Cause:
-
-- Upstream Claude account quota exhausted for the model configured in that group.
-
-Action:
-
-1. Verify response in `logs/nanoclaw.log` (`Agent output: You've hit your limit ...`).
-2. Wait for reset or switch that group to an available model/runtime.
-3. For worker execution lane, continue routing bounded tasks to OpenCode workers (`jarvis-worker-*`) via `andy-developer`.
-
-### 6. [FIXED 2026-02-23] Duplicate running group containers
-
-Symptom:
-
-- Two `nanoclaw-andy-developer-*` (or same-group) containers appear as `running`.
-- New runs may race with stale prior runs, causing unstable behavior.
-
-Cause:
-
-- Stop path did not always verify runtime-level container shutdown before new launch.
-- Runtime could report inconsistent stop state without escalation.
-
-Fix:
-
-- Startup orphan cleanup now uses verified stop escalation (`stop` -> `stop SIGKILL` -> `kill` + running-state verification).
-- Pre-launch cleanup now stops any already-running container with same group prefix before new spawn.
-- Timeout shutdown now uses verified stop escalation and logs attempt history.
-
-Verification:
-
-1. `npm run build`
-2. `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
-3. Trigger one message in Andy lane.
-4. Confirm only one running group container:
-   `container ls -a | rg 'nanoclaw-andy-developer|nanoclaw-jarvis'`
-
-### 7. [FIXED 2026-02-25] Transient skill staging ENOENT under parallel runs
-
-Symptom:
-
-- Concurrent Andy runs can fail early with errors like:
-  - `ENOENT ... unlink .../.claude/skills/...`
-  - `ENOENT ... chmod .../.claude/skills/...`
-
-Cause:
-
-- Parallel filesystem copy into the same per-group staged skills directory can race inside `fs.cpSync` internals.
-
-Fix:
-
-- `src/container-runner.ts` now retries transient skill sync filesystem errors (`ENOENT`, `EBUSY`, `EPERM`) before failing run setup.
-
-Verification:
-
-1. Run two smoke tests in parallel:
-   `npx tsx scripts/test-worker-e2e.ts` (twice concurrently)
-2. Confirm logs may show `Retrying skill copy after transient filesystem race` warnings.
-3. Confirm runs continue to container spawn and completion instead of aborting on ENOENT.
+- `docs/workflow/runtime/nanoclaw-container-debugging.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`
 
 ## Quick Status Check
 

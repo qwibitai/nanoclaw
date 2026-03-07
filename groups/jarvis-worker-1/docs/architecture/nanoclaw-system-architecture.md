@@ -35,6 +35,6 @@ Canonical architecture view for this NanoClaw codebase (including Jarvis extensi
 ## Required Companion Docs
 
 - `docs/architecture/nanoclaw-jarvis.md`
-- `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
-- `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
-- `docs/workflow/nanoclaw-jarvis-acceptance-checklist.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
+- `docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md`

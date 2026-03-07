@@ -75,4 +75,4 @@ echo
 echo "Manual User POV runbook confirmed:"
 echo "  $user_confirmation"
 echo "Reference:"
-echo "  docs/workflow/nanoclaw-andy-user-happiness-gate.md (User POV Runbook)"
+echo "  docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md (User POV Runbook)"

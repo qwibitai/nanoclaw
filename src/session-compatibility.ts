@@ -12,7 +12,9 @@ export function buildSessionContextVersion(input: {
   const hash = createHash('sha256');
   hash.update(input.salt);
 
-  for (const entry of [...input.entries].sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const entry of [...input.entries].sort((a, b) =>
+    a.path.localeCompare(b.path),
+  )) {
     hash.update('\nFILE:');
     hash.update(entry.path);
     hash.update('\n');

@@ -283,7 +283,7 @@ async function main(): Promise<void> {
     console.log('PASS: all user-facing scenarios satisfied criteria');
     console.log('PASS: internal integrity checks satisfied criteria');
     console.log(
-      'NEXT: run manual User POV Runbook in docs/workflow/nanoclaw-andy-user-happiness-gate.md',
+      'NEXT: run manual User POV Runbook in docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md',
     );
   } finally {
     db.close();

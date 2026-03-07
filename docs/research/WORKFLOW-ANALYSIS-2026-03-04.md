@@ -486,13 +486,13 @@ After every non-trivial change:
    - Root cause: Watchdog timeouts not cleaning up stale probe runs
    - Fix: Move from advisory checks to mandatory deterministic gates (no warnings, only hard-fail)
    - Acceptance: `verify-worker-connectivity --skip-prechecks PASS` every time
-   - Knowledge: Update `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
+   - Knowledge: Update `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
 
 2. **Fix Andy greeting latency:**
    - Root cause: No fast-path for simple salutations; all requests wait for heavy orchestration
    - Fix: Add greeting handler in `src/index.ts` that returns within 500ms
    - Test: Unit test for greeting latency < 1s
-   - Knowledge: Update `docs/workflow/nanoclaw-andy-user-happiness-gate.md`
+   - Knowledge: Update `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md`
 
 3. **Establish incident closure discipline:**
    - All open incidents must have root cause analysis + prevention in CLAUDE.md

@@ -100,3 +100,14 @@ Do not delegate when:
 - `workflow-optimization-loop.md` — requires research judgment
 - `unified-codex-claude-loop.md` — defines cross-tool coordination
 - `session-recall.md` — script-driven, result is needed immediately
+
+## GitHub Governance Routing
+
+Use this for GitHub control-plane work owned by `docs/workflow/github/nanoclaw-github-control-plane.md`.
+
+| Step | Agent | Mode | Notes |
+|------|-------|------|-------|
+| Policy decisions | `main` | foreground | governance changes require orchestrator judgment |
+| Workflow YAML reads | `explorer` | foreground | scan `.github/workflows/` and adjacent docs for drift |
+| Drift detection | `reviewer` | foreground | compare current vs expected governance state after a coherent diff exists |
+| CI status checks | `monitor` | background | poll `gh run` or deterministic check state without blocking main reasoning |

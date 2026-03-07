@@ -25,7 +25,7 @@ Mission anchor: `docs/MISSION.md`.
 
 Weekly slop-pruning execution (docs/scripts/config/code) is defined in:
 
-- `docs/workflow/weekly-slop-optimization-loop.md`
+- `docs/workflow/strategy/weekly-slop-optimization-loop.md`
 
 ## Phase 1: Research Intake (Weekly)
 

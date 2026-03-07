@@ -21,7 +21,7 @@ Evidence must be produced by executable gates, not static checkbox edits.
 5. Retry semantics are bounded to `failed` and `failed_contract`.
 6. Completion artifacts satisfy required fields and `run_id`/branch matching.
 
-Reference: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`.
+Reference: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`.
 
 ## 3) Worker Runtime Contract (Must Hold)
 
@@ -30,7 +30,7 @@ Reference: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`.
 3. Worker skills/rules staging is deterministic and read-only in-container.
 4. Timeout/probe guardrails remain deterministic.
 
-Reference: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`.
+Reference: `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`.
 
 ## 4) Executable Verification Gate (Required)
 

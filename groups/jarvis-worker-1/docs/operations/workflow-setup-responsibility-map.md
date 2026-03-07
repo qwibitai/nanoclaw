@@ -14,12 +14,12 @@ Canonical map for selecting workflow setup, assigning responsibility, and knowin
 
 | Concern | Primary Owner | Repository-Tracked Update Locations | Runtime-Local Update Locations |
 |---------|---------------|-------------------------------------|-------------------------------|
-| GitHub Actions and governance | `andy-developer` | `.github/workflows/*`, `docs/workflow/nanoclaw-github-control-plane.md` | `groups/andy-developer/docs/github-workflow-admin.md` |
-| Worker branch seeding (`base_branch` -> `jarvis-*`) | `andy-developer` | `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`, `src/ipc.ts` | `groups/andy-developer/docs/jarvis-dispatch.md`, `groups/jarvis-worker-*/CLAUDE.md` |
-| PR review mode policy (`@claude`) | `andy-developer` | `docs/workflow/nanoclaw-github-control-plane.md`, `docs/operations/roles-classification.md` | `groups/andy-developer/CLAUDE.md`, `groups/andy-developer/docs/github.md` |
+| GitHub Actions and governance | `andy-developer` | `.github/workflows/*`, `docs/workflow/github/nanoclaw-github-control-plane.md` | `groups/andy-developer/docs/github-workflow-admin.md` |
+| Worker branch seeding (`base_branch` -> `jarvis-*`) | `andy-developer` | `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`, `src/ipc.ts` | `groups/andy-developer/docs/jarvis-dispatch.md`, `groups/jarvis-worker-*/CLAUDE.md` |
+| PR review mode policy (`@claude`) | `andy-developer` | `docs/workflow/github/nanoclaw-github-control-plane.md`, `docs/operations/roles-classification.md` | `groups/andy-developer/CLAUDE.md`, `groups/andy-developer/docs/github.md` |
 | Role boundaries (Andy vs Jarvis) | `andy-developer` + core maintainer | `docs/operations/roles-classification.md`, `container/rules/andy-developer-operating-rule.md`, `src/ipc.ts` | `groups/andy-developer/CLAUDE.md`, `groups/jarvis-worker-*/CLAUDE.md` |
-| Worker dispatch/completion contract | core maintainer + `andy-developer` | `src/dispatch-validator.ts`, `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`, `src/jarvis-worker-dispatch.test.ts` | `groups/andy-developer/docs/jarvis-dispatch.md` |
-| Worker runtime setup (OpenCode/image/mounts) | core maintainer + `andy-developer` | `container/worker/*`, `src/container-runner.ts`, `docs/workflow/nanoclaw-jarvis-worker-runtime.md` | `groups/jarvis-worker-*/docs/workflow/*` |
+| Worker dispatch/completion contract | core maintainer + `andy-developer` | `src/dispatch-validator.ts`, `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`, `src/jarvis-worker-dispatch.test.ts` | `groups/andy-developer/docs/jarvis-dispatch.md` |
+| Worker runtime setup (OpenCode/image/mounts) | core maintainer + `andy-developer` | `container/worker/*`, `src/container-runner.ts`, `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md` | `groups/jarvis-worker-*/docs/workflow/*` |
 | Browser test skill behavior (WebMCP gate, pass/fail evidence) | core maintainer + `andy-developer` | `docs/operations/roles-classification.md`, `container/rules/andy-developer-operating-rule.md`, `container/rules/jarvis-worker-operating-rule.md` | `~/.claude/skills/testing/SKILL.md`, `~/.claude/skills/browser-testing/SKILL.md` (mounted via `container/skills/testing` and `container/skills/browser-testing` symlinks) |
 | Product implementation tasks | `jarvis-worker-*` | product repo source + tests | worker group docs/memory as needed |
 

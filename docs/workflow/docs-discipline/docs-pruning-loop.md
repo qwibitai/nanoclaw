@@ -2,7 +2,7 @@
 
 Applies when adding/updating `docs/*.md` or root `CLAUDE.md`.
 
-Before creating a new doc or trigger, apply `docs/workflow/doc-creation-contract.md` first.
+Before creating a new doc or trigger, apply `docs/workflow/docs-discipline/doc-creation-contract.md` first.
 
 ## Keep Docs Lean
 
@@ -39,4 +39,5 @@ Before finishing docs changes:
 - `rg -n \"<deleted-or-renamed-doc>\" .` returns no stale references
 - Root `CLAUDE.md` remains concise and index-like
 - `bash scripts/check-workflow-contracts.sh` passes
+- `bash scripts/check-docs-hygiene.sh` passes
 - `bash scripts/check-claude-codex-mirror.sh` passes (for cross-tool workflow docs/policy edits)

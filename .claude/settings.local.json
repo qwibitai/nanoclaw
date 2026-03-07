@@ -50,7 +50,10 @@
       "Bash(~/.zshrc:*)",
       "Bash(./container/worker/build.sh:*)",
       "Bash(container exec:*)",
-      "Bash(opencode run:*)"
+      "Bash(opencode run:*)",
+      "Bash(gh api:*)",
+      "Bash(gh project:*)",
+      "Bash(gh issue:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

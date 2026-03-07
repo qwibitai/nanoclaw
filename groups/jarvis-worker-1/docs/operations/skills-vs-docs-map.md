@@ -14,7 +14,7 @@ Canonical decision map for when to run a skill and when to follow repository doc
 |-----------|--------------|-----|
 | Setup, authentication, service bring-up | skill-first (`/setup`) | deterministic operational workflow |
 | Runtime troubleshooting and recovery | skill-first (`/debug`) | fast diagnostics and known fix paths |
-| Incident triage, root-cause tracking, and resolution lifecycle | skill-first (`/incident-debugger`) | standardized incident script routing + history tracking |
+| Incident triage, root-cause tracking, and resolution lifecycle | docs-first (`docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`, `docs/workflow/runtime/nanoclaw-container-debugging.md`) + `/debug` | incident ownership and evidence stay contractual while `/debug` handles execution |
 | Upstream sync and merge flow | skill-first (`/update`) | structured fetch/preview/apply/conflict loop |
 | Feature/channel additions and integration changes | skill-first (`/customize`, `/add-*`) | guided implementation and post-change verification |
 | Container runtime migration (Docker/Apple) | skill-first (`/convert-to-apple-container`) | deterministic runtime conversion |
@@ -30,7 +30,7 @@ Run these first, before implementation work starts:
 | Add a new feature or modify behavior | `/customize` |
 | Add a specific channel/integration with an existing skill | matching `/add-*` skill (fallback: `/customize`) |
 | Container/auth/runtime issue, service failure, link/auth breakage | `/debug` |
-| Incident investigation, recurrence analysis, incident tracking/resolution | `/incident-debugger` |
+| Incident investigation, recurrence analysis, incident tracking/resolution | read `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`, then use `/debug` |
 | First-time install/onboarding | `/setup` |
 | Pull latest upstream core changes | `/update` |
 | Move runtime from Docker to Apple Container | `/convert-to-apple-container` |
@@ -68,7 +68,6 @@ Fallback policy:
 | `/setup` | bootstrap, auth, registration, service start/verify |
 | `/customize` | guided customization for channels/integrations/behavior |
 | `/debug` | container/runtime/auth/debug loops |
-| `/incident-debugger` | incident triage workflow, tracking in `.claude/progress/incident.json`, guarded resolution |
 | `/update` | upstream sync with customization preservation |
 | `/convert-to-apple-container` | Docker -> Apple Container migration |
 | `/add-telegram` | add Telegram channel |
@@ -87,7 +86,7 @@ These remain contract-first and must be maintained in docs/code/tests:
 
 - `docs/reference/REQUIREMENTS.md`, `docs/reference/SPEC.md`, `docs/reference/SECURITY.md`
 - `docs/architecture/nanoclaw-jarvis.md`
-- `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
 - `docs/operations/workflow-setup-responsibility-map.md`
 - `docs/operations/update-requirements-matrix.md`
 - `.claude/rules/jarvis-dispatch-contract-discipline.md`

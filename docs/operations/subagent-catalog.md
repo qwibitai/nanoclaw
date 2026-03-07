@@ -2,7 +2,7 @@
 
 Canonical catalog for parallel verification subagents used in Claude Code and Codex workflows.
 
-Use with `docs/workflow/unified-codex-claude-loop.md`.
+Use with `docs/workflow/delivery/unified-codex-claude-loop.md`.
 
 ## Contract
 

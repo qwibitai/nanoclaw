@@ -54,6 +54,6 @@ These are separate state machines. Blocked dispatch is not a worker run.
 ## Required Companion Docs
 
 - `docs/architecture/nanoclaw-jarvis.md`
-- `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
-- `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
-- `docs/workflow/nanoclaw-jarvis-acceptance-checklist.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
+- `docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md`

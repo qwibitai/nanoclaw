@@ -11,12 +11,14 @@ description:
 
 - `gh` CLI is installed and available in `PATH`.
 - `gh auth status` succeeds for GitHub operations in this repo.
+- In Codex/harness sessions, request escalated execution directly for `gh` commands and remote git operations before first use.
 
 ## Goals
 
 - Push current branch changes to `origin` safely.
 - Create a PR if none exists for the branch, otherwise update the existing PR.
 - Keep branch history clean when remote has moved.
+- For this repo, never push to `upstream`; `origin` is the only allowed push/PR target.
 
 ## Related Skills
 
@@ -26,9 +28,11 @@ description:
 ## Steps
 
 1. Identify current branch and confirm remote state.
+   - In Codex/harness sessions, do this with escalated execution rather than attempting sandboxed `gh` or remote git first.
 2. Run local validation (`make -C elixir all`) before pushing.
 3. Push branch to `origin` with upstream tracking if needed, using whatever
    remote URL is already configured.
+   - Do not retarget the push to `upstream` (`qwibitai/nanoclaw`).
 4. If push is not clean/rejected:
    - If the failure is a non-fast-forward or sync problem, run the `pull`
      skill to merge `origin/main`, resolve conflicts, and rerun validation.

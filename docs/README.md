@@ -10,10 +10,16 @@ Use [`DOCS.md`](../DOCS.md) for the full inventory.
 ```text
 docs/
   architecture/     # system architecture and design rationale
-  workflow/         # delivery/runtime/docs-discipline/strategy docs (currently flat)
+  workflow/
+    delivery/       # delivery loops, gates, and cross-tool execution
+    runtime/        # runtime contracts, incident/debug loops, recall
+    github/         # GitHub collaboration, governance, and offload boundaries
+    docs-discipline/ # docs authoring, pruning, and trigger hygiene
+    strategy/       # optimization cadence and slop reduction workflows
   operations/       # role authority and change-management matrix
   reference/        # baseline requirements/spec/security documents
   troubleshooting/  # debug playbooks and platform-specific fixes
+  archives/         # historical RCA and archived doc snapshots
   research/         # workflow research intake and weekly optimization evidence
 ```
 
@@ -21,16 +27,17 @@ docs/
 
 - Mission and operating intent: `docs/MISSION.md`
 - Core-vs-extension ownership contract: `docs/ARCHITECTURE.md`
+- Mission runtime profiles: `docs/architecture/mission-runtime-profiles.md`
 - Core architecture: `docs/architecture/nanoclaw-system-architecture.md`
 - Jarvis architecture and delegation model: `docs/architecture/nanoclaw-jarvis.md`
-- Doc creation and pruning discipline: `docs/workflow/doc-creation-contract.md` + `docs/workflow/docs-pruning-loop.md`
-- Task-start routing: `docs/workflow/skill-routing-preflight.md` + `docs/operations/skills-vs-docs-map.md`
-- Default delivery workflow: `docs/workflow/nanoclaw-development-loop.md`
-- Runtime and incident debugging: `docs/workflow/nanoclaw-jarvis-debug-loop.md`
-- Worker contract and runtime: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` + `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
-- GitHub and workflow governance: `docs/workflow/nanoclaw-github-control-plane.md` + `docs/workflow/github-offload-boundary-loop.md`
-- Day-to-day GitHub agent collaboration: `docs/workflow/github-agent-collaboration-loop.md`
-- Cross-tool Claude/Codex execution: `docs/workflow/unified-codex-claude-loop.md`
+- Doc creation and pruning discipline: `docs/workflow/docs-discipline/doc-creation-contract.md` + `docs/workflow/docs-discipline/docs-pruning-loop.md`
+- Task-start routing: `docs/workflow/docs-discipline/skill-routing-preflight.md` + `docs/operations/skills-vs-docs-map.md`
+- Default delivery workflow: `docs/workflow/delivery/nanoclaw-development-loop.md`
+- Runtime and incident debugging: `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`
+- Worker contract and runtime: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` + `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
+- GitHub and workflow governance: `docs/workflow/github/nanoclaw-github-control-plane.md` + `docs/workflow/github/github-offload-boundary-loop.md`
+- Day-to-day GitHub agent collaboration: `docs/workflow/github/github-agent-collaboration-loop.md`
+- Cross-tool Claude/Codex execution: `docs/workflow/delivery/unified-codex-claude-loop.md`
 - Ownership and update surfaces: `docs/operations/workflow-setup-responsibility-map.md` + `docs/operations/update-requirements-matrix.md`
 - Research artifacts and optimization evidence: `docs/research/README.md`
 

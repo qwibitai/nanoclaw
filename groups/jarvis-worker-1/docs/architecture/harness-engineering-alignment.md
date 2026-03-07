@@ -25,6 +25,6 @@ This repository applies that approach as follows.
 ## Current Contract-Centric Artifacts
 
 - Architecture source: `docs/architecture/nanoclaw-jarvis.md`
-- Dispatch contract: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`
-- Worker runtime: `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
-- Operational validation: `docs/workflow/nanoclaw-jarvis-acceptance-checklist.md`
+- Dispatch contract: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
+- Worker runtime: `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
+- Operational validation: `docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md`

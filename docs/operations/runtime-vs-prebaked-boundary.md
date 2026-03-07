@@ -29,8 +29,8 @@ Use this before changing any behavior:
 | Andy control-plane behavior/instructions | Runtime local | `groups/andy-developer/CLAUDE.md`, `groups/andy-developer/docs/*` |
 | Group runtime configuration files | Runtime local (tracked subset) | `groups/**/.mcp.json`, `groups/**/opencode.json`, `groups/**/container-config.*` |
 | Role authority + delegation gates | Host orchestrator primitive | `src/ipc.ts`, `container/rules/*-operating-rule.md`, `docs/operations/roles-classification.md` |
-| Dispatch/completion contract | Host orchestrator primitive + docs/tests | `src/dispatch-validator.ts`, `src/jarvis-worker-dispatch.test.ts`, `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` |
-| GitHub workflow/review governance | Control-plane (repo tracked) | `.github/workflows/*`, `docs/workflow/nanoclaw-github-control-plane.md` |
+| Dispatch/completion contract | Host orchestrator primitive + docs/tests | `src/dispatch-validator.ts`, `src/jarvis-worker-dispatch.test.ts`, `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` |
+| GitHub workflow/review governance | Control-plane (repo tracked) | `.github/workflows/*`, `docs/workflow/github/nanoclaw-github-control-plane.md` |
 | Root instruction routing | Compressed index | `CLAUDE.md` trigger lines only |
 
 ## Ownership

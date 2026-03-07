@@ -51,16 +51,19 @@ CREATE TABLE andy_requests (
   return dbPath;
 }
 
-function insertRequest(dbPath: string, input: {
-  requestId: string;
-  chatJid?: string;
-  state: string;
-  updatedAt: string;
-  createdAt?: string;
-  workerRunId?: string | null;
-  workerGroupFolder?: string | null;
-  prompt?: string;
-}): void {
+function insertRequest(
+  dbPath: string,
+  input: {
+    requestId: string;
+    chatJid?: string;
+    state: string;
+    updatedAt: string;
+    createdAt?: string;
+    workerRunId?: string | null;
+    workerGroupFolder?: string | null;
+    prompt?: string;
+  },
+): void {
   const sql = `
 INSERT INTO andy_requests (
   request_id, chat_jid, source_group_folder, source_lane_id, user_message_id,

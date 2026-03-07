@@ -128,7 +128,7 @@ sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;
 Validate role/runtime placement rules before editing runtime:
 
 - `docs/operations/runtime-vs-prebaked-boundary.md`
-- `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
+- `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
 
 ## 5) MCP Failures
 
@@ -139,7 +139,7 @@ Follow fix-first loop:
 3. Re-run minimal MCP verification.
 4. Fall back only with blocker evidence.
 
-Reference: `docs/workflow/skill-routing-preflight.md` (MCP Reliability Loop).
+Reference: `docs/workflow/docs-discipline/skill-routing-preflight.md` (MCP Reliability Loop).
 
 ## Log Locations
 

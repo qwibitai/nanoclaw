@@ -10,11 +10,11 @@ errors=()
 collect_files=()
 collect_files+=("docs/ARCHITECTURE.md" "CLAUDE.md" "AGENTS.md" "DOCS.md" "docs/README.md")
 collect_files+=(
-  "docs/workflow/skill-routing-preflight.md"
-  "docs/workflow/jarvis-dispatch-contract-discipline.md"
-  "docs/workflow/nanoclaw-jarvis-debug-loop.md"
-  "docs/workflow/nanoclaw-root-claude-compression.md"
-  "docs/workflow/docs-pruning-loop.md"
+  "docs/workflow/docs-discipline/skill-routing-preflight.md"
+  "docs/workflow/runtime/jarvis-dispatch-contract-discipline.md"
+  "docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md"
+  "docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md"
+  "docs/workflow/docs-discipline/docs-pruning-loop.md"
 )
 
 while IFS= read -r f; do collect_files+=("$f"); done < <(find docs/workflow docs/operations -type f -name '*.md' | sort)
@@ -71,24 +71,24 @@ while IFS= read -r ref; do
   fi
 done <"$refs_tmp"
 
-if [ ! -f "docs/workflow/nanoclaw-development-loop.md" ]; then
-  errors+=("Missing canonical workflow doc: docs/workflow/nanoclaw-development-loop.md")
+if [ ! -f "docs/workflow/delivery/nanoclaw-development-loop.md" ]; then
+  errors+=("Missing canonical workflow doc: docs/workflow/delivery/nanoclaw-development-loop.md")
 fi
 
 if [ ! -f "docs/ARCHITECTURE.md" ]; then
   errors+=("Missing architecture boundary contract: docs/ARCHITECTURE.md")
 fi
 
-if [ ! -f "docs/workflow/workflow-optimization-loop.md" ]; then
-  errors+=("Missing optimization workflow doc: docs/workflow/workflow-optimization-loop.md")
+if [ ! -f "docs/workflow/strategy/workflow-optimization-loop.md" ]; then
+  errors+=("Missing optimization workflow doc: docs/workflow/strategy/workflow-optimization-loop.md")
 fi
 
-if [ ! -f "docs/workflow/weekly-slop-optimization-loop.md" ]; then
-  errors+=("Missing weekly slop optimization workflow doc: docs/workflow/weekly-slop-optimization-loop.md")
+if [ ! -f "docs/workflow/strategy/weekly-slop-optimization-loop.md" ]; then
+  errors+=("Missing weekly slop optimization workflow doc: docs/workflow/strategy/weekly-slop-optimization-loop.md")
 fi
 
-if [ ! -f "docs/workflow/unified-codex-claude-loop.md" ]; then
-  errors+=("Missing unified cross-tool workflow doc: docs/workflow/unified-codex-claude-loop.md")
+if [ ! -f "docs/workflow/delivery/unified-codex-claude-loop.md" ]; then
+  errors+=("Missing unified cross-tool workflow doc: docs/workflow/delivery/unified-codex-claude-loop.md")
 fi
 
 if [ ! -f "docs/operations/claude-codex-adapter-matrix.md" ]; then
@@ -115,15 +115,19 @@ if [ ! -x "scripts/check-architecture-boundary.sh" ]; then
   errors+=("Missing executable architecture boundary checker: scripts/check-architecture-boundary.sh")
 fi
 
-if ! has_text 'docs/workflow/nanoclaw-development-loop.md' CLAUDE.md; then
+if [ ! -x "scripts/check-docs-hygiene.sh" ]; then
+  errors+=("Missing executable docs hygiene checker: scripts/check-docs-hygiene.sh")
+fi
+
+if ! has_text 'docs/workflow/delivery/nanoclaw-development-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing development-loop trigger reference")
 fi
 
-if ! has_text 'docs/workflow/workflow-optimization-loop.md' CLAUDE.md; then
+if ! has_text 'docs/workflow/strategy/workflow-optimization-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing workflow-optimization-loop trigger reference")
 fi
 
-if ! has_text 'docs/workflow/weekly-slop-optimization-loop.md' CLAUDE.md; then
+if ! has_text 'docs/workflow/strategy/weekly-slop-optimization-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing weekly-slop-optimization-loop trigger reference")
 fi
 
@@ -131,7 +135,7 @@ if ! has_text 'docs/operations/tooling-governance-budget.json' CLAUDE.md; then
   errors+=("CLAUDE.md is missing tooling-governance-budget trigger reference")
 fi
 
-if ! has_text 'docs/workflow/unified-codex-claude-loop.md' CLAUDE.md; then
+if ! has_text 'docs/workflow/delivery/unified-codex-claude-loop.md' CLAUDE.md; then
   errors+=("CLAUDE.md is missing unified-codex-claude-loop trigger reference")
 fi
 
@@ -151,7 +155,7 @@ if ! has_text 'docs/ARCHITECTURE.md' AGENTS.md; then
   errors+=("AGENTS.md is missing architecture boundary reference")
 fi
 
-if has_text 'docs/nanoclaw-jarvis-dispatch-contract.md' docs/workflow/jarvis-dispatch-contract-discipline.md; then
+if has_text 'docs/nanoclaw-jarvis-dispatch-contract.md' docs/workflow/runtime/jarvis-dispatch-contract-discipline.md; then
   errors+=("jarvis-dispatch-contract-discipline.md still references deprecated path docs/nanoclaw-jarvis-dispatch-contract.md")
 fi
 
@@ -162,6 +166,16 @@ if [ -x "scripts/check-architecture-boundary.sh" ]; then
       [ -n "$line" ] || continue
       errors+=("  $line")
     done <<<"$boundary_output"
+  }
+fi
+
+if [ -x "scripts/check-docs-hygiene.sh" ]; then
+  docs_hygiene_output="$(bash scripts/check-docs-hygiene.sh 2>&1)" || {
+    errors+=("docs-hygiene-check failed:")
+    while IFS= read -r line; do
+      [ -n "$line" ] || continue
+      errors+=("  $line")
+    done <<<"$docs_hygiene_output"
   }
 fi
 

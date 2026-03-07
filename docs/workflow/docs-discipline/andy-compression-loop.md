@@ -2,7 +2,7 @@
 
 Applies when editing `groups/main/CLAUDE.md` or Andy's docs.
 
-For repository root `CLAUDE.md`, follow `docs/workflow/nanoclaw-root-claude-compression.md` instead.
+For repository root `CLAUDE.md`, follow `docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md` instead.
 
 ## Gate: What Stays in CLAUDE.md
 

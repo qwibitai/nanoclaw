@@ -42,7 +42,7 @@ require_pattern() {
 
 require_file "CLAUDE.md"
 require_file "AGENTS.md"
-require_file "docs/workflow/unified-codex-claude-loop.md"
+require_file "docs/workflow/delivery/unified-codex-claude-loop.md"
 require_file "docs/operations/claude-codex-adapter-matrix.md"
 require_file "docs/operations/subagent-catalog.md"
 require_file "docs/operations/tooling-governance-budget.json"
@@ -65,12 +65,12 @@ else
   errors+=(".codex/settings.local.json should be a symlink to ../.claude/settings.local.json")
 fi
 
-require_pattern "CLAUDE.md" 'docs/workflow/unified-codex-claude-loop.md' "CLAUDE.md missing unified workflow trigger"
+require_pattern "CLAUDE.md" 'docs/workflow/delivery/unified-codex-claude-loop.md' "CLAUDE.md missing unified workflow trigger"
 require_pattern "CLAUDE.md" 'docs/operations/claude-codex-adapter-matrix.md' "CLAUDE.md missing adapter matrix trigger"
 require_pattern "CLAUDE.md" 'docs/operations/subagent-catalog.md' "CLAUDE.md missing subagent catalog trigger"
 require_pattern "CLAUDE.md" 'docs/operations/tooling-governance-budget.json' "CLAUDE.md missing tooling governance budget trigger"
 
-require_pattern "AGENTS.md" 'docs/workflow/unified-codex-claude-loop.md' "AGENTS.md missing unified workflow mirror reference"
+require_pattern "AGENTS.md" 'docs/workflow/delivery/unified-codex-claude-loop.md' "AGENTS.md missing unified workflow mirror reference"
 require_pattern "AGENTS.md" 'docs/operations/claude-codex-adapter-matrix.md' "AGENTS.md missing adapter matrix mirror reference"
 require_pattern "AGENTS.md" 'docs/operations/subagent-catalog.md' "AGENTS.md missing subagent catalog mirror reference"
 require_pattern "AGENTS.md" 'docs/operations/tooling-governance-budget.json' "AGENTS.md missing tooling governance budget mirror reference"

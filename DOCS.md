@@ -19,47 +19,49 @@ Canonical classification for repository docs.
 - `docs/architecture/harness-engineering-alignment.md`: harness-engineering principles mapped to this repo
 - `docs/architecture/nanoclaw-architecture-optimization-plan.md`: prioritized Apple-Container-first optimization backlog (`P0`/`P1`/`P2`) with expected benefits
 - `docs/architecture/architecture-audit.md`: architecture audit findings and recommendations
-- `docs/architecture/mission-core-profile.md`: minimum mission profile and required runtime shape
-- `docs/architecture/mission-optional-features.md`: optional mission profile features and boundaries
+- `docs/architecture/mission-runtime-profiles.md`: mission-core vs ops-extended runtime profiles and feature-gate boundaries
 
 ## `docs/workflow/`
 
-Workflow docs are currently stored in one folder.
-The subfamilies below are the intended semantic organization without changing file paths yet.
+Workflow docs are physically grouped by operational concern.
 
-### `docs/workflow/` Delivery
+### `docs/workflow/delivery/`
 
-- `docs/workflow/nanoclaw-development-loop.md`: default feature/bug/reliability delivery loop
-- `docs/workflow/unified-codex-claude-loop.md`: cross-tool anti-slop execution loop shared by Claude and Codex
-- `docs/workflow/nanoclaw-jarvis-acceptance-checklist.md`: acceptance and smoke validation gates
-- `docs/workflow/nanoclaw-andy-user-happiness-gate.md`: user-facing reliability sign-off protocol
-- `docs/workflow/nanoclaw-github-control-plane.md`: GitHub workflow/review control-plane rules
+- `docs/workflow/delivery/nanoclaw-development-loop.md`: default feature/bug/reliability delivery loop
+- `docs/workflow/delivery/unified-codex-claude-loop.md`: cross-tool anti-slop execution loop shared by Claude and Codex
+- `docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md`: acceptance and smoke validation gates
+- `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md`: user-facing reliability sign-off protocol
+- `docs/workflow/delivery/claude-cli-resume-consult-lane.md`: scoped Claude CLI consult lane guidance
 
-### `docs/workflow/` Runtime
+### `docs/workflow/runtime/`
 
-- `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`: strict dispatch/completion contract
-- `docs/workflow/jarvis-dispatch-contract-discipline.md`: edit protocol and verification for dispatch contract changes
-- `docs/workflow/nanoclaw-jarvis-worker-runtime.md`: worker runtime, mounts, model fallback, role bundles
-- `docs/workflow/nanoclaw-jarvis-debug-loop.md`: primary Jarvis runtime and incident debug loop
-- `docs/workflow/nanoclaw-container-debugging.md`: container/auth/session debug workflow
-- `docs/workflow/session-recall.md`: session reconstruction and handoff workflow
+- `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`: strict dispatch/completion contract
+- `docs/workflow/runtime/jarvis-dispatch-contract-discipline.md`: edit protocol and verification for dispatch contract changes
+- `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`: worker runtime, mounts, model fallback, role bundles
+- `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`: primary Jarvis runtime and incident debug loop
+- `docs/workflow/runtime/nanoclaw-container-debugging.md`: container/auth/session debug workflow
+- `docs/workflow/runtime/session-recall.md`: session reconstruction and handoff workflow
 
-### `docs/workflow/` Docs Discipline
+### `docs/workflow/github/`
 
-- `docs/workflow/doc-creation-contract.md`: admission gate and template for new docs and `CLAUDE.md` triggers
-- `docs/workflow/docs-pruning-loop.md`: docs lifecycle cleanup, deletion, and sync checks
-- `docs/workflow/nanoclaw-root-claude-compression.md`: root `CLAUDE.md` compression rule
-- `docs/workflow/andy-compression-loop.md`: Andy lane `CLAUDE.md` compression rule
+- `docs/workflow/github/nanoclaw-github-control-plane.md`: GitHub workflow/review control-plane rules
+- `docs/workflow/github/github-offload-boundary-loop.md`: GitHub-vs-local workflow placement policy
+- `docs/workflow/github/github-multi-agent-collaboration-loop.md`: multi-agent GitHub coordination model
+- `docs/workflow/github/github-agent-collaboration-loop.md`: day-to-day agent operating workflow for GitHub Discussions, Issues, and Project usage
+- `docs/workflow/github/github-collab-sweep.md`: session-start GitHub sweep protocol, agent-category affinity, and handoff comment format
 
-### `docs/workflow/` Strategy and Governance
+### `docs/workflow/docs-discipline/`
 
-- `docs/workflow/workflow-optimization-loop.md`: research-to-pilot workflow optimization process and decision gates
-- `docs/workflow/weekly-slop-optimization-loop.md`: weekly deterministic slop-pruning workflow for docs/scripts/config/code surfaces
-- `docs/workflow/github-offload-boundary-loop.md`: GitHub-vs-local workflow placement policy
-- `docs/workflow/github-multi-agent-collaboration-loop.md`: multi-agent GitHub coordination model
-- `docs/workflow/github-agent-collaboration-loop.md`: day-to-day agent operating workflow for GitHub Discussions, Issues, and Project usage
-- `docs/workflow/claude-cli-resume-consult-lane.md`: scoped Claude CLI consult lane guidance
-- `docs/workflow/skill-routing-preflight.md`: task-start routing checklist for skills, docs, and MCPs
+- `docs/workflow/docs-discipline/doc-creation-contract.md`: admission gate and template for new docs and `CLAUDE.md` triggers
+- `docs/workflow/docs-discipline/docs-pruning-loop.md`: docs lifecycle cleanup, deletion, and sync checks
+- `docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md`: root `CLAUDE.md` compression rule
+- `docs/workflow/docs-discipline/andy-compression-loop.md`: Andy lane `CLAUDE.md` compression rule
+- `docs/workflow/docs-discipline/skill-routing-preflight.md`: task-start routing checklist for skills, docs, and MCPs
+
+### `docs/workflow/strategy/`
+
+- `docs/workflow/strategy/workflow-optimization-loop.md`: research-to-pilot workflow optimization process and decision gates
+- `docs/workflow/strategy/weekly-slop-optimization-loop.md`: weekly deterministic slop-pruning workflow for docs/scripts/config/code surfaces
 
 ## `docs/operations/`
 
@@ -84,11 +86,12 @@ The subfamilies below are the intended semantic organization without changing fi
 
 - `docs/troubleshooting/DEBUG_CHECKLIST.md`: debug flow for runtime/container/session failures
 - `docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md`: Apple container networking/build diagnostics
-- `docs/troubleshooting/worker-dispatch-root-cause-2026-02-24.md`: root-cause analysis archive for worker dispatch incident
 
 ## `docs/archives/`
 
 - `docs/archives/CHANGELOG-2026-02-26.md`: historical changelog snapshot prior to current changelog flow
+- `docs/archives/debug-known-issues-2026-02.md`: archived fixed-issue notes removed from the active debug checklist
+- `docs/archives/worker-dispatch-root-cause-2026-02-24.md`: root-cause analysis archive for worker dispatch incident
 
 ## `docs/research/`
 
@@ -124,4 +127,3 @@ When docs are added, moved, or removed:
 
 `docs/README.md` should stay curated.
 Exhaustive inventories belong in `DOCS.md`, not in the landing page.
-Semantic subfamilies may be reflected here before any physical file moves happen.

@@ -2024,7 +2024,10 @@ async function startMessageLoop(): Promise<void> {
               ? getAndyRequestsForMessages(messagesToSend)
               : [];
           if (andyRequestsToSend.length > 0) {
-            markAndyRequestsCoordinatorActive(andyRequestsToSend, 'Coordinator is processing your request');
+            markAndyRequestsCoordinatorActive(
+              andyRequestsToSend,
+              'Coordinator is processing your request',
+            );
             markAndyRequestsReviewInProgress(
               andyRequestsToSend,
               'Andy is reviewing worker completion artifacts',

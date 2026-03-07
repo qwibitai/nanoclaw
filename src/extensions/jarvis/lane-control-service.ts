@@ -239,7 +239,10 @@ export function getLaneStatus(input: {
   let availability: LaneControlAvailability = 'idle';
   if (!runtimeOwner) {
     availability = 'offline';
-  } else if (queueStatus?.active || isBusyAndyRequestState(latestRequest?.state)) {
+  } else if (
+    queueStatus?.active ||
+    isBusyAndyRequestState(latestRequest?.state)
+  ) {
     availability = 'busy';
   } else if (hasQueuedWork) {
     availability = 'queued';

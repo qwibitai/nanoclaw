@@ -106,10 +106,10 @@ For each file in `mergeConflicts`:
 After resolving all conflicts:
 
 ```bash
-npx tsx scripts/post-update.ts
+npx tsx -e "import { clearBackup } from './skills-engine/backup.js'; clearBackup();"
 ```
 
-This clears the backup, confirming the resolution.
+This clears the preserved backup, confirming the resolution. The old `scripts/post-update.ts` wrapper no longer exists.
 
 **If you cannot confidently resolve a conflict:** Show the user the conflicting sections and ask them to choose or provide guidance.
 

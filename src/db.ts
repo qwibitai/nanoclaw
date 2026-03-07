@@ -568,7 +568,14 @@ export function getNewMessages(
   `;
 
   const params = lastMessageId
-    ? [lastTimestamp, lastTimestamp, lastMessageId, ...jids, `${botPrefix}:%`, limit]
+    ? [
+        lastTimestamp,
+        lastTimestamp,
+        lastMessageId,
+        ...jids,
+        `${botPrefix}:%`,
+        limit,
+      ]
     : [lastTimestamp, ...jids, `${botPrefix}:%`, limit];
 
   const rows = db.prepare(sql).all(...params) as NewMessage[];
