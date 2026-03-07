@@ -70,3 +70,19 @@ The WhatsApp channel MUST reconnect automatically after transient disconnects us
 #### Scenario: Repeated transient disconnects
 - **WHEN** WhatsApp disconnects for a non-logout reason
 - **THEN** the channel schedules reconnect attempts with increasing delays up to a bounded maximum
+
+### Requirement: WhatsApp Provider Adapter Compatibility
+The WhatsApp integration MUST expose a provider implementation under `src/providers/` and keep channel registration wired to the runtime router.
+
+#### Scenario: Routing through channel adapter
+- **WHEN** runtime bootstraps channels from `src/channels/index.ts`
+- **THEN** the WhatsApp channel adapter registers with the channel registry
+- **AND** it delegates connectivity and messaging behavior to the Baileys-backed provider implementation
+
+### Requirement: Lossless Outbound Queue Retry
+Queued WhatsApp outbound messages MUST be retained and retried if a flush attempt fails.
+
+#### Scenario: Flush failure during reconnect
+- **WHEN** the channel is reconnecting and sending a queued message throws
+- **THEN** the failed message remains in the queue
+- **AND** the channel schedules a subsequent retry instead of dropping the message

@@ -887,14 +887,46 @@ describe('WhatsAppChannel', () => {
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
+      vi.useFakeTimers();
 
       // Make sendMessage fail
       fakeSocket.sendMessage.mockRejectedValueOnce(new Error('Network error'));
 
       await channel.sendMessage('test@g.us', 'Will fail');
 
-      // Should not throw, message queued for retry
-      // The queue should have the message
+      // Should be queued and retried later without losing the message
+      expect((channel as any).outgoingQueue).toEqual([
+        { jid: 'test@g.us', text: 'Andy: Will fail' },
+      ]);
+
+      fakeSocket.sendMessage.mockResolvedValueOnce(undefined);
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fakeSocket.sendMessage).toHaveBeenLastCalledWith('test@g.us', {
+        text: 'Andy: Will fail',
+      });
+      expect((channel as any).outgoingQueue).toHaveLength(0);
+      vi.useRealTimers();
+    });
+
+    it('keeps queued message when flush fails', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+      (channel as any).connected = false;
+      await channel.sendMessage('test@g.us', 'Queued');
+      expect((channel as any).outgoingQueue).toEqual([
+        { jid: 'test@g.us', text: 'Andy: Queued' },
+      ]);
+
+      (channel as any).connected = true;
+      fakeSocket.sendMessage.mockRejectedValueOnce(new Error('flush fail'));
+      await (channel as any).flushOutgoingQueue();
+      expect((channel as any).outgoingQueue).toEqual([
+        { jid: 'test@g.us', text: 'Andy: Queued' },
+      ]);
     });
 
     it('flushes multiple queued messages in order', async () => {
@@ -1032,6 +1064,11 @@ describe('WhatsAppChannel', () => {
     it('owns @s.whatsapp.net JIDs (WhatsApp DMs)', () => {
       const channel = new WhatsAppChannel(createTestOpts());
       expect(channel.ownsJid('12345@s.whatsapp.net')).toBe(true);
+    });
+
+    it('owns @lid JIDs for LID-form chats', () => {
+      const channel = new WhatsAppChannel(createTestOpts());
+      expect(channel.ownsJid('12345@lid')).toBe(true);
     });
 
     it('does not own Telegram JIDs', () => {
