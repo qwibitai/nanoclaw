@@ -141,6 +141,11 @@ export class JsonRpcTransport {
     }
   }
 
+  /** Push events back to the front of the queue (e.g. unconsumed input). */
+  unshift(...events: TransportEvent[]): void {
+    this.eventQueue.unshift(...events);
+  }
+
   sendRequest(method: string, params?: any): PromiseLike<any> {
     return this.serverAndClient.request(method, params);
   }

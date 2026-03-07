@@ -79,6 +79,11 @@ class MessageStream {
     this.waiting?.();
   }
 
+  /** Return any unconsumed messages still in the queue. */
+  remaining(): string[] {
+    return this.queue.splice(0).map(m => m.message.content);
+  }
+
   async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
     while (true) {
       while (this.queue.length > 0) {
@@ -400,6 +405,15 @@ async function runQuery(
 
   draining = false;
   transport.cancelWait();
+
+  // Re-queue any input that drainLoop pushed to stream but the SDK never consumed.
+  // Without this, a follow-up arriving as the query finishes would be silently dropped.
+  const leftover = stream.remaining();
+  if (leftover.length > 0) {
+    log(`Re-queuing ${leftover.length} unconsumed message(s) back to transport`);
+    transport.unshift(...leftover.map(text => ({ type: 'input' as const, text })));
+  }
+
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
