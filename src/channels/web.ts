@@ -29,6 +29,7 @@ import {
 import {
   handleSquareCheckout,
   getAvailabilityBusySlots,
+  handleSquareWebhook,
 } from '../square-payments.js';
 
 export interface WebChannelOpts {
@@ -118,6 +119,25 @@ export class WebChannel implements Channel {
             logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Availability endpoint error');
             res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Internal server error' }));
+          }
+        });
+        return;
+      }
+
+      // ── POST /api/square-webhook — Square payment.completed callback ──
+      if (req.method === 'POST' && url.pathname === '/api/square-webhook') {
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk; });
+        req.on('end', async () => {
+          try {
+            const signature = (req.headers['x-square-hmacsha256-signature'] as string) || '';
+            const ok = await handleSquareWebhook(body, signature);
+            res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ received: ok }));
+          } catch (err) {
+            logger.error({ error: err instanceof Error ? err.message : String(err) }, 'Square webhook endpoint error');
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ received: false }));
           }
         });
         return;
