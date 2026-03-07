@@ -17,6 +17,7 @@ const envConfig = readEnvFile([
   'HAL_WORKSPACE_DIR',
   'OPENCLAW_AUTH_DIR',
   'HAL_ALLOWED_WHATSAPP_SENDER',
+  'WHATSAPP_PAIRING_PHONE',
   'TZ',
   'CC_WEBHOOK_TOKEN',
   'CC_WEBHOOK_HOST',
@@ -85,6 +86,8 @@ export const HAL_ALLOWED_WHATSAPP_SENDER =
   process.env.HAL_ALLOWED_WHATSAPP_SENDER ||
   envConfig.HAL_ALLOWED_WHATSAPP_SENDER ||
   '19493969849@s.whatsapp.net';
+export const WHATSAPP_PAIRING_PHONE =
+  process.env.WHATSAPP_PAIRING_PHONE || envConfig.WHATSAPP_PAIRING_PHONE || '';
 
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';

@@ -48,3 +48,25 @@ Adding a new channel MUST follow the same registration and barrel import pattern
 #### Scenario: Installing a new channel skill
 - **WHEN** a new channel is introduced
 - **THEN** the change adds a `src/channels/<name>.ts` implementation, calls `registerChannel`, and adds the module import to `src/channels/index.ts`
+
+### Requirement: WhatsApp Headless Pairing Artifacts
+The WhatsApp channel MUST persist pairing artifacts for headless setups when authentication is required.
+
+#### Scenario: QR update emitted by Baileys
+- **WHEN** the WhatsApp connection emits a QR update event
+- **THEN** the channel writes QR payload data to `store/qr-data.txt`
+- **AND** if `WHATSAPP_PAIRING_PHONE` is configured, it requests a pairing code and writes it to `store/pairing-code.txt`
+
+### Requirement: WhatsApp Media Message Normalization
+The WhatsApp channel MUST normalize non-text media messages into routable textual content for the runtime router.
+
+#### Scenario: Image or voice note received without caption
+- **WHEN** a registered WhatsApp chat receives an image or voice note that has no text body
+- **THEN** the channel emits an inbound message with stable placeholder content (`[Image]` or `[Voice note]`) so routing and agent invocation remain functional
+
+### Requirement: WhatsApp Reconnect Backoff
+The WhatsApp channel MUST reconnect automatically after transient disconnects using exponential backoff.
+
+#### Scenario: Repeated transient disconnects
+- **WHEN** WhatsApp disconnects for a non-logout reason
+- **THEN** the channel schedules reconnect attempts with increasing delays up to a bounded maximum

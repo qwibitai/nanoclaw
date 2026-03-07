@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import fs from 'fs';
 
 // --- Mocks ---
 
@@ -9,6 +10,7 @@ vi.mock('../config.js', () => ({
   OPENCLAW_AUTH_DIR: '/tmp/openclaw/store/auth',
   ASSISTANT_NAME: 'Andy',
   ASSISTANT_HAS_OWN_NUMBER: false,
+  WHATSAPP_PAIRING_PHONE: '14155551234',
 }));
 
 // Mock logger
@@ -37,6 +39,9 @@ vi.mock('fs', async () => {
       ...actual,
       existsSync: vi.fn(() => true),
       mkdirSync: vi.fn(),
+      writeFileSync: vi.fn(),
+      unlinkSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -62,6 +67,7 @@ function createFakeSocket() {
     sendMessage: vi.fn().mockResolvedValue(undefined),
     sendPresenceUpdate: vi.fn().mockResolvedValue(undefined),
     groupFetchAllParticipating: vi.fn().mockResolvedValue({}),
+    requestPairingCode: vi.fn().mockResolvedValue('123-456'),
     end: vi.fn(),
     // Expose the event emitter for triggering events in tests
     _ev: ev,
@@ -102,6 +108,7 @@ vi.mock('@whiskeysockets/baileys', () => {
 
 import { WhatsAppChannel, WhatsAppChannelOpts } from './whatsapp.js';
 import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
+import { getChannelFactory } from './registry.js';
 
 // --- Test helpers ---
 
@@ -151,6 +158,7 @@ describe('WhatsAppChannel', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -298,16 +306,13 @@ describe('WhatsAppChannel', () => {
   // --- QR code and auth ---
 
   describe('authentication', () => {
-    it('exits process when QR code is emitted (no auth state)', async () => {
+    it('writes QR data and pairing code artifacts for headless auth', async () => {
       vi.useFakeTimers();
-      const mockExit = vi
-        .spyOn(process, 'exit')
-        .mockImplementation(() => undefined as never);
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
-      // Start connect but don't await (it won't resolve - process exits)
+      // Start connect but don't await (it resolves only after connection open)
       channel.connect().catch(() => {});
 
       // Flush microtasks so connectInternal registers handlers
@@ -316,11 +321,28 @@ describe('WhatsAppChannel', () => {
       // Emit QR code event
       fakeSocket._ev.emit('connection.update', { qr: 'some-qr-data' });
 
-      // Advance timer past the 1000ms setTimeout before exit
-      await vi.advanceTimersByTimeAsync(1500);
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/qr-data.txt',
+        'some-qr-data',
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/auth-status.txt',
+        'qr_required',
+      );
 
-      expect(mockExit).toHaveBeenCalledWith(1);
-      mockExit.mockRestore();
+      // Pairing code request is delayed by 3 seconds
+      await vi.advanceTimersByTimeAsync(3000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(fakeSocket.requestPairingCode).toHaveBeenCalledWith('14155551234');
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/pairing-code.txt',
+        '123-456',
+      );
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/auth-status.txt',
+        'pairing_code:123-456',
+      );
       vi.useRealTimers();
     });
   });
@@ -328,7 +350,8 @@ describe('WhatsAppChannel', () => {
   // --- Reconnection behavior ---
 
   describe('reconnection', () => {
-    it('reconnects on non-loggedOut disconnect', async () => {
+    it('schedules reconnect on non-loggedOut disconnect', async () => {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -340,14 +363,10 @@ describe('WhatsAppChannel', () => {
       triggerDisconnect(428);
 
       expect(channel.isConnected()).toBe(false);
-      // The channel should attempt to reconnect (calls connectInternal again)
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
     });
 
-    it('exits on loggedOut disconnect', async () => {
-      const mockExit = vi
-        .spyOn(process, 'exit')
-        .mockImplementation(() => undefined as never);
-
+    it('does not reconnect on loggedOut disconnect', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -357,21 +376,31 @@ describe('WhatsAppChannel', () => {
       triggerDisconnect(401);
 
       expect(channel.isConnected()).toBe(false);
-      expect(mockExit).toHaveBeenCalledWith(0);
-      mockExit.mockRestore();
+      expect((channel as any).reconnectTimer).toBeNull();
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/auth-status.txt',
+        'failed:logged_out',
+      );
     });
 
-    it('retries reconnection after 5s on failure', async () => {
+    it('uses exponential backoff for repeated reconnect attempts', async () => {
+      const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      // Disconnect with stream error 515
-      triggerDisconnect(515);
+      triggerDisconnect(428);
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1000);
+      const firstRetryCallback = setTimeoutSpy.mock.calls.at(-1)?.[0];
+      expect(typeof firstRetryCallback).toBe('function');
+      if (typeof firstRetryCallback === 'function') {
+        firstRetryCallback();
+      }
+      await new Promise((r) => setTimeout(r, 0));
 
-      // The channel sets a 5s retry — just verify it doesn't crash
-      await new Promise((r) => setTimeout(r, 100));
+      triggerDisconnect(428);
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 2000);
     });
   });
 
@@ -548,6 +577,36 @@ describe('WhatsAppChannel', () => {
       );
     });
 
+    it('uses [Image] placeholder when image has no caption', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-6b',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            imageMessage: {
+              mimetype: 'image/jpeg',
+            },
+          },
+          pushName: 'Dana',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ content: '[Image]' }),
+      );
+    });
+
     it('extracts caption from videoMessage', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -576,7 +635,7 @@ describe('WhatsAppChannel', () => {
       );
     });
 
-    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
+    it('uses [Voice note] placeholder for voice notes', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -598,8 +657,10 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Skipped — no text content to process
-      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({ content: '[Voice note]' }),
+      );
     });
 
     it('uses sender JID when pushName is absent', async () => {
@@ -983,6 +1044,10 @@ describe('WhatsAppChannel', () => {
     it('has name "whatsapp"', () => {
       const channel = new WhatsAppChannel(createTestOpts());
       expect(channel.name).toBe('whatsapp');
+    });
+
+    it('registers a WhatsApp factory in the channel registry', () => {
+      expect(getChannelFactory('whatsapp')).toBeDefined();
     });
 
     it('does not expose prefixAssistantName (prefix handled internally)', () => {

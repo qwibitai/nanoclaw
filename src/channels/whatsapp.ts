@@ -17,6 +17,7 @@ import {
   ASSISTANT_NAME,
   OPENCLAW_AUTH_DIR,
   STORE_DIR,
+  WHATSAPP_PAIRING_PHONE,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
@@ -29,6 +30,28 @@ import {
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const INITIAL_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+const QR_FILE = path.join(STORE_DIR, 'qr-data.txt');
+const PAIRING_CODE_FILE = path.join(STORE_DIR, 'pairing-code.txt');
+const AUTH_STATUS_FILE = path.join(STORE_DIR, 'auth-status.txt');
+
+function writeArtifact(filePath: string, content: string): void {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content);
+  } catch (err) {
+    logger.warn({ err, filePath }, 'Failed to write WhatsApp auth artifact');
+  }
+}
+
+function removeArtifact(filePath: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // no-op
+  }
+}
 
 function maybeSeedAuthFromOpenClaw(authDir: string): void {
   const localCreds = path.join(authDir, 'creds.json');
@@ -67,6 +90,10 @@ export class WhatsAppChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private groupSyncTimerStarted = false;
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private manualDisconnect = false;
+  private pairingCodeRequested = false;
 
   private opts: WhatsAppChannelOpts;
 
@@ -75,6 +102,7 @@ export class WhatsAppChannel implements Channel {
   }
 
   async connect(): Promise<void> {
+    this.manualDisconnect = false;
     return new Promise<void>((resolve, reject) => {
       this.connectInternal(resolve).catch(reject);
     });
@@ -82,8 +110,10 @@ export class WhatsAppChannel implements Channel {
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
     const authDir = path.join(STORE_DIR, 'auth');
+    fs.mkdirSync(STORE_DIR, { recursive: true });
     maybeSeedAuthFromOpenClaw(authDir);
     fs.mkdirSync(authDir, { recursive: true });
+    this.pairingCodeRequested = false;
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
@@ -109,15 +139,16 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
+        writeArtifact(QR_FILE, qr);
+        writeArtifact(AUTH_STATUS_FILE, 'qr_required');
+        const msg = `WhatsApp authentication required. QR data saved to ${QR_FILE}`;
+        logger.warn(msg);
         if (process.platform === 'darwin') {
           exec(
             `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
           );
         }
-        setTimeout(() => process.exit(1), 1000);
+        this.requestPairingCode();
       }
 
       if (connection === 'close') {
@@ -125,7 +156,8 @@ export class WhatsAppChannel implements Channel {
         const reason = (
           lastDisconnect?.error as { output?: { statusCode?: number } }
         )?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const shouldReconnect =
+          !this.manualDisconnect && reason !== DisconnectReason.loggedOut;
         logger.info(
           {
             reason,
@@ -136,21 +168,20 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.scheduleReconnect();
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+          if (reason === DisconnectReason.loggedOut) {
+            writeArtifact(AUTH_STATUS_FILE, 'failed:logged_out');
+            logger.info('Logged out. Run /setup to re-authenticate.');
+          }
         }
       } else if (connection === 'open') {
         this.connected = true;
+        this.reconnectAttempts = 0;
+        this.clearReconnectTimer();
+        writeArtifact(AUTH_STATUS_FILE, 'authenticated');
+        removeArtifact(QR_FILE);
+        removeArtifact(PAIRING_CODE_FILE);
         logger.info('Connected to WhatsApp');
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
@@ -201,11 +232,6 @@ export class WhatsAppChannel implements Channel {
       for (const msg of messages) {
         try {
           if (!msg.message) continue;
-          // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
-          // editedMessage, etc.) so that conversation, extendedTextMessage,
-          // imageMessage, etc. are accessible at the top level.
-          const normalized = normalizeMessageContent(msg.message);
-          if (!normalized) continue;
           const rawJid = msg.key.remoteJid;
           if (!rawJid || rawJid === 'status@broadcast') continue;
 
@@ -229,12 +255,7 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
-              normalized.conversation ||
-              normalized.extendedTextMessage?.text ||
-              normalized.imageMessage?.caption ||
-              normalized.videoMessage?.caption ||
-              '';
+            const content = this.extractMessageContent(msg.message);
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;
@@ -311,6 +332,8 @@ export class WhatsAppChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    this.manualDisconnect = true;
+    this.clearReconnectTimer();
     this.connected = false;
     this.sock?.end(undefined);
   }
@@ -418,6 +441,90 @@ export class WhatsAppChannel implements Channel {
     } finally {
       this.flushing = false;
     }
+  }
+
+  private extractMessageContent(message: unknown): string {
+    const normalized = normalizeMessageContent(
+      message as Parameters<typeof normalizeMessageContent>[0],
+    );
+    if (!normalized) return '';
+
+    const text =
+      normalized.conversation || normalized.extendedTextMessage?.text || '';
+    if (text) return text;
+
+    if (normalized.imageMessage) {
+      return normalized.imageMessage.caption || '[Image]';
+    }
+    if (normalized.videoMessage) {
+      return normalized.videoMessage.caption || '[Video]';
+    }
+    if (normalized.audioMessage) {
+      return normalized.audioMessage.ptt ? '[Voice note]' : '[Audio]';
+    }
+    if (normalized.documentMessage) {
+      const fileName = normalized.documentMessage.fileName;
+      return fileName ? `[Document: ${fileName}]` : '[Document]';
+    }
+    if (normalized.stickerMessage) {
+      return '[Sticker]';
+    }
+
+    return '';
+  }
+
+  private scheduleReconnect(): void {
+    if (this.manualDisconnect) return;
+    if (this.reconnectTimer) return;
+
+    const attempt = this.reconnectAttempts + 1;
+    const delayMs = Math.min(
+      MAX_RECONNECT_DELAY_MS,
+      INITIAL_RECONNECT_DELAY_MS * 2 ** this.reconnectAttempts,
+    );
+    this.reconnectAttempts = attempt;
+
+    logger.info({ attempt, delayMs }, 'Scheduling WhatsApp reconnect');
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connectInternal().catch((err) => {
+        logger.error({ err, attempt }, 'Reconnect attempt failed');
+        this.scheduleReconnect();
+      });
+    }, delayMs);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private requestPairingCode(): void {
+    if (!WHATSAPP_PAIRING_PHONE || this.pairingCodeRequested) return;
+    this.pairingCodeRequested = true;
+
+    setTimeout(() => {
+      this.sock
+        .requestPairingCode(WHATSAPP_PAIRING_PHONE)
+        .then((code) => {
+          writeArtifact(PAIRING_CODE_FILE, code);
+          writeArtifact(AUTH_STATUS_FILE, `pairing_code:${code}`);
+          logger.info(
+            {
+              pairingPhone: WHATSAPP_PAIRING_PHONE,
+              pairingCodeFile: PAIRING_CODE_FILE,
+            },
+            'WhatsApp pairing code generated for headless auth',
+          );
+        })
+        .catch((err) => {
+          this.pairingCodeRequested = false;
+          logger.warn({ err }, 'Failed to request WhatsApp pairing code');
+        });
+    }, 3000);
   }
 }
 
