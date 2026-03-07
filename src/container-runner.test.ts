@@ -27,6 +27,11 @@ vi.mock('./logger.js', () => ({
   },
 }));
 
+// Mock os
+vi.mock('os', () => ({
+  default: { homedir: vi.fn(() => '/home/testuser') },
+}));
+
 // Mock fs
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
@@ -82,6 +87,7 @@ vi.mock('child_process', async () => {
   };
 });
 
+import fs from 'fs';
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
@@ -199,5 +205,87 @@ describe('container-runner timeout behavior', () => {
     const result = await resultPromise;
     expect(result.status).toBe('success');
     expect(result.newSessionId).toBe('session-456');
+  });
+});
+
+// Helper: collect everything written to stdin before the container closes
+async function captureStdinPayload(
+  group: RegisteredGroup,
+  input: Parameters<typeof runContainerAgent>[1],
+): Promise<Record<string, unknown>> {
+  let stdinData = '';
+  fakeProc.stdin.on('data', (chunk: Buffer) => {
+    stdinData += chunk.toString();
+  });
+
+  const resultPromise = runContainerAgent(group, { ...input }, () => {});
+  fakeProc.emit('close', 0);
+  await resultPromise;
+
+  return JSON.parse(stdinData);
+}
+
+describe('readSecrets — OAuth token resolution', () => {
+  const credPath = '/home/testuser/.claude/.credentials.json';
+  const futureExpiry = Date.now() + 3600_000;
+  const pastExpiry = Date.now() - 3600_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fakeProc = createFakeProcess();
+    // Default: no .env content, no credentials file
+    vi.mocked(fs.readFileSync).mockReturnValue('');
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('uses token from credentials.json when .env has a stale token', async () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath).endsWith('.env')) return 'CLAUDE_CODE_OAUTH_TOKEN=stale-token';
+      if (String(filePath) === credPath)
+        return JSON.stringify({ claudeAiOauth: { accessToken: 'fresh-token', expiresAt: futureExpiry } });
+      return '';
+    });
+
+    const payload = await captureStdinPayload(testGroup, testInput);
+    expect(payload.secrets).toEqual(expect.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: 'fresh-token' }));
+  });
+
+  it('falls back to .env when credentials.json is missing', async () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath).endsWith('.env')) return 'CLAUDE_CODE_OAUTH_TOKEN=env-token';
+      if (String(filePath) === credPath) throw new Error('ENOENT');
+      return '';
+    });
+
+    const payload = await captureStdinPayload(testGroup, testInput);
+    expect(payload.secrets).toEqual(expect.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: 'env-token' }));
+  });
+
+  it('falls back to .env when credentials.json token is expired', async () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath).endsWith('.env')) return 'CLAUDE_CODE_OAUTH_TOKEN=env-token';
+      if (String(filePath) === credPath)
+        return JSON.stringify({ claudeAiOauth: { accessToken: 'expired-token', expiresAt: pastExpiry } });
+      return '';
+    });
+
+    const payload = await captureStdinPayload(testGroup, testInput);
+    expect(payload.secrets).toEqual(expect.objectContaining({ CLAUDE_CODE_OAUTH_TOKEN: 'env-token' }));
+  });
+
+  it('skips credentials.json entirely when ANTHROPIC_API_KEY is set', async () => {
+    const credReadSpy = vi.fn();
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (String(filePath).endsWith('.env')) return 'ANTHROPIC_API_KEY=sk-ant-key';
+      if (String(filePath) === credPath) { credReadSpy(); return '{}'; }
+      return '';
+    });
+
+    await captureStdinPayload(testGroup, testInput);
+    expect(credReadSpy).not.toHaveBeenCalled();
   });
 });

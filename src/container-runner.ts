@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -178,12 +179,57 @@ function buildVolumeMounts(
   return mounts;
 }
 
+interface ClaudeCredentials {
+  claudeAiOauth?: {
+    accessToken?: string;
+    expiresAt?: number;
+  };
+}
+
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
+ * Try to get a fresh OAuth token from ~/.claude/.credentials.json.
+ * Claude Code keeps this file up to date automatically, so it will always
+ * have a newer token than whatever was written to .env at setup time.
+ * Returns null if the file is missing, unreadable, or the token is expired.
+ */
+function getFreshOAuthToken(): string | null {
+  try {
+    const credPath = path.join(os.homedir(), '.claude', '.credentials.json');
+    const raw = fs.readFileSync(credPath, 'utf-8');
+    const creds: ClaudeCredentials = JSON.parse(raw);
+    const token = creds.claudeAiOauth?.accessToken;
+    const expiresAt = creds.claudeAiOauth?.expiresAt;
+    if (!token) return null;
+    if (expiresAt != null && Date.now() >= expiresAt) {
+      logger.warn(
+        { expiresAt },
+        'OAuth token in ~/.claude/.credentials.json is expired — falling back to .env',
+      );
+      return null;
+    }
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read allowed secrets for passing to the container via stdin.
+ * Prefers the OAuth token from ~/.claude/.credentials.json (kept fresh by
+ * Claude Code) over the potentially stale token in .env. Falls back to .env
+ * for all values if no credentials file is found.
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  // Only attempt credentials.json refresh when using OAuth (not API key)
+  if (!secrets['ANTHROPIC_API_KEY']) {
+    const freshToken = getFreshOAuthToken();
+    if (freshToken) {
+      secrets['CLAUDE_CODE_OAUTH_TOKEN'] = freshToken;
+    }
+  }
+  return secrets;
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
