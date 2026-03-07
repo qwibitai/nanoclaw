@@ -56,3 +56,17 @@ NEVER use markdown. Only use WhatsApp/Telegram formatting:
 - ```triple backticks``` for code
 
 No ## headings. No [links](url). No **double stars**.
+
+## Obsidian Vault
+
+You have read-write access to the user's Obsidian vault at `/workspace/extra/obsidian-vault`. This is a shared knowledge base — the same vault the user sees in Obsidian on their Mac and iPhone (synced via Obsidian Sync).
+
+- Notes are plain markdown files (`.md`)
+- Folders organise topics
+- Use `[[wikilinks]]` to link between notes
+- Use `#tags` for categorisation
+- Frontmatter (YAML between `---` delimiters) is supported for metadata
+- The vault is live: changes you make appear in the user's Obsidian immediately
+- Notes can be created directly in `/workspace/extra/obsidian-vault/` or in subfolders as appropriate
+
+When the user asks you to take notes, remember something long-term, or work on the knowledge base, use the vault.
