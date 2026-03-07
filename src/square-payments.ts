@@ -175,7 +175,7 @@ function logMissedBooking(info: MissedBookingInfo): void {
   }
 }
 
-/** Normalize phone to E.164 for Square (strips non-digits, prepends +1 if needed) */function normalizePhone(phone: string): string {  const digits = phone.replace(/D/g, '');  if (digits.length === 10) return '+1' + digits;  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;  if (phone.startsWith('+')) return phone;  return '+1' + digits;}
+/** Normalize phone to E.164 for Square (strips non-digits, prepends +1 if needed) */function normalizePhone(phone: string): string {  const digits = phone.replace(/\D/g, '');  if (digits.length === 10) return '+1' + digits;  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;  if (phone.startsWith('+')) return phone;  return '+1' + digits;}
 function generateBookingId(): string {
   return 'SR-' + crypto.randomBytes(4).toString('hex').toUpperCase();
 }
@@ -910,7 +910,7 @@ export async function getAvailabilityBusySlots(
   try {
     const db = getDb();
     const rows = db.prepare(
-      `SELECT dates FROM bookings WHERE equipment = ? AND status = 'confirmed'`,
+      `SELECT dates FROM bookings WHERE equipment = ? AND status IN ('pending', 'confirmed')`,
     ).all(equipmentKey) as { dates: string }[];
 
     for (const row of rows) {
