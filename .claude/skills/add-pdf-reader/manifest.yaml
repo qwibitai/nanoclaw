@@ -1,0 +1,17 @@
+skill: add-pdf-reader
+version: 1.1.0
+description: "Add PDF reading capability to container agents via pdftotext CLI"
+core_version: 1.2.8
+adds:
+  - container/skills/pdf-reader/SKILL.md
+  - container/skills/pdf-reader/pdf-reader
+modifies:
+  - container/Dockerfile
+  - src/channels/whatsapp.ts
+  - src/channels/whatsapp.test.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-pdf-reader/tests/pdf-reader.test.ts"

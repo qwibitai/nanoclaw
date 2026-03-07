@@ -394,6 +394,64 @@ describe('task CRUD', () => {
   });
 });
 
+// --- LIMIT behavior ---
+
+describe('message query LIMIT', () => {
+  beforeEach(() => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    for (let i = 1; i <= 10; i++) {
+      store({
+        id: `lim-${i}`,
+        chat_jid: 'group@g.us',
+        sender: 'user@s.whatsapp.net',
+        sender_name: 'User',
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, '0')}.000Z`,
+      });
+    }
+  });
+
+  it('getNewMessages caps to limit and returns most recent in chronological order', () => {
+    const { messages, newTimestamp } = getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      3,
+    );
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toBe('message 8');
+    expect(messages[2].content).toBe('message 10');
+    // Chronological order preserved
+    expect(messages[1].timestamp > messages[0].timestamp).toBe(true);
+    // newTimestamp reflects latest returned row
+    expect(newTimestamp).toBe('2024-01-01T00:00:10.000Z');
+  });
+
+  it('getMessagesSince caps to limit and returns most recent in chronological order', () => {
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      3,
+    );
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toBe('message 8');
+    expect(messages[2].content).toBe('message 10');
+    expect(messages[1].timestamp > messages[0].timestamp).toBe(true);
+  });
+
+  it('returns all messages when count is under the limit', () => {
+    const { messages } = getNewMessages(
+      ['group@g.us'],
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+      50,
+    );
+    expect(messages).toHaveLength(10);
+  });
+});
+
 // --- RegisteredGroup isMain round-trip ---
 
 describe('registered group isMain', () => {
