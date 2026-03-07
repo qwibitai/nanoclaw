@@ -9,9 +9,11 @@ import { readEnvFile } from './env.js';
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
+  'HIPPOCAMPUS_URL',
   'HIPPOCAMPUS_API_URL',
   'HIPPOCAMPUS_BUDGET_TOKENS',
   'HIPPOCAMPUS_TOP_K',
+  'HIPPOCAMPUS_MIN_SCORE',
   'HIPPOCAMPUS_ENABLED',
   'NO_TRIGGER_REQUIRED_IN_DMS',
   'HAL_WORKSPACE_DIR',
@@ -140,13 +142,15 @@ export const TRIGGER_PATTERN = new RegExp(
 // Defaults to Hal's home timezone; can be overridden via TZ.
 export const TIMEZONE = process.env.TZ || envConfig.TZ || 'America/Los_Angeles';
 
-const DEFAULT_HIPPOCAMPUS_PORT =
-  process.env.HIPPOCAMPUS_PORT || process.env.PORT || '8000';
+const DEFAULT_HIPPOCAMPUS_URL = 'http://localhost:3600';
 
-export const HIPPOCAMPUS_API_URL =
+export const HIPPOCAMPUS_URL =
+  process.env.HIPPOCAMPUS_URL ||
+  envConfig.HIPPOCAMPUS_URL ||
   process.env.HIPPOCAMPUS_API_URL ||
   envConfig.HIPPOCAMPUS_API_URL ||
-  `http://localhost:${DEFAULT_HIPPOCAMPUS_PORT}`;
+  DEFAULT_HIPPOCAMPUS_URL;
+export const HIPPOCAMPUS_API_URL = HIPPOCAMPUS_URL;
 export const HIPPOCAMPUS_BUDGET_TOKENS = Math.max(
   256,
   parseInt(
@@ -162,6 +166,17 @@ export const HIPPOCAMPUS_TOP_K = Math.max(
     process.env.HIPPOCAMPUS_TOP_K || envConfig.HIPPOCAMPUS_TOP_K || '10',
     10,
   ) || 10,
+);
+export const HIPPOCAMPUS_MIN_SCORE = Math.min(
+  1,
+  Math.max(
+    0,
+    parseFloat(
+      process.env.HIPPOCAMPUS_MIN_SCORE ||
+        envConfig.HIPPOCAMPUS_MIN_SCORE ||
+        '0',
+    ) || 0,
+  ),
 );
 export const HIPPOCAMPUS_ENABLED =
   (process.env.HIPPOCAMPUS_ENABLED ||

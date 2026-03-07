@@ -75,9 +75,10 @@ Key Hippocampus settings in `src/config.ts`:
 - `OPENCLAW_AUTH_DIR` — `~/.openclaw/store/auth` (reuse existing WhatsApp credentials)
 - `HAL_WORKSPACE_DIR` — `~/.openclaw/workspace` (mount SOUL.md, AGENTS.md, MEMORY.md)
 - `HAL_ALLOWED_WHATSAPP_SENDER` — `19493969849@s.whatsapp.net` (Adam allowlist)
-- `HIPPOCAMPUS_API_URL` — defaults to `http://localhost:${HIPPOCAMPUS_PORT || PORT || 8000}`
+- `HIPPOCAMPUS_URL` — defaults to `http://localhost:3600` (`HIPPOCAMPUS_API_URL` is still accepted as a legacy alias)
 - `HIPPOCAMPUS_BUDGET_TOKENS` — 4096
 - `HIPPOCAMPUS_TOP_K` — 10
+- `HIPPOCAMPUS_MIN_SCORE` — 0
 - `HIPPOCAMPUS_ENABLED` — default `true`
 - `DEEP_THINKING_SCHEDULE` — ["10:00", "18:00"]
 - `CC_WEBHOOK_TOKEN` — shared secret for Command Center webhook authentication

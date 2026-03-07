@@ -2,6 +2,7 @@ import {
   HIPPOCAMPUS_API_URL,
   HIPPOCAMPUS_BUDGET_TOKENS,
   HIPPOCAMPUS_ENABLED,
+  HIPPOCAMPUS_MIN_SCORE,
   HIPPOCAMPUS_TOP_K,
 } from './config.js';
 import { logger } from './logger.js';
@@ -12,8 +13,10 @@ const TOKEN_TO_CHAR_ESTIMATE = 4;
 const MIN_QUERY_TOKEN_LENGTH = 3;
 const MAX_QUERY_TERMS = 32;
 const WARN_THROTTLE_MS = 60_000;
+const RECALL_CACHE_TTL_MS = 30_000;
+const RECALL_CACHE_MAX_ENTRIES = 256;
 
-const RECALL_ENDPOINTS = ['/recall', '/api/recall', '/v1/recall'];
+const RECALL_ENDPOINT = '/api/recall';
 const EPISODE_ENDPOINTS = [
   '/episodes/extract',
   '/api/episodes/extract',
@@ -68,6 +71,8 @@ export interface RecalledMemory {
   text: string;
   score?: number;
   source?: string;
+  from?: number;
+  to?: number;
   createdAt?: string;
   metadata?: Record<string, unknown>;
 }
@@ -88,16 +93,15 @@ export interface EpisodeExtractionArgs {
   messages?: NewMessage[];
 }
 
-interface RecallRequest {
-  query: string;
-  chatJid: string;
-  groupFolder: string;
-  sessionId?: string;
-  messages: Array<{ sender: string; content: string; timestamp: string }>;
+interface RecallCacheEntry {
+  recallBlock: string;
+  expiresAt: number;
 }
 
+const recallTurnCache = new Map<string, RecallCacheEntry>();
+
 export function extractQueryTerms(messages: NewMessage[]): string {
-  const context = selectRecallContext(messages);
+  const context = selectUserRecallContext(messages);
   if (context.length === 0) return '';
 
   const scores = new Map<string, number>();
@@ -145,8 +149,7 @@ export function buildRecallBlock(
 
   const maxChars = Math.max(1024, budgetTokens * TOKEN_TO_CHAR_ESTIMATE);
   const lines = [
-    '<RECALL>',
-    '## RECALL',
+    '## RECALL.md',
     `Generated: ${new Date().toISOString()}`,
     `Query: ${query}`,
     'Use these memories as context hints. Prefer current conversation details when conflict exists.',
@@ -161,11 +164,12 @@ export function buildRecallBlock(
       typeof memory.score === 'number'
         ? ` (score ${memory.score.toFixed(3)})`
         : '';
+    const sourceRef = formatSourceReference(memory);
 
     const entry = [
       `### Memory ${i + 1}${headingScore}`,
       truncate(memory.text, 800),
-      memory.source ? `Source: ${memory.source}` : '',
+      sourceRef ? `Source: ${sourceRef}` : '',
       memory.createdAt ? `Timestamp: ${memory.createdAt}` : '',
       '',
     ]
@@ -183,11 +187,7 @@ export function buildRecallBlock(
     out += `${entry}\n`;
   }
 
-  if (out.length + '</RECALL>'.length + 1 > maxChars) {
-    out = truncate(out, maxChars - '</RECALL>'.length - 1);
-  }
-
-  return `${out}</RECALL>`;
+  return truncate(out.trimEnd(), maxChars);
 }
 
 export async function injectRecallBlock(
@@ -199,35 +199,28 @@ export async function injectRecallBlock(
   const query = extractQueryTerms(args.messages);
   if (!query) return args.prompt;
 
-  try {
-    const recallRequest: RecallRequest = {
-      query,
-      chatJid: args.chatJid,
-      groupFolder: args.groupFolder,
-      sessionId: args.sessionId,
-      messages: selectRecallContext(args.messages).map((m) => ({
-        sender: m.sender_name,
-        content: truncate(m.content, 1200),
-        timestamp: m.timestamp,
-      })),
-    };
+  const cacheKey = buildRecallCacheKey(args, query);
+  const cachedRecall = readRecallFromCache(cacheKey);
+  if (cachedRecall !== undefined) {
+    return cachedRecall ? `${cachedRecall}\n\n${args.prompt}` : args.prompt;
+  }
 
-    const response = await postWithEndpointFallback(
-      HIPPOCAMPUS_API_URL,
-      RECALL_ENDPOINTS,
+  try {
+    const response = await postJson(
+      toUrl(HIPPOCAMPUS_API_URL, RECALL_ENDPOINT),
       {
         query,
         topK: HIPPOCAMPUS_TOP_K,
-        top_k: HIPPOCAMPUS_TOP_K,
-        budgetTokens: HIPPOCAMPUS_BUDGET_TOKENS,
-        budget_tokens: HIPPOCAMPUS_BUDGET_TOKENS,
-        context: recallRequest,
+        minScore: HIPPOCAMPUS_MIN_SCORE,
       },
       fetchImpl,
     );
 
     const memories = normalizeMemories(response).slice(0, HIPPOCAMPUS_TOP_K);
-    if (memories.length === 0) return args.prompt;
+    if (memories.length === 0) {
+      writeRecallToCache(cacheKey, '');
+      return args.prompt;
+    }
 
     const recallBlock = buildRecallBlock(
       query,
@@ -235,6 +228,7 @@ export async function injectRecallBlock(
       HIPPOCAMPUS_BUDGET_TOKENS,
     );
 
+    writeRecallToCache(cacheKey, recallBlock);
     if (!recallBlock) return args.prompt;
     return `${recallBlock}\n\n${args.prompt}`;
   } catch (err) {
@@ -288,6 +282,22 @@ export async function extractEpisodeAtBoundary(
   }
 }
 
+function selectUserRecallContext(messages: NewMessage[]): NewMessage[] {
+  const nonEmpty = messages.filter(
+    (m) => m.content && m.content.trim().length > 0,
+  );
+  if (nonEmpty.length === 0) return [];
+
+  const userMessages = nonEmpty.filter(
+    (m) => m.is_from_me !== true && m.is_bot_message !== true,
+  );
+  const source = userMessages.length > 0 ? userMessages : nonEmpty;
+
+  const last = source[source.length - 1];
+  const prior = source.slice(Math.max(0, source.length - 4), source.length - 1);
+  return [...prior, last];
+}
+
 function selectRecallContext(messages: NewMessage[]): NewMessage[] {
   const nonEmpty = messages.filter(
     (m) => m.content && m.content.trim().length > 0,
@@ -300,6 +310,81 @@ function selectRecallContext(messages: NewMessage[]): NewMessage[] {
     nonEmpty.length - 1,
   );
   return [...prior, last];
+}
+
+function buildRecallCacheKey(args: RecallInjectionArgs, query: string): string {
+  const context = selectUserRecallContext(args.messages);
+  const contextIds = context
+    .map((m) => `${m.id}:${m.timestamp}`)
+    .join('|')
+    .slice(0, 512);
+
+  return [
+    args.chatJid,
+    args.groupFolder,
+    args.sessionId || '',
+    query,
+    contextIds,
+  ].join('::');
+}
+
+function readRecallFromCache(cacheKey: string): string | undefined {
+  const entry = recallTurnCache.get(cacheKey);
+  if (!entry) return undefined;
+
+  if (entry.expiresAt <= Date.now()) {
+    recallTurnCache.delete(cacheKey);
+    return undefined;
+  }
+
+  return entry.recallBlock;
+}
+
+function writeRecallToCache(cacheKey: string, recallBlock: string): void {
+  pruneRecallCache();
+  recallTurnCache.set(cacheKey, {
+    recallBlock,
+    expiresAt: Date.now() + RECALL_CACHE_TTL_MS,
+  });
+
+  if (recallTurnCache.size <= RECALL_CACHE_MAX_ENTRIES) return;
+  const oldestKey = recallTurnCache.keys().next().value as string | undefined;
+  if (oldestKey) recallTurnCache.delete(oldestKey);
+}
+
+function pruneRecallCache(): void {
+  if (recallTurnCache.size === 0) return;
+
+  const now = Date.now();
+  for (const [key, value] of recallTurnCache.entries()) {
+    if (value.expiresAt <= now) {
+      recallTurnCache.delete(key);
+    }
+  }
+}
+
+async function postJson(
+  url: string,
+  payload: unknown,
+  fetchImpl: typeof fetch,
+): Promise<unknown> {
+  const response = await fetchImpl(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hippocampus API error ${response.status} (${url})`);
+  }
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return { results: [] };
+  }
+
+  return response.json();
 }
 
 async function postWithEndpointFallback(
@@ -374,6 +459,10 @@ function normalizeMemory(value: unknown): RecalledMemory | null {
 
   if (!value || typeof value !== 'object') return null;
   const obj = value as Record<string, unknown>;
+  const metadata =
+    obj.metadata && typeof obj.metadata === 'object'
+      ? (obj.metadata as Record<string, unknown>)
+      : undefined;
 
   const text =
     pickString(obj, [
@@ -397,12 +486,7 @@ function normalizeMemory(value: unknown): RecalledMemory | null {
 
   const source =
     pickString(obj, ['source', 'origin']) ||
-    (obj.metadata && typeof obj.metadata === 'object'
-      ? pickString(obj.metadata as Record<string, unknown>, [
-          'source',
-          'origin',
-        ])
-      : undefined);
+    (metadata ? pickString(metadata, ['source', 'origin']) : undefined);
 
   const createdAt = pickString(obj, [
     'createdAt',
@@ -411,16 +495,27 @@ function normalizeMemory(value: unknown): RecalledMemory | null {
     'time',
     'updatedAt',
   ]);
+  const from = toLineNumber(
+    pickNumber(obj, ['from', 'fromLine', 'lineStart', 'start']) ||
+      (metadata
+        ? pickNumber(metadata, ['from', 'fromLine', 'lineStart', 'start'])
+        : undefined),
+  );
+  const to = toLineNumber(
+    pickNumber(obj, ['to', 'toLine', 'lineEnd', 'end']) ||
+      (metadata
+        ? pickNumber(metadata, ['to', 'toLine', 'lineEnd', 'end'])
+        : undefined),
+  );
 
   return {
     text: trimmed,
     score,
     source,
+    from,
+    to,
     createdAt,
-    metadata:
-      obj.metadata && typeof obj.metadata === 'object'
-        ? (obj.metadata as Record<string, unknown>)
-        : undefined,
+    metadata,
   };
 }
 
@@ -452,6 +547,24 @@ function pickNumber(
     }
   }
   return undefined;
+}
+
+function toLineNumber(value: number | undefined): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const normalized = Math.floor(value);
+  return normalized >= 1 ? normalized : undefined;
+}
+
+function formatSourceReference(memory: RecalledMemory): string | undefined {
+  if (!memory.source) return undefined;
+
+  if (typeof memory.from === 'number' && typeof memory.to === 'number') {
+    const maxTo = Math.max(memory.from, memory.to);
+    return `${memory.source}:${memory.from}-${maxTo}`;
+  }
+  if (typeof memory.from === 'number') return `${memory.source}:${memory.from}`;
+  if (typeof memory.to === 'number') return `${memory.source}:${memory.to}`;
+  return memory.source;
 }
 
 function toUrl(baseUrl: string, endpoint: string): string {
