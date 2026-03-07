@@ -2,7 +2,7 @@ import express from 'express';
 import { executePermission, processWebhook } from 'corsair';
 
 import { corsair, db } from './corsair.js';
-import { routeToListeners, writeIpcMessage } from './corsair-mcp.js';
+import { writeIpcMessage } from './corsair-mcp.js';
 import { MAIN_GROUP_FOLDER, WEBHOOK_LISTENER_PORT } from './config.js';
 import { getAllRegisteredGroups } from './db.js';
 import { logger } from './logger.js';
@@ -88,18 +88,8 @@ export function startCorsairWebhookServer(port: number): void {
         res.status(404).json({ success: false, message: 'No matching webhook handler found' });
       }
 
-      // Route to listeners asynchronously — never blocks the HTTP response
-      // and never causes a 500 if listener routing fails
+      // Forward to the webhook listener server (SQLite-backed listeners)
       if (webhookResponse.plugin) {
-        routeToListeners(
-          webhookResponse.plugin,
-          webhookResponse.action ?? '',
-          webhookResponse,
-        ).catch((err) =>
-          logger.error({ err, plugin: webhookResponse.plugin }, 'Webhook listener routing error'),
-        );
-
-        // Also forward to the webhook listener server (SQLite-based listeners)
         fetch(`http://localhost:${WEBHOOK_LISTENER_PORT}/webhook`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
