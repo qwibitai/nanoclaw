@@ -207,17 +207,22 @@ function readAgentRunnerSyncMetadata(
   if (!fs.existsSync(metadataPath)) return null;
 
   try {
-    const raw = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Partial<
-      AgentRunnerSourceSyncMetadata
-    >;
+    const raw = JSON.parse(
+      fs.readFileSync(metadataPath, 'utf8'),
+    ) as Partial<AgentRunnerSourceSyncMetadata>;
     if (typeof raw.baselineHash !== 'string') return null;
     return {
       baselineHash: raw.baselineHash,
       syncedAt:
-        typeof raw.syncedAt === 'string' ? raw.syncedAt : new Date(0).toISOString(),
+        typeof raw.syncedAt === 'string'
+          ? raw.syncedAt
+          : new Date(0).toISOString(),
     };
   } catch (err) {
-    logger.warn({ err, metadataPath }, 'Failed to read agent-runner sync metadata');
+    logger.warn(
+      { err, metadataPath },
+      'Failed to read agent-runner sync metadata',
+    );
     return null;
   }
 }

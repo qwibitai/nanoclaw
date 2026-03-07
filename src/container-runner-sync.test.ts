@@ -42,25 +42,34 @@ describe('syncAgentRunnerSource', () => {
   });
 
   it('copies repo source and writes sync metadata for a new staged directory', () => {
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const v = 1;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const v = 1;\n',
+    );
 
     syncAgentRunnerSource(repoSrc, stagedDir, metadataPath);
 
     expect(
       fs.readFileSync(path.join(stagedDir, 'ipc-mcp-stdio.ts'), 'utf8'),
     ).toBe('export const v = 1;\n');
-    const metadata = JSON.parse(
-      fs.readFileSync(metadataPath, 'utf8'),
-    ) as { baselineHash?: string };
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as {
+      baselineHash?: string;
+    };
     expect(typeof metadata.baselineHash).toBe('string');
     expect(metadata.baselineHash).toHaveLength(64);
   });
 
   it('refreshes staged source when it still matches the previously synced baseline', () => {
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const v = 1;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const v = 1;\n',
+    );
     syncAgentRunnerSource(repoSrc, stagedDir, metadataPath);
 
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const v = 2;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const v = 2;\n',
+    );
     syncAgentRunnerSource(repoSrc, stagedDir, metadataPath);
 
     expect(
@@ -69,14 +78,20 @@ describe('syncAgentRunnerSource', () => {
   });
 
   it('preserves locally customized staged source when repo baseline drifts', () => {
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const repo = 1;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const repo = 1;\n',
+    );
     syncAgentRunnerSource(repoSrc, stagedDir, metadataPath);
 
     writeTextFile(
       path.join(stagedDir, 'ipc-mcp-stdio.ts'),
       'export const local = true;\n',
     );
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const repo = 2;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const repo = 2;\n',
+    );
 
     syncAgentRunnerSource(repoSrc, stagedDir, metadataPath);
 
@@ -92,7 +107,10 @@ describe('syncAgentRunnerSource', () => {
   });
 
   it('backs up and resets legacy staged source that has no sync metadata', () => {
-    writeTextFile(path.join(repoSrc, 'ipc-mcp-stdio.ts'), 'export const repo = 2;\n');
+    writeTextFile(
+      path.join(repoSrc, 'ipc-mcp-stdio.ts'),
+      'export const repo = 2;\n',
+    );
     writeTextFile(
       path.join(stagedDir, 'ipc-mcp-stdio.ts'),
       'export const legacy = true;\n',
