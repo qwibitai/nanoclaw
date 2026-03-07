@@ -42,7 +42,8 @@ export function parseIdentityMarkdown(content: string): AgentIdentity {
     const raw = cleaned.slice(colonIdx + 1).trim();
     const value = raw.replace(/^[*_]+|[*_]+$/g, '').trim();
 
-    if (!value || IDENTITY_PLACEHOLDERS.has(normalizePlaceholderCheck(value))) continue;
+    if (!value || IDENTITY_PLACEHOLDERS.has(normalizePlaceholderCheck(value)))
+      continue;
 
     if (label === 'name') identity.name = value;
     else if (label === 'emoji') identity.emoji = value;
