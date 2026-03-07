@@ -53,75 +53,123 @@ describe('manifest', () => {
   it('throws on missing skill field', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      version: '1.0.0', core_version: '1.0.0', adds: [], modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow();
   });
 
   it('throws on missing version field', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', core_version: '1.0.0', adds: [], modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow();
   });
 
   it('throws on missing core_version field', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', adds: [], modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        adds: [],
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow();
   });
 
   it('throws on missing adds field', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', core_version: '1.0.0', modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow();
   });
 
   it('throws on missing modifies field', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', core_version: '1.0.0', adds: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow();
   });
 
   it('throws on path traversal in adds', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', core_version: '1.0.0',
-      adds: ['../etc/passwd'], modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: ['../etc/passwd'],
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow('Invalid path');
   });
 
   it('throws on path traversal in modifies', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', core_version: '1.0.0',
-      adds: [], modifies: ['../../secret.ts'],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: ['../../secret.ts'],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow('Invalid path');
   });
 
   it('throws on absolute path in adds', () => {
     const dir = path.join(tmpDir, 'bad-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test', version: '1.0.0', core_version: '1.0.0',
-      adds: ['/etc/passwd'], modifies: [],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: ['/etc/passwd'],
+        modifies: [],
+      }),
+    );
     expect(() => readManifest(dir)).toThrow('Invalid path');
   });
 
@@ -230,18 +278,21 @@ describe('manifest', () => {
   it('parses new optional fields (author, license, etc)', () => {
     const dir = path.join(tmpDir, 'full-pkg');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
-      adds: [],
-      modifies: [],
-      author: 'tester',
-      license: 'MIT',
-      min_skills_system_version: '0.1.0',
-      tested_with: ['telegram', 'discord'],
-      post_apply: ['echo done'],
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: [],
+        author: 'tester',
+        license: 'MIT',
+        min_skills_system_version: '0.1.0',
+        tested_with: ['telegram', 'discord'],
+        post_apply: ['echo done'],
+      }),
+    );
     const manifest = readManifest(dir);
     expect(manifest.author).toBe('tester');
     expect(manifest.license).toBe('MIT');
@@ -266,14 +317,17 @@ describe('manifest', () => {
   it('checkSystemVersion passes when engine is new enough', () => {
     const dir = path.join(tmpDir, 'sys-ok');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
-      adds: [],
-      modifies: [],
-      min_skills_system_version: '0.1.0',
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: [],
+        min_skills_system_version: '0.1.0',
+      }),
+    );
     const manifest = readManifest(dir);
     const result = checkSystemVersion(manifest);
     expect(result.ok).toBe(true);
@@ -282,14 +336,17 @@ describe('manifest', () => {
   it('checkSystemVersion fails when engine is too old', () => {
     const dir = path.join(tmpDir, 'sys-fail');
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'manifest.yaml'), stringify({
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
-      adds: [],
-      modifies: [],
-      min_skills_system_version: '99.0.0',
-    }));
+    fs.writeFileSync(
+      path.join(dir, 'manifest.yaml'),
+      stringify({
+        skill: 'test',
+        version: '1.0.0',
+        core_version: '1.0.0',
+        adds: [],
+        modifies: [],
+        min_skills_system_version: '99.0.0',
+      }),
+    );
     const manifest = readManifest(dir);
     const result = checkSystemVersion(manifest);
     expect(result.ok).toBe(false);

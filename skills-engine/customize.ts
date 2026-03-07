@@ -5,7 +5,11 @@ import path from 'path';
 import { parse, stringify } from 'yaml';
 
 import { BASE_DIR, CUSTOM_DIR } from './constants.js';
-import { computeFileHash, readState, recordCustomModification } from './state.js';
+import {
+  computeFileHash,
+  readState,
+  recordCustomModification,
+} from './state.js';
 
 interface PendingCustomize {
   description: string;
@@ -76,7 +80,9 @@ export function commitCustomize(): void {
   }
 
   if (changedFiles.length === 0) {
-    console.log('No files changed during customize session. Nothing to commit.');
+    console.log(
+      'No files changed during customize session. Nothing to commit.',
+    );
     fs.unlinkSync(pendingPath);
     return;
   }
@@ -104,7 +110,9 @@ export function commitCustomize(): void {
         // diff exits 1 when files differ — that's expected
         combinedPatch += execErr.stdout;
       } else if (execErr.status === 2) {
-        throw new Error(`diff error for ${relativePath}: diff exited with status 2 (check file permissions or encoding)`);
+        throw new Error(
+          `diff error for ${relativePath}: diff exited with status 2 (check file permissions or encoding)`,
+        );
       } else {
         throw err;
       }
