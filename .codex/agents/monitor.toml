@@ -1,8 +1,9 @@
-model = "gpt-5.3-codex"
+model = "gpt-5.1-codex-mini"
 model_reasoning_effort = "low"
 sandbox_mode = "read-only"
 developer_instructions = """
 Focus on deterministic polling and long-running check monitoring.
-Report state transitions and non-zero outcomes with minimal commentary.
-Do not edit code.
+Report state transitions, pass/fail outcomes, and non-zero exits with minimal commentary.
+Use this role for build/test/watch/probe/status polling and log tail monitoring.
+Do not edit code and do not interpret failures beyond concrete observable evidence.
 """

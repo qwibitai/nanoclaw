@@ -25,6 +25,7 @@ If any command fails, capture exact output and continue via issue category below
 | Symptom | Primary Path |
 |---------|--------------|
 | Runtime not responding, CLI hangs, container state mismatch | Runtime health + recovery |
+| WhatsApp `conflict` / `connectionReplaced` after restart | Runtime ownership + session isolation |
 | Worker dispatch/probe failures | Connectivity + trace path |
 | Auth/session failures | Auth + session path |
 | Mount/permission/config failures | Mount + config path |
@@ -56,6 +57,20 @@ Interpretation rule:
 
 - Old `ERR_FS_CP_EINVAL` or `No channel for JID` lines elsewhere in the historical log are not enough to reopen the incident.
 - Require a fresh post-restart occurrence or a current PID-scoped log hit.
+
+Runtime ownership check:
+
+```bash
+bash scripts/jarvis-ops.sh preflight
+bash scripts/jarvis-ops.sh reliability
+sqlite3 store/messages.db "SELECT owner_name, owner_mode, pid, heartbeat_at, claimed_by FROM runtime_owners;"
+```
+
+Interpretation rule:
+
+- `runtime_owners` must show exactly one active `host` owner.
+- Launchd `com.nanoclaw` is the normal owner. `manual` ownership should appear only for deliberate local development runs.
+- If WhatsApp reports `connectionReplaced` and `runtime_owners` points to a different live PID, stop the extra manual host instead of retrying reconnect loops.
 
 ## 2) Worker Connectivity + Dispatch Failures
 

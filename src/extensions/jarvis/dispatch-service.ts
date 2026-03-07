@@ -55,6 +55,11 @@ export interface WorkerDispatchQueueDecision {
   attemptId?: string;
 }
 
+export interface WorkerSessionSelection {
+  selectedSessionId?: string;
+  source: 'explicit' | 'auto_repo_branch' | 'new';
+}
+
 export function buildDispatchBlockedMessage(event: DispatchBlockEvent): string {
   if (event.reason_code === 'duplicate_run_id') {
     return [
@@ -129,6 +134,38 @@ export function canJarvisDispatchToTarget(
   }
 
   return false;
+}
+
+export function selectWorkerSessionForDispatch(
+  groupFolder: string,
+  payload: {
+    context_intent: 'continue' | 'fresh';
+    session_id?: string;
+    repo: string;
+    branch: string;
+  },
+): WorkerSessionSelection | null {
+  if (payload.context_intent === 'fresh') {
+    return { source: 'new' };
+  }
+
+  if (payload.session_id) {
+    return { selectedSessionId: payload.session_id, source: 'explicit' };
+  }
+
+  const reusable = getLatestReusableWorkerSession(
+    groupFolder,
+    payload.repo,
+    payload.branch,
+  );
+  if (!reusable?.effective_session_id) {
+    return null;
+  }
+
+  return {
+    selectedSessionId: reusable.effective_session_id,
+    source: 'auto_repo_branch',
+  };
 }
 
 function validateWorkerSessionRouting(

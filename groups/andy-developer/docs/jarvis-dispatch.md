@@ -161,3 +161,44 @@ queued -> running -> review_requested
 ## Retry Semantics
 
 Re-send the same `run_id` only when status is `failed` or `failed_contract`.
+
+If a worker run already reached `review_requested`, any follow-up rework must:
+
+1. keep the same `request_id`
+2. create a new child `run_id`
+3. set `parent_run_id` to the reviewed run
+4. use `context_intent: "continue"`
+5. reuse the same worker session when available
+
+For small review-only deltas, Andy should patch directly on the same worker branch instead of dispatching another worker run.
+
+## Review Ownership
+
+When a worker run reaches `review_requested`, NanoClaw sends Andy an internal:
+
+```xml
+<review_request>
+{ ... }
+</review_request>
+```
+
+Andy must immediately take ownership of the linked `request_id` and choose one path:
+
+1. `approve`
+2. `andy_patch`
+3. `rework`
+
+Use hidden state markers so the host can track review progress deterministically:
+
+```xml
+<review_state_update>
+{"request_id":"req-...","state":"review_in_progress","summary":"Reviewing worker artifacts"}
+</review_state_update>
+```
+
+Allowed `state` values:
+
+- `review_in_progress`
+- `andy_patch_in_progress`
+- `completed`
+- `failed`

@@ -35,10 +35,19 @@ import { registerChannel } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+export interface WhatsAppCloseContext {
+  reason?: number;
+  queuedMessages: number;
+  defaultShouldReconnect: boolean;
+}
+
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onConnectionClose?: (
+    ctx: WhatsAppCloseContext,
+  ) => Promise<'stop_reconnect' | void> | 'stop_reconnect' | void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -184,7 +193,7 @@ export class WhatsAppChannel implements Channel {
     });
     this.sock = sock;
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
       if (generation !== this.socketGeneration) return;
       const { connection, lastDisconnect, qr } = update;
 
@@ -207,16 +216,27 @@ export class WhatsAppChannel implements Channel {
         this.reconnectCloseEvents.push(nowMs);
         this.pruneReconnectCloseEvents(nowMs);
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        const closeAction = await this.opts.onConnectionClose?.({
+          reason,
+          queuedMessages: this.outgoingQueue.length,
+          defaultShouldReconnect: shouldReconnect,
+        });
         logger.info(
           {
             reason,
             shouldReconnect,
+            closeAction: closeAction || 'default',
             queuedMessages: this.outgoingQueue.length,
           },
           'Connection closed',
         );
 
-        if (shouldReconnect) {
+        if (closeAction === 'stop_reconnect') {
+          logger.warn(
+            { reason, queuedMessages: this.outgoingQueue.length },
+            'Connection close handled externally; skipping reconnect',
+          );
+        } else if (shouldReconnect) {
           logger.info('Reconnecting...');
           this.scheduleReconnect();
         } else {

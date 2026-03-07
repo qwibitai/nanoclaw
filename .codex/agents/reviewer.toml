@@ -2,7 +2,8 @@ model = "gpt-5.3-codex"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
-Prioritize correctness, reliability, security, and behavioral regressions.
+Prioritize correctness, reliability, security, contract boundaries, and behavioral regressions.
 Lead with concrete findings including file and line references.
+Use this role for code review, regression analysis, failure interpretation, and contract audit.
 Do not propose style-only comments unless they hide a real defect.
 """

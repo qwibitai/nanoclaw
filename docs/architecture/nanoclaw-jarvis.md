@@ -36,7 +36,7 @@ Core files should call these modules, not re-own Jarvis workflow policy.
 |------|---------|------|
 | Main orchestration | NanoClaw Node.js process | Poll messages, route by group, enforce queueing and run-state updates |
 | Andy-bot (observer) | `nanoclaw-agent` container | Monitor, summarize, triage, GitHub research on `openclaw-gurusharan`, hand off to Andy-developer |
-| Andy-Developer (lead) | `nanoclaw-agent` container | Planning, dispatching, review, rework instructions |
+| Andy-Developer (lead) | `nanoclaw-agent` container | Planning, dispatching, review ownership, bounded review-time patches, rework instructions |
 | Jarvis worker (`jarvis-worker-*`) | `nanoclaw-worker` container | Bounded execution only (implement/fix/test/etc.) |
 
 ## Worker Routing
@@ -64,6 +64,23 @@ queued -> running -> review_requested
 - `run_id` is canonical and must be provided by dispatcher.
 - Same `run_id` is idempotent: duplicate execution is blocked unless retrying from `failed`/`failed_contract`.
 - Completion contract gates transition to `review_requested`.
+
+## Request Review Lifecycle
+
+`andy_requests` now has an explicit review-owned path after worker completion:
+
+```text
+queued_for_coordinator -> coordinator_active -> worker_queued -> worker_running
+                                             -> worker_review_requested -> review_in_progress -> completed
+                                                                                       -> andy_patch_in_progress -> completed
+                                                                                       -> worker_queued (rework dispatch)
+                                                                                       -> failed
+```
+
+- Accepted worker completion auto-enqueues an internal Andy `<review_request>` trigger.
+- Andy owns the request end-to-end once review starts.
+- Small review-only deltas may be patched directly by Andy on the same worker branch.
+- Larger follow-up changes must be redispatched as a new child `run_id` on the same `request_id`.
 
 ## Invariants (P0)
 

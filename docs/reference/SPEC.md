@@ -534,10 +534,11 @@ NanoClaw runs as a single macOS launchd service.
 
 When NanoClaw starts, it:
 
-1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
-2. Initializes the SQLite database (migrates from JSON files if they exist)
-3. Loads state from SQLite (registered groups, sessions, router state)
-4. Connects to WhatsApp (on `connection.open`):
+1. Initializes the SQLite database (migrates from JSON files if they exist)
+2. Claims runtime ownership in SQLite (`runtime_owners`) before connecting channels or replaying work
+3. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
+4. Loads state from SQLite (registered groups, sessions, router state)
+5. Connects to WhatsApp (on `connection.open`):
    - Starts the scheduler loop
    - Starts the IPC watcher for container messages
    - Sets up the per-group queue with `processGroupMessages`
@@ -574,6 +575,10 @@ When NanoClaw starts, it:
         <string>{{HOME}}</string>
         <key>ASSISTANT_NAME</key>
         <string>Andy</string>
+        <key>NANOCLAW_RUNTIME_OWNER_MODE</key>
+        <string>service</string>
+        <key>NANOCLAW_LAUNCHD_LABEL</key>
+        <string>com.nanoclaw</string>
     </dict>
     <key>StandardOutPath</key>
     <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>
@@ -601,6 +606,14 @@ launchctl list | grep nanoclaw
 # View logs
 tail -f logs/nanoclaw.log
 ```
+
+### Runtime Ownership Contract
+
+- Launchd `com.nanoclaw` is the default runtime owner.
+- Ownership is recorded in `runtime_owners` with heartbeat, pid, mode, and `claimed_by`.
+- Manual local runs must be explicit and use manual mode (`npm run dev` or `npm start`).
+- If another healthy owner exists, startup fails fast instead of sharing the same WhatsApp/auth state.
+- On WhatsApp `connectionReplaced`, NanoClaw checks `runtime_owners` and exits rather than entering reconnect churn when another live owner is present.
 
 ---
 
@@ -678,6 +691,6 @@ Run manually for verbose output:
 
 ```bash
 npm run dev
-# or
-node dist/index.js
 ```
+
+`npm run dev` and `npm start` set `NANOCLAW_RUNTIME_OWNER_MODE=manual`. Do not use raw `node dist/index.js` as the normal operator path; it bypasses the explicit owner-mode convention.

@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-06T18:27:07.324Z
+Generated: 2026-03-07T18:58:50.793Z
 Project: nanoclaw
 
 ## Features
@@ -21,6 +21,7 @@ Project: nanoclaw
   - src/routing.test.ts
 - Shared Files:
   - src/config.ts
+  - src/group-queue.ts
   - src/index.ts
   - src/router.ts
 - Suggested Verify:
@@ -39,6 +40,7 @@ Project: nanoclaw
 - Tests (1):
   - src/channels/whatsapp.test.ts
 - Shared Files:
+  - src/channels/whatsapp.ts
   - src/config.ts
   - src/types.ts
 - Validation Warnings:
@@ -61,6 +63,7 @@ Project: nanoclaw
   - src/ipc-auth.test.ts
   - src/jarvis-worker-dispatch.test.ts
 - Shared Files:
+  - groups/andy-developer/docs/jarvis-dispatch.md
   - src/dispatch-validator.ts
   - src/event-bridge.ts
   - src/ipc.ts
@@ -88,6 +91,38 @@ Project: nanoclaw
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts
+
+### runtime-ownership-isolation - Runtime Ownership Isolation
+- Risk: high
+- Summary: Single active NanoClaw host ownership, heartbeat/lease tracking, and service-vs-manual session isolation to prevent WhatsApp conflict churn.
+- Keywords: runtime ownership, session isolation, launchd, whatsapp conflict, single owner, manual override
+- Files (11):
+  - docs/architecture/nanoclaw-system-architecture.md
+  - docs/reference/SPEC.md
+  - docs/workflow/nanoclaw-container-debugging.md
+  - launchd/com.nanoclaw.plist
+  - scripts/jarvis-preflight.sh
+  - scripts/jarvis-reliability.sh
+  - src/channels/whatsapp.ts
+  - src/config.ts
+  - src/db.ts
+  - src/index.ts
+  - src/runtime-ownership.ts
+- Tests (3):
+  - src/channels/whatsapp.test.ts
+  - src/db.test.ts
+  - src/runtime-ownership.test.ts
+- Shared Files:
+  - docs/architecture/nanoclaw-system-architecture.md
+  - scripts/jarvis-preflight.sh
+  - scripts/jarvis-reliability.sh
+  - src/channels/whatsapp.ts
+  - src/config.ts
+  - src/db.ts
+  - src/index.ts
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/channels/whatsapp.test.ts src/db.test.ts src/runtime-ownership.test.ts
 
 ### task-scheduling - Task Scheduling
 - Risk: medium
@@ -164,6 +199,7 @@ Project: nanoclaw
   - src/jarvis-worker-dispatch.test.ts
   - src/worker-run-supervisor.test.ts
 - Shared Files:
+  - groups/andy-developer/CLAUDE.md
   - src/dispatch-validator.ts
   - src/ipc.ts
   - src/worker-run-supervisor.ts
@@ -211,29 +247,89 @@ Project: nanoclaw
 - Risk: high
 - Summary: Explicit Jarvis extension modules, lane identity, and dispatch-attempt state extracted out of NanoClaw core control files.
 - Keywords: jarvis extension, lane id, dispatch attempts, andy frontdesk, synthetic worker, architecture
-- Files (11):
+- Files (15):
   - docs/architecture/nanoclaw-jarvis.md
   - docs/architecture/nanoclaw-system-architecture.md
   - src/db.ts
   - src/extensions/jarvis/dispatch-service.ts
   - src/extensions/jarvis/frontdesk-service.ts
   - src/extensions/jarvis/index.ts
+  - src/extensions/jarvis/lane-control-service.test.ts
+  - src/extensions/jarvis/lane-control-service.ts
   - src/extensions/jarvis/lanes.ts
   - src/extensions/jarvis/request-state-service.ts
+  - src/group-queue.test.ts
+  - src/group-queue.ts
   - src/index.ts
   - src/ipc.ts
   - src/types.ts
-- Tests (2):
+- Tests (4):
+  - src/extensions/jarvis/lane-control-service.test.ts
+  - src/group-queue.test.ts
   - src/ipc-auth.test.ts
   - src/jarvis-worker-dispatch.test.ts
 - Shared Files:
+  - docs/architecture/nanoclaw-jarvis.md
+  - docs/architecture/nanoclaw-system-architecture.md
   - src/db.ts
+  - src/extensions/jarvis/frontdesk-service.ts
+  - src/extensions/jarvis/request-state-service.ts
+  - src/group-queue.ts
   - src/index.ts
   - src/ipc.ts
   - src/types.ts
 - Suggested Verify:
   - npm run typecheck
-  - npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
+  - npx vitest run src/extensions/jarvis/lane-control-service.test.ts src/group-queue.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts
+
+### andy-review-ownership - Andy Review Ownership
+- Risk: high
+- Summary: Auto-triggered review workflow for Andy-developer, including review-state progression, bounded direct review patches, and rework lineage.
+- Keywords: andy review, review requested, review trigger, direct patch, rework lineage, request state
+- Files (11):
+  - docs/architecture/nanoclaw-jarvis.md
+  - docs/workflow/nanoclaw-jarvis-dispatch-contract.md
+  - groups/andy-developer/CLAUDE.md
+  - groups/andy-developer/docs/github.md
+  - groups/andy-developer/docs/jarvis-dispatch.md
+  - groups/jarvis-worker-1/docs/workflow/worker-skill-policy.md
+  - groups/jarvis-worker-2/docs/workflow/worker-skill-policy.md
+  - src/db.ts
+  - src/extensions/jarvis/frontdesk-service.ts
+  - src/extensions/jarvis/request-state-service.ts
+  - src/index.ts
+- Tests (3):
+  - src/db.test.ts
+  - src/extensions/jarvis/frontdesk-service.test.ts
+  - src/jarvis-worker-dispatch.test.ts
+- Shared Files:
+  - docs/architecture/nanoclaw-jarvis.md
+  - groups/andy-developer/CLAUDE.md
+  - groups/andy-developer/docs/jarvis-dispatch.md
+  - src/db.ts
+  - src/extensions/jarvis/frontdesk-service.ts
+  - src/extensions/jarvis/request-state-service.ts
+  - src/index.ts
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/db.test.ts src/extensions/jarvis/frontdesk-service.test.ts src/jarvis-worker-dispatch.test.ts
+
+### andy-request-admin-cleanup - Andy Request Admin Cleanup
+- Risk: medium
+- Summary: Administrative cleanup tooling for stale non-terminal Andy requests, including dry-run inspection and explicit archival/closure.
+- Keywords: andy requests, stale request cleanup, archive requests, cancel stale requests, admin command, testing backlog
+- Files (3):
+  - .claude/progress/feature-catalog.seed.json
+  - scripts/jarvis-ops.sh
+  - scripts/jarvis-reconcile-stale-andy-requests.sh
+- Tests (1):
+  - src/jarvis-reconcile-stale-andy-requests.test.ts
+- Shared Files:
+  - .claude/progress/feature-catalog.seed.json
+  - scripts/jarvis-ops.sh
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/jarvis-reconcile-stale-andy-requests.test.ts
 
 ### architecture-boundary-governance - Architecture Boundary Governance
 - Risk: high
@@ -309,6 +405,9 @@ Project: nanoclaw
 - Shared Files:
   - scripts/jarvis-happiness-gate.sh
   - scripts/jarvis-incident.sh
+  - scripts/jarvis-ops.sh
+  - scripts/jarvis-preflight.sh
+  - scripts/jarvis-reliability.sh
   - scripts/jarvis-worker-probe.sh
 - Suggested Verify:
   - npm run typecheck

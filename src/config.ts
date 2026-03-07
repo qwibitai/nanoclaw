@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 
 import { readEnvFile } from './env.js';
+import type { RuntimeOwnerMode } from './types.js';
 
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
@@ -69,7 +70,7 @@ export const ENABLE_DYNAMIC_GROUP_REGISTRATION = envBool(
 );
 export const ENABLE_CONTROL_PLANE_SNAPSHOTS = envBool(
   process.env.NANOCLAW_ENABLE_CONTROL_PLANE_SNAPSHOTS,
-  RUNTIME_OPS_EXTENDED,
+  true,
 );
 
 export const CONTAINER_IMAGE =
@@ -130,6 +131,29 @@ export const WA_RECONNECT_COOLDOWN_MS = parseInt(
   process.env.WA_RECONNECT_COOLDOWN_MS || '60000',
   10,
 );
+const rawRuntimeOwnerMode = (
+  process.env.NANOCLAW_RUNTIME_OWNER_MODE || 'service'
+)
+  .trim()
+  .toLowerCase();
+export const RUNTIME_OWNER_MODE: RuntimeOwnerMode =
+  rawRuntimeOwnerMode === 'service' ? 'service' : 'manual';
+export const RUNTIME_OWNER_ALLOW_TAKEOVER = envBool(
+  process.env.NANOCLAW_RUNTIME_ALLOW_TAKEOVER,
+  false,
+);
+export const RUNTIME_OWNER_NAME =
+  process.env.NANOCLAW_RUNTIME_OWNER_NAME || 'host';
+export const RUNTIME_OWNER_HEARTBEAT_MS = parseInt(
+  process.env.NANOCLAW_RUNTIME_OWNER_HEARTBEAT_MS || '5000',
+  10,
+);
+export const RUNTIME_OWNER_STALE_MS = parseInt(
+  process.env.NANOCLAW_RUNTIME_OWNER_STALE_MS || '20000',
+  10,
+);
+export const RUNTIME_OWNER_LAUNCHD_LABEL =
+  process.env.NANOCLAW_LAUNCHD_LABEL || 'com.nanoclaw';
 export const SHUTDOWN_DRAIN_MS = parseInt(
   process.env.SHUTDOWN_DRAIN_MS || '600000',
   10,

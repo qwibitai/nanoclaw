@@ -120,6 +120,29 @@ Implementation and review can be assigned to either tool, but lifecycle is ident
 
 See `docs/operations/claude-codex-adapter-matrix.md`.
 
+### Codex Default Lane Policy
+
+When Codex is the primary orchestrator for this repo:
+
+1. Main lane defaults to `gpt-5.3-codex` with `high` reasoning effort.
+2. `explorer` and `monitor` are lower-cost helper lanes for read-heavy and deterministic work.
+3. `worker` is the only write-enabled helper lane and must stay scoped to the approved touch-set.
+4. `reviewer` handles correctness, regression, and contract-risk analysis with file/line evidence.
+5. `gpt-5.4` at `xhigh` is an escalation-only profile for cross-system ambiguity, giant-context synthesis, or repeated failed loops.
+6. Claude consult remains an escalation lane, not a routine second-review default.
+
+### Delegation Payoff Rule
+
+Codex should not use subagents for their own sake.
+
+Delegate only when at least one is true:
+
+1. The main lane has parallel work to do while the helper lane runs.
+2. The helper lane will return a materially better artifact than a direct main-lane pass.
+3. The task is long-running or noisy enough that isolating it improves focus in the main lane.
+
+If none of those are true, keep the work in the main lane.
+
 ## Exit Criteria
 
 A task is done when all are true:

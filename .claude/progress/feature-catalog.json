@@ -2,18 +2,19 @@
   "schema_version": 1,
   "project": "nanoclaw",
   "maintainer": "andy-developer",
-  "generated_at": "2026-03-06T18:27:07.324Z",
+  "generated_at": "2026-03-07T18:58:50.793Z",
   "source_seed": ".claude/progress/feature-catalog.seed.json",
   "stats": {
-    "feature_count": 22,
-    "high_risk_count": 14,
-    "shared_file_count": 16,
+    "feature_count": 25,
+    "high_risk_count": 16,
+    "shared_file_count": 27,
     "missing_ref_count": 4
   },
   "file_owners": {
     "src/config.ts": [
       "core-message-loop",
       "whatsapp-channel",
+      "runtime-ownership-isolation",
       "config-env",
       "forked-worker-runtime-restore"
     ],
@@ -21,21 +22,25 @@
       "core-message-loop"
     ],
     "src/group-queue.ts": [
-      "core-message-loop"
+      "core-message-loop",
+      "jarvis-extension-boundary"
     ],
     "src/index.ts": [
       "core-message-loop",
+      "runtime-ownership-isolation",
       "task-scheduling",
       "database-state",
       "forked-worker-runtime-restore",
-      "jarvis-extension-boundary"
+      "jarvis-extension-boundary",
+      "andy-review-ownership"
     ],
     "src/router.ts": [
       "core-message-loop",
       "routing-formatting"
     ],
     "src/channels/whatsapp.ts": [
-      "whatsapp-channel"
+      "whatsapp-channel",
+      "runtime-ownership-isolation"
     ],
     "src/types.ts": [
       "whatsapp-channel",
@@ -47,7 +52,8 @@
       "whatsapp-channel"
     ],
     "groups/andy-developer/docs/jarvis-dispatch.md": [
-      "ipc-dispatch-contract"
+      "ipc-dispatch-contract",
+      "andy-review-ownership"
     ],
     "src/dispatch-validator.ts": [
       "ipc-dispatch-contract",
@@ -79,19 +85,129 @@
       "jarvis-worker-lifecycle",
       "forked-worker-runtime-restore"
     ],
-    "src/task-scheduler.ts": [
-      "task-scheduling"
+    "docs/architecture/nanoclaw-system-architecture.md": [
+      "runtime-ownership-isolation",
+      "jarvis-extension-boundary"
+    ],
+    "docs/reference/SPEC.md": [
+      "runtime-ownership-isolation"
+    ],
+    "docs/workflow/nanoclaw-container-debugging.md": [
+      "runtime-ownership-isolation"
+    ],
+    "launchd/com.nanoclaw.plist": [
+      "runtime-ownership-isolation"
+    ],
+    "scripts/jarvis-preflight.sh": [
+      "runtime-ownership-isolation",
+      "ops-reliability-tooling"
+    ],
+    "scripts/jarvis-reliability.sh": [
+      "runtime-ownership-isolation",
+      "ops-reliability-tooling"
     ],
     "src/db.ts": [
+      "runtime-ownership-isolation",
       "database-state",
       "forked-worker-runtime-restore",
-      "jarvis-extension-boundary"
+      "jarvis-extension-boundary",
+      "andy-review-ownership"
+    ],
+    "src/runtime-ownership.ts": [
+      "runtime-ownership-isolation"
+    ],
+    "src/task-scheduler.ts": [
+      "task-scheduling"
     ],
     "src/env.ts": [
       "config-env"
     ],
     "groups/andy-developer/CLAUDE.md": [
-      "jarvis-worker-lifecycle"
+      "jarvis-worker-lifecycle",
+      "andy-review-ownership"
+    ],
+    "scripts/jarvis-incident.sh": [
+      "forked-worker-runtime-restore",
+      "ops-reliability-tooling"
+    ],
+    "scripts/jarvis-worker-probe.sh": [
+      "forked-worker-runtime-restore",
+      "ops-reliability-tooling"
+    ],
+    "docs/architecture/nanoclaw-jarvis.md": [
+      "jarvis-extension-boundary",
+      "andy-review-ownership"
+    ],
+    "src/extensions/jarvis/dispatch-service.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/frontdesk-service.ts": [
+      "jarvis-extension-boundary",
+      "andy-review-ownership"
+    ],
+    "src/extensions/jarvis/index.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/lane-control-service.test.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/lane-control-service.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/lanes.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "src/extensions/jarvis/request-state-service.ts": [
+      "jarvis-extension-boundary",
+      "andy-review-ownership"
+    ],
+    "src/group-queue.test.ts": [
+      "jarvis-extension-boundary"
+    ],
+    "docs/workflow/nanoclaw-jarvis-dispatch-contract.md": [
+      "andy-review-ownership"
+    ],
+    "groups/andy-developer/docs/github.md": [
+      "andy-review-ownership"
+    ],
+    "groups/jarvis-worker-1/docs/workflow/worker-skill-policy.md": [
+      "andy-review-ownership"
+    ],
+    "groups/jarvis-worker-2/docs/workflow/worker-skill-policy.md": [
+      "andy-review-ownership"
+    ],
+    ".claude/progress/feature-catalog.seed.json": [
+      "andy-request-admin-cleanup",
+      "architecture-boundary-governance",
+      "feature-tracking-pipeline"
+    ],
+    "scripts/jarvis-ops.sh": [
+      "andy-request-admin-cleanup",
+      "ops-reliability-tooling"
+    ],
+    "scripts/jarvis-reconcile-stale-andy-requests.sh": [
+      "andy-request-admin-cleanup"
+    ],
+    "AGENTS.md": [
+      "architecture-boundary-governance"
+    ],
+    "CLAUDE.md": [
+      "architecture-boundary-governance"
+    ],
+    "DOCS.md": [
+      "architecture-boundary-governance"
+    ],
+    "docs/ARCHITECTURE.md": [
+      "architecture-boundary-governance"
+    ],
+    "docs/README.md": [
+      "architecture-boundary-governance"
+    ],
+    "scripts/check-architecture-boundary.sh": [
+      "architecture-boundary-governance"
+    ],
+    "scripts/check-workflow-contracts.sh": [
+      "architecture-boundary-governance"
     ],
     "scripts/jarvis-incident.sh": [
       "forked-worker-runtime-restore",
@@ -191,16 +307,7 @@
     "scripts/jarvis-incident-bundle.sh": [
       "ops-reliability-tooling"
     ],
-    "scripts/jarvis-ops.sh": [
-      "ops-reliability-tooling"
-    ],
-    "scripts/jarvis-preflight.sh": [
-      "ops-reliability-tooling"
-    ],
     "scripts/jarvis-recover.sh": [
-      "ops-reliability-tooling"
-    ],
-    "scripts/jarvis-reliability.sh": [
       "ops-reliability-tooling"
     ],
     "scripts/jarvis-smoke.sh": [
@@ -394,6 +501,7 @@
       "missing_tests": [],
       "shared_files": [
         "src/config.ts",
+        "src/group-queue.ts",
         "src/index.ts",
         "src/router.ts"
       ],
@@ -401,7 +509,7 @@
         "npm run typecheck",
         "npx vitest run src/group-folder.test.ts src/group-queue.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "whatsapp-channel",
@@ -428,6 +536,7 @@
       ],
       "missing_tests": [],
       "shared_files": [
+        "src/channels/whatsapp.ts",
         "src/config.ts",
         "src/types.ts"
       ],
@@ -435,7 +544,7 @@
         "npm run typecheck",
         "npx vitest run src/channels/whatsapp.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "ipc-dispatch-contract",
@@ -462,6 +571,7 @@
       "missing_files": [],
       "missing_tests": [],
       "shared_files": [
+        "groups/andy-developer/docs/jarvis-dispatch.md",
         "src/dispatch-validator.ts",
         "src/event-bridge.ts",
         "src/ipc.ts"
@@ -470,7 +580,7 @@
         "npm run typecheck",
         "npx vitest run src/extensions/jarvis/frontdesk-service.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "container-runtime",
@@ -505,7 +615,55 @@
         "npm run typecheck",
         "npx vitest run src/container-runner.test.ts src/container-runtime.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
+    },
+    {
+      "id": "runtime-ownership-isolation",
+      "name": "Runtime Ownership Isolation",
+      "summary": "Single active NanoClaw host ownership, heartbeat/lease tracking, and service-vs-manual session isolation to prevent WhatsApp conflict churn.",
+      "risk": "high",
+      "keywords": [
+        "runtime ownership",
+        "session isolation",
+        "launchd",
+        "whatsapp conflict",
+        "single owner",
+        "manual override"
+      ],
+      "files": [
+        "docs/architecture/nanoclaw-system-architecture.md",
+        "docs/reference/SPEC.md",
+        "docs/workflow/nanoclaw-container-debugging.md",
+        "launchd/com.nanoclaw.plist",
+        "scripts/jarvis-preflight.sh",
+        "scripts/jarvis-reliability.sh",
+        "src/channels/whatsapp.ts",
+        "src/config.ts",
+        "src/db.ts",
+        "src/index.ts",
+        "src/runtime-ownership.ts"
+      ],
+      "tests": [
+        "src/channels/whatsapp.test.ts",
+        "src/db.test.ts",
+        "src/runtime-ownership.test.ts"
+      ],
+      "missing_files": [],
+      "missing_tests": [],
+      "shared_files": [
+        "docs/architecture/nanoclaw-system-architecture.md",
+        "scripts/jarvis-preflight.sh",
+        "scripts/jarvis-reliability.sh",
+        "src/channels/whatsapp.ts",
+        "src/config.ts",
+        "src/db.ts",
+        "src/index.ts"
+      ],
+      "suggested_verify_commands": [
+        "npm run typecheck",
+        "npx vitest run src/channels/whatsapp.test.ts src/db.test.ts src/runtime-ownership.test.ts"
+      ],
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "task-scheduling",
@@ -533,7 +691,7 @@
         "npm run typecheck",
         "npx vitest run src/task-scheduler.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "database-state",
@@ -562,7 +720,7 @@
         "npm run typecheck",
         "npx vitest run src/db.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "config-env",
@@ -587,7 +745,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "routing-formatting",
@@ -617,7 +775,7 @@
         "npm run typecheck",
         "npx vitest run src/formatting.test.ts src/routing.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "jarvis-worker-lifecycle",
@@ -646,6 +804,7 @@
       "missing_files": [],
       "missing_tests": [],
       "shared_files": [
+        "groups/andy-developer/CLAUDE.md",
         "src/dispatch-validator.ts",
         "src/ipc.ts",
         "src/worker-run-supervisor.ts"
@@ -654,7 +813,7 @@
         "npm run typecheck",
         "npx vitest run src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "forked-worker-runtime-restore",
@@ -706,7 +865,7 @@
         "npm run typecheck",
         "npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts src/worker-run-supervisor.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "jarvis-extension-boundary",
@@ -728,29 +887,121 @@
         "src/extensions/jarvis/dispatch-service.ts",
         "src/extensions/jarvis/frontdesk-service.ts",
         "src/extensions/jarvis/index.ts",
+        "src/extensions/jarvis/lane-control-service.test.ts",
+        "src/extensions/jarvis/lane-control-service.ts",
         "src/extensions/jarvis/lanes.ts",
         "src/extensions/jarvis/request-state-service.ts",
+        "src/group-queue.test.ts",
+        "src/group-queue.ts",
         "src/index.ts",
         "src/ipc.ts",
         "src/types.ts"
       ],
       "tests": [
+        "src/extensions/jarvis/lane-control-service.test.ts",
+        "src/group-queue.test.ts",
         "src/ipc-auth.test.ts",
         "src/jarvis-worker-dispatch.test.ts"
       ],
       "missing_files": [],
       "missing_tests": [],
       "shared_files": [
+        "docs/architecture/nanoclaw-jarvis.md",
+        "docs/architecture/nanoclaw-system-architecture.md",
         "src/db.ts",
+        "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/request-state-service.ts",
+        "src/group-queue.ts",
         "src/index.ts",
         "src/ipc.ts",
         "src/types.ts"
       ],
       "suggested_verify_commands": [
         "npm run typecheck",
-        "npx vitest run src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
+        "npx vitest run src/extensions/jarvis/lane-control-service.test.ts src/group-queue.test.ts src/ipc-auth.test.ts src/jarvis-worker-dispatch.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
+    },
+    {
+      "id": "andy-review-ownership",
+      "name": "Andy Review Ownership",
+      "summary": "Auto-triggered review workflow for Andy-developer, including review-state progression, bounded direct review patches, and rework lineage.",
+      "risk": "high",
+      "keywords": [
+        "andy review",
+        "review requested",
+        "review trigger",
+        "direct patch",
+        "rework lineage",
+        "request state"
+      ],
+      "files": [
+        "docs/architecture/nanoclaw-jarvis.md",
+        "docs/workflow/nanoclaw-jarvis-dispatch-contract.md",
+        "groups/andy-developer/CLAUDE.md",
+        "groups/andy-developer/docs/github.md",
+        "groups/andy-developer/docs/jarvis-dispatch.md",
+        "groups/jarvis-worker-1/docs/workflow/worker-skill-policy.md",
+        "groups/jarvis-worker-2/docs/workflow/worker-skill-policy.md",
+        "src/db.ts",
+        "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/request-state-service.ts",
+        "src/index.ts"
+      ],
+      "tests": [
+        "src/db.test.ts",
+        "src/extensions/jarvis/frontdesk-service.test.ts",
+        "src/jarvis-worker-dispatch.test.ts"
+      ],
+      "missing_files": [],
+      "missing_tests": [],
+      "shared_files": [
+        "docs/architecture/nanoclaw-jarvis.md",
+        "groups/andy-developer/CLAUDE.md",
+        "groups/andy-developer/docs/jarvis-dispatch.md",
+        "src/db.ts",
+        "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/request-state-service.ts",
+        "src/index.ts"
+      ],
+      "suggested_verify_commands": [
+        "npm run typecheck",
+        "npx vitest run src/db.test.ts src/extensions/jarvis/frontdesk-service.test.ts src/jarvis-worker-dispatch.test.ts"
+      ],
+      "generated_at": "2026-03-07T18:58:50.793Z"
+    },
+    {
+      "id": "andy-request-admin-cleanup",
+      "name": "Andy Request Admin Cleanup",
+      "summary": "Administrative cleanup tooling for stale non-terminal Andy requests, including dry-run inspection and explicit archival/closure.",
+      "risk": "medium",
+      "keywords": [
+        "andy requests",
+        "stale request cleanup",
+        "archive requests",
+        "cancel stale requests",
+        "admin command",
+        "testing backlog"
+      ],
+      "files": [
+        ".claude/progress/feature-catalog.seed.json",
+        "scripts/jarvis-ops.sh",
+        "scripts/jarvis-reconcile-stale-andy-requests.sh"
+      ],
+      "tests": [
+        "src/jarvis-reconcile-stale-andy-requests.test.ts"
+      ],
+      "missing_files": [],
+      "missing_tests": [],
+      "shared_files": [
+        ".claude/progress/feature-catalog.seed.json",
+        "scripts/jarvis-ops.sh"
+      ],
+      "suggested_verify_commands": [
+        "npm run typecheck",
+        "npx vitest run src/jarvis-reconcile-stale-andy-requests.test.ts"
+      ],
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "architecture-boundary-governance",
@@ -784,7 +1035,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "reliability-e2e",
@@ -811,7 +1062,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "observability-logging",
@@ -840,7 +1091,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "ops-reliability-tooling",
@@ -879,12 +1130,15 @@
       "shared_files": [
         "scripts/jarvis-happiness-gate.sh",
         "scripts/jarvis-incident.sh",
+        "scripts/jarvis-ops.sh",
+        "scripts/jarvis-preflight.sh",
+        "scripts/jarvis-reliability.sh",
         "scripts/jarvis-worker-probe.sh"
       ],
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "skills-engine-lifecycle",
@@ -933,7 +1187,7 @@
         "npm run typecheck",
         "npx vitest run skills-engine/__tests__/apply.test.ts skills-engine/__tests__/rebase.test.ts skills-engine/__tests__/uninstall.test.ts skills-engine/__tests__/update.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "agent-runner-mcp",
@@ -960,7 +1214,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "worker-runtime-lane",
@@ -989,7 +1243,7 @@
         "npm run typecheck",
         "npx vitest run container/worker/runner/src/lib.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "core-skill-workflows",
@@ -1023,7 +1277,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "feature-tracking-pipeline",
@@ -1056,7 +1310,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "project-skill-delivery-pipeline",
@@ -1091,7 +1345,7 @@
       "suggested_verify_commands": [
         "npm run typecheck"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     },
     {
       "id": "channel-extension-skills",
@@ -1132,7 +1386,7 @@
         "npm run typecheck",
         "npx vitest run .claude/skills/add-discord/tests/discord.test.ts .claude/skills/add-gmail/tests/gmail.test.ts .claude/skills/add-slack/tests/slack.test.ts .claude/skills/add-telegram/tests/telegram.test.ts .claude/skills/add-voice-transcription/tests/voice-transcription.test.ts"
       ],
-      "generated_at": "2026-03-06T18:27:07.324Z"
+      "generated_at": "2026-03-07T18:58:50.793Z"
     }
   ]
 }

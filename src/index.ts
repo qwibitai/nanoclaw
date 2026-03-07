@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { DisconnectReason } from '@whiskeysockets/baileys';
+
 import {
   ANDY_BUSY_ACK_COOLDOWN_MS,
   ANDY_BUSY_PREEMPT_MS,
@@ -14,11 +16,17 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  RUNTIME_OWNER_HEARTBEAT_MS,
   RUNTIME_OPS_EXTENDED,
   SHUTDOWN_DRAIN_MS,
+  TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import {
+  type WhatsAppChannelOpts,
+  type WhatsAppCloseContext,
+  WhatsAppChannel,
+} from './channels/whatsapp.js';
 import {
   ContainerOutput,
   DispatchBlockSnapshotEntry,
@@ -34,6 +42,7 @@ import {
 } from './container-runtime.js';
 import {
   acceptWorkerRunCompletion,
+  clearSession,
   completeWorkerRun,
   getAllChats,
   getAllRegisteredGroups,
@@ -44,6 +53,7 @@ import {
   getMessagesSince,
   getLatestReusableWorkerSession,
   getNewMessages,
+  getStoredMessage,
   getWorkerRuns,
   getWorkerRun,
   getRouterState,
@@ -52,7 +62,6 @@ import {
   getProcessedMessageIds,
   isNonRetryableWorkerStatus,
   markMessagesProcessed,
-  requeueWorkerRunForReplay,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -71,21 +80,46 @@ import {
 } from './dispatch-validator.js';
 import {
   ackAndyIntakeMessages,
+  applyAndyReviewStateUpdates,
   attachAndyRequestToWorkerRun,
+  buildAndyReviewTriggerMessage,
   buildAndyFrontdeskContextBlock,
+  buildControlPlaneStatusSnapshot,
   completeAndyCoordinatorRequest,
   getAndyRequestsForMessages,
   handleAndyFrontdeskMessages,
+  handleMainLaneControlMessages,
   isInternalWorkerLaneGroup,
   isSimpleAndyGreeting,
   markAndyRequestsCoordinatorActive,
+  markAndyRequestsReviewInProgress,
+  parseAndyReviewStateUpdates,
+  recoverInterruptedWorkerDispatches,
+  recoverPendingMessages,
+  reconcileJarvisStaleWorkerRuns,
+  selectWorkerSessionForDispatch,
+  stripAndyReviewStateUpdates,
   syncAndyRequestWithWorkerRun,
+  type WorkerSessionSelection,
 } from './extensions/jarvis/index.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { emitBridgeEvent } from './event-bridge.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
+import {
+  buildSessionContextVersion,
+  shouldInvalidateStoredSession,
+} from './session-compatibility.js';
+import {
+  claimRuntimeOwnership,
+  getCurrentRuntimeOwner,
+  heartbeatRuntimeOwnership,
+  isOwnedByCurrentProcess,
+  logRuntimeOwnershipClaim,
+  releaseRuntimeOwnership,
+  RuntimeOwnershipConflictError,
+} from './runtime-ownership.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import {
   Channel,
@@ -101,6 +135,7 @@ export { escapeXml, formatMessages } from './router.js';
 
 let lastCursor = '';
 let sessions: Record<string, string> = {};
+let sessionContextVersions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let inFlightAgentTimestamp: Record<string, string> = {};
@@ -109,6 +144,8 @@ let messageLoopRunning = false;
 let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let runtimeOwnershipHeartbeat: ReturnType<typeof setInterval> | null = null;
+let shutdownPromise: Promise<void> | null = null;
 const ANDY_DEVELOPER_FOLDER = 'andy-developer';
 const MISSION_CORE_FOLDERS = new Set([
   MAIN_GROUP_FOLDER,
@@ -129,6 +166,12 @@ const WORKER_SNAPSHOT_REFRESH_INTERVAL_MS = 15_000;
 const WORKER_SUPERVISOR_OWNER = `nanoclaw-${process.pid}`;
 const PROCESS_START_AT_MS = Date.now();
 const PROCESS_START_AT_ISO = new Date(PROCESS_START_AT_MS).toISOString();
+const MAIN_SESSION_CONTEXT_SALT = 'main-lane-context-v1';
+const MAIN_SESSION_CONTEXT_FILES = [
+  'groups/main/CLAUDE.md',
+  'container/agent-runner/src/index.ts',
+  'container/agent-runner/src/ipc-mcp-stdio.ts',
+];
 const andyBusyAckLastSentMs: Record<string, number> = {};
 const andyRetryNoticeState: Record<
   string,
@@ -150,11 +193,6 @@ interface WorkerRunContext {
   dispatchPayload: DispatchPayload;
 }
 
-interface WorkerSessionSelection {
-  selectedSessionId?: string;
-  source: 'explicit' | 'auto_repo_branch' | 'new';
-}
-
 interface RunAgentResult {
   status: 'success' | 'error';
   newSessionId?: string;
@@ -169,6 +207,16 @@ function isMissionCoreAllowedFolder(folder: string): boolean {
 
 function isSyntheticWorkerGroup(group: RegisteredGroup): boolean {
   return isInternalWorkerLaneGroup(group);
+}
+
+function findGroupJidByFolder(
+  groups: Record<string, RegisteredGroup>,
+  folder: string,
+): string | undefined {
+  for (const [jid, group] of Object.entries(groups)) {
+    if (group.folder === folder) return jid;
+  }
+  return undefined;
 }
 
 function stripCodeFence(raw: string): string {
@@ -552,6 +600,76 @@ function refreshWorkerRunSnapshotsForGroups(folders?: string[]): void {
   }
 }
 
+function writeMainControlPlaneStatusSnapshot(): void {
+  if (!ENABLE_CONTROL_PLANE_SNAPSHOTS) return;
+
+  const snapshot = buildControlPlaneStatusSnapshot({
+    registeredGroups,
+    queue,
+  });
+  const groupIpcDir = resolveGroupIpcPath(MAIN_GROUP_FOLDER);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(groupIpcDir, 'control_plane_status.json'),
+    JSON.stringify(snapshot, null, 2),
+  );
+}
+
+function enqueueAndyReviewTrigger(input: {
+  runId: string;
+  dispatchPayload: DispatchPayload;
+  workerGroupFolder: string;
+  completion: {
+    branch: string;
+    commit_sha: string;
+    test_result: string;
+    risk: string;
+    pr_url?: string | null;
+    pr_skipped_reason?: string | null;
+  };
+  effectiveSessionId?: string | null;
+}): void {
+  const requestId = input.dispatchPayload.request_id?.trim();
+  if (!requestId) return;
+
+  const andyJid = findGroupJidByFolder(registeredGroups, ANDY_DEVELOPER_FOLDER);
+  if (!andyJid) return;
+
+  const timestamp = new Date().toISOString();
+  const message = buildAndyReviewTriggerMessage({
+    chatJid: andyJid,
+    timestamp,
+    payload: {
+      request_id: requestId,
+      run_id: input.runId,
+      repo: input.dispatchPayload.repo,
+      branch: input.completion.branch,
+      worker_group_folder: input.workerGroupFolder,
+      summary: `Worker run ${input.runId} completed and needs Andy review.`,
+      session_id: input.effectiveSessionId ?? null,
+      parent_run_id: input.dispatchPayload.parent_run_id ?? null,
+      commit_sha: input.completion.commit_sha,
+      test_result: input.completion.test_result,
+      risk: input.completion.risk,
+      pr_url: input.completion.pr_url ?? null,
+      pr_skipped_reason: input.completion.pr_skipped_reason ?? null,
+    },
+  });
+
+  storeChatMetadata(
+    andyJid,
+    timestamp,
+    registeredGroups[andyJid]?.name ?? 'Andy Developer',
+    'nanoclaw',
+    true,
+  );
+
+  if (!getStoredMessage(andyJid, message.id)) {
+    storeMessage(message);
+  }
+  queue.enqueueMessageCheck(andyJid);
+}
+
 function extractWorkerRunContext(
   group: RegisteredGroup,
   messages: NewMessage[],
@@ -573,33 +691,6 @@ function extractWorkerRunContext(
   }
 
   return null;
-}
-
-function selectWorkerSessionForDispatch(
-  groupFolder: string,
-  payload: DispatchPayload,
-): WorkerSessionSelection | null {
-  if (payload.context_intent === 'fresh') {
-    return { source: 'new' };
-  }
-
-  if (payload.session_id) {
-    return { selectedSessionId: payload.session_id, source: 'explicit' };
-  }
-
-  const reusable = getLatestReusableWorkerSession(
-    groupFolder,
-    payload.repo,
-    payload.branch,
-  );
-  if (!reusable?.effective_session_id) {
-    return null;
-  }
-
-  return {
-    selectedSessionId: reusable.effective_session_id,
-    source: 'auto_repo_branch',
-  };
 }
 
 function buildWorkerDispatchPrompt(payload: DispatchPayload): string {
@@ -732,16 +823,11 @@ function shouldAllowNoCodeCompletion(runId: string): boolean {
   return /^(ping|smoke|health|sync)-/i.test(runId);
 }
 
-function findChatJidByGroupFolder(groupFolder: string): string | undefined {
-  return Object.entries(registeredGroups).find(
-    ([, group]) => group.folder === groupFolder,
-  )?.[0];
-}
-
 function reconcileStaleWorkerRuns(): void {
-  const changed = workerRunSupervisor.reconcile({
+  const changed = reconcileJarvisStaleWorkerRuns({
+    workerRunSupervisor,
     lastAgentTimestamp,
-    resolveChatJid: findChatJidByGroupFolder,
+    registeredGroups,
   });
   if (changed && ENABLE_CONTROL_PLANE_SNAPSHOTS) {
     refreshWorkerRunSnapshotsForGroups();
@@ -751,11 +837,20 @@ function reconcileStaleWorkerRuns(): void {
 function loadState(): void {
   lastCursor = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
+  const sessionContextState = getRouterState('session_context_versions');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
+  }
+  try {
+    sessionContextVersions = sessionContextState
+      ? JSON.parse(sessionContextState)
+      : {};
+  } catch {
+    logger.warn('Corrupted session_context_versions in DB, resetting');
+    sessionContextVersions = {};
   }
   inFlightAgentTimestamp = {};
   sessions = getAllSessions();
@@ -780,6 +875,45 @@ function loadState(): void {
 function saveState(): void {
   setRouterState('last_timestamp', lastCursor);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState(
+    'session_context_versions',
+    JSON.stringify(sessionContextVersions),
+  );
+}
+
+function getMainSessionContextVersion(): string {
+  const entries = MAIN_SESSION_CONTEXT_FILES.map((relativePath) => {
+    const absolutePath = path.join(process.cwd(), relativePath);
+    let content = '__missing__';
+    try {
+      content = fs.readFileSync(absolutePath, 'utf-8');
+    } catch {
+      // Keep a deterministic marker if the file is unavailable.
+    }
+    return { path: relativePath, content };
+  });
+
+  return buildSessionContextVersion({
+    salt: MAIN_SESSION_CONTEXT_SALT,
+    entries,
+  });
+}
+
+function getSessionContextVersionForGroup(
+  group: RegisteredGroup,
+  isMain: boolean,
+): string | undefined {
+  if (!isMain || group.folder !== MAIN_GROUP_FOLDER) return undefined;
+  return getMainSessionContextVersion();
+}
+
+function setSessionContextVersion(
+  groupFolder: string,
+  version: string | undefined,
+): void {
+  if (!version) return;
+  sessionContextVersions[groupFolder] = version;
+  saveState();
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -904,6 +1038,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     );
     if (!hasTrigger) return true;
   }
+  if (
+    channel &&
+    isMainGroup &&
+    (await handleMainLaneControlMessages({
+      chatJid,
+      group,
+      messages: messagesToProcess,
+      channel,
+      queue,
+      registeredGroups,
+      runtime: {
+        markCursorInFlight,
+        clearInFlightCursor,
+        markBatchProcessed,
+        commitInFlightCursor,
+      },
+    }))
+  ) {
+    return true;
+  }
 
   if (
     channel &&
@@ -933,13 +1087,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         ? `Coordinator picked up ${messagesToProcess.length} pending message(s)`
         : 'Coordinator is processing your request';
     markAndyRequestsCoordinatorActive(andyRequestsInBatch, coordinatorText);
+    markAndyRequestsReviewInProgress(
+      andyRequestsInBatch,
+      'Andy is reviewing worker completion artifacts',
+    );
   }
   const activeAndyRequestId = andyRequestsInBatch[0]?.requestId;
 
   const workerRun = extractWorkerRunContext(group, messagesToProcess);
   const basePrompt = workerRun
     ? buildWorkerDispatchPrompt(workerRun.dispatchPayload)
-    : formatMessages(messagesToProcess);
+    : formatMessages(messagesToProcess, TIMEZONE);
   const prompt =
     !workerRun && group.folder === ANDY_DEVELOPER_FOLDER && activeAndyRequestId
       ? `${buildAndyFrontdeskContextBlock(chatJid, activeAndyRequestId)}\n\n${basePrompt}`
@@ -1175,8 +1333,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         if (workerRun) {
           workerOutputBuffer += `${raw}\n`;
         }
+        let cleaned = raw;
+        if (group.folder === ANDY_DEVELOPER_FOLDER) {
+          const reviewStateUpdates = parseAndyReviewStateUpdates(raw);
+          if (reviewStateUpdates.length > 0) {
+            applyAndyReviewStateUpdates(reviewStateUpdates);
+            cleaned = stripAndyReviewStateUpdates(cleaned);
+          }
+        }
         // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        const text = cleaned
+          .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+          .trim();
         logger.info(
           { group: group.name },
           `Agent output: ${raw.slice(0, 200)}`,
@@ -1372,6 +1540,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           'worker_review_requested',
           `Worker run ${workerRun.runId} reached review_requested on ${group.folder}`,
         );
+        enqueueAndyReviewTrigger({
+          runId: workerRun.runId,
+          dispatchPayload: workerRun.dispatchPayload,
+          workerGroupFolder: group.folder,
+          completion,
+          effectiveSessionId: runtimeEffectiveSessionId ?? null,
+        });
         void emitBridgeEvent({
           event_type: 'worker_completed',
           summary: `[${group.folder}] ✓ review: ${completion.branch}`,
@@ -1611,10 +1786,31 @@ async function runAgent(
   workerRunId?: string,
 ): Promise<RunAgentResult> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
-  const sessionId =
+  let sessionId =
     sessionOverride === undefined
       ? sessions[group.folder]
       : (sessionOverride ?? undefined);
+  const sessionContextVersion = getSessionContextVersionForGroup(group, isMain);
+  if (
+    shouldInvalidateStoredSession({
+      sessionId,
+      storedVersion: sessionContextVersions[group.folder],
+      currentVersion: sessionContextVersion,
+    })
+  ) {
+    logger.info(
+      {
+        group: group.name,
+        groupFolder: group.folder,
+        storedVersion: sessionContextVersions[group.folder],
+        currentVersion: sessionContextVersion,
+      },
+      'Invalidating stored session because the session context changed',
+    );
+    delete sessions[group.folder];
+    clearSession(group.folder);
+    sessionId = undefined;
+  }
   if (sessionId) {
     sessions[group.folder] = sessionId;
     setSession(group.folder, sessionId);
@@ -1649,6 +1845,9 @@ async function runAgent(
 
     workerRunsSnapshot = buildWorkerRunsSnapshot(group, isMain);
     writeWorkerRunsSnapshot(group.folder, workerRunsSnapshot);
+    if (isMain) {
+      writeMainControlPlaneStatusSnapshot();
+    }
   }
   const effectivePrompt =
     group.folder === ANDY_DEVELOPER_FOLDER && workerRunsSnapshot
@@ -1661,6 +1860,7 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+          setSessionContextVersion(group.folder, sessionContextVersion);
         }
         await onOutput(output);
       }
@@ -1699,6 +1899,9 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+      setSessionContextVersion(group.folder, sessionContextVersion);
+    } else if (sessionId) {
+      setSessionContextVersion(group.folder, sessionContextVersion);
     }
 
     if (output.status === 'error') {
@@ -1821,13 +2024,14 @@ async function startMessageLoop(): Promise<void> {
               ? getAndyRequestsForMessages(messagesToSend)
               : [];
           if (andyRequestsToSend.length > 0) {
-            markAndyRequestsCoordinatorActive(
+            markAndyRequestsCoordinatorActive(andyRequestsToSend, 'Coordinator is processing your request');
+            markAndyRequestsReviewInProgress(
               andyRequestsToSend,
-              'Coordinator is processing your request',
+              'Andy is reviewing worker completion artifacts',
             );
           }
           const activeRequestForSend = andyRequestsToSend[0]?.requestId;
-          const baseFormatted = formatMessages(messagesToSend);
+          const baseFormatted = formatMessages(messagesToSend, TIMEZONE);
           const formatted =
             group.folder === ANDY_DEVELOPER_FOLDER && activeRequestForSend
               ? `${buildAndyFrontdeskContextBlock(chatJid, activeRequestForSend)}\n\n${baseFormatted}`
@@ -1837,6 +2041,27 @@ async function startMessageLoop(): Promise<void> {
           // Never pipe additional dispatches into an active worker session.
           if (syntheticWorker) {
             queue.enqueueMessageCheck(chatJid);
+            continue;
+          }
+
+          if (
+            channel &&
+            isMainGroup &&
+            (await handleMainLaneControlMessages({
+              chatJid,
+              group,
+              messages: messagesToSend,
+              channel,
+              queue,
+              registeredGroups,
+              runtime: {
+                markCursorInFlight,
+                clearInFlightCursor,
+                markBatchProcessed,
+                commitInFlightCursor,
+              },
+            }))
+          ) {
             continue;
           }
 
@@ -1857,6 +2082,10 @@ async function startMessageLoop(): Promise<void> {
             }))
           ) {
             continue;
+          }
+
+          if (isMainGroup && ENABLE_CONTROL_PLANE_SNAPSHOTS) {
+            writeMainControlPlaneStatusSnapshot();
           }
 
           if (queue.sendMessage(chatJid, formatted)) {
@@ -1906,198 +2135,187 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
-/**
- * Startup recovery: check for unprocessed messages in registered groups.
- * Handles crash between advancing the message cursor and processing messages.
- */
-function recoverPendingMessages(): void {
-  for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
-    if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        'Recovery: found unprocessed messages',
-      );
-      queue.enqueueMessageCheck(chatJid);
-    }
-  }
-}
-
-function recoverInterruptedWorkerDispatches(): void {
-  const activeRuns = getWorkerRuns({
-    groupFolderLike: 'jarvis-worker-%',
-    statuses: ['queued', 'running'],
-    limit: 200,
-  });
-
-  if (activeRuns.length === 0) return;
-
-  let replayed = 0;
-  let skipped = 0;
-  for (const run of activeRuns) {
-    const chatJid = findChatJidByGroupFolder(run.group_folder);
-    if (!chatJid) {
-      skipped += 1;
-      logger.warn(
-        { runId: run.run_id, groupFolder: run.group_folder },
-        'Startup replay skipped: worker chat JID not registered',
-      );
-      continue;
-    }
-
-    const payloadText = run.dispatch_payload || '';
-    const parsed = parseDispatchPayload(payloadText);
-    if (!parsed) {
-      skipped += 1;
-      logger.warn(
-        { runId: run.run_id, groupFolder: run.group_folder },
-        'Startup replay skipped: missing or invalid dispatch payload',
-      );
-      continue;
-    }
-
-    if (run.status === 'running') {
-      requeueWorkerRunForReplay(run.run_id, 'startup_replay_after_restart');
-    }
-
-    const replayTimestamp = new Date().toISOString();
-    storeChatMetadata(
-      chatJid,
-      replayTimestamp,
-      registeredGroups[chatJid]?.name || run.group_folder,
-      'nanoclaw',
-      true,
-    );
-    storeMessage({
-      id: `replay-${run.run_id}-${Date.now()}`,
-      chat_jid: chatJid,
-      sender: 'nanoclaw-replay@nanoclaw',
-      sender_name: 'nanoclaw-replay',
-      content: JSON.stringify(parsed),
-      timestamp: replayTimestamp,
-      is_from_me: false,
-      is_bot_message: false,
-    });
-    queue.enqueueMessageCheck(chatJid);
-    replayed += 1;
-  }
-
-  logger.info(
-    { activeRuns: activeRuns.length, replayed, skipped },
-    'Startup worker dispatch replay complete',
-  );
-}
-
 function ensureContainerSystemRunning(): void {
   ensureContainerRuntimeRunning();
   cleanupOrphans();
 }
 
+function stopRuntimeOwnershipHeartbeat(): void {
+  if (!runtimeOwnershipHeartbeat) return;
+  clearInterval(runtimeOwnershipHeartbeat);
+  runtimeOwnershipHeartbeat = null;
+}
+
+function startRuntimeOwnershipHeartbeat(): void {
+  stopRuntimeOwnershipHeartbeat();
+  runtimeOwnershipHeartbeat = setInterval(() => {
+    const result = heartbeatRuntimeOwnership();
+    if (result.ok) return;
+    logger.error(
+      {
+        currentOwnerPid: result.currentOwner?.pid,
+        currentOwnerMode: result.currentOwner?.owner_mode,
+      },
+      'Runtime ownership lost; stopping process',
+    );
+    requestShutdown('runtime_ownership_lost', 1);
+  }, RUNTIME_OWNER_HEARTBEAT_MS);
+}
+
+function requestShutdown(signal: string, exitCode = 0): void {
+  if (shutdownPromise) return;
+  shutdownPromise = (async () => {
+    logger.info(
+      { signal, shutdownDrainMs: SHUTDOWN_DRAIN_MS, exitCode },
+      'Shutdown signal received',
+    );
+    stopRuntimeOwnershipHeartbeat();
+    try {
+      await queue.shutdown(SHUTDOWN_DRAIN_MS);
+      for (const ch of channels) await ch.disconnect();
+    } finally {
+      releaseRuntimeOwnership();
+      process.exit(exitCode);
+    }
+  })();
+}
+
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
   initDatabase();
   setRouterState('process_start_at', PROCESS_START_AT_ISO);
   logger.info('Database initialized');
-  loadState();
+  const ownership = claimRuntimeOwnership();
+  try {
+    logRuntimeOwnershipClaim(ownership);
+    startRuntimeOwnershipHeartbeat();
 
-  // Graceful shutdown handlers
-  const shutdown = async (signal: string) => {
-    logger.info(
-      { signal, shutdownDrainMs: SHUTDOWN_DRAIN_MS },
-      'Shutdown signal received',
-    );
-    await queue.shutdown(SHUTDOWN_DRAIN_MS);
-    for (const ch of channels) await ch.disconnect();
-    process.exit(0);
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+    ensureContainerSystemRunning();
+    setRouterState('process_start_at', PROCESS_START_AT_ISO);
+    loadState();
 
-  // Channel callbacks (shared by all channels)
-  const channelOpts = {
-    onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
-    onChatMetadata: (
-      chatJid: string,
-      timestamp: string,
-      name?: string,
-      channel?: string,
-      isGroup?: boolean,
-    ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
-    registeredGroups: () => registeredGroups,
-  };
+    process.on('SIGTERM', () => requestShutdown('SIGTERM'));
+    process.on('SIGINT', () => requestShutdown('SIGINT'));
 
-  // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
-
-  // Start subsystems (independently of connection handler)
-  if (ENABLE_SCHEDULER) {
-    startSchedulerLoop({
+    // Channel callbacks (shared by all channels)
+    const channelOpts: WhatsAppChannelOpts = {
+      onMessage: (_chatJid: string, msg: NewMessage) => storeMessage(msg),
+      onChatMetadata: (
+        chatJid: string,
+        timestamp: string,
+        name?: string,
+        channel?: string,
+        isGroup?: boolean,
+      ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
       registeredGroups: () => registeredGroups,
-      getSessions: () => sessions,
-      queue,
-      onProcess: (groupJid, proc, containerName, groupFolder) =>
-        queue.registerProcess(groupJid, proc, containerName, groupFolder),
-      sendMessage: async (jid, rawText) => {
-        const channel = findChannel(channels, jid);
-        if (!channel) {
-          console.log(
-            `Warning: no channel owns JID ${jid}, cannot send message`,
-          );
+      onConnectionClose: async ({
+        reason,
+        defaultShouldReconnect,
+        queuedMessages,
+      }: WhatsAppCloseContext) => {
+        if (
+          !defaultShouldReconnect ||
+          reason !== DisconnectReason.connectionReplaced
+        ) {
           return;
         }
-        const text = formatOutbound(rawText);
-        if (text) await channel.sendMessage(jid, text);
+        const owner = getCurrentRuntimeOwner();
+        if (!owner || isOwnedByCurrentProcess(owner)) {
+          return;
+        }
+        logger.error(
+          {
+            reason,
+            queuedMessages,
+            ownerPid: owner.pid,
+            ownerMode: owner.owner_mode,
+            ownerClaimedBy: owner.claimed_by,
+          },
+          'WhatsApp session conflict with another active runtime owner',
+        );
+        requestShutdown('whatsapp_connection_replaced', 1);
+        return 'stop_reconnect';
+      },
+    };
+
+    whatsapp = new WhatsAppChannel(channelOpts);
+    channels.push(whatsapp);
+    await whatsapp.connect();
+
+    if (ENABLE_SCHEDULER) {
+      startSchedulerLoop({
+        registeredGroups: () => registeredGroups,
+        getSessions: () => sessions,
+        queue,
+        onProcess: (groupJid, proc, containerName, groupFolder) =>
+          queue.registerProcess(groupJid, proc, containerName, groupFolder),
+        sendMessage: async (jid, rawText) => {
+          const channel = findChannel(channels, jid);
+          if (!channel) {
+            console.log(
+              `Warning: no channel owns JID ${jid}, cannot send message`,
+            );
+            return;
+          }
+          const text = formatOutbound(rawText);
+          if (text) await channel.sendMessage(jid, text);
+        },
+      });
+    } else {
+      logger.info('Scheduler disabled by runtime profile');
+    }
+    startIpcWatcher({
+      sendMessage: (jid, text, sourceGroup) => {
+        const target = registeredGroups[jid];
+        if (target && isSyntheticWorkerGroup(target)) {
+          const timestamp = new Date().toISOString();
+          // Ensure parent chat row exists before inserting message row (FK on messages.chat_jid).
+          storeChatMetadata(jid, timestamp, target.name, 'nanoclaw', true);
+          storeMessage({
+            id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            chat_jid: jid,
+            sender: `${sourceGroup}@nanoclaw`,
+            sender_name: sourceGroup,
+            content: text,
+            timestamp,
+            is_from_me: false,
+            is_bot_message: false,
+          });
+          return Promise.resolve();
+        }
+        const channel = findChannel(channels, jid);
+        if (!channel) throw new Error(`No channel for JID: ${jid}`);
+        return channel.sendMessage(jid, text);
+      },
+      registeredGroups: () => registeredGroups,
+      registerGroup,
+      syncGroupMetadata: (force) =>
+        whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+      getAvailableGroups,
+      writeGroupsSnapshot: (gf, im, ag, rj) =>
+        writeGroupsSnapshot(gf, im, ag, rj),
+      options: {
+        taskControlEnabled: ENABLE_SCHEDULER,
+        workerSteeringEnabled: ENABLE_WORKER_STEERING,
+        dynamicGroupRegistrationEnabled: ENABLE_DYNAMIC_GROUP_REGISTRATION,
       },
     });
-  } else {
-    logger.info('Scheduler disabled by runtime profile');
+    queue.setProcessMessagesFn(processGroupMessages);
+    recoverInterruptedWorkerDispatches({ registeredGroups, queue });
+    recoverPendingMessages({
+      registeredGroups,
+      lastAgentTimestamp,
+      assistantName: ASSISTANT_NAME,
+      queue,
+    });
+    startMessageLoop().catch((err) => {
+      logger.fatal({ err }, 'Message loop crashed unexpectedly');
+      requestShutdown('message_loop_crashed', 1);
+    });
+  } catch (err) {
+    stopRuntimeOwnershipHeartbeat();
+    releaseRuntimeOwnership();
+    throw err;
   }
-  startIpcWatcher({
-    sendMessage: (jid, text, sourceGroup) => {
-      const target = registeredGroups[jid];
-      if (target && isSyntheticWorkerGroup(target)) {
-        const timestamp = new Date().toISOString();
-        // Ensure parent chat row exists before inserting message row (FK on messages.chat_jid).
-        storeChatMetadata(jid, timestamp, target.name, 'nanoclaw', true);
-        storeMessage({
-          id: `ipc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          chat_jid: jid,
-          sender: `${sourceGroup}@nanoclaw`,
-          sender_name: sourceGroup,
-          content: text,
-          timestamp,
-          is_from_me: false,
-          is_bot_message: false,
-        });
-        return Promise.resolve();
-      }
-      const channel = findChannel(channels, jid);
-      if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
-    },
-    registeredGroups: () => registeredGroups,
-    registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
-    getAvailableGroups,
-    writeGroupsSnapshot: (gf, im, ag, rj) =>
-      writeGroupsSnapshot(gf, im, ag, rj),
-    options: {
-      taskControlEnabled: ENABLE_SCHEDULER,
-      workerSteeringEnabled: ENABLE_WORKER_STEERING,
-      dynamicGroupRegistrationEnabled: ENABLE_DYNAMIC_GROUP_REGISTRATION,
-    },
-  });
-  queue.setProcessMessagesFn(processGroupMessages);
-  recoverInterruptedWorkerDispatches();
-  recoverPendingMessages();
-  startMessageLoop().catch((err) => {
-    logger.fatal({ err }, 'Message loop crashed unexpectedly');
-    process.exit(1);
-  });
 }
 
 // Guard: only run when executed directly, not when imported by tests
@@ -2108,6 +2326,16 @@ const isDirectRun =
 
 if (isDirectRun) {
   main().catch((err) => {
+    if (err instanceof RuntimeOwnershipConflictError) {
+      logger.error(
+        {
+          currentOwnerPid: err.currentOwner.pid,
+          currentOwnerMode: err.currentOwner.owner_mode,
+          currentOwnerClaimedBy: err.currentOwner.claimed_by,
+        },
+        'Failed to start NanoClaw because another runtime owner is active',
+      );
+    }
     logger.error({ err }, 'Failed to start NanoClaw');
     process.exit(1);
   });

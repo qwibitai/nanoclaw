@@ -322,6 +322,7 @@ describe('WhatsAppChannel', () => {
 
       // Disconnect with loggedOut reason (401)
       triggerDisconnect(401);
+      await new Promise((r) => setTimeout(r, 0));
 
       expect(channel.isConnected()).toBe(false);
       expect(mockExit).toHaveBeenCalledWith(0);
@@ -339,6 +340,25 @@ describe('WhatsAppChannel', () => {
 
       // The channel sets a 5s retry — just verify it doesn't crash
       await new Promise((r) => setTimeout(r, 100));
+    });
+
+    it('lets caller suppress reconnect handling on ownership conflict', async () => {
+      const onConnectionClose: NonNullable<
+        WhatsAppChannelOpts['onConnectionClose']
+      > = vi.fn().mockResolvedValue('stop_reconnect');
+      const opts = createTestOpts({ onConnectionClose });
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+      triggerDisconnect(440);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(onConnectionClose).toHaveBeenCalledWith({
+        reason: 440,
+        queuedMessages: 0,
+        defaultShouldReconnect: true,
+      });
+      expect((channel as any).reconnectTimer).toBeNull();
     });
   });
 

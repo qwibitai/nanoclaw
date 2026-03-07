@@ -23,6 +23,10 @@
         <string>{{HOME}}</string>
         <key>ASSISTANT_NAME</key>
         <string>Andy</string>
+        <key>NANOCLAW_RUNTIME_OWNER_MODE</key>
+        <string>service</string>
+        <key>NANOCLAW_LAUNCHD_LABEL</key>
+        <string>com.nanoclaw</string>
     </dict>
     <key>StandardOutPath</key>
     <string>{{PROJECT_ROOT}}/logs/nanoclaw.log</string>

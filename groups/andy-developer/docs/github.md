@@ -21,7 +21,7 @@ This is mandatory for Andy-developer.
 7. Andy-developer reviews code and sends `approve` or `rework`.
 8. If approved, Andy-developer syncs the approved branch/commit into `NanoClawWorkspace` and runs checks on that same branch/commit only.
 9. Andy-developer runs local preflight (`build` + `server start/health`), verifies no duplicate same-lane running containers, and sends user testing handoff (user-run local commands).
-10. If not approved, Andy-developer delegates rework to Jarvis using the same `run_id`.
+10. If not approved and rework is large enough to warrant Jarvis, Andy-developer delegates rework to Jarvis using a new child `run_id`, the same `request_id`, and `parent_run_id` pointing at the reviewed run.
 
 ## Ownership Split
 
@@ -46,14 +46,15 @@ Before saying "done", include:
 
 ## Prohibited
 
-- Direct product source implementation by Andy-developer
-- Product feature/fix commits from Andy lane (implementation remains worker-owned)
+- Initial product source implementation by Andy-developer when the task should be worker-owned
+- Large product feature/fix commits from Andy lane during review
 - Any direct push to `main`
 
 ## Allowed Push Scope
 
 - Control-plane changes (`.github/workflows`, review/branch-governance docs)
 - Branch seeding pushes for worker lanes (`jarvis-*` pre-created from `base_branch`)
+- Review-time bounded direct patches on the same approved worker branch when the delta is small, local, and clearly cheaper than redispatch
 - Review/handoff staging operations that do not author product feature code
 
 ## Required Repo Controls

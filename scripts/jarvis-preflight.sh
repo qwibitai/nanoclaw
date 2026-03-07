@@ -307,6 +307,26 @@ else
 fi
 
 if [ -f "$DB_PATH" ] && have_cmd sqlite3; then
+  if sqlite3 "$DB_PATH" ".schema runtime_owners" | grep -q "CREATE TABLE"; then
+    pass "db.runtime_owners.table" "runtime_owners table present"
+  else
+    fail "db.runtime_owners.table" "runtime_owners table missing"
+  fi
+
+  runtime_owner_row="$(sqlite3 -separator '|' "$DB_PATH" "SELECT owner_name, owner_mode, pid, heartbeat_at, claimed_by FROM runtime_owners WHERE owner_name = 'host' LIMIT 1;" 2>/dev/null || true)"
+  if [ -n "$runtime_owner_row" ]; then
+    IFS='|' read -r runtime_owner_name runtime_owner_mode runtime_owner_pid runtime_owner_heartbeat runtime_owner_claimed_by <<<"$runtime_owner_row"
+    if [[ "$runtime_owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$runtime_owner_pid" 2>/dev/null; then
+      pass "db.runtime_owners.active" "runtime owner ${runtime_owner_name:-host} is ${runtime_owner_mode:-unknown} (pid=$runtime_owner_pid)"
+      echo "[INFO] runtime owner heartbeat: ${runtime_owner_heartbeat:-unknown} (${runtime_owner_claimed_by:-unknown})"
+    else
+      fail "db.runtime_owners.active" "runtime owner row is stale or pid is not running"
+      echo "[INFO] stale runtime owner: ${runtime_owner_name:-host}|${runtime_owner_mode:-unknown}|${runtime_owner_pid:-unknown}|${runtime_owner_heartbeat:-unknown}|${runtime_owner_claimed_by:-unknown}"
+    fi
+  else
+    fail "db.runtime_owners.active" "runtime owner row missing"
+  fi
+
   if sqlite3 "$DB_PATH" ".schema worker_runs" | grep -q "CREATE TABLE"; then
     pass "db.worker_runs.table" "worker_runs table present"
   else

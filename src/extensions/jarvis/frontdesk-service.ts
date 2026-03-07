@@ -16,7 +16,9 @@ import {
 } from '../../types.js';
 import {
   createAndyWorkIntakeRequest,
+  type AndyRequestMessageRef,
   listTrackedAndyRequestRefsForMessages,
+  parseAndyReviewRequestMessage,
 } from './request-state-service.js';
 
 const ANDY_DEVELOPER_FOLDER = 'andy-developer';
@@ -65,7 +67,11 @@ function getAndyProgressQueryContext(
   let queryMessage: NewMessage | null = null;
   let containsNonQueryWork = false;
   for (const message of messages) {
-    if (parseDispatchPayload(message.content)) return null;
+    if (
+      parseDispatchPayload(message.content) ||
+      parseAndyReviewRequestMessage(message.content)
+    )
+      return null;
     const body = stripAssistantTrigger(message.content).trim();
     if (!body) continue;
     if (
@@ -101,6 +107,7 @@ function isAndyWorkIntakeMessage(
 ): boolean {
   if (group.folder !== ANDY_DEVELOPER_FOLDER) return false;
   if (parseDispatchPayload(message.content)) return false;
+  if (parseAndyReviewRequestMessage(message.content)) return false;
 
   const body = stripAssistantTrigger(message.content).trim();
   if (!body) return false;
@@ -181,6 +188,33 @@ function formatElapsedSince(startedAt: string): string {
   return minutes === 0 ? `elapsed ${hours}h` : `elapsed ${hours}h ${minutes}m`;
 }
 
+function describeAndyRequestState(state: string): string {
+  switch (state) {
+    case 'queued_for_coordinator':
+      return 'queued for Andy coordination';
+    case 'coordinator_active':
+      return 'Andy coordinating the request';
+    case 'worker_queued':
+      return 'queued for Jarvis execution';
+    case 'worker_running':
+      return 'Jarvis worker is executing';
+    case 'worker_review_requested':
+      return 'awaiting Andy review';
+    case 'review_in_progress':
+      return 'Andy review in progress';
+    case 'andy_patch_in_progress':
+      return 'Andy is applying a bounded review patch';
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    default:
+      return state;
+  }
+}
+
 export function buildAndyProgressStatusReply(
   chatJid: string,
   requestId?: string,
@@ -200,14 +234,14 @@ export function buildAndyProgressStatusReply(
         const progress = getWorkerRunProgress(run.run_id);
         const progressSummary = progress?.last_progress_summary?.trim();
         const suffix = progressSummary ? ` - ${progressSummary}` : '';
-        return `${ASSISTANT_NAME}: \`${request.request_id}\` is \`${request.state}\`. Worker run \`${run.run_id}\` on \`${run.group_folder}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}.`;
+        return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`). Worker run \`${run.run_id}\` on \`${run.group_folder}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}.`;
       }
     }
 
     const lastText = request.last_status_text
       ? ` ${request.last_status_text}`
       : '';
-    return `${ASSISTANT_NAME}: \`${request.request_id}\` is \`${request.state}\`.${lastText}`;
+    return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`).${lastText}`;
   }
 
   const activeRequests = listActiveAndyRequests(chatJid, 3);
@@ -219,10 +253,10 @@ export function buildAndyProgressStatusReply(
           const progress = getWorkerRunProgress(run.run_id);
           const progressSummary = progress?.last_progress_summary?.trim();
           const suffix = progressSummary ? ` - ${progressSummary}` : '';
-          return `- \`${request.request_id}\`: ${request.state}; run \`${run.run_id}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}`;
+          return `- \`${request.request_id}\`: ${describeAndyRequestState(request.state)} (\`${request.state}\`); run \`${run.run_id}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}`;
         }
       }
-      return `- \`${request.request_id}\`: ${request.state}`;
+      return `- \`${request.request_id}\`: ${describeAndyRequestState(request.state)} (\`${request.state}\`)`;
     });
     return `${ASSISTANT_NAME}: Current tracked requests:\n${lines.join('\n')}`;
   }
@@ -351,10 +385,9 @@ export async function handleAndyFrontdeskMessages(input: {
   return trySendAndyProgressStatus(chatJid, group, messages, channel, runtime);
 }
 
-export function getAndyRequestsForMessages(messages: NewMessage[]): Array<{
-  requestId: string;
-  messageId: string;
-}> {
+export function getAndyRequestsForMessages(
+  messages: NewMessage[],
+): AndyRequestMessageRef[] {
   return listTrackedAndyRequestRefsForMessages(messages);
 }
 

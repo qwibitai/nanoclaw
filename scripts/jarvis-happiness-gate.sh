@@ -14,7 +14,8 @@ Usage: scripts/jarvis-happiness-gate.sh [options] [-- <probe-args>]
 
 Runs the Andy user-facing reliability gate:
 1) runtime lane status snapshot
-2) user-point-of-view probe (scripts/test-andy-user-e2e.ts)
+2) andy-developer user-point-of-view probe (scripts/test-andy-user-e2e.ts)
+3) main-lane control-plane status probe (scripts/test-main-lane-status-e2e.ts)
 
 Options:
   --skip-status   Skip jarvis status snapshot
@@ -69,6 +70,7 @@ if [ "$run_status" = true ]; then
 fi
 
 NODE_NO_WARNINGS=1 node --experimental-transform-types scripts/test-andy-user-e2e.ts "${forward_args[@]}"
+NODE_NO_WARNINGS=1 node --experimental-transform-types scripts/test-main-lane-status-e2e.ts
 echo
 echo "Manual User POV runbook confirmed:"
 echo "  $user_confirmation"

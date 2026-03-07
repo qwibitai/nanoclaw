@@ -11,6 +11,8 @@ import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
+import { buildLaneStatusToolResponse } from './control-plane-status.js';
+
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
@@ -63,6 +65,21 @@ server.tool(
     return {
       content: [{ type: 'text' as const, text: `Message queued for ${targetJid}.` }],
     };
+  },
+);
+
+server.tool(
+  'get_lane_status',
+  'Read deterministic control-plane status for a supported internal lane. Use this when the user asks about andy-developer progress, what it is doing, or whether it is busy. Main lane only. If `lane_id` is omitted, it defaults to andy-developer.',
+  {
+    lane_id: z
+      .enum(['andy-developer'])
+      .optional()
+      .default('andy-developer')
+      .describe('Optional internal lane to inspect. v1 supports only andy-developer.'),
+  },
+  async (args) => {
+    return buildLaneStatusToolResponse(args.lane_id, { isMain });
   },
 );
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-06T15:30:00.000Z",
+  "updated_at": "2026-03-07T18:59:23.870Z",
   "items": [
     {
       "id": "work-architecture-boundary-governance-1772821500000",
@@ -47,21 +47,38 @@
       "id": "work-jarvis-extension-boundary-1772811000000",
       "title": "Extract Jarvis extension boundary from core control loop",
       "feature_id": "jarvis-extension-boundary",
-      "status": "testing",
+      "status": "in_progress",
       "request": "Implement the planned Jarvis extension architecture: explicit extension modules, lane identity, dispatch-attempt state, and reduced Jarvis policy in core files.",
       "notes": [
         "2026-03-06T15:30:00.000Z: Start architecture extraction from src/index.ts, src/ipc.ts, and src/db.ts into explicit Jarvis extension modules.",
         "2026-03-06T15:30:00.000Z: Constraints locked from plan: preserve single-process NanoClaw core, keep filesystem IPC/SQLite, use lane ids with synthetic @nanoclaw JID compatibility during migration.",
         "2026-03-06T17:53:00.000Z: Implemented src/extensions/jarvis/* modules, additive DB schema for dispatch_attempts/lane ids, and rewired src/index.ts + src/ipc.ts to delegate Jarvis policy through the extension boundary.",
         "2026-03-06T18:08:00.000Z: Local verification passed: npm run typecheck, focused Jarvis tests, npm test, npm run build, verify-worker-connectivity PASS, linkage-audit PASS.",
-        "2026-03-06T18:09:00.000Z: Live restarted-build validation is currently blocked by incident-20260306T180837Z (WhatsApp conflict type=replaced after restart)."
+        "2026-03-06T18:09:00.000Z: Live restarted-build validation is currently blocked by incident-20260306T180837Z (WhatsApp conflict type=replaced after restart).",
+        "2026-03-06T18:58:42.000Z: Resuming seam reduction with an incremental pass focused on startup/runtime flow extraction from src/index.ts, shared-seam cleanup in src/ipc.ts and src/db.ts, and explicit runtime/session ownership services.",
+        "2026-03-07T01:04:00.000Z: Extending the Jarvis extension boundary so main lane gets additive control-plane status/steer handling for andy-developer without reducing original NanoClaw main-lane behavior.",
+        "2026-03-07T01:39:00.000Z: Implemented main-lane lane-control service, queue status snapshot seam, explicit steer/interrupt handling for andy-developer, and additive main-lane interception that falls back to original NanoClaw behavior for all non-control messages."
       ],
       "evidence": [
         ".claude/progress/feature-catalog.json",
         ".claude/progress/feature-catalog.md"
       ],
       "created_at": "2026-03-06T15:30:00.000Z",
-      "updated_at": "2026-03-06T18:09:00.000Z"
+      "updated_at": "2026-03-07T01:39:00.000Z"
+    },
+    {
+      "id": "work-runtime-ownership-isolation-1772823522000",
+      "title": "Implement single-owner runtime/session isolation",
+      "feature_id": "runtime-ownership-isolation",
+      "status": "in_progress",
+      "request": "Implement the planned runtime ownership/session isolation model so launchd is the default host owner, manual runs are explicit overrides, and WhatsApp replacement conflicts stop causing reconnect churn.",
+      "notes": [
+        "2026-03-06T18:58:42.000Z: Starting runtime ownership implementation after planning service+dev override ownership model and identifying startup/channels/scripts surfaces: src/index.ts, src/channels/whatsapp.ts, src/db.ts, launchd/com.nanoclaw.plist, scripts/jarvis-preflight.sh, scripts/jarvis-reliability.sh.",
+        "2026-03-06T18:58:42.000Z: Constraints locked: one active host owner at a time, ownership claimed before WhatsApp connect or startup replay, explicit manual takeover only via env override, and ops scripts must expose owner state."
+      ],
+      "evidence": [],
+      "created_at": "2026-03-06T18:58:42.000Z",
+      "updated_at": "2026-03-06T18:58:42.000Z"
     },
     {
       "id": "work-jarvis-worker-lifecycle-1772518124323",
@@ -218,6 +235,36 @@
       ],
       "created_at": "2026-03-06T09:23:10.923Z",
       "updated_at": "2026-03-06T09:27:59.409Z"
+    },
+    {
+      "id": "work-andy-review-ownership-1772866769087",
+      "title": "Implement Andy review ownership workflow",
+      "feature_id": "andy-review-ownership",
+      "status": "done",
+      "request": "Auto-trigger Andy review on worker completion, allow bounded review-only direct patches, and align rework lineage/state handling.",
+      "notes": [
+        "2026-03-07T17:50:24.282Z: Implemented Andy review ownership with deterministic internal review triggers, explicit review states, bounded same-branch Andy patching contract, and corrected post-review rework lineage. Verification passed after runtime recovery: build, targeted tests, full tests, preflight, verify-worker-connectivity, acceptance-gate, and happiness-gate."
+      ],
+      "evidence": [
+        "data/diagnostics/acceptance/acceptance-20260307T174420Z.json"
+      ],
+      "created_at": "2026-03-07T06:59:29.087Z",
+      "updated_at": "2026-03-07T17:50:24.282Z"
+    },
+    {
+      "id": "work-andy-request-admin-cleanup-1772909699391",
+      "title": "Add stale Andy request admin cleanup command",
+      "feature_id": "andy-request-admin-cleanup",
+      "status": "done",
+      "request": "Create an admin command/script to archive or close stale Andy requests for testing and control-plane cleanup.",
+      "notes": [
+        "2026-03-07T18:59:23.870Z: Added bash scripts/jarvis-ops.sh reconcile-stale-andy-requests with dry-run-by-default stale request targeting, targeted request-id cleanup, DB backups on apply, and terminal close-state control. Verified with npm run build, feature test artifact, and real-DB dry-run via bash scripts/jarvis-ops.sh reconcile-stale-andy-requests --stale-minutes 720 --limit 2."
+      ],
+      "evidence": [
+        ".claude/progress/test-report-andy-request-admin-cleanup.json"
+      ],
+      "created_at": "2026-03-07T18:54:59.391Z",
+      "updated_at": "2026-03-07T18:59:23.870Z"
     }
   ]
 }

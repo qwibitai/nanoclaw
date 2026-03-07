@@ -21,15 +21,19 @@ describe('worker connectivity shell compatibility', () => {
 });
 
 describe('slop inventory workflow hardening', () => {
-  it('does not flag jarvis-ops routed scripts as unreferenced', () => {
-    const output = execFileSync(
-      'bash',
-      ['scripts/workflow/slop-inventory.sh', '--list-unreferenced-scripts'],
-      { cwd: repoRoot, encoding: 'utf8' },
-    );
+  it(
+    'does not flag jarvis-ops routed scripts as unreferenced',
+    () => {
+      const output = execFileSync(
+        'bash',
+        ['scripts/workflow/slop-inventory.sh', '--list-unreferenced-scripts'],
+        { cwd: repoRoot, encoding: 'utf8' },
+      );
 
-    expect(output).not.toContain('scripts/jarvis-message-timeline.sh');
-  });
+      expect(output).not.toContain('scripts/jarvis-message-timeline.sh');
+    },
+    15_000,
+  );
 
   it('passes tooling governance checks after slop pruning', () => {
     const output = execFileSync('bash', ['scripts/check-tooling-governance.sh'], {

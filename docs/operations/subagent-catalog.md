@@ -53,16 +53,21 @@ Each subagent response must include:
 
 ## Implementation Map
 
-Catalog roles map to 3 agent definition files in `.claude/agents/`:
+Catalog roles map to Claude and Codex execution surfaces:
 
-| Catalog Role | Agent File | Model | Notes |
+| Catalog Role | Claude Mapping | Codex Mapping | Notes |
 |---|---|---|---|
-| `plan-architect` (research) | `scout.md` | haiku | Research/scan phase only; plan synthesis stays Opus |
-| `feature-worker` | `implementer.md` | sonnet | Bounded execution with approved plan |
-| `verify-app` | `verifier.md` | haiku | Deterministic gate execution |
-| `contract-auditor` | `verifier.md` | haiku | Invariant compliance checks |
-| `incident-regression` | — | opus | Requires cross-codepath judgment; not delegated |
-| `code-simplifier` (discovery) | `scout.md` | haiku | Hotspot/duplication scanning only |
-| `docs-sync-checker` (scan) | `scout.md` | haiku | Stale reference detection |
+| `plan-architect` (research) | `scout.md` / haiku | `explorer` + main | Discovery can delegate; plan synthesis stays with the main agent |
+| `feature-worker` | `implementer.md` / sonnet | `worker` | Bounded execution with approved plan |
+| `verify-app` | `verifier.md` / haiku | `monitor` | Deterministic gate execution and polling |
+| `contract-auditor` | `verifier.md` / haiku | `reviewer` | Invariant compliance checks and diff-backed findings |
+| `incident-regression` | — / opus | main or escalation lane | Requires cross-codepath judgment; not delegated to helper lanes |
+| `code-simplifier` (discovery) | `scout.md` / haiku | `reviewer` or `explorer` | Use `explorer` for hotspot discovery, `reviewer` for change-aware simplification findings |
+| `docs-sync-checker` (scan) | `scout.md` / haiku | `explorer` | Stale reference detection |
+
+In Codex, "debugger" and "tester" are responsibilities, not separate roles:
+
+- debugging: `explorer` gathers evidence, `reviewer` interprets it
+- testing/verification: `monitor` executes and polls deterministic checks
 
 Routing details: `docs/operations/subagent-routing.md`

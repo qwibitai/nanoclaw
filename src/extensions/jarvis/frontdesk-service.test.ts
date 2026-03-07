@@ -2,10 +2,16 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   _initTestDatabase,
+  createAndyRequestIfAbsent,
   getAndyRequestByMessageId,
   listActiveAndyRequests,
+  updateAndyRequestState,
 } from '../../db.js';
-import { handleAndyFrontdeskMessages } from './frontdesk-service.js';
+import {
+  buildAndyProgressStatusReply,
+  getAndyRequestsForMessages,
+  handleAndyFrontdeskMessages,
+} from './frontdesk-service.js';
 import {
   type Channel,
   type NewMessage,
@@ -66,5 +72,118 @@ describe('frontdesk-service', () => {
     expect(listActiveAndyRequests(STATUS_QUERY_MESSAGE.chat_jid)).toHaveLength(
       0,
     );
+  });
+
+  it('does not ack internal review triggers or create new intake requests', async () => {
+    const sent: string[] = [];
+    const channel: Channel = {
+      name: 'test',
+      connect: async () => {},
+      sendMessage: async (_jid, text) => {
+        sent.push(text);
+      },
+      isConnected: () => true,
+      ownsJid: () => true,
+      disconnect: async () => {},
+    };
+
+    const reviewTrigger: NewMessage = {
+      id: 'msg-review-trigger-1',
+      chat_jid: 'andy-developer@g.us',
+      sender: 'nanoclaw-review@nanoclaw',
+      sender_name: 'nanoclaw-review',
+      content: `<review_request>
+{
+  "request_id": "req-review-1",
+  "run_id": "run-review-1",
+  "repo": "openclaw-gurusharan/nanoclaw",
+  "branch": "jarvis-review-1",
+  "worker_group_folder": "jarvis-worker-1"
+}
+</review_request>`,
+      timestamp: '2026-03-07T10:10:00.000Z',
+    };
+
+    const handled = await handleAndyFrontdeskMessages({
+      chatJid: reviewTrigger.chat_jid,
+      group: ANDY_GROUP,
+      messages: [reviewTrigger],
+      channel,
+      runtime: {
+        markCursorInFlight: () => {},
+        clearInFlightCursor: () => {},
+        markBatchProcessed: () => {},
+        commitInFlightCursor: () => {},
+      },
+    });
+
+    expect(handled).toBe(false);
+    expect(sent).toHaveLength(0);
+    expect(getAndyRequestByMessageId(reviewTrigger.id)).toBeUndefined();
+    expect(listActiveAndyRequests(reviewTrigger.chat_jid)).toHaveLength(0);
+  });
+
+  it('maps review triggers back to the existing tracked request', () => {
+    createAndyRequestIfAbsent({
+      request_id: 'req-review-2',
+      chat_jid: 'andy-developer@g.us',
+      source_group_folder: 'andy-developer',
+      user_message_id: 'msg-user-review-2',
+      user_prompt: 'ship the change',
+      intent: 'work_intake',
+      state: 'worker_review_requested',
+    });
+
+    const refs = getAndyRequestsForMessages([
+      {
+        id: 'msg-review-trigger-2',
+        chat_jid: 'andy-developer@g.us',
+        sender: 'nanoclaw-review@nanoclaw',
+        sender_name: 'nanoclaw-review',
+        content: `<review_request>
+{
+  "request_id": "req-review-2",
+  "run_id": "run-review-2",
+  "repo": "openclaw-gurusharan/nanoclaw",
+  "branch": "jarvis-review-2",
+  "worker_group_folder": "jarvis-worker-2"
+}
+</review_request>`,
+        timestamp: '2026-03-07T10:11:00.000Z',
+      },
+    ]);
+
+    expect(refs).toEqual([
+      {
+        requestId: 'req-review-2',
+        messageId: 'msg-review-trigger-2',
+        kind: 'review',
+      },
+    ]);
+  });
+
+  it('humanizes explicit review ownership states in status replies', () => {
+    createAndyRequestIfAbsent({
+      request_id: 'req-review-3',
+      chat_jid: 'andy-developer@g.us',
+      source_group_folder: 'andy-developer',
+      user_message_id: 'msg-user-review-3',
+      user_prompt: 'check the worker result',
+      intent: 'work_intake',
+      state: 'worker_review_requested',
+    });
+    updateAndyRequestState(
+      'req-review-3',
+      'andy_patch_in_progress',
+      'Applying a small follow-up fix on the same branch',
+    );
+
+    const reply = buildAndyProgressStatusReply(
+      'andy-developer@g.us',
+      'req-review-3',
+    );
+
+    expect(reply).toContain('Andy is applying a bounded review patch');
+    expect(reply).toContain('`andy_patch_in_progress`');
   });
 });

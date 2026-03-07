@@ -8,12 +8,12 @@ Boundary ownership lives in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md). This f
 
 1. **Host Orchestrator (NanoClaw core)**
    - Runtime: Node.js process
-   - Files: `src/index.ts`, `src/group-queue.ts`, `src/ipc.ts`, `src/db.ts`, `src/container-runner.ts`
-   - Responsibilities: poll messages, route by group, queue execution, persist generic runtime state
+   - Files: `src/index.ts`, `src/group-queue.ts`, `src/ipc.ts`, `src/db.ts`, `src/container-runner.ts`, `src/runtime-ownership.ts`
+   - Responsibilities: claim single-host runtime ownership, poll messages, route by group, queue execution, persist generic runtime state
 
 2. **Jarvis Extension Layer**
    - Files: `src/extensions/jarvis/*`
-   - Responsibilities: lane identity, Andy frontdesk semantics, dispatch authorization, request/linkage state transitions, synthetic worker JID compatibility
+   - Responsibilities: lane identity, Andy frontdesk semantics, dispatch authorization, request/linkage state transitions, synthetic worker JID compatibility, startup replay for Jarvis worker lanes
 
 3. **Agent Runtime Tier**
    - `andy-bot`: `nanoclaw-agent` (observe/research lane)
@@ -22,6 +22,7 @@ Boundary ownership lives in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md). This f
 
 4. **Persistence + Control Plane**
    - SQLite for chat/task/session/run state
+   - `runtime_owners` for single active host ownership and heartbeat tracking
    - `dispatch_attempts` for request-to-worker handoff auditability
    - Filesystem IPC per group under `data/ipc/<group>`
    - Contract lifecycle: `queued -> running -> review_requested|failed_contract|failed`
@@ -29,6 +30,7 @@ Boundary ownership lives in [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md). This f
 ## Execution Boundaries
 
 - Core orchestration remains in NanoClaw host files.
+- Launchd `com.nanoclaw` is the default runtime owner; manual runs are an explicit override path.
 - Jarvis policy belongs under `src/extensions/jarvis/*`, not as duplicated inline helper clusters in `src/index.ts`, `src/ipc.ts`, and `src/db.ts`.
 - Worker behavior is contract-driven (dispatch/completion schema), not prompt-only.
 - Non-worker groups retain Claude Agent SDK behavior.

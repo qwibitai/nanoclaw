@@ -3,6 +3,7 @@
  * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
+import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -68,6 +69,13 @@ interface VolumeMount {
   containerPath: string;
   readonly: boolean;
 }
+
+interface AgentRunnerSourceSyncMetadata {
+  baselineHash: string;
+  syncedAt: string;
+}
+
+const AGENT_RUNNER_SYNC_METADATA_FILENAME = 'agent-runner-src.sync.json';
 
 function isRetryableSkillSyncError(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | undefined)?.code;
@@ -161,6 +169,154 @@ function syncContainerSkills(skillsSrc: string, skillsDst: string): void {
   }
 }
 
+function hashDirectoryContents(dirPath: string): string {
+  const hash = createHash('sha256');
+
+  const visit = (currentPath: string, relativePrefix = ''): void => {
+    const entries = fs
+      .readdirSync(currentPath, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const entry of entries) {
+      const relativePath = relativePrefix
+        ? `${relativePrefix}/${entry.name}`
+        : entry.name;
+      const fullPath = path.join(currentPath, entry.name);
+
+      if (entry.isDirectory()) {
+        hash.update(`dir:${relativePath}\n`);
+        visit(fullPath, relativePath);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+
+      hash.update(`file:${relativePath}\n`);
+      hash.update(fs.readFileSync(fullPath));
+      hash.update('\n');
+    }
+  };
+
+  visit(dirPath);
+  return hash.digest('hex');
+}
+
+function readAgentRunnerSyncMetadata(
+  metadataPath: string,
+): AgentRunnerSourceSyncMetadata | null {
+  if (!fs.existsSync(metadataPath)) return null;
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(metadataPath, 'utf8')) as Partial<
+      AgentRunnerSourceSyncMetadata
+    >;
+    if (typeof raw.baselineHash !== 'string') return null;
+    return {
+      baselineHash: raw.baselineHash,
+      syncedAt:
+        typeof raw.syncedAt === 'string' ? raw.syncedAt : new Date(0).toISOString(),
+    };
+  } catch (err) {
+    logger.warn({ err, metadataPath }, 'Failed to read agent-runner sync metadata');
+    return null;
+  }
+}
+
+function writeAgentRunnerSyncMetadata(
+  metadataPath: string,
+  baselineHash: string,
+): void {
+  const metadata: AgentRunnerSourceSyncMetadata = {
+    baselineHash,
+    syncedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
+}
+
+function replaceDirectory(srcPath: string, dstPath: string): void {
+  fs.rmSync(dstPath, { recursive: true, force: true });
+  fs.cpSync(srcPath, dstPath, { recursive: true });
+}
+
+function backupDirectory(dirPath: string): string {
+  const backupPath = `${dirPath}.backup-${new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')}`;
+  fs.cpSync(dirPath, backupPath, { recursive: true });
+  return backupPath;
+}
+
+export function syncAgentRunnerSource(
+  agentRunnerSrc: string,
+  groupAgentRunnerDir: string,
+  metadataPath = path.join(
+    path.dirname(groupAgentRunnerDir),
+    AGENT_RUNNER_SYNC_METADATA_FILENAME,
+  ),
+): void {
+  if (!fs.existsSync(agentRunnerSrc)) return;
+
+  fs.mkdirSync(path.dirname(groupAgentRunnerDir), { recursive: true });
+  const repoBaselineHash = hashDirectoryContents(agentRunnerSrc);
+
+  if (!fs.existsSync(groupAgentRunnerDir)) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    writeAgentRunnerSyncMetadata(metadataPath, repoBaselineHash);
+    return;
+  }
+
+  const stagedHash = hashDirectoryContents(groupAgentRunnerDir);
+  const metadata = readAgentRunnerSyncMetadata(metadataPath);
+
+  if (metadata) {
+    const stagedMatchesBaseline = stagedHash === metadata.baselineHash;
+    const repoMatchesBaseline = repoBaselineHash === metadata.baselineHash;
+
+    if (stagedMatchesBaseline) {
+      if (!repoMatchesBaseline) {
+        replaceDirectory(agentRunnerSrc, groupAgentRunnerDir);
+        writeAgentRunnerSyncMetadata(metadataPath, repoBaselineHash);
+      }
+      return;
+    }
+
+    if (!repoMatchesBaseline) {
+      logger.warn(
+        {
+          agentRunnerSrc,
+          groupAgentRunnerDir,
+          metadataPath,
+          stagedHash,
+          syncedBaselineHash: metadata.baselineHash,
+          repoBaselineHash,
+        },
+        'Preserving locally customized staged agent-runner source after repo drift',
+      );
+    }
+    return;
+  }
+
+  if (stagedHash === repoBaselineHash) {
+    writeAgentRunnerSyncMetadata(metadataPath, repoBaselineHash);
+    return;
+  }
+
+  const backupPath = backupDirectory(groupAgentRunnerDir);
+  logger.warn(
+    {
+      agentRunnerSrc,
+      groupAgentRunnerDir,
+      metadataPath,
+      backupPath,
+      stagedHash,
+      repoBaselineHash,
+    },
+    'Resetting legacy staged agent-runner source to repo baseline after backup',
+  );
+  replaceDirectory(agentRunnerSrc, groupAgentRunnerDir);
+  writeAgentRunnerSyncMetadata(metadataPath, repoBaselineHash);
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -168,6 +324,7 @@ function buildVolumeMounts(
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const groupDir = resolveGroupFolderPath(group.folder);
+  const groupSessionRoot = path.join(DATA_DIR, 'sessions', group.folder);
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
@@ -209,12 +366,7 @@ function buildVolumeMounts(
 
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
+  const groupSessionsDir = path.join(groupSessionRoot, '.claude');
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
 
@@ -320,24 +472,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // Stage agent-runner source into a per-group writable location so agents can
+  // customize it without affecting other groups. The staged copy is baseline-
+  // synced against the repo source on every launch.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
     'agent-runner',
     'src',
   );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-  }
+  const groupAgentRunnerDir = path.join(groupSessionRoot, 'agent-runner-src');
+  syncAgentRunnerSource(agentRunnerSrc, groupAgentRunnerDir);
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',

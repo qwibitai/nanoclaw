@@ -90,7 +90,8 @@ Use `pr_skipped_reason` when no PR is opened.
 ## Safety Rules
 
 - Keep changes inside declared scope paths.
-- Use same `run_id` for rework on the same logical task.
+- Same `run_id` may be reused only for retry after `failed` or `failed_contract`.
+- If Andy sends post-review rework, expect a new child `run_id` on the same `request_id` with `parent_run_id` pointing at the previously reviewed run.
 - Escalate to Andy-Developer instead of guessing when requirements are ambiguous.
 - Prefer deterministic verification over prose claims.
 - Do not silently downgrade required browser validation to DOM-only scraping.

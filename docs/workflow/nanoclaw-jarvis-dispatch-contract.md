@@ -154,6 +154,26 @@ If dispatch is blocked before run creation, classify it as policy-blocked dispat
 | `review_requested` | duplicate blocked |
 | `done` | duplicate blocked |
 
+After a run reaches `review_requested`, follow-up rework must use a new child `run_id` with the same `request_id` and `parent_run_id` set to the reviewed run. Do not reuse the reviewed `run_id`.
+
+## Review Ownership
+
+Accepted worker completion now triggers deterministic Andy review ownership:
+
+1. host marks the linked `andy_request` as `worker_review_requested`
+2. host injects a synthetic `<review_request>` message into `andy-developer`
+3. Andy must choose one outcome:
+   - approve
+   - bounded direct patch on the same worker branch
+   - rework dispatch to Jarvis with a new child `run_id`
+
+When Andy changes review state, it emits hidden `<review_state_update>` blocks so the host can persist:
+
+- `review_in_progress`
+- `andy_patch_in_progress`
+- `completed`
+- `failed`
+
 ## Agent Routing
 
 | Step | Agent | Mode | Notes |

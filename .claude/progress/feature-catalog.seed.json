@@ -95,6 +95,38 @@
       ]
     },
     {
+      "id": "runtime-ownership-isolation",
+      "name": "Runtime Ownership Isolation",
+      "summary": "Single active NanoClaw host ownership, heartbeat/lease tracking, and service-vs-manual session isolation to prevent WhatsApp conflict churn.",
+      "risk": "high",
+      "keywords": [
+        "runtime ownership",
+        "session isolation",
+        "launchd",
+        "whatsapp conflict",
+        "single owner",
+        "manual override"
+      ],
+      "files": [
+        "launchd/com.nanoclaw.plist",
+        "src/runtime-ownership.ts",
+        "src/channels/whatsapp.ts",
+        "src/config.ts",
+        "src/db.ts",
+        "src/index.ts",
+        "scripts/jarvis-preflight.sh",
+        "scripts/jarvis-reliability.sh",
+        "docs/workflow/nanoclaw-container-debugging.md",
+        "docs/architecture/nanoclaw-system-architecture.md",
+        "docs/reference/SPEC.md"
+      ],
+      "tests": [
+        "src/runtime-ownership.test.ts",
+        "src/channels/whatsapp.test.ts",
+        "src/db.test.ts"
+      ]
+    },
+    {
       "id": "task-scheduling",
       "name": "Task Scheduling",
       "summary": "Time-based task definitions and execution pipeline.",
@@ -240,17 +272,77 @@
         "src/ipc.ts",
         "src/db.ts",
         "src/types.ts",
+        "src/group-queue.ts",
         "src/extensions/jarvis/index.ts",
         "src/extensions/jarvis/lanes.ts",
         "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/lane-control-service.ts",
         "src/extensions/jarvis/dispatch-service.ts",
         "src/extensions/jarvis/request-state-service.ts",
+        "src/group-queue.test.ts",
+        "src/extensions/jarvis/lane-control-service.test.ts",
         "docs/architecture/nanoclaw-jarvis.md",
         "docs/architecture/nanoclaw-system-architecture.md"
       ],
       "tests": [
+        "src/group-queue.test.ts",
         "src/ipc-auth.test.ts",
-        "src/jarvis-worker-dispatch.test.ts"
+        "src/jarvis-worker-dispatch.test.ts",
+        "src/extensions/jarvis/lane-control-service.test.ts"
+      ]
+    },
+    {
+      "id": "andy-review-ownership",
+      "name": "Andy Review Ownership",
+      "summary": "Auto-triggered review workflow for Andy-developer, including review-state progression, bounded direct review patches, and rework lineage.",
+      "risk": "high",
+      "keywords": [
+        "andy review",
+        "review requested",
+        "review trigger",
+        "direct patch",
+        "rework lineage",
+        "request state"
+      ],
+      "files": [
+        "src/index.ts",
+        "src/db.ts",
+        "src/extensions/jarvis/frontdesk-service.ts",
+        "src/extensions/jarvis/request-state-service.ts",
+        "groups/andy-developer/CLAUDE.md",
+        "groups/andy-developer/docs/github.md",
+        "groups/andy-developer/docs/jarvis-dispatch.md",
+        "groups/jarvis-worker-1/docs/workflow/worker-skill-policy.md",
+        "groups/jarvis-worker-2/docs/workflow/worker-skill-policy.md",
+        "docs/architecture/nanoclaw-jarvis.md",
+        "docs/workflow/nanoclaw-jarvis-dispatch-contract.md"
+      ],
+      "tests": [
+        "src/extensions/jarvis/frontdesk-service.test.ts",
+        "src/jarvis-worker-dispatch.test.ts",
+        "src/db.test.ts"
+      ]
+    },
+    {
+      "id": "andy-request-admin-cleanup",
+      "name": "Andy Request Admin Cleanup",
+      "summary": "Administrative cleanup tooling for stale non-terminal Andy requests, including dry-run inspection and explicit archival/closure.",
+      "risk": "medium",
+      "keywords": [
+        "andy requests",
+        "stale request cleanup",
+        "archive requests",
+        "cancel stale requests",
+        "admin command",
+        "testing backlog"
+      ],
+      "files": [
+        "scripts/jarvis-ops.sh",
+        "scripts/jarvis-reconcile-stale-andy-requests.sh",
+        ".claude/progress/feature-catalog.seed.json"
+      ],
+      "tests": [
+        "src/jarvis-reconcile-stale-andy-requests.test.ts"
       ]
     },
     {

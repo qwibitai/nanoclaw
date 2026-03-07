@@ -433,6 +433,43 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
+  it('reports a read-only status snapshot for the group', async () => {
+    let resolveProcess: () => void;
+
+    const processMessages = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveProcess = resolve;
+      });
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+    queue.enqueueMessageCheck('group1@g.us');
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+    );
+    queue.notifyIdle('group1@g.us');
+    queue.enqueueTask('group1@g.us', 'task-1', async () => {});
+
+    expect(queue.getStatus('group1@g.us')).toEqual({
+      active: true,
+      idleWaiting: true,
+      isTaskContainer: false,
+      runningTaskId: null,
+      pendingMessages: false,
+      pendingTaskCount: 1,
+      containerName: 'container-1',
+      groupFolder: 'test-group',
+    });
+
+    resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
   it('preempts when idle arrives with pending tasks', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;

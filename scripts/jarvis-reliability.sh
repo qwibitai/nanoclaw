@@ -191,6 +191,27 @@ else
 fi
 
 if [ -f "$DB_PATH" ] && have_cmd sqlite3; then
+  if sqlite3 "$DB_PATH" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_owners';" 2>/dev/null | grep -q 1; then
+    pass "runtime_owners table exists"
+    runtime_owner_row="$(sqlite3 -separator '|' "$DB_PATH" "SELECT owner_name, owner_mode, pid, heartbeat_at, claimed_by FROM runtime_owners WHERE owner_name = 'host' LIMIT 1;" 2>/dev/null || true)"
+    if [ -n "$runtime_owner_row" ]; then
+      IFS='|' read -r runtime_owner_name runtime_owner_mode runtime_owner_pid runtime_owner_heartbeat runtime_owner_claimed_by <<<"$runtime_owner_row"
+      info "runtime owner: ${runtime_owner_name:-host} | mode=${runtime_owner_mode:-unknown} | pid=${runtime_owner_pid:-unknown} | heartbeat=${runtime_owner_heartbeat:-unknown}"
+      if [[ "$runtime_owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$runtime_owner_pid" 2>/dev/null; then
+        pass "runtime owner pid is alive"
+      else
+        fail "runtime owner pid is stale (${runtime_owner_pid:-unknown})"
+      fi
+      if [ -n "$runtime_owner_claimed_by" ]; then
+        info "runtime owner claimed_by: $runtime_owner_claimed_by"
+      fi
+    else
+      fail "runtime owner row missing"
+    fi
+  else
+    fail "runtime_owners table missing"
+  fi
+
   required_cols=(
     dispatch_repo
     dispatch_branch

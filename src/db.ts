@@ -8,6 +8,7 @@ import { logger } from './logger.js';
 import {
   NewMessage,
   RegisteredGroup,
+  RuntimeOwnerRecord,
   ScheduledTask,
   TaskRunLog,
 } from './types.js';
@@ -168,6 +169,18 @@ function createSchema(database: Database.Database): void {
       run_id TEXT,
       PRIMARY KEY (chat_jid, message_id)
     );
+    CREATE TABLE IF NOT EXISTS runtime_owners (
+      owner_name TEXT PRIMARY KEY,
+      owner_mode TEXT NOT NULL,
+      pid INTEGER NOT NULL,
+      started_at TEXT NOT NULL,
+      heartbeat_at TEXT NOT NULL,
+      auth_scope TEXT NOT NULL,
+      launchd_label TEXT,
+      claimed_by TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_owners_heartbeat
+      ON runtime_owners(heartbeat_at);
     CREATE TABLE IF NOT EXISTS worker_steering_events (
       steer_id TEXT PRIMARY KEY,
       run_id TEXT NOT NULL,
@@ -467,6 +480,19 @@ export function storeMessage(msg: NewMessage): void {
   );
 }
 
+export function getStoredMessage(
+  chatJid: string,
+  messageId: string,
+): NewMessage | undefined {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message
+       FROM messages
+       WHERE chat_jid = ? AND id = ?`,
+    )
+    .get(chatJid, messageId) as NewMessage | undefined;
+}
+
 /**
  * Store a message directly (for non-WhatsApp channels that don't use Baileys proto).
  */
@@ -498,16 +524,17 @@ export function getNewMessages(
   jids: string[],
   lastCursor: string,
   botPrefix: string,
+  limit: number = 200,
 ): { messages: NewMessage[]; newCursor: string; newTimestamp: string } {
-  if (jids.length === 0) {
-    return { messages: [], newCursor: lastCursor, newTimestamp: lastCursor };
-  }
-
   // Parse composite cursor: "timestamp|messageId" or just "timestamp" for backward compat
   let lastTimestamp = lastCursor;
   let lastMessageId = '';
   if (lastCursor.includes('|')) {
     [lastTimestamp, lastMessageId] = lastCursor.split('|');
+  }
+
+  if (jids.length === 0) {
+    return { messages: [], newCursor: lastCursor, newTimestamp: lastTimestamp };
   }
 
   const placeholders = jids.map(() => '?').join(',');
@@ -517,26 +544,32 @@ export function getNewMessages(
   // This prevents message loss when multiple messages share the same timestamp.
   const sql = lastMessageId
     ? `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
-    FROM messages
-    WHERE ((timestamp > ?) OR (timestamp = ? AND id > ?))
-      AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp, id
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE ((timestamp > ?) OR (timestamp = ? AND id > ?))
+        AND chat_jid IN (${placeholders})
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    ) ORDER BY timestamp, id
   `
     : `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
-    FROM messages
-    WHERE timestamp > ? AND chat_jid IN (${placeholders})
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp, id
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE timestamp > ? AND chat_jid IN (${placeholders})
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    ) ORDER BY timestamp, id
   `;
 
   const params = lastMessageId
-    ? [lastTimestamp, lastTimestamp, lastMessageId, ...jids, `${botPrefix}:%`]
-    : [lastTimestamp, ...jids, `${botPrefix}:%`];
+    ? [lastTimestamp, lastTimestamp, lastMessageId, ...jids, `${botPrefix}:%`, limit]
+    : [lastTimestamp, ...jids, `${botPrefix}:%`, limit];
 
   const rows = db.prepare(sql).all(...params) as NewMessage[];
 
@@ -556,20 +589,24 @@ export function getMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
+  limit: number = 200,
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
-    FROM messages
-    WHERE chat_jid = ? AND timestamp > ?
-      AND is_bot_message = 0 AND content NOT LIKE ?
-      AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      FROM messages
+      WHERE chat_jid = ? AND timestamp > ?
+        AND is_bot_message = 0 AND content NOT LIKE ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    ) ORDER BY timestamp, id
   `;
   return db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
 export function createTask(
@@ -720,6 +757,79 @@ export function setRouterState(key: string, value: string): void {
   ).run(key, value);
 }
 
+// --- Runtime ownership accessors ---
+
+export function getRuntimeOwner(
+  ownerName: string,
+): RuntimeOwnerRecord | undefined {
+  return db
+    .prepare(
+      `SELECT owner_name, owner_mode, pid, started_at, heartbeat_at, auth_scope, launchd_label, claimed_by
+       FROM runtime_owners
+       WHERE owner_name = ?`,
+    )
+    .get(ownerName) as RuntimeOwnerRecord | undefined;
+}
+
+export function upsertRuntimeOwner(record: RuntimeOwnerRecord): void {
+  db.prepare(
+    `INSERT INTO runtime_owners (
+      owner_name,
+      owner_mode,
+      pid,
+      started_at,
+      heartbeat_at,
+      auth_scope,
+      launchd_label,
+      claimed_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(owner_name) DO UPDATE SET
+      owner_mode = excluded.owner_mode,
+      pid = excluded.pid,
+      started_at = excluded.started_at,
+      heartbeat_at = excluded.heartbeat_at,
+      auth_scope = excluded.auth_scope,
+      launchd_label = excluded.launchd_label,
+      claimed_by = excluded.claimed_by`,
+  ).run(
+    record.owner_name,
+    record.owner_mode,
+    record.pid,
+    record.started_at,
+    record.heartbeat_at,
+    record.auth_scope,
+    record.launchd_label,
+    record.claimed_by,
+  );
+}
+
+export function updateRuntimeOwnerHeartbeat(
+  ownerName: string,
+  pid: number,
+  heartbeatAt: string,
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE runtime_owners
+       SET heartbeat_at = ?
+       WHERE owner_name = ? AND pid = ?`,
+    )
+    .run(heartbeatAt, ownerName, pid);
+  return result.changes > 0;
+}
+
+export function deleteRuntimeOwner(ownerName: string, pid?: number): boolean {
+  const stmt =
+    pid === undefined
+      ? db.prepare(`DELETE FROM runtime_owners WHERE owner_name = ?`)
+      : db.prepare(
+          `DELETE FROM runtime_owners WHERE owner_name = ? AND pid = ?`,
+        );
+  const result =
+    pid === undefined ? stmt.run(ownerName) : stmt.run(ownerName, pid);
+  return result.changes > 0;
+}
+
 // --- Session accessors ---
 
 export function getSession(groupFolder: string): string | undefined {
@@ -733,6 +843,10 @@ export function setSession(groupFolder: string, sessionId: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO sessions (group_folder, session_id) VALUES (?, ?)',
   ).run(groupFolder, sessionId);
+}
+
+export function clearSession(groupFolder: string): void {
+  db.prepare('DELETE FROM sessions WHERE group_folder = ?').run(groupFolder);
 }
 
 export function getAllSessions(): Record<string, string> {
@@ -924,6 +1038,8 @@ export type AndyRequestState =
   | 'worker_queued'
   | 'worker_running'
   | 'worker_review_requested'
+  | 'review_in_progress'
+  | 'andy_patch_in_progress'
   | 'completed'
   | 'failed'
   | 'cancelled';

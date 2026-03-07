@@ -11,6 +11,7 @@ import {
   recoverWorkerRunForCompletionAccept,
   recoverWorkerRunFromNoContainerFailure,
   updateAndyRequestByWorkerRun,
+  updateAndyRequestState,
   updateWorkerRunLifecycle,
   updateWorkerRunStatus,
   updateWorkerRunCompletion,
@@ -395,6 +396,49 @@ describe('andy request tracking', () => {
     expect(request?.state).toBe('worker_review_requested');
     expect(request?.last_status_text).toBe('ready for review');
     expect(request?.closed_at).toBeNull();
+  });
+
+  it('persists Andy review ownership states and closes the request on approval', () => {
+    createAndyRequestIfAbsent({
+      request_id: 'req-link-2',
+      chat_jid: 'chat-2',
+      source_group_folder: 'andy-developer',
+      user_message_id: 'msg-link-2',
+      user_prompt: 'review and close the task',
+      intent: 'work_intake',
+      state: 'queued_for_coordinator',
+    });
+
+    insertWorkerRun('run-link-2', 'jarvis-worker-1', {
+      request_id: 'req-link-2',
+    });
+    linkAndyRequestToWorkerRun('req-link-2', 'run-link-2', 'jarvis-worker-1');
+    updateAndyRequestByWorkerRun(
+      'run-link-2',
+      'worker_review_requested',
+      'ready for review',
+    );
+    updateAndyRequestState(
+      'req-link-2',
+      'review_in_progress',
+      'Reviewing completion artifacts',
+    );
+    updateAndyRequestState(
+      'req-link-2',
+      'andy_patch_in_progress',
+      'Applying a small same-branch follow-up fix',
+    );
+    updateAndyRequestState(
+      'req-link-2',
+      'completed',
+      'Approved after bounded patch',
+    );
+
+    const request = getAndyRequestById('req-link-2');
+    expect(request?.worker_run_id).toBe('run-link-2');
+    expect(request?.state).toBe('completed');
+    expect(request?.last_status_text).toBe('Approved after bounded patch');
+    expect(request?.closed_at).not.toBeNull();
   });
 });
 

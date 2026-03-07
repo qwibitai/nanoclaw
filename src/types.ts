@@ -10,6 +10,19 @@ export type LaneId =
 
 export type LaneKind = 'external' | 'agent' | 'worker';
 
+export type RuntimeOwnerMode = 'service' | 'manual';
+
+export interface RuntimeOwnerRecord {
+  owner_name: string;
+  owner_mode: RuntimeOwnerMode;
+  pid: number;
+  started_at: string;
+  heartbeat_at: string;
+  auth_scope: string;
+  launchd_label: string | null;
+  claimed_by: string;
+}
+
 export interface LaneAddress {
   laneId: LaneId;
   laneKind: LaneKind;

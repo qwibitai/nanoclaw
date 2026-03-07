@@ -36,6 +36,8 @@ Commands:
   incident-bundle Collect a timestamped diagnostics bundle for an incident
   reconcile-stale-runs
                   Reconcile stale worker_runs (dry-run by default)
+  reconcile-stale-andy-requests
+                  Archive/close stale non-terminal Andy requests (dry-run by default)
   recover         Run runtime/builder recovery and service restart
   smoke           Rebuild worker image and run worker e2e smoke
   help            Show this help
@@ -113,6 +115,9 @@ case "$command_name" in
     ;;
   reconcile-stale-runs)
     exec "$SCRIPT_DIR/jarvis-reconcile-stale-runs.sh" "$@"
+    ;;
+  reconcile-stale-andy-requests)
+    exec "$SCRIPT_DIR/jarvis-reconcile-stale-andy-requests.sh" "$@"
     ;;
   recover)
     exec "$SCRIPT_DIR/jarvis-recover.sh" "$@"
