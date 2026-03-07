@@ -1022,9 +1022,9 @@
       '.sr-review-deposit-note { font-size: 11px; color: #9ca3af; font-style: italic; padding: 2px 0 4px; }' +
       '#sr-booking-error { background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5; border-radius: 8px; padding: 12px 16px; margin: 12px 0; font-size: 14px; }' +
       '.sr-date-booked { position: relative; }' +
-      '.sr-date-booked .sr-booked-span { color: #d1d5db !important; cursor: not-allowed !important; text-decoration: line-through; pointer-events: none; }' +
-      '.sr-date-booked { background: #fee2e2 !important; }' +
-      '.sr-date-booked a { color: #d1d5db !important; cursor: not-allowed !important; text-decoration: line-through; pointer-events: none; }' +
+      '.sr-date-booked .sr-booked-span { color: #fff !important; cursor: not-allowed !important; text-decoration: none; pointer-events: none; }' +
+      '.sr-date-booked { background: transparent !important; }' +
+      '.sr-date-booked a { color: #fff !important; cursor: not-allowed !important; text-decoration: none; pointer-events: none; }' + '.sr-date-booked .wpbc-cell-box { background: rgba(166, 13, 13, 0.8) !important; }' +
       '@media (max-width: 480px) {' +
       '  .sr-progress-label { font-size: 9px; }' +
       '  .sr-step-card { padding: 16px; }' +
