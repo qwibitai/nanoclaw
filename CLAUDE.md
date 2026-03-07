@@ -57,6 +57,7 @@ BEFORE deciding workflow setup, responsibility ownership, or where updates belon
 BEFORE deciding whether to run a skill workflow or docs-first workflow → read docs/operations/skills-vs-docs-map.md
 BEFORE deciding what to offload to GitHub Actions/rulesets vs keep in local lanes → read docs/workflow/github-offload-boundary-loop.md
 BEFORE setting up multi-agent GitHub coordination using Issues/Projects/Discussions/rulesets → read docs/workflow/github-multi-agent-collaboration-loop.md
+BEFORE using GitHub Projects/Discussions for day-to-day agent collaboration or promoting Discussions into Issues → read docs/workflow/github-agent-collaboration-loop.md
 BEFORE consulting Claude Code CLI via resumed/forked sessions for parallel reasoning/review → read docs/workflow/claude-cli-resume-consult-lane.md
 BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md
 BEFORE finalizing any Andy/Jarvis operating agreement change → read docs/operations/agreement-sync-protocol.md

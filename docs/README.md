@@ -29,6 +29,7 @@ docs/
 - Runtime and incident debugging: `docs/workflow/nanoclaw-jarvis-debug-loop.md`
 - Worker contract and runtime: `docs/workflow/nanoclaw-jarvis-dispatch-contract.md` + `docs/workflow/nanoclaw-jarvis-worker-runtime.md`
 - GitHub and workflow governance: `docs/workflow/nanoclaw-github-control-plane.md` + `docs/workflow/github-offload-boundary-loop.md`
+- Day-to-day GitHub agent collaboration: `docs/workflow/github-agent-collaboration-loop.md`
 - Cross-tool Claude/Codex execution: `docs/workflow/unified-codex-claude-loop.md`
 - Ownership and update surfaces: `docs/operations/workflow-setup-responsibility-map.md` + `docs/operations/update-requirements-matrix.md`
 - Research artifacts and optimization evidence: `docs/research/README.md`

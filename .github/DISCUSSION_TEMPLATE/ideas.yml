@@ -1,0 +1,44 @@
+title: "[Idea] "
+body:
+  - type: dropdown
+    id: idea_type
+    attributes:
+      label: Idea Type
+      options:
+        - Feature Idea
+        - Upstream NanoClaw Sync
+        - SDK / Tooling Opportunity
+    validations:
+      required: true
+  - type: textarea
+    id: mission_alignment
+    attributes:
+      label: Mission Alignment
+      description: How does this improve the core mission of shipping production-quality code through the WhatsApp-driven workflow?
+      placeholder: Explain the mission-aligned value.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Summarize the feature, upstream change, or tooling update.
+      placeholder: Describe the opportunity and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and Links
+      description: Add source links, upstream commits, docs, or references.
+      placeholder: https://...
+    validations:
+      required: false
+  - type: textarea
+    id: promotion
+    attributes:
+      label: Promotion Trigger
+      description: What deterministic outcome would justify creating an Issue?
+      placeholder: Example: accept the proposal and define concrete acceptance criteria.
+    validations:
+      required: true

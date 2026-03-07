@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-07T18:59:23.870Z",
+  "updated_at": "2026-03-07T20:00:28.588Z",
   "items": [
     {
       "id": "work-architecture-boundary-governance-1772821500000",
@@ -265,6 +265,39 @@
       ],
       "created_at": "2026-03-07T18:54:59.391Z",
       "updated_at": "2026-03-07T18:59:23.870Z"
+    },
+    {
+      "id": "work-github-collaboration-control-plane-1772911763760",
+      "title": "Implement GitHub collaboration control plane",
+      "feature_id": "github-collaboration-control-plane",
+      "status": "done",
+      "request": "Implement the GitHub Project + Discussions collaboration control plane for Claude/Codex with issue-first project sync and discussion scaffolding.",
+      "notes": [
+        "2026-03-07T19:45:13.469Z: Implemented issue-first Project automation, added discussion scaffolding, passed build/test/workflow/mirror/tooling checks, and migrated the live GitHub Project to the new field/status model with PR cards removed."
+      ],
+      "evidence": [
+        "https://github.com/users/ingpoc/projects/1",
+        "https://github.com/ingpoc/nanoclaw/discussions"
+      ],
+      "created_at": "2026-03-07T19:29:23.760Z",
+      "updated_at": "2026-03-07T19:45:13.469Z"
+    },
+    {
+      "id": "work-github-collaboration-control-plane-1772913523539",
+      "title": "Document GitHub agent collaboration workflow",
+      "feature_id": "github-collaboration-control-plane",
+      "status": "done",
+      "request": "Create a canonical repo doc for agent use of GitHub Projects and Discussions, and reference it from CLAUDE.md and AGENTS.md.",
+      "notes": [
+        "2026-03-07T20:00:28.588Z: Added the canonical GitHub agent collaboration workflow doc, linked it from CLAUDE.md and AGENTS.md, updated docs inventory/landing pages, and passed workflow/mirror/tooling checks."
+      ],
+      "evidence": [
+        "docs/workflow/github-agent-collaboration-loop.md",
+        "CLAUDE.md",
+        "AGENTS.md"
+      ],
+      "created_at": "2026-03-07T19:58:43.539Z",
+      "updated_at": "2026-03-07T20:00:28.588Z"
     }
   ]
 }

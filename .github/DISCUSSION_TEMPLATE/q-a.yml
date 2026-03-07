@@ -1,0 +1,28 @@
+title: "[Question] "
+body:
+  - type: dropdown
+    id: question_type
+    attributes:
+      label: Question Type
+      options:
+        - Workflow Question
+        - Upstream Evaluation
+        - Tool Capability
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Ask the concrete question that needs an answer.
+      placeholder: What are we trying to understand?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Add current constraints, relevant links, or background.
+      placeholder: Share the necessary context for a good answer.
+    validations:
+      required: true

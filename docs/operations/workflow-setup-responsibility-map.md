@@ -15,6 +15,7 @@ Canonical map for selecting workflow setup, assigning responsibility, and knowin
 | Concern | Primary Owner | Repository-Tracked Update Locations | Runtime-Local Update Locations |
 |---------|---------------|-------------------------------------|-------------------------------|
 | GitHub Actions and governance | `andy-developer` | `.github/workflows/*`, `docs/workflow/nanoclaw-github-control-plane.md` | `groups/andy-developer/docs/github-workflow-admin.md` |
+| GitHub Project / Discussions collaboration taxonomy | `andy-developer` | `.github/workflows/project-intake-sync.yml`, `.github/workflows/project-status-sync.yml`, `.github/DISCUSSION_TEMPLATE/*`, `docs/workflow/github-multi-agent-collaboration-loop.md`, `docs/workflow/nanoclaw-github-control-plane.md` | `groups/andy-developer/docs/github-workflow-admin.md` |
 | Worker branch seeding (`base_branch` -> `jarvis-*`) | `andy-developer` | `docs/workflow/nanoclaw-jarvis-dispatch-contract.md`, `src/ipc.ts` | `groups/andy-developer/docs/jarvis-dispatch.md`, `groups/jarvis-worker-*/CLAUDE.md` |
 | PR review mode policy (`@claude`) | `andy-developer` | `docs/workflow/nanoclaw-github-control-plane.md`, `docs/operations/roles-classification.md` | `groups/andy-developer/CLAUDE.md`, `groups/andy-developer/docs/github.md` |
 | Role boundaries (Andy vs Jarvis) | `andy-developer` + core maintainer | `docs/operations/roles-classification.md`, `container/rules/andy-developer-operating-rule.md`, `src/ipc.ts` | `groups/andy-developer/CLAUDE.md`, `groups/jarvis-worker-*/CLAUDE.md` |

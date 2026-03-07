@@ -597,6 +597,42 @@
       "tests": []
     },
     {
+      "id": "github-collaboration-control-plane",
+      "name": "GitHub Collaboration Control Plane",
+      "summary": "Issue-first Project board automation, discussion scaffolding, and governance docs for Claude/Codex collaboration.",
+      "risk": "high",
+      "keywords": [
+        "github project",
+        "discussions",
+        "control plane",
+        "collaboration",
+        "workflow",
+        "project sync"
+      ],
+      "files": [
+        ".github/DISCUSSION_TEMPLATE/general.yml",
+        ".github/DISCUSSION_TEMPLATE/ideas.yml",
+        ".github/DISCUSSION_TEMPLATE/q-a.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/workflows/project-intake-sync.yml",
+        ".github/workflows/project-status-sync.yml",
+        ".claude/progress/feature-catalog.seed.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "DOCS.md",
+        "docs/README.md",
+        "docs/operations/workflow-setup-responsibility-map.md",
+        "docs/workflow/github-agent-collaboration-loop.md",
+        "docs/workflow/github-multi-agent-collaboration-loop.md",
+        "docs/workflow/nanoclaw-github-control-plane.md",
+        "scripts/workflow/github-project-sync.js",
+        "setup/github-project-sync.test.ts"
+      ],
+      "tests": [
+        "setup/github-project-sync.test.ts"
+      ]
+    },
+    {
       "id": "channel-extension-skills",
       "name": "Channel and Integration Extension Skills",
       "summary": "Optional upstream capabilities delivered as skills (Telegram, Slack, Discord, Gmail, X, voice, parallel).",

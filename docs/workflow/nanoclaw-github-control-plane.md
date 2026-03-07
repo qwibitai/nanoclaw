@@ -17,6 +17,17 @@ For cross-domain ownership and update-location mapping, see
   - implements product code changes from dispatch contracts
   - does not own branch protection/workflow governance by default
 
+## Project and Discussion Control Plane
+
+- The GitHub Project is an Issue-first execution board, not an ideation board.
+- PRs should not appear as first-class Project cards; use the Project `Linked pull requests` field on the Issue card instead.
+- Discussions are the durable home for workflow debates, mission-aligned feature ideas, upstream NanoClaw evaluation, Claude/Codex collaboration design, and SDK/tooling opportunity review.
+- Day-to-day agent behavior on those surfaces is defined by `docs/workflow/github-agent-collaboration-loop.md`.
+- This repository ships two project workflows:
+  - `.github/workflows/project-intake-sync.yml` for Issue intake + default field initialization
+  - `.github/workflows/project-status-sync.yml` for status sync from Issue/PR lifecycle
+- Discussion category taxonomy is only partially repo-configurable. The repository ships templates for the default GitHub categories (`General`, `Ideas`, `Q&A`), and any rename to the preferred collaboration taxonomy is a one-time GitHub UI admin action.
+
 ## Merge Policy
 
 1. `main` is PR-only.

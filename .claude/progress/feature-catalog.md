@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-07T18:58:50.793Z
+Generated: 2026-03-07T19:58:58.918Z
 Project: nanoclaw
 
 ## Features
@@ -348,6 +348,10 @@ Project: nanoclaw
   - none
 - Shared Files:
   - .claude/progress/feature-catalog.seed.json
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/README.md
 - Suggested Verify:
   - npm run typecheck
 
@@ -533,6 +537,42 @@ Project: nanoclaw
   - scripts/test-andy-user-e2e.ts
 - Suggested Verify:
   - npm run typecheck
+
+### github-collaboration-control-plane - GitHub Collaboration Control Plane
+- Risk: high
+- Summary: Issue-first Project board automation, discussion scaffolding, and governance docs for Claude/Codex collaboration.
+- Keywords: github project, discussions, control plane, collaboration, workflow, project sync
+- Files (17):
+  - .claude/progress/feature-catalog.seed.json
+  - .github/DISCUSSION_TEMPLATE/general.yml
+  - .github/DISCUSSION_TEMPLATE/ideas.yml
+  - .github/DISCUSSION_TEMPLATE/q-a.yml
+  - .github/ISSUE_TEMPLATE/config.yml
+  - .github/workflows/project-intake-sync.yml
+  - .github/workflows/project-status-sync.yml
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/operations/workflow-setup-responsibility-map.md
+  - docs/README.md
+  - docs/workflow/github-agent-collaboration-loop.md
+  - docs/workflow/github-multi-agent-collaboration-loop.md
+  - docs/workflow/nanoclaw-github-control-plane.md
+  - scripts/workflow/github-project-sync.js
+  - setup/github-project-sync.test.ts
+- Tests (1):
+  - setup/github-project-sync.test.ts
+- Shared Files:
+  - .claude/progress/feature-catalog.seed.json
+  - AGENTS.md
+  - CLAUDE.md
+  - DOCS.md
+  - docs/README.md
+- Validation Warnings:
+  - missing file: docs/workflow/github-agent-collaboration-loop.md
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run setup/github-project-sync.test.ts
 
 ### channel-extension-skills - Channel and Integration Extension Skills
 - Risk: medium

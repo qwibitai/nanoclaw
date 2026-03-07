@@ -1,16 +1,23 @@
-name: Project Intake Sync
+name: Project Status Sync
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, assigned, unassigned, labeled, unlabeled, closed]
+  pull_request:
+    types: [opened, reopened, ready_for_review, converted_to_draft, synchronize, closed, edited]
   workflow_dispatch:
 
 permissions:
   contents: read
   issues: read
+  pull-requests: read
+
+concurrency:
+  group: project-status-sync-${{ github.event.issue.number || github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
-  add-to-project:
+  sync-project-status:
     runs-on: ubuntu-latest
     env:
       ADD_TO_PROJECT_PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
@@ -26,8 +33,8 @@ jobs:
         if: ${{ env.ADD_TO_PROJECT_PAT != '' }}
         uses: actions/checkout@v4
 
-      - name: Add issue to project and initialize fields
+      - name: Sync issue-first project state
         if: ${{ env.ADD_TO_PROJECT_PAT != '' }}
         env:
           GITHUB_TOKEN: ${{ env.ADD_TO_PROJECT_PAT }}
-        run: node scripts/workflow/github-project-sync.js intake
+        run: node scripts/workflow/github-project-sync.js status

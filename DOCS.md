@@ -57,6 +57,7 @@ The subfamilies below are the intended semantic organization without changing fi
 - `docs/workflow/weekly-slop-optimization-loop.md`: weekly deterministic slop-pruning workflow for docs/scripts/config/code surfaces
 - `docs/workflow/github-offload-boundary-loop.md`: GitHub-vs-local workflow placement policy
 - `docs/workflow/github-multi-agent-collaboration-loop.md`: multi-agent GitHub coordination model
+- `docs/workflow/github-agent-collaboration-loop.md`: day-to-day agent operating workflow for GitHub Discussions, Issues, and Project usage
 - `docs/workflow/claude-cli-resume-consult-lane.md`: scoped Claude CLI consult lane guidance
 - `docs/workflow/skill-routing-preflight.md`: task-start routing checklist for skills, docs, and MCPs
 
