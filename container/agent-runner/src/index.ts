@@ -393,13 +393,8 @@ async function runQuery(
 
   // Discover additional directories to pass to the SDK.
   // Their CLAUDE.md files are loaded automatically, and files are accessible to the agent.
+  // Note: /workspace/CLAUDE.md is auto-discovered by the SDK (walks up from cwd).
   const extraDirs: string[] = [];
-
-  // Global shared directory (mounted for all groups)
-  const globalDir = '/workspace/global';
-  if (fs.existsSync(globalDir)) {
-    extraDirs.push(globalDir);
-  }
 
   // Additional directories mounted at /workspace/extra/*
   const extraBase = '/workspace/extra';

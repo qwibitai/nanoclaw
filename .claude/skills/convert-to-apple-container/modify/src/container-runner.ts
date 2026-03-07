@@ -88,14 +88,14 @@ function buildVolumeMounts(
       readonly: false,
     });
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
+    // Global CLAUDE.md file
+    // Mounted as /workspace/CLAUDE.md so the SDK auto-discovers it
+    const globalClaudeMd = path.join(GROUPS_DIR, 'CLAUDE.md');
+    if (fs.existsSync(globalClaudeMd)) {
       mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
+        hostPath: globalClaudeMd,
+        containerPath: '/workspace/CLAUDE.md',
+        readonly: !isMain,
       });
     }
   }

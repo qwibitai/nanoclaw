@@ -115,6 +115,7 @@ function emitOutputMarker(
 describe('global directory mount', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     fakeProc = createFakeProcess();
   });
 
@@ -128,11 +129,11 @@ describe('global directory mount', () => {
   }
 
   function startAgent(isMain: boolean) {
-    // Make existsSync return true for global dir
+    // Make existsSync return true for global CLAUDE.md
     const existsMock = vi.mocked(fs.existsSync);
     existsMock.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
-      if (s.endsWith('/global')) return true;
+      if (s.endsWith('groups/CLAUDE.md')) return true;
       return false;
     });
 
@@ -144,7 +145,7 @@ describe('global directory mount', () => {
     return promise;
   }
 
-  it('mounts global directory for non-main groups', async () => {
+  it('mounts global directory read-only for non-main groups', async () => {
     const promise = startAgent(false);
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
@@ -152,18 +153,21 @@ describe('global directory mount', () => {
     await promise;
 
     const args = getSpawnArgs().join(' ');
-    expect(args).toContain('/workspace/global');
+    expect(args).toContain('/workspace/CLAUDE.md:ro');
   });
 
-  it('mounts global directory for main groups', async () => {
+  it('mounts global directory writable for main groups', async () => {
     const promise = startAgent(true);
     await vi.advanceTimersByTimeAsync(10);
     fakeProc.emit('close', 0);
     await vi.advanceTimersByTimeAsync(10);
     await promise;
 
-    const args = getSpawnArgs().join(' ');
-    expect(args).toContain('/workspace/global');
+    const args = getSpawnArgs();
+    // Should contain /workspace/CLAUDE.md mount without :ro suffix
+    const globalMountIdx = args.findIndex(a => a.includes('/workspace/CLAUDE.md'));
+    expect(globalMountIdx).toBeGreaterThan(-1);
+    expect(args[globalMountIdx]).not.toContain(':ro');
   });
 });
 
