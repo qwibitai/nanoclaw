@@ -6,15 +6,12 @@ adds:
   - src/channels/telegram.ts
   - src/channels/telegram.test.ts
 modifies:
-  - src/index.ts
-  - src/config.ts
-  - src/routing.test.ts
+  - src/channels/index.ts
 structured:
   npm_dependencies:
     grammy: "^1.39.3"
   env_additions:
     - TELEGRAM_BOT_TOKEN
-    - TELEGRAM_ONLY
 conflicts: []
 depends: []
 test: "npx vitest run src/channels/telegram.test.ts"

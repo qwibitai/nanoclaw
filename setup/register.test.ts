@@ -18,7 +18,8 @@ function createTestDb(): Database.Database {
     trigger_pattern TEXT NOT NULL,
     added_at TEXT NOT NULL,
     container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1
+    requires_trigger INTEGER DEFAULT 1,
+    is_main INTEGER DEFAULT 0
   )`);
   return db;
 }
@@ -128,6 +129,49 @@ describe('parameterized SQL registration', () => {
       .get('789@s.whatsapp.net') as { requires_trigger: number };
 
     expect(row.requires_trigger).toBe(0);
+  });
+
+  it('stores is_main flag', () => {
+    db.prepare(
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(
+      '789@s.whatsapp.net',
+      'Personal',
+      'whatsapp_main',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      0,
+      1,
+    );
+
+    const row = db
+      .prepare('SELECT is_main FROM registered_groups WHERE jid = ?')
+      .get('789@s.whatsapp.net') as { is_main: number };
+
+    expect(row.is_main).toBe(1);
+  });
+
+  it('defaults is_main to 0', () => {
+    db.prepare(
+      `INSERT OR REPLACE INTO registered_groups
+       (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+    ).run(
+      '123@g.us',
+      'Some Group',
+      'whatsapp_some-group',
+      '@Andy',
+      '2024-01-01T00:00:00.000Z',
+      1,
+    );
+
+    const row = db
+      .prepare('SELECT is_main FROM registered_groups WHERE jid = ?')
+      .get('123@g.us') as { is_main: number };
+
+    expect(row.is_main).toBe(0);
   });
 
   it('upserts on conflict', () => {
