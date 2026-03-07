@@ -18,7 +18,6 @@ Everything on your VPS
 ├── RUNTIME BACKUPS ────────────── S3: <bucket>/backups/
 │   ├── nanoclaw/store/            WhatsApp session + messages DB
 │   ├── nanoclaw/groups/           Group memory (CLAUDE.md files)
-│   ├── janasuvidha/pb_data/       PocketBase database (if present)
 │   └── credentials/               Gmail + GDrive OAuth tokens
 │
 └── LIVE FILES ─────────────────── S3: <bucket>/files/  →  ~/s3/
@@ -146,11 +145,6 @@ echo "[$(date -Iseconds)] Starting backup" >> "$LOG"
 # NanoClaw runtime data
 $RCLONE sync $HOME/nanoclaw/store/      s3:<BUCKET_NAME>/backups/nanoclaw/store/      --checksum 2>> "$LOG"
 $RCLONE sync $HOME/nanoclaw/groups/     s3:<BUCKET_NAME>/backups/nanoclaw/groups/     --checksum 2>> "$LOG"
-
-# JanaSuvidha PocketBase database (if present)
-if [ -d $HOME/janasuvidha/pb_data ]; then
-  $RCLONE sync $HOME/janasuvidha/pb_data/ s3:<BUCKET_NAME>/backups/janasuvidha/pb_data/ --checksum 2>> "$LOG"
-fi
 
 # OAuth credentials
 [ -d $HOME/.gmail-mcp ]  && $RCLONE sync $HOME/.gmail-mcp/  s3:<BUCKET_NAME>/backups/credentials/gmail-mcp/  --checksum 2>> "$LOG"
