@@ -196,7 +196,10 @@ export class GmailChannel implements Channel {
     const tokensPath = path.join(credDir, 'credentials.json');
 
     if (!fs.existsSync(keysPath) || !fs.existsSync(tokensPath)) {
-      logger.debug({ label, credDir }, 'Gmail credentials incomplete, skipping');
+      logger.debug(
+        { label, credDir },
+        'Gmail credentials incomplete, skipping',
+      );
       return null;
     }
 
@@ -395,9 +398,7 @@ export class GmailChannel implements Channel {
     }
 
     // Fallback to first main group
-    const mainEntry = Object.entries(groups).find(
-      ([, g]) => g.isMain === true,
-    );
+    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
     return mainEntry ? mainEntry[0] : null;
   }
 
@@ -435,10 +436,10 @@ export class GmailChannel implements Channel {
  * Maps credential directory suffixes to group folders.
  */
 const ACCOUNT_ROUTES: Record<string, string> = {
-  'sunday': 'sunday',
-  'illysium': 'xzo',
-  'numberdrinks': 'number-drinks',
-  'personal2': 'personal',
+  sunday: 'sunday',
+  illysium: 'xzo',
+  numberdrinks: 'number-drinks',
+  personal2: 'personal',
 };
 
 /**

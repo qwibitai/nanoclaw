@@ -156,6 +156,21 @@ function buildVolumeMounts(
     }
   }
 
+  // Write global .mcp.json for MCP servers available to all containers
+  const mcpJsonPath = path.join(groupSessionsDir, '.mcp.json');
+  const globalMcpConfig = {
+    mcpServers: {
+      granola: {
+        type: 'http',
+        url: 'https://mcp.granola.ai/mcp',
+      },
+    },
+  };
+  fs.writeFileSync(
+    mcpJsonPath,
+    JSON.stringify(globalMcpConfig, null, 2) + '\n',
+  );
+
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
@@ -197,6 +212,15 @@ function buildVolumeMounts(
   } catch {
     // ignore readdir errors
   }
+
+  // Google Calendar MCP credentials directory
+  const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+  fs.mkdirSync(calendarDir, { recursive: true });
+  mounts.push({
+    hostPath: calendarDir,
+    containerPath: '/home/node/.config/google-calendar-mcp',
+    readonly: false, // MCP needs to store/refresh OAuth tokens
+  });
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
@@ -252,7 +276,11 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'GITHUB_TOKEN']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'GITHUB_TOKEN',
+  ]);
 }
 
 function buildContainerArgs(

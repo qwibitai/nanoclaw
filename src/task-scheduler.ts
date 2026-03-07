@@ -2,7 +2,13 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, DEFAULT_MODEL, MODEL_ALIASES, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  DEFAULT_MODEL,
+  MODEL_ALIASES,
+  SCHEDULER_POLL_INTERVAL,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -180,7 +186,8 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
         model: group.containerConfig?.model
-          ? (MODEL_ALIASES[group.containerConfig.model.toLowerCase()] || group.containerConfig.model)
+          ? MODEL_ALIASES[group.containerConfig.model.toLowerCase()] ||
+            group.containerConfig.model
           : DEFAULT_MODEL,
       },
       (proc, containerName) =>
