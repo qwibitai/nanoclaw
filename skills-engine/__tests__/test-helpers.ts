@@ -99,6 +99,7 @@ export function initGitRepo(dir: string): void {
   });
   execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' });
   execSync('git config rerere.enabled true', { cwd: dir, stdio: 'pipe' });
+  execSync('git config commit.gpgsign false', { cwd: dir, stdio: 'pipe' });
   fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n');
   execSync('git add -A && git commit -m "init"', { cwd: dir, stdio: 'pipe' });
 }
