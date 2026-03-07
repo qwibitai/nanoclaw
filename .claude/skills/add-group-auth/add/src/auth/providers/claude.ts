@@ -382,6 +382,73 @@ function receiveOrContainerExit(
   ]);
 }
 
+/**
+ * Shared OAuth flow for setup-token and auth-login.
+ * Handles container spawn, URL detection, code delivery, and user interaction.
+ * Returns the handle + output ref on success so callers can extract results.
+ */
+async function runOAuthFlow(
+  ctx: AuthContext,
+  flowName: string,
+  cliCommand: string,
+  pastePrompt: RegExp | null = DEFAULT_PASTE_PROMPT_RE,
+): Promise<{ handle: ExecHandle; output: { value: string }; sessionDir: string } | null> {
+  await ctx.chat.send(`Starting Claude ${flowName} flow. Spawning container...`);
+
+  const sessionDir = authSessionDir(ctx.scope);
+  const authIpcDir = path.join(sessionDir, 'auth-ipc');
+  // Remove stale .oauth-url from previous attempts before container starts
+  try { fs.unlinkSync(path.join(authIpcDir, OAUTH_URL_FILE)); } catch { /* ignore */ }
+  const handle = ctx.exec(
+    // Wide PTY so Ink doesn't wrap long URLs/tokens (\r overwrites corrupt them)
+    ['script', '-qc', `stty columns 500 && ${cliCommand}`, '/dev/null'],
+    claudeExecOpts(sessionDir),
+  );
+
+  const output = { value: '' };
+  handle.onStdout((chunk) => {
+    output.value += chunk;
+  });
+
+  // Wait for the OAuth URL in stdout
+  const urlMatch = await waitForPatternOrExit(
+    output, OAUTH_URL_RE, URL_WAIT_MS, handle,
+  );
+  if (!urlMatch) {
+    await ctx.chat.send('Container exited or timed out before providing OAuth URL.');
+    handle.kill();
+    return null;
+  }
+
+  // Detect how the CLI will accept the code
+  const delivery = await detectCodeDelivery(
+    output, authIpcDir, DELIVERY_DETECT_MS, handle, urlMatch[0], pastePrompt,
+  );
+  if (!delivery) {
+    await ctx.chat.send('Could not detect auth input method. Container may have exited.');
+    handle.kill();
+    return null;
+  }
+
+  await ctx.chat.send(`Open this URL and authorize:\n${delivery.oauthUrl}\n\n${delivery.instructions}`);
+
+  const userInput = await receiveOrContainerExit(ctx.chat, handle);
+  if (!userInput || isCancelReply(userInput)) {
+    await ctx.chat.send(userInput ? 'Cancelled.' : 'Auth container exited or timed out.');
+    handle.kill();
+    return null;
+  }
+
+  const delivered = await delivery.deliver(userInput);
+  if (!delivered.ok) {
+    await ctx.chat.send(`Failed to deliver auth code. ${delivered.error ?? ''}`);
+    handle.kill();
+    return null;
+  }
+
+  return { handle, output, sessionDir };
+}
+
 export const claudeProvider: CredentialProvider = {
   service: SERVICE,
   displayName: 'Claude',
@@ -488,63 +555,11 @@ export const claudeProvider: CredentialProvider = {
         description: 'Generates a long-lived OAuth token via `claude setup-token`. Token is valid for ~1 year.',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
-          await ctx.chat.send(
-            'Starting Claude setup token flow. Spawning container...',
-          );
+          const handle = await runOAuthFlow(ctx, 'setup token', 'claude setup-token');
+          if (!handle) return null;
 
-          const sessionDir = authSessionDir(ctx.scope);
-          const authIpcDir = path.join(sessionDir, 'auth-ipc');
-          // Remove stale .oauth-url from previous attempts before container starts
-          try { fs.unlinkSync(path.join(authIpcDir, OAUTH_URL_FILE)); } catch { /* ignore */ }
-          const handle = ctx.exec(
-            // Wide PTY so Ink doesn't wrap the token at 80 cols (\r overwrites corrupt it)
-            ['script', '-qc', 'stty columns 500 && claude setup-token', '/dev/null'],
-            claudeExecOpts(sessionDir),
-          );
-
-          const output = { value: '' };
-          handle.onStdout((chunk) => {
-            output.value += chunk;
-          });
-
-          // Wait for the manual OAuth URL in stdout
-          const urlMatch = await waitForPatternOrExit(
-            output, OAUTH_URL_RE, URL_WAIT_MS, handle,
-          );
-          if (!urlMatch) {
-            await ctx.chat.send('Container exited or timed out before providing OAuth URL.');
-            handle.kill();
-            return null;
-          }
-
-          // Detect how the CLI will accept the code
-          const delivery = await detectCodeDelivery(
-            output, authIpcDir, DELIVERY_DETECT_MS, handle, urlMatch[0],
-          );
-          if (!delivery) {
-            await ctx.chat.send('Could not detect auth input method. Container may have exited.');
-            handle.kill();
-            return null;
-          }
-
-          await ctx.chat.send(`Open this URL and authorize:\n${delivery.oauthUrl}\n\n${delivery.instructions}`);
-
-          const userInput = await receiveOrContainerExit(ctx.chat, handle);
-          if (!userInput || isCancelReply(userInput)) {
-            await ctx.chat.send(userInput ? 'Cancelled.' : 'Auth container exited or timed out.');
-            handle.kill();
-            return null;
-          }
-
-          const delivered = await delivery.deliver(userInput);
-          if (!delivered.ok) {
-            await ctx.chat.send(`Failed to deliver auth code. ${delivered.error ?? ''}`);
-            handle.kill();
-            return null;
-          }
-
-          const result = await handle.wait();
-          const allOutput = stripAnsi(output.value + result.stdout);
+          const result = await handle.handle.wait();
+          const allOutput = stripAnsi(handle.output.value + result.stdout);
 
           const tokenMatch = allOutput.match(/sk-ant-\S+/);
           if (!tokenMatch) {
@@ -569,67 +584,15 @@ export const claudeProvider: CredentialProvider = {
         description: 'Standard OAuth login via `claude auth login`. Does not expose long-term refresh key to agent. Access keys are refreshed automatically.',
         provider: this,
         async run(ctx: AuthContext): Promise<FlowResult | null> {
-          await ctx.chat.send(
-            'Starting Claude auth login flow. Spawning container...',
-          );
-
-          const sessionDir = authSessionDir(ctx.scope);
-          const authIpcDir = path.join(sessionDir, 'auth-ipc');
-          // Remove stale .oauth-url from previous attempts before container starts
-          try { fs.unlinkSync(path.join(authIpcDir, OAUTH_URL_FILE)); } catch { /* ignore */ }
-          const handle = ctx.exec(
-            // Wide PTY so Ink doesn't wrap long OAuth URLs (\r overwrites corrupt them)
-            ['script', '-qc', 'stty columns 500 && claude auth login', '/dev/null'],
-            claudeExecOpts(sessionDir),
-          );
-
-          const output = { value: '' };
-          handle.onStdout((chunk) => {
-            output.value += chunk;
-          });
-
-          // Wait for the manual OAuth URL in stdout
-          const urlMatch = await waitForPatternOrExit(
-            output, OAUTH_URL_RE, URL_WAIT_MS, handle,
-          );
-          if (!urlMatch) {
-            await ctx.chat.send('Container exited or timed out before providing OAuth URL.');
-            handle.kill();
-            return null;
-          }
-
-          // Detect how the CLI will accept the code.
           // auth-login with xdg-open returning 0 won't show a paste prompt,
           // so disable stdin detection (null pastePrompt) — callback only.
-          const delivery = await detectCodeDelivery(
-            output, authIpcDir, DELIVERY_DETECT_MS, handle, urlMatch[0], null,
-          );
-          if (!delivery) {
-            await ctx.chat.send('Could not detect auth input method. Container may have exited.');
-            handle.kill();
-            return null;
-          }
+          const handle = await runOAuthFlow(ctx, 'auth login', 'claude auth login', null);
+          if (!handle) return null;
 
-          await ctx.chat.send(`Open this URL and authorize:\n${delivery.oauthUrl}\n\n${delivery.instructions}`);
-
-          const userInput = await receiveOrContainerExit(ctx.chat, handle);
-          if (!userInput || isCancelReply(userInput)) {
-            await ctx.chat.send(userInput ? 'Cancelled.' : 'Auth container exited or timed out.');
-            handle.kill();
-            return null;
-          }
-
-          const delivered = await delivery.deliver(userInput);
-          if (!delivered.ok) {
-            await ctx.chat.send(`Failed to deliver auth code. ${delivered.error ?? ''}`);
-            handle.kill();
-            return null;
-          }
-
-          await handle.wait();
+          await handle.handle.wait();
 
           // Read .credentials.json from the session dir mount
-          const credsPath = path.join(sessionDir, '.credentials.json');
+          const credsPath = path.join(handle.sessionDir, '.credentials.json');
 
           let credsContent: string | null = null;
           try {
