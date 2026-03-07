@@ -3,6 +3,9 @@ import { EventEmitter } from 'events';
 
 // --- Mocks ---
 
+// Mock registry (registerChannel runs at import time)
+vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
+
 // Mock config
 vi.mock('../config.js', () => ({
   STORE_DIR: '/tmp/nanoclaw-test-store',
@@ -582,6 +585,155 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
         expect.objectContaining({ sender_name: '5551234' }),
+      );
+    });
+  });
+
+  // --- Reply context ---
+
+  describe('reply context', () => {
+    it('includes reply sender and quoted text', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-reply',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'I agree',
+              contextInfo: {
+                quotedMessage: { conversation: 'We should meet tomorrow' },
+                participant: '5559999@s.whatsapp.net',
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Reply to 5559999: "We should meet tomorrow"] I agree',
+        }),
+      );
+    });
+
+    it('uses caption from quoted image message', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-reply-img',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'Beautiful!',
+              contextInfo: {
+                quotedMessage: { imageMessage: { caption: 'Sunset photo' } },
+                participant: '5559999@s.whatsapp.net',
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Reply to 5559999: "Sunset photo"] Beautiful!',
+        }),
+      );
+    });
+
+    it('skips reply prefix when quoted message has no text', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-reply-empty',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'What was that?',
+              contextInfo: {
+                quotedMessage: { audioMessage: {} },
+                participant: '5559999@s.whatsapp.net',
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      // audioMessage has no caption → extractContent returns '' → no reply prefix
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: 'What was that?',
+        }),
+      );
+    });
+
+    it('reads contextInfo from imageMessage when replying with an image', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-img-reply',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            imageMessage: {
+              caption: 'Here is mine',
+              contextInfo: {
+                quotedMessage: { conversation: 'Show me yours' },
+                participant: '5559999@s.whatsapp.net',
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '[Reply to 5559999: "Show me yours"] Here is mine',
+        }),
       );
     });
   });

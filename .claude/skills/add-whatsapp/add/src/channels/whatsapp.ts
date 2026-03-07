@@ -35,6 +35,17 @@ export interface WhatsAppChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/** Extract text content from a normalized WhatsApp message. */
+function extractContent(msg: ReturnType<typeof normalizeMessageContent>): string {
+  if (!msg) return '';
+  return msg.conversation
+    || msg.extendedTextMessage?.text
+    || msg.imageMessage?.caption
+    || msg.videoMessage?.caption
+    || '';
+}
+
+
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
@@ -203,12 +214,22 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
-              normalized.conversation ||
-              normalized.extendedTextMessage?.text ||
-              normalized.imageMessage?.caption ||
-              normalized.videoMessage?.caption ||
-              '';
+            let content = extractContent(normalized);
+
+            // Handle reply context — include who the user is replying to
+            // contextInfo lives on whichever message type carries the reply
+            const contextInfo = normalized.extendedTextMessage?.contextInfo
+              || normalized.imageMessage?.contextInfo
+              || normalized.videoMessage?.contextInfo
+              || normalized.audioMessage?.contextInfo
+              || normalized.documentMessage?.contextInfo;
+            if (contextInfo?.quotedMessage) {
+              const quotedContent = extractContent(contextInfo.quotedMessage);
+              if (quotedContent) {
+                const quotedSender = contextInfo.participant?.split('@')[0] || 'Unknown';
+                content = `[Reply to ${quotedSender}: "${quotedContent}"] ${content}`;
+              }
+            }
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;

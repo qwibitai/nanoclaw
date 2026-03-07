@@ -11,6 +11,18 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+function appendAttachments(text: string, message: Message): string {
+  if (message.attachments.size === 0) return text;
+  const descs = [...message.attachments.values()].map((att) => {
+    const ct = att.contentType || '';
+    if (ct.startsWith('image/')) return `[Image: ${att.name || 'image'}]`;
+    if (ct.startsWith('video/')) return `[Video: ${att.name || 'video'}]`;
+    if (ct.startsWith('audio/')) return `[Audio: ${att.name || 'audio'}]`;
+    return `[File: ${att.name || 'file'}]`;
+  });
+  return text ? `${text}\n${descs.join('\n')}` : descs.join('\n');
+}
+
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -87,25 +99,7 @@ export class DiscordChannel implements Channel {
       }
 
       // Handle attachments — store placeholders so the agent knows something was sent
-      if (message.attachments.size > 0) {
-        const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
-          } else {
-            return `[File: ${att.name || 'file'}]`;
-          }
-        });
-        if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
-        } else {
-          content = attachmentDescriptions.join('\n');
-        }
-      }
+      content = appendAttachments(content, message);
 
       // Handle reply context — include who the user is replying to
       if (message.reference?.messageId) {
@@ -117,7 +111,12 @@ export class DiscordChannel implements Channel {
             repliedTo.member?.displayName ||
             repliedTo.author.displayName ||
             repliedTo.author.username;
-          content = `[Reply to ${replyAuthor}] ${content}`;
+          const replyContent = appendAttachments(repliedTo.content || '', repliedTo);
+          if (replyContent) {
+            content = `[Reply to ${replyAuthor}: "${replyContent}"] ${content}`;
+          } else {
+            content = `[Reply to ${replyAuthor}] ${content}`;
+          }
         } catch {
           // Referenced message may have been deleted
         }
