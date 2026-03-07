@@ -282,41 +282,114 @@ function buildVolumeMounts(
     });
   }
 
-  // Snowflake credentials — gated by tools config
-  if (!tools || tools.includes('snowflake')) {
+  // Snowflake credentials — gated by tools config.
+  // Supports scoped access: 'snowflake' = all connections,
+  // 'snowflake:sunday' or 'snowflake:apollo' = only those connections.
+  const snowflakeEnabled =
+    !tools ||
+    tools.some((t) => t === 'snowflake' || t.startsWith('snowflake:'));
+  if (snowflakeEnabled) {
     const snowflakeDir = path.join(homeDir, '.snowflake');
     if (fs.existsSync(snowflakeDir)) {
-      // Write a container-specific connections.toml with adjusted key paths
-      // since the host paths (/root/.snowflake/keys/...) map to /home/node/.snowflake/keys/... in-container
       const origToml = path.join(snowflakeDir, 'connections.toml');
       if (fs.existsSync(origToml)) {
-        const tomlContent = fs
-          .readFileSync(origToml, 'utf-8')
-          .replace(/\/root\/\.snowflake\//g, '/home/node/.snowflake/');
-        const containerTomlDir = path.join(
+        // Determine which connections this group may access
+        const allowedConns = tools
+          ?.filter((t) => t.startsWith('snowflake:'))
+          .map((t) => t.split(':')[1]);
+        const filterConnections =
+          allowedConns && allowedConns.length > 0 && !tools!.includes('snowflake');
+
+        // Stage everything into a single directory: connections.toml (with
+        // rewritten paths), config.toml (with rewritten log path), and key
+        // files.  A single mount avoids the readonly-parent/sub-mount conflict.
+        const stagingDir = path.join(
           DATA_DIR,
           'sessions',
           group.folder,
           'snowflake',
         );
-        fs.mkdirSync(containerTomlDir, { recursive: true });
-        fs.writeFileSync(
-          path.join(containerTomlDir, 'connections.toml'),
-          tomlContent,
+        fs.mkdirSync(stagingDir, { recursive: true });
+
+        // Rewrite connections.toml key paths for container home,
+        // and optionally filter to only allowed connection sections
+        const homePattern = new RegExp(
+          homeDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/\\.snowflake/',
+          'g',
         );
-        // Mount the rewritten toml
+        let tomlContent = fs
+          .readFileSync(origToml, 'utf-8')
+          .replace(homePattern, '/home/node/.snowflake/');
+
+        if (filterConnections) {
+          // Split TOML into sections and keep only allowed ones
+          const sections = tomlContent.split(/^(?=\[)/m);
+          tomlContent = sections
+            .filter((section) => {
+              const match = section.match(/^\[([^\]]+)\]/);
+              if (!match) return !section.trim(); // keep blank preamble
+              return allowedConns!.includes(match[1]);
+            })
+            .join('');
+        }
+
+        fs.writeFileSync(path.join(stagingDir, 'connections.toml'), tomlContent);
+
+        // Rewrite config.toml log path for container home
+        const origConfig = path.join(snowflakeDir, 'config.toml');
+        if (fs.existsSync(origConfig)) {
+          const configContent = fs
+            .readFileSync(origConfig, 'utf-8')
+            .replace(homePattern, '/home/node/.snowflake/');
+          fs.writeFileSync(
+            path.join(stagingDir, 'config.toml'),
+            configContent,
+          );
+        }
+
+        // Copy only key files referenced in the (possibly filtered) connections.toml,
+        // making them readable by container user (uid 1000)
+        const keysDir = path.join(snowflakeDir, 'keys');
+        if (fs.existsSync(keysDir)) {
+          // Extract referenced key paths from the filtered toml
+          const referencedKeys = new Set<string>();
+          for (const match of tomlContent.matchAll(
+            /private_key_path\s*=\s*"[^"]*\/keys\/([^"]+)"/g,
+          )) {
+            referencedKeys.add(match[1]);
+          }
+
+          const destKeysDir = path.join(stagingDir, 'keys');
+          // Clean previous staging to avoid stale keys from prior runs
+          if (fs.existsSync(destKeysDir)) {
+            fs.rmSync(destKeysDir, { recursive: true });
+          }
+          fs.mkdirSync(destKeysDir, { recursive: true });
+          for (const entry of fs.readdirSync(keysDir, {
+            withFileTypes: true,
+            recursive: true,
+          })) {
+            if (entry.isFile()) {
+              const srcPath = path.join(
+                entry.parentPath || entry.path,
+                entry.name,
+              );
+              const relPath = path.relative(keysDir, srcPath);
+              // Skip key files not referenced by any allowed connection
+              if (referencedKeys.size > 0 && !referencedKeys.has(relPath)) {
+                continue;
+              }
+              const destPath = path.join(destKeysDir, relPath);
+              fs.mkdirSync(path.dirname(destPath), { recursive: true });
+              fs.copyFileSync(srcPath, destPath);
+              fs.chmodSync(destPath, 0o644);
+            }
+          }
+        }
+
         mounts.push({
-          hostPath: containerTomlDir,
+          hostPath: stagingDir,
           containerPath: '/home/node/.snowflake',
-          readonly: true,
-        });
-      }
-      // Mount key files (subdirectories)
-      const keysDir = path.join(snowflakeDir, 'keys');
-      if (fs.existsSync(keysDir)) {
-        mounts.push({
-          hostPath: keysDir,
-          containerPath: '/home/node/.snowflake/keys',
           readonly: true,
         });
       }
