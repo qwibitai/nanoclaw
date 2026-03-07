@@ -7,7 +7,7 @@ import {
   formatOutbound,
   stripInternalTags,
 } from './router.js';
-import { Channel, NewMessage } from './types.js';
+import { NewMessage } from './types.js';
 
 function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
   return {
@@ -58,21 +58,32 @@ describe('escapeXml', () => {
 // --- formatMessages ---
 
 describe('formatMessages', () => {
-  it('formats a single message as XML', () => {
-    const result = formatMessages([makeMsg()]);
-    expect(result).toBe(
-      '<messages>\n' +
-        '<message sender="Alice" time="2024-01-01T00:00:00.000Z">hello</message>\n' +
-        '</messages>',
-    );
+  const TZ = 'UTC';
+
+  it('formats a single message as XML with context header', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('<message sender="Alice"');
+    expect(result).toContain('>hello</message>');
+    expect(result).toContain('Jan 1, 2024');
   });
 
   it('formats multiple messages', () => {
     const msgs = [
-      makeMsg({ id: '1', sender_name: 'Alice', content: 'hi', timestamp: 't1' }),
-      makeMsg({ id: '2', sender_name: 'Bob', content: 'hey', timestamp: 't2' }),
+      makeMsg({
+        id: '1',
+        sender_name: 'Alice',
+        content: 'hi',
+        timestamp: '2024-01-01T00:00:00.000Z',
+      }),
+      makeMsg({
+        id: '2',
+        sender_name: 'Bob',
+        content: 'hey',
+        timestamp: '2024-01-01T01:00:00.000Z',
+      }),
     ];
-    const result = formatMessages(msgs);
+    const result = formatMessages(msgs, TZ);
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('sender="Bob"');
     expect(result).toContain('>hi</message>');
@@ -80,56 +91,73 @@ describe('formatMessages', () => {
   });
 
   it('escapes special characters in sender names', () => {
-    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })]);
+    const result = formatMessages([makeMsg({ sender_name: 'A & B <Co>' })], TZ);
     expect(result).toContain('sender="A &amp; B &lt;Co&gt;"');
   });
 
   it('escapes special characters in content', () => {
-    const result = formatMessages([
-      makeMsg({ content: '<script>alert("xss")</script>' }),
-    ]);
+    const result = formatMessages(
+      [makeMsg({ content: '<script>alert("xss")</script>' })],
+      TZ,
+    );
     expect(result).toContain(
       '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
   });
 
   it('handles empty array', () => {
-    const result = formatMessages([]);
-    expect(result).toBe('<messages>\n\n</messages>');
+    const result = formatMessages([], TZ);
+    expect(result).toContain('<context timezone="UTC" />');
+    expect(result).toContain('<messages>\n\n</messages>');
+  });
+
+  it('converts timestamps to local time for given timezone', () => {
+    // 2024-01-01T18:30:00Z in America/New_York (EST) = 1:30 PM
+    const result = formatMessages(
+      [makeMsg({ timestamp: '2024-01-01T18:30:00.000Z' })],
+      'America/New_York',
+    );
+    expect(result).toContain('1:30');
+    expect(result).toContain('PM');
+    expect(result).toContain('<context timezone="America/New_York" />');
   });
 });
 
 // --- TRIGGER_PATTERN ---
 
 describe('TRIGGER_PATTERN', () => {
-  it('matches @Andy at start of message', () => {
-    expect(TRIGGER_PATTERN.test('@Andy hello')).toBe(true);
+  const name = ASSISTANT_NAME;
+  const lower = name.toLowerCase();
+  const upper = name.toUpperCase();
+
+  it('matches @name at start of message', () => {
+    expect(TRIGGER_PATTERN.test(`@${name} hello`)).toBe(true);
   });
 
   it('matches case-insensitively', () => {
-    expect(TRIGGER_PATTERN.test('@andy hello')).toBe(true);
-    expect(TRIGGER_PATTERN.test('@ANDY hello')).toBe(true);
+    expect(TRIGGER_PATTERN.test(`@${lower} hello`)).toBe(true);
+    expect(TRIGGER_PATTERN.test(`@${upper} hello`)).toBe(true);
   });
 
   it('does not match when not at start of message', () => {
-    expect(TRIGGER_PATTERN.test('hello @Andy')).toBe(false);
+    expect(TRIGGER_PATTERN.test(`hello @${name}`)).toBe(false);
   });
 
-  it('does not match partial name like @Andrew (word boundary)', () => {
-    expect(TRIGGER_PATTERN.test('@Andrew hello')).toBe(false);
+  it('does not match partial name like @NameExtra (word boundary)', () => {
+    expect(TRIGGER_PATTERN.test(`@${name}extra hello`)).toBe(false);
   });
 
   it('matches with word boundary before apostrophe', () => {
-    expect(TRIGGER_PATTERN.test("@Andy's thing")).toBe(true);
+    expect(TRIGGER_PATTERN.test(`@${name}'s thing`)).toBe(true);
   });
 
-  it('matches @Andy alone (end of string is a word boundary)', () => {
-    expect(TRIGGER_PATTERN.test('@Andy')).toBe(true);
+  it('matches @name alone (end of string is a word boundary)', () => {
+    expect(TRIGGER_PATTERN.test(`@${name}`)).toBe(true);
   });
 
   it('matches with leading whitespace after trim', () => {
     // The actual usage trims before testing: TRIGGER_PATTERN.test(m.content.trim())
-    expect(TRIGGER_PATTERN.test('@Andy hey'.trim())).toBe(true);
+    expect(TRIGGER_PATTERN.test(`@${name} hey`.trim())).toBe(true);
   });
 });
 
@@ -150,9 +178,7 @@ describe('stripInternalTags', () => {
 
   it('strips multiple internal tag blocks', () => {
     expect(
-      stripInternalTags(
-        '<internal>a</internal>hello<internal>b</internal>',
-      ),
+      stripInternalTags('<internal>a</internal>hello<internal>b</internal>'),
     ).toBe('hello');
   });
 
@@ -162,34 +188,18 @@ describe('stripInternalTags', () => {
 });
 
 describe('formatOutbound', () => {
-  const waChannel = { prefixAssistantName: true } as Channel;
-  const noPrefixChannel = { prefixAssistantName: false } as Channel;
-  const defaultChannel = {} as Channel;
-
-  it('prefixes with assistant name when channel wants it', () => {
-    expect(formatOutbound(waChannel, 'hello world')).toBe(
-      `${ASSISTANT_NAME}: hello world`,
-    );
-  });
-
-  it('does not prefix when channel opts out', () => {
-    expect(formatOutbound(noPrefixChannel, 'hello world')).toBe('hello world');
-  });
-
-  it('defaults to prefixing when prefixAssistantName is undefined', () => {
-    expect(formatOutbound(defaultChannel, 'hello world')).toBe(
-      `${ASSISTANT_NAME}: hello world`,
-    );
+  it('returns text with internal tags stripped', () => {
+    expect(formatOutbound('hello world')).toBe('hello world');
   });
 
   it('returns empty string when all text is internal', () => {
-    expect(formatOutbound(waChannel, '<internal>hidden</internal>')).toBe('');
+    expect(formatOutbound('<internal>hidden</internal>')).toBe('');
   });
 
-  it('strips internal tags and prefixes remaining text', () => {
+  it('strips internal tags from remaining text', () => {
     expect(
-      formatOutbound(waChannel, '<internal>thinking</internal>The answer is 42'),
-    ).toBe(`${ASSISTANT_NAME}: The answer is 42`);
+      formatOutbound('<internal>thinking</internal>The answer is 42'),
+    ).toBe('The answer is 42');
   });
 });
 
@@ -235,7 +245,7 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   });
 
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
-    const msgs = [makeMsg({ content: '@Andy do something' })];
+    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
     expect(shouldProcess(false, true, msgs)).toBe(true);
   });
 

@@ -61,11 +61,11 @@ This is the **main channel**, which has elevated privileges.
 
 ## Container Mounts
 
-Main has access to the entire project:
+Main has read-only access to the project and read-write access to its group folder:
 
 | Container Path | Host Path | Access |
 |----------------|-----------|--------|
-| `/workspace/project` | Project root | read-write |
+| `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
 
 Key paths inside the container:
@@ -119,13 +119,13 @@ sqlite3 /workspace/project/store/messages.db "
 
 ### Registered Groups Config
 
-Groups are registered in `/workspace/project/data/registered_groups.json`:
+Groups are registered in the SQLite `registered_groups` table:
 
 ```json
 {
   "1234567890-1234567890@g.us": {
     "name": "Family Chat",
-    "folder": "family-chat",
+    "folder": "whatsapp_family-chat",
     "trigger": "@Andy",
     "added_at": "2024-01-31T12:00:00.000Z"
   }
@@ -133,32 +133,34 @@ Groups are registered in `/workspace/project/data/registered_groups.json`:
 ```
 
 Fields:
-- **Key**: The WhatsApp JID (unique identifier for the chat)
+- **Key**: The chat JID (unique identifier — WhatsApp, Telegram, Slack, Discord, etc.)
 - **name**: Display name for the group
-- **folder**: Folder name under `groups/` for this group's files and memory
+- **folder**: Channel-prefixed folder name under `groups/` for this group's files and memory
 - **trigger**: The trigger word (usually same as global, but could differ)
 - **requiresTrigger**: Whether `@trigger` prefix is needed (default: `true`). Set to `false` for solo/personal chats where all messages should be processed
+- **isMain**: Whether this is the main control group (elevated privileges, no trigger required)
 - **added_at**: ISO timestamp when registered
 
 ### Trigger Behavior
 
-- **Main group**: No trigger needed — all messages are processed automatically
+- **Main group** (`isMain: true`): No trigger needed — all messages are processed automatically
 - **Groups with `requiresTrigger: false`**: No trigger needed — all messages processed (use for 1-on-1 or solo chats)
 - **Other groups** (default): Messages must start with `@AssistantName` to be processed
 
 ### Adding a Group
 
 1. Query the database to find the group's JID
-2. Read `/workspace/project/data/registered_groups.json`
-3. Add the new group entry with `containerConfig` if needed
-4. Write the updated JSON back
-5. Create the group folder: `/workspace/project/groups/{folder-name}/`
-6. Optionally create an initial `CLAUDE.md` for the group
+2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
+3. Optionally include `containerConfig` for additional mounts
+4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
+5. Optionally create an initial `CLAUDE.md` for the group
 
-Example folder name conventions:
-- "Family Chat" → `family-chat`
-- "Work Team" → `work-team`
-- Use lowercase, hyphens instead of spaces
+Folder naming convention — channel prefix with underscore separator:
+- WhatsApp "Family Chat" → `whatsapp_family-chat`
+- Telegram "Dev Team" → `telegram_dev-team`
+- Discord "General" → `discord_general`
+- Slack "Engineering" → `slack_engineering`
+- Use lowercase, hyphens for the group name part
 
 #### Adding Additional Directories for a Group
 
@@ -185,6 +187,37 @@ Groups can have extra directories mounted. Add `containerConfig` to their entry:
 ```
 
 The directory will appear at `/workspace/extra/webapp` in that group's container.
+
+#### Sender Allowlist
+
+After registering a group, explain the sender allowlist feature to the user:
+
+> This group can be configured with a sender allowlist to control who can interact with me. There are two modes:
+>
+> - **Trigger mode** (default): Everyone's messages are stored for context, but only allowed senders can trigger me with @{AssistantName}.
+> - **Drop mode**: Messages from non-allowed senders are not stored at all.
+>
+> For closed groups with trusted members, I recommend setting up an allow-only list so only specific people can trigger me. Want me to configure that?
+
+If the user wants to set up an allowlist, edit `~/.config/nanoclaw/sender-allowlist.json` on the host:
+
+```json
+{
+  "default": { "allow": "*", "mode": "trigger" },
+  "chats": {
+    "<chat-jid>": {
+      "allow": ["sender-id-1", "sender-id-2"],
+      "mode": "trigger"
+    }
+  },
+  "logDenied": true
+}
+```
+
+Notes:
+- Your own messages (`is_from_me`) explicitly bypass the allowlist in trigger checks. Bot messages are filtered out by the database query before trigger evaluation, so they never reach the allowlist.
+- If the config file doesn't exist or is invalid, all senders are allowed (fail-open)
+- The config file is on the host at `~/.config/nanoclaw/sender-allowlist.json`, not inside the container
 
 ### Removing a Group
 

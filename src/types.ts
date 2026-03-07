@@ -39,6 +39,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
 export interface NewMessage {
@@ -49,6 +50,7 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  is_bot_message?: boolean;
 }
 
 export interface ScheduledTask {
@@ -86,10 +88,8 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Whether to prefix outbound messages with the assistant name.
-  // Telegram bots already display their name, so they return false.
-  // WhatsApp returns true. Default true if not implemented.
-  prefixAssistantName?: boolean;
+  // Optional: sync group/chat names from the platform.
+  syncGroups?(force: boolean): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -97,5 +97,11 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
-export type OnChatMetadata = (chatJid: string, timestamp: string, name?: string) => void;
+// channels that sync names separately (via syncGroups) omit it.
+export type OnChatMetadata = (
+  chatJid: string,
+  timestamp: string,
+  name?: string,
+  channel?: string,
+  isGroup?: boolean,
+) => void;

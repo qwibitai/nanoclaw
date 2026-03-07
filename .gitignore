@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-
+.npm-cache/
 # Build output
 dist/
 
@@ -22,11 +22,17 @@ groups/global/*
 *.keys.json
 .env
 
+# Temp files
+.tmp-*
+
 # OS
 .DS_Store
 
 # IDE
 .idea/
 .vscode/
+
+# Skills system (local per-installation state)
+.nanoclaw/
 
 agents-sdk-docs
