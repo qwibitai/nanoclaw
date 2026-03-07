@@ -4,7 +4,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const tmpDir = path.join(os.tmpdir(), `nanoclaw-gpg-test-${Date.now()}`);
+// Keep path short to stay under Unix socket limit (107 chars for S.gpg-agent.browser)
+const tmpDir = path.join(os.tmpdir(), `nc-gpg-${process.pid}`);
 vi.stubEnv('HOME', tmpDir);
 
 beforeEach(() => {
