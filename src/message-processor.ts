@@ -122,12 +122,11 @@ export async function processGroupMessages(
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
       }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
     }
 
     if (result.status === 'success') {
       deps.queue.notifyIdle(chatJid);
+      resetIdleTimer();
     }
 
     if (result.status === 'error') {

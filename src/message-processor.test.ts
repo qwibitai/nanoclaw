@@ -288,6 +288,54 @@ describe('processGroupMessages', () => {
     expect(ch.sendMessage).toHaveBeenCalledWith('group@g.us', 'visible  text');
   });
 
+  it('starts idle timer on tool-call-only completion (null result)', async () => {
+    vi.useFakeTimers();
+    const ch = createMockChannel();
+    const deps = createDeps({
+      registeredGroups: () => ({ 'group@g.us': TEST_GROUP }),
+      findChannel: () => ch,
+      idleTimeout: 5000,
+    });
+
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s',
+      sender_name: 'User',
+      content: 'hello',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    // Simulate a container that stays alive until closeStdin fires
+    mockRunAgent.mockImplementation(
+      async (_group, _prompt, _chatJid, onOutput) => {
+        if (onOutput) {
+          await onOutput({ status: 'success', result: null });
+        }
+        // Block until idle timer triggers closeStdin
+        await new Promise<void>((resolve) => {
+          const orig = mockQueue.closeStdin.getMockImplementation();
+          mockQueue.closeStdin.mockImplementation((...args) => {
+            orig?.(...args);
+            resolve();
+          });
+        });
+        return 'success';
+      },
+    );
+
+    const promise = processGroupMessages('group@g.us', deps);
+
+    // Idle timer should have been started; advance past it
+    await vi.advanceTimersByTimeAsync(5000);
+    await promise;
+
+    expect(mockQueue.closeStdin).toHaveBeenCalledWith('group@g.us');
+    expect(ch.sendMessage).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
   it('does not send message when result is internal-only', async () => {
     const ch = createMockChannel();
     const deps = createDeps({
