@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   DEFAULT_MODEL,
   IDLE_TIMEOUT,
   MODEL_ALIASES,
@@ -515,6 +516,25 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  // Prevent multiple instances — WhatsApp revokes sessions on conflict
+  const pidFile = path.join(DATA_DIR, 'nanoclaw.pid');
+  if (fs.existsSync(pidFile)) {
+    const oldPid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+    try {
+      process.kill(oldPid, 0); // check if still running
+      logger.error(
+        { oldPid },
+        'Another NanoClaw instance is running. Kill it first or remove ' +
+          pidFile,
+      );
+      process.exit(1);
+    } catch {
+      // Process not running, stale pid file — continue
+    }
+  }
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(pidFile, String(process.pid));
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
@@ -525,6 +545,11 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'Shutdown signal received');
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
+    try {
+      fs.unlinkSync(pidFile);
+    } catch {
+      // best-effort
+    }
     process.exit(0);
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

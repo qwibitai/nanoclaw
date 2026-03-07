@@ -298,6 +298,12 @@ export class WhatsAppChannel implements Channel {
 
   async disconnect(): Promise<void> {
     this.connected = false;
+    this.disabled = true; // Prevent reconnect loop during shutdown
+    try {
+      await this.sock?.ws?.close();
+    } catch {
+      // best-effort
+    }
     this.sock?.end(undefined);
   }
 

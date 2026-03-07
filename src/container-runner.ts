@@ -298,7 +298,9 @@ function buildVolumeMounts(
           ?.filter((t) => t.startsWith('snowflake:'))
           .map((t) => t.split(':')[1]);
         const filterConnections =
-          allowedConns && allowedConns.length > 0 && !tools!.includes('snowflake');
+          allowedConns &&
+          allowedConns.length > 0 &&
+          !tools!.includes('snowflake');
 
         // Stage everything into a single directory: connections.toml (with
         // rewritten paths), config.toml (with rewritten log path), and key
@@ -333,7 +335,10 @@ function buildVolumeMounts(
             .join('');
         }
 
-        fs.writeFileSync(path.join(stagingDir, 'connections.toml'), tomlContent);
+        fs.writeFileSync(
+          path.join(stagingDir, 'connections.toml'),
+          tomlContent,
+        );
 
         // Rewrite config.toml log path for container home
         const origConfig = path.join(snowflakeDir, 'config.toml');
@@ -341,10 +346,7 @@ function buildVolumeMounts(
           const configContent = fs
             .readFileSync(origConfig, 'utf-8')
             .replace(homePattern, '/home/node/.snowflake/');
-          fs.writeFileSync(
-            path.join(stagingDir, 'config.toml'),
-            configContent,
-          );
+          fs.writeFileSync(path.join(stagingDir, 'config.toml'), configContent);
         }
 
         // Copy only key files referenced in the (possibly filtered) connections.toml,
