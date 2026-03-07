@@ -276,54 +276,75 @@ export async function processTaskIpc(
     case 'pause_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task paused via IPC',
+            'Task not found for pause (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task pause attempt',
           );
+          break;
         }
+        updateTask(data.taskId, { status: 'paused' });
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task paused via IPC',
+        );
       }
       break;
 
     case 'resume_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task resumed via IPC',
+            'Task not found for resume (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task resume attempt',
           );
+          break;
         }
+        updateTask(data.taskId, { status: 'active' });
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task resumed via IPC',
+        );
       }
       break;
 
     case 'cancel_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task cancelled via IPC',
+            'Task not found for cancel (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task cancel attempt',
           );
+          break;
         }
+        deleteTask(data.taskId);
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task cancelled via IPC',
+        );
       }
       break;
 
