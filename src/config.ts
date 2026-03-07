@@ -6,10 +6,17 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'SIGNAL_PHONE_NUMBER',
+  'TRIGGER_WORD',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
+export const TRIGGER_WORD =
+  process.env.TRIGGER_WORD || envConfig.TRIGGER_WORD || ASSISTANT_NAME;
 export const ASSISTANT_HAS_OWN_NUMBER =
   (process.env.ASSISTANT_HAS_OWN_NUMBER ||
     envConfig.ASSISTANT_HAS_OWN_NUMBER) === 'true';
@@ -54,11 +61,44 @@ function escapeRegex(str: string): string {
 }
 
 export const TRIGGER_PATTERN = new RegExp(
-  `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
+  `^@${escapeRegex(TRIGGER_WORD)}\\b`,
   'i',
 );
+
+// For voice notes stored as "[Voice: ...]", the transcript may mention the
+// assistant anywhere. Whisper transcribes "at Jorgenclaw" as plain text, not
+// "@Jorgenclaw", so we match both forms: "@Jorgenclaw" and "at Jorgenclaw".
+const VOICE_MENTION_PATTERN = new RegExp(
+  `(^|\\b)(at\\s+|@)${escapeRegex(TRIGGER_WORD)}\\b`,
+  'i',
+);
+
+export function messageHasTrigger(content: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.startsWith('[Voice:')) return VOICE_MENTION_PATTERN.test(trimmed);
+  return TRIGGER_PATTERN.test(trimmed);
+}
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+export const SIGNAL_PHONE_NUMBER =
+  process.env.SIGNAL_PHONE_NUMBER || envConfig.SIGNAL_PHONE_NUMBER || '';
+export const SIGNAL_CLI_TCP_HOST =
+  process.env.SIGNAL_CLI_TCP_HOST || '127.0.0.1';
+export const SIGNAL_CLI_TCP_PORT = parseInt(
+  process.env.SIGNAL_CLI_TCP_PORT || '7583',
+  10,
+);
+
+// Local Whisper transcription (whisper-cli from whisper.cpp)
+// Set WHISPER_BIN to empty string to disable and fall back to OpenAI only.
+export const WHISPER_BIN =
+  process.env.WHISPER_BIN !== undefined
+    ? process.env.WHISPER_BIN
+    : path.join(HOME_DIR, '.local', 'bin', 'whisper-cli');
+export const WHISPER_MODEL =
+  process.env.WHISPER_MODEL ||
+  path.join(HOME_DIR, '.local', 'share', 'whisper', 'models', 'ggml-base.en.bin');

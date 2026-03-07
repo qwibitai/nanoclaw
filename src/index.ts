@@ -6,9 +6,11 @@ import {
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
+  SIGNAL_PHONE_NUMBER,
   TRIGGER_PATTERN,
+  messageHasTrigger,
 } from './config.js';
-import { WhatsAppChannel } from './channels/whatsapp.js';
+import { SignalChannel } from './channels/signal.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -28,6 +30,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  logTokenUsage,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -50,8 +53,9 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+// JIDs of unregistered contacts Scott has already been notified about
+let notifiedContacts: Set<string> = new Set();
 
-let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
@@ -63,6 +67,12 @@ function loadState(): void {
   } catch {
     logger.warn('Corrupted last_agent_timestamp in DB, resetting');
     lastAgentTimestamp = {};
+  }
+  const notifiedRaw = getRouterState('notified_contacts');
+  try {
+    notifiedContacts = new Set(notifiedRaw ? JSON.parse(notifiedRaw) : []);
+  } catch {
+    notifiedContacts = new Set();
   }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
@@ -153,9 +163,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const hasTrigger = missedMessages.some((m) =>
-      TRIGGER_PATTERN.test(m.content.trim()),
-    );
+    const hasTrigger = missedMessages.some((m) => messageHasTrigger(m.content));
     if (!hasTrigger) return true;
   }
 
@@ -310,6 +318,14 @@ async function runAgent(
       setSession(group.folder, output.newSessionId);
     }
 
+    if ((output.inputTokens || 0) + (output.outputTokens || 0) > 0) {
+      logTokenUsage(group.folder, chatJid, output.inputTokens || 0, output.outputTokens || 0);
+      logger.debug(
+        { group: group.name, inputTokens: output.inputTokens, outputTokens: output.outputTokens },
+        'Token usage logged',
+      );
+    }
+
     if (output.status === 'error') {
       logger.error(
         { group: group.name, error: output.error },
@@ -322,6 +338,49 @@ async function runAgent(
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
+  }
+}
+
+/**
+ * Check for DMs from unregistered contacts and notify the admin once per contact.
+ * The admin (main group) can then approve contacts via the agent's register_group IPC.
+ */
+async function checkNewContactDMs(): Promise<void> {
+  const registeredJids = new Set(Object.keys(registeredGroups));
+  const adminJid = Object.entries(registeredGroups).find(
+    ([, g]) => g.folder === MAIN_GROUP_FOLDER,
+  )?.[0];
+  if (!adminJid) return;
+
+  const allChats = getAllChats();
+  for (const chat of allChats) {
+    // Only notify for Signal individual contacts — not WhatsApp history,
+    // not groups (is_group may be 0/null for old data), not our own number
+    if (
+      chat.channel !== 'signal' ||
+      !chat.jid.startsWith('signal:') ||
+      chat.jid.includes('group.') ||
+      chat.jid === `signal:${SIGNAL_PHONE_NUMBER}` ||
+      registeredJids.has(chat.jid) ||
+      notifiedContacts.has(chat.jid)
+    )
+      continue;
+
+    notifiedContacts.add(chat.jid);
+    setRouterState('notified_contacts', JSON.stringify([...notifiedContacts]));
+
+    const adminChannel = findChannel(channels, adminJid);
+    if (!adminChannel) continue;
+
+    const displayName = chat.name || chat.jid;
+    await adminChannel.sendMessage(
+      adminJid,
+      `New Signal DM from *${displayName}*\nJID: ${chat.jid}\n\nTell me "approve contact ${displayName}" to allow them to chat with Jorgenclaw.`,
+    );
+    logger.info(
+      { jid: chat.jid, name: chat.name },
+      'Notified admin of new contact DM',
+    );
   }
 }
 
@@ -379,7 +438,7 @@ async function startMessageLoop(): Promise<void> {
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const hasTrigger = groupMessages.some((m) =>
-              TRIGGER_PATTERN.test(m.content.trim()),
+              messageHasTrigger(m.content),
             );
             if (!hasTrigger) continue;
           }
@@ -418,6 +477,10 @@ async function startMessageLoop(): Promise<void> {
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
     }
+    // Check for DMs from new (unregistered) contacts and notify admin
+    await checkNewContactDMs().catch((err) =>
+      logger.warn({ err }, 'Error checking new contact DMs'),
+    );
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
 }
@@ -475,9 +538,9 @@ async function main(): Promise<void> {
   };
 
   // Create and connect channels
-  whatsapp = new WhatsAppChannel(channelOpts);
-  channels.push(whatsapp);
-  await whatsapp.connect();
+  const signal = new SignalChannel(channelOpts);
+  channels.push(signal);
+  await signal.connect();
 
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
@@ -504,8 +567,7 @@ async function main(): Promise<void> {
     },
     registeredGroups: () => registeredGroups,
     registerGroup,
-    syncGroupMetadata: (force) =>
-      whatsapp?.syncGroupMetadata(force) ?? Promise.resolve(),
+    syncGroupMetadata: () => Promise.resolve(),
     getAvailableGroups,
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),

@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -46,6 +47,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 interface VolumeMount {
@@ -186,6 +189,23 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Signal attachments: allows agent to view images sent via Signal
+  // Mounted read-only so agents can read but not delete attachments
+  const signalAttachmentsDir = path.join(
+    os.homedir(),
+    '.local',
+    'share',
+    'signal-cli',
+    'attachments',
+  );
+  if (fs.existsSync(signalAttachmentsDir)) {
+    mounts.push({
+      hostPath: signalAttachmentsDir,
+      containerPath: '/workspace/attachments',
+      readonly: true,
+    });
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -204,7 +224,13 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'BW_CLIENTID', 'BW_CLIENTSECRET', 'BW_PASSWORD']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'BW_CLIENTID',
+    'BW_CLIENTSECRET',
+    'BW_PASSWORD',
+  ]);
 }
 
 function buildContainerArgs(
@@ -303,6 +329,8 @@ export async function runContainerAgent(
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
     let newSessionId: string | undefined;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
     let outputChain = Promise.resolve();
 
     container.stdout.on('data', (data) => {
@@ -341,6 +369,8 @@ export async function runContainerAgent(
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
+            if (parsed.inputTokens) totalInputTokens = parsed.inputTokens;
+            if (parsed.outputTokens) totalOutputTokens = parsed.outputTokens;
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
@@ -444,6 +474,8 @@ export async function runContainerAgent(
               status: 'success',
               result: null,
               newSessionId,
+              inputTokens: totalInputTokens || undefined,
+              outputTokens: totalOutputTokens || undefined,
             });
           });
           return;
@@ -545,13 +577,15 @@ export async function runContainerAgent(
       if (onOutput) {
         outputChain.then(() => {
           logger.info(
-            { group: group.name, duration, newSessionId },
+            { group: group.name, duration, newSessionId, inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
             'Container completed (streaming mode)',
           );
           resolve({
             status: 'success',
             result: null,
             newSessionId,
+            inputTokens: totalInputTokens || undefined,
+            outputTokens: totalOutputTokens || undefined,
           });
         });
         return;

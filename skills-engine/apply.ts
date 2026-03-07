@@ -323,6 +323,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
           stdio: 'pipe',
           cwd: projectRoot,
           timeout: 120_000,
+          env: { ...process.env, PATH: `/home/jorgenclaw/.nvm/versions/node/v22.22.0/bin:${process.env.PATH ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}` },
         });
       } catch (testErr: any) {
         // Tests failed — remove added files, restore backup and undo state

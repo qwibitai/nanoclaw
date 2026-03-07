@@ -18,6 +18,7 @@ import {
   getDueTasks,
   getTaskById,
   logTaskRun,
+  logTokenUsage,
   updateTask,
   updateTaskAfterRun,
 } from './db.js';
@@ -169,6 +170,10 @@ async function runTask(
     } else if (output.result) {
       // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
+    }
+
+    if ((output.inputTokens || 0) + (output.outputTokens || 0) > 0) {
+      logTokenUsage(task.group_folder, task.chat_jid, output.inputTokens || 0, output.outputTokens || 0);
     }
 
     logger.info(

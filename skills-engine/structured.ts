@@ -194,8 +194,10 @@ export function mergeDockerComposeServices(
 }
 
 export function runNpmInstall(): void {
+  const nvmBin = '/home/jorgenclaw/.nvm/versions/node/v22.22.0/bin';
   execSync('npm install --legacy-peer-deps', {
     stdio: 'inherit',
     cwd: process.cwd(),
+    env: { ...process.env, PATH: `${nvmBin}:${process.env.PATH ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'}` },
   });
 }

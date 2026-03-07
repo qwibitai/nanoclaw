@@ -73,6 +73,16 @@ function createSchema(database: Database.Database): void {
       group_folder TEXT PRIMARY KEY,
       session_id TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_folder TEXT NOT NULL,
+      chat_jid TEXT NOT NULL,
+      run_at TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_run_at ON token_usage(run_at);
+    CREATE INDEX IF NOT EXISTS idx_token_usage_group ON token_usage(group_folder, run_at);
     CREATE TABLE IF NOT EXISTS registered_groups (
       jid TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -486,6 +496,20 @@ export function setRouterState(key: string, value: string): void {
   db.prepare(
     'INSERT OR REPLACE INTO router_state (key, value) VALUES (?, ?)',
   ).run(key, value);
+}
+
+// --- Token usage ---
+
+export function logTokenUsage(
+  groupFolder: string,
+  chatJid: string,
+  inputTokens: number,
+  outputTokens: number,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO token_usage (group_folder, chat_jid, run_at, input_tokens, output_tokens) VALUES (?, ?, ?, ?, ?)`,
+  ).run(groupFolder, chatJid, now, inputTokens, outputTokens);
 }
 
 // --- Session accessors ---
