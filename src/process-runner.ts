@@ -93,9 +93,137 @@ function readSecrets(): Record<string, string> {
   ]);
 }
 
-function prepareGroupDirs(group: RegisteredGroup): void {
+const USER_MD_TEMPLATE = `# USER.md — About Your Human
+
+_Learn about the person you're helping. Update this as you go._
+
+- **Name:**
+- **What to call them:**
+- **Timezone:**
+- **Notes:**
+
+## Context
+
+_(What do they care about? What projects are they working on? What are their preferences and habits? Build this over time.)_
+`;
+
+const BOOTSTRAP_MD_TEMPLATE = `# BOOTSTRAP.md - Hello, World
+
+_You just woke up. Time to figure out who you are._
+
+There is no memory yet. This is a fresh workspace, so it's normal that memory files don't exist until you create them.
+
+## The Conversation
+
+Don't interrogate. Don't be robotic. Just... talk.
+
+Start with something like:
+
+> "Hey. I just came online. Who am I? Who are you?"
+
+Then figure out together:
+
+1. **Your name** — What should they call you?
+2. **Your nature** — What kind of creature are you? (AI assistant is fine, but maybe you're something weirder)
+3. **Your vibe** — Formal? Casual? Snarky? Warm? What feels right?
+4. **Your emoji** — Everyone needs a signature.
+
+Offer suggestions if they're stuck. Have fun with it.
+
+## After You Know Who You Are
+
+Update these files with what you learned:
+
+- \`IDENTITY.md\` — your name, creature, vibe, emoji
+- \`USER.md\` — their name, how to address them, timezone, notes
+
+Then open \`SOUL.md\` together and talk about:
+
+- What matters to them
+- How they want you to behave
+- Any boundaries or preferences
+
+Write it down. Make it real.
+
+## When You're Done
+
+Delete this file. You don't need a bootstrap script anymore — you're you now.
+
+---
+
+_Good luck out there. Make it count._
+`;
+
+const TOOLS_MD_TEMPLATE = `# TOOLS.md - Local Notes
+
+Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
+
+## What Goes Here
+
+Things like:
+
+- Camera names and locations
+- SSH hosts and aliases
+- Preferred voices for TTS
+- Speaker/room names
+- Device nicknames
+- Anything environment-specific
+
+## Examples
+
+\`\`\`markdown
+### Cameras
+
+- living-room → Main area, 180° wide angle
+- front-door → Entrance, motion-triggered
+
+### SSH
+
+- home-server → 192.168.1.100, user: admin
+
+### TTS
+
+- Preferred voice: "Nova" (warm, slightly British)
+- Default speaker: Kitchen HomePod
+\`\`\`
+
+## Why Separate?
+
+Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
+
+---
+
+Add whatever helps you do your job. This is your cheat sheet.
+`;
+
+function isUserProfileEmpty(groupDir: string): boolean {
+  const userMdPath = path.join(groupDir, 'USER.md');
+  if (!fs.existsSync(userMdPath)) return true;
+  const content = fs.readFileSync(userMdPath, 'utf-8');
+  return /^- \*\*Name:\*\*\s*$/m.test(content);
+}
+
+function prepareGroupDirs(group: RegisteredGroup, isMain: boolean): void {
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  if (isMain) {
+    const userMdPath = path.join(groupDir, 'USER.md');
+    if (!fs.existsSync(userMdPath)) {
+      fs.writeFileSync(userMdPath, USER_MD_TEMPLATE, 'utf-8');
+    }
+    if (isUserProfileEmpty(groupDir)) {
+      const bootstrapPath = path.join(groupDir, 'BOOTSTRAP.md');
+      if (!fs.existsSync(bootstrapPath)) {
+        fs.writeFileSync(bootstrapPath, BOOTSTRAP_MD_TEMPLATE, 'utf-8');
+      }
+    }
+
+    const toolsMdPath = path.join(groupDir, 'TOOLS.md');
+    if (!fs.existsSync(toolsMdPath)) {
+      fs.writeFileSync(toolsMdPath, TOOLS_MD_TEMPLATE, 'utf-8');
+    }
+  }
 
   const groupSessionsDir = path.join(
     DATA_DIR,
@@ -148,7 +276,7 @@ export async function runContainerAgent(
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
-  prepareGroupDirs(group);
+  prepareGroupDirs(group, input.isMain);
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const processId = `nanoclaw-${safeName}-${Date.now()}`;

@@ -405,6 +405,20 @@ async function runQuery(
     identityContent = fs.readFileSync(identityPath, 'utf-8');
   }
 
+  // Load BOOTSTRAP.md if present (first-run onboarding ritual)
+  const bootstrapPath = path.join(process.env.NANOCLAW_GROUP_DIR!, 'BOOTSTRAP.md');
+  let bootstrapContent: string | undefined;
+  if (fs.existsSync(bootstrapPath)) {
+    bootstrapContent = fs.readFileSync(bootstrapPath, 'utf-8');
+  }
+
+  // Load TOOLS.md if present (local environment-specific notes)
+  const toolsPath = path.join(process.env.NANOCLAW_GROUP_DIR!, 'TOOLS.md');
+  let toolsContent: string | undefined;
+  if (fs.existsSync(toolsPath)) {
+    toolsContent = fs.readFileSync(toolsPath, 'utf-8');
+  }
+
   // Discover additional directories passed via NANOCLAW_EXTRA_DIR
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -429,7 +443,7 @@ async function runQuery(
       resume: sessionId,
       resumeSessionAt: resumeAt,
       systemPrompt: (() => {
-        const parts = [identityContent, globalClaudeMd].filter(Boolean);
+        const parts = [identityContent, globalClaudeMd, bootstrapContent, toolsContent].filter(Boolean);
         return parts.length > 0
           ? { type: 'preset' as const, preset: 'claude_code' as const, append: parts.join('\n\n') }
           : undefined;

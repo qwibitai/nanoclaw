@@ -20,7 +20,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **nanoclaw-office** (716 symbols, 1601 relationships, 49 execution flows).
+This project is indexed by GitNexus as **nanoclaw-office** (739 symbols, 1611 relationships, 49 execution flows).
 
 ## Always Start Here
 
