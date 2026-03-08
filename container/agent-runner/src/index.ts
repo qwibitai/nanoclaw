@@ -17,6 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
+import { createSanitizeWebContentHook } from './sanitize-external-content.js';
 import { fileURLToPath } from 'url';
 
 interface ContainerInput {
@@ -452,6 +453,10 @@ async function runQuery(
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
+        PostToolUse: [
+          { matcher: 'WebFetch', hooks: [createSanitizeWebContentHook()] },
+          { matcher: 'WebSearch', hooks: [createSanitizeWebContentHook()] },
+        ],
       },
     }
   })) {
