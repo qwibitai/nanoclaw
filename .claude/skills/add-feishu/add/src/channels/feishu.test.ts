@@ -7,6 +7,8 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  GROUPS_DIR: '/tmp/test-groups',
+  PROJECT_ROOT: '/tmp/test-project',
 }));
 vi.mock('../logger.js', () => ({
   logger: {
@@ -14,6 +16,12 @@ vi.mock('../logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+  },
+}));
+vi.mock('node:fs', () => ({
+  promises: {
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -25,6 +33,18 @@ const wsClientRef = vi.hoisted(() => ({ current: null as any }));
 const reactionMocks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ data: { reaction_id: 'rxn_mock_001' } }),
   delete: vi.fn().mockResolvedValue({}),
+}));
+const messageMocks = vi.hoisted(() => ({
+  create: vi
+    .fn()
+    .mockResolvedValue({ code: 0, data: { message_id: 'sent_msg_001' } }),
+  reply: vi
+    .fn()
+    .mockResolvedValue({ code: 0, data: { message_id: 'reply_msg_001' } }),
+  get: vi.fn().mockResolvedValue({ code: 0, data: { items: [] } }),
+}));
+const messageResourceMocks = vi.hoisted(() => ({
+  get: vi.fn().mockResolvedValue(Buffer.from('fake-image-data')),
 }));
 
 vi.mock('@larksuiteoapi/node-sdk', () => {
@@ -47,14 +67,17 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
       },
     };
 
+    request = vi
+      .fn()
+      .mockResolvedValue({ bot: { open_id: 'ou_bot_open_id_mock' } });
+
     im = {
-      message: {
-        create: vi.fn().mockResolvedValue({ data: {} }),
-      },
+      message: messageMocks,
       messageReaction: {
         create: reactionMocks.create,
         delete: reactionMocks.delete,
       },
+      messageResource: messageResourceMocks,
     };
   }
 
@@ -125,6 +148,8 @@ function makeEvent(overrides: {
   msgId?: string;
   createTime?: string;
   mentions?: Array<{ id?: { open_id?: string } }>;
+  messageType?: string;
+  parentId?: string;
 }) {
   return {
     sender: {
@@ -134,10 +159,11 @@ function makeEvent(overrides: {
       message_id: overrides.msgId ?? 'msg_001',
       chat_id: overrides.chatId ?? 'oc_group_id_001',
       chat_type: overrides.chatType ?? 'group',
-      message_type: 'text',
+      message_type: overrides.messageType ?? 'text',
       content: JSON.stringify({ text: overrides.content ?? 'Hello' }),
       create_time: overrides.createTime ?? '1704067200000',
       mentions: overrides.mentions ?? [],
+      ...(overrides.parentId ? { parent_id: overrides.parentId } : {}),
     },
   };
 }
@@ -153,6 +179,21 @@ async function triggerMessage(channel: FeishuChannel, event: any) {
 describe('FeishuChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Restore default mock return values
+    messageMocks.create.mockResolvedValue({
+      code: 0,
+      data: { message_id: 'sent_msg_001' },
+    });
+    messageMocks.reply.mockResolvedValue({
+      code: 0,
+      data: { message_id: 'reply_msg_001' },
+    });
+    messageMocks.get.mockResolvedValue({ code: 0, data: { items: [] } });
+    messageResourceMocks.get.mockResolvedValue(Buffer.from('fake-image-data'));
+    reactionMocks.create.mockResolvedValue({
+      data: { reaction_id: 'rxn_mock_001' },
+    });
+    reactionMocks.delete.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -383,25 +424,327 @@ describe('FeishuChannel', () => {
     });
   });
 
+  // --- post inbound parsing ---
+
+  describe('post inbound parsing', () => {
+    it('extracts text from post message', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const postContent = JSON.stringify({
+        zh_cn: {
+          title: 'My Title',
+          content: [
+            [
+              { tag: 'text', text: 'Hello ' },
+              { tag: 'text', text: 'world' },
+            ],
+          ],
+        },
+      });
+      const event = {
+        sender: { sender_id: { open_id: 'ou_user_open_id' } },
+        message: {
+          message_id: 'msg_post_001',
+          chat_id: 'oc_group_id_001',
+          chat_type: 'group',
+          message_type: 'post',
+          content: postContent,
+          create_time: '1704067200000',
+          mentions: [],
+        },
+      };
+      await triggerMessage(channel, event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({
+          content: expect.stringContaining('Hello world'),
+        }),
+      );
+    });
+
+    it('falls back to [Rich text message] for unparseable post', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = {
+        sender: { sender_id: { open_id: 'ou_user_open_id' } },
+        message: {
+          message_id: 'msg_post_002',
+          chat_id: 'oc_group_id_001',
+          chat_type: 'group',
+          message_type: 'post',
+          content: 'not json',
+          create_time: '1704067200000',
+          mentions: [],
+        },
+      };
+      await triggerMessage(channel, event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({ content: '[Rich text message]' }),
+      );
+    });
+  });
+
+  // --- quoted message context ---
+
+  describe('quoted message context', () => {
+    it('prepends quoted text when parent_id is present', async () => {
+      messageMocks.get.mockResolvedValue({
+        code: 0,
+        data: {
+          items: [
+            {
+              msg_type: 'text',
+              body: { content: JSON.stringify({ text: 'original question' }) },
+            },
+          ],
+        },
+      });
+
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: 'follow-up answer',
+        parentId: 'parent_msg_001',
+      });
+      await triggerMessage(channel, event);
+
+      expect(messageMocks.get).toHaveBeenCalledWith({
+        path: { message_id: 'parent_msg_001' },
+      });
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({
+          content: '[Quoted: original question]\nfollow-up answer',
+        }),
+      );
+    });
+
+    it('delivers message normally when quoted fetch fails', async () => {
+      messageMocks.get.mockRejectedValue(new Error('API error'));
+
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: 'my message',
+        parentId: 'parent_msg_002',
+      });
+      await triggerMessage(channel, event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({ content: 'my message' }),
+      );
+    });
+  });
+
+  // --- media download ---
+
+  describe('media download', () => {
+    it('downloads image and sets content to file path', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = {
+        sender: { sender_id: { open_id: 'ou_user_open_id' } },
+        message: {
+          message_id: 'msg_img_001',
+          chat_id: 'oc_group_id_001',
+          chat_type: 'group',
+          message_type: 'image',
+          content: JSON.stringify({ image_key: 'img_abcdefgh' }),
+          create_time: '1704067200000',
+          mentions: [],
+        },
+      };
+      await triggerMessage(channel, event);
+
+      expect(messageResourceMocks.get).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { message_id: 'msg_img_001', file_key: 'img_abcdefgh' },
+          params: { type: 'image' },
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({
+          content: expect.stringContaining('[Downloaded:'),
+        }),
+      );
+    });
+
+    it('sets placeholder when download fails', async () => {
+      messageResourceMocks.get.mockRejectedValue(new Error('download error'));
+
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = {
+        sender: { sender_id: { open_id: 'ou_user_open_id' } },
+        message: {
+          message_id: 'msg_img_002',
+          chat_id: 'oc_group_id_001',
+          chat_type: 'group',
+          message_type: 'image',
+          content: JSON.stringify({ image_key: 'img_fail_key' }),
+          create_time: '1704067200000',
+          mentions: [],
+        },
+      };
+      await triggerMessage(channel, event);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({ content: '[image: unable to download]' }),
+      );
+    });
+
+    it('downloads embedded image from post message and appends path', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'fs:oc_group_id_001': {
+            name: 'Test Group',
+            folder: 'test_group',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+            requiresTrigger: false,
+          },
+        })),
+      });
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const postContent = JSON.stringify({
+        zh_cn: {
+          content: [
+            [{ tag: 'text', text: 'See image:' }],
+            [{ tag: 'img', image_key: 'img_embed_001' }],
+          ],
+        },
+      });
+      const event = {
+        sender: { sender_id: { open_id: 'ou_user_open_id' } },
+        message: {
+          message_id: 'msg_post_img_001',
+          chat_id: 'oc_group_id_001',
+          chat_type: 'group',
+          message_type: 'post',
+          content: postContent,
+          create_time: '1704067200000',
+          mentions: [],
+        },
+      };
+      await triggerMessage(channel, event);
+
+      expect(messageResourceMocks.get).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: { message_id: 'msg_post_img_001', file_key: 'img_embed_001' },
+          params: { type: 'image' },
+        }),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'fs:oc_group_id_001',
+        expect.objectContaining({
+          content: expect.stringContaining('[Image:'),
+        }),
+      );
+    });
+  });
+
   // --- sendMessage ---
 
   describe('sendMessage', () => {
-    it('sends to group chat using chat_id receive_id_type', async () => {
+    it('sends to group chat using post format', async () => {
       const opts = createTestOpts();
       const channel = new FeishuChannel('app_id', 'app_secret', opts);
       await channel.connect();
 
       await channel.sendMessage('fs:oc_group_id_001', 'Hello group');
 
-      const { Client } = await import('@larksuiteoapi/node-sdk');
-      const clientInstance = new (Client as any)({ appId: '', appSecret: '' });
-      // Access the underlying mock client via the channel's private field
       const anyChannel = channel as any;
       expect(anyChannel.client.im.message.create).toHaveBeenCalledWith({
         data: {
           receive_id: 'oc_group_id_001',
-          msg_type: 'text',
-          content: JSON.stringify({ text: 'Hello group' }),
+          msg_type: 'post',
+          content: JSON.stringify({
+            zh_cn: { content: [[{ tag: 'md', text: 'Hello group' }]] },
+          }),
         },
         params: { receive_id_type: 'chat_id' },
       });
@@ -418,8 +761,10 @@ describe('FeishuChannel', () => {
       expect(anyChannel.client.im.message.create).toHaveBeenCalledWith({
         data: {
           receive_id: 'ou_user_open_id',
-          msg_type: 'text',
-          content: JSON.stringify({ text: 'Hello DM' }),
+          msg_type: 'post',
+          content: JSON.stringify({
+            zh_cn: { content: [[{ tag: 'md', text: 'Hello DM' }]] },
+          }),
         },
         params: { receive_id_type: 'open_id' },
       });
@@ -472,6 +817,69 @@ describe('FeishuChannel', () => {
       await expect(
         channel.sendMessage('fs:oc_group_id_001', 'will fail'),
       ).resolves.toBeUndefined();
+    });
+  });
+
+  // --- thread reply ---
+
+  describe('thread reply', () => {
+    it('replies to triggering message when cached message ID exists', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      // Trigger a message to populate lastMessageIdByJid
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+        msgId: 'trigger_msg_001',
+      });
+      await triggerMessage(channel, event);
+
+      messageMocks.create.mockClear();
+      await channel.sendMessage('fs:oc_group_id_001', 'my reply');
+
+      expect(messageMocks.reply).toHaveBeenCalledWith({
+        path: { message_id: 'trigger_msg_001' },
+        data: expect.objectContaining({ msg_type: 'post' }),
+      });
+      expect(messageMocks.create).not.toHaveBeenCalled();
+    });
+
+    it('falls back to create when no cached message ID', async () => {
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      // No prior message event — no cached ID
+      await channel.sendMessage('fs:oc_group_id_001', 'unprompted');
+
+      expect(messageMocks.reply).not.toHaveBeenCalled();
+      expect(messageMocks.create).toHaveBeenCalled();
+    });
+
+    it('falls back to create when reply target is withdrawn', async () => {
+      // reply() returns withdrawn error code
+      messageMocks.reply.mockResolvedValue({ code: 230011, msg: 'withdrawn' });
+
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+        msgId: 'withdrawn_msg_001',
+      });
+      await triggerMessage(channel, event);
+
+      messageMocks.create.mockClear();
+      await channel.sendMessage('fs:oc_group_id_001', 'fallback reply');
+
+      expect(messageMocks.reply).toHaveBeenCalled();
+      expect(messageMocks.create).toHaveBeenCalled();
     });
   });
 
@@ -576,6 +984,93 @@ describe('FeishuChannel', () => {
       expect(reactionMocks.delete).toHaveBeenCalledWith({
         path: { message_id: 'msg_first', reaction_id: 'rxn_mock_001' },
       });
+    });
+
+    it('trips backoff when thrown error has backoff code', async () => {
+      reactionMocks.create.mockRejectedValue({ code: 99991400 });
+
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+      });
+      await triggerMessage(channel, event);
+
+      await channel.setTyping('fs:oc_group_id_001', true);
+
+      // Should not throw and backoff should be set
+      const anyChannel = channel as any;
+      expect(anyChannel.typingBackoffUntil).toBeGreaterThan(Date.now());
+    });
+
+    it('trips backoff when response body contains backoff code', async () => {
+      reactionMocks.create.mockResolvedValue({ code: 99991403 });
+
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+      });
+      await triggerMessage(channel, event);
+
+      await channel.setTyping('fs:oc_group_id_001', true);
+
+      const anyChannel = channel as any;
+      expect(anyChannel.typingBackoffUntil).toBeGreaterThan(Date.now());
+    });
+
+    it('suppresses typing calls during backoff period', async () => {
+      reactionMocks.create.mockRejectedValue({ code: 429 });
+
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+      });
+      await triggerMessage(channel, event);
+
+      // First call trips the breaker
+      await channel.setTyping('fs:oc_group_id_001', true);
+      expect(reactionMocks.create).toHaveBeenCalledTimes(1);
+
+      reactionMocks.create.mockClear();
+
+      // Subsequent calls during backoff should not call the API
+      await triggerMessage(channel, event);
+      await channel.setTyping('fs:oc_group_id_001', true);
+      expect(reactionMocks.create).not.toHaveBeenCalled();
+    });
+
+    it('silently ignores non-backoff errors without tripping breaker', async () => {
+      reactionMocks.create.mockRejectedValue(new Error('message deleted'));
+
+      const opts = createTestOpts();
+      const channel = new FeishuChannel('app_id', 'app_secret', opts);
+      await channel.connect();
+
+      const event = makeEvent({
+        chatType: 'group',
+        chatId: 'oc_group_id_001',
+        content: '@Andy hello',
+      });
+      await triggerMessage(channel, event);
+
+      await channel.setTyping('fs:oc_group_id_001', true);
+
+      const anyChannel = channel as any;
+      expect(anyChannel.typingBackoffUntil).toBe(0);
     });
   });
 

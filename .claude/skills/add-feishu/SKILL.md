@@ -275,3 +275,9 @@ The Feishu channel supports:
 - `<at user_id>` XML mention tags normalised to NanoClaw trigger format
 - Message splitting for replies over 4000 UTF-8 bytes
 - WebSocket long-connection — no public URL or HTTPS certificate needed
+- **Post format outbound** — all outgoing messages use `msg_type: 'post'` with Markdown (`tag: 'md'`) for proper rendering of code blocks, tables, and links
+- **Thread reply** — bot replies are threaded to the triggering message; falls back to a new message if the original was withdrawn (codes 230011, 231003)
+- **Post inbound parsing** — incoming `post` (rich-text) messages are parsed to Markdown; titles, bold, italic, links, `@mentions`, code blocks, and embedded images are all handled
+- **Quoted message context** — when a user replies to a message (`parent_id` present), the quoted text is prepended as `[Quoted: …]` so the agent sees full context
+- **Media download** — inbound `image`, `file`, and `audio` messages are downloaded to `groups/{folder}/media/` and the local path is injected into content; embedded images in `post` messages are also downloaded
+- **Typing indicator circuit breaker** — rate-limit errors (codes 99991400, 99991403, 429) from the typing reaction API trip a 5-minute backoff that suppresses further typing calls until the cooldown expires

@@ -1,5 +1,5 @@
 skill: feishu
-version: 1.0.0
+version: 2.0.0
 description: "Feishu/Lark Bot integration via @larksuiteoapi/node-sdk (WebSocket long-connection)"
 core_version: 0.1.0
 adds:
