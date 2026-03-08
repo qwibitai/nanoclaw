@@ -26,7 +26,7 @@ interface PostToolUseInput {
   tool_result?: unknown;
 }
 
-const REDACTED = '[FILTERED_EXTERNAL_CONTENT]';
+const REDACTED = '[REDACTED_REFUSAL_STRING]';
 
 /**
  * Patterns that match content known to cause Claude session termination
