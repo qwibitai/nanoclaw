@@ -151,7 +151,7 @@ describe('lane-control-service', () => {
     const handled = await handleMainLaneControlMessages({
       chatJid: 'main@g.us',
       group: MAIN_GROUP,
-      messages: [createMessage('status andy-developer')],
+      messages: [createMessage('what is Andy developer doing right now?')],
       channel: createChannel(sent),
       queue,
       registeredGroups: {
@@ -225,6 +225,41 @@ describe('lane-control-service', () => {
     expect(status.summary).toContain('Andy review in progress');
   });
 
+  it('does not treat stale review backlog as queued live work', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T10:00:00.000Z'));
+
+    try {
+      createAndyRequestIfAbsent({
+        request_id: 'req-review-stale-queue-1',
+        chat_jid: 'andy-developer@g.us',
+        source_group_folder: 'andy-developer',
+        user_message_id: 'msg-review-stale-queue-1',
+        user_prompt: 'review the worker output',
+        intent: 'work_intake',
+        state: 'worker_review_requested',
+      });
+
+      vi.setSystemTime(new Date('2026-03-07T13:30:01.000Z'));
+
+      const snapshot = buildControlPlaneStatusSnapshot({
+        registeredGroups: {
+          'main@g.us': MAIN_GROUP,
+          'andy-developer@g.us': ANDY_GROUP,
+        },
+        queue: createQueueStub(),
+      });
+
+      expect(snapshot.lanes['andy-developer']?.availability).toBe('idle');
+      expect(snapshot.lanes['andy-developer']?.active_requests).toHaveLength(0);
+      expect(snapshot.lanes['andy-developer']?.summary).toContain(
+        'stale review request',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('answers request status by request id from persisted state', async () => {
     createAndyRequestIfAbsent({
       request_id: 'req-main-status-1',
@@ -261,6 +296,66 @@ describe('lane-control-service', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('`req-main-status-1`');
     expect(sent[0]).toContain('`coordinator_active`');
+  });
+
+  it('answers main-lane shorthand status command for andy-developer', async () => {
+    const sent: string[] = [];
+    const runtime = createRuntimeCallbacks();
+
+    const handled = await handleMainLaneControlMessages({
+      chatJid: 'main@g.us',
+      group: MAIN_GROUP,
+      messages: [createMessage('status')],
+      channel: createChannel(sent),
+      queue: createQueueStub(),
+      registeredGroups: {
+        'main@g.us': MAIN_GROUP,
+        'andy-developer@g.us': ANDY_GROUP,
+      },
+      runtime,
+    });
+
+    expect(handled).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('`andy-developer` is idle');
+  });
+
+  it('accepts shorthand steer command for andy-developer', async () => {
+    const sent: string[] = [];
+    const runtime = createRuntimeCallbacks();
+    const queue = createQueueStub({
+      getStatus: vi.fn(() => ({
+        active: true,
+        idleWaiting: false,
+        isTaskContainer: false,
+        runningTaskId: null,
+        pendingMessages: false,
+        pendingTaskCount: 0,
+        containerName: 'andy-container',
+        groupFolder: 'andy-developer',
+      })),
+      sendMessage: vi.fn(() => true),
+    });
+
+    const handled = await handleMainLaneControlMessages({
+      chatJid: 'main@g.us',
+      group: MAIN_GROUP,
+      messages: [createMessage('steer: focus on authorization first')],
+      channel: createChannel(sent),
+      queue,
+      registeredGroups: {
+        'main@g.us': MAIN_GROUP,
+        'andy-developer@g.us': ANDY_GROUP,
+      },
+      runtime,
+    });
+
+    expect(handled).toBe(true);
+    expect(queue.sendMessage).toHaveBeenCalledWith(
+      'andy-developer@g.us',
+      'Main lane steer: focus on authorization first',
+    );
+    expect(sent[0]).toContain('Sent a steer');
   });
 
   it('steers the active andy-developer session only through the explicit steer command', async () => {
@@ -301,6 +396,52 @@ describe('lane-control-service', () => {
       'Main lane steer: focus on authorization first',
     );
     expect(sent[0]).toContain('Sent a steer');
+  });
+
+  it('accepts shorthand interrupt command for andy-developer', async () => {
+    const sent: string[] = [];
+    const runtime = createRuntimeCallbacks();
+    const queue = createQueueStub({
+      getStatus: vi.fn(() => ({
+        active: true,
+        idleWaiting: false,
+        isTaskContainer: false,
+        runningTaskId: null,
+        pendingMessages: false,
+        pendingTaskCount: 0,
+        containerName: 'andy-container',
+        groupFolder: 'andy-developer',
+      })),
+    });
+
+    const handled = await handleMainLaneControlMessages({
+      chatJid: 'main@g.us',
+      group: MAIN_GROUP,
+      messages: [createMessage('interrupt: stop and re-evaluate the approach')],
+      channel: createChannel(sent),
+      queue,
+      registeredGroups: {
+        'main@g.us': MAIN_GROUP,
+        'andy-developer@g.us': ANDY_GROUP,
+      },
+      runtime,
+    });
+
+    expect(handled).toBe(true);
+    expect(queue.closeStdin).toHaveBeenCalledWith('andy-developer@g.us');
+    expect(queue.enqueueMessageCheck).toHaveBeenCalledWith(
+      'andy-developer@g.us',
+    );
+    const messages = getMessagesSince(
+      'andy-developer@g.us',
+      '1970-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].content).toContain(
+      '@Andy Main lane steer: stop and re-evaluate the approach',
+    );
+    expect(sent[0]).toContain('Soft-interrupted');
   });
 
   it('soft-interrupts andy-developer and queues the steer as the next turn', async () => {

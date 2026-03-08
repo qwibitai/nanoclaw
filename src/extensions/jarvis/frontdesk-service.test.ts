@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   _initTestDatabase,
@@ -185,5 +185,61 @@ describe('frontdesk-service', () => {
 
     expect(reply).toContain('Andy is applying a bounded review patch');
     expect(reply).toContain('`andy_patch_in_progress`');
+  });
+
+  it('treats stale review backlog as non-active status work', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T10:00:00.000Z'));
+
+    try {
+      createAndyRequestIfAbsent({
+        request_id: 'req-review-stale-1',
+        chat_jid: 'andy-developer@g.us',
+        source_group_folder: 'andy-developer',
+        user_message_id: 'msg-user-review-stale-1',
+        user_prompt: 'check the worker result',
+        intent: 'work_intake',
+        state: 'worker_review_requested',
+      });
+
+      vi.setSystemTime(new Date('2026-03-07T13:30:01.000Z'));
+
+      const reply = buildAndyProgressStatusReply('andy-developer@g.us');
+
+      expect(reply).toContain('No worker run is active right now');
+      expect(reply).toContain('stale review request');
+      expect(reply).toContain('older than 180m');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks stale request-id status replies as non-active work', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T10:00:00.000Z'));
+
+    try {
+      createAndyRequestIfAbsent({
+        request_id: 'req-review-stale-2',
+        chat_jid: 'andy-developer@g.us',
+        source_group_folder: 'andy-developer',
+        user_message_id: 'msg-user-review-stale-2',
+        user_prompt: 'check the worker result',
+        intent: 'work_intake',
+        state: 'worker_review_requested',
+      });
+
+      vi.setSystemTime(new Date('2026-03-07T13:30:01.000Z'));
+
+      const reply = buildAndyProgressStatusReply(
+        'andy-developer@g.us',
+        'req-review-stale-2',
+      );
+
+      expect(reply).toContain('worker_review_requested');
+      expect(reply).toContain('not counted as active work');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

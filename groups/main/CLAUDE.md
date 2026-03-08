@@ -72,6 +72,13 @@ This is the **main channel**, which has elevated privileges.
 
 When the user asks about `andy-developer` status, progress, what it is doing, or whether it is busy, read `/workspace/ipc/control_plane_status.json` and summarize `lanes["andy-developer"]` instead of guessing from memory. Treat that snapshot as the source of truth. If the file is unavailable, say the control-plane status is temporarily unavailable. If `mcp__nanoclaw__get_lane_status` is available in the current toolset, it is an equivalent shortcut, but do not depend on it.
 
+Main-lane control shortcuts:
+- `status` or `status <request_id>`
+- `steer: <instruction>`
+- `interrupt: <instruction>`
+
+Treat `steer:` and `interrupt:` as commands for `andy-developer` by default.
+
 ## Container Mounts
 
 Main has read-only access to the project and read-write access to its group folder:

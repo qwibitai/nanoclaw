@@ -1,7 +1,40 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-07T17:49:30Z",
+  "updated_at": "2026-03-08T05:33:00.813773+00:00",
   "incidents": [
+    {
+      "id": "incident-20260308T053300Z",
+      "title": "Stale UAT andy_requests polluted main-lane Andy status",
+      "status": "open",
+      "severity": "medium",
+      "created_at": "2026-03-08T05:33:00.810542+00:00",
+      "updated_at": "2026-03-08T05:33:00.813550+00:00",
+      "summary": {
+        "symptom": "Main lane reported Andy-developer as queued/stalled because stale test-created worker_review_requested rows were treated as live work.",
+        "suspected_cause": "Shared-DB E2E scripts left non-terminal uat-* andy_requests behind, and status logic surfaced stale worker_review_requested rows as curre...",
+        "impact": "Main-lane control-plane status overstated backlog and falsely implied Andy-developer was hung/queued.",
+        "next_action": "Await user confirmation, then resolve after live main-lane status verification remains stable."
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "main",
+        "chat_jid": "120363425034645731@g.us"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-08T05:33:00.810542+00:00",
+          "author": "user",
+          "text": "reported: Main lane reported Andy-developer as queued/stalled because stale test-created worker_review_requested rows were treated as live work."
+        },
+        {
+          "ts": "2026-03-08T05:33:00.813544+00:00",
+          "author": "codex",
+          "text": "Implemented two-part fix on 2026-03-08: scripts/test-andy-full-user-journey-e2e.ts now cancels its temporary andy_requests on exit; status logic now excludes stale worker_review_requested rows from live active work and reports them as stale backlog instead of queued/stalled. Backed up store/messages.db to data/diagnostics/db-backups/messages-pre-uat-cleanup-20260308T110200.db and closed 28 stale uat-* review requests. Verification: npm test -- --run src/extensions/jarvis/frontdesk-service.test.ts src/extensions/jarvis/lane-control-service.test.ts PASS; npm run build PASS; main-lane status E2E PASS after restart; current control_plane_status.json shows availability=idle and active_requests=[]; bash scripts/jarvis-preflight.sh PASS after settle."
+        }
+      ]
+    },
     {
       "id": "incident-20260307T174930Z",
       "title": "Worker review_requested backlog lacked deterministic Andy review ownership",
@@ -11,7 +44,7 @@
       "updated_at": "2026-03-07T17:49:30Z",
       "summary": {
         "symptom": "Worker completions could remain in `worker_review_requested` without deterministically waking Andy-developer, causing backlog buildup and stale status reports like 'awaiting review' or 'stalled/queued' even when the next step should have been immediate review.",
-        "suspected_cause": "Accepted worker completion updated request state but did not inject a deterministic internal review trigger, and Andy's contract prohibited small review-time direct patches while docs still implied post-review rework could reuse the same run_id.",
+        "suspected_cause": "Accepted worker completion updated request state but did not inject a deterministic internal review trigger, and Andy's contract prohibit...",
         "impact": "Andy review ownership was passive instead of active, small deltas were forced through unnecessary redispatch loops, and main/Andy status could overstate review backlog.",
         "next_action": "None; keep the review-ownership tests plus live acceptance/happiness gates in the standard verification path."
       },
@@ -32,11 +65,55 @@
         "summary": "Andy now owns review immediately after worker completion and can close small review-time deltas directly without another full Andy -> Jarvis -> review_requested loop.",
         "confirmed_by_user": "",
         "confirmed_at": "2026-03-07T17:49:30Z",
-        "verification": "npm run build PASS; npm test -- --run src/extensions/jarvis/frontdesk-service.test.ts src/extensions/jarvis/lane-control-service.test.ts src/jarvis-worker-dispatch.test.ts src/db.test.ts PASS; npm test PASS (518 tests); bash scripts/jarvis-ops.sh preflight PASS after runtime recovery; bash scripts/jarvis-ops.sh verify-worker-connectivity PASS; bash scripts/jarvis-ops.sh acceptance-gate PASS; bash scripts/jarvis-ops.sh happiness-gate --user-confirmation 'review ownership live user-POV run completed by Codex after runtime recovery' PASS",
-        "fix_reference": "src/index.ts, src/extensions/jarvis/request-state-service.ts, src/extensions/jarvis/frontdesk-service.ts, src/extensions/jarvis/lane-control-service.ts, groups/andy-developer/CLAUDE.md, groups/andy-developer/docs/jarvis-dispatch.md, groups/andy-developer/docs/github.md, groups/jarvis-worker-*/docs/workflow/worker-skill-policy.md, docs/architecture/nanoclaw-jarvis.md, docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md",
+        "verification": "npm run build PASS; npm test -- --run src/extensions/jarvis/frontdesk-service.test.ts src/extensions/jarvis/lane-control-service.test.ts src/jarvis-worker-dispatch.test.ts src/db.test.ts PASS; npm test PASS (518 tests); bash scripts/jarvis-ops.sh preflight PASS after runtime recovery; bash scripts/jarvis-ops.sh verify-worker-connectivity PASS; bash scripts/jarvis-ops.sh acceptance-gate PASS; bash scripts/jarvis-ops.sh happiness-gate --user-confirmation 'review ownership live user-POV run comp...",
+        "fix_reference": "src/index.ts, src/extensions/jarvis/request-state-service.ts, src/extensions/jarvis/frontdesk-service.ts, src/extensions/jarvis/lane-control-service.ts, groups/andy-developer/CLAUDE.md, groups/andy-developer/docs/jarvis-dispatch.md, grou...",
         "resolved_by": "codex"
       },
       "resolved_at": "2026-03-07T17:49:30Z"
+    },
+    {
+      "id": "incident-worker-connectivity-block-20260227",
+      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
+      "status": "open",
+      "severity": "high",
+      "created_at": "2026-02-27T13:02:09.098285+00:00",
+      "updated_at": "2026-03-07T17:49:30Z",
+      "summary": {
+        "symptom": "Synthetic worker lanes rejected IPC probe dispatches with 'No channel for JID', so fresh probe worker_runs were not created.",
+        "suspected_cause": "root_runtime_missing_internal_nanoclaw_dispatch",
+        "impact": "Live worker connectivity verification and Andy->worker validation were blocked.",
+        "next_action": "None; keep verify-worker-connectivity in the live gate."
+      },
+      "evidence": {
+        "bundle_count": 5,
+        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
+        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
+        "last_root_cause": "unknown",
+        "last_status": "pass",
+        "last_checked_at": "2026-03-06T15:19:53Z",
+        "non_zero_command_count": 2,
+        "debug_summary": "2026-03-06 verify-worker-connectivity PASS after root runtime restore: probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600 both reached review_requested with zero stale queued/running runs."
+      },
+      "context": {
+        "lane": "andy-developer"
+      },
+      "notes": [
+        {
+          "ts": "2026-03-06T13:32:56.813764+00:00",
+          "author": "codex",
+          "text": "2026-03-06 live regression check on branch chore/update-1.2.8-docs: baseline preflight/status/reliability pass with no stale queued/running runs, but verify-worker-connectivity cannot create fresh probe worker_runs. Root cause split: (1) script deadlock fixed locally in scripts/jarvis-worker-probe.sh by skipping connectivity proof for probe pre-dispatch, and (2) live runtime still rejects IPC probe payloads for jarvis-worker-*@nanoclaw with 'No channel for JID', leaving probe JSON files in data/ipc/errors and zero new probe rows in worker_runs."
+        },
+        {
+          "ts": "2026-03-06T15:19:53Z",
+          "author": "codex",
+          "text": "Resolved on 2026-03-06 after restoring root-runtime synthetic worker dispatch support. Live verify-worker-connectivity PASS created fresh probe runs probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600, both reaching review_requested; no new 'No channel for JID' failures occurred on the current runtime."
+        },
+        {
+          "ts": "2026-03-07T17:49:30Z",
+          "author": "codex",
+          "text": "During review-ownership verification on 2026-03-07, acceptance-gate initially failed because com.nanoclaw and the Apple container runtime were down (`spawnscheduled`, missing runtime owner row, XPC/container builder failure). Recovered with `bash scripts/jarvis-ops.sh recover`; follow-up preflight PASS, verify-worker-connectivity PASS, and acceptance-gate PASS on the same runtime."
+        }
+      ]
     },
     {
       "id": "incident-20260306T204429Z",
@@ -148,55 +225,6 @@
           "ts": "2026-03-06T19:22:55.718460+00:00",
           "author": "codex",
           "text": "Implemented runtime ownership isolation with runtime_owners heartbeat, restarted com.nanoclaw onto the new build, and reran live preflight/reliability on 2026-03-07. Preflight passed with runtime owner host=service pid=88657. Reliability passed with runtime owner pid alive; remaining WhatsApp conflict warnings are historical log lines from older PIDs, not fresh post-restart conflicts."
-        }
-      ]
-    },
-    {
-      "id": "incident-worker-connectivity-block-20260227",
-      "title": "Workers not connected; Andy developer cannot restart workers; push task blocked",
-      "status": "open",
-      "severity": "high",
-      "created_at": "2026-02-27T13:02:09.098285+00:00",
-      "updated_at": "2026-03-07T17:49:30Z",
-      "summary": {
-        "symptom": "Synthetic worker lanes rejected IPC probe dispatches with 'No channel for JID', so fresh probe worker_runs were not created.",
-        "suspected_cause": "root_runtime_missing_internal_nanoclaw_dispatch",
-        "impact": "Live worker connectivity verification and Andy->worker validation were blocked.",
-        "next_action": "None; keep verify-worker-connectivity in the live gate."
-      },
-      "evidence": {
-        "bundle_count": 5,
-        "last_bundle_dir": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z",
-        "last_manifest_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/data/diagnostics/incidents/incident-20260303T070438Z/manifest.json",
-        "last_root_cause": "unknown",
-        "last_status": "pass",
-        "last_checked_at": "2026-03-06T15:19:53Z",
-        "non_zero_command_count": 2,
-        "debug_summary": "2026-03-06 verify-worker-connectivity PASS after root runtime restore: probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600 both reached review_requested with zero stale queued/running runs."
-      },
-      "context": {
-        "lane": "andy-developer"
-      },
-      "notes": [
-        {
-          "ts": "2026-03-06T13:32:07.890419+00:00",
-          "author": "codex",
-          "text": "reopened by codex: 2026-03-06 live verify-worker-connectivity regression: probe deadlock fixed locally, but runtime still routes jarvis-worker-*@nanoclaw via external channel ownership only; IPC probe messages fail with 'No channel for JID' and no new probe worker_runs are created. | previous_resolution=Worker connectivity gate stabilized; live probe + acceptance gate now pass with review_requested terminals."
-        },
-        {
-          "ts": "2026-03-06T13:32:56.813764+00:00",
-          "author": "codex",
-          "text": "2026-03-06 live regression check on branch chore/update-1.2.8-docs: baseline preflight/status/reliability pass with no stale queued/running runs, but verify-worker-connectivity cannot create fresh probe worker_runs. Root cause split: (1) script deadlock fixed locally in scripts/jarvis-worker-probe.sh by skipping connectivity proof for probe pre-dispatch, and (2) live runtime still rejects IPC probe payloads for jarvis-worker-*@nanoclaw with 'No channel for JID', leaving probe JSON files in data/ipc/errors and zero new probe rows in worker_runs."
-        },
-        {
-          "ts": "2026-03-06T15:19:53Z",
-          "author": "codex",
-          "text": "Resolved on 2026-03-06 after restoring root-runtime synthetic worker dispatch support. Live verify-worker-connectivity PASS created fresh probe runs probe-jarvis-worker-1-1772807520-13939 and probe-jarvis-worker-2-1772807683-29600, both reaching review_requested; no new 'No channel for JID' failures occurred on the current runtime."
-        },
-        {
-          "ts": "2026-03-07T17:49:30Z",
-          "author": "codex",
-          "text": "During review-ownership verification on 2026-03-07, acceptance-gate initially failed because com.nanoclaw and the Apple container runtime were down (`spawnscheduled`, missing runtime owner row, XPC/container builder failure). Recovered with `bash scripts/jarvis-ops.sh recover`; follow-up preflight PASS, verify-worker-connectivity PASS, and acceptance-gate PASS on the same runtime."
         }
       ]
     },

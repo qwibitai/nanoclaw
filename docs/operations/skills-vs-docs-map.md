@@ -42,8 +42,6 @@ Run these first, before implementation work starts:
 | First-time install/onboarding | `/setup` |
 | Pull latest upstream core changes | `/update` |
 | Move runtime from Docker to Apple Container | `/convert-to-apple-container` |
-| Resolve Qodo review issues in PR | `/qodo-pr-resolver` |
-| Start coding/review with Qodo policy requirements | `/get-qodo-rules` |
 
 Enforcement intent:
 - If a request matches a router row, start with that skill before ad-hoc edits/debugging.
@@ -85,8 +83,7 @@ Fallback policy:
 | `/add-voice-transcription` | WhatsApp voice transcription |
 | `/add-parallel` | Parallel AI MCP integration |
 | `/x-integration` | X/Twitter automation integration |
-| `/get-qodo-rules` | load org/repo coding constraints before coding |
-| `/qodo-pr-resolver` | fetch and resolve Qodo PR issues |
+| This fork intentionally excludes repo-local Qodo skills | Qodo is not configured for this repository; do not route coding/review work through Qodo-specific skills |
 
 ## What Skills Must Not Replace
 

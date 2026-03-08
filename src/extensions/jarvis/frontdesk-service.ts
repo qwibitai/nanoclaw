@@ -1,5 +1,6 @@
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../../config.js';
 import {
+  type AndyRequestRecord,
   getAndyRequestById,
   getAndyRequestByMessageId,
   getWorkerRun,
@@ -28,6 +29,9 @@ const ANDY_PROGRESS_QUERY_PATTERN =
   /\b(progress|status|update|what(?:'|’)s happening|what is happening|where are we|how far|eta|current progress|current status|what(?:\s+are|(?:'|’)re)\s+you\s+working\s+on(?:\s+(?:right\s+now|now|currently))?)\b/i;
 const ANDY_STATUS_BY_ID_PATTERN = /\bstatus\s+(req-[a-z0-9-]+)\b/i;
 const ANDY_REQUEST_ID_PATTERN = /\b(req-[a-z0-9-]+)\b/i;
+const STALE_REVIEW_REQUEST_THRESHOLD_MINUTES = 180;
+const STALE_REVIEW_REQUEST_THRESHOLD_MS =
+  STALE_REVIEW_REQUEST_THRESHOLD_MINUTES * 60_000;
 
 export interface AndyFrontdeskRuntimeCallbacks {
   markCursorInFlight(chatJid: string, timestamp: string): void;
@@ -99,6 +103,44 @@ function extractAndyStatusRequestId(message: NewMessage): string | undefined {
   if (!ANDY_PROGRESS_QUERY_PATTERN.test(body)) return undefined;
   const anyId = body.match(ANDY_REQUEST_ID_PATTERN);
   return anyId?.[1];
+}
+
+function getRequestUpdatedAtMs(request: AndyRequestRecord): number | null {
+  const updatedAt = request.updated_at || request.created_at;
+  const parsed = Date.parse(updatedAt);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function isStaleAndyReviewRequest(
+  request: AndyRequestRecord,
+  nowMs = Date.now(),
+): boolean {
+  if (request.state !== 'worker_review_requested') return false;
+  const updatedAtMs = getRequestUpdatedAtMs(request);
+  if (updatedAtMs === null) return false;
+  return nowMs - updatedAtMs >= STALE_REVIEW_REQUEST_THRESHOLD_MS;
+}
+
+export function getAndyStatusRequestBuckets(
+  chatJid: string,
+  limit = 20,
+): {
+  liveRequests: AndyRequestRecord[];
+  staleReviewRequests: AndyRequestRecord[];
+} {
+  const requests = listActiveAndyRequests(chatJid, limit);
+  const liveRequests: AndyRequestRecord[] = [];
+  const staleReviewRequests: AndyRequestRecord[] = [];
+
+  for (const request of requests) {
+    if (isStaleAndyReviewRequest(request)) {
+      staleReviewRequests.push(request);
+    } else {
+      liveRequests.push(request);
+    }
+  }
+
+  return { liveRequests, staleReviewRequests };
 }
 
 function isAndyWorkIntakeMessage(
@@ -234,19 +276,29 @@ export function buildAndyProgressStatusReply(
         const progress = getWorkerRunProgress(run.run_id);
         const progressSummary = progress?.last_progress_summary?.trim();
         const suffix = progressSummary ? ` - ${progressSummary}` : '';
-        return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`). Worker run \`${run.run_id}\` on \`${run.group_folder}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}.`;
+        const staleSuffix = isStaleAndyReviewRequest(request)
+          ? ` This review state is older than ${STALE_REVIEW_REQUEST_THRESHOLD_MINUTES}m and is not counted as active work.`
+          : '';
+        return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`). Worker run \`${run.run_id}\` on \`${run.group_folder}\` is \`${run.status}\` (${formatElapsedSince(run.started_at)})${suffix}.${staleSuffix}`;
       }
     }
 
     const lastText = request.last_status_text
       ? ` ${request.last_status_text}`
       : '';
-    return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`).${lastText}`;
+    const staleSuffix = isStaleAndyReviewRequest(request)
+      ? ` This review state is older than ${STALE_REVIEW_REQUEST_THRESHOLD_MINUTES}m and is not counted as active work.`
+      : '';
+    return `${ASSISTANT_NAME}: \`${request.request_id}\` is ${describeAndyRequestState(request.state)} (\`${request.state}\`).${lastText}${staleSuffix}`;
   }
 
-  const activeRequests = listActiveAndyRequests(chatJid, 3);
-  if (activeRequests.length > 0) {
-    const lines = activeRequests.map((request) => {
+  const { liveRequests, staleReviewRequests } = getAndyStatusRequestBuckets(
+    chatJid,
+    20,
+  );
+  const visibleRequests = liveRequests.slice(0, 3);
+  if (visibleRequests.length > 0) {
+    const lines = visibleRequests.map((request) => {
       if (request.worker_run_id) {
         const run = getWorkerRun(request.worker_run_id);
         if (run) {
@@ -258,7 +310,22 @@ export function buildAndyProgressStatusReply(
       }
       return `- \`${request.request_id}\`: ${describeAndyRequestState(request.state)} (\`${request.state}\`)`;
     });
-    return `${ASSISTANT_NAME}: Current tracked requests:\n${lines.join('\n')}`;
+    const staleSuffix =
+      staleReviewRequests.length > 0
+        ? `\nStale review backlog omitted: ${staleReviewRequests.length} request(s) older than ${STALE_REVIEW_REQUEST_THRESHOLD_MINUTES}m.`
+        : '';
+    return `${ASSISTANT_NAME}: Current tracked requests:\n${lines.join('\n')}${staleSuffix}`;
+  }
+
+  if (staleReviewRequests.length > 0) {
+    const latestStale = staleReviewRequests[0];
+    const latestRun = latestStale.worker_run_id
+      ? getWorkerRun(latestStale.worker_run_id)
+      : null;
+    const latestDetail = latestRun
+      ? ` Latest stale review \`${latestStale.request_id}\` is linked to run \`${latestRun.run_id}\` on \`${latestRun.group_folder}\` (\`${latestRun.status}\`).`
+      : ` Latest stale review is \`${latestStale.request_id}\`.`;
+    return `${ASSISTANT_NAME}: No worker run is active right now. There are ${staleReviewRequests.length} stale review request(s) older than ${STALE_REVIEW_REQUEST_THRESHOLD_MINUTES}m and not counted as active work.${latestDetail}`;
   }
 
   const activeRuns = getWorkerRuns({

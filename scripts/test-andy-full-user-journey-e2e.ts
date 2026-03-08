@@ -47,7 +47,6 @@ const MAX_STAGE_ATTEMPTS = 3;
 const TIMESTAMP_FLOOR_TOLERANCE_MS = 1_000;
 const RUN_TERMINAL_OK = new Set(['review_requested', 'done']);
 const RUN_TERMINAL_FAIL = new Set(['failed', 'failed_contract']);
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -212,6 +211,31 @@ function clampLatencyMs(sentMs: number, replyTimestamp: string, label: string): 
     throw new Error(`${label} latency invalid: ${raw}`);
   }
   return Math.max(0, raw);
+}
+
+function cleanupJourneyRequests(db: Database.Database, token: string): number {
+  const requestRows = db.prepare(
+    `SELECT request_id
+     FROM andy_requests
+     WHERE user_message_id LIKE ?
+       AND state NOT IN ('completed', 'failed', 'cancelled')`,
+  ).all(`uat-full-${token}-%`) as Array<{ request_id: string }>;
+
+  if (requestRows.length === 0) return 0;
+
+  const now = nowIso();
+  const reason = `Closed after Andy full user journey E2E cleanup (token=${token})`;
+  const result = db.prepare(
+    `UPDATE andy_requests
+     SET state = 'cancelled',
+         last_status_text = ?,
+         updated_at = ?,
+         closed_at = COALESCE(closed_at, ?)
+     WHERE user_message_id LIKE ?
+       AND state NOT IN ('completed', 'failed', 'cancelled')`,
+  ).run(reason, now, now, `uat-full-${token}-%`);
+
+  return Number(result.changes ?? requestRows.length);
 }
 
 async function waitForWorkerRunTerminal(
@@ -418,6 +442,10 @@ async function main(): Promise<void> {
 
     console.log('\nPASS: full build -> feature -> customization user journey validated');
   } finally {
+    const cleaned = cleanupJourneyRequests(db, token);
+    if (cleaned > 0) {
+      console.log(`cleanup: cancelled ${cleaned} temporary andy_request row(s) for token=${token}`);
+    }
     db.close();
   }
 }

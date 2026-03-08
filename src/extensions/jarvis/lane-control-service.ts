@@ -7,7 +7,6 @@ import {
   getAndyRequestById,
   getLatestAndyRequestForChat,
   getWorkerRunProgress,
-  listActiveAndyRequests,
   storeChatMetadata,
   storeMessage,
 } from '../../db.js';
@@ -22,6 +21,7 @@ import {
 } from '../../types.js';
 import {
   buildAndyProgressStatusReply,
+  getAndyStatusRequestBuckets,
   type AndyFrontdeskRuntimeCallbacks,
 } from './frontdesk-service.js';
 import {
@@ -33,7 +33,10 @@ import {
 type LaneControlAvailability = 'idle' | 'busy' | 'queued' | 'offline';
 type LaneControlMode = 'append' | 'interrupt';
 
+const LANE_STATUS_PATTERN = /^status(?:\s+andy-developer)?\s*[.!?]*$/i;
 const REQUEST_STATUS_PATTERN = /^status\s+(req-[a-z0-9-]+)\s*[.!?]*$/i;
+const SHORTHAND_LANE_CONTROL_PATTERN =
+  /^(steer|interrupt)\s*:\s*([\s\S]+)$/i;
 const LANE_CONTROL_COMMAND_PATTERN =
   /^(steer|interrupt)\s+([^:]+?)\s*:\s*([\s\S]+)$/i;
 
@@ -74,6 +77,7 @@ export interface LaneControlQueue {
 
 type MainLaneControlIntent =
   | { kind: 'request_status'; requestId: string }
+  | { kind: 'lane_status'; laneId: LaneId }
   | {
       kind: 'lane_control';
       laneId: LaneId | 'unknown';
@@ -143,6 +147,23 @@ function parseMainLaneControlIntent(
     return { kind: 'request_status', requestId: requestMatch[1] };
   }
 
+  if (LANE_STATUS_PATTERN.test(body)) {
+    return { kind: 'lane_status', laneId: ANDY_DEVELOPER_LANE_ID };
+  }
+
+  const shorthandControlMatch = body.match(SHORTHAND_LANE_CONTROL_PATTERN);
+  if (shorthandControlMatch) {
+    const [, rawMode, rawMessage] = shorthandControlMatch;
+    const message = rawMessage.trim();
+    if (!message) return null;
+    return {
+      kind: 'lane_control',
+      laneId: ANDY_DEVELOPER_LANE_ID,
+      mode: rawMode.toLowerCase() === 'interrupt' ? 'interrupt' : 'append',
+      message,
+    };
+  }
+
   const controlMatch = body.match(LANE_CONTROL_COMMAND_PATTERN);
   if (controlMatch) {
     const [, rawMode, rawTarget, rawMessage] = controlMatch;
@@ -187,20 +208,22 @@ export function listActiveRequests(
     chatJid ?? findChatJidForLane(registeredGroups, ANDY_DEVELOPER_LANE_ID);
   if (!targetChatJid) return [];
 
-  return listActiveAndyRequests(targetChatJid).map((request) => {
-    const progress = request.worker_run_id
-      ? getWorkerRunProgress(request.worker_run_id)
-      : null;
-    return {
-      request_id: request.request_id,
-      state: request.state,
-      worker_run_id: request.worker_run_id ?? undefined,
-      worker_group_folder: request.worker_group_folder ?? undefined,
-      last_status_text: request.last_status_text ?? undefined,
-      last_progress_summary: progress?.last_progress_summary ?? undefined,
-      updated_at: request.updated_at,
-    };
-  });
+  return getAndyStatusRequestBuckets(targetChatJid).liveRequests.map(
+    (request) => {
+      const progress = request.worker_run_id
+        ? getWorkerRunProgress(request.worker_run_id)
+        : null;
+      return {
+        request_id: request.request_id,
+        state: request.state,
+        worker_run_id: request.worker_run_id ?? undefined,
+        worker_group_folder: request.worker_group_folder ?? undefined,
+        last_status_text: request.last_status_text ?? undefined,
+        last_progress_summary: progress?.last_progress_summary ?? undefined,
+        updated_at: request.updated_at,
+      };
+    },
+  );
 }
 
 export function getLaneStatus(input: {
@@ -216,7 +239,7 @@ export function getLaneStatus(input: {
     ? getLatestAndyRequestForChat(chatJid)
     : undefined;
   const activeRequest = chatJid
-    ? listActiveAndyRequests(chatJid, 1)[0]
+    ? getAndyStatusRequestBuckets(chatJid).liveRequests[0]
     : undefined;
 
   if (!chatJid) {
@@ -229,7 +252,7 @@ export function getLaneStatus(input: {
   }
 
   const activeRunId =
-    activeRequest?.worker_run_id ?? latestRequest?.worker_run_id ?? undefined;
+    activeRequest?.worker_run_id ?? undefined;
   const hasQueuedWork = Boolean(
     activeRequest ||
     queueStatus?.pendingMessages ||
@@ -256,8 +279,7 @@ export function getLaneStatus(input: {
   return {
     lane_id: laneId,
     availability,
-    active_request_id:
-      activeRequest?.request_id ?? latestRequest?.request_id ?? undefined,
+    active_request_id: activeRequest?.request_id ?? undefined,
     active_run_id: activeRunId,
     summary,
     updated_at:
@@ -294,6 +316,19 @@ function buildRequestStatusReply(requestId: string): string {
   }
 
   return buildAndyProgressStatusReply(request.chat_jid, requestId);
+}
+
+function buildLaneStatusReply(input: {
+  laneId: LaneId;
+  registeredGroups: Record<string, RegisteredGroup>;
+  queue: Pick<LaneControlQueue, 'getStatus'>;
+}): string {
+  const status = getLaneStatus(input);
+  if (input.laneId !== ANDY_DEVELOPER_LANE_ID) {
+    return `${ASSISTANT_NAME}: \`${input.laneId}\` status is not available from the main control plane.`;
+  }
+
+  return `${ASSISTANT_NAME}: \`andy-developer\` is ${status.availability}.\n${status.summary}`;
 }
 
 export function steerLane(input: {
@@ -399,6 +434,12 @@ export async function handleMainLaneControlMessages(input: {
   try {
     if (intent.kind === 'request_status') {
       reply = buildRequestStatusReply(intent.requestId);
+    } else if (intent.kind === 'lane_status') {
+      reply = buildLaneStatusReply({
+        laneId: intent.laneId,
+        registeredGroups: input.registeredGroups,
+        queue: input.queue,
+      });
     } else {
       reply = steerLane({
         actorLaneId: MAIN_LANE_ID,
