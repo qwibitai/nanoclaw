@@ -175,6 +175,36 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  // Download attachments before formatting messages for the agent
+  if (channel.downloadAttachment) {
+    const groupDir = resolveGroupFolderPath(group.folder);
+    const destDir = path.join(groupDir, 'attachments');
+
+    for (const msg of missedMessages) {
+      if (!msg.attachments?.length) continue;
+      for (const att of msg.attachments) {
+        if (att.localPath) continue; // already downloaded
+        try {
+          const localPath = await channel.downloadAttachment(att, destDir);
+          if (localPath) att.localPath = localPath;
+        } catch (err) {
+          logger.warn(
+            { attachmentId: att.id, err },
+            'Failed to download attachment',
+          );
+        }
+      }
+      const paths = msg.attachments
+        .filter((a) => a.localPath)
+        .map((a) => `[file: ${a.localPath}]`);
+      if (paths.length) {
+        msg.content = msg.content
+          ? `${msg.content}\n${paths.join('\n')}`
+          : paths.join('\n');
+      }
+    }
+  }
+
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
