@@ -43,6 +43,14 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+### Memory files - always read at session start
+
+- `/workspace/group/dev-notes.md` - developer workflows (GitHub API push workflow, Claude Code hygiene)
+- `/workspace/group/notes.md` - miscellaneous notes (car parking etc.)
+- `/workspace/group/friends.md` - info about Simon's friends and contacts
+- `/workspace/group/wines.md` - wine preferences and tasting notes
+- `/workspace/group/wealth-ai-era.md` - Simon's thinking on wealth and AI era investing
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:
