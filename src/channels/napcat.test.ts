@@ -264,14 +264,20 @@ describe('NapCatChannel', () => {
 
     it('handles share segments', () => {
       const segments = [
-        { type: 'share', data: { url: 'https://example.com', title: 'Example' } },
+        {
+          type: 'share',
+          data: { url: 'https://example.com', title: 'Example' },
+        },
       ];
       expect(extractTextContent(segments, '')).toBe('[Link: Example]');
     });
 
     it('handles location segments', () => {
       const segments = [
-        { type: 'location', data: { lat: '39.9', lon: '116.3', title: 'Beijing' } },
+        {
+          type: 'location',
+          data: { lat: '39.9', lon: '116.3', title: 'Beijing' },
+        },
       ];
       expect(extractTextContent(segments, '')).toBe('[Location: Beijing]');
     });
@@ -468,10 +474,7 @@ describe('NapCatChannel', () => {
       const channel = new NapCatChannel('ws://localhost:6700', '', opts);
       await connectChannel(channel);
 
-      currentWs().emit(
-        'message',
-        createGroupMessageEvent({ groupId: 999999 }),
-      );
+      currentWs().emit('message', createGroupMessageEvent({ groupId: 999999 }));
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
         'qq:999999',
@@ -521,10 +524,7 @@ describe('NapCatChannel', () => {
       await connectChannel(channel);
 
       const unixTime = 1704067200; // 2024-01-01T00:00:00.000Z
-      currentWs().emit(
-        'message',
-        createGroupMessageEvent({ time: unixTime }),
-      );
+      currentWs().emit('message', createGroupMessageEvent({ time: unixTime }));
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'qq:123456',
@@ -584,9 +584,7 @@ describe('NapCatChannel', () => {
       const channel = new NapCatChannel('ws://localhost:6700', '', opts);
       await connectChannel(channel, 10000);
 
-      const message = [
-        { type: 'text', data: { text: '@Andy hello' } },
-      ];
+      const message = [{ type: 'text', data: { text: '@Andy hello' } }];
       currentWs().emit(
         'message',
         createGroupMessageEvent({

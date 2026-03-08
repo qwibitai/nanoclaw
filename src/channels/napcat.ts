@@ -56,7 +56,10 @@ interface OneBotApiResponse {
   echo?: string;
 }
 
-type OneBotEvent = OneBotMessageEvent | OneBotMetaEvent | { post_type: string; [key: string]: any };
+type OneBotEvent =
+  | OneBotMessageEvent
+  | OneBotMetaEvent
+  | { post_type: string; [key: string]: any };
 
 export interface NapCatChannelOpts {
   onMessage: OnInboundMessage;
@@ -159,9 +162,7 @@ export function isBotMentioned(
     return false;
   }
   return message.some(
-    (seg) =>
-      seg.type === 'at' &&
-      String(seg.data.qq) === String(selfId),
+    (seg) => seg.type === 'at' && String(seg.data.qq) === String(selfId),
   );
 }
 
@@ -175,11 +176,14 @@ export class NapCatChannel implements Channel {
   private selfId: number = 0;
   private connected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingCalls = new Map<string, {
-    resolve: (value: OneBotApiResponse) => void;
-    reject: (reason: any) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
+  private pendingCalls = new Map<
+    string,
+    {
+      resolve: (value: OneBotApiResponse) => void;
+      reject: (reason: any) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private callCounter = 0;
 
   constructor(wsUrl: string, accessToken: string, opts: NapCatChannelOpts) {
@@ -209,7 +213,9 @@ export class NapCatChannel implements Channel {
 
       this.ws.on('message', (data: WebSocket.Data) => {
         try {
-          const event = JSON.parse(data.toString()) as OneBotEvent | OneBotApiResponse;
+          const event = JSON.parse(data.toString()) as
+            | OneBotEvent
+            | OneBotApiResponse;
 
           // Check if this is an API response (has echo field)
           if ('echo' in event && event.echo) {
@@ -226,7 +232,10 @@ export class NapCatChannel implements Channel {
           if ('post_type' in event) {
             if (event.post_type === 'meta_event') {
               const metaEvent = event as OneBotMetaEvent;
-              if (metaEvent.meta_event_type === 'lifecycle' && metaEvent.sub_type === 'connect') {
+              if (
+                metaEvent.meta_event_type === 'lifecycle' &&
+                metaEvent.sub_type === 'connect'
+              ) {
                 this.selfId = metaEvent.self_id;
                 this.connected = true;
                 clearTimeout(connectTimeout);
@@ -374,7 +383,10 @@ export class NapCatChannel implements Channel {
   /**
    * Call an OneBot 11 API action via WebSocket.
    */
-  private callApi(action: string, params: Record<string, any> = {}): Promise<OneBotApiResponse> {
+  private callApi(
+    action: string,
+    params: Record<string, any> = {},
+  ): Promise<OneBotApiResponse> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
@@ -429,7 +441,11 @@ export class NapCatChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.connected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    return (
+      this.connected &&
+      this.ws !== null &&
+      this.ws.readyState === WebSocket.OPEN
+    );
   }
 
   ownsJid(jid: string): boolean {
@@ -486,10 +502,7 @@ export class NapCatChannel implements Channel {
             );
           }
         }
-        logger.info(
-          { count: resp.data.length },
-          'NapCat group list synced',
-        );
+        logger.info({ count: resp.data.length }, 'NapCat group list synced');
       }
     } catch (err) {
       logger.debug({ err }, 'Failed to sync NapCat groups');
@@ -499,8 +512,7 @@ export class NapCatChannel implements Channel {
 
 registerChannel('napcat', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['NAPCAT_WS_URL', 'NAPCAT_ACCESS_TOKEN']);
-  const wsUrl =
-    process.env.NAPCAT_WS_URL || envVars.NAPCAT_WS_URL || '';
+  const wsUrl = process.env.NAPCAT_WS_URL || envVars.NAPCAT_WS_URL || '';
   const accessToken =
     process.env.NAPCAT_ACCESS_TOKEN || envVars.NAPCAT_ACCESS_TOKEN || '';
 
