@@ -74,6 +74,7 @@ export class SignalChannel implements Channel {
     { resolve: (v: unknown) => void; reject: (e: Error) => void }
   >();
   private buffer = '';
+  private lastSentTimestamps: Map<string, number> = new Map();
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shuttingDown = false;
@@ -154,22 +155,53 @@ export class SignalChannel implements Channel {
   async sendMessage(jid: string, text: string): Promise<void> {
     const prefixed = `${ASSISTANT_NAME}: ${text}`;
 
+    let result: { timestamp?: number } | null = null;
     if (jid.startsWith('signal:group:')) {
       const groupId = jid.slice('signal:group:'.length);
-      await this.rpcCall('send', {
+      result = (await this.rpcCall('send', {
         account: this.accountNumber,
         groupId,
         message: prefixed,
-      });
+      })) as { timestamp?: number } | null;
     } else {
       const recipient = jid.slice('signal:'.length);
-      await this.rpcCall('send', {
+      result = (await this.rpcCall('send', {
         account: this.accountNumber,
         recipient: [recipient],
         message: prefixed,
-      });
+      })) as { timestamp?: number } | null;
+    }
+    if (result?.timestamp) {
+      this.lastSentTimestamps.set(jid, result.timestamp);
     }
     logger.info({ jid, length: prefixed.length }, 'Signal message sent');
+  }
+
+  async editMessage(
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ): Promise<number> {
+    const editTimestamp = originalTimestamp ?? this.lastSentTimestamps.get(jid);
+    if (!editTimestamp) {
+      throw new Error('No message to edit — no stored timestamp for this chat');
+    }
+
+    const params: Record<string, unknown> = {
+      account: this.accountNumber,
+      message: `${ASSISTANT_NAME}: ${newText}`,
+      editTimestamp,
+    };
+
+    if (jid.startsWith('signal:group:')) {
+      params.groupId = jid.slice('signal:group:'.length);
+    } else {
+      params.recipient = [jid.slice('signal:'.length)];
+    }
+
+    await this.rpcCall('send', params);
+    logger.info({ jid, editTimestamp }, 'Signal message edited');
+    return editTimestamp;
   }
 
   isConnected(): boolean {
