@@ -42,6 +42,33 @@ Rules:
 5. Decide review mode: request Claude review (`@claude`) only when required by project policy/risk.
 6. Merge only after required checks pass.
 
+## NanoClaw Platform Claude Loop
+
+Use the dedicated Claude `/loop` lane only for `NanoClaw Platform` issues that are already decision-complete.
+
+Required runtime surfaces:
+
+- `.claude/commands/platform-pickup.md`
+- `scripts/workflow/platform-loop.js`
+- `scripts/workflow/start-platform-loop.sh`
+- `scripts/workflow/check-platform-loop.sh`
+- `launchd/com.nanoclaw-platform-loop.plist`
+
+Operating rules:
+
+1. the loop claims only one `Ready for Dispatch` platform issue at a time
+2. if any platform item is already `Review Queue`, the loop must no-op
+3. the loop must move active implementation to `Claude Running`
+4. the loop must move review-ready PRs to `Review Queue`
+5. on ambiguity or failed required checks, the loop must move the item to `Blocked` with a concrete `Next Decision`
+6. Codex is the default review lane after the loop finishes implementation
+7. merge remains human-only
+
+CLI mode rule:
+
+1. use an interactive Claude Code session for `/loop`
+2. do not use `claude -p` to invoke `/platform-pickup`, because headless mode is for non-interactive prompts and interactive slash commands are unavailable there
+
 ## Requirement-Based Review Decision
 
 | Profile | `@claude` Review |

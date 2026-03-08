@@ -161,11 +161,12 @@ For `SDK / Tooling Opportunities`, use this stricter decision contract:
 
 1. one comment from Claude with an explicit `Agent Label: Claude Code` line plus `accept`, `pilot`, `defer`, or `reject`
 2. one comment from Codex with an explicit `Agent Label: Codex` line plus `accept`, `pilot`, `defer`, or `reject`
-3. promote to an Issue and add that Issue to the correct board only if both agents choose `accept` or `pilot`
-4. before promotion, check whether the Discussion already has an open promoted execution Issue; if it does, update that Issue/Project item instead of creating a duplicate
-5. after promotion, leave one summary comment in the Discussion listing the execution Issue numbers and stating which board they were added to
-6. if agents disagree, keep the work in Discussion until a human resolves the tie
-7. if promoted, run one pilot at a time rather than bundling multiple tooling changes
+3. before either agent decides, review the upstream changelog first and then the corresponding implementation/usage docs for the feature under discussion
+4. promote to an Issue and add that Issue to the correct board only if both agents choose `accept` or `pilot`
+5. before promotion, check whether the Discussion already has an open promoted execution Issue; if it does, update that Issue/Project item instead of creating a duplicate
+6. after promotion, leave one summary comment in the Discussion listing the execution Issue numbers and stating which board they were added to
+7. if agents disagree, keep the work in Discussion until a human resolves the tie
+8. if promoted, run one pilot at a time rather than bundling multiple tooling changes
 
 Do not use a Discussion to:
 
@@ -252,6 +253,13 @@ Delivery-board execution tracking:
 3. workers contribute execution evidence only; they do not manually manage board workflow state
 4. issue/PR lifecycle still initializes cards, but runtime transitions own delivery execution status after intake
 
+Platform-board automation tracking:
+
+1. `NanoClaw Platform` uses `Workflow Status` for `Triage`, `Architecture`, `Ready for Dispatch`, `Claude Running`, `Review Queue`, `Blocked`, and `Done`
+2. the dedicated Claude `/loop` lane picks only one `Ready for Dispatch` issue at a time
+3. platform automation uses `Request ID`, `Run ID`, and `Next Decision` as text fields for handoff clarity
+4. platform items stay issue-first: design reasoning remains in the Issue body, Discussion, or PR comments
+
 Execution status flow:
 
 1. `Triage`: request accepted and awaiting Andy scoping
@@ -262,6 +270,16 @@ Execution status flow:
 6. `Blocked`: waiting on dependency or decision
 7. `Done`: Issue closed and acceptance met
 
+Platform `/loop` status flow:
+
+1. `Triage`: newly promoted or newly opened platform work awaiting scope lock
+2. `Architecture`: scope and acceptance are being finalized
+3. `Ready for Dispatch`: issue is decision-complete and eligible for Claude pickup
+4. `Claude Running`: Claude `/loop` owns active implementation
+5. `Review Queue`: PR/evidence is ready for Codex review
+6. `Blocked`: waiting on dependency, missing scope, or failed required checks
+7. `Done`: merged/closed complete work
+
 Default state transitions:
 
 1. new delivery Issue or auto-created Andy intake -> `Triage`
@@ -270,6 +288,16 @@ Default state transitions:
 4. active worker run -> `Worker Running`
 5. review handoff to Andy or active PR -> `Review`
 6. blocked/cancelled/failed request -> `Blocked`
+7. merged/closed complete work -> `Done`
+
+Platform automation transitions:
+
+1. opened/promoted platform issue -> `Triage`
+2. scope lock in progress -> `Architecture`
+3. explicit dispatch readiness -> `Ready for Dispatch`
+4. Claude `/loop` claims the item -> `Claude Running`
+5. PR + evidence ready -> `Review Queue`
+6. scope ambiguity/check failure/dependency -> `Blocked`
 7. merged/closed complete work -> `Done`
 
 Do not use the Project to store:

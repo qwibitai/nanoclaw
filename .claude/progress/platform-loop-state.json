@@ -1,0 +1,10 @@
+{
+  "label": "com.nanoclaw.platform-loop",
+  "worktree_path": "/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/.worktrees/platform-loop",
+  "worktree_branch": "claude-platform-loop",
+  "base_branch": "main",
+  "loop_interval": "1h",
+  "loop_command": "/platform-pickup",
+  "launched_at": "2026-03-08T09:07:53Z",
+  "shell_command": "cd \"/Users/gurusharan/Documents/remote-claude/Codex/jarvis-mac/nanoclaw/.worktrees/platform-loop\" && claude \"/loop 1h /platform-pickup\""
+}

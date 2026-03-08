@@ -14,13 +14,15 @@
 
 ## Summary
 
-Describe the intent, scope boundary, and expected outcome.
+Describe the intent, scope boundary, expected outcome, and concrete productivity/operator-load gain.
 
 ## Verification Evidence
 
 - [ ] Build/type/test checks executed (or intentionally not required)
 - [ ] Risk-prone paths were validated
 - [ ] Relevant acceptance criteria from linked issue are satisfied
+- [ ] Required evidence from the linked issue is included
+- [ ] Platform pilot handoff is ready for Codex review when applicable
 
 ## Risks and Rollback
 

@@ -56,6 +56,49 @@ body:
     validations:
       required: true
   - type: textarea
+    id: expected_productivity_gain
+    attributes:
+      label: Expected Productivity Gain
+      description: Describe the concrete quality, operator-load, latency, or throughput gain expected from this work.
+      placeholder: Fewer manual review steps, faster PR turnaround, lower operator burden...
+    validations:
+      required: true
+  - type: input
+    id: base_branch
+    attributes:
+      label: Base Branch
+      description: Approved base branch for implementation work.
+      placeholder: main
+      value: main
+    validations:
+      required: true
+  - type: textarea
+    id: required_checks
+    attributes:
+      label: Required Checks
+      description: List the commands or checks the implementation lane must run before review.
+      placeholder: |
+        - npm run build
+        - npm test
+    validations:
+      required: true
+  - type: textarea
+    id: required_evidence
+    attributes:
+      label: Required Evidence
+      description: Describe the evidence that must appear in the PR or board handoff before review.
+      placeholder: Build/test output, linked PR, evidence artifact paths...
+    validations:
+      required: true
+  - type: textarea
+    id: blocked_if
+    attributes:
+      label: Blocked If
+      description: List the conditions that should force the automation lane to stop and mark the work blocked instead of guessing.
+      placeholder: Missing API access, unclear scope, failing required checks...
+    validations:
+      required: true
+  - type: textarea
     id: risks
     attributes:
       label: Risks and Dependencies
@@ -76,6 +119,6 @@ body:
     attributes:
       label: Suggested Owner
       description: Agent or human expected to execute this item.
-      placeholder: agent:codex
+      placeholder: agent:claude
     validations:
       required: false

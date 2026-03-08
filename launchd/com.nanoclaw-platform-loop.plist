@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.nanoclaw.platform-loop</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-lc</string>
+        <string>{{PROJECT_ROOT}}/scripts/workflow/check-platform-loop.sh</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>{{PROJECT_ROOT}}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>21600</integer>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>{{HOME}}</string>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>{{PROJECT_ROOT}}/logs/platform-loop.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{PROJECT_ROOT}}/logs/platform-loop.error.log</string>
+</dict>
+</plist>

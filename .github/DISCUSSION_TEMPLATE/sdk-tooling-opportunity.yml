@@ -47,6 +47,14 @@ body:
       placeholder: What would we implement, replace, or pilot?
     validations:
       required: true
+  - type: textarea
+    id: expected_gain
+    attributes:
+      label: Expected Gain
+      description: State the expected quality, operator-load, latency, or throughput improvement if we adopt this change.
+      placeholder: Lower operator load, clearer review handoffs, faster implementation cycles...
+    validations:
+      required: true
   - type: dropdown
     id: board_target
     attributes:
@@ -61,8 +69,14 @@ body:
     id: evidence_links
     attributes:
       label: Evidence and Links
-      description: Include official changelog, docs, release notes, or source links.
-      placeholder: https://...
+      description: Include the official changelog/release-note link first, then the official implementation or usage docs used to evaluate the feature.
+      placeholder: |
+        Changelog:
+        https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md
+
+        Docs:
+        https://code.claude.com/docs/en/overview
+        https://code.claude.com/docs/en/headless
     validations:
       required: true
   - type: textarea

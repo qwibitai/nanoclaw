@@ -42,18 +42,7 @@ describe('github-project-sync helpers', () => {
         assigneeCount: 0,
         boardKey: 'platform',
       }),
-    ).toBe('Backlog');
-
-    expect(
-      deriveIssueStatus({
-        action: 'assigned',
-        currentStatus: 'Backlog',
-        issueState: 'OPEN',
-        labels: [],
-        assigneeCount: 1,
-        boardKey: 'platform',
-      }),
-    ).toBe('In Progress');
+    ).toBe('Triage');
   });
 
   it('uses delivery-specific initial issue status', () => {
@@ -78,10 +67,25 @@ describe('github-project-sync helpers', () => {
         pullRequestState: 'OPEN',
         isDraft: false,
         merged: false,
-        currentStatus: 'In Progress',
+        currentStatus: 'Claude Running',
         boardKey: 'platform',
       }),
-    ).toBe('Review');
+    ).toBe('Review Queue');
+  });
+
+  it('keeps draft platform pull requests in claude running state', () => {
+    expect(
+      derivePullRequestStatus({
+        issueState: 'OPEN',
+        labels: [],
+        assigneeCount: 1,
+        pullRequestState: 'OPEN',
+        isDraft: true,
+        merged: false,
+        currentStatus: 'Claude Running',
+        boardKey: 'platform',
+      }),
+    ).toBe('Claude Running');
   });
 
   it('keeps delivery pull requests in review vocabulary', () => {

@@ -155,13 +155,11 @@ export function deriveIssueStatus({ action, currentStatus, issueState, labels, a
 
   if (issueState === 'CLOSED') return 'Done';
   if (labels.includes('status:blocked')) return 'Blocked';
-  if (action === 'opened' || action === 'reopened') return 'Backlog';
-  if (action === 'assigned' && assigneeCount > 0) return 'In Progress';
-  if (action === 'unassigned' && assigneeCount === 0) return 'Ready';
+  if (action === 'opened' || action === 'reopened') return 'Triage';
   if (action === 'unlabeled' && currentStatus === 'Blocked') {
-    return assigneeCount > 0 ? 'In Progress' : 'Ready';
+    return 'Triage';
   }
-  if (!currentStatus) return assigneeCount > 0 ? 'In Progress' : 'Backlog';
+  if (!currentStatus) return 'Triage';
   return currentStatus;
 }
 
@@ -184,10 +182,10 @@ export function derivePullRequestStatus({
 
   if (issueState === 'CLOSED' || merged) return 'Done';
   if (labels.includes('status:blocked')) return 'Blocked';
-  if (pullRequestState === 'OPEN' && !isDraft) return 'Review';
-  if (pullRequestState === 'OPEN' && isDraft) return assigneeCount > 0 ? 'In Progress' : 'Ready';
-  if (pullRequestState === 'CLOSED') return assigneeCount > 0 ? 'In Progress' : 'Ready';
-  return currentStatus || 'Backlog';
+  if (pullRequestState === 'OPEN' && !isDraft) return 'Review Queue';
+  if (pullRequestState === 'OPEN' && isDraft) return currentStatus || 'Claude Running';
+  if (pullRequestState === 'CLOSED') return currentStatus || 'Triage';
+  return currentStatus || 'Triage';
 }
 
 async function getProjects() {

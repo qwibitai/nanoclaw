@@ -116,7 +116,7 @@ Baseline Project rule:
 
 1. Add each Issue to the correct Project v2 board.
 2. Set required fields:
-   - `Status`: Backlog/Ready/In Progress/Review/Blocked/Done
+   - `Status`: board-specific execution flow
    - `Agent`
    - `Lane`
    - `Priority`
@@ -124,6 +124,7 @@ Baseline Project rule:
    - `Target`
    - `Source`
    - `Review Lane`
+   - optional text fields for active automation lanes: `Request ID`, `Run ID`, `Next Decision`
 3. Keep only one active owner per Issue.
 
 Recommended two-board shape when both domains exist:
@@ -238,6 +239,7 @@ Project automation prerequisite:
 1. Add repository secret `ADD_TO_PROJECT_PAT` with `project` + repository scopes.
 2. Set the Project board owner to `openclaw-gurusharan` in `.github/workflows/project-intake-sync.yml` and `.github/workflows/project-status-sync.yml`, while keeping repo Issues/Discussions on `ingpoc/nanoclaw`.
 3. For `Andy/Jarvis Delivery`, configure `Workflow Status` with `Triage`, `Architecture`, `Ready`, `Worker Running`, `Review`, `Blocked`, and `Done`.
+4. For `NanoClaw Platform`, configure `Workflow Status` with `Triage`, `Architecture`, `Ready for Dispatch`, `Claude Running`, `Review Queue`, `Blocked`, and `Done` if the repository uses the dedicated Claude `/loop` lane.
 4. Keep the default GitHub `Status` field as fallback only; runtime sync should prefer `Workflow Status`.
 5. Create the `Source`, `Review Lane`, `Worker`, `Agent`, `Priority`, and `Risk` single-select fields plus the runtime text fields `Request State`, `Worker Status`, `Request ID`, `Run ID`, `Branch`, `PR URL`, `Last Evidence`, and `Next Action`.
 

@@ -48,6 +48,7 @@ Workflow docs are physically grouped by operational concern.
 - `docs/workflow/github/github-offload-boundary-loop.md`: GitHub-vs-local workflow placement policy
 - `docs/workflow/github/github-multi-agent-collaboration-loop.md`: multi-agent GitHub coordination model
 - `docs/workflow/github/github-agent-collaboration-loop.md`: day-to-day agent operating workflow for GitHub Discussions, Issues, and Project usage
+- `docs/workflow/github/nanoclaw-platform-loop.md`: dedicated Claude `/loop` workflow for NanoClaw Platform implementation pickup
 - `docs/workflow/github/github-collab-sweep.md`: session-start GitHub sweep protocol, agent-category affinity, and handoff comment format
 
 ### `docs/workflow/docs-discipline/`

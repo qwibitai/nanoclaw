@@ -41,12 +41,35 @@ Required weekly changelog scan for this repository:
 2. Claude Agent SDK release notes / changelog
 3. OpenCode release notes / changelog
 
+Use this source order for every tooling-improvement candidate:
+
+1. start from the upstream changelog / release notes to identify the new feature or behavior
+2. then read the corresponding implementation / usage docs to understand:
+   - how it is actually used
+   - what constraints or runtime assumptions it has
+   - what benefit it claims
+   - what part of NanoClaw it could improve
+
+Pinned source set for this repository:
+
+1. Claude Code changelog:
+   - `https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md`
+2. Claude Code docs:
+   - `https://code.claude.com/docs/en/overview`
+   - `https://code.claude.com/docs/en/headless`
+3. Claude Agent SDK changelog:
+   - `https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md`
+4. OpenCode docs:
+   - `https://opencode.ai/docs`
+
 For each source, capture:
 
 1. upstream change summary
 2. NanoClaw subsystem fit (`main`, `andy-developer`, `jarvis-worker-*`, shared runtime)
 3. candidate adoption or explicit `no-fit`
 4. risk / operator-load impact
+
+Do not stop at changelog headlines when a candidate looks promising; read the implementation docs before opening or updating the Discussion so Claude and Codex are debating the real usage model, not guessing from release-note wording.
 
 Record findings in `docs/research/` with:
 
@@ -81,6 +104,13 @@ Define a pilot with fixed boundaries:
 Do not bundle multiple workflow changes in one pilot.
 
 Do not promote a changelog-derived idea directly from local notes into implementation without the Discussion decision step, unless a human explicitly instructs otherwise.
+
+If the pilot uses the dedicated NanoClaw Platform Claude `/loop` lane:
+
+1. keep only one active platform pilot in the lane at a time
+2. require a decision-complete issue before moving to `Ready for Dispatch`
+3. require PR evidence before the item enters `Review Queue`
+4. evaluate operator-load impact explicitly as part of the pilot result
 
 ## Phase 4: Execution + Evidence
 

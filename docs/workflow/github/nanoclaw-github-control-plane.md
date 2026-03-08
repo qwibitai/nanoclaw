@@ -71,6 +71,18 @@ Use instead:
 - Maintain a single curated Claude workflow. If the Claude GitHub App opens bootstrap PRs with generated workflows, treat them as scaffolding to review and selectively absorb, not as the canonical control-plane implementation.
 - This repository ships an on-demand example at `.github/workflows/claude-review.yml`.
 
+## NanoClaw Platform Claude Loop Baseline
+
+- The primary implementation lane for autonomous `NanoClaw Platform` pilots is local Claude Code `/loop`, not GitHub Actions.
+- The repo-tracked command surface is `.claude/commands/platform-pickup.md`.
+- The local bootstrap surfaces are:
+  - `scripts/workflow/start-platform-loop.sh`
+  - `scripts/workflow/check-platform-loop.sh`
+  - `launchd/com.nanoclaw-platform-loop.plist`
+- The `/loop` lane may claim only one platform item at a time and must stop if any item is already in `Review Queue`.
+- `/loop` may implement, test, branch, and open/update PRs, but it must not merge and it must not bypass deterministic required checks.
+- Codex remains the default review lane for these platform PRs.
+
 ## CI Failure Feedback Loop
 
 - Keep deterministic `CI` as the required merge gate.

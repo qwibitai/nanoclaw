@@ -24,6 +24,7 @@
 - Before deciding what to offload to GitHub Actions/rulesets vs keep in local lanes, follow `docs/workflow/github/github-offload-boundary-loop.md`.
 - Before setting up multi-agent GitHub coordination using Issues/Projects/Discussions/rulesets, follow `docs/workflow/github/github-multi-agent-collaboration-loop.md`.
 - Before using GitHub Projects/Discussions for day-to-day agent collaboration or promoting Discussions into Issues, follow `docs/workflow/github/github-agent-collaboration-loop.md`.
+- Before changing NanoClaw Platform Claude `/loop` automation or launchd rebootstrap, follow `docs/workflow/github/nanoclaw-platform-loop.md`.
 - Before consulting Claude Code CLI via resumed/forked sessions for parallel reasoning/review, follow `docs/workflow/delivery/claude-cli-resume-consult-lane.md`.
 - If `AGENTS.md` and `CLAUDE.md` ever conflict, `CLAUDE.md` wins.
 
