@@ -14,9 +14,14 @@ export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
   sendReaction?: (
     jid: string,
+    messageId: string | null,
     emoji: string,
-    messageId?: string,
   ) => Promise<void>;
+  editMessage?: (
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ) => Promise<number>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -103,39 +108,71 @@ export function startIpcWatcher(deps: IpcDeps): void {
               } else if (
                 data.type === 'reaction' &&
                 data.chatJid &&
-                data.emoji &&
-                deps.sendReaction
+                data.emoji
               ) {
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  try {
+                  if (deps.sendReaction) {
                     await deps.sendReaction(
                       data.chatJid,
-                      data.emoji,
-                      data.messageId,
+                      (data.messageId as string | undefined) || null,
+                      data.emoji as string,
                     );
                     logger.info(
-                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      { chatJid: data.chatJid, sourceGroup, emoji: data.emoji },
                       'IPC reaction sent',
-                    );
-                  } catch (err) {
-                    logger.error(
-                      {
-                        chatJid: data.chatJid,
-                        emoji: data.emoji,
-                        sourceGroup,
-                        err,
-                      },
-                      'IPC reaction failed',
                     );
                   }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC reaction attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'edit_message' &&
+                data.chatJid &&
+                data.newText
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  if (deps.editMessage) {
+                    const resolvedTs = await deps.editMessage(
+                      data.chatJid,
+                      data.newText as string,
+                      data.originalTimestamp
+                        ? Number(data.originalTimestamp)
+                        : undefined,
+                    );
+                    if (deps.sendReaction && resolvedTs) {
+                      await deps
+                        .sendReaction(
+                          data.chatJid,
+                          `signal-${resolvedTs}`,
+                          '✏️',
+                        )
+                        .catch((err) =>
+                          logger.warn(
+                            { err, chatJid: data.chatJid },
+                            'edit_message reaction failed',
+                          ),
+                        );
+                    }
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC edit_message sent',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC edit_message attempt blocked',
                   );
                 }
               }
@@ -293,18 +330,20 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const scheduled = new Date(data.schedule_value);
-          if (isNaN(scheduled.getTime())) {
+          const date = new Date(data.schedule_value);
+          if (isNaN(date.getTime())) {
             logger.warn(
               { scheduleValue: data.schedule_value },
               'Invalid timestamp',
             );
             break;
           }
-          nextRun = scheduled.toISOString();
+          nextRun = date.toISOString();
         }
 
-        const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const taskId =
+          data.taskId ||
+          `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const contextMode =
           data.context_mode === 'group' || data.context_mode === 'isolated'
             ? data.context_mode
@@ -379,6 +418,70 @@ export async function processTaskIpc(
             'Unauthorized task cancel attempt',
           );
         }
+      }
+      break;
+
+    case 'update_task':
+      if (data.taskId) {
+        const task = getTaskById(data.taskId);
+        if (!task) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Task not found for update',
+          );
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
+          logger.warn(
+            { taskId: data.taskId, sourceGroup },
+            'Unauthorized task update attempt',
+          );
+          break;
+        }
+
+        const updates: Parameters<typeof updateTask>[1] = {};
+        if (data.prompt !== undefined) updates.prompt = data.prompt;
+        if (data.schedule_type !== undefined)
+          updates.schedule_type = data.schedule_type as
+            | 'cron'
+            | 'interval'
+            | 'once';
+        if (data.schedule_value !== undefined)
+          updates.schedule_value = data.schedule_value;
+
+        // Recompute next_run if schedule changed
+        if (data.schedule_type || data.schedule_value) {
+          const updatedTask = {
+            ...task,
+            ...updates,
+          };
+          if (updatedTask.schedule_type === 'cron') {
+            try {
+              const interval = CronExpressionParser.parse(
+                updatedTask.schedule_value,
+                { tz: TIMEZONE },
+              );
+              updates.next_run = interval.next().toISOString();
+            } catch {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid cron in task update',
+              );
+              break;
+            }
+          } else if (updatedTask.schedule_type === 'interval') {
+            const ms = parseInt(updatedTask.schedule_value, 10);
+            if (!isNaN(ms) && ms > 0) {
+              updates.next_run = new Date(Date.now() + ms).toISOString();
+            }
+          }
+        }
+
+        updateTask(data.taskId, updates);
+        logger.info(
+          { taskId: data.taskId, sourceGroup, updates },
+          'Task updated via IPC',
+        );
       }
       break;
 

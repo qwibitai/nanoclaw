@@ -39,6 +39,7 @@ export interface RegisteredGroup {
   added_at: string;
   containerConfig?: ContainerConfig;
   requiresTrigger?: boolean; // Default: true for groups, false for solo chats
+  isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
 export interface NewMessage {
@@ -50,6 +51,16 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  quoted_message_id?: string;
+  quote_sender_name?: string;
+  quote_content?: string;
+}
+
+export interface Reaction {
+  chatJid: string;
+  messageId: string;
+  emoji: string;
+  timestamp: string;
 }
 
 export interface ScheduledTask {
@@ -87,13 +98,22 @@ export interface Channel {
   disconnect(): Promise<void>;
   // Optional: typing indicator. Channels that support it implement it.
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
-  // Optional: reaction support
+  // Optional: sync group/chat names from the platform.
+  syncGroups?(force: boolean): Promise<void>;
+  // Optional: send a reaction to a specific message.
   sendReaction?(
     chatJid: string,
-    messageKey: { id: string; remoteJid: string; fromMe?: boolean; participant?: string },
-    emoji: string
+    messageId: string,
+    emoji: string,
   ): Promise<void>;
+  // Optional: react to the most recent message in the chat.
   reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
+  // Optional: edit a previously sent message.
+  editMessage?(
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ): Promise<number>;
 }
 
 // Callback type that channels use to deliver inbound messages
@@ -101,7 +121,7 @@ export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
 // Callback for chat metadata discovery.
 // name is optional — channels that deliver names inline (Telegram) pass it here;
-// channels that sync names separately (WhatsApp syncGroupMetadata) omit it.
+// channels that sync names separately (via syncGroups) omit it.
 export type OnChatMetadata = (
   chatJid: string,
   timestamp: string,

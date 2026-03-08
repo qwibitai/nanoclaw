@@ -1,23 +1,15 @@
 skill: reactions
 version: 1.0.0
-description: "WhatsApp emoji reaction support with status tracking"
+description: "Channel-agnostic emoji reactions — stores reactions, renders quote context, and exposes react_to_message MCP tool"
 core_version: 0.1.0
-adds:
-  - scripts/migrate-reactions.ts
-  - container/skills/reactions/SKILL.md
-  - src/status-tracker.ts
-  - src/status-tracker.test.ts
+adds: []
 modifies:
-  - src/db.ts
-  - src/db.test.ts
-  - src/channels/whatsapp.ts
   - src/types.ts
+  - src/db.ts
+  - src/router.ts
   - src/ipc.ts
-  - src/index.ts
   - container/agent-runner/src/ipc-mcp-stdio.ts
-  - src/channels/whatsapp.test.ts
-  - src/group-queue.test.ts
-  - src/ipc-auth.test.ts
+structured: {}
 conflicts: []
 depends: []
-test: "npx tsc --noEmit"
+test: "npm test"
