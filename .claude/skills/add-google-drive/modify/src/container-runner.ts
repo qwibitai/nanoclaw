@@ -43,6 +43,13 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cost_usd?: number;
+  };
 }
 
 interface VolumeMount {
@@ -141,32 +148,13 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
-  const gmailDir = path.join(homeDir, '.gmail-mcp');
-  if (fs.existsSync(gmailDir)) {
-    mounts.push({
-      hostPath: gmailDir,
-      containerPath: '/home/node/.gmail-mcp',
-      readonly: false, // MCP may need to refresh OAuth tokens
-    });
-  }
-
-  // Google Drive credentials directory (for gdrive MCP inside the container)
+  // Google Drive credentials directory (for GDrive MCP inside the container)
+  // Mounted read-write so the MCP server can refresh OAuth tokens automatically.
   const gdriveDir = path.join(homeDir, '.gdrive-mcp');
   if (fs.existsSync(gdriveDir)) {
     mounts.push({
       hostPath: gdriveDir,
       containerPath: '/home/node/.gdrive-mcp',
-      readonly: false, // MCP server needs to refresh OAuth tokens
-    });
-  }
-
-  // ai-chat socket directory (shared across all groups, read-write so containers can connect)
-  const aiChatDir = path.join(DATA_DIR, 'ai-chat');
-  if (fs.existsSync(aiChatDir)) {
-    mounts.push({
-      hostPath: aiChatDir,
-      containerPath: '/var/run/ai-chat',
       readonly: false,
     });
   }
@@ -232,24 +220,6 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
-  }
-
-  // Pass Composio credentials if configured
-  // API key: ~/.composio/api.key (x-api-key header for the MCP server)
-  // MCP URL: ~/.composio/mcp.url (dedicated MCP server endpoint)
-  const composioKeyFile = path.join(os.homedir(), '.composio', 'api.key');
-  if (fs.existsSync(composioKeyFile)) {
-    try {
-      const key = fs.readFileSync(composioKeyFile, 'utf-8').trim();
-      if (key) args.push('-e', `COMPOSIO_API_KEY=${key}`);
-    } catch { /* not configured, skip */ }
-  }
-  const composioUrlFile = path.join(os.homedir(), '.composio', 'mcp.url');
-  if (fs.existsSync(composioUrlFile)) {
-    try {
-      const url = fs.readFileSync(composioUrlFile, 'utf-8').trim();
-      if (url) args.push('-e', `COMPOSIO_MCP_URL=${url}`);
-    } catch { /* not configured, skip */ }
   }
 
   for (const mount of mounts) {

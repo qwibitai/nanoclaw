@@ -67,11 +67,35 @@ Main has read-only access to the project and read-write access to its group fold
 |----------------|-----------|--------|
 | `/workspace/project` | Project root | read-only |
 | `/workspace/group` | `groups/main/` | read-write |
+| `/var/run/ai-chat` | `data/ai-chat/` | read-write |
 
 Key paths inside the container:
 - `/workspace/project/store/messages.db` - SQLite database
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
+
+---
+
+## AI Chatbot Access
+
+You have access to ChatGPT, Grok, Kimi, and Sarvam via a local API server running on the host.
+
+**Usage from inside the container:**
+
+```bash
+curl --unix-socket /var/run/ai-chat/ai-chat.sock \
+  'http://localhost/ask?bot=grok&prompt=What+is+the+capital+of+France'
+```
+
+Available bots: `chatgpt`, `grok`, `kimi`, `sarvam`
+
+Other endpoints:
+- `GET /health` — check the service is running
+- `GET /bots` — list available bots
+
+**When to use**: When the user wants a second opinion from a different AI, asks "what does Grok think about...", or wants to compare answers across models.
+
+The socket is at `/var/run/ai-chat/ai-chat.sock`. If it's not there, the service might be down (check with the user).
 
 ---
 
@@ -211,3 +235,26 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## Email Notifications
+
+When you receive an email notification (messages starting with `[Email from ...`), inform the user about it but do NOT reply to the email unless specifically asked. You have Gmail tools available — use them only when the user explicitly asks you to reply, forward, or take action on an email.
+
+---
+
+## VPS Disk Space
+
+Server: Hetzner VPS — 75GB main disk, 40GB additional volume at `/mnt/HC_Volume_104738904`.
+
+**The additional volume is unused and can be unsubscribed from Hetzner to save ~€1.90/month.**
+
+When disk space is low, reclaim space with:
+```bash
+docker system prune --volumes   # reclaims ~12GB (build cache + unused images)
+```
+- Docker images: ~14GB (6GB reclaimable)
+- Docker build cache: ~11GB (6GB reclaimable)
+
+Warn the user proactively if main disk usage exceeds 80%.
