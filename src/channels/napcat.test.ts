@@ -683,19 +683,25 @@ describe('NapCatChannel', () => {
       const channel = new NapCatChannel('ws://localhost:6700', '', opts);
       await connectChannel(channel);
 
+      // Receive a group message first so the channel records the chat type
+      currentWs().emit('message', createGroupMessageEvent({}));
+
       await channel.sendMessage('qq:123456', 'Hello group');
 
-      expect(currentWs().send).toHaveBeenCalledWith(
-        expect.stringContaining('"action":"send_group_msg"'),
+      // The second send call (first is from the auto-response mock)
+      const sendCalls = currentWs().send.mock.calls;
+      const apiCall = sendCalls.find((c: any[]) =>
+        c[0].includes('"send_group_msg"'),
       );
-      const sent = JSON.parse(currentWs().send.mock.calls[0][0]);
+      expect(apiCall).toBeDefined();
+      const sent = JSON.parse(apiCall![0]);
       expect(sent.params.group_id).toBe(123456);
       expect(sent.params.message).toEqual([
         { type: 'text', data: { text: 'Hello group' } },
       ]);
     });
 
-    it('sends private message for unregistered JID', async () => {
+    it('sends private message for unknown JID (default)', async () => {
       const opts = createTestOpts();
       const channel = new NapCatChannel('ws://localhost:6700', '', opts);
       await connectChannel(channel);
@@ -709,14 +715,50 @@ describe('NapCatChannel', () => {
       expect(sent.params.user_id).toBe(99001);
     });
 
+    it('sends private message after receiving private message', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'qq:99001': {
+            name: 'Alice DM',
+            folder: 'alice_dm',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new NapCatChannel('ws://localhost:6700', '', opts);
+      await connectChannel(channel);
+
+      // Receive a private message first
+      currentWs().emit('message', createPrivateMessageEvent({}));
+
+      await channel.sendMessage('qq:99001', 'Reply');
+
+      const sendCalls = currentWs().send.mock.calls;
+      const apiCall = sendCalls.find((c: any[]) =>
+        c[0].includes('"send_private_msg"'),
+      );
+      expect(apiCall).toBeDefined();
+      const sent = JSON.parse(apiCall![0]);
+      expect(sent.params.user_id).toBe(99001);
+    });
+
     it('strips qq: prefix from JID', async () => {
       const opts = createTestOpts();
       const channel = new NapCatChannel('ws://localhost:6700', '', opts);
       await connectChannel(channel);
 
+      // Receive a group message to record chat type
+      currentWs().emit('message', createGroupMessageEvent({}));
+
       await channel.sendMessage('qq:123456', 'Test');
 
-      const sent = JSON.parse(currentWs().send.mock.calls[0][0]);
+      const sendCalls = currentWs().send.mock.calls;
+      const apiCall = sendCalls.find((c: any[]) =>
+        c[0].includes('"send_group_msg"'),
+      );
+      expect(apiCall).toBeDefined();
+      const sent = JSON.parse(apiCall![0]);
       expect(sent.params.group_id).toBe(123456);
     });
 

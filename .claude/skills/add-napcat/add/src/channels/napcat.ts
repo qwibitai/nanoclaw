@@ -56,7 +56,10 @@ interface OneBotApiResponse {
   echo?: string;
 }
 
-type OneBotEvent = OneBotMessageEvent | OneBotMetaEvent | { post_type: string; [key: string]: any };
+type OneBotEvent =
+  | OneBotMessageEvent
+  | OneBotMetaEvent
+  | { post_type: string; [key: string]: any };
 
 export interface NapCatChannelOpts {
   onMessage: OnInboundMessage;
@@ -159,9 +162,7 @@ export function isBotMentioned(
     return false;
   }
   return message.some(
-    (seg) =>
-      seg.type === 'at' &&
-      String(seg.data.qq) === String(selfId),
+    (seg) => seg.type === 'at' && String(seg.data.qq) === String(selfId),
   );
 }
 
@@ -175,11 +176,16 @@ export class NapCatChannel implements Channel {
   private selfId: number = 0;
   private connected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingCalls = new Map<string, {
-    resolve: (value: OneBotApiResponse) => void;
-    reject: (reason: any) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
+  private chatTypes = new Map<string, 'group' | 'private'>();
+  private static readonly MAX_CHAT_TYPES = 10000;
+  private pendingCalls = new Map<
+    string,
+    {
+      resolve: (value: OneBotApiResponse) => void;
+      reject: (reason: any) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private callCounter = 0;
 
   constructor(wsUrl: string, accessToken: string, opts: NapCatChannelOpts) {
@@ -191,7 +197,7 @@ export class NapCatChannel implements Channel {
   async connect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const url = this.accessToken
-        ? `${this.wsUrl}?access_token=${this.accessToken}`
+        ? `${this.wsUrl}?access_token=${encodeURIComponent(this.accessToken)}`
         : this.wsUrl;
 
       this.ws = new WebSocket(url);
@@ -203,13 +209,36 @@ export class NapCatChannel implements Channel {
         }
       }, 15000);
 
+      // Fallback timer for NapCat configs that don't send lifecycle events
+      const fallbackTimer = setTimeout(async () => {
+        if (!this.connected && this.ws?.readyState === WebSocket.OPEN) {
+          this.connected = true;
+          clearTimeout(connectTimeout);
+          logger.info('NapCat connected (no lifecycle event received)');
+          // Try to fetch selfId via API
+          try {
+            const resp = await this.callApi('get_login_info');
+            if (resp.retcode === 0 && resp.data?.user_id) {
+              this.selfId = resp.data.user_id;
+            }
+          } catch {
+            // Non-fatal — selfId stays 0
+          }
+          console.log(`\n  NapCat QQ bot connected`);
+          console.log(`  Connected to: ${this.wsUrl}\n`);
+          resolve();
+        }
+      }, 5000);
+
       this.ws.on('open', () => {
         logger.info({ url: this.wsUrl }, 'NapCat WebSocket connected');
       });
 
       this.ws.on('message', (data: WebSocket.Data) => {
         try {
-          const event = JSON.parse(data.toString()) as OneBotEvent | OneBotApiResponse;
+          const event = JSON.parse(data.toString()) as
+            | OneBotEvent
+            | OneBotApiResponse;
 
           // Check if this is an API response (has echo field)
           if ('echo' in event && event.echo) {
@@ -226,10 +255,14 @@ export class NapCatChannel implements Channel {
           if ('post_type' in event) {
             if (event.post_type === 'meta_event') {
               const metaEvent = event as OneBotMetaEvent;
-              if (metaEvent.meta_event_type === 'lifecycle' && metaEvent.sub_type === 'connect') {
+              if (
+                metaEvent.meta_event_type === 'lifecycle' &&
+                metaEvent.sub_type === 'connect'
+              ) {
                 this.selfId = metaEvent.self_id;
                 this.connected = true;
                 clearTimeout(connectTimeout);
+                clearTimeout(fallbackTimer);
                 logger.info(
                   { selfId: this.selfId },
                   'NapCat bot connected (lifecycle event)',
@@ -255,6 +288,7 @@ export class NapCatChannel implements Channel {
         logger.error({ err: err.message }, 'NapCat WebSocket error');
         if (!this.connected) {
           clearTimeout(connectTimeout);
+          clearTimeout(fallbackTimer);
           reject(err);
         }
       });
@@ -267,30 +301,13 @@ export class NapCatChannel implements Channel {
         this.connected = false;
 
         // Reject all pending API calls
-        for (const [echo, pending] of this.pendingCalls) {
-          clearTimeout(pending.timer);
-          pending.reject(new Error('WebSocket closed'));
-          this.pendingCalls.delete(echo);
-        }
+        this.rejectAllPendingCalls('WebSocket closed');
 
         // Auto-reconnect after 5 seconds
         if (this.ws) {
           this.scheduleReconnect();
         }
       });
-
-      // If no lifecycle event within 5s but WS is open, resolve anyway
-      // (some NapCat configs may not send lifecycle events)
-      setTimeout(() => {
-        if (!this.connected && this.ws?.readyState === WebSocket.OPEN) {
-          this.connected = true;
-          clearTimeout(connectTimeout);
-          logger.info('NapCat connected (no lifecycle event received)');
-          console.log(`\n  NapCat QQ bot connected`);
-          console.log(`  Connected to: ${this.wsUrl}\n`);
-          resolve();
-        }
-      }, 5000);
     });
   }
 
@@ -307,6 +324,18 @@ export class NapCatChannel implements Channel {
         this.scheduleReconnect();
       }
     }, 5000);
+  }
+
+  /**
+   * Reject all pending API calls and clear the map.
+   */
+  private rejectAllPendingCalls(reason: string): void {
+    const entries = [...this.pendingCalls.values()];
+    this.pendingCalls.clear();
+    for (const pending of entries) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
   }
 
   private handleMessage(event: OneBotMessageEvent): void {
@@ -330,6 +359,14 @@ export class NapCatChannel implements Channel {
     } else {
       chatName = senderName;
     }
+
+    // Record chat type for sendMessage routing (cap size to prevent unbounded growth)
+    if (this.chatTypes.size >= NapCatChannel.MAX_CHAT_TYPES) {
+      // Evict oldest entry
+      const firstKey = this.chatTypes.keys().next().value;
+      if (firstKey !== undefined) this.chatTypes.delete(firstKey);
+    }
+    this.chatTypes.set(chatJid, event.message_type);
 
     // Store chat metadata
     this.opts.onChatMetadata(chatJid, timestamp, chatName, 'napcat', isGroup);
@@ -374,7 +411,10 @@ export class NapCatChannel implements Channel {
   /**
    * Call an OneBot 11 API action via WebSocket.
    */
-  private callApi(action: string, params: Record<string, any> = {}): Promise<OneBotApiResponse> {
+  private callApi(
+    action: string,
+    params: Record<string, any> = {},
+  ): Promise<OneBotApiResponse> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new Error('WebSocket not connected'));
@@ -394,18 +434,13 @@ export class NapCatChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      logger.warn('NapCat WebSocket not connected');
-      return;
-    }
-
     try {
       const id = jid.replace(/^qq:/, '');
 
       // Determine if this is a group or private message
-      // Group IDs in QQ are typically large numbers; we check registered groups
-      const group = this.opts.registeredGroups()[jid];
-      const isGroup = group !== undefined;
+      // Use recorded chat type from received messages; fall back to 'private'
+      const chatType = this.chatTypes.get(jid) || 'private';
+      const isGroup = chatType === 'group';
 
       // Build message segments (plain text)
       const message: OneBotSegment[] = [{ type: 'text', data: { text } }];
@@ -429,7 +464,11 @@ export class NapCatChannel implements Channel {
   }
 
   isConnected(): boolean {
-    return this.connected && this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+    return (
+      this.connected &&
+      this.ws !== null &&
+      this.ws.readyState === WebSocket.OPEN
+    );
   }
 
   ownsJid(jid: string): boolean {
@@ -442,12 +481,7 @@ export class NapCatChannel implements Channel {
       this.reconnectTimer = null;
     }
 
-    // Reject all pending API calls
-    for (const [echo, pending] of this.pendingCalls) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error('Channel disconnecting'));
-      this.pendingCalls.delete(echo);
-    }
+    this.rejectAllPendingCalls('Channel disconnecting');
 
     const ws = this.ws;
     this.ws = null;
@@ -473,10 +507,10 @@ export class NapCatChannel implements Channel {
     try {
       const resp = await this.callApi('get_group_list');
       if (resp.retcode === 0 && Array.isArray(resp.data)) {
+        const registered = this.opts.registeredGroups();
         for (const group of resp.data) {
           const jid = `qq:${group.group_id}`;
-          const registeredGroup = this.opts.registeredGroups()[jid];
-          if (registeredGroup) {
+          if (registered[jid]) {
             this.opts.onChatMetadata(
               jid,
               new Date().toISOString(),
@@ -486,10 +520,7 @@ export class NapCatChannel implements Channel {
             );
           }
         }
-        logger.info(
-          { count: resp.data.length },
-          'NapCat group list synced',
-        );
+        logger.info({ count: resp.data.length }, 'NapCat group list synced');
       }
     } catch (err) {
       logger.debug({ err }, 'Failed to sync NapCat groups');
@@ -499,8 +530,7 @@ export class NapCatChannel implements Channel {
 
 registerChannel('napcat', (opts: ChannelOpts) => {
   const envVars = readEnvFile(['NAPCAT_WS_URL', 'NAPCAT_ACCESS_TOKEN']);
-  const wsUrl =
-    process.env.NAPCAT_WS_URL || envVars.NAPCAT_WS_URL || '';
+  const wsUrl = process.env.NAPCAT_WS_URL || envVars.NAPCAT_WS_URL || '';
   const accessToken =
     process.env.NAPCAT_ACCESS_TOKEN || envVars.NAPCAT_ACCESS_TOKEN || '';
 
