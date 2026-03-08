@@ -22,6 +22,7 @@ import {
   writeTasksSnapshot,
 } from './container-runner.js';
 import { runHostWorker } from './host-worker.js';
+import { classifyTier, callFreeModel } from './model-router.js';
 import {
   getAllChats,
   getAllRegisteredGroups,
@@ -57,26 +58,109 @@ let whatsapp: WhatsAppChannel;
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
-/** Check if a session transcript is too large and should be rotated */
-export const SESSION_MAX_SIZE = 512_000; // 500KB
-export function shouldRotateSession(groupFolder: string, sessionId?: string): boolean {
-  if (!sessionId) return false;
+// ── Session Rotation (Context Engineering) ──────────────────────
+//
+// Context rot: LLM performance degrades 15-47% as context fills.
+// Research shows rotating at 60-65% produces better handover documents
+// than waiting until 80%+. We use multiple signals to decide when:
+//   1. Transcript file size (bytes on disk)
+//   2. Turn count (messages processed in this session)
+//   3. Session age (hours since first message)
+//
+// On rotation, we generate a structured handover document that the
+// new session receives as its initial context — "compound, don't compact".
+
+export const SESSION_MAX_SIZE = 300_000;  // 300KB (was 500KB)
+export const SESSION_MAX_TURNS = 15;      // Max message turns before rotation
+export const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+/** Per-group turn counter and session start time */
+const sessionTurns: Record<string, number> = {};
+const sessionStartTime: Record<string, number> = {};
+
+/** Track a new turn for a group session */
+export function trackSessionTurn(groupFolder: string): void {
+  sessionTurns[groupFolder] = (sessionTurns[groupFolder] || 0) + 1;
+  if (!sessionStartTime[groupFolder]) {
+    sessionStartTime[groupFolder] = Date.now();
+  }
+}
+
+/** Reset turn counter (called after rotation) */
+function resetSessionTracking(groupFolder: string): void {
+  sessionTurns[groupFolder] = 0;
+  sessionStartTime[groupFolder] = Date.now();
+}
+
+/** Check if a session should be rotated based on size, turns, or age */
+export function shouldRotateSession(groupFolder: string, sessionId?: string): { rotate: boolean; reason?: string } {
+  if (!sessionId) return { rotate: false };
+
+  // Check turn count
+  const turns = sessionTurns[groupFolder] || 0;
+  if (turns >= SESSION_MAX_TURNS) {
+    logger.info(
+      { group: groupFolder, sessionId, turns },
+      'Session turn limit reached, rotating',
+    );
+    return { rotate: true, reason: `turn limit (${turns}/${SESSION_MAX_TURNS})` };
+  }
+
+  // Check session age
+  const startTime = sessionStartTime[groupFolder];
+  if (startTime && (Date.now() - startTime) > SESSION_MAX_AGE_MS) {
+    const ageHours = ((Date.now() - startTime) / 3600000).toFixed(1);
+    logger.info(
+      { group: groupFolder, sessionId, ageHours },
+      'Session age limit reached, rotating',
+    );
+    return { rotate: true, reason: `session age (${ageHours}h)` };
+  }
+
+  // Check transcript file size
   const transcriptPath = path.join(
     DATA_DIR, 'sessions', groupFolder, '.claude', 'projects', '-workspace-group', `${sessionId}.jsonl`,
   );
   try {
     const stat = fs.statSync(transcriptPath);
     if (stat.size > SESSION_MAX_SIZE) {
+      const sizeKB = (stat.size / 1024).toFixed(0);
       logger.info(
-        { group: groupFolder, sessionId, size: stat.size },
-        'Session transcript too large, rotating to fresh session',
+        { group: groupFolder, sessionId, sizeKB },
+        'Session transcript too large, rotating',
       );
-      return true;
+      return { rotate: true, reason: `transcript size (${sizeKB}KB)` };
     }
   } catch {
     // File doesn't exist or can't stat — proceed with session
   }
-  return false;
+
+  return { rotate: false };
+}
+
+/**
+ * Generate a handover preamble for the new session.
+ * This is prepended to the user's prompt so the fresh session has context.
+ * Keeps it concise — structured data, not prose.
+ */
+function generateHandoverPreamble(group: RegisteredGroup, reason: string): string {
+  const turns = sessionTurns[group.folder] || 0;
+  const startTime = sessionStartTime[group.folder];
+  const ageMin = startTime ? ((Date.now() - startTime) / 60000).toFixed(0) : '?';
+
+  return [
+    '<context_handover>',
+    `Session rotated: ${reason}`,
+    `Previous session: ${turns} turns over ${ageMin} minutes`,
+    `Group: ${group.name}`,
+    `Time: ${new Date().toISOString()}`,
+    '',
+    'This is a fresh session. You are NEO. Your persistent memory is in /root/CLAUDE.md.',
+    'Search the knowledge base (curl http://127.0.0.1:8100/search?q=...) if the user references past context.',
+    'Do NOT apologize for the rotation — just continue naturally.',
+    '</context_handover>',
+    '',
+  ].join('\n');
 }
 
 function loadState(): void {
@@ -169,6 +253,45 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const prompt = formatMessages(missedMessages);
 
+  // --- Model Router: classify message complexity ---
+  const route = classifyTier(prompt);
+  logger.info(
+    { group: group.name, tier: route.tier, model: route.model || 'free', effort: route.effort, reason: route.reason },
+    'Model router classification',
+  );
+
+  // Simple messages: handle with free model (Groq/Gemini), skip claude -p entirely
+  if (route.useFreeModel) {
+    try {
+      const userText = missedMessages.map((m) => m.content).join(' ');
+
+      // Advance cursor
+      const previousCursor = lastAgentTimestamp[chatJid] || '';
+      lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+      saveState();
+
+      await channel.setTyping?.(chatJid, true);
+      const freeResult = await callFreeModel(userText);
+      await channel.setTyping?.(chatJid, false);
+
+      logger.info(
+        { group: group.name, provider: freeResult.provider, model: freeResult.model, latencyMs: freeResult.latencyMs },
+        'Free model response sent',
+      );
+
+      if (freeResult.text) {
+        await channel.sendMessage(chatJid, freeResult.text);
+      }
+      return true;
+    } catch (err) {
+      logger.warn({ group: group.name, err }, 'Free model failed, falling back to claude -p haiku');
+      // Fall through to runAgent with haiku
+      route.useFreeModel = false;
+      route.model = 'haiku';
+      route.tier = 'moderate';
+    }
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -196,7 +319,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  const output = await runAgent(group, prompt, chatJid, async (result) => {
+  const output = await runAgent(group, prompt, chatJid, route.model, route.effort, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
       const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
@@ -240,15 +363,33 @@ async function runAgent(
   group: RegisteredGroup,
   prompt: string,
   chatJid: string,
+  model?: string,
+  effort?: string,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.folder === MAIN_GROUP_FOLDER;
   let sessionId: string | undefined = sessions[group.folder];
+  let handoverPreamble = '';
 
-  // Session rotation: if transcript exceeds 500KB, start fresh to prevent OOM
-  if (shouldRotateSession(group.folder, sessionId)) {
+  // Track this turn
+  trackSessionTurn(group.folder);
+
+  // Session rotation: check size, turns, and age
+  const rotation = shouldRotateSession(group.folder, sessionId);
+  if (rotation.rotate) {
+    handoverPreamble = generateHandoverPreamble(group, rotation.reason || 'unknown');
+    logger.info(
+      { group: group.name, sessionId, reason: rotation.reason, turns: sessionTurns[group.folder] },
+      'Rotating session with handover',
+    );
     sessionId = undefined;
     delete sessions[group.folder];
+    resetSessionTracking(group.folder);
+  }
+
+  // Prepend handover context to prompt if rotating
+  if (handoverPreamble) {
+    prompt = handoverPreamble + prompt;
   }
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -300,6 +441,8 @@ async function runAgent(
           groupFolder: group.folder,
           chatJid,
           isMain,
+          model,
+          effort,
           cwd: group.containerConfig?.hostWorkerCwd,
         },
         (proc, workerName) => queue.registerProcess(chatJid, proc, workerName, group.folder),
