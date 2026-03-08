@@ -32,7 +32,6 @@ describe('add-compact skill package', () => {
     });
 
     it('lists all modify files', () => {
-      expect(content).toContain('src/group-queue.ts');
       expect(content).toContain('src/index.ts');
       expect(content).toContain('container/agent-runner/src/index.ts');
     });
@@ -67,7 +66,6 @@ describe('add-compact skill package', () => {
 
   describe('modify/ files exist', () => {
     const modifyFiles = [
-      'src/group-queue.ts',
       'src/index.ts',
       'container/agent-runner/src/index.ts',
     ];
@@ -82,7 +80,6 @@ describe('add-compact skill package', () => {
 
   describe('intent files exist', () => {
     const intentFiles = [
-      'src/group-queue.ts.intent.md',
       'src/index.ts.intent.md',
       'container/agent-runner/src/index.ts.intent.md',
     ];
@@ -93,33 +90,6 @@ describe('add-compact skill package', () => {
         expect(fs.existsSync(filePath)).toBe(true);
       });
     }
-  });
-
-  describe('modify/src/group-queue.ts', () => {
-    let content: string;
-
-    beforeAll(() => {
-      content = fs.readFileSync(
-        path.join(SKILL_DIR, 'modify', 'src', 'group-queue.ts'),
-        'utf-8',
-      );
-    });
-
-    it('adds isActive method', () => {
-      expect(content).toContain('isActive(groupJid: string): boolean');
-      expect(content).toContain('state?.active === true');
-    });
-
-    it('preserves core GroupQueue structure', () => {
-      expect(content).toContain('export class GroupQueue');
-      expect(content).toContain('enqueueMessageCheck');
-      expect(content).toContain('enqueueTask');
-      expect(content).toContain('closeStdin');
-      expect(content).toContain('sendMessage');
-      expect(content).toContain('notifyIdle');
-      expect(content).toContain('registerProcess');
-      expect(content).toContain('async shutdown');
-    });
   });
 
   describe('modify/src/index.ts', () => {
@@ -136,8 +106,8 @@ describe('add-compact skill package', () => {
       expect(content).toContain("import { extractSessionCommand, isSessionCommandAllowed } from './session-commands.js'");
     });
 
-    it('uses let for missedMessages (mutable for deny path)', () => {
-      expect(content).toMatch(/let missedMessages = getMessagesSince/);
+    it('uses const for missedMessages', () => {
+      expect(content).toMatch(/const missedMessages = getMessagesSince/);
     });
 
     it('has session command interception in processGroupMessages', () => {
@@ -153,24 +123,15 @@ describe('add-compact skill package', () => {
       expect(content).toContain('hadCmdError');
     });
 
-    it('has denied path with filter-and-fall-through', () => {
-      expect(content).toContain('deniedCmdTimestamp');
+    it('has denied path with cursor advance and return', () => {
       expect(content).toContain('Session commands require admin access');
-      expect(content).toContain('missedMessages = missedMessages.filter(m => m !== sessionCmdMsg)');
-    });
-
-    it('has denied cursor bump at trigger-check early return', () => {
-      expect(content).toContain('Consume denied /compact so it doesn\'t replay');
-    });
-
-    it('has denied cursor bump after normal cursor advancement', () => {
-      expect(content).toContain('Ensure denied /compact is consumed even if its timestamp exceeds the batch');
+      // Denied path advances cursor to /compact timestamp and returns
+      expect(content).toContain('silently consume the /compact by advancing the cursor past it');
     });
 
     it('has session command interception in startMessageLoop', () => {
       expect(content).toContain('Session command interception (message loop)');
-      expect(content).toContain('isLoopAuthorized');
-      expect(content).toContain('queue.isActive(chatJid)');
+      expect(content).toContain('queue.enqueueMessageCheck(chatJid)');
     });
 
     it('respects sender allowlist in deny path', () => {

@@ -32,13 +32,11 @@ npx tsx scripts/apply-skill.ts .claude/skills/add-compact
 This deterministically:
 - Adds `src/session-commands.ts` (extract and authorize session commands)
 - Adds `src/session-commands.test.ts` (unit tests for command parsing and auth)
-- Three-way merges `isActive()` method into `src/group-queue.ts`
 - Three-way merges session command interception into `src/index.ts` (both `processGroupMessages` and `startMessageLoop`)
 - Three-way merges slash command handling into `container/agent-runner/src/index.ts`
 - Records application in `.nanoclaw/state.yaml`
 
 If merge conflicts occur, read the intent files:
-- `modify/src/group-queue.ts.intent.md`
 - `modify/src/index.ts.intent.md`
 - `modify/container/agent-runner/src/index.ts.intent.md`
 
@@ -71,7 +69,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 3. Verify:
    - The agent acknowledges compaction (e.g., "Conversation compacted.")
    - The session continues — send a follow-up message and verify the agent responds coherently
-   - A conversation archive is written to `groups/main/conversations/` (by the PreCompact hook)
+   - A conversation archive is written to `groups/{folder}/conversations/` (by the PreCompact hook)
    - Container logs show `Compact boundary observed` (confirms SDK actually compacted)
    - If `compact_boundary` was NOT observed, the response says "compact_boundary was not observed"
 4. From a **non-main group** as a non-admin user, send: `@<assistant> /compact`
@@ -83,8 +81,8 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
    - Compaction proceeds normally (same behavior as main group)
 8. While an **active container** is running for the main group, send `/compact`
 9. Verify:
-   - The active container is closed cleanly first
-   - Compaction proceeds via a new container
+   - The active container is signaled to close (authorized senders only — untrusted senders cannot kill in-flight work)
+   - Compaction proceeds via a new container once the active one exits
    - The command is not dropped (no cursor race)
 10. Send a normal message, then `/compact`, then another normal message in quick succession (same polling batch):
 11. Verify:
@@ -95,6 +93,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 13. Verify:
     - Denial message is sent ("Session commands require admin access.")
     - The `/compact` is consumed (cursor advanced) — it does NOT replay on future polls
+    - Other messages in the same batch are also consumed (cursor is a high-water mark — this is an accepted tradeoff for the narrow edge case of denied `/compact` + other messages in the same polling interval)
     - No container is killed or interrupted
 14. From a **non-main group** (with `requiresTrigger` enabled) as a non-admin user, send bare `/compact` (no trigger prefix):
 15. Verify:

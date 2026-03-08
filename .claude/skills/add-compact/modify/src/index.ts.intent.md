@@ -2,15 +2,13 @@
 
 ## What Changed
 - Added `import { extractSessionCommand, isSessionCommandAllowed } from './session-commands.js'`
-- Changed `const missedMessages` to `let missedMessages` (deny path filters it)
 - Added session command interception block in `processGroupMessages()` between `missedMessages.length === 0` check and trigger check
-- Added `deniedCmdTimestamp` cursor bump in trigger-check early return and after normal cursor advancement
 - Added session command interception in `startMessageLoop()` between `isMainGroup` check and `needsTrigger` block
 
 ## Key Sections
 - **Imports** (top of file): extractSessionCommand, isSessionCommandAllowed from session-commands
-- **processGroupMessages**: Session command interception (authorized path with pre-compact + /compact, denied path with filter-and-fall-through), cursor bump at trigger-check early return, cursor bump after normal advancement
-- **startMessageLoop**: Session command detection, auth-gated closeStdin, enqueue for processGroupMessages
+- **processGroupMessages**: Session command interception (authorized path with pre-compact + /compact, denied path advances cursor and returns)
+- **startMessageLoop**: Session command detection, auth-gated closeStdin (prevents DoS), enqueue for processGroupMessages
 
 ## Invariants (must-keep)
 - State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp)

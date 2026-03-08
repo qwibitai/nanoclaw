@@ -6,7 +6,6 @@ adds:
   - src/session-commands.ts
   - src/session-commands.test.ts
 modifies:
-  - src/group-queue.ts
   - src/index.ts
   - container/agent-runner/src/index.ts
 structured:

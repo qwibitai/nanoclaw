@@ -154,7 +154,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
-  let missedMessages = getMessagesSince(
+  const missedMessages = getMessagesSince(
     chatJid,
     sinceTimestamp,
     ASSISTANT_NAME,
@@ -163,8 +163,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // --- Session command interception (before trigger check) ---
-  // Track denied command timestamp so cursor can be bumped past it after normal processing.
-  let deniedCmdTimestamp: string | null = null;
   // Scan ALL messages for a session command, not just the last one.
   const sessionCmdMsg = missedMessages.find(
     (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
@@ -251,7 +249,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       return true;
     }
 
-    // DENIED: send denial if the sender would normally be allowed to interact.
+    // DENIED: send denial if the sender would normally be allowed to interact,
+    // then silently consume the /compact by advancing the cursor past it.
+    // Trade-off: other messages in the same batch are also consumed (cursor is
+    // a high-water mark). Acceptable for this narrow edge case.
     const denyHasTrigger = TRIGGER_PATTERN.test(sessionCmdMsg.content.trim());
     const requiresTrigger = !isMainGroup && group.requiresTrigger !== false;
     const senderAllowed = isMainGroup || !requiresTrigger || (denyHasTrigger && (
@@ -261,16 +262,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (senderAllowed) {
       await channel.sendMessage(chatJid, 'Session commands require admin access.');
     }
-    // Filter out the /compact and fall through to normal processing so
-    // other messages in the batch aren't dropped. The /compact is consumed
-    // by bumping the cursor floor after normal processing advances it.
-    deniedCmdTimestamp = sessionCmdMsg.timestamp;
-    missedMessages = missedMessages.filter(m => m !== sessionCmdMsg);
-    if (missedMessages.length === 0) {
-      lastAgentTimestamp[chatJid] = sessionCmdMsg.timestamp;
-      saveState();
-      return true;
-    }
+    lastAgentTimestamp[chatJid] = sessionCmdMsg.timestamp;
+    saveState();
+    return true;
   }
   // --- End session command interception ---
 
@@ -283,18 +277,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) {
-      // Consume denied /compact so it doesn't replay with repeated denial messages.
-      // Trade-off: non-trigger messages before /compact in the same batch are also
-      // consumed (cursor is a high-water mark). These would normally accumulate as
-      // context for a future trigger. Acceptable for this narrow edge case
-      // (unauthorized /compact + non-trigger messages in same polling interval).
-      if (deniedCmdTimestamp) {
-        const current = lastAgentTimestamp[chatJid] || '';
-        if (!current || deniedCmdTimestamp > current) {
-          lastAgentTimestamp[chatJid] = deniedCmdTimestamp;
-          saveState();
-        }
-      }
       return true;
     }
   }
@@ -306,10 +288,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-  // Ensure denied /compact is consumed even if its timestamp exceeds the batch
-  if (deniedCmdTimestamp && deniedCmdTimestamp > lastAgentTimestamp[chatJid]) {
-    lastAgentTimestamp[chatJid] = deniedCmdTimestamp;
-  }
   saveState();
 
   logger.info(
@@ -526,11 +504,13 @@ async function startMessageLoop(): Promise<void> {
           if (loopCmdMsg) {
             // Only close active container if the sender is authorized — otherwise an
             // untrusted user could kill in-flight work by sending /compact (DoS).
-            // Always enqueue so processGroupMessages handles auth + cursor advancement.
-            const isLoopAuthorized = isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true);
-            if (isLoopAuthorized && queue.isActive(chatJid)) {
+            // closeStdin no-ops internally when no container is active.
+            if (isSessionCommandAllowed(isMainGroup, loopCmdMsg.is_from_me === true)) {
               queue.closeStdin(chatJid);
             }
+            // Enqueue so processGroupMessages handles auth + cursor advancement.
+            // Don't pipe via IPC — slash commands need a fresh container with
+            // string prompt (not MessageStream) for SDK recognition.
             queue.enqueueMessageCheck(chatJid);
             continue;
           }
