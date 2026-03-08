@@ -1,3 +1,5 @@
+export type AgentRuntime = 'claude' | 'codex' | 'gemini' | 'opencode';
+
 export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
@@ -30,6 +32,7 @@ export interface AllowedRoot {
 export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
+  runtime?: AgentRuntime; // Default: 'claude' for backward compatibility
 }
 
 export interface RegisteredGroup {

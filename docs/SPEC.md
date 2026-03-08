@@ -783,3 +783,15 @@ npm run dev
 # or
 node dist/index.js
 ```
+
+
+### Agent Runtime Selection
+
+`registered_groups.container_config.runtime` supports:
+
+- `claude` (default, backward-compatible)
+- `codex`
+- `gemini`
+- `opencode`
+
+If runtime is missing or invalid, NanoClaw falls back to `claude` to preserve existing behavior.

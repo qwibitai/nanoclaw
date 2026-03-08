@@ -61,6 +61,7 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content from the Web
 - **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
+- **Runtime selection (experimental)** - Choose `containerConfig.runtime` per group (`claude` default, plus `codex`, `gemini`, `opencode`) with backward-compatible fallback
 - **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
