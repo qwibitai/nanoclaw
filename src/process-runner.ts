@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  AGENT_BACKEND,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
@@ -71,6 +72,7 @@ function buildEnv(
     NANOCLAW_IDENTITY_PATH: path.join(GROUPS_DIR, 'main', 'IDENTITY.md'),
     HOME: homeDir,
     TZ: TIMEZONE,
+    AGENT_BACKEND,
   };
 
   if (isMain && group.containerConfig?.additionalMounts?.length) {
@@ -225,12 +227,7 @@ function prepareGroupDirs(group: RegisteredGroup, isMain: boolean): void {
     }
   }
 
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
+  const groupSessionsDir = path.join(groupDir, '.claude');
   fs.mkdirSync(groupSessionsDir, { recursive: true });
 
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
@@ -266,6 +263,9 @@ function prepareGroupDirs(group: RegisteredGroup, isMain: boolean): void {
   fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+
+  const homeDir = path.join(DATA_DIR, 'sessions', group.folder);
+  fs.mkdirSync(path.join(homeDir, '.claude', 'debug'), { recursive: true });
 }
 
 export async function runContainerAgent(
