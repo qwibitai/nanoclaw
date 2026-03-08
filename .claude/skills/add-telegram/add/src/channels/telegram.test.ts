@@ -8,6 +8,8 @@ vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 // Mock env reader (used by the factory, not needed in unit tests)
 vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 
+import { readEnvFile } from '../env.js';
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
@@ -583,12 +585,90 @@ describe('TelegramChannel', () => {
       );
     });
 
-    it('stores voice message with placeholder', async () => {
+    it('stores voice message with placeholder when no Deepgram key', async () => {
       const opts = createTestOpts();
+      // No deepgramApiKey passed — defaults to ''
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createMediaCtx({});
+      const ctx = createMediaCtx({
+        extra: { voice: { file_id: 'tg-file-001' } },
+      });
+      await triggerMediaMessage('message:voice', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '[Voice message]' }),
+      );
+    });
+
+    it('transcribes voice message when Deepgram key is set', async () => {
+      vi.spyOn(global, 'fetch' as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            result: { file_path: 'voice/file.ogg' },
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: { get: () => '100' },
+          arrayBuffer: async () => new ArrayBuffer(100),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            results: {
+              channels: [{ alternatives: [{ transcript: 'Hello world' }] }],
+            },
+          }),
+        } as any);
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts, 'test-dg-key');
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        extra: { voice: { file_id: 'tg-file-001' } },
+      });
+      await triggerMediaMessage('message:voice', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({ content: '[Voice: Hello world]' }),
+      );
+    });
+
+    it('falls back to placeholder when Deepgram API call fails', async () => {
+      vi.mocked(readEnvFile).mockReturnValue({
+        DEEPGRAM_API_KEY: 'test-dg-key',
+      });
+      vi.spyOn(global, 'fetch' as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            ok: true,
+            result: { file_path: 'voice/file.ogg' },
+          }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: { get: () => '100' },
+          arrayBuffer: async () => new ArrayBuffer(100),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+        } as any);
+
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts, 'test-dg-key');
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        extra: { voice: { file_id: 'tg-file-001' } },
+      });
       await triggerMediaMessage('message:voice', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(

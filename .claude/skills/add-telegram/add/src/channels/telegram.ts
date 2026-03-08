@@ -11,6 +11,68 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+const MAX_VOICE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+async function transcribeVoiceWithDeepgram(
+  fileId: string,
+  botToken: string,
+  apiKey: string,
+): Promise<string | null> {
+  try {
+    // Resolve Telegram file path
+    const fileRes = await fetch(
+      `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`,
+    );
+    const fileData = (await fileRes.json()) as any;
+    if (!fileData.ok) return null;
+    const filePath: string = fileData.result.file_path;
+
+    // Download audio bytes — reject oversized files before buffering
+    const audioRes = await fetch(
+      `https://api.telegram.org/file/bot${botToken}/${filePath}`,
+    );
+    if (!audioRes.ok) return null;
+    const contentLength = Number(audioRes.headers.get('content-length') ?? 0);
+    if (contentLength > MAX_VOICE_BYTES) {
+      logger.warn({ contentLength }, 'Voice file too large to transcribe, skipping');
+      return null;
+    }
+    const audioBuffer = await audioRes.arrayBuffer();
+    if (audioBuffer.byteLength > MAX_VOICE_BYTES) {
+      logger.warn({ bytes: audioBuffer.byteLength }, 'Voice file too large to transcribe, skipping');
+      return null;
+    }
+
+    // Transcribe with Deepgram Nova-2, auto-detect language
+    const dgAbort = AbortSignal.timeout(60_000);
+    const dgRes = await fetch(
+      'https://api.deepgram.com/v1/listen?model=nova-2&detect_language=true&smart_format=true',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Token ${apiKey}`,
+          'Content-Type': 'audio/ogg',
+        },
+        body: audioBuffer,
+        signal: dgAbort,
+      },
+    );
+
+    if (!dgRes.ok) {
+      logger.warn({ status: dgRes.status }, 'Deepgram transcription failed');
+      return null;
+    }
+
+    const data = (await dgRes.json()) as any;
+    const transcript: string =
+      data?.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? '';
+    return transcript || null;
+  } catch (err) {
+    logger.error({ err }, 'Deepgram voice transcription error');
+    return null;
+  }
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -23,10 +85,12 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private opts: TelegramChannelOpts;
   private botToken: string;
+  private deepgramApiKey: string;
 
-  constructor(botToken: string, opts: TelegramChannelOpts) {
+  constructor(botToken: string, opts: TelegramChannelOpts, deepgramApiKey = '') {
     this.botToken = botToken;
     this.opts = opts;
+    this.deepgramApiKey = deepgramApiKey;
   }
 
   async connect(): Promise<void> {
@@ -94,8 +158,15 @@ export class TelegramChannel implements Channel {
       }
 
       // Store chat metadata for discovery
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        chatName,
+        'telegram',
+        isGroup,
+      );
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
@@ -138,8 +209,15 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
-      const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
-      this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
       this.opts.onMessage(chatJid, {
         id: ctx.message.message_id.toString(),
         chat_jid: chatJid,
@@ -153,9 +231,53 @@ export class TelegramChannel implements Channel {
 
     this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
+    this.bot.on('message:voice', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      let content = '[Voice message]';
+      if (this.deepgramApiKey) {
+        const transcript = await transcribeVoiceWithDeepgram(
+          ctx.message.voice.file_id,
+          this.botToken,
+          this.deepgramApiKey,
+        );
+        if (transcript) {
+          content = `[Voice: ${transcript}]`;
+          logger.info({ chatJid, sender: senderName }, 'Voice message transcribed');
+        }
+      } else {
+        logger.debug({ chatJid }, 'DEEPGRAM_API_KEY not set, voice message not transcribed');
+      }
+
+      this.opts.onMessage(chatJid, {
+        id: ctx.message.message_id.toString(),
+        chat_jid: chatJid,
+        sender: ctx.from?.id?.toString() || '',
+        sender_name: senderName,
+        content,
+        timestamp,
+        is_from_me: false,
+      });
+    });
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
     this.bot.on('message:document', (ctx) => {
       const name = ctx.message.document?.file_name || 'file';
@@ -246,12 +368,14 @@ export class TelegramChannel implements Channel {
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN']);
+  const envVars = readEnvFile(['TELEGRAM_BOT_TOKEN', 'DEEPGRAM_API_KEY']);
   const token =
     process.env.TELEGRAM_BOT_TOKEN || envVars.TELEGRAM_BOT_TOKEN || '';
   if (!token) {
     logger.warn('Telegram: TELEGRAM_BOT_TOKEN not set');
     return null;
   }
-  return new TelegramChannel(token, opts);
+  const deepgramApiKey =
+    process.env.DEEPGRAM_API_KEY || envVars.DEEPGRAM_API_KEY || '';
+  return new TelegramChannel(token, opts, deepgramApiKey);
 });

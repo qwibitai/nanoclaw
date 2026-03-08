@@ -87,6 +87,16 @@ TELEGRAM_BOT_TOKEN=<their-token>
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
 
+### Voice message transcription (optional)
+
+To enable automatic transcription of voice messages, add a [Deepgram](https://console.deepgram.com) API key:
+
+```bash
+DEEPGRAM_API_KEY=<your-key>
+```
+
+Deepgram offers a free tier (12,000 minutes/month). Without the key, voice messages appear as `[Voice message]` — the bot still works, transcription is silently skipped.
+
 Sync to container environment:
 
 ```bash
