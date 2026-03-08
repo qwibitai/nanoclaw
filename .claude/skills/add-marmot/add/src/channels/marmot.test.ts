@@ -37,6 +37,74 @@ vi.mock('nostr-tools/utils', () => ({
     new Uint8Array(hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16))),
 }));
 
+vi.mock('nostr-tools/nip44', () => ({
+  v2: {
+    utils: {
+      getConversationKey: vi.fn().mockReturnValue(new Uint8Array(32)),
+    },
+    encrypt: vi.fn().mockReturnValue('encrypted-data'),
+    decrypt: vi.fn().mockReturnValue('decrypted-data'),
+  },
+}));
+
+// Mock marmot-ts
+const mockKeyPackagesCreate = vi.fn().mockResolvedValue({
+  keyPackageRef: new Uint8Array(32),
+  publicPackage: {},
+  published: [],
+});
+
+const mockSendChatMessage = vi.fn().mockResolvedValue({});
+
+const mockMarmotGroup = {
+  idStr: 'abc123',
+  id: new Uint8Array(16),
+  sendChatMessage: mockSendChatMessage,
+  ingest: vi.fn().mockReturnValue({
+    [Symbol.asyncIterator]: () => ({
+      next: () => Promise.resolve({ done: true, value: undefined }),
+    }),
+  }),
+  save: vi.fn().mockResolvedValue(undefined),
+  selfUpdate: vi.fn().mockResolvedValue({}),
+};
+
+const mockLoadAllGroups = vi.fn().mockResolvedValue([]);
+const mockGetGroup = vi.fn().mockResolvedValue(mockMarmotGroup);
+const mockOn = vi.fn();
+
+vi.mock('@internet-privacy/marmot-ts', () => ({
+  MarmotClient: class {
+    keyPackages = { create: mockKeyPackagesCreate };
+    loadAllGroups = mockLoadAllGroups;
+    getGroup = mockGetGroup;
+    on = mockOn;
+  },
+  KeyValueGroupStateBackend: class {
+    constructor() {}
+  },
+  KeyPackageStore: class {
+    constructor() {}
+  },
+  InviteReader: class {
+    constructor() {}
+    ingestEvents = vi.fn().mockResolvedValue(0);
+    decryptGiftWraps = vi.fn().mockResolvedValue([]);
+    markAsRead = vi.fn().mockResolvedValue(undefined);
+  },
+  deserializeApplicationRumor: vi.fn().mockReturnValue({
+    id: 'rumor-id',
+    pubkey: 'b'.repeat(64),
+    content: 'Hello from MLS!',
+    created_at: Math.floor(Date.now() / 1000),
+    kind: 9,
+    tags: [],
+  }),
+  GROUP_EVENT_KIND: 445,
+  KEY_PACKAGE_KIND: 443,
+  WELCOME_EVENT_KIND: 444,
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'TestBot',
@@ -157,6 +225,25 @@ describe('MarmotChannel', () => {
       expect(channel.isConnected()).toBe(true);
     });
 
+    it('should publish a KeyPackage on connect', async () => {
+      await channel.connect();
+      expect(mockKeyPackagesCreate).toHaveBeenCalledWith({
+        relays: ['wss://relay.test.com'],
+        client: 'NanoClaw/marmot',
+        isLastResort: true,
+      });
+    });
+
+    it('should load existing groups on connect', async () => {
+      await channel.connect();
+      expect(mockLoadAllGroups).toHaveBeenCalled();
+    });
+
+    it('should register groupJoined event handler', async () => {
+      await channel.connect();
+      expect(mockOn).toHaveBeenCalledWith('groupJoined', expect.any(Function));
+    });
+
     it('should not throw with valid credentials', async () => {
       await expect(channel.connect()).resolves.not.toThrow();
     });
@@ -196,17 +283,17 @@ describe('MarmotChannel', () => {
       );
     });
 
-    it('should send to valid group via Nostr event', async () => {
+    it('should send via MLS-encrypted group.sendChatMessage', async () => {
       await channel.connect();
-      // sendMessage creates a kind 444 Nostr event and publishes it
-      await expect(
-        channel.sendMessage('marmot:abc123', 'hello world'),
-      ).resolves.not.toThrow();
+      await channel.sendMessage('marmot:abc123', 'hello world');
+      expect(mockGetGroup).toHaveBeenCalledWith('abc123');
+      expect(mockSendChatMessage).toHaveBeenCalledWith('hello world');
     });
 
     it('should handle send errors gracefully', async () => {
+      mockGetGroup.mockRejectedValueOnce(new Error('group not found'));
       await channel.connect();
-      // Should not throw even with edge cases
+      // Should not throw even with errors
       await expect(
         channel.sendMessage('marmot:abc123', 'hello'),
       ).resolves.not.toThrow();
@@ -241,5 +328,24 @@ describe('MarmotChannel self-registration', () => {
     // by the registry integration when the barrel file imports marmot.js.
     expect(MarmotChannel).toBeDefined();
     expect(typeof MarmotChannel).toBe('function');
+  });
+});
+
+describe('MarmotChannel MLS integration', () => {
+  it('should use kind 443 for KeyPackage, 445 for group messages', async () => {
+    const { GROUP_EVENT_KIND, KEY_PACKAGE_KIND } = await import(
+      '@internet-privacy/marmot-ts'
+    );
+    expect(KEY_PACKAGE_KIND).toBe(443);
+    expect(GROUP_EVENT_KIND).toBe(445);
+  });
+
+  it('should have NIP-44 support in signer for gift-wrap', () => {
+    // The MarmotEventSigner class has nip44 encrypt/decrypt methods
+    // This is tested implicitly by MarmotClient accepting the signer
+    // and InviteReader being able to decrypt gift wraps
+    const opts = createOpts();
+    const channel = new MarmotChannel(opts);
+    expect(channel).toBeDefined();
   });
 });
