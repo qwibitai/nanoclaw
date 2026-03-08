@@ -42,6 +42,20 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
+/** Channel-agnostic attachment metadata */
+export interface Attachment {
+  id: string;            // Channel-specific ID (signal-cli long, WhatsApp mediaKey, Telegram file_id)
+  contentType: string;   // MIME type
+  filename?: string;     // Original filename if provided by sender
+  size?: number;         // Bytes
+  width?: number;        // Pixels (images/video)
+  height?: number;       // Pixels (images/video)
+  duration?: number;     // Seconds (audio/video)
+  isVoiceNote?: boolean; // Audio recorded in-app as voice note
+  caption?: string;      // Caption text (WhatsApp/Telegram support this natively)
+  localPath?: string;    // Absolute path after download; set by orchestrator
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -51,6 +65,7 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  attachments?: Attachment[];
 }
 
 export interface ScheduledTask {
@@ -90,6 +105,12 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  /**
+   * Download an attachment to destDir and return the local path.
+   * Return null if the attachment cannot be fetched.
+   * The orchestrator calls this after getMessagesSince, before formatMessages.
+   */
+  downloadAttachment?(attachment: Attachment, destDir: string): Promise<string | null>;
 }
 
 // Callback type that channels use to deliver inbound messages
