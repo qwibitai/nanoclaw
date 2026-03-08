@@ -1,0 +1,20 @@
+skill: mattermost
+version: 1.0.0
+description: "Mattermost integration via REST API"
+core_version: 0.1.0
+adds:
+  - src/channels/mattermost.ts
+  - src/channels/mattermost.test.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - src/routing.test.ts
+structured:
+  npm_dependencies: []
+  env_additions:
+    - MATTERMOST_URL
+    - MATTERMOST_BOT_TOKEN
+    - MATTERMOST_ONLY
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/mattermost.test.ts"
