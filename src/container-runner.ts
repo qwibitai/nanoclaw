@@ -46,6 +46,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Partial text for streaming updates (progressive message editing). */
+  streamText?: string;
 }
 
 interface VolumeMount {

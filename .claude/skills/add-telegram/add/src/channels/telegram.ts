@@ -1,6 +1,7 @@
 import { Bot } from 'grammy';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
+import { createDraftStream, DraftStream } from '../draft-stream.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -242,6 +243,26 @@ export class TelegramChannel implements Channel {
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
+  }
+
+  createDraftStream(jid: string): DraftStream {
+    const bot = this.bot!;
+    const numericId = jid.replace(/^tg:/, '');
+    return createDraftStream({
+      sendMessage: async (text: string) => {
+        const sent = await bot.api.sendMessage(numericId, text);
+        return sent.message_id;
+      },
+      editMessage: async (messageId: number, text: string) => {
+        await bot.api.editMessageText(numericId, messageId, text);
+      },
+      deleteMessage: async (messageId: number) => {
+        await bot.api.deleteMessage(numericId, messageId);
+      },
+      throttleMs: 1000,
+      maxLength: 4096,
+      minInitialChars: 30,
+    });
   }
 }
 

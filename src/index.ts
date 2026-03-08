@@ -204,8 +204,26 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Create draft stream for channels that support progressive message editing
+  const draftStream = channel.createDraftStream?.(chatJid);
+  let draftStreamUsed = false;
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
-    // Streaming output callback — called for each agent result
+    // Streaming text update — route to draft stream for progressive editing.
+    // Channels without createDraftStream ignore these (draftStream is undefined).
+    if (result.streamText && draftStream) {
+      const text = result.streamText
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .trim();
+      if (text) {
+        draftStream.update(text);
+        draftStreamUsed = true;
+      }
+      resetIdleTimer();
+      return;
+    }
+
+    // Final result — called for each agent result
     if (result.result) {
       const raw =
         typeof result.result === 'string'
@@ -215,7 +233,16 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        await channel.sendMessage(chatJid, text);
+        // If we were streaming a draft, finalize it with the final text.
+        // Falls back to sendMessage if the draft stream can't deliver.
+        let sentViaDraft = false;
+        if (draftStream && draftStreamUsed) {
+          sentViaDraft = await draftStream.finish(text);
+          draftStreamUsed = false; // Reset so subsequent results send new messages
+        }
+        if (!sentViaDraft) {
+          await channel.sendMessage(chatJid, text);
+        }
         outputSentToUser = true;
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -230,6 +257,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       hadError = true;
     }
   });
+
+  // Clean up draft stream if it was never finalized.
+  // Don't cancel (delete) if we've already shown text — the user already saw it.
+  if (draftStream && !outputSentToUser) {
+    if (draftStreamUsed) {
+      // Text was shown — preserve the message rather than deleting
+      await draftStream.finish('').catch(() => {});
+    } else {
+      await draftStream.cancel();
+    }
+  }
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
