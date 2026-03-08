@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 const PROJECT_OWNER =
   process.env.PROJECT_OWNER ||
   process.env.NANOCLAW_PLATFORM_PROJECT_OWNER ||
-  'openclaw-gurusharan';
+  'ingpoc';
 const PLATFORM_PROJECT_NUMBER = Number.parseInt(
   process.env.PLATFORM_PROJECT_NUMBER ||
     process.env.NANOCLAW_PLATFORM_PROJECT_NUMBER ||
@@ -19,6 +19,14 @@ const REPO_NAME =
   'nanoclaw';
 
 const PLATFORM_STATUS_FIELD_NAMES = ['Workflow Status', 'Status'];
+const PLATFORM_STATUS_GROUPS = {
+  ready: ['Ready', 'Ready for Dispatch'],
+  running: ['In Progress', 'Claude Running'],
+  review: ['Review', 'Review Queue'],
+  blocked: ['Blocked'],
+  done: ['Done'],
+  backlog: ['Backlog', 'Triage'],
+};
 const PLATFORM_REQUIRED_SECTIONS = [
   'Problem Statement',
   'Scope',
@@ -81,7 +89,7 @@ export function buildPlatformRunContext(issueNumber, title, now = new Date()) {
 }
 
 function sectionPattern(sectionName) {
-  return new RegExp(`^###\\s+${sectionName}\\s*$`, 'im');
+  return new RegExp(`^##+\\s+${sectionName}\\s*$`, 'im');
 }
 
 export function missingPlatformSections(body) {
@@ -113,7 +121,36 @@ function resolveToken() {
   }
 }
 
+function hasExplicitGithubToken() {
+  return Boolean(
+    process.env.GITHUB_TOKEN || process.env.ADD_TO_PROJECT_PAT || process.env.GH_TOKEN,
+  );
+}
+
+function activeGhUser() {
+  try {
+    return execFileSync('gh', ['api', 'user', '-q', '.login'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+function ensureExpectedGhUser(expectedUser) {
+  if (hasExplicitGithubToken()) return;
+  const activeUser = activeGhUser();
+  if (!activeUser) {
+    throw new Error(`Unable to determine active gh account; expected ${expectedUser}`);
+  }
+  if (activeUser !== expectedUser) {
+    throw new Error(`Active gh account must be ${expectedUser}; found ${activeUser}`);
+  }
+}
+
 async function githubGraphql(query, variables) {
+  ensureExpectedGhUser(PROJECT_OWNER);
   const token = resolveToken();
   if (!token) {
     throw new Error(
@@ -173,6 +210,26 @@ function priorityRank(priorityValue) {
   return index === -1 ? PRIORITY_ORDER.length : index;
 }
 
+function normalizeStatus(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function statusMatches(value, groupName) {
+  const group = PLATFORM_STATUS_GROUPS[groupName] || [];
+  const normalized = normalizeStatus(value);
+  return group.some((candidate) => normalizeStatus(candidate) === normalized);
+}
+
+function statusCandidates(value) {
+  const normalized = normalizeStatus(value);
+  for (const group of Object.values(PLATFORM_STATUS_GROUPS)) {
+    if (group.some((candidate) => normalizeStatus(candidate) === normalized)) {
+      return group;
+    }
+  }
+  return [value];
+}
+
 function getStatusValue(fieldValues) {
   for (const fieldName of PLATFORM_STATUS_FIELD_NAMES) {
     const value = fieldValues.get(fieldName)?.value;
@@ -191,7 +248,7 @@ function summarizeNoop(reason, details = {}) {
 
 export function selectPlatformCandidate(items) {
   const reviewQueueItems = items.filter(
-    (item) => item.status === 'Review Queue',
+    (item) => item.agent === 'claude' && statusMatches(item.status, 'review'),
   );
   if (reviewQueueItems.length > 0) {
     return summarizeNoop('review_queue_present', {
@@ -199,7 +256,9 @@ export function selectPlatformCandidate(items) {
     });
   }
 
-  const runningItems = items.filter((item) => item.status === 'Claude Running');
+  const runningItems = items.filter(
+    (item) => item.agent === 'claude' && statusMatches(item.status, 'running'),
+  );
   if (runningItems.length > 0) {
     return summarizeNoop('claude_running_present', {
       blockingIssueNumbers: runningItems.map((item) => item.number),
@@ -208,7 +267,8 @@ export function selectPlatformCandidate(items) {
 
   const eligible = items
     .filter((item) => item.state === 'OPEN')
-    .filter((item) => item.status === 'Ready for Dispatch')
+    .filter((item) => statusMatches(item.status, 'ready'))
+    .filter((item) => !item.agent || item.agent === 'claude')
     .filter((item) => !item.labels.includes('status:blocked'))
     .filter((item) => item.missingSections.length === 0)
     .sort((left, right) => {
@@ -238,6 +298,7 @@ export function selectPlatformCandidate(items) {
       title: selected.title,
       url: selected.url,
       status: selected.status,
+      agent: selected.agent,
       priority: selected.priority,
       labels: selected.labels,
       missingSections: selected.missingSections,
@@ -358,6 +419,7 @@ async function getPlatformProject() {
         labels,
         fieldValues,
         status: getStatusValue(fieldValues),
+        agent: fieldValues.get('Agent')?.value || '',
         priority: fieldValues.get('Priority')?.value || 'p2',
         requestId: fieldValues.get('Request ID')?.value || '',
         runId: fieldValues.get('Run ID')?.value || '',
@@ -387,6 +449,16 @@ function fieldOptionId(project, fieldName, optionName) {
   if (!field?.options) return null;
   const option = field.options.find((entry) => entry.name === optionName);
   return option?.id || null;
+}
+
+function resolveStatusOptionId(project, fieldName, desiredStatus) {
+  const field = project.fields.get(fieldName);
+  if (!field?.options) return null;
+  for (const candidate of statusCandidates(desiredStatus)) {
+    const option = field.options.find((entry) => entry.name === candidate);
+    if (option) return option.id;
+  }
+  return null;
 }
 
 async function setSingleSelectField(projectId, itemId, fieldId, optionId) {
@@ -504,7 +576,10 @@ async function handleSetStatus(options) {
     }
 
     if (update.type === 'single_select') {
-      const optionId = fieldOptionId(project, update.fieldName, update.value);
+      const optionId =
+        update.fieldName === statusFieldName
+          ? resolveStatusOptionId(project, update.fieldName, update.value)
+          : fieldOptionId(project, update.fieldName, update.value);
       if (!optionId) {
         throw new Error(
           `Project ${project.title} is missing option "${update.value}" for ${update.fieldName}`,

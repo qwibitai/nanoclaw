@@ -51,18 +51,22 @@ Required runtime surfaces:
 - `.claude/commands/platform-pickup.md`
 - `scripts/workflow/platform-loop.js`
 - `scripts/workflow/start-platform-loop.sh`
+- `scripts/workflow/trigger-platform-pickup-now.sh`
 - `scripts/workflow/check-platform-loop.sh`
 - `launchd/com.nanoclaw-platform-loop.plist`
 
 Operating rules:
 
-1. the loop claims only one `Ready for Dispatch` platform issue at a time
-2. if any platform item is already `Review Queue`, the loop must no-op
-3. the loop must move active implementation to `Claude Running`
-4. the loop must move review-ready PRs to `Review Queue`
-5. on ambiguity or failed required checks, the loop must move the item to `Blocked` with a concrete `Next Decision`
-6. Codex is the default review lane after the loop finishes implementation
-7. merge remains human-only
+1. the loop confirms local GitHub auth is `ingpoc` before reading or mutating the NanoClaw platform board
+2. unanimous discussion promotion creates the platform Issue, but does not make it `Ready`
+3. before an issue can be marked `Ready`, Codex must write or normalize the scope, acceptance, checks, evidence, blocked conditions, and checked `Ready Checklist` on the Issue body
+4. the loop claims only one `Ready` platform issue at a time
+5. if any Claude-owned platform item is already `Review`, the loop must no-op
+6. the loop must move active implementation to `In Progress` and set `Agent=claude`
+7. the loop must move review-ready PRs to `Review`
+8. on ambiguity or failed required checks, the loop must move the item to `Blocked` with a concrete `Next Decision`
+9. Codex is the default review lane after the loop finishes implementation
+10. merge remains human-only
 
 CLI mode rule:
 

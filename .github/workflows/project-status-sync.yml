@@ -21,10 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       ADD_TO_PROJECT_PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
-      PROJECT_OWNER: openclaw-gurusharan
+      PLATFORM_PROJECT_OWNER: ingpoc
       PLATFORM_PROJECT_NUMBER: 1
-      PLATFORM_PROJECT_URL: https://github.com/users/openclaw-gurusharan/projects/1
+      PLATFORM_PROJECT_URL: https://github.com/users/ingpoc/projects/1
       PLATFORM_PROJECT_NAME: NanoClaw Platform
+      DELIVERY_PROJECT_OWNER: openclaw-gurusharan
       DELIVERY_PROJECT_NUMBER: 2
       DELIVERY_PROJECT_URL: https://github.com/users/openclaw-gurusharan/projects/2
       DELIVERY_PROJECT_NAME: Andy/Jarvis Delivery

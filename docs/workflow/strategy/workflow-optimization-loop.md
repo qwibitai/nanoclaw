@@ -108,9 +108,10 @@ Do not promote a changelog-derived idea directly from local notes into implement
 If the pilot uses the dedicated NanoClaw Platform Claude `/loop` lane:
 
 1. keep only one active platform pilot in the lane at a time
-2. require a decision-complete issue before moving to `Ready for Dispatch`
-3. require PR evidence before the item enters `Review Queue`
-4. evaluate operator-load impact explicitly as part of the pilot result
+2. after discussion promotion, require Codex to write or normalize the full execution contract and checked `Ready Checklist` on the Issue before it can move to `Ready`
+3. require a decision-complete issue before moving to `Ready`
+4. require PR evidence before the item enters `Review`
+5. evaluate operator-load impact explicitly as part of the pilot result
 
 ## Phase 4: Execution + Evidence
 

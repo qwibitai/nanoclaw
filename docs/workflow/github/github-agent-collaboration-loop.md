@@ -52,7 +52,8 @@ Use this before agents create, update, promote, or close GitHub Discussions, Iss
 - `bash scripts/check-workflow-contracts.sh`
 - `bash scripts/check-claude-codex-mirror.sh`
 - `bash scripts/check-tooling-governance.sh`
-- `gh project field-list 1 --owner openclaw-gurusharan --format json`
+- `gh project field-list 1 --owner ingpoc --format json`
+- `gh project field-list 2 --owner openclaw-gurusharan --format json`
 - `gh api graphql -f query='query { repository(owner: "ingpoc", name: "nanoclaw") { discussionCategories(first: 10) { nodes { name slug } } } }'`
 
 ## Related Docs
@@ -255,10 +256,12 @@ Delivery-board execution tracking:
 
 Platform-board automation tracking:
 
-1. `NanoClaw Platform` uses `Workflow Status` for `Triage`, `Architecture`, `Ready for Dispatch`, `Claude Running`, `Review Queue`, `Blocked`, and `Done`
-2. the dedicated Claude `/loop` lane picks only one `Ready for Dispatch` issue at a time
-3. platform automation uses `Request ID`, `Run ID`, and `Next Decision` as text fields for handoff clarity
-4. platform items stay issue-first: design reasoning remains in the Issue body, Discussion, or PR comments
+1. `NanoClaw Platform` uses the `ingpoc` board and the stock GitHub `Status` values `Backlog`, `Ready`, `In Progress`, `Review`, `Blocked`, and `Done`
+2. the dedicated Claude `/loop` lane picks only one `Ready` issue at a time and marks the claimed item `In Progress` with `Agent=claude`
+3. discussion promotion is not enough for `Ready`; Codex must first write or normalize the scope, acceptance, checks, evidence, blocked conditions, and `Ready Checklist` on the Issue
+4. platform automation confirms the active local GitHub account is `ingpoc` before board reads or writes
+5. if `Request ID`, `Run ID`, and `Next Decision` text fields are present, platform automation populates them for handoff clarity
+6. platform items stay issue-first: design reasoning remains in the Issue body, Discussion, or PR comments
 
 Execution status flow:
 
@@ -272,13 +275,12 @@ Execution status flow:
 
 Platform `/loop` status flow:
 
-1. `Triage`: newly promoted or newly opened platform work awaiting scope lock
-2. `Architecture`: scope and acceptance are being finalized
-3. `Ready for Dispatch`: issue is decision-complete and eligible for Claude pickup
-4. `Claude Running`: Claude `/loop` owns active implementation
-5. `Review Queue`: PR/evidence is ready for Codex review
-6. `Blocked`: waiting on dependency, missing scope, or failed required checks
-7. `Done`: merged/closed complete work
+1. `Backlog`: newly promoted or newly opened platform work awaiting scope lock
+2. `Ready`: issue is decision-complete and eligible for Claude pickup
+3. `In Progress`: Claude `/loop` owns active implementation and `Agent=claude`
+4. `Review`: PR/evidence is ready for Codex review
+5. `Blocked`: waiting on dependency, missing scope, or failed required checks
+6. `Done`: merged/closed complete work
 
 Default state transitions:
 
@@ -292,11 +294,11 @@ Default state transitions:
 
 Platform automation transitions:
 
-1. opened/promoted platform issue -> `Triage`
-2. scope lock in progress -> `Architecture`
-3. explicit dispatch readiness -> `Ready for Dispatch`
-4. Claude `/loop` claims the item -> `Claude Running`
-5. PR + evidence ready -> `Review Queue`
+1. opened/promoted platform issue -> `Backlog`
+2. Codex writes or validates the full execution contract on the Issue
+3. explicit dispatch readiness -> `Ready`
+4. Claude `/loop` claims the item -> `In Progress`
+5. PR + evidence ready -> `Review`
 6. scope ambiguity/check failure/dependency -> `Blocked`
 7. merged/closed complete work -> `Done`
 

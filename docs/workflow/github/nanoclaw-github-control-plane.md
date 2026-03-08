@@ -46,7 +46,7 @@ Use instead:
   - `.github/workflows/project-intake-sync.yml` for Issue intake + default field initialization
   - `.github/workflows/project-status-sync.yml` for status sync from Issue/PR lifecycle
 - Delivery execution state on `Andy/Jarvis Delivery` is additionally host-managed from `andy_requests` + `worker_runs` through `src/extensions/jarvis/github-delivery-sync.ts`.
-- Repo Issues/Discussions stay on `ingpoc/nanoclaw`; Project boards live on `openclaw-gurusharan`.
+- Repo Issues/Discussions stay on `ingpoc/nanoclaw`; `NanoClaw Platform` board checks/mutations use `ingpoc`, while `Andy/Jarvis Delivery` board checks use `openclaw-gurusharan`.
 - Discussion category taxonomy is only partially repo-configurable. The repository ships templates for the default GitHub categories (`General`, `Ideas`, `Q&A`), and any rename to the preferred collaboration taxonomy is a one-time GitHub UI admin action.
 - The operating rules for how agents use those surfaces are intentionally not repeated here; they belong in `docs/workflow/github/github-agent-collaboration-loop.md`.
 
@@ -79,7 +79,7 @@ Use instead:
   - `scripts/workflow/start-platform-loop.sh`
   - `scripts/workflow/check-platform-loop.sh`
   - `launchd/com.nanoclaw-platform-loop.plist`
-- The `/loop` lane may claim only one platform item at a time and must stop if any item is already in `Review Queue`.
+- The `/loop` lane may claim only one platform item at a time and must stop if any Claude-owned item is already in `Review`.
 - `/loop` may implement, test, branch, and open/update PRs, but it must not merge and it must not bypass deterministic required checks.
 - Codex remains the default review lane for these platform PRs.
 

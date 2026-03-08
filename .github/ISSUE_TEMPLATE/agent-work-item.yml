@@ -99,6 +99,25 @@ body:
     validations:
       required: true
   - type: textarea
+    id: ready_checklist
+    attributes:
+      label: Ready Checklist
+      description: Codex must validate and check every item below before moving the board status to Ready.
+      value: |
+        - [ ] Problem Statement is explicit and implementation-relevant.
+        - [ ] Execution Board is correct for this work.
+        - [ ] Scope includes clear in-scope and out-of-scope boundaries.
+        - [ ] Acceptance Criteria are deterministic and testable.
+        - [ ] Expected Productivity Gain is concrete.
+        - [ ] Base Branch is approved.
+        - [ ] Required Checks are concrete commands.
+        - [ ] Required Evidence is explicit.
+        - [ ] Blocked If conditions are explicit.
+        - [ ] Source Discussion is linked when promoted from a discussion.
+        - [ ] Suggested Owner is set or intentionally omitted.
+    validations:
+      required: true
+  - type: textarea
     id: risks
     attributes:
       label: Risks and Dependencies

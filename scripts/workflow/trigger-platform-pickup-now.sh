@@ -3,15 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$ROOT_DIR/.claude/progress"
-STATE_FILE="$STATE_DIR/platform-loop-state.json"
+STATE_FILE="$STATE_DIR/platform-pickup-manual-state.json"
 WORKTREE_PATH="${NANOCLAW_PLATFORM_LOOP_WORKTREE:-$ROOT_DIR/.worktrees/platform-loop}"
 WORKTREE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BRANCH:-claude-platform-loop}"
 BASE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BASE_BRANCH:-main}"
-LOOP_INTERVAL="${NANOCLAW_PLATFORM_LOOP_INTERVAL:-1h}"
-LOOP_COMMAND="${NANOCLAW_PLATFORM_LOOP_COMMAND:-/platform-pickup}"
-LAUNCH_LABEL="${NANOCLAW_PLATFORM_LOOP_LABEL:-com.nanoclaw.platform-loop}"
+PICKUP_COMMAND="${NANOCLAW_PLATFORM_PICKUP_COMMAND:-/platform-pickup}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
-LOG_DIR="$ROOT_DIR/logs"
 DRY_RUN=0
 
 while (($#)); do
@@ -27,7 +24,7 @@ while (($#)); do
   esac
 done
 
-mkdir -p "$STATE_DIR" "$LOG_DIR"
+mkdir -p "$STATE_DIR"
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "claude CLI is required but not found in PATH" >&2
@@ -36,6 +33,11 @@ fi
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required but not found in PATH" >&2
+  exit 1
+fi
+
+if ! command -v osascript >/dev/null 2>&1; then
+  echo "osascript is required to trigger the dedicated Claude session" >&2
   exit 1
 fi
 
@@ -52,8 +54,7 @@ mkdir -p "$WORKTREE_PATH/.claude/commands" "$WORKTREE_PATH/scripts/workflow"
 cp "$ROOT_DIR/.claude/commands/platform-pickup.md" "$WORKTREE_PATH/.claude/commands/platform-pickup.md"
 cp "$ROOT_DIR/scripts/workflow/platform-loop.js" "$WORKTREE_PATH/scripts/workflow/platform-loop.js"
 
-LOOP_PROMPT="/loop ${LOOP_INTERVAL} ${LOOP_COMMAND}"
-SHELL_COMMAND="cd \"$WORKTREE_PATH\" && claude \"$LOOP_PROMPT\""
+SHELL_COMMAND="cd \"$WORKTREE_PATH\" && claude \"$PICKUP_COMMAND\""
 
 json_escape() {
   python3 - <<'PY' "$1"
@@ -65,12 +66,10 @@ PY
 record_state() {
   cat >"$STATE_FILE" <<EOF
 {
-  "label": $(json_escape "$LAUNCH_LABEL"),
   "worktree_path": $(json_escape "$WORKTREE_PATH"),
   "worktree_branch": $(json_escape "$WORKTREE_BRANCH"),
-  "base_branch": $(json_escape "$BASE_BRANCH"),
-  "loop_interval": $(json_escape "$LOOP_INTERVAL"),
-  "loop_command": $(json_escape "$LOOP_COMMAND"),
+  "pickup_command": $(json_escape "$PICKUP_COMMAND"),
+  "github_account": $(json_escape "$GH_ACCOUNT"),
   "launched_at": $(json_escape "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"),
   "shell_command": $(json_escape "$SHELL_COMMAND")
 }
@@ -83,14 +82,9 @@ if [[ "$DRY_RUN" == "1" ]]; then
   exit 0
 fi
 
-if ! command -v osascript >/dev/null 2>&1; then
-  echo "osascript is required to bootstrap the dedicated Claude session" >&2
-  exit 1
-fi
-
 ESCAPED_COMMAND="${SHELL_COMMAND//\\/\\\\}"
 ESCAPED_COMMAND="${ESCAPED_COMMAND//\"/\\\"}"
 
 osascript -e "tell application \"Terminal\" to do script \"$ESCAPED_COMMAND\"" >/dev/null
 record_state
-echo "Started NanoClaw platform loop session via Terminal"
+echo "Triggered NanoClaw platform pickup once via Terminal"

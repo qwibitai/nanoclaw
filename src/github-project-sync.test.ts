@@ -42,7 +42,7 @@ describe('github-project-sync helpers', () => {
         assigneeCount: 0,
         boardKey: 'platform',
       }),
-    ).toBe('Triage');
+    ).toBe('Backlog');
   });
 
   it('uses delivery-specific initial issue status', () => {
@@ -55,7 +55,7 @@ describe('github-project-sync helpers', () => {
         assigneeCount: 0,
         boardKey: 'delivery',
       }),
-    ).toBe('Triage');
+    ).toBe('Backlog');
   });
 
   it('derives pull request review status', () => {
@@ -67,10 +67,10 @@ describe('github-project-sync helpers', () => {
         pullRequestState: 'OPEN',
         isDraft: false,
         merged: false,
-        currentStatus: 'Claude Running',
+        currentStatus: 'In Progress',
         boardKey: 'platform',
       }),
-    ).toBe('Review Queue');
+    ).toBe('Review');
   });
 
   it('keeps draft platform pull requests in claude running state', () => {
@@ -82,10 +82,10 @@ describe('github-project-sync helpers', () => {
         pullRequestState: 'OPEN',
         isDraft: true,
         merged: false,
-        currentStatus: 'Claude Running',
+        currentStatus: 'In Progress',
         boardKey: 'platform',
       }),
-    ).toBe('Claude Running');
+    ).toBe('In Progress');
   });
 
   it('keeps delivery pull requests in review vocabulary', () => {
@@ -97,7 +97,7 @@ describe('github-project-sync helpers', () => {
         pullRequestState: 'OPEN',
         isDraft: false,
         merged: false,
-        currentStatus: 'Worker Running',
+        currentStatus: 'In Progress',
         boardKey: 'delivery',
       }),
     ).toBe('Review');

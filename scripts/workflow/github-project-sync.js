@@ -2,32 +2,48 @@
 
 import fs from 'node:fs';
 
-// Repo/issues/discussions live on ingpoc/nanoclaw, but execution boards for
-// Andy/Jarvis are owned by openclaw-gurusharan.
-const PROJECT_OWNER = process.env.PROJECT_OWNER || 'openclaw-gurusharan';
+// Repo/issues/discussions live on ingpoc/nanoclaw. The NanoClaw platform board
+// is owned by ingpoc, while the Andy/Jarvis delivery board is owned by
+// openclaw-gurusharan.
+const LEGACY_PROJECT_OWNER = process.env.PROJECT_OWNER || 'ingpoc';
 const LEGACY_PROJECT_NUMBER = Number.parseInt(process.env.PROJECT_NUMBER || '1', 10);
 const LEGACY_PROJECT_URL =
-  process.env.PROJECT_URL || `https://github.com/users/${PROJECT_OWNER}/projects/${LEGACY_PROJECT_NUMBER}`;
+  process.env.PROJECT_URL ||
+  `https://github.com/users/${LEGACY_PROJECT_OWNER}/projects/${LEGACY_PROJECT_NUMBER}`;
 
 const BOARD_CONFIGS = [
   {
     key: 'platform',
+    owner:
+      process.env.PLATFORM_PROJECT_OWNER ||
+      process.env.PROJECT_OWNER ||
+      'ingpoc',
     name: process.env.PLATFORM_PROJECT_NAME || 'NanoClaw Platform',
     number: Number.parseInt(process.env.PLATFORM_PROJECT_NUMBER || String(LEGACY_PROJECT_NUMBER), 10),
     url:
       process.env.PLATFORM_PROJECT_URL ||
       process.env.PROJECT_URL ||
-      `https://github.com/users/${PROJECT_OWNER}/projects/${LEGACY_PROJECT_NUMBER}`,
+      `https://github.com/users/${
+        process.env.PLATFORM_PROJECT_OWNER || process.env.PROJECT_OWNER || 'ingpoc'
+      }/projects/${process.env.PLATFORM_PROJECT_NUMBER || String(LEGACY_PROJECT_NUMBER)}`,
   },
   ...(process.env.DELIVERY_PROJECT_NUMBER
     ? [
         {
           key: 'delivery',
+          owner:
+            process.env.DELIVERY_PROJECT_OWNER ||
+            process.env.PROJECT_OWNER ||
+            'openclaw-gurusharan',
           name: process.env.DELIVERY_PROJECT_NAME || 'Andy/Jarvis Delivery',
           number: Number.parseInt(process.env.DELIVERY_PROJECT_NUMBER, 10),
           url:
             process.env.DELIVERY_PROJECT_URL ||
-            `https://github.com/users/${PROJECT_OWNER}/projects/${process.env.DELIVERY_PROJECT_NUMBER}`,
+            `https://github.com/users/${
+              process.env.DELIVERY_PROJECT_OWNER ||
+              process.env.PROJECT_OWNER ||
+              'openclaw-gurusharan'
+            }/projects/${process.env.DELIVERY_PROJECT_NUMBER}`,
         },
       ]
     : []),
@@ -146,20 +162,20 @@ export function deriveIssueStatus({ action, currentStatus, issueState, labels, a
   if (boardKey === 'delivery') {
     if (issueState === 'CLOSED') return 'Done';
     if (labels.includes('status:blocked')) return 'Blocked';
-    if (action === 'opened' || action === 'reopened') return 'Triage';
+    if (action === 'opened' || action === 'reopened') return 'Backlog';
     if (action === 'unlabeled' && currentStatus === 'Blocked') {
-      return 'Triage';
+      return 'Backlog';
     }
-    return currentStatus || 'Triage';
+    return currentStatus || 'Backlog';
   }
 
   if (issueState === 'CLOSED') return 'Done';
   if (labels.includes('status:blocked')) return 'Blocked';
-  if (action === 'opened' || action === 'reopened') return 'Triage';
+  if (action === 'opened' || action === 'reopened') return 'Backlog';
   if (action === 'unlabeled' && currentStatus === 'Blocked') {
-    return 'Triage';
+    return 'Backlog';
   }
-  if (!currentStatus) return 'Triage';
+  if (!currentStatus) return 'Backlog';
   return currentStatus;
 }
 
@@ -177,15 +193,16 @@ export function derivePullRequestStatus({
     if (issueState === 'CLOSED' || merged) return 'Done';
     if (labels.includes('status:blocked')) return 'Blocked';
     if (pullRequestState === 'OPEN' && !isDraft) return 'Review';
-    return currentStatus || 'Triage';
+    if (pullRequestState === 'OPEN' && isDraft) return currentStatus || 'In Progress';
+    return currentStatus || 'Backlog';
   }
 
   if (issueState === 'CLOSED' || merged) return 'Done';
   if (labels.includes('status:blocked')) return 'Blocked';
-  if (pullRequestState === 'OPEN' && !isDraft) return 'Review Queue';
-  if (pullRequestState === 'OPEN' && isDraft) return currentStatus || 'Claude Running';
-  if (pullRequestState === 'CLOSED') return currentStatus || 'Triage';
-  return currentStatus || 'Triage';
+  if (pullRequestState === 'OPEN' && !isDraft) return 'Review';
+  if (pullRequestState === 'OPEN' && isDraft) return currentStatus || 'In Progress';
+  if (pullRequestState === 'CLOSED') return currentStatus || 'Backlog';
+  return currentStatus || 'Backlog';
 }
 
 async function getProjects() {
@@ -215,7 +232,7 @@ async function getProjects() {
           }
         }
       `,
-      { owner: PROJECT_OWNER, number: config.number },
+      { owner: config.owner, number: config.number },
     );
 
     const project = data.user?.projectV2;

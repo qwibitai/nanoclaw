@@ -41,12 +41,42 @@ describe('platform-loop helpers', () => {
     ]);
   });
 
+  it('accepts issue-form headings with double hashes', () => {
+    expect(
+      missingPlatformSections(
+        [
+          '## Problem Statement',
+          'X',
+          '',
+          '## Scope',
+          'Y',
+          '',
+          '## Acceptance Criteria',
+          'Z',
+          '',
+          '## Expected Productivity Gain',
+          'Gain',
+          '',
+          '## Required Checks',
+          '- npm run build',
+          '',
+          '## Required Evidence',
+          '- linked PR',
+          '',
+          '## Blocked If',
+          '- tests fail',
+        ].join('\n'),
+      ),
+    ).toEqual([]);
+  });
+
   it('prefers review queue blocks before picking new work', () => {
     const result = selectPlatformCandidate([
       {
         number: 10,
         state: 'OPEN',
-        status: 'Review Queue',
+        status: 'Review',
+        agent: 'claude',
         priority: 'p1',
         labels: [],
         missingSections: [],
@@ -54,7 +84,8 @@ describe('platform-loop helpers', () => {
       {
         number: 11,
         state: 'OPEN',
-        status: 'Ready for Dispatch',
+        status: 'Ready',
+        agent: '',
         priority: 'p0',
         labels: [],
         missingSections: [],
@@ -75,7 +106,8 @@ describe('platform-loop helpers', () => {
         title: 'Lower priority item',
         url: 'https://example.com/22',
         state: 'OPEN',
-        status: 'Ready for Dispatch',
+        status: 'Ready',
+        agent: '',
         priority: 'p2',
         labels: [],
         missingSections: [],
@@ -88,7 +120,8 @@ describe('platform-loop helpers', () => {
         title: 'Adopt /loop over another command',
         url: 'https://example.com/21',
         state: 'OPEN',
-        status: 'Ready for Dispatch',
+        status: 'Ready',
+        agent: '',
         priority: 'p0',
         labels: [],
         missingSections: [],
@@ -104,7 +137,8 @@ describe('platform-loop helpers', () => {
         number: 21,
         title: 'Adopt /loop over another command',
         url: 'https://example.com/21',
-        status: 'Ready for Dispatch',
+        status: 'Ready',
+        agent: '',
         priority: 'p0',
         labels: [],
         missingSections: [],
@@ -113,6 +147,39 @@ describe('platform-loop helpers', () => {
         nextDecision: '',
         branch: 'claude-platform-21-adopt-loop-over-another-command',
       },
+    });
+  });
+
+  it('ignores ready items assigned away from claude', () => {
+    const result = selectPlatformCandidate([
+      {
+        number: 30,
+        title: 'Human-owned item',
+        url: 'https://example.com/30',
+        state: 'OPEN',
+        status: 'Ready',
+        agent: 'human',
+        priority: 'p0',
+        labels: [],
+        missingSections: [],
+        requestId: '',
+        runId: '',
+        nextDecision: '',
+      },
+    ]);
+
+    expect(result).toEqual({
+      action: 'noop',
+      reason: 'no_eligible_issue',
+      candidatesChecked: [
+        {
+          number: 30,
+          status: 'Ready',
+          priority: 'p0',
+          blocked: false,
+          missingSections: [],
+        },
+      ],
     });
   });
 });

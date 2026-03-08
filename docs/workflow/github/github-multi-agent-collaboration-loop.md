@@ -237,11 +237,10 @@ bash scripts/workflow/apply-branch-protection-baseline.sh <owner/repo> [branch]
 Project automation prerequisite:
 
 1. Add repository secret `ADD_TO_PROJECT_PAT` with `project` + repository scopes.
-2. Set the Project board owner to `openclaw-gurusharan` in `.github/workflows/project-intake-sync.yml` and `.github/workflows/project-status-sync.yml`, while keeping repo Issues/Discussions on `ingpoc/nanoclaw`.
-3. For `Andy/Jarvis Delivery`, configure `Workflow Status` with `Triage`, `Architecture`, `Ready`, `Worker Running`, `Review`, `Blocked`, and `Done`.
-4. For `NanoClaw Platform`, configure `Workflow Status` with `Triage`, `Architecture`, `Ready for Dispatch`, `Claude Running`, `Review Queue`, `Blocked`, and `Done` if the repository uses the dedicated Claude `/loop` lane.
-4. Keep the default GitHub `Status` field as fallback only; runtime sync should prefer `Workflow Status`.
-5. Create the `Source`, `Review Lane`, `Worker`, `Agent`, `Priority`, and `Risk` single-select fields plus the runtime text fields `Request State`, `Worker Status`, `Request ID`, `Run ID`, `Branch`, `PR URL`, `Last Evidence`, and `Next Action`.
+2. Set `PLATFORM_PROJECT_OWNER=ingpoc` and `DELIVERY_PROJECT_OWNER=openclaw-gurusharan` in `.github/workflows/project-intake-sync.yml` and `.github/workflows/project-status-sync.yml`.
+3. Both current boards use the stock GitHub `Status` field with `Backlog`, `Ready`, `In Progress`, `Review`, `Blocked`, and `Done`.
+4. For the dedicated Claude `/loop` lane on `NanoClaw Platform`, use `Agent=claude` plus `Status=In Progress` as the active implementation signal and `Status=Review` for Codex handoff.
+5. Create the `Source`, `Review Lane`, `Worker`, `Agent`, `Priority`, and `Risk` single-select fields plus any optional runtime text fields such as `Request ID`, `Run ID`, `Branch`, `PR URL`, `Last Evidence`, and `Next Action`.
 
 ## Suggested Metrics
 
