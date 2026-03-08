@@ -105,16 +105,20 @@ claude
 
 **通信渠道**
 - `/add-signal` - 添加 Signal 作为渠道
+- `/add-sms` - 通过 Twilio 或类似服务添加短信功能
 
 **会话管理**
 - `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
+**安全**
+- 凭据隔离 - 找到一种方法在不向容器内的 Bash 环境暴露 API 密钥的情况下进行 Claude Code 身份验证。详见 [docs/SECURITY.md](docs/SECURITY.md)。
+
 ## 系统要求
 
-- macOS 或 Linux
+- macOS、Linux 或 Windows（通过 WSL2）
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) 或 [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container) (macOS) 或 [Docker](https://docker.com/products/docker-desktop) (macOS/Linux/WSL2)
 
 ## 架构
 

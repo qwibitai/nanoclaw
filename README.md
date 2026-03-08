@@ -108,16 +108,20 @@ Skills we'd like to see:
 
 **Communication Channels**
 - `/add-signal` - Add Signal as a channel
+- `/add-sms` - Add SMS via Twilio or similar
 
 **Session Management**
 - `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
+**Security**
+- Credential isolation - Find a way to authenticate Claude Code without exposing API keys to the agent's Bash environment inside the container. See [docs/SECURITY.md](docs/SECURITY.md) for details.
+
 ## Requirements
 
-- macOS or Linux
+- macOS, Linux, or Windows (via WSL2)
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux/WSL2)
 
 ## Architecture
 

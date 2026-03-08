@@ -47,38 +47,35 @@ When people contribute, they shouldn't add "Telegram support alongside WhatsApp.
 Skills we'd love contributors to build:
 
 ### Communication Channels
-Skills to add or switch to different messaging platforms:
-- `/add-telegram` - Add Telegram as an input channel
-- `/add-slack` - Add Slack as an input channel
-- `/add-discord` - Add Discord as an input channel
+- `/add-signal` - Add Signal as an input channel
 - `/add-sms` - Add SMS via Twilio or similar
-- `/convert-to-telegram` - Replace WhatsApp with Telegram entirely
 
-### Container Runtime
-The project uses Docker by default (cross-platform). For macOS users who prefer Apple Container:
-- `/convert-to-apple-container` - Switch from Docker to Apple Container (macOS-only)
+### Session Management
+- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
-### Platform Support
-- `/setup-linux` - Make the full setup work on Linux (depends on Docker conversion)
-- `/setup-windows` - Windows support via WSL2 + Docker
+### Completed Skills
+These were previously requested and have been built:
+- `/add-telegram`, `/add-slack`, `/add-discord`, `/add-gmail` - Channel skills
+- `/convert-to-apple-container` - Apple Container runtime (macOS)
+- `/add-voice-transcription`, `/add-image-vision`, `/add-pdf-reader` - Media skills
 
 ---
 
 ## Vision
 
-A personal Claude assistant accessible via WhatsApp, with minimal custom code.
+A personal Claude assistant accessible via messaging channels, with minimal custom code.
 
 **Core components:**
 - **Claude Agent SDK** as the core agent
 - **Containers** for isolated agent execution (Linux VMs)
-- **WhatsApp** as the primary I/O channel
+- **Multi-channel messaging** via skills (WhatsApp, Telegram, Slack, Discord, Gmail)
 - **Persistent memory** per conversation and globally
 - **Scheduled tasks** that run Claude and can message back
 - **Web access** for search and browsing
 - **Browser automation** via agent-browser
 
 **Implementation approach:**
-- Use existing tools (WhatsApp connector, Claude Agent SDK, MCP servers)
+- Use existing tools (channel connectors, Claude Agent SDK, MCP servers)
 - Minimal glue code
 - File-based systems where possible (CLAUDE.md for memory, folders for groups)
 
@@ -87,7 +84,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 ## Architecture Decisions
 
 ### Message Routing
-- A router listens to WhatsApp and routes messages based on configuration
+- A router listens to connected channels and routes messages based on configuration
 - Only messages from registered groups are processed
 - Trigger: `@Andy` prefix (case insensitive), configurable via `ASSISTANT_NAME` env var
 - Unregistered groups are ignored completely
@@ -136,10 +133,10 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 
 ## Integration Points
 
-### WhatsApp
-- Using baileys library for WhatsApp Web connection
+### Channels
+- Channels are installed as skills and self-register at startup
 - Messages stored in SQLite, polled by router
-- QR code authentication during setup
+- Each channel has its own authentication method (QR code for WhatsApp, bot token for Telegram, etc.)
 
 ### Scheduler
 - Built-in scheduler runs on the host, spawns containers for task execution
@@ -170,12 +167,12 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Each user gets a custom setup matching their exact needs
 
 ### Skills
-- `/setup` - Install dependencies, authenticate WhatsApp, configure scheduler, start services
-- `/customize` - General-purpose skill for adding capabilities (new channels like Telegram, new integrations, behavior changes)
-- `/update` - Pull upstream changes, merge with customizations, run migrations
+- `/setup` - Install dependencies, authenticate channels, configure scheduler, start services
+- `/customize` - General-purpose skill for adding capabilities (new channels, new integrations, behavior changes)
+- `/update-nanoclaw` - Pull upstream changes, merge with customizations, run migrations
 
 ### Deployment
-- Runs on local Mac via launchd
+- Runs as a service via launchd (macOS) or systemd (Linux)
 - Single Node.js process handles everything
 
 ---

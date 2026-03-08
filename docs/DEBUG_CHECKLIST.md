@@ -8,8 +8,8 @@ When agent teams spawns subagent CLI processes, they write to the same session J
 ### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
 Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
 
-### 3. Cursor advanced before agent succeeds
-`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
+### 3. [FIXED] Cursor advanced before agent succeeds
+`processGroupMessages` advances `lastAgentTimestamp` before the agent runs. **Fix**: the cursor is now rolled back on error (unless output was already sent to the user, to prevent duplicate messages).
 
 ## Quick Status Check
 
@@ -19,16 +19,16 @@ launchctl list | grep nanoclaw
 # Expected: PID  0  com.nanoclaw (PID = running, "-" = not running, non-zero exit = crashed)
 
 # 2. Any running containers?
-container ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
+docker ls --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
 # 3. Any stopped/orphaned containers?
-container ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
+docker ls -a --format '{{.Names}} {{.Status}}' 2>/dev/null | grep nanoclaw
 
 # 4. Recent errors in service log?
 grep -E 'ERROR|WARN' logs/nanoclaw.log | tail -20
 
-# 5. Is WhatsApp connected? (look for last connection event)
-grep -E 'Connected to WhatsApp|Connection closed|connection.*close' logs/nanoclaw.log | tail -5
+# 5. Are channels connected? (look for last connection event)
+grep -E 'Connected|Channel.*connected|Connection closed|connection.*close' logs/nanoclaw.log | tail -5
 
 # 6. Are groups loaded?
 grep 'groupCount' logs/nanoclaw.log | tail -3
@@ -77,7 +77,7 @@ grep -E 'Scheduling retry|retry|Max retries' logs/nanoclaw.log | tail -10
 ## Agent Not Responding
 
 ```bash
-# Check if messages are being received from WhatsApp
+# Check if messages are being received
 grep 'New messages' logs/nanoclaw.log | tail -10
 
 # Check if messages are being processed (container spawned)
@@ -107,20 +107,19 @@ sqlite3 store/messages.db "SELECT name, container_config FROM registered_groups;
 
 # Test-run a container to check mounts (dry run)
 # Replace <group-folder> with the group's folder name
-container run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
+docker run -i --rm --entrypoint ls nanoclaw-agent:latest /workspace/extra/
 ```
 
-## WhatsApp Auth Issues
+## Channel Auth Issues
 
 ```bash
-# Check if QR code was requested (means auth expired)
-grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
+# Check for authentication errors (WhatsApp QR expired, bot token invalid, etc.)
+grep -iE 'QR|authentication|auth.*fail|credentials missing' logs/nanoclaw.log | tail -5
 
-# Check auth files exist
+# Check auth files exist (channel-specific)
 ls -la store/auth/
 
-# Re-authenticate if needed
-npm run auth
+# Re-run the channel skill to re-authenticate (e.g., /add-whatsapp)
 ```
 
 ## Service Management

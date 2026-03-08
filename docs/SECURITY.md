@@ -7,7 +7,7 @@
 | Main group | Trusted | Private self-chat, admin control |
 | Non-main groups | Untrusted | Other users may be malicious |
 | Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| Inbound messages | User input | Potential prompt injection (any channel) |
 
 ## Security Boundaries
 
@@ -66,21 +66,21 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Handling
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+**Passed via stdin (never written to disk):**
+- Claude auth tokens (filtered from `.env`)
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
+**NOT Exposed:**
+- Channel sessions (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
 - Any credentials matching blocked patterns
 
 **Credential Filtering:**
-Only these environment variables are exposed to containers:
+Only these environment variables are passed to containers (via stdin JSON):
 ```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
 ```
 
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
+> **Note:** Anthropic credentials are passed via stdin so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment. **PRs welcome** if you have ideas for credential isolation.
 
 ## Privilege Comparison
 
@@ -98,7 +98,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
+│  Inbound Messages (potentially malicious, any channel)             │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
                                  ▼ Trigger check, input escaping

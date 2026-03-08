@@ -78,7 +78,7 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Channel System | Channel registry (`src/channels/registry.ts`) | Channels self-register at startup |
 | Message Storage | SQLite (better-sqlite3) | Store messages for polling |
 | Container Runtime | Containers (Linux VMs) | Isolated environments for agent execution |
-| Agent | @anthropic-ai/claude-agent-sdk (0.2.29) | Run Claude with tools and MCP servers |
+| Agent | @anthropic-ai/claude-agent-sdk (^0.2.34) | Run Claude with tools and MCP servers |
 | Browser Automation | agent-browser + Chromium | Web interaction and screenshots |
 | Runtime | Node.js 20+ | Host process for routing and scheduling |
 
@@ -264,7 +264,7 @@ nanoclaw/
 │   ├── db.ts                      # SQLite database initialization and queries
 │   ├── group-queue.ts             # Per-group queue with global concurrency limit
 │   ├── mount-security.ts          # Mount allowlist validation for containers
-│   ├── whatsapp-auth.ts           # Standalone WhatsApp authentication
+│   ├── sender-allowlist.ts        # Per-chat sender filtering
 │   ├── task-scheduler.ts          # Runs scheduled tasks when due
 │   └── container-runner.ts        # Spawns agents in containers
 │
@@ -284,15 +284,23 @@ nanoclaw/
 │
 ├── .claude/
 │   └── skills/
-│       ├── setup/SKILL.md              # /setup - First-time installation
-│       ├── customize/SKILL.md          # /customize - Add capabilities
-│       ├── debug/SKILL.md              # /debug - Container debugging
-│       ├── add-telegram/SKILL.md       # /add-telegram - Telegram channel
-│       ├── add-gmail/SKILL.md          # /add-gmail - Gmail integration
+│       ├── setup/                      # /setup - First-time installation
+│       ├── customize/                  # /customize - Add capabilities
+│       ├── debug/                      # /debug - Container debugging
+│       ├── update-nanoclaw/            # /update-nanoclaw - Upstream updates
+│       ├── add-whatsapp/               # /add-whatsapp - WhatsApp channel
+│       ├── add-telegram/               # /add-telegram - Telegram channel
+│       ├── add-telegram-swarm/         # /add-telegram-swarm - Agent swarms
+│       ├── add-slack/                  # /add-slack - Slack channel
+│       ├── add-discord/                # /add-discord - Discord channel
+│       ├── add-gmail/                  # /add-gmail - Gmail integration
+│       ├── add-image-vision/           # /add-image-vision - Image processing
 │       ├── add-voice-transcription/    # /add-voice-transcription - Whisper
-│       ├── x-integration/SKILL.md      # /x-integration - X/Twitter
-│       ├── convert-to-apple-container/  # /convert-to-apple-container - Apple Container runtime
-│       └── add-parallel/SKILL.md       # /add-parallel - Parallel agents
+│       ├── add-pdf-reader/             # /add-pdf-reader - PDF reading
+│       ├── add-ollama-tool/            # /add-ollama-tool - Local LLM
+│       ├── convert-to-apple-container/ # /convert-to-apple-container - Apple Container
+│       ├── x-integration/              # /x-integration - X/Twitter
+│       └── add-parallel/              # /add-parallel - Parallel agents
 │
 ├── groups/
 │   ├── CLAUDE.md                  # Global memory (all groups read this)
@@ -305,13 +313,12 @@ nanoclaw/
 │       └── *.md                   # Files created by the agent
 │
 ├── store/                         # Local data (gitignored)
-│   ├── auth/                      # WhatsApp authentication state
+│   ├── auth/                      # Channel authentication state (e.g., WhatsApp session)
 │   └── messages.db                # SQLite database (messages, chats, scheduled_tasks, task_run_logs, registered_groups, sessions, router_state)
 │
 ├── data/                          # Application state (gitignored)
 │   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── env/env                    # Copy of .env for container mounting
-│   └── ipc/                       # Container IPC (messages/, tasks/)
+│   └── ipc/                       # Container IPC per group (messages/, tasks/, input/)
 │
 ├── logs/                          # Runtime logs (gitignored)
 │   ├── nanoclaw.log               # Host stdout
@@ -380,7 +387,7 @@ Folder names follow the convention `{channel}_{group-name}` (e.g., `whatsapp_fam
 
 Additional mounts appear at `/workspace/extra/{containerPath}` inside the container.
 
-**Mount syntax note:** Read-write mounts use `-v host:container`, but readonly mounts require `--mount "type=bind,source=...,target=...,readonly"` (the `:ro` suffix may not work on all runtimes).
+**Mount syntax note:** Read-write mounts use `-v host:container`. Readonly mounts use `-v host:container:ro` for Docker; Apple Container requires `--mount "type=bind,source=...,target=...,readonly"` instead. The `container-runtime.ts` abstraction handles this difference.
 
 ### Claude Authentication
 
@@ -397,7 +404,7 @@ The token can be extracted from `~/.claude/.credentials.json` if you're logged i
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
+Only allowed environment variables are extracted from `.env` and passed to the container via stdin JSON (never written to disk or mounted as files). The allowed variables are: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, and `ANTHROPIC_AUTH_TOKEN`. All other environment variables in `.env` are not exposed to the agent.
 
 ### Changing the Assistant Name
 
@@ -428,21 +435,21 @@ NanoClaw uses a hierarchical memory system based on CLAUDE.md files.
 
 | Level | Location | Read By | Written By | Purpose |
 |-------|----------|---------|------------|---------|
-| **Global** | `groups/CLAUDE.md` | All groups | Main only | Preferences, facts, context shared across all conversations |
+| **Global** | `groups/global/CLAUDE.md` | All groups | Main only | Preferences, facts, context shared across all conversations |
 | **Group** | `groups/{name}/CLAUDE.md` | That group | That group | Group-specific context, conversation memory |
 | **Files** | `groups/{name}/*.md` | That group | That group | Notes, research, documents created during conversation |
 
 ### How Memory Works
 
 1. **Agent Context Loading**
-   - Agent runs with `cwd` set to `groups/{group-name}/`
-   - Claude Agent SDK with `settingSources: ['project']` automatically loads:
-     - `../CLAUDE.md` (parent directory = global memory)
-     - `./CLAUDE.md` (current directory = group memory)
+   - Agent runs with `cwd` set to `/workspace/group/` (mounted from `groups/{group-name}/`)
+   - Group CLAUDE.md is loaded from `./CLAUDE.md` in the working directory
+   - For non-main groups: `groups/global/` is mounted read-only at `/workspace/global/`; its CLAUDE.md is loaded via the `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` setting
+   - For main: the project root is mounted read-only at `/workspace/project/`
 
 2. **Writing Memory**
-   - When user says "remember this", agent writes to `./CLAUDE.md`
-   - When user says "remember this globally" (main channel only), agent writes to `../CLAUDE.md`
+   - When user says "remember this", agent writes to `./CLAUDE.md` (group memory)
+   - When user says "remember this globally" (main channel only), agent writes to the global CLAUDE.md
    - Agent can create files like `notes.md`, `research.md` in the group folder
 
 3. **Main Channel Privileges**
@@ -636,12 +643,12 @@ The `nanoclaw` MCP server is created dynamically per agent call with the current
 
 ## Deployment
 
-NanoClaw runs as a single macOS launchd service.
+NanoClaw runs as a single service: launchd on macOS or systemd on Linux.
 
 ### Startup Sequence
 
 When NanoClaw starts, it:
-1. **Ensures container runtime is running** - Automatically starts it if needed; kills orphaned NanoClaw containers from previous runs
+1. **Ensures container runtime is running** - Checks Docker is reachable (exits with error if not); kills orphaned NanoClaw containers from previous runs
 2. Initializes the SQLite database (migrates from JSON files if they exist)
 3. Loads state from SQLite (registered groups, sessions, router state)
 4. **Connects channels** — loops through registered channels, instantiates those with credentials, calls `connect()` on each
@@ -717,14 +724,14 @@ tail -f logs/nanoclaw.log
 
 All agents run inside containers (lightweight Linux VMs), providing:
 - **Filesystem isolation**: Agents can only access mounted directories
-- **Safe Bash access**: Commands run inside the container, not on your Mac
+- **Safe Bash access**: Commands run inside the container, not on the host
 - **Network isolation**: Can be configured per-container if needed
 - **Process isolation**: Container processes can't affect the host
 - **Non-root user**: Container runs as unprivileged `node` user (uid 1000)
 
 ### Prompt Injection Risk
 
-WhatsApp messages could contain malicious instructions attempting to manipulate Claude's behavior.
+Inbound messages from any channel could contain malicious instructions attempting to manipulate Claude's behavior.
 
 **Mitigations:**
 - Container isolation limits blast radius
@@ -745,7 +752,8 @@ WhatsApp messages could contain malicious instructions attempting to manipulate 
 | Credential | Storage Location | Notes |
 |------------|------------------|-------|
 | Claude CLI Auth | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/ | Auto-created, persists ~20 days |
+| Anthropic secrets | .env (host only) | Passed to container via stdin JSON, never written to disk |
+| Channel sessions | store/auth/ (varies by channel) | Channel-specific auth state (e.g., WhatsApp session) |
 
 ### File Permissions
 
