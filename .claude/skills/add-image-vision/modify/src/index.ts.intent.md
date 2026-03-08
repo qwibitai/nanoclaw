@@ -2,23 +2,26 @@
 
 ## What Changed
 - Added `import { parseImageReferences } from './image.js'`
-- In `processGroupMessages`: extract image references after formatting, pass `imageAttachments` to `runAgent`
-- In `runAgent`: added `imageAttachments` parameter, conditionally spread into `runContainerAgent` input
+- In `runAgent`: added optional `imageAttachments` parameter (5th), conditionally spread into `runContainerAgent` input
+- In `buildProcessorDeps`: `runAgent` wrapper forwards the 5th `imageAttachments` param
 
 ## Key Sections
 - **Imports** (top of file): parseImageReferences
-- **processGroupMessages**: Image extraction, threading to runAgent
-- **runAgent**: Signature change + imageAttachments in input
+- **runAgent function**: Signature change + imageAttachments in container input
+- **buildProcessorDeps**: runAgent wrapper forwards imageAttachments
 
 ## Invariants (must-keep)
-- State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp)
+- State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp, pendingSendCursor)
 - loadState/saveState functions
-- registerGroup function with folder validation
+- registerGroup/unregisterGroup functions with folder validation
 - getAvailableGroups function
-- processGroupMessages trigger logic, cursor management, idle timer, error rollback with duplicate prevention
-- runAgent task/group snapshot writes, session tracking, wrappedOnOutput
-- startMessageLoop with dedup-by-group and piping logic
-- recoverPendingMessages startup recovery
-- main() with channel setup, scheduler, IPC watcher, queue
+- buildHandlerDeps with sendMessage, registeredGroups, registerGroup, unregisterGroup, syncGroups, getAvailableGroups
+- buildProcessorDeps with all existing fields
+- processGroupMessages and recoverPendingMessages imported from message-processor.ts
+- startMessageLoop with dedup-by-group, optimistic cursor, and async piping logic
+- main() with channel setup, scheduler, queue, handler deps
 - ensureContainerSystemRunning using container-runtime abstraction
 - Graceful shutdown with queue.shutdown
+- No inline processGroupMessages (it's in message-processor.ts)
+- No startIpcWatcher (removed in stdio IPC migration)
+- No writeTasksSnapshot/writeGroupsSnapshot (removed in stdio IPC migration)

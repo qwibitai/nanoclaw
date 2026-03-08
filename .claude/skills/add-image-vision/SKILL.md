@@ -42,11 +42,9 @@ Adds the ability for NanoClaw agents to see and understand images sent via Whats
    ./container/build.sh
    ```
 
-2. Sync agent-runner source to group caches:
+2. Clear cached agent-runner source (forces refresh on next container start):
    ```bash
-   for dir in data/sessions/*/agent-runner-src/; do
-     cp container/agent-runner/src/*.ts "$dir"
-   done
+   rm -rf data/sessions/*/agent-runner-src/
    ```
 
 3. Restart the service:
@@ -67,4 +65,4 @@ Adds the ability for NanoClaw agents to see and understand images sent via Whats
 
 - **"Image - download failed"**: Check WhatsApp connection stability. The download may timeout on slow connections.
 - **"Image - processing failed"**: Sharp may not be installed correctly. Run `npm ls sharp` to verify.
-- **Agent doesn't mention image content**: Check container logs for "Loaded image" messages. If missing, ensure agent-runner source was synced to group caches.
+- **Agent doesn't mention image content**: Check container logs for "Loaded image" messages. If missing, clear cached agent-runner-src directories and restart.
