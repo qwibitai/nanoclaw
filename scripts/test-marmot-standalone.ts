@@ -38,6 +38,8 @@ import {
   deserializeApplicationRumor,
   GROUP_EVENT_KIND,
   KEY_PACKAGE_KIND,
+  KEY_PACKAGE_RELAY_LIST_KIND,
+  createKeyPackageRelayListEvent,
 } from '@internet-privacy/marmot-ts';
 import type {
   NostrNetworkInterface,
@@ -298,6 +300,40 @@ async function main() {
       seen: new InMemoryKVStore(),
     },
   });
+
+  // --- Publish kind 0 profile metadata (so White Noise can find us in search) ---
+  log('INIT', 'Publishing profile metadata (kind 0)...');
+  try {
+    const profileEvent = signer.signEvent({
+      kind: 0,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+      content: JSON.stringify({
+        name: 'NanoClaw Bot',
+        about: 'NanoClaw Marmot/White Noise test bot',
+        picture: '',
+      }),
+    } as any);
+    await network.publish(relays, profileEvent);
+    log('INIT', 'Profile metadata published (kind 0)');
+  } catch (err: any) {
+    log('ERROR', 'Failed to publish profile', { error: err?.message });
+  }
+
+  // --- Publish kind 10051 KeyPackage Relay List (tells White Noise WHERE to find our KeyPackages) ---
+  log('INIT', 'Publishing KeyPackage relay list (kind 10051)...');
+  try {
+    const relayListUnsigned = createKeyPackageRelayListEvent({
+      pubkey,
+      relays,
+      client: 'NanoClaw/marmot-test',
+    });
+    const relayListEvent = signer.signEvent(relayListUnsigned);
+    await network.publish(relays, relayListEvent);
+    log('INIT', `KeyPackage relay list published (kind ${KEY_PACKAGE_RELAY_LIST_KIND}) with ${relays.length} relays`);
+  } catch (err: any) {
+    log('ERROR', 'Failed to publish relay list', { error: err?.message });
+  }
 
   // --- Publish KeyPackage (kind 443) ---
   log('INIT', 'Publishing KeyPackage (kind 443)...');

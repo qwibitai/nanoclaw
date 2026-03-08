@@ -27,6 +27,8 @@ import {
   deserializeApplicationRumor,
   GROUP_EVENT_KIND,
   KEY_PACKAGE_KIND,
+  KEY_PACKAGE_RELAY_LIST_KIND,
+  createKeyPackageRelayListEvent,
 } from '@internet-privacy/marmot-ts';
 import type {
   NostrNetworkInterface,
@@ -297,6 +299,41 @@ export class MarmotChannel implements Channel {
         seen: new InMemoryKVStore(),
       },
     });
+
+    // Publish kind 0 profile metadata so White Noise can discover us
+    try {
+      const profileEvent = this.signer.signEvent({
+        kind: 0,
+        pubkey,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [],
+        content: JSON.stringify({
+          name: 'NanoClaw Bot',
+          about: 'NanoClaw assistant via Marmot/White Noise',
+        }),
+      } as UnsignedEvent);
+      await this.network.publish(MARMOT_NOSTR_RELAYS, profileEvent);
+      logger.info('Profile metadata published (kind 0)');
+    } catch (err) {
+      logger.error({ err }, 'Failed to publish profile metadata');
+    }
+
+    // Publish kind 10051 KeyPackage Relay List (tells White Noise WHERE our KeyPackages are)
+    try {
+      const relayListUnsigned = createKeyPackageRelayListEvent({
+        pubkey,
+        relays: MARMOT_NOSTR_RELAYS,
+        client: 'NanoClaw/marmot',
+      });
+      const relayListEvent = this.signer.signEvent(relayListUnsigned);
+      await this.network.publish(MARMOT_NOSTR_RELAYS, relayListEvent);
+      logger.info(
+        { kind: KEY_PACKAGE_RELAY_LIST_KIND, relayCount: MARMOT_NOSTR_RELAYS.length },
+        'KeyPackage relay list published (kind 10051)',
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to publish KeyPackage relay list');
+    }
 
     // Publish a KeyPackage so White Noise users can invite us
     try {
