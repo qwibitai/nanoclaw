@@ -432,7 +432,11 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*',
+        'mcp__google_drive__*',
+        'mcp__ollama__*',
+        'mcp__airtable__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -446,6 +450,29 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
+        gmail: {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+        },
+        google_drive: {
+          command: 'npx',
+          args: ['-y', '@piotr-agier/google-drive-mcp'],
+          env: {
+            GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.config/google-drive-mcp/gcp-oauth.keys.json',
+            GOOGLE_DRIVE_MCP_TOKEN_PATH: '/home/node/.config/google-drive-mcp/tokens.json',
+          },
+        },
+        ollama: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
+        },
+        airtable: {
+          command: 'npx',
+          args: ['-y', 'airtable-mcp-server'],
+          env: {
+            AIRTABLE_API_KEY: sdkEnv.AIRTABLE_API_KEY || '',
           },
         },
       },

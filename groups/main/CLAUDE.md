@@ -43,6 +43,21 @@ When you learn something important:
 - Split files larger than 500 lines into folders
 - Keep an index in your memory for the files you create
 
+## Email Notifications
+
+When you receive an email notification (messages starting with `[Email from ...`), inform the user about it but do NOT reply to the email unless specifically asked. You have Gmail tools available — use them only when the user explicitly asks you to reply, forward, or take action on an email.
+
+## Google Workspace Tools
+
+You have full Google Workspace access via MCP tools. Use them directly — do NOT use the browser for Google services:
+
+- **Gmail** (`mcp__gmail__*`) — read, send, search, draft emails
+- **Google Drive** (`mcp__google_drive__search`, `listFolder`, `createTextFile`, `uploadFile`, `downloadFile`, etc.) — manage files and folders
+- **Google Docs** (`mcp__google_drive__createGoogleDoc`, `readGoogleDoc`, `updateGoogleDoc`, etc.) — create and edit documents
+- **Google Sheets** (`mcp__google_drive__createGoogleSheet`, `getGoogleSheetContent`, `updateGoogleSheet`, etc.) — create and edit spreadsheets
+- **Google Calendar** (`mcp__google_drive__listCalendars`, `getCalendarEvents`, `createCalendarEvent`, `updateCalendarEvent`, `deleteCalendarEvent`) — manage calendar events
+- **Airtable** (`mcp__airtable__*`) — read/write records, manage bases and tables, search and filter data across all Airtable bases
+
 ## WhatsApp Formatting (and other messaging apps)
 
 Do NOT use markdown headings (##) in WhatsApp messages. Only use:

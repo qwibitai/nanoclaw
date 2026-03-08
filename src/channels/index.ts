@@ -4,9 +4,14 @@
 // discord
 
 // gmail
+import './gmail.js';
 
 // slack
 
 // telegram
 
+// web
+import './web.js';
+
 // whatsapp
+import './whatsapp.js';
