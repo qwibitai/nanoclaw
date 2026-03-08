@@ -40,11 +40,13 @@ This deterministically:
 - Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
 - Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
+- Adds `files/` IPC subdirectory creation in `src/container-runner.ts` (for attachment downloads)
 - Installs the `discord.js` npm dependency
 - Records the application in `.nanoclaw/state.yaml`
 
-If the apply reports merge conflicts, read the intent file:
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+If the apply reports merge conflicts, read the intent files:
+- `modify/src/channels/index.ts.intent.md` — channel barrel import
+- `modify/src/container-runner.ts.intent.md` — files IPC directory
 
 ### Validate code changes
 
@@ -199,7 +201,7 @@ If you can't copy the channel ID:
 
 The Discord bot supports:
 - Text messages in registered channels
-- Attachment descriptions (images, videos, files shown as placeholders)
+- **File downloads**: Downloads all attachments (images, documents, spreadsheets, PDFs, audio, video, text files) to `/workspace/ipc/files/` so the agent can read/view them with the Read tool
 - Reply context (shows who the user is replying to)
 - @mention translation (Discord `<@botId>` → NanoClaw trigger format)
 - Message splitting for responses over 2000 characters

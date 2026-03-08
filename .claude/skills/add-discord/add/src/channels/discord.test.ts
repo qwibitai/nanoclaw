@@ -24,6 +24,23 @@ vi.mock('../logger.js', () => ({
   },
 }));
 
+// Mock fs (for image download)
+vi.mock('fs', () => ({
+  default: {
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
+}));
+
+// Mock group-folder (for IPC path resolution)
+vi.mock('../group-folder.js', () => ({
+  resolveGroupIpcPath: vi.fn(() => '/tmp/test-ipc'),
+}));
+
+// Mock global fetch
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
 // --- discord.js mock ---
 
 type Handler = (...args: any[]) => any;
@@ -195,6 +212,11 @@ async function triggerMessage(message: any) {
 describe('DiscordChannel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: fetch succeeds (for image download tests)
+    mockFetch.mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    });
   });
 
   afterEach(() => {
@@ -490,13 +512,85 @@ describe('DiscordChannel', () => {
   // --- Attachments ---
 
   describe('attachments', () => {
-    it('stores image attachment with placeholder', async () => {
+    it('downloads image and includes container path', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'photo.png', contentType: 'image/png' }],
+        ['att1', { id: 'att1', name: 'photo.png', contentType: 'image/png', url: 'https://cdn.discord.com/photo.png' }],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(mockFetch).toHaveBeenCalledWith('https://cdn.discord.com/photo.png');
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Image: photo.png — view with Read tool at /workspace/ipc/files/msg_001-att1.png]',
+        }),
+      );
+    });
+
+    it('downloads document and includes container path', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { id: 'att1', name: 'report.pdf', contentType: 'application/pdf', url: 'https://cdn.discord.com/report.pdf' }],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(mockFetch).toHaveBeenCalledWith('https://cdn.discord.com/report.pdf');
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[File: report.pdf — view with Read tool at /workspace/ipc/files/msg_001-att1.pdf]',
+        }),
+      );
+    });
+
+    it('downloads audio and includes container path', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { id: 'att1', name: 'voice.ogg', contentType: 'audio/ogg', url: 'https://cdn.discord.com/voice.ogg' }],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Audio: voice.ogg — view with Read tool at /workspace/ipc/files/msg_001-att1.ogg]',
+        }),
+      );
+    });
+
+    it('falls back to placeholder when download fails', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { id: 'att1', name: 'photo.png', contentType: 'image/png', url: 'https://cdn.discord.com/photo.png' }],
       ]);
       const msg = createMessage({
         content: '',
@@ -559,13 +653,13 @@ describe('DiscordChannel', () => {
       );
     });
 
-    it('includes text content with attachments', async () => {
+    it('includes text content with downloaded file path', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'photo.jpg', contentType: 'image/jpeg' }],
+        ['att1', { id: 'att1', name: 'photo.jpg', contentType: 'image/jpeg', url: 'https://cdn.discord.com/photo.jpg' }],
       ]);
       const msg = createMessage({
         content: 'Check this out',
@@ -577,19 +671,19 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: 'Check this out\n[Image: photo.jpg]',
+          content: 'Check this out\n[Image: photo.jpg — view with Read tool at /workspace/ipc/files/msg_001-att1.jpg]',
         }),
       );
     });
 
-    it('handles multiple attachments', async () => {
+    it('downloads all attachment types', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
       const attachments = new Map([
-        ['att1', { name: 'a.png', contentType: 'image/png' }],
-        ['att2', { name: 'b.txt', contentType: 'text/plain' }],
+        ['att1', { id: 'att1', name: 'a.png', contentType: 'image/png', url: 'https://cdn.discord.com/a.png' }],
+        ['att2', { id: 'att2', name: 'b.txt', contentType: 'text/plain', url: 'https://cdn.discord.com/b.txt' }],
       ]);
       const msg = createMessage({
         content: '',
@@ -598,12 +692,33 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
+      expect(mockFetch).toHaveBeenCalledTimes(2);
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Image: a.png]\n[File: b.txt]',
+          content: '[Image: a.png — view with Read tool at /workspace/ipc/files/msg_001-att1.png]\n[File: b.txt — view with Read tool at /workspace/ipc/files/msg_001-att2.txt]',
         }),
       );
+    });
+
+    it('skips image download for unregistered channels', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        ['att1', { id: 'att1', name: 'photo.png', contentType: 'image/png', url: 'https://cdn.discord.com/photo.png' }],
+      ]);
+      const msg = createMessage({
+        channelId: '9999999999999999',
+        content: '',
+        attachments,
+        guildName: 'Other Server',
+      });
+      await triggerMessage(msg);
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(opts.onMessage).not.toHaveBeenCalled();
     });
   });
 
