@@ -50,6 +50,10 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  /** Claude model to use (haiku/sonnet/opus). If unset, uses default. */
+  model?: string;
+  /** Claude effort level (low/medium/high). Controls thinking budget. */
+  effort?: string;
 }
 
 export interface ContainerOutput {

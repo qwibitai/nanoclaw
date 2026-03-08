@@ -10,6 +10,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { ContainerOutput, runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { runHostWorker } from './host-worker.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -22,6 +23,23 @@ import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
+
+/**
+ * Model assignments for scheduled agent tasks.
+ * - Intelligence gathering agents: haiku (simple, cost-effective)
+ * - Analysis/decision agents: sonnet (reasoning required)
+ * Default: haiku for unrecognized agents.
+ */
+const TASK_MODEL_MAP: Record<string, { model: string; effort: string }> = {
+  'neo-intelligence-ch':  { model: 'haiku',  effort: 'low' },
+  'neo-x-intel-ch':      { model: 'haiku',  effort: 'low' },
+  'neo-housekeeping-ch': { model: 'haiku',  effort: 'low' },
+  'neo-portfolio-ch':    { model: 'haiku',  effort: 'medium' },
+  'neo-strategies-ch':   { model: 'sonnet', effort: 'high' },
+  'neo-risk-ch':         { model: 'sonnet', effort: 'high' },
+  'neo-learner-ch':      { model: 'sonnet', effort: 'high' },
+  'main':                { model: 'sonnet', effort: 'high' },
+};
 
 export interface SchedulerDependencies {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -61,8 +79,15 @@ async function runTask(
   fs.mkdirSync(groupDir, { recursive: true });
 
   logger.info(
+
     { taskId: task.id, group: task.group_folder },
     'Running scheduled task',
+  );
+
+  const taskModel = TASK_MODEL_MAP[task.group_folder] || { model: 'haiku', effort: 'medium' };
+  logger.info(
+    { taskId: task.id, model: taskModel.model, effort: taskModel.effort },
+    'Model assignment for scheduled task',
   );
 
   const groups = deps.registeredGroups();
@@ -126,40 +151,67 @@ async function runTask(
   };
 
   try {
-    const output = await runContainerAgent(
-      group,
-      {
-        prompt: task.prompt,
-        sessionId,
-        groupFolder: task.group_folder,
-        chatJid: task.chat_jid,
-        isMain,
-        isScheduledTask: true,
-        assistantName: ASSISTANT_NAME,
-      },
-      (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
-      async (streamedOutput: ContainerOutput) => {
-        // Persist session for group context mode
-        if (task.context_mode === 'group' && streamedOutput.newSessionId) {
-          deps.setSessions(task.group_folder, streamedOutput.newSessionId);
-        }
-        if (streamedOutput.result) {
-          result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
-          scheduleClose();
-        }
-        if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid);
-        }
-        if (streamedOutput.status === 'error') {
-          error = streamedOutput.error || 'Unknown error';
-        }
-      },
-    );
+    const useHost = group.containerConfig?.useHostWorker === true;
+    let output: ContainerOutput;
+
+    // Shared streaming output handler
+    const onStreamOutput = async (streamedOutput: ContainerOutput) => {
+      if (task.context_mode === 'group' && streamedOutput.newSessionId) {
+        deps.setSessions(task.group_folder, streamedOutput.newSessionId);
+      }
+      if (streamedOutput.result) {
+        result = streamedOutput.result;
+        await deps.sendMessage(task.chat_jid, streamedOutput.result);
+        if (!useHost) scheduleClose();
+      }
+      if (streamedOutput.status === 'success') {
+        deps.queue.notifyIdle(task.chat_jid);
+      }
+      if (streamedOutput.status === 'error') {
+        error = streamedOutput.error || 'Unknown error';
+      }
+    };
+
+    if (useHost) {
+      logger.info(
+        { taskId: task.id, model: taskModel.model, cwd: group.containerConfig?.hostWorkerCwd },
+        'Running task via host worker',
+      );
+      output = await runHostWorker(
+        group,
+        {
+          prompt: task.prompt,
+          sessionId,
+          groupFolder: task.group_folder,
+          chatJid: task.chat_jid,
+          isMain,
+          model: taskModel.model,
+          effort: taskModel.effort,
+          cwd: group.containerConfig?.hostWorkerCwd || '/root',
+        },
+        (proc, name) => deps.onProcess(task.chat_jid, proc, name, task.group_folder),
+        onStreamOutput,
+      );
+    } else {
+      output = await runContainerAgent(
+        group,
+        {
+          prompt: task.prompt,
+          sessionId,
+          groupFolder: task.group_folder,
+          chatJid: task.chat_jid,
+          isMain,
+          isScheduledTask: true,
+          assistantName: ASSISTANT_NAME,
+          model: taskModel.model,
+          effort: taskModel.effort,
+        },
+        (proc, containerName) => deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+        onStreamOutput,
+      );
+    }
 
     if (closeTimer) clearTimeout(closeTimer);
-
 
     // Persist session ID for group context mode
     if (task.context_mode === 'group' && output.newSessionId) {
@@ -168,12 +220,11 @@ async function runTask(
     if (output.status === 'error') {
       error = output.error || 'Unknown error';
     } else if (output.result) {
-      // Messages are sent via MCP tool (IPC), result text is just logged
       result = output.result;
     }
 
     logger.info(
-      { taskId: task.id, durationMs: Date.now() - startTime },
+      { taskId: task.id, useHost, model: taskModel.model, durationMs: Date.now() - startTime },
       'Task completed',
     );
   } catch (err) {
@@ -221,13 +272,15 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
     return;
   }
   schedulerRunning = true;
-  logger.info('Scheduler loop started');
+  logger.info(
+'Scheduler loop started');
 
   const loop = async () => {
     try {
       const dueTasks = getDueTasks();
       if (dueTasks.length > 0) {
-        logger.info({ count: dueTasks.length }, 'Found due tasks');
+        logger.info(
+{ count: dueTasks.length }, 'Found due tasks');
       }
 
       for (const task of dueTasks) {

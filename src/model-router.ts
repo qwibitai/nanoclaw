@@ -257,6 +257,7 @@ export function classifyTier(prompt: string): RouteResult {
       model: 'haiku',
       effort: metaTags.effort || 'medium',
       useFreeModel: false,
+
       reason: 'needs tool access (KB/file/code reference)',
     };
   }
@@ -284,7 +285,7 @@ export function classifyTier(prompt: string): RouteResult {
   // 8. Default → moderate (haiku, medium effort)
   return {
     tier: 'moderate',
-    model: 'haiku',
+    model: 'sonnet',
     effort: metaTags.effort || 'medium',
     useFreeModel: false,
     reason: 'default tier',
