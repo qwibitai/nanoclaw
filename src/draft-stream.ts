@@ -144,25 +144,40 @@ export function createDraftStream(opts: DraftStreamOpts): DraftStream {
     },
 
     async finish(text: string): Promise<boolean> {
-      // Re-enable sending for the final flush even if previously stopped
-      // due to length (the final text might be shorter/different).
-      const wasStopped = stopped;
-      stopped = false;
-      pendingText = text;
-      await flush();
+      // Immediately lock out update() to prevent race conditions where
+      // streamText from a new agent turn sneaks in during our async work.
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (inFlight) await inFlight;
 
-      // If we never managed to send anything (debounce or earlier failure),
-      // try one direct send now.
-      if (messageId === undefined && text.trim()) {
-        const ok = await doSendOrEdit(text);
-        stopped = true;
-        return ok;
+      const trimmed = text.trimEnd();
+      if (!trimmed) {
+        // Empty text — preserve any existing message (don't delete it).
+        return messageId !== undefined;
+      }
+      if (trimmed.length > maxLength) {
+        return false; // Too long — caller should fall back to sendMessage
       }
 
-      stopped = true;
-      // If the stream was stopped due to length and we couldn't edit, report failure
-      if (wasStopped && messageId === undefined) return false;
-      return true;
+      try {
+        if (messageId !== undefined) {
+          // Edit existing draft with final text
+          if (trimmed !== lastSentText) {
+            await opts.editMessage(messageId, trimmed);
+          }
+          return true;
+        } else {
+          // Never managed to send (debounce threshold) — try direct send
+          messageId = await opts.sendMessage(trimmed);
+          return messageId !== undefined;
+        }
+      } catch (err) {
+        logger.debug({ err }, 'Draft stream finish failed');
+        return false;
+      }
     },
 
     async cancel(): Promise<void> {
