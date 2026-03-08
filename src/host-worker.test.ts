@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ChildProcess, EventEmitter } from 'events';
+import { EventEmitter } from 'events';
+import { ChildProcess } from 'child_process';
 import { Readable, Writable } from 'stream';
 
 // Mock child_process.spawn before importing host-worker

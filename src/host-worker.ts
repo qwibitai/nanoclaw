@@ -7,6 +7,7 @@
  * - Streaming output (stream-json) — results sent to Discord as they arrive
  * - Follow-up IPC — watches ipc/input/ directory for new messages, pipes to stdin
  * - Session resumption — continues conversations across messages
+ * - Model routing — supports --model flag for tier-based model selection
  */
 import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
@@ -23,6 +24,10 @@ export interface HostWorkerInput {
   groupFolder: string;
   chatJid: string;
   isMain: boolean;
+  /** Claude model to use (haiku/sonnet/opus). If unset, uses default. */
+  model?: string;
+  /** Claude effort level (low/medium/high). Controls thinking budget. */
+  effort?: string;
   /** Working directory for claude -p (defaults to HOME) */
   cwd?: string;
 }
@@ -64,6 +69,16 @@ export async function runHostWorker(
     '--verbose',
   ];
 
+  // Model selection (haiku/sonnet/opus)
+  if (input.model) {
+    args.push('--model', input.model);
+  }
+
+  // Effort level (thinking budget: low/medium/high)
+  if (input.effort) {
+    args.push('--effort', input.effort);
+  }
+
   // Session resumption
   if (input.sessionId) {
     args.push('--resume', input.sessionId);
@@ -80,7 +95,7 @@ export async function runHostWorker(
   }
 
   logger.info(
-    { group: group.name, workerName, cwd, hasSession: !!input.sessionId },
+    { group: group.name, workerName, cwd, hasSession: !!input.sessionId, model: input.model || 'default' },
     'Spawning host worker',
   );
 
@@ -92,8 +107,9 @@ export async function runHostWorker(
         HOME: '/root',
         PATH: '/usr/local/bin:/usr/bin:/bin:/root/.local/bin',
         LANG: process.env.LANG || 'en_US.UTF-8',
-        // Delay auto-compaction to preserve more context (default ~95%)
-        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '98',
+        // Trigger auto-compaction early to prevent context rot (default ~95%)
+        // Research shows 75% preserves ~50K tokens as working memory for reasoning
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '75',
       },
     });
 
@@ -193,6 +209,7 @@ export async function runHostWorker(
         `Worker: ${workerName}`,
         `Group: ${group.name}`,
         `CWD: ${cwd}`,
+        `Model: ${input.model || 'default'}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Session ID: ${newSessionId || 'none'}`,
@@ -218,7 +235,7 @@ export async function runHostWorker(
       }
 
       logger.info(
-        { group: group.name, workerName, duration, code, newSessionId },
+        { group: group.name, workerName, duration, code, newSessionId, model: input.model || 'default' },
         'Host worker completed',
       );
 
