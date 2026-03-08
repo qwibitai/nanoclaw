@@ -64,6 +64,51 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+const typingHeartbeats = new Map<string, ReturnType<typeof setInterval>>();
+const TYPING_REFRESH_MS = 4000;
+
+function clearTypingHeartbeat(chatJid: string): void {
+  const existing = typingHeartbeats.get(chatJid);
+  if (existing) {
+    clearInterval(existing);
+    typingHeartbeats.delete(chatJid);
+  }
+}
+
+function startTypingHeartbeat(
+  channel: Channel,
+  chatJid: string,
+  immediate = true,
+): void {
+  if (!channel.setTyping) return;
+
+  clearTypingHeartbeat(chatJid);
+
+  const sendTyping = () =>
+    channel
+      .setTyping?.(chatJid, true)
+      ?.catch((err) =>
+        logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
+      );
+
+  if (immediate) {
+    void sendTyping();
+  }
+
+  typingHeartbeats.set(chatJid, setInterval(sendTyping, TYPING_REFRESH_MS));
+}
+
+async function stopTypingHeartbeat(
+  channel: Channel,
+  chatJid: string,
+): Promise<void> {
+  clearTypingHeartbeat(chatJid);
+  try {
+    await channel.setTyping?.(chatJid, false);
+  } catch (err) {
+    logger.warn({ chatJid, err }, 'Failed to clear typing indicator');
+  }
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -200,7 +245,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
-  await channel.setTyping?.(chatJid, true);
+  startTypingHeartbeat(channel, chatJid);
   let hadError = false;
   let outputSentToUser = false;
 
@@ -215,14 +260,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
+        await stopTypingHeartbeat(channel, chatJid);
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        startTypingHeartbeat(channel, chatJid, false);
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
     }
 
     if (result.status === 'success') {
+      await stopTypingHeartbeat(channel, chatJid);
       queue.notifyIdle(chatJid);
     }
 
@@ -231,7 +279,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
-  await channel.setTyping?.(chatJid, false);
+  await stopTypingHeartbeat(channel, chatJid);
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
@@ -421,11 +469,7 @@ async function startMessageLoop(): Promise<void> {
               messagesToSend[messagesToSend.length - 1].timestamp;
             saveState();
             // Show typing indicator while the container processes the piped message
-            channel
-              .setTyping?.(chatJid, true)
-              ?.catch((err) =>
-                logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
-              );
+            startTypingHeartbeat(channel, chatJid);
           } else {
             // No active container — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
