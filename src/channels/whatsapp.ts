@@ -6,8 +6,8 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WAMessageStubType,
-  WASocket,
   downloadMediaMessage,
+  WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
@@ -18,6 +18,7 @@ import makeWASocket, {
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { transcribeAudio } from '../speech.js';
@@ -276,7 +277,7 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const textContent =
+            let content =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
@@ -313,15 +314,23 @@ export class WhatsAppChannel implements Channel {
                     : `${Date.now()}${ext}`;
                   fs.writeFileSync(path.join(attachDir, filename), buffer);
 
-                  const label =
-                    mediaType === 'image'
-                      ? 'Image'
-                      : mediaType === 'video'
-                        ? 'Video'
-                        : mediaType === 'document'
-                          ? 'Document'
-                          : 'Audio';
-                  attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+                  if (
+                    mediaType === 'document' &&
+                    normalized.documentMessage?.mimetype === 'application/pdf'
+                  ) {
+                    const sizeKB = Math.round(buffer.length / 1024);
+                    attachmentRef = `\n[PDF: attachments/${filename} (${sizeKB}KB)]\nUse: pdf-reader extract attachments/${filename}`;
+                  } else {
+                    const label =
+                      mediaType === 'image'
+                        ? 'Image'
+                        : mediaType === 'video'
+                          ? 'Video'
+                          : mediaType === 'document'
+                            ? 'Document'
+                            : 'Audio';
+                    attachmentRef = `\n[${label} saved: /workspace/group/attachments/${filename}]`;
+                  }
                   logger.info(
                     { chatJid, filename, mediaType },
                     'Media attachment saved',
@@ -355,7 +364,8 @@ export class WhatsAppChannel implements Channel {
               }
             }
 
-            const content = textContent + attachmentRef + voiceTranscript;
+            content = content + attachmentRef + voiceTranscript;
+
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content.trim()) continue;
