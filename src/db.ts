@@ -136,6 +136,12 @@ function createSchema(database: Database.Database): void {
     database.exec(
       `UPDATE chats SET channel = 'telegram', is_group = 1 WHERE jid LIKE 'tg:%'`,
     );
+    database.exec(
+      `UPDATE chats SET channel = 'simplex', is_group = 0 WHERE jid LIKE 'sx:%' AND jid NOT LIKE 'sx:g:%'`,
+    );
+    database.exec(
+      `UPDATE chats SET channel = 'simplex', is_group = 1 WHERE jid LIKE 'sx:g:%'`,
+    );
   } catch {
     /* columns already exist */
   }
@@ -596,6 +602,10 @@ export function setRegisteredGroup(jid: string, group: RegisteredGroup): void {
     group.requiresTrigger === undefined ? 1 : group.requiresTrigger ? 1 : 0,
     group.isMain ? 1 : 0,
   );
+}
+
+export function removeRegisteredGroup(jid: string): void {
+  db.prepare('DELETE FROM registered_groups WHERE jid = ?').run(jid);
 }
 
 export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {

@@ -10,3 +10,6 @@
 // telegram
 
 // whatsapp
+
+// simplex
+import './simplex.js';
