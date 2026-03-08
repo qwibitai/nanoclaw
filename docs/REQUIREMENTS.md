@@ -115,7 +115,7 @@ A personal Claude assistant accessible via WhatsApp, with minimal custom code.
 - Tasks have access to all tools including Bash (safe in container)
 - Tasks can optionally send messages to their group via `send_message` tool, or complete silently
 - Task runs are logged to the database with duration and result
-- Schedule types: cron expressions, intervals (ms), or one-time (ISO timestamp)
+- Schedule types: cron expressions, intervals (ms), or one-time (local timestamp without timezone suffix)
 - From main: can schedule tasks for any group, view/manage all tasks
 - From other groups: can only manage that group's tasks
 

@@ -37,6 +37,14 @@ const THIRD_GROUP: RegisteredGroup = {
 let groups: Record<string, RegisteredGroup>;
 let deps: IpcDeps;
 
+const futureOnce = (): string => {
+  const local = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  local.setMilliseconds(0);
+  return new Date(local.getTime() - local.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 19);
+};
+
 beforeEach(() => {
   _initTestDatabase();
 
@@ -74,7 +82,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'do something',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
@@ -94,7 +102,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'self task',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         targetJid: 'other@g.us',
       },
       'other-group',
@@ -113,7 +121,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'unauthorized',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         targetJid: 'main@g.us',
       },
       'other-group',
@@ -131,7 +139,7 @@ describe('schedule_task authorization', () => {
         type: 'schedule_task',
         prompt: 'no target',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         targetJid: 'unknown@g.us',
       },
       'whatsapp_main',
@@ -154,7 +162,7 @@ describe('pause_task authorization', () => {
       chat_jid: 'main@g.us',
       prompt: 'main task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'active',
@@ -166,7 +174,7 @@ describe('pause_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'other task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'active',
@@ -215,7 +223,7 @@ describe('resume_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'paused task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: '2025-06-01T00:00:00.000Z',
       status: 'paused',
@@ -264,7 +272,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'cancel me',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -287,7 +295,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'other@g.us',
       prompt: 'my task',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -310,7 +318,7 @@ describe('cancel_task authorization', () => {
       chat_jid: 'main@g.us',
       prompt: 'not yours',
       schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00',
+      schedule_value: futureOnce(),
       context_mode: 'isolated',
       next_run: null,
       status: 'active',
@@ -554,6 +562,48 @@ describe('schedule_task schedule types', () => {
 
     expect(getAllTasks()).toHaveLength(0);
   });
+
+  it('rejects once timestamp with timezone suffix', async () => {
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'zulu once',
+        schedule_type: 'once',
+        schedule_value: '2026-12-25T09:00:00Z',
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
+
+  it('rejects once timestamp in the past', async () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    yesterday.setMilliseconds(0);
+    const pastLocal = new Date(
+      yesterday.getTime() - yesterday.getTimezoneOffset() * 60_000,
+    )
+      .toISOString()
+      .slice(0, 19);
+
+    await processTaskIpc(
+      {
+        type: 'schedule_task',
+        prompt: 'past once',
+        schedule_type: 'once',
+        schedule_value: pastLocal,
+        targetJid: 'other@g.us',
+      },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+
+    expect(getAllTasks()).toHaveLength(0);
+  });
 });
 
 // --- context_mode defaulting ---
@@ -565,7 +615,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'group context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         context_mode: 'group',
         targetJid: 'other@g.us',
       },
@@ -584,7 +634,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'isolated context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         context_mode: 'isolated',
         targetJid: 'other@g.us',
       },
@@ -603,7 +653,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'bad context',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         context_mode: 'bogus' as any,
         targetJid: 'other@g.us',
       },
@@ -622,7 +672,7 @@ describe('schedule_task context_mode', () => {
         type: 'schedule_task',
         prompt: 'no context mode',
         schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00',
+        schedule_value: futureOnce(),
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
