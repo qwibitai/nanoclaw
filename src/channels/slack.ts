@@ -7,7 +7,8 @@ import {
   escapeRegex,
   resolveAssistantName,
 } from '../config.js';
-import { updateChatName } from '../db.js';
+import { getRouterState, setRouterState, updateChatName } from '../db.js';
+import { ContainerConfig } from '../types.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -22,11 +23,20 @@ const MAX_MESSAGE_LENGTH = 4000;
 // (BotMessageEvent, subtype 'bot_message') so we can track our own output.
 type HandledMessageEvent = GenericMessageEvent | BotMessageEvent;
 
+/** Auto-register config: maps workspace team_id to registration template. */
+interface AutoRegisterTemplate {
+  folder: string;
+  containerConfig: ContainerConfig;
+  requiresTrigger: boolean;
+}
+
 export class SlackChannel implements Channel {
   name = 'slack';
 
   private app: App;
   private botUserId: string | undefined;
+  private teamId: string | undefined;
+  private autoRegisterConfig: Record<string, AutoRegisterTemplate> = {};
   private connected = false;
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
@@ -69,6 +79,67 @@ export class SlackChannel implements Channel {
   }
 
   private setupEventHandlers(): void {
+    // Auto-register when the bot is invited to a new channel
+    this.app.event('member_joined_channel', async ({ event }) => {
+      // Only handle the bot itself joining
+      if (event.user !== this.botUserId) return;
+
+      const jid = `slack:${event.channel}`;
+      const groups = this.opts.registeredGroups();
+      if (groups[jid]) return; // Already registered
+
+      const teamId = (event as { team?: string }).team;
+      if (!teamId) return;
+
+      const template = this.autoRegisterConfig[teamId];
+      if (!template || !this.opts.registerGroup) return;
+
+      // Get channel name from API
+      let channelName = event.channel;
+      try {
+        const info = await this.app.client.conversations.info({
+          channel: event.channel,
+        });
+        channelName = info.channel?.name || event.channel;
+      } catch {
+        // Use channel ID as fallback
+      }
+
+      const assistantName = resolveAssistantName(template.containerConfig);
+      this.opts.registerGroup(jid, {
+        name: channelName,
+        folder: template.folder,
+        trigger: `@${assistantName}`,
+        added_at: new Date().toISOString(),
+        containerConfig: { ...template.containerConfig },
+        requiresTrigger: template.requiresTrigger,
+      });
+
+      // Store metadata so the channel shows up in discovery
+      this.opts.onChatMetadata(
+        jid,
+        new Date().toISOString(),
+        channelName,
+        'slack',
+        true,
+      );
+
+      logger.info(
+        { jid, channelName, teamId, folder: template.folder },
+        'Auto-registered Slack channel',
+      );
+
+      // Send greeting
+      try {
+        await this.app.client.chat.postMessage({
+          channel: event.channel,
+          text: `Hey! I'm ${assistantName} — tag me with @${assistantName} to get started.`,
+        });
+      } catch (err) {
+        logger.warn({ jid, err }, 'Failed to send auto-register greeting');
+      }
+    });
+
     // Use app.event('message') instead of app.message() to capture all
     // message subtypes including bot_message (needed to track our own output)
     this.app.event('message', async ({ event }) => {
@@ -173,10 +244,17 @@ export class SlackChannel implements Channel {
     try {
       const auth = await this.app.client.auth.test();
       this.botUserId = auth.user_id as string;
-      logger.info({ botUserId: this.botUserId }, 'Connected to Slack');
+      this.teamId = auth.team_id as string;
+      logger.info(
+        { botUserId: this.botUserId, teamId: this.teamId },
+        'Connected to Slack',
+      );
     } catch (err) {
       logger.warn({ err }, 'Connected to Slack but failed to get bot user ID');
     }
+
+    // Load or auto-discover auto-register config for workspace-wide registration
+    this.loadAutoRegisterConfig();
 
     this.connected = true;
 
@@ -423,6 +501,59 @@ export class SlackChannel implements Channel {
       result = result.replace(pattern, `<@${userId}>`);
     }
     return result;
+  }
+
+  /**
+   * Load auto-register config from DB, or auto-discover from existing
+   * registered Slack channels that have a per-group assistantName set.
+   */
+  private loadAutoRegisterConfig(): void {
+    if (!this.teamId) return;
+
+    // Try loading existing config
+    const stored = getRouterState('slack_auto_register');
+    if (stored) {
+      try {
+        this.autoRegisterConfig = JSON.parse(stored);
+        if (this.autoRegisterConfig[this.teamId]) {
+          logger.info(
+            { teamId: this.teamId },
+            'Slack auto-register config loaded',
+          );
+        }
+        return;
+      } catch {
+        // Corrupted — fall through to auto-discover
+      }
+    }
+
+    // Auto-discover: find existing Slack channels with assistantName override
+    const groups = this.opts.registeredGroups();
+    for (const [jid, group] of Object.entries(groups)) {
+      if (!jid.startsWith('slack:') || !group.containerConfig?.assistantName)
+        continue;
+      // Use this channel's config as the template
+      this.autoRegisterConfig = {
+        [this.teamId]: {
+          folder: group.folder,
+          containerConfig: { ...group.containerConfig },
+          requiresTrigger: group.requiresTrigger !== false,
+        },
+      };
+      setRouterState(
+        'slack_auto_register',
+        JSON.stringify(this.autoRegisterConfig),
+      );
+      logger.info(
+        {
+          teamId: this.teamId,
+          folder: group.folder,
+          templateJid: jid,
+        },
+        'Slack auto-register config created from existing channel',
+      );
+      return;
+    }
   }
 
   private async flushOutgoingQueue(): Promise<void> {

@@ -29,6 +29,8 @@ vi.mock('../logger.js', () => ({
 // Mock db
 vi.mock('../db.js', () => ({
   updateChatName: vi.fn(),
+  getRouterState: vi.fn(() => null),
+  setRouterState: vi.fn(),
 }));
 
 // --- @slack/bolt mock ---
