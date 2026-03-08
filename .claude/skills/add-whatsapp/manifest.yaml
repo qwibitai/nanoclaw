@@ -10,6 +10,7 @@ adds:
 modifies:
   - src/channels/index.ts
   - setup/index.ts
+  - setup/service.ts
 structured:
   npm_dependencies:
     "@whiskeysockets/baileys": "^7.0.0-rc.9"
