@@ -155,12 +155,6 @@ test -f store/auth/creds.json && echo "Authentication successful" || echo "Authe
 
 Channels auto-enable when their credentials are present — WhatsApp activates when `store/auth/creds.json` exists.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
 ## Phase 4: Registration
 
 ### Configure trigger and channel type
@@ -357,5 +351,4 @@ To remove WhatsApp integration:
 
 1. Delete auth credentials: `rm -rf store/auth/`
 2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+3. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)

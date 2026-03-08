@@ -87,14 +87,6 @@ DISCORD_BOT_TOKEN=<their-token>
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
-
 ### Build and restart
 
 ```bash
@@ -169,7 +161,7 @@ tail -f logs/nanoclaw.log
 
 ### Bot not responding
 
-1. Check `DISCORD_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+1. Check `DISCORD_BOT_TOKEN` is set in `.env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'dc:%'"`
 3. For non-main channels: message must include trigger pattern (@mention the bot)
 4. Service is running: `launchctl list | grep nanoclaw`
