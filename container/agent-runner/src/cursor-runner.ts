@@ -98,6 +98,7 @@ function buildPrompt(containerInput: ContainerInput, promptText: string): string
 
 interface SpawnResult {
   newSessionId?: string;
+  fatalError?: boolean;
 }
 
 async function spawnAgent(
@@ -132,6 +133,10 @@ async function spawnAgent(
     let lineBuffer = '';
     let messageCount = 0;
     let resultCount = 0;
+    let hadOutput = false;
+    let hadAssistantOutput = false;
+    let stderrBuffer = '';
+    let lastEventHint = '';
 
     proc.stdout.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString();
@@ -166,6 +171,8 @@ async function spawnAgent(
           .map(c => c.text ?? '')
           .join('') ?? '';
         if (text) {
+          hadOutput = true;
+          hadAssistantOutput = true;
           writeOutput({ status: 'success', result: text, newSessionId });
         }
         return;
@@ -173,28 +180,33 @@ async function spawnAgent(
 
       if (type === 'result') {
         resultCount++;
+        hadOutput = true;
         const isError = event.is_error as boolean;
         log(`Result #${resultCount}: isError=${isError}`);
         if (isError) {
-          writeOutput({
-            status: 'error',
-            result: null,
-            error: (event.result as string | undefined) ?? 'Cursor agent returned an error',
-            newSessionId,
-          });
+          const errText = (event.result as string | undefined) || lastEventHint || stderrBuffer || 'Cursor agent returned an error';
+          writeOutput({ status: 'error', result: null, error: errText, newSessionId });
+        } else if (!hadAssistantOutput) {
+          // No streaming chunks yet — send the full result text
+          writeOutput({ status: 'success', result: (event.result as string | null) ?? null, newSessionId });
         } else {
-          writeOutput({
-            status: 'success',
-            result: (event.result as string | null) ?? null,
-            newSessionId,
-          });
+          // Already streamed via type=assistant — just signal completion
+          writeOutput({ status: 'success', result: null, newSessionId });
         }
         return;
       }
+
+      // For unhandled event types, try to extract any text that might describe an error
+      try {
+        const raw = JSON.stringify(event);
+        if (raw.length < 500) lastEventHint = `[${type}] ${raw}`;
+      } catch { /* ignore */ }
     }
 
     proc.stderr.on('data', (chunk: Buffer) => {
-      log(`stderr: ${chunk.toString().trim()}`);
+      const text = chunk.toString().trim();
+      stderrBuffer += (stderrBuffer ? '\n' : '') + text;
+      log(`stderr: ${text}`);
     });
 
     proc.on('error', (err) => {
@@ -208,7 +220,14 @@ async function spawnAgent(
         } catch { /* ignore */ }
       }
       log(`agent process exited with code ${code}`);
-      resolve({ newSessionId });
+      let fatalError = false;
+      if (!hadOutput && code !== 0) {
+        const errMsg = stderrBuffer || lastEventHint || `Cursor agent exited with code ${code}`;
+        log(`No output produced, reporting error: ${errMsg}`);
+        writeOutput({ status: 'error', result: null, error: errMsg, newSessionId });
+        fatalError = true;
+      }
+      resolve({ newSessionId, fatalError });
     });
   });
 }
@@ -261,8 +280,6 @@ export async function main(): Promise<void> {
       if (result.newSessionId) {
         sessionId = result.newSessionId;
       }
-
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
       log('Query ended, waiting for next IPC message...');
       const nextMessage = await waitForIpcMessage(IPC_INPUT_DIR, IPC_INPUT_CLOSE_SENTINEL);

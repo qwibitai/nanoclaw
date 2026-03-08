@@ -291,6 +291,7 @@ export async function runContainerAgent(
       groupDir: env.NANOCLAW_GROUP_DIR,
       ipcDir: env.NANOCLAW_IPC_DIR,
       globalDir: env.NANOCLAW_GLOBAL_DIR,
+      agentBackend: env.AGENT_BACKEND,
     },
     'Process environment configuration',
   );

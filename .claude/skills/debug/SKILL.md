@@ -100,6 +100,34 @@ HOME: homeDir,  // path.join(DATA_DIR, 'sessions', group.folder)
 
 If an MCP server fails to start, the agent may exit. Check the process logs for MCP initialization errors.
 
+### 4. Cursor Mode No Response
+
+When messages get no reply after setting `AGENT_BACKEND=cursor` in `.env`:
+
+1. **Verify backend is active**: Process log stderr should show `[agent-runner] AGENT_BACKEND=cursor`. If it shows `claude`, .env was not loaded correctly (restart the service and retry).
+2. **Verify agent CLI is in PATH**: launchd PATH is `~/.local/bin:/usr/local/bin:/usr/bin:/bin`. If `agent` is installed elsewhere, add that path to the plist.
+3. **Run with debug logging**: `LOG_LEVEL=debug npm run dev`, then send a message and check the main log for `agentBackend` and the process log stderr.
+
+Manual test for cursor-runner:
+
+```bash
+mkdir -p groups/main data/ipc/main data/sessions/main
+
+echo '{
+  "prompt": "What is 1+1? Short answer.",
+  "groupFolder": "main",
+  "chatJid": "test",
+  "isMain": true
+}' | \
+  NANOCLAW_GROUP_DIR=$(pwd)/groups/main \
+  NANOCLAW_IPC_DIR=$(pwd)/data/ipc/main \
+  NANOCLAW_GLOBAL_DIR=$(pwd)/groups/global \
+  AGENT_BACKEND=cursor \
+  node container/agent-runner/dist/index.js
+```
+
+If stderr shows `[cursor-runner]` and stdout has JSON wrapped in `---NANOCLAW_OUTPUT_START---`, the runner is working. Otherwise check that the Cursor `agent` CLI is available (`agent "hi" --print`). Authentication is handled by `agent login`; no `CURSOR_API_KEY` is required.
+
 ## Manual Process Testing
 
 ### Build the agent runner first:

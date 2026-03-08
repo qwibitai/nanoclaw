@@ -7,6 +7,7 @@
  */
 
 const backend = process.env.AGENT_BACKEND ?? 'claude';
+console.error(`[agent-runner] AGENT_BACKEND=${backend}`);
 
 if (backend === 'cursor') {
   const { main } = await import('./cursor-runner.js');

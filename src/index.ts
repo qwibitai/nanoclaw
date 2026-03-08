@@ -200,6 +200,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let errorSentToUser = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -225,6 +226,11 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'error') {
       hadError = true;
+      // Notify user once if the agent failed before sending any output
+      if (!outputSentToUser && !errorSentToUser && result.error) {
+        errorSentToUser = true;
+        await channel.sendMessage(chatJid, `⚠️ ${result.error}`);
+      }
     }
   });
 
