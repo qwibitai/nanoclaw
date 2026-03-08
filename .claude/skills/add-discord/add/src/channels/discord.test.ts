@@ -610,7 +610,7 @@ describe('DiscordChannel', () => {
   // --- Reply context ---
 
   describe('reply context', () => {
-    it('includes reply author in content', async () => {
+    it('includes reply author and snippet in content', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -620,12 +620,99 @@ describe('DiscordChannel', () => {
         reference: { messageId: 'original_msg_id' },
         guildName: 'Server',
       });
+      // Mock the replied-to message with content and attachments
+      msg.channel.messages.fetch = vi.fn().mockResolvedValue({
+        author: { username: 'Bob', displayName: 'Bob' },
+        member: { displayName: 'Bob' },
+        content: 'We should meet tomorrow',
+        attachments: new Map(),
+      });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Reply to Bob] I agree with that',
+          content: '[Reply to Bob: "We should meet tomorrow"] I agree with that',
+        }),
+      );
+    });
+
+    it('includes attachment placeholder in reply snippet', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        content: 'Nice photo!',
+        reference: { messageId: 'original_msg_id' },
+        guildName: 'Server',
+      });
+      msg.channel.messages.fetch = vi.fn().mockResolvedValue({
+        author: { username: 'Bob', displayName: 'Bob' },
+        member: { displayName: 'Bob' },
+        content: '',
+        attachments: new Map([
+          ['att1', { name: 'sunset.jpg', contentType: 'image/jpeg' }],
+        ]),
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Reply to Bob: "[Image: sunset.jpg]"] Nice photo!',
+        }),
+      );
+    });
+
+    it('auto-triggers when replying to the bot', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        content: 'thanks for that',
+        reference: { messageId: 'original_msg_id' },
+        guildName: 'Server',
+      });
+      msg.channel.messages.fetch = vi.fn().mockResolvedValue({
+        author: { id: '999888777', username: 'Andy', displayName: 'Andy' },
+        member: { displayName: 'Andy' },
+        content: 'Here is the info you requested',
+        attachments: new Map(),
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '@Andy [Reply to Andy: "Here is the info you requested"] thanks for that',
+        }),
+      );
+    });
+
+    it('falls back to name only when replied message has no content', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const msg = createMessage({
+        content: 'What was that?',
+        reference: { messageId: 'original_msg_id' },
+        guildName: 'Server',
+      });
+      msg.channel.messages.fetch = vi.fn().mockResolvedValue({
+        author: { username: 'Bob', displayName: 'Bob' },
+        member: { displayName: 'Bob' },
+        content: '',
+        attachments: new Map(),
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Reply to Bob] What was that?',
         }),
       );
     });

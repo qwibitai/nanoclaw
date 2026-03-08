@@ -35,6 +35,17 @@ export interface WhatsAppChannelOpts {
   registeredGroups: () => Record<string, RegisteredGroup>;
 }
 
+/** Extract text content from a normalized WhatsApp message. */
+function extractContent(msg: ReturnType<typeof normalizeMessageContent>): string {
+  if (!msg) return '';
+  return msg.conversation
+    || msg.extendedTextMessage?.text
+    || msg.imageMessage?.caption
+    || msg.videoMessage?.caption
+    || '';
+}
+
+
 export class WhatsAppChannel implements Channel {
   name = 'whatsapp';
 
@@ -203,12 +214,22 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
-              normalized.conversation ||
-              normalized.extendedTextMessage?.text ||
-              normalized.imageMessage?.caption ||
-              normalized.videoMessage?.caption ||
-              '';
+            let content = extractContent(normalized);
+
+            // Handle reply context — include who the user is replying to
+            // contextInfo lives on whichever message type carries the reply
+            const contextInfo = normalized.extendedTextMessage?.contextInfo
+              || normalized.imageMessage?.contextInfo
+              || normalized.videoMessage?.contextInfo
+              || normalized.audioMessage?.contextInfo
+              || normalized.documentMessage?.contextInfo;
+            if (contextInfo?.quotedMessage) {
+              const quotedContent = extractContent(contextInfo.quotedMessage);
+              if (quotedContent) {
+                const quotedSender = contextInfo.participant?.split('@')[0] || 'Unknown';
+                content = `[Reply to ${quotedSender}: "${quotedContent}"] ${content}`;
+              }
+            }
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
             if (!content) continue;
@@ -217,6 +238,16 @@ export class WhatsAppChannel implements Channel {
             const senderName = msg.pushName || sender.split('@')[0];
 
             const fromMe = msg.key.fromMe || false;
+
+            // Auto-trigger when replying to the bot — users expect a response.
+            // Must be after fromMe check to avoid triggering on the bot's own messages.
+            if (contextInfo?.quotedMessage && !fromMe) {
+              const selfJid = this.sock.user?.id?.split(':')[0];
+              const quotedJid = contextInfo.participant?.split('@')[0];
+              if (selfJid && quotedJid === selfJid) {
+                content = `@${ASSISTANT_NAME} ${content}`;
+              }
+            }
             // Detect bot messages: with own number, fromMe is reliable
             // since only the bot sends from that number.
             // With shared number, bot messages carry the assistant name prefix

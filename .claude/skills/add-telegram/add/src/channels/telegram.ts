@@ -11,6 +11,21 @@ import {
   RegisteredGroup,
 } from '../types.js';
 
+/** Extract text content from a Telegram message, including non-text placeholders. */
+function describeMessage(msg: any): string {
+  if (msg.text) return msg.text;
+  const caption = msg.caption ? ` ${msg.caption}` : '';
+  if (msg.photo) return `[Photo]${caption}`;
+  if (msg.video) return `[Video]${caption}`;
+  if (msg.voice) return `[Voice message]${caption}`;
+  if (msg.audio) return `[Audio]${caption}`;
+  if (msg.document) return `[Document: ${msg.document.file_name || 'file'}]${caption}`;
+  if (msg.sticker) return `[Sticker ${msg.sticker.emoji || ''}]`;
+  if (msg.location) return '[Location]';
+  if (msg.contact) return '[Contact]';
+  return '';
+}
+
 export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
@@ -58,6 +73,24 @@ export class TelegramChannel implements Channel {
 
       const chatJid = `tg:${ctx.chat.id}`;
       let content = ctx.message.text;
+
+      // Handle reply context — include who the user is replying to
+      if (ctx.message.reply_to_message) {
+        const rm = ctx.message.reply_to_message;
+        const replyAuthor = rm.from?.first_name || rm.from?.username || 'Unknown';
+        const replyContent = describeMessage(rm);
+        if (replyContent) {
+          content = `[Reply to ${replyAuthor}: "${replyContent}"] ${content}`;
+        } else {
+          content = `[Reply to ${replyAuthor}] ${content}`;
+        }
+        // Auto-trigger when replying to the bot — users expect a response
+        const isReplyToBot = rm.from?.id === ctx.me?.id;
+        if (isReplyToBot && !TRIGGER_PATTERN.test(content)) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+        }
+      }
+
       const timestamp = new Date(ctx.message.date * 1000).toISOString();
       const senderName =
         ctx.from?.first_name ||
@@ -125,7 +158,7 @@ export class TelegramChannel implements Channel {
     });
 
     // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    const storeNonText = (ctx: any) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -136,7 +169,8 @@ export class TelegramChannel implements Channel {
         ctx.from?.username ||
         ctx.from?.id?.toString() ||
         'Unknown';
-      const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
+      const content = describeMessage(ctx.message);
+      if (!content) return;
 
       const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
       this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
@@ -145,28 +179,20 @@ export class TelegramChannel implements Channel {
         chat_jid: chatJid,
         sender: ctx.from?.id?.toString() || '',
         sender_name: senderName,
-        content: `${placeholder}${caption}`,
+        content,
         timestamp,
         is_from_me: false,
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
-    this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
-    this.bot.on('message:voice', (ctx) =>
-      storeNonText(ctx, '[Voice message]'),
-    );
-    this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
-    });
-    this.bot.on('message:sticker', (ctx) => {
-      const emoji = ctx.message.sticker?.emoji || '';
-      storeNonText(ctx, `[Sticker ${emoji}]`);
-    });
-    this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
-    this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
+    this.bot.on('message:photo', storeNonText);
+    this.bot.on('message:video', storeNonText);
+    this.bot.on('message:voice', storeNonText);
+    this.bot.on('message:audio', storeNonText);
+    this.bot.on('message:document', storeNonText);
+    this.bot.on('message:sticker', storeNonText);
+    this.bot.on('message:location', storeNonText);
+    this.bot.on('message:contact', storeNonText);
 
     // Handle errors gracefully
     this.bot.catch((err) => {
