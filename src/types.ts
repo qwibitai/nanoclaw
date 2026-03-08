@@ -42,6 +42,20 @@ export interface RegisteredGroup {
   isMain?: boolean; // True for the main control group (no trigger, elevated privileges)
 }
 
+/** Channel-agnostic attachment metadata */
+export interface Attachment {
+  id: string; // Channel-specific ID (signal attachment ID, WhatsApp mediaKey, Telegram file_id)
+  contentType: string; // MIME type
+  filename?: string; // Original filename if available
+  size?: number; // Bytes
+  width?: number; // Pixels (images/video)
+  height?: number; // Pixels (images/video)
+  duration?: number; // Seconds (audio/video)
+  isVoiceNote?: boolean; // Audio recorded as voice note
+  caption?: string; // Caption text (WhatsApp/Telegram support this natively)
+  localPath?: string; // Host path after download (set by orchestrator)
+}
+
 export interface NewMessage {
   id: string;
   chat_jid: string;
@@ -51,6 +65,21 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  quoted_message_id?: string;
+  quote_sender_name?: string;
+  quote_content?: string;
+  is_reaction?: boolean;
+  reaction_emoji?: string;
+  reaction_target_timestamp?: string;
+  reaction_target_author?: string;
+  attachments?: Attachment[];
+}
+
+export interface Reaction {
+  chatJid: string;
+  messageId: string;
+  emoji: string;
+  timestamp: string;
 }
 
 export interface ScheduledTask {
@@ -90,6 +119,25 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send a reaction to a specific message.
+  sendReaction?(
+    chatJid: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<void>;
+  // Optional: react to the most recent message in the chat.
+  reactToLatestMessage?(chatJid: string, emoji: string): Promise<void>;
+  // Optional: edit a previously sent message.
+  editMessage?(
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ): Promise<number>;
+  // Optional: download an inbound attachment to a local directory. Returns host path or null on failure.
+  downloadAttachment?(
+    attachment: Attachment,
+    destDir: string,
+  ): Promise<string | null>;
 }
 
 // Callback type that channels use to deliver inbound messages

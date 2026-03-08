@@ -138,6 +138,67 @@ describe('storeMessage', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
   });
+
+  it('stores and round-trips attachments_json via getMessagesSince', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-att',
+      chat_jid: 'group@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content:
+        'here is a photo\n[attachment: photo.jpg (image/jpeg, 357KB 1440x2560)]',
+      timestamp: '2024-01-01T00:00:10.000Z',
+      is_from_me: false,
+      attachments: [
+        {
+          id: '9876543210',
+          contentType: 'image/jpeg',
+          filename: 'photo.jpg',
+          size: 365568,
+          width: 1440,
+          height: 2560,
+        },
+      ],
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments).toHaveLength(1);
+    expect(messages[0].attachments![0]).toMatchObject({
+      id: '9876543210',
+      contentType: 'image/jpeg',
+      filename: 'photo.jpg',
+      width: 1440,
+      height: 2560,
+    });
+  });
+
+  it('returns undefined attachments for messages stored without attachments', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    store({
+      id: 'msg-no-att',
+      chat_jid: 'group@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'plain text',
+      timestamp: '2024-01-01T00:00:11.000Z',
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0].attachments).toBeUndefined();
+  });
 });
 
 // --- getMessagesSince ---
