@@ -382,7 +382,9 @@ export class GmailChannel implements Channel {
     }
 
     // Fallback to first main group, preferring Discord over other channels
-    const mainGroups = Object.entries(groups).filter(([, g]) => g.isMain === true);
+    const mainGroups = Object.entries(groups).filter(
+      ([, g]) => g.isMain === true,
+    );
     const discordMain = mainGroups.find(([jid]) => jid.startsWith('dc:'));
     if (discordMain) return discordMain[0];
     return mainGroups[0]?.[0] ?? null;
@@ -444,7 +446,11 @@ function discoverCredentialDirs(
     fs.existsSync(path.join(primaryDir, 'gcp-oauth.keys.json')) &&
     fs.existsSync(path.join(primaryDir, 'credentials.json'))
   ) {
-    results.push({ label: 'primary', credDir: primaryDir, routeToGroup: 'personal' });
+    results.push({
+      label: 'primary',
+      credDir: primaryDir,
+      routeToGroup: 'personal',
+    });
   }
 
   // Additional accounts: ~/.gmail-mcp-*

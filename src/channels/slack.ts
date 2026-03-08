@@ -429,7 +429,9 @@ export class SlackChannel implements Channel {
       });
 
       const messages = (result.messages || []).filter(
-        (m) => m.ts !== currentTs && (m.text || m.attachments?.length || m.blocks?.length),
+        (m) =>
+          m.ts !== currentTs &&
+          (m.text || m.attachments?.length || m.blocks?.length),
       );
 
       if (messages.length === 0) return undefined;
@@ -479,7 +481,10 @@ export class SlackChannel implements Channel {
             if (el.text) {
               parts.push(el.text);
             } else if (el.elements) {
-              const inner = el.elements.map((e: any) => e.text).filter(Boolean).join('');
+              const inner = el.elements
+                .map((e: any) => e.text)
+                .filter(Boolean)
+                .join('');
               if (inner) parts.push(inner);
             }
           }
