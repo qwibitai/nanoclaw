@@ -35,6 +35,8 @@ interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  /** Partial text for streaming updates (progressive message editing). */
+  streamText?: string;
 }
 
 interface SessionEntry {
@@ -391,6 +393,14 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Token-level streaming state.
+  // The agent-runner throttles at 300ms to reduce Docker stdout noise.
+  // The host-side draft-stream throttles again at ~1000ms for Telegram API limits.
+  // Both layers are intentional: inner reduces IPC volume, outer reduces API calls.
+  const STREAM_THROTTLE_MS = 300;
+  let streamingTextAccum = '';
+  let lastStreamEmitAt = 0;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -449,6 +459,7 @@ async function runQuery(
           },
         },
       },
+      includePartialMessages: true,
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
         PreToolUse: [{ matcher: 'Bash', hooks: [createSanitizeBashHook()] }],
@@ -457,10 +468,33 @@ async function runQuery(
   })) {
     messageCount++;
     const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
+
+    // Token-level streaming: accumulate text deltas and emit periodically
+    if (message.type === 'stream_event') {
+      const event = (message as { event: { type: string; delta?: { type: string; text?: string } } }).event;
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta' && event.delta.text) {
+        streamingTextAccum += event.delta.text;
+        const now = Date.now();
+        if (now - lastStreamEmitAt >= STREAM_THROTTLE_MS && streamingTextAccum.length >= 20) {
+          writeOutput({ status: 'success', result: null, streamText: streamingTextAccum });
+          lastStreamEmitAt = now;
+        }
+      }
+      continue;
+    }
+
     log(`[msg #${messageCount}] type=${msgType}`);
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+    }
+
+    // When a complete assistant message arrives, flush any remaining
+    // accumulated streaming text and reset for the next turn.
+    if (message.type === 'assistant' && 'message' in message && streamingTextAccum) {
+      writeOutput({ status: 'success', result: null, streamText: streamingTextAccum });
+      streamingTextAccum = '';
+      lastStreamEmitAt = 0;
     }
 
     if (message.type === 'system' && message.subtype === 'init') {

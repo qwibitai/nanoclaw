@@ -90,6 +90,9 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: streaming draft support. Channels that can edit messages
+  // (like Telegram) implement this for progressive response streaming.
+  createDraftStream?(jid: string): import('./draft-stream.js').DraftStream;
 }
 
 // Callback type that channels use to deliver inbound messages
