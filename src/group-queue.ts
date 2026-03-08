@@ -171,8 +171,7 @@ export class GroupQueue {
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
-    const payload =
-      typeof message === 'string' ? { text: message } : message;
+    const payload = typeof message === 'string' ? { text: message } : message;
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });

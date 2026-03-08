@@ -31,12 +31,10 @@ vi.mock('../db.js', () => ({
 
 vi.mock('../image.js', () => ({
   isImageMessage: vi.fn().mockReturnValue(false),
-  processImage: vi
-    .fn()
-    .mockResolvedValue({
-      content: '[Image: attachments/test.jpg]',
-      relativePath: 'attachments/test.jpg',
-    }),
+  processImage: vi.fn().mockResolvedValue({
+    content: '[Image: attachments/test.jpg]',
+    relativePath: 'attachments/test.jpg',
+  }),
 }));
 
 // Mock fs

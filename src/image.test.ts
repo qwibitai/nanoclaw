@@ -69,7 +69,11 @@ describe('image processing', () => {
     });
 
     it('returns null on empty buffer', async () => {
-      const result = await processImage(Buffer.alloc(0), '/tmp/groups/test', '');
+      const result = await processImage(
+        Buffer.alloc(0),
+        '/tmp/groups/test',
+        '',
+      );
 
       expect(result).toBeNull();
     });
