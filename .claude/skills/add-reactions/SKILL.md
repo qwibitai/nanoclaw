@@ -27,14 +27,16 @@ This deterministically:
 - Adds `scripts/migrate-reactions.ts` (database migration for `reactions` table with composite PK and indexes)
 - Adds `src/status-tracker.ts` (forward-only emoji state machine for message lifecycle signaling, with persistence and retry)
 - Adds `src/status-tracker.test.ts` (unit tests for StatusTracker)
+- Adds `src/ipc-handlers/reactions.ts` (JSON-RPC reaction handler with group-scoped authorization)
 - Adds `container/skills/reactions/SKILL.md` (agent-facing documentation for the `react_to_message` MCP tool)
 - Modifies `src/db.ts` — adds `Reaction` interface, `reactions` table schema, `storeReaction`, `getReactionsForMessage`, `getMessagesByReaction`, `getReactionsByUser`, `getReactionStats`, `getLatestMessage`, `getMessageFromMe`
 - Modifies `src/channels/whatsapp.ts` — adds `messages.reaction` event handler, `sendReaction()`, `reactToLatestMessage()` methods
 - Modifies `src/types.ts` — adds optional `sendReaction` and `reactToLatestMessage` to `Channel` interface
-- Modifies `src/ipc.ts` — adds `type: 'reaction'` IPC handler with group-scoped authorization
-- Modifies `src/index.ts` — wires `sendReaction` dependency into IPC watcher
-- Modifies `src/group-queue.ts` — `GroupQueue` class for per-group container concurrency with retry
-- Modifies `container/agent-runner/src/ipc-mcp-stdio.ts` — adds `react_to_message` MCP tool exposed to container agents
+- Modifies `src/ipc-handlers/registry.ts` — adds `sendReaction` to `HandlerDeps` interface
+- Modifies `src/ipc-handlers/index.ts` — registers the reactions handler
+- Modifies `src/index.ts` — wires `sendReaction` into handler deps, initializes StatusTracker, adds heartbeat timer
+- Modifies `src/message-processor.ts` — adds optional `statusCallbacks` for message lifecycle tracking
+- Modifies `container/agent-runner/src/ipc-mcp-inprocess.ts` — adds `react_to_message` MCP tool exposed to container agents
 - Records the application in `.nanoclaw/state.yaml`
 
 ### Run database migration
@@ -99,5 +101,5 @@ Ask the agent to react to a message via the `react_to_message` MCP tool. Check y
 
 ### Agent can't send reactions
 
-- Check IPC logs for `Unauthorized IPC reaction attempt blocked` — the agent can only react in its own group's chat
+- Check logs for `Unauthorized reaction attempt blocked` — the agent can only react in its own group's chat
 - Verify WhatsApp is connected: check logs for connection status

@@ -7,14 +7,18 @@ adds:
   - container/skills/reactions/SKILL.md
   - src/status-tracker.ts
   - src/status-tracker.test.ts
+  - src/ipc-handlers/reactions.ts
 modifies:
   - src/db.ts
   - src/db.test.ts
   - src/channels/whatsapp.ts
   - src/types.ts
-  - src/ipc.ts
+  - src/group-queue.ts
+  - src/ipc-handlers/registry.ts
+  - src/ipc-handlers/index.ts
   - src/index.ts
-  - container/agent-runner/src/ipc-mcp-stdio.ts
+  - src/message-processor.ts
+  - container/agent-runner/src/ipc-mcp-inprocess.ts
   - src/channels/whatsapp.test.ts
   - src/group-queue.test.ts
   - src/ipc-auth.test.ts
