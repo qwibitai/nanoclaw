@@ -64,13 +64,11 @@ export function startCredentialProxy(port: number): Promise<Server> {
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: inject real Bearer token only on the token exchange
-          // endpoint. After exchange, the container uses the temp API key
-          // via x-api-key which is valid as-is — no Authorization needed.
-          const isTokenExchange = req.url?.startsWith(
-            '/api/oauth/claude_cli/create_api_key',
-          );
-          if (isTokenExchange) {
+          // OAuth mode: replace placeholder Bearer token with the real one
+          // only when the container actually sends an Authorization header
+          // (exchange request + auth probes). Post-exchange requests use
+          // x-api-key only, so they pass through without token injection.
+          if (headers['authorization']) {
             delete headers['authorization'];
             if (oauthToken) {
               headers['authorization'] = `Bearer ${oauthToken}`;

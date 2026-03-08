@@ -97,7 +97,7 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['x-api-key']).toBe('sk-ant-real-key');
   });
 
-  it('OAuth mode injects Authorization on exchange endpoint', async () => {
+  it('OAuth mode replaces Authorization when container sends one', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
@@ -120,11 +120,12 @@ describe('credential-proxy', () => {
     );
   });
 
-  it('OAuth mode does not inject Authorization on non-exchange requests', async () => {
+  it('OAuth mode does not inject Authorization when container omits it', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
 
+    // Post-exchange: container uses x-api-key only, no Authorization header
     await makeRequest(
       proxyPort,
       {
