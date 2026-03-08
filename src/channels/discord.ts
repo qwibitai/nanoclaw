@@ -227,10 +227,7 @@ export class DiscordChannel implements Channel {
       nameMap.sort((a, b) => b[0].length - a[0].length);
       let result = text;
       for (const [name, userId] of nameMap) {
-        const pattern = new RegExp(
-          `@${escapeRegex(name)}\\b`,
-          'gi',
-        );
+        const pattern = new RegExp(`@${escapeRegex(name)}\\b`, 'gi');
         result = result.replace(pattern, `<@${userId}>`);
       }
       return result;

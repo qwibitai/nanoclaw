@@ -186,10 +186,7 @@ interface VolumeMount {
  * Supports scoped tool names (e.g., 'gmail:sunday' matches 'gmail').
  * Returns true if tools is undefined (all tools enabled).
  */
-function isToolEnabled(
-  tools: string[] | undefined,
-  name: string,
-): boolean {
+function isToolEnabled(tools: string[] | undefined, name: string): boolean {
   if (!tools) return true;
   return tools.some((t) => t === name || t.startsWith(name + ':'));
 }

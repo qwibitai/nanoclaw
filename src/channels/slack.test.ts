@@ -90,9 +90,7 @@ import { readEnvFile } from '../env.js';
 
 // --- Test helpers ---
 
-function createTestOpts(
-  overrides?: Partial<ChannelOpts>,
-): ChannelOpts {
+function createTestOpts(overrides?: Partial<ChannelOpts>): ChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
