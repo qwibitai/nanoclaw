@@ -38,6 +38,7 @@ import {
   KeyPackageStore,
   InviteReader,
   deserializeApplicationRumor,
+  getNostrGroupIdHex,
   GROUP_EVENT_KIND,
   KEY_PACKAGE_KIND,
   KEY_PACKAGE_RELAY_LIST_KIND,
@@ -565,20 +566,12 @@ async function main() {
     const groupName = group.groupData?.name || `marmot:${mlsGroupIdHex.slice(0, 12)}`;
 
     // Extract the nostrGroupId (used in #h tags on kind 445 events)
-    // This is DIFFERENT from the MLS internal group ID (group.idStr)
+    // This is DIFFERENT from the MLS internal group ID (group.idStr).
+    // We use the SAME function (getNostrGroupIdHex) that createGroupEvent uses
+    // when building the #h tag, so the subscription filter is guaranteed to match.
     let nostrGroupIdHex: string;
     try {
-      const groupData = group.groupData;
-      if (groupData?.nostrGroupId) {
-        nostrGroupIdHex = bytesToHex(new Uint8Array(
-          groupData.nostrGroupId instanceof Uint8Array
-            ? groupData.nostrGroupId
-            : Object.values(groupData.nostrGroupId) as number[]
-        ));
-      } else {
-        log('WARN', 'No nostrGroupId in groupData, falling back to MLS group ID');
-        nostrGroupIdHex = mlsGroupIdHex;
-      }
+      nostrGroupIdHex = getNostrGroupIdHex(group.state);
     } catch (err: any) {
       log('WARN', `Failed to extract nostrGroupId: ${err?.message}, falling back to MLS group ID`);
       nostrGroupIdHex = mlsGroupIdHex;
