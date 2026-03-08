@@ -12,9 +12,7 @@ export function escapeXml(s: string): string {
 
 export function formatMessages(
   messages: NewMessage[],
-  timezoneOrImagePathTransformer?:
-    | string
-    | ((hostPath: string) => string),
+  timezoneOrImagePathTransformer?: string | ((hostPath: string) => string),
   imagePathTransformer?: (hostPath: string) => string,
 ): string {
   const timezone =
