@@ -228,6 +228,52 @@ describe('processGroupMessages', () => {
     expect(cursors['group@g.us']).toBe('2024-01-01T00:00:01.000Z');
   });
 
+  it('rolls back cursor on error if follow-up was piped after last output', async () => {
+    const cursors: Record<string, string> = {
+      'group@g.us': '2024-01-01T00:00:00.500Z',
+    };
+    const ch = createMockChannel();
+    const deps = createDeps({
+      registeredGroups: () => ({ 'group@g.us': TEST_GROUP }),
+      findChannel: () => ch,
+      getAgentCursor: (chatJid) => cursors[chatJid] || '',
+      setAgentCursor: (chatJid, ts) => {
+        cursors[chatJid] = ts;
+      },
+    });
+
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+    storeMessage({
+      id: 'msg-1',
+      chat_jid: 'group@g.us',
+      sender: 'user@s',
+      sender_name: 'User',
+      content: 'hello',
+      timestamp: '2024-01-01T00:00:01.000Z',
+    });
+
+    mockRunAgent.mockImplementation(
+      async (_group, _prompt, _chatJid, onOutput) => {
+        if (onOutput) {
+          // Agent sends first reply (sets outputSentToUser)
+          await onOutput({ status: 'success', result: 'first reply' });
+        }
+        // Simulate a follow-up being piped after output was sent
+        const pipedCb = mockQueue.registerOnPiped.mock.calls.find(
+          (c) => c[0] === 'group@g.us',
+        )?.[1];
+        pipedCb?.();
+        // Agent then fails before responding to the piped follow-up
+        return 'error';
+      },
+    );
+
+    const result = await processGroupMessages('group@g.us', deps);
+    // Should retry (return false) and roll back cursor despite earlier output
+    expect(result).toBe(false);
+    expect(cursors['group@g.us']).toBe('2024-01-01T00:00:00.500Z');
+  });
+
   it('sends message to channel on agent output', async () => {
     const ch = createMockChannel();
     const deps = createDeps({

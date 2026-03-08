@@ -133,10 +133,18 @@ export async function processGroupMessages(
     }
   };
 
+  // Track whether new input was piped after the last user-visible output.
+  // If the agent fails after piped input but before responding to it,
+  // we must roll back the cursor so those messages are retried.
+  let pipedAfterLastOutput = false;
+
   // Cancel idle timer when a follow-up message is piped to the container,
   // since the agent is no longer idle. A fresh timer starts when the agent
   // finishes the next query and emits another success.
-  deps.queue.registerOnPiped(chatJid, cancelIdleTimer);
+  deps.queue.registerOnPiped(chatJid, () => {
+    cancelIdleTimer();
+    pipedAfterLastOutput = true;
+  });
 
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
@@ -163,6 +171,7 @@ export async function processGroupMessages(
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        pipedAfterLastOutput = false;
       }
     }
 
@@ -181,9 +190,10 @@ export async function processGroupMessages(
   if (idleTimer) clearTimeout(idleTimer);
 
   if (output === 'error' || hadError) {
-    // If we already sent output to the user, don't roll back the cursor —
-    // the user got their response and re-processing would send duplicates.
-    if (outputSentToUser) {
+    // If we already sent output and no follow-up was piped since, don't
+    // roll back — the user got their response and re-processing would
+    // send duplicates.
+    if (outputSentToUser && !pipedAfterLastOutput) {
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
@@ -191,11 +201,16 @@ export async function processGroupMessages(
       deps.statusCallbacks?.markAllDone(chatJid);
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // Roll back cursor so retries can re-process these messages.
+    // When output was sent but a follow-up was piped after, we still
+    // roll back to previousCursor — the retry will re-send the earlier
+    // messages but the agent's session/context will deduplicate them.
     deps.setAgentCursor(chatJid, previousCursor);
     logger.warn(
       { group: group.name },
-      'Agent error, rolled back message cursor for retry',
+      pipedAfterLastOutput
+        ? 'Agent error after piped follow-up, rolled back cursor to retry unanswered messages'
+        : 'Agent error, rolled back message cursor for retry',
     );
     deps.statusCallbacks?.markAllFailed(chatJid, 'Task crashed — retrying.');
     return false;
