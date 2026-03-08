@@ -185,6 +185,7 @@ async function runTask(task: ScheduledTask, deps: SchedulerDependencies): Promis
         }
         if (streamedOutput.status === "success") {
           deps.queue.notifyIdle(task.chat_jid);
+          scheduleClose(); // Close promptly even when result is null (e.g. IPC-only tasks)
         }
         if (streamedOutput.status === "error") {
           error = streamedOutput.error || "Unknown error";
