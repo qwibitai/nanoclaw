@@ -89,6 +89,7 @@ If the user doesn't have a Feishu app, tell them:
 >          "im:message",
 >          "im:message:send_as_bot",
 >          "im:chat:readonly",
+>          "im:resource",
 >          "contact:user.base:readonly",
 >          "contact:contact.base:readonly"
 >        ]
@@ -260,6 +261,37 @@ Plain text messages without Markdown are sent as simple text messages for effici
 
 **Note:** The `md` tag is send-only. When reading back messages, Feishu returns the content as expanded post tags (`text`, `a`, etc.).
 
+### Media Support
+
+The Feishu channel supports sending and receiving media files:
+
+**Receiving (Inbound):**
+- When a user sends an image, file, audio, or video in Feishu, the bot automatically downloads it using `messageResource.get`
+- Downloaded files are stored at `groups/{folder}/media/{msgId}_{filename}`
+- The agent sees the file path in the container: `[Image: /workspace/group/media/om_xxx_photo.jpg]`
+- If download fails, the original placeholder is kept (e.g., `[Image]`, `[File: report.pdf]`)
+- Downloads have a 10-second timeout and do not block message delivery
+
+**Sending (Outbound):**
+- The agent can send media files using the `send_media` MCP tool
+- Supported types: `image`, `file`, `audio`, `video`
+- Files must be under `/workspace/group/` in the container
+- Images are uploaded via `image.create`, files/audio/video via `file.create`
+- Video is sent as a file (Feishu's `media` msg_type requires a cover image)
+
+**Required permission:** `im:resource` (for both downloading user media and uploading files)
+
+## Existing User Upgrade (Media Support)
+
+If you already have the Feishu skill applied and want to add media support:
+
+1. Add the `im:resource` permission in the Feishu open platform
+2. Create a new app version and get it approved
+3. Re-apply the skill: `npx tsx scripts/apply-skill.ts .claude/skills/add-feishu`
+4. Rebuild: `npm run build`
+5. Rebuild container: `./container/build.sh`
+6. Restart the service
+
 ## Troubleshooting
 
 ### Bot not responding
@@ -282,6 +314,14 @@ Check:
 
 - The app needs `contact:contact.base:readonly` permission (not just `contact:user.base:readonly`)
 - Create a new app version and get it approved after adding the permission
+
+### Media not downloading / sending
+
+- Verify the app has `im:resource` permission (required for both downloading user media and uploading files)
+- Create a new app version and get it approved after adding the permission
+- Check that the bot is in the same chat as the media message (required for `messageResource.get`)
+- For sending: ensure the file is under `/workspace/group/` in the container
+- Check logs for download/upload errors: `grep -i "media\|download\|upload" logs/nanoclaw.log`
 
 ### WebSocket connection fails
 

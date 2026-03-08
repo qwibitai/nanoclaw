@@ -1,11 +1,15 @@
+import fs from 'fs';
+import path from 'path';
 import * as Lark from '@larksuiteoapi/node-sdk';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
+import { GROUPS_DIR } from '../config.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
+  MediaPayload,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
@@ -24,6 +28,97 @@ function markdownToMdPost(text: string): string {
       content: [[{ tag: 'md', text }]],
     },
   });
+}
+
+/**
+ * Map file extension to Feishu file_type for the file upload API.
+ */
+function extensionToFeishuFileType(
+  filename: string,
+): 'opus' | 'mp4' | 'pdf' | 'doc' | 'xls' | 'ppt' | 'stream' {
+  const ext = path.extname(filename).toLowerCase();
+  switch (ext) {
+    case '.opus':
+    case '.ogg':
+      return 'opus';
+    case '.mp4':
+      return 'mp4';
+    case '.pdf':
+      return 'pdf';
+    case '.doc':
+    case '.docx':
+      return 'doc';
+    case '.xls':
+    case '.xlsx':
+      return 'xls';
+    case '.ppt':
+    case '.pptx':
+      return 'ppt';
+    default:
+      return 'stream';
+  }
+}
+
+/**
+ * Resolve media info from incoming message content.
+ * Returns the file key, resource type, and filename for downloading.
+ */
+function resolveMediaInfo(
+  msgType: string,
+  parsed: any,
+): { fileKey: string; resourceType: 'image' | 'file'; filename: string } | null {
+  switch (msgType) {
+    case 'image': {
+      const imageKey = parsed.image_key;
+      if (!imageKey) return null;
+      return {
+        fileKey: imageKey,
+        resourceType: 'image',
+        filename: `${imageKey}.jpg`,
+      };
+    }
+    case 'file': {
+      const fileKey = parsed.file_key;
+      if (!fileKey) return null;
+      return {
+        fileKey,
+        resourceType: 'file',
+        filename: parsed.file_name || 'file',
+      };
+    }
+    case 'audio': {
+      const fileKey = parsed.file_key;
+      if (!fileKey) return null;
+      return { fileKey, resourceType: 'file', filename: 'audio.opus' };
+    }
+    case 'media': {
+      const fileKey = parsed.file_key;
+      if (!fileKey) return null;
+      return {
+        fileKey,
+        resourceType: 'file',
+        filename: parsed.file_name || 'video.mp4',
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/** Media type label for agent content */
+function mediaTypeLabel(msgType: string): string {
+  switch (msgType) {
+    case 'image':
+      return 'Image';
+    case 'file':
+      return 'File';
+    case 'audio':
+      return 'Audio';
+    case 'media':
+      return 'Video';
+    default:
+      return 'File';
+  }
 }
 
 export interface FeishuChannelOpts {
@@ -167,6 +262,29 @@ export class FeishuChannel implements Channel {
       return;
     }
 
+    // Try to download media for supported message types
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch {
+      parsed = {};
+    }
+
+    const mediaInfo = resolveMediaInfo(msgType, parsed);
+    if (mediaInfo) {
+      const containerPath = await this.downloadMessageResource(
+        msgId,
+        mediaInfo.fileKey,
+        mediaInfo.resourceType,
+        group.folder,
+        mediaInfo.filename,
+      );
+      if (containerPath) {
+        content = `[${mediaTypeLabel(msgType)}: ${containerPath}]`;
+      }
+      // If download fails, keep the original placeholder content
+    }
+
     // Deliver message
     this.opts.onMessage(chatJid, {
       id: msgId,
@@ -182,6 +300,51 @@ export class FeishuChannel implements Channel {
       { chatJid, chatName, sender: senderName },
       'Feishu message stored',
     );
+  }
+
+  /**
+   * Download a media resource from a user message using messageResource.get.
+   * Returns the container path if successful, null otherwise.
+   */
+  private async downloadMessageResource(
+    msgId: string,
+    fileKey: string,
+    resourceType: 'image' | 'file',
+    groupFolder: string,
+    filename: string,
+  ): Promise<string | null> {
+    try {
+      const mediaDir = path.join(GROUPS_DIR, groupFolder, 'media');
+      fs.mkdirSync(mediaDir, { recursive: true });
+
+      const safeFilename = `${msgId}_${filename}`.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const savePath = path.join(mediaDir, safeFilename);
+
+      const resp = await Promise.race([
+        this.client.im.v1.messageResource.get({
+          path: { message_id: msgId, file_key: fileKey },
+          params: { type: resourceType },
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Media download timeout')), 10_000),
+        ),
+      ]);
+
+      await (resp as any).writeFile(savePath);
+
+      const containerPath = `/workspace/group/media/${safeFilename}`;
+      logger.info(
+        { msgId, fileKey, savePath, containerPath },
+        'Media resource downloaded',
+      );
+      return containerPath;
+    } catch (err) {
+      logger.warn(
+        { msgId, fileKey, err },
+        'Failed to download media resource, using placeholder',
+      );
+      return null;
+    }
   }
 
   private extractContent(
@@ -350,6 +513,90 @@ export class FeishuChannel implements Channel {
       }
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Feishu message');
+    }
+  }
+
+  async sendMedia(jid: string, media: MediaPayload): Promise<void> {
+    const chatId = jid.replace(/^feishu:/, '');
+
+    try {
+      switch (media.type) {
+        case 'image': {
+          const resp = await this.client.im.v1.image.create({
+            data: {
+              image_type: 'message',
+              image: fs.createReadStream(media.filePath),
+            },
+          } as any);
+          const imageKey = (resp as any)?.image_key || (resp as any)?.data?.image_key;
+          if (!imageKey) {
+            logger.error({ jid }, 'Image upload returned no key');
+            return;
+          }
+          await this.client.im.v1.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              content: JSON.stringify({ image_key: imageKey }),
+              msg_type: 'image',
+            },
+          });
+          logger.info({ jid, imageKey }, 'Feishu image sent');
+          break;
+        }
+        case 'audio': {
+          const resp = await this.client.im.v1.file.create({
+            data: {
+              file_type: 'opus',
+              file_name: media.filename || 'audio.opus',
+              file: fs.createReadStream(media.filePath),
+            },
+          } as any);
+          const fileKey = (resp as any)?.file_key || (resp as any)?.data?.file_key;
+          if (!fileKey) {
+            logger.error({ jid }, 'Audio upload returned no key');
+            return;
+          }
+          await this.client.im.v1.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              content: JSON.stringify({ file_key: fileKey }),
+              msg_type: 'audio',
+            },
+          });
+          logger.info({ jid, fileKey }, 'Feishu audio sent');
+          break;
+        }
+        default: {
+          // 'file' and 'video' (video downgrades to file since media type needs cover image)
+          const fname = media.filename || path.basename(media.filePath);
+          const fileType = extensionToFeishuFileType(fname);
+          const resp = await this.client.im.v1.file.create({
+            data: {
+              file_type: fileType,
+              file_name: fname,
+              file: fs.createReadStream(media.filePath),
+            },
+          } as any);
+          const fileKey = (resp as any)?.file_key || (resp as any)?.data?.file_key;
+          if (!fileKey) {
+            logger.error({ jid }, 'File upload returned no key');
+            return;
+          }
+          await this.client.im.v1.message.create({
+            params: { receive_id_type: 'chat_id' },
+            data: {
+              receive_id: chatId,
+              content: JSON.stringify({ file_key: fileKey }),
+              msg_type: 'file',
+            },
+          });
+          logger.info({ jid, fileKey, fileType }, 'Feishu file sent');
+        }
+      }
+    } catch (err) {
+      logger.error({ jid, err }, 'Failed to send media');
     }
   }
 

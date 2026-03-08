@@ -7,6 +7,10 @@ adds:
   - src/channels/feishu.test.ts
 modifies:
   - src/channels/index.ts
+  - src/types.ts
+  - src/ipc.ts
+  - src/index.ts
+  - container/agent-runner/src/ipc-mcp-stdio.ts
 structured:
   npm_dependencies:
     "@larksuiteoapi/node-sdk": "^1.24.0"
