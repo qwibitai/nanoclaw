@@ -307,6 +307,15 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     name: z.string().describe('Display name for the group'),
     folder: z.string().describe('Channel-prefixed folder name (e.g., "whatsapp_family-chat", "telegram_dev-team")'),
     trigger: z.string().describe('Trigger word (e.g., "@Andy")'),
+    requires_trigger: z.boolean().optional().describe('Whether messages must match the trigger pattern to activate the agent. Defaults to true for groups, set false for 1-on-1 chats.'),
+    container_config: z.object({
+      additionalMounts: z.array(z.object({
+        hostPath: z.string().describe('Absolute path on the host machine'),
+        containerPath: z.string().describe('Path inside the container'),
+        readonly: z.boolean().optional().describe('Mount as read-only (default false)'),
+      })).optional().describe('Extra filesystem mounts for the container'),
+      timeout: z.number().optional().describe('Container timeout in milliseconds'),
+    }).optional().describe('Container configuration (mounts, timeout). Re-register the group to update.'),
   },
   async (args) => {
     if (!isMain) {
@@ -316,7 +325,7 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       };
     }
 
-    const data = {
+    const data: Record<string, unknown> = {
       type: 'register_group',
       jid: args.jid,
       name: args.name,
@@ -324,6 +333,8 @@ Use available_groups.json to find the JID for a group. The folder name must be c
       trigger: args.trigger,
       timestamp: new Date().toISOString(),
     };
+    if (args.requires_trigger !== undefined) data.requiresTrigger = args.requires_trigger;
+    if (args.container_config !== undefined) data.containerConfig = args.container_config;
 
     writeIpcFile(TASKS_DIR, data);
 
