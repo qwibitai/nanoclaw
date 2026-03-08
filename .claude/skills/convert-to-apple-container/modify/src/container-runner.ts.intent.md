@@ -25,9 +25,13 @@ Apple Container (VirtioFS) only supports directory mounts, not file mounts. The 
 - Non-main containers behave identically (still get `--user` flag)
 - JSON-RPC server/client setup unchanged
 - Handler registration unchanged
-- Secrets passed via JSON-RPC initialize request
+- Credentials injected by host-side credential proxy, never in container env or stdin
 
 ## Must-keep
 - The `isMain` parameter on `buildContainerArgs` (consumed by `runContainerAgent`)
 - The `RUN_UID`/`RUN_GID` env vars for main containers (consumed by entrypoint.sh)
 - The `--user` flag for non-main containers (file permission compatibility)
+- `CONTAINER_HOST_GATEWAY` and `hostGatewayArgs()` imports from `container-runtime.js`
+- `detectAuthMode()` import from `credential-proxy.js`
+- `CREDENTIAL_PROXY_PORT` import from `config.js`
+- Credential proxy env vars: `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`/`CLAUDE_CODE_OAUTH_TOKEN`

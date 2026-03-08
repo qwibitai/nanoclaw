@@ -64,28 +64,22 @@ Messages and task operations are verified against group identity:
 | View all tasks | ✓ | Own only |
 | Manage other groups | ✓ | ✗ |
 
-### 5. Credential Handling
+### 5. Credential Isolation (Credential Proxy)
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+Real API credentials **never enter containers**. Instead, the host runs an HTTP credential proxy that injects authentication headers transparently.
+
+**How it works:**
+1. Host starts a credential proxy on `CREDENTIAL_PROXY_PORT` (default: 3001)
+2. Containers receive `ANTHROPIC_BASE_URL=http://host.docker.internal:<port>` and `ANTHROPIC_API_KEY=placeholder`
+3. The SDK sends API requests to the proxy with the placeholder key
+4. The proxy strips placeholder auth, injects real credentials (`x-api-key` or `Authorization: Bearer`), and forwards to `api.anthropic.com`
+5. Agents cannot discover real credentials — not in environment, stdin, files, or `/proc`
 
 **NOT Mounted:**
 - WhatsApp session (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
 - Any credentials matching blocked patterns
-
-**Credential Filtering:**
-Only these environment variables are exposed to containers:
-```typescript
-const allowedVars = [
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-];
-```
-
-> **Note:** Anthropic auth settings are passed so Claude Code can authenticate. Before each `Bash` tool execution, NanoClaw explicitly unsets these variables to prevent shell-command exfiltration.
+- `.env` is shadowed in the project root mount so agents cannot read secrets from disk
 
 ## Privilege Comparison
 
@@ -113,16 +107,16 @@ const allowedVars = [
 │  • IPC authorization                                              │
 │  • Mount validation (external allowlist)                          │
 │  • Container lifecycle                                            │
-│  • Credential filtering                                           │
+│  • Credential proxy (injects auth headers)                       │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Explicit mounts only
+                                 ▼ Explicit mounts only, no secrets
 ┌──────────────────────────────────────────────────────────────────┐
 │                CONTAINER (ISOLATED/SANDBOXED)                     │
 │  • Agent execution                                                │
 │  • Bash commands (sandboxed)                                      │
 │  • File operations (limited to mounts)                            │
-│  • Network access (unrestricted)                                  │
-│  • Cannot modify security config                                  │
+│  • API calls routed through credential proxy                     │
+│  • No real credentials in environment or filesystem              │
 └──────────────────────────────────────────────────────────────────┘
 ```

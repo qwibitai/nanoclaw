@@ -53,6 +53,7 @@ RUN mkdir -p /workspace/group /workspace/global /workspace/extra
 
 # Create entrypoint script
 # Communication uses JSON-RPC over stdio (stdin/stdout)
+# Credentials are injected by the host's credential proxy — never passed here.
 RUN printf '#!/bin/bash\nset -e\ncd /app && npx tsc --outDir /tmp/dist 2>&1 >&2\nln -s /app/node_modules /tmp/dist/node_modules\nchmod -R a-w /tmp/dist\nexec node /tmp/dist/index.js\n' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
