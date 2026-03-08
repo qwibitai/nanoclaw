@@ -116,6 +116,10 @@ AskUserQuestion: Agent access to external directories?
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
+The mounts step writes the allowlist AND syncs `additionalMounts` to all registered groups' `container_config`. Check `GROUPS_UPDATED` in the status block to confirm groups were updated. If no groups are registered yet (step 5 hasn't run), that's fine — re-run the mounts step after step 5 completes.
+
+**If step 6 runs before step 5** (no registered groups yet): After step 5 completes and groups are registered, re-run the mounts step to sync mounts to the newly registered groups: `npx tsx setup/index.ts --step mounts -- --json '<same json>'`
+
 ## 7. Start Service
 
 If service already running: unload first.
