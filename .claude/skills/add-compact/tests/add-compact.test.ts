@@ -49,6 +49,7 @@ describe('add-compact skill package', () => {
       const content = fs.readFileSync(filePath, 'utf-8');
       expect(content).toContain('export function extractSessionCommand');
       expect(content).toContain('export function isSessionCommandAllowed');
+      expect(content).toContain('export async function handleSessionCommand');
       expect(content).toContain("'/compact'");
     });
 
@@ -103,39 +104,33 @@ describe('add-compact skill package', () => {
     });
 
     it('imports session command helpers', () => {
-      expect(content).toContain("import { extractSessionCommand, isSessionCommandAllowed } from './session-commands.js'");
+      expect(content).toContain("import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js'");
     });
 
     it('uses const for missedMessages', () => {
       expect(content).toMatch(/const missedMessages = getMessagesSince/);
     });
 
-    it('has session command interception in processGroupMessages', () => {
+    it('delegates to handleSessionCommand in processGroupMessages', () => {
       expect(content).toContain('Session command interception (before trigger check)');
-      expect(content).toContain('extractSessionCommand(m.content, TRIGGER_PATTERN)');
-      expect(content).toContain('isSessionCommandAllowed(isMainGroup');
+      expect(content).toContain('handleSessionCommand(');
+      expect(content).toContain('cmdResult.handled');
+      expect(content).toContain('cmdResult.success');
     });
 
-    it('has authorized path with pre-compact and /compact', () => {
-      expect(content).toContain('preCompactMsgs');
-      expect(content).toContain('hadPreError');
-      expect(content).toContain('preOutputSent');
-      expect(content).toContain('hadCmdError');
-    });
-
-    it('has denied path with cursor advance and return', () => {
-      expect(content).toContain('Session commands require admin access');
-      // Denied path advances cursor to /compact timestamp and returns
-      expect(content).toContain('silently consume the /compact by advancing the cursor past it');
+    it('passes deps to handleSessionCommand', () => {
+      expect(content).toContain('sendMessage:');
+      expect(content).toContain('setTyping:');
+      expect(content).toContain('runAgent:');
+      expect(content).toContain('closeStdin:');
+      expect(content).toContain('advanceCursor:');
+      expect(content).toContain('formatMessages');
+      expect(content).toContain('canSenderInteract:');
     });
 
     it('has session command interception in startMessageLoop', () => {
       expect(content).toContain('Session command interception (message loop)');
       expect(content).toContain('queue.enqueueMessageCheck(chatJid)');
-    });
-
-    it('respects sender allowlist in deny path', () => {
-      expect(content).toContain('isTriggerAllowed(chatJid, sessionCmdMsg.sender, loadSenderAllowlist())');
     });
 
     it('preserves core index.ts structure', () => {

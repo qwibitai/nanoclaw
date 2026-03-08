@@ -49,7 +49,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { extractSessionCommand, isSessionCommandAllowed } from './session-commands.js';
+import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -163,109 +163,30 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // --- Session command interception (before trigger check) ---
-  // Scan ALL messages for a session command, not just the last one.
-  const sessionCmdMsg = missedMessages.find(
-    (m) => extractSessionCommand(m.content, TRIGGER_PATTERN) !== null,
-  );
-  const sessionCommand = sessionCmdMsg
-    ? extractSessionCommand(sessionCmdMsg.content, TRIGGER_PATTERN)
-    : null;
-
-  if (sessionCommand && sessionCmdMsg) {
-    if (isSessionCommandAllowed(isMainGroup, sessionCmdMsg.is_from_me === true)) {
-      // AUTHORIZED: process pre-compact messages first, then run /compact
-      logger.info({ group: group.name, command: sessionCommand }, 'Session command');
-
-      const cmdIndex = missedMessages.indexOf(sessionCmdMsg);
-      const preCompactMsgs = missedMessages.slice(0, cmdIndex);
-
-      // Send pre-compact messages to the agent so they're in the session context.
-      // Close stdin on session-update marker (result: null) so the container exits
-      // the IPC wait loop. This waits until all results are emitted (including
-      // multi-result agent teams runs) before closing.
-      if (preCompactMsgs.length > 0) {
-        const prePrompt = formatMessages(preCompactMsgs, TIMEZONE);
-        let hadPreError = false;
-        let preOutputSent = false;
-        const preOutput = await runAgent(group, prePrompt, chatJid, async (result) => {
-          if (result.status === 'error') {
-            hadPreError = true;
-          }
-          if (result.result) {
-            const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-            const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-            if (text) {
-              await channel.sendMessage(chatJid, text);
-              preOutputSent = true;
-            }
-          }
-          // Close stdin on session-update marker — emitted after query completes,
-          // so all results (including multi-result runs) are already written.
-          if (result.status === 'success' && result.result === null) {
-            queue.closeStdin(chatJid);
-          }
-        });
-
-        // If pre-compact processing failed, don't proceed to /compact.
-        if (preOutput === 'error' || hadPreError) {
-          logger.warn({ group: group.name }, 'Pre-compact processing failed, aborting /compact');
-          await channel.sendMessage(chatJid, 'Failed to process messages before /compact. Try again.');
-          if (preOutputSent) {
-            // Output was already sent — don't retry or it will duplicate.
-            // Advance cursor past pre-compact messages, leave /compact pending.
-            lastAgentTimestamp[chatJid] = preCompactMsgs[preCompactMsgs.length - 1].timestamp;
-            saveState();
-            return true;
-          }
-          return false;
-        }
-      }
-
-      // Forward the literal slash command as the prompt (no XML formatting)
-      await channel.setTyping?.(chatJid, true);
-
-      let hadCmdError = false;
-      const output = await runAgent(group, sessionCommand, chatJid, async (result) => {
-        if (result.status === 'error') {
-          hadCmdError = true;
-        }
-        if (result.result) {
-          const raw = typeof result.result === 'string' ? result.result : JSON.stringify(result.result);
-          const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-          if (text) await channel.sendMessage(chatJid, text);
-        }
-      });
-
-      // Advance cursor to /compact — messages AFTER it remain pending for next poll.
-      lastAgentTimestamp[chatJid] = sessionCmdMsg.timestamp;
-      saveState();
-
-      await channel.setTyping?.(chatJid, false);
-
-      if (output === 'error' || hadCmdError) {
-        await channel.sendMessage(chatJid, 'Compaction failed. The session is unchanged.');
-      }
-
-      return true;
-    }
-
-    // DENIED: send denial if the sender would normally be allowed to interact,
-    // then silently consume the /compact by advancing the cursor past it.
-    // Trade-off: other messages in the same batch are also consumed (cursor is
-    // a high-water mark). Acceptable for this narrow edge case.
-    const denyHasTrigger = TRIGGER_PATTERN.test(sessionCmdMsg.content.trim());
-    const requiresTrigger = !isMainGroup && group.requiresTrigger !== false;
-    const senderAllowed = isMainGroup || !requiresTrigger || (denyHasTrigger && (
-      sessionCmdMsg.is_from_me ||
-      isTriggerAllowed(chatJid, sessionCmdMsg.sender, loadSenderAllowlist())
-    ));
-    if (senderAllowed) {
-      await channel.sendMessage(chatJid, 'Session commands require admin access.');
-    }
-    lastAgentTimestamp[chatJid] = sessionCmdMsg.timestamp;
-    saveState();
-    return true;
-  }
+  const cmdResult = await handleSessionCommand({
+    missedMessages,
+    isMainGroup,
+    groupName: group.name,
+    triggerPattern: TRIGGER_PATTERN,
+    timezone: TIMEZONE,
+    deps: {
+      sendMessage: (text) => channel.sendMessage(chatJid, text),
+      setTyping: (typing) => channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+      runAgent: (prompt, onOutput) => runAgent(group, prompt, chatJid, onOutput),
+      closeStdin: () => queue.closeStdin(chatJid),
+      advanceCursor: (ts) => { lastAgentTimestamp[chatJid] = ts; saveState(); },
+      formatMessages,
+      canSenderInteract: (msg) => {
+        const hasTrigger = TRIGGER_PATTERN.test(msg.content.trim());
+        const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
+        return isMainGroup || !reqTrigger || (hasTrigger && (
+          msg.is_from_me ||
+          isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())
+        ));
+      },
+    },
+  });
+  if (cmdResult.handled) return cmdResult.success;
   // --- End session command interception ---
 
   // For non-main groups, check if trigger is required and present

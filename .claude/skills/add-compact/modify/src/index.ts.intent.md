@@ -1,13 +1,13 @@
 # Intent: src/index.ts
 
 ## What Changed
-- Added `import { extractSessionCommand, isSessionCommandAllowed } from './session-commands.js'`
-- Added session command interception block in `processGroupMessages()` between `missedMessages.length === 0` check and trigger check
+- Added `import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js'`
+- Added `handleSessionCommand()` call in `processGroupMessages()` between `missedMessages.length === 0` check and trigger check
 - Added session command interception in `startMessageLoop()` between `isMainGroup` check and `needsTrigger` block
 
 ## Key Sections
-- **Imports** (top of file): extractSessionCommand, isSessionCommandAllowed from session-commands
-- **processGroupMessages**: Session command interception (authorized path with pre-compact + /compact, denied path advances cursor and returns)
+- **Imports** (top of file): extractSessionCommand, handleSessionCommand, isSessionCommandAllowed from session-commands
+- **processGroupMessages**: Calls `handleSessionCommand()` with deps (sendMessage, runAgent, closeStdin, advanceCursor, formatMessages, canSenderInteract), returns early if handled
 - **startMessageLoop**: Session command detection, auth-gated closeStdin (prevents DoS), enqueue for processGroupMessages
 
 ## Invariants (must-keep)
