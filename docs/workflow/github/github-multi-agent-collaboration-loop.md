@@ -206,7 +206,7 @@ Use these assets as the standard starter pack for this and future repositories:
 5. `.github/workflows/multi-agent-governance.yml` (auto-label + issue-link enforcement)
 6. `.github/workflows/project-intake-sync.yml` (auto-add Issues to Project board and initialize execution fields)
 7. `.github/workflows/project-status-sync.yml` (sync Issue-first Project status from Issue/PR lifecycle)
-8. `.github/DISCUSSION_TEMPLATE/*.yml` (portable discussion scaffolding for workflow/ideas/questions)
+8. `.github/DISCUSSION_TEMPLATE/*.yml` (portable discussion scaffolding for workflow/ideas/questions/sdk-tooling review)
 9. `scripts/workflow/sync-github-labels.sh` (safe label upsert, non-destructive)
 10. `scripts/workflow/apply-branch-protection-baseline.sh` (low-friction branch protection baseline)
 

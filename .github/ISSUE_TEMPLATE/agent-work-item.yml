@@ -54,6 +54,14 @@ body:
     validations:
       required: false
   - type: input
+    id: source_discussion
+    attributes:
+      label: Source Discussion
+      description: Link the GitHub Discussion if this work was promoted from research, changelog review, or tooling evaluation.
+      placeholder: https://github.com/<owner>/<repo>/discussions/<id>
+    validations:
+      required: false
+  - type: input
     id: owner
     attributes:
       label: Suggested Owner

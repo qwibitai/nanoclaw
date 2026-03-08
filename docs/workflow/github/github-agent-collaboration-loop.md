@@ -111,6 +111,13 @@ Current live Discussion taxonomy:
 4. `Claude/Codex Collaboration`
 5. `SDK / Tooling Opportunities`
 
+`SDK / Tooling Opportunities` is the required start surface for:
+
+1. Claude Code changelog review
+2. Claude Agent SDK changelog review
+3. OpenCode changelog review
+4. cross-system feature adoption ideas that affect NanoClaw lane behavior, autonomy, or operator workflow
+
 Project rules:
 
 1. Issue cards only
@@ -128,6 +135,14 @@ Expected outputs from a Discussion:
 2. `deferred`
 3. `rejected`
 4. `reference only`
+
+For `SDK / Tooling Opportunities`, use this stricter decision contract:
+
+1. one comment from Claude with `accept`, `pilot`, `defer`, or `reject`
+2. one comment from Codex with `accept`, `pilot`, `defer`, or `reject`
+3. promote to an Issue only if both agents choose `accept` or `pilot`
+4. if agents disagree, keep the work in Discussion until a human resolves the tie
+5. if promoted, run one pilot at a time rather than bundling multiple tooling changes
 
 Do not use a Discussion to:
 
@@ -152,6 +167,12 @@ Promotion from Discussion to Issue:
 3. set `Source=discussion`
 4. assign one owner in `Agent`
 5. add the Issue to the Project
+
+For changelog- or research-driven tooling work:
+
+1. link the source Discussion in the Issue body
+2. preserve the unanimous agent decision in the Issue summary
+3. scope the first Issue as a pilot when the change affects workflow or lane behavior
 
 Do not open an Issue for:
 
@@ -238,6 +259,8 @@ Human-admin only:
 5. changing the Project schema beyond the accepted field model
 
 ## Session Start Sweep
+
+In addition to the normal sweep contract, agents should check whether any open `SDK / Tooling Opportunities` Discussions need a first-response decision or a second agent decision comment before starting unrelated workflow-change work.
 
 Run this before any task work every session:
 

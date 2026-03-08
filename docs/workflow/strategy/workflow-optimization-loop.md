@@ -35,12 +35,27 @@ Collect only high-signal sources:
 2. Source must include actionable workflow mechanics, not only opinions.
 3. Source must be recent enough for current tool/runtime behavior.
 
+Required weekly changelog scan for this repository:
+
+1. Claude Code release notes / changelog
+2. Claude Agent SDK release notes / changelog
+3. OpenCode release notes / changelog
+
+For each source, capture:
+
+1. upstream change summary
+2. NanoClaw subsystem fit (`main`, `andy-developer`, `jarvis-worker-*`, shared runtime)
+3. candidate adoption or explicit `no-fit`
+4. risk / operator-load impact
+
 Record findings in `docs/research/` with:
 
 1. What they do.
 2. Why it works.
 3. Preconditions.
 4. Failure modes.
+
+Before implementation discussion, open or update a GitHub Discussion in `SDK / Tooling Opportunities` and require both Claude and Codex to leave a decision comment (`accept`, `pilot`, `defer`, `reject`).
 
 ## Phase 2: Translation to NanoClaw Context
 
@@ -64,6 +79,8 @@ Define a pilot with fixed boundaries:
 5. Success metrics and failure thresholds.
 
 Do not bundle multiple workflow changes in one pilot.
+
+Do not promote a changelog-derived idea directly from local notes into implementation without the Discussion decision step, unless a human explicitly instructs otherwise.
 
 ## Phase 4: Execution + Evidence
 

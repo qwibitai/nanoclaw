@@ -1,0 +1,73 @@
+title: "[SDK/Tooling] "
+body:
+  - type: dropdown
+    id: source_system
+    attributes:
+      label: Source System
+      options:
+        - Claude Code
+        - Claude Agent SDK
+        - OpenCode
+        - Cross-system
+    validations:
+      required: true
+  - type: dropdown
+    id: change_type
+    attributes:
+      label: Change Type
+      options:
+        - Changelog / release note
+        - New feature
+        - API / SDK capability
+        - Workflow / tooling pattern
+        - Reliability / performance improvement
+    validations:
+      required: true
+  - type: textarea
+    id: upstream_change
+    attributes:
+      label: Upstream Change
+      description: Summarize the new feature, release, or behavior change.
+      placeholder: What changed upstream?
+    validations:
+      required: true
+  - type: textarea
+    id: nanoclaw_fit
+    attributes:
+      label: NanoClaw Fit
+      description: Map it to `main`, `andy-developer`, `jarvis-worker-*`, or the shared runtime.
+      placeholder: Where does this fit in NanoClaw, and why?
+    validations:
+      required: true
+  - type: textarea
+    id: candidate_adoption
+    attributes:
+      label: Candidate Adoption
+      description: Describe the concrete change we could make if we adopt it.
+      placeholder: What would we implement, replace, or pilot?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence_links
+    attributes:
+      label: Evidence and Links
+      description: Include official changelog, docs, release notes, or source links.
+      placeholder: https://...
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and Constraints
+      description: List mission, reliability, contract, or operational risks.
+      placeholder: What could break, drift, or add operator overhead?
+    validations:
+      required: true
+  - type: textarea
+    id: decision_contract
+    attributes:
+      label: Decision Contract
+      description: Claude and Codex must both comment with one of `accept`, `pilot`, `defer`, or `reject`. Promotion to an Issue requires unanimous `accept` or `pilot`, unless a human explicitly overrides.
+      placeholder: What exact decision should come out of this discussion?
+    validations:
+      required: true

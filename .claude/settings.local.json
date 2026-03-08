@@ -53,7 +53,8 @@
       "Bash(opencode run:*)",
       "Bash(gh api:*)",
       "Bash(gh project:*)",
-      "Bash(gh issue:*)"
+      "Bash(gh issue:*)",
+      "mcp__exa__get_code_context_exa"
     ]
   },
   "enableAllProjectMcpServers": true,
