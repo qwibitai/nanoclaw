@@ -7,6 +7,7 @@ import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
   NewMessage,
+  Reaction,
   RegisteredGroup,
   ScheduledTask,
   TaskRunLog,
@@ -32,10 +33,21 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      quoted_message_id TEXT,
+      quote_sender_name TEXT,
+      quote_content TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+
+    CREATE TABLE IF NOT EXISTS reactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_jid TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      timestamp TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -106,6 +118,15 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add quote columns if they don't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN quoted_message_id TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_sender_name TEXT`);
+    database.exec(`ALTER TABLE messages ADD COLUMN quote_content TEXT`);
+  } catch {
+    /* columns already exist */
+  }
+
   // Add is_main column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -117,6 +138,29 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* column already exists */
+  }
+
+  // Add attachments_json column if it doesn't exist (migration for existing DBs)
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN attachments_json TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add reaction columns to messages if they don't exist (migration for existing DBs)
+  try {
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_reaction INTEGER DEFAULT 0`,
+    );
+    database.exec(`ALTER TABLE messages ADD COLUMN reaction_emoji TEXT`);
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reaction_target_timestamp TEXT`,
+    );
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN reaction_target_author TEXT`,
+    );
+  } catch {
+    /* columns already exist */
   }
 
   // Add channel and is_group columns if they don't exist (migration for existing DBs)
@@ -138,6 +182,29 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // Recreate reactions table with new schema (old table was for incoming WhatsApp reactions)
+  try {
+    const info = database
+      .prepare(
+        `SELECT sql FROM sqlite_master WHERE type='table' AND name='reactions'`,
+      )
+      .get() as { sql: string } | undefined;
+    if (info && info.sql.includes('reactor_jid')) {
+      database.exec('DROP TABLE reactions');
+      database.exec(`
+        CREATE TABLE reactions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_jid TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          emoji TEXT NOT NULL,
+          timestamp TEXT NOT NULL
+        )
+      `);
+    }
+  } catch {
+    /* table doesn't exist yet, will be created by CREATE TABLE IF NOT EXISTS */
   }
 }
 
@@ -262,7 +329,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author, attachments_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -272,7 +339,25 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.quoted_message_id || null,
+    msg.quote_sender_name || null,
+    msg.quote_content || null,
+    msg.is_reaction ? 1 : 0,
+    msg.reaction_emoji || null,
+    msg.reaction_target_timestamp ?? null,
+    msg.reaction_target_author || null,
+    msg.attachments ? JSON.stringify(msg.attachments) : null,
   );
+}
+
+export function deleteReactionByTarget(
+  chatJid: string,
+  targetTimestamp: number | string,
+  senderJid: string,
+): void {
+  db.prepare(
+    `DELETE FROM messages WHERE chat_jid = ? AND sender = ? AND reaction_target_timestamp = ? AND is_reaction = 1`,
+  ).run(chatJid, senderJid, String(targetTimestamp));
 }
 
 /**
@@ -316,7 +401,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author, attachments_json
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -328,11 +413,20 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as (NewMessage & {
+    attachments_json?: string;
+  })[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
     if (row.timestamp > newTimestamp) newTimestamp = row.timestamp;
+    if (row.attachments_json) {
+      try {
+        row.attachments = JSON.parse(row.attachments_json);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   return { messages: rows, newTimestamp };
@@ -349,7 +443,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, quoted_message_id, quote_sender_name, quote_content, is_reaction, reaction_emoji, reaction_target_timestamp, reaction_target_author, attachments_json
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -358,9 +452,21 @@ export function getMessagesSince(
       LIMIT ?
     ) ORDER BY timestamp
   `;
-  return db
+  const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as (NewMessage & {
+    attachments_json?: string;
+  })[];
+  for (const row of rows) {
+    if (row.attachments_json) {
+      try {
+        row.attachments = JSON.parse(row.attachments_json);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return rows;
 }
 
 export function createTask(
@@ -494,6 +600,49 @@ export function logTaskRun(log: TaskRunLog): void {
     log.result,
     log.error,
   );
+}
+
+// --- Reaction accessors ---
+
+export function storeReaction(reaction: Reaction): void {
+  db.prepare(
+    `INSERT INTO reactions (chat_jid, message_id, emoji, timestamp) VALUES (?, ?, ?, ?)`,
+  ).run(
+    reaction.chatJid,
+    reaction.messageId,
+    reaction.emoji,
+    reaction.timestamp,
+  );
+}
+
+/**
+ * Get the most recent message for a chat (any sender, including bot messages).
+ * Used by channels to find the message to react to.
+ */
+export function getLatestMessage(
+  chatJid: string,
+):
+  | { id: string; sender: string; sender_name: string; is_from_me: boolean }
+  | undefined {
+  const row = db
+    .prepare(
+      `SELECT id, sender, sender_name, is_from_me FROM messages WHERE chat_jid = ? ORDER BY timestamp DESC LIMIT 1`,
+    )
+    .get(chatJid) as
+    | { id: string; sender: string; sender_name: string; is_from_me: number }
+    | undefined;
+  if (!row) return undefined;
+  return { ...row, is_from_me: row.is_from_me === 1 };
+}
+
+export function getMessageById(
+  messageId: string,
+): { sender: string; is_from_me: boolean } | undefined {
+  const row = db
+    .prepare('SELECT sender, is_from_me FROM messages WHERE id = ?')
+    .get(messageId) as { sender: string; is_from_me: number } | undefined;
+  if (!row) return undefined;
+  return { ...row, is_from_me: row.is_from_me === 1 };
 }
 
 // --- Router state accessors ---
