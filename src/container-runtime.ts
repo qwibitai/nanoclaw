@@ -3,6 +3,7 @@
  * All runtime-specific logic lives here so swapping runtimes means changing one file.
  */
 import { execSync } from 'child_process';
+import fs from 'fs';
 import os from 'os';
 
 import { logger } from './logger.js';
@@ -25,8 +26,9 @@ export const PROXY_BIND_HOST =
 function detectProxyBindHost(): string {
   if (os.platform() === 'darwin') return '127.0.0.1';
 
-  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct
-  if (process.env.WSL_DISTRO_NAME) return '127.0.0.1';
+  // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.
+  // Check /proc filesystem, not env vars — WSL_DISTRO_NAME isn't set under systemd.
+  if (fs.existsSync('/proc/sys/fs/binfmt_misc/WSLInterop')) return '127.0.0.1';
 
   // Bare-metal Linux: bind to the docker0 bridge IP instead of 0.0.0.0
   const ifaces = os.networkInterfaces();
