@@ -117,6 +117,20 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 ## Phase 4: Registration
 
+### Ensure service is running
+
+Before asking the user to send `/chatid`, the service must be running — otherwise the bot won't respond.
+
+Check current status:
+```bash
+launchctl list | grep nanoclaw  # macOS
+# Linux: systemctl --user is-active nanoclaw
+```
+
+- If the service is **already running** (PID shown, exit code 0): continue.
+- If **not running**: start it now with `npx tsx setup/index.ts --step service`.
+- If this skill was invoked from `/setup` mid-flow (before Step 7): start the service here anyway. The `/setup` service step is idempotent and will no-op when called again later.
+
 ### Get Chat ID
 
 Tell the user:
@@ -129,7 +143,31 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 ### Register the chat
 
-Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
+Recommended: use `node scripts/register-chat.cjs` so the SQLite row, group folder, and trigger flags stay consistent. The script wraps the existing setup register flow.
+
+Example main chat:
+```bash
+node scripts/register-chat.cjs \
+  --jid tg:<chat-id> \
+  --name "<chat-name>" \
+  --folder telegram_main \
+  --channel telegram \
+  --assistant-name "$ASSISTANT_NAME" \
+  --no-trigger-required \
+  --is-main
+```
+
+Example trigger-only chat:
+```bash
+node scripts/register-chat.cjs \
+  --jid tg:<chat-id> \
+  --name "<chat-name>" \
+  --folder telegram_<group-name> \
+  --channel telegram \
+  --assistant-name "$ASSISTANT_NAME"
+```
+
+Use the IPC register flow or register directly if you need lower-level control. The chat ID, name, and folder name are needed.
 
 For a main chat (responds to all messages):
 

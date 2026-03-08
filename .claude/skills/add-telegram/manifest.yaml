@@ -9,7 +9,7 @@ modifies:
   - src/channels/index.ts
 structured:
   npm_dependencies:
-    grammy: "^1.39.3"
+    grammy: "^1.41.1"
   env_additions:
     - TELEGRAM_BOT_TOKEN
 conflicts: []
