@@ -122,7 +122,7 @@ function createTextCtx(overrides: {
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
     },
-    me: { username: 'andy_ai_bot' },
+    me: { id: 12345, username: 'andy_ai_bot' },
     reply: vi.fn(),
   };
 }
@@ -155,7 +155,7 @@ function createMediaCtx(overrides: {
       caption: overrides.caption,
       ...(overrides.extra || {}),
     },
-    me: { username: 'andy_ai_bot' },
+    me: { id: 12345, username: 'andy_ai_bot' },
   };
 }
 
@@ -737,6 +737,26 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content: '[Reply to Bob: "[Photo] Sunset"] Nice!',
+        }),
+      );
+    });
+
+    it('auto-triggers when replying to the bot', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({ text: 'thanks' });
+      (ctx.message as any).reply_to_message = {
+        from: { id: 12345, first_name: 'Andy' },
+        text: 'Here is the info',
+      };
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '@Andy [Reply to Andy: "Here is the info"] thanks',
         }),
       );
     });

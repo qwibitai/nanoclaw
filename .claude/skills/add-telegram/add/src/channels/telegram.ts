@@ -84,6 +84,11 @@ export class TelegramChannel implements Channel {
         } else {
           content = `[Reply to ${replyAuthor}] ${content}`;
         }
+        // Auto-trigger when replying to the bot — users expect a response
+        const isReplyToBot = rm.from?.id === ctx.me?.id;
+        if (isReplyToBot && !TRIGGER_PATTERN.test(content)) {
+          content = `@${ASSISTANT_NAME} ${content}`;
+        }
       }
 
       const timestamp = new Date(ctx.message.date * 1000).toISOString();

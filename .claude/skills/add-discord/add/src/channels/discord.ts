@@ -112,10 +112,15 @@ export class DiscordChannel implements Channel {
             repliedTo.author.displayName ||
             repliedTo.author.username;
           const replyContent = appendAttachments(repliedTo.content || '', repliedTo);
+          const isReplyToBot = repliedTo.author.id === this.client?.user?.id;
           if (replyContent) {
             content = `[Reply to ${replyAuthor}: "${replyContent}"] ${content}`;
           } else {
             content = `[Reply to ${replyAuthor}] ${content}`;
+          }
+          // Auto-trigger when replying to the bot — users expect a response
+          if (isReplyToBot && !TRIGGER_PATTERN.test(content)) {
+            content = `@${ASSISTANT_NAME} ${content}`;
           }
         } catch {
           // Referenced message may have been deleted

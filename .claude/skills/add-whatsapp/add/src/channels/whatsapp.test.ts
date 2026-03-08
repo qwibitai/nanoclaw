@@ -701,6 +701,42 @@ describe('WhatsAppChannel', () => {
       );
     });
 
+    it('auto-triggers when replying to the bot', async () => {
+      const opts = createTestOpts();
+      const channel = new WhatsAppChannel(opts);
+
+      await connectChannel(channel);
+
+      await triggerMessages([
+        {
+          key: {
+            id: 'msg-reply-bot',
+            remoteJid: 'registered@g.us',
+            participant: '5551234@s.whatsapp.net',
+            fromMe: false,
+          },
+          message: {
+            extendedTextMessage: {
+              text: 'thanks',
+              contextInfo: {
+                quotedMessage: { conversation: 'Here is the info' },
+                participant: '1234567890@s.whatsapp.net',
+              },
+            },
+          },
+          pushName: 'Alice',
+          messageTimestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'registered@g.us',
+        expect.objectContaining({
+          content: '@Andy [Reply to 1234567890: "Here is the info"] thanks',
+        }),
+      );
+    });
+
     it('reads contextInfo from imageMessage when replying with an image', async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);

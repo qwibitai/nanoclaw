@@ -238,6 +238,16 @@ export class WhatsAppChannel implements Channel {
             const senderName = msg.pushName || sender.split('@')[0];
 
             const fromMe = msg.key.fromMe || false;
+
+            // Auto-trigger when replying to the bot — users expect a response.
+            // Must be after fromMe check to avoid triggering on the bot's own messages.
+            if (contextInfo?.quotedMessage && !fromMe) {
+              const selfJid = this.sock.user?.id?.split(':')[0];
+              const quotedJid = contextInfo.participant?.split('@')[0];
+              if (selfJid && quotedJid === selfJid) {
+                content = `@${ASSISTANT_NAME} ${content}`;
+              }
+            }
             // Detect bot messages: with own number, fromMe is reliable
             // since only the bot sends from that number.
             // With shared number, bot messages carry the assistant name prefix
