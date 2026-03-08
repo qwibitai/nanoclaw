@@ -1,5 +1,5 @@
 skill: add-image-vision
-version: 1.1.0
+version: 1.2.0
 description: "Add image vision to NanoClaw agents via WhatsApp image attachments"
 core_version: 1.2.8
 adds:
@@ -10,6 +10,7 @@ modifies:
   - src/channels/whatsapp.test.ts
   - src/container-runner.ts
   - src/index.ts
+  - src/message-processor.ts
   - container/agent-runner/src/index.ts
 structured:
   npm_dependencies:

@@ -1,8 +1,6 @@
 import { ChildProcess } from 'child_process';
-import fs from 'fs';
-import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import { MAX_CONCURRENT_CONTAINERS } from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -25,6 +23,9 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  sendFn: ((text: string) => Promise<boolean>) | null;
+  closeFn: (() => void) | null;
+  onPipedCallback: (() => void) | null;
 }
 
 export class GroupQueue {
@@ -49,6 +50,9 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        sendFn: null,
+        closeFn: null,
+        onPipedCallback: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -141,6 +145,25 @@ export class GroupQueue {
     if (groupFolder) state.groupFolder = groupFolder;
   }
 
+  registerIpcFns(
+    groupJid: string,
+    sendFn: (text: string) => Promise<boolean>,
+    closeFn: () => void,
+  ): void {
+    const state = this.getGroup(groupJid);
+    state.sendFn = sendFn;
+    state.closeFn = closeFn;
+  }
+
+  /**
+   * Register a callback invoked when a message is successfully piped to the
+   * active container. Used by processGroupMessages to reset the idle timer.
+   */
+  registerOnPiped(groupJid: string, callback: () => void): void {
+    const state = this.getGroup(groupJid);
+    state.onPipedCallback = callback;
+  }
+
   /**
    * Mark the container as idle-waiting (finished work, waiting for IPC input).
    * If tasks are pending, preempt the idle container immediately.
@@ -154,43 +177,40 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Send a follow-up message to the active container via JSON-RPC.
+   * Returns true if the message was sent, false if no active container.
    */
-  sendMessage(groupJid: string, text: string): boolean {
+  async sendMessage(groupJid: string, text: string): Promise<boolean> {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder || state.isTaskContainer)
-      return false;
-    state.idleWaiting = false; // Agent is about to receive work, no longer idle
-
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
+    if (!state.active || !state.sendFn || state.isTaskContainer) return false;
     try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
-      const filepath = path.join(inputDir, filename);
-      const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
-      fs.renameSync(tempPath, filepath);
-      return true;
+      if (!(await state.sendFn(text))) return false;
     } catch {
       return false;
     }
+    state.idleWaiting = false;
+    state.onPipedCallback?.();
+    return true;
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal the active container to wind down via JSON-RPC.
+   * Nulls sendFn to prevent input requests racing with the close notification.
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
-    if (!state.active || !state.groupFolder) return;
+    if (!state.active || !state.closeFn) return;
+    state.sendFn = null;
+    state.closeFn();
+  }
 
-    const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
-    try {
-      fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
-    } catch {
-      // ignore
-    }
+  private clearContainerState(state: GroupState): void {
+    state.process = null;
+    state.containerName = null;
+    state.groupFolder = null;
+    state.sendFn = null;
+    state.closeFn = null;
+    state.onPipedCallback = null;
   }
 
   private async runForGroup(
@@ -223,9 +243,7 @@ export class GroupQueue {
       this.scheduleRetry(groupJid, state);
     } finally {
       state.active = false;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
+      this.clearContainerState(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }
@@ -252,9 +270,7 @@ export class GroupQueue {
       state.active = false;
       state.isTaskContainer = false;
       state.runningTaskId = null;
-      state.process = null;
-      state.containerName = null;
-      state.groupFolder = null;
+      this.clearContainerState(state);
       this.activeCount--;
       this.drainGroup(groupJid);
     }

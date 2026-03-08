@@ -2,10 +2,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 
-// Sentinel markers must match container-runner.ts
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
 // Mock config
 vi.mock('./config.js', () => ({
   CONTAINER_IMAGE: 'nanoclaw-agent:latest',
@@ -49,6 +45,13 @@ vi.mock('fs', async () => {
 // Mock mount-security
 vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
+}));
+
+// Mock ipc-handlers registry
+vi.mock('./ipc-handlers/registry.js', () => ({
+  getRegisteredHandlers: vi.fn(() => new Map()),
+  HandlerContext: {},
+  HandlerDeps: {},
 }));
 
 // Create a controllable fake ChildProcess
@@ -103,12 +106,26 @@ const testInput = {
   isMain: false,
 };
 
-function emitOutputMarker(
+/** Send a JSON-RPC response to the initialize request */
+function sendInitializeResponse(
+  proc: ReturnType<typeof createFakeProcess>,
+  id: number = 1,
+) {
+  const response = JSON.stringify({ jsonrpc: '2.0', id, result: {} });
+  proc.stdout.push('\0' + response + '\n');
+}
+
+/** Send a JSON-RPC notification (output) to the container's stdout */
+function sendOutputNotification(
   proc: ReturnType<typeof createFakeProcess>,
   output: ContainerOutput,
 ) {
-  const json = JSON.stringify(output);
-  proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
+  const notification = JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'output',
+    params: output,
+  });
+  proc.stdout.push('\0' + notification + '\n');
 }
 
 describe('container-runner timeout behavior', () => {
@@ -130,8 +147,13 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output with a result
-    emitOutputMarker(fakeProc, {
+    // Respond to initialize request
+    await vi.advanceTimersByTimeAsync(10);
+    sendInitializeResponse(fakeProc);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Emit output notification
+    sendOutputNotification(fakeProc, {
       status: 'success',
       result: 'Here is my response',
       newSessionId: 'session-123',
@@ -166,6 +188,11 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
+    // Respond to initialize request
+    await vi.advanceTimersByTimeAsync(10);
+    sendInitializeResponse(fakeProc);
+    await vi.advanceTimersByTimeAsync(10);
+
     // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
 
@@ -189,8 +216,13 @@ describe('container-runner timeout behavior', () => {
       onOutput,
     );
 
-    // Emit output
-    emitOutputMarker(fakeProc, {
+    // Respond to initialize request
+    await vi.advanceTimersByTimeAsync(10);
+    sendInitializeResponse(fakeProc);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Emit output notification
+    sendOutputNotification(fakeProc, {
       status: 'success',
       result: 'Done',
       newSessionId: 'session-456',

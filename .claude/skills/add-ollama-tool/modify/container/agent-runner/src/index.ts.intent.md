@@ -1,23 +1,43 @@
 # Intent: container/agent-runner/src/index.ts modifications
 
 ## What changed
-Added Ollama MCP server configuration so the container agent can call local Ollama models as tools.
+Replaced stdio-based Ollama MCP server with an in-process SDK MCP server that sends status notifications via JSON-RPC transport.
 
 ## Key sections
 
-### allowedTools array (inside runQuery → options)
-- Added: `'mcp__ollama__*'` to the allowedTools array (after `'mcp__nanoclaw__*'`)
+### Imports
+- Removed: `import { fileURLToPath } from 'url';` (no longer needed for resolving stdio script path)
+- Added: `import { createOllamaMcpServer } from './ollama-mcp-inprocess.js';`
 
-### mcpServers object (inside runQuery → options)
-- Added: `ollama` entry as a stdio MCP server
-  - command: `'node'`
-  - args: resolves to `ollama-mcp-stdio.js` in the same directory as `ipc-mcp-stdio.js`
-  - Uses `path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')` to compute the path
+### mcpServers (inside runQuery -> query() call)
+- Changed: `ollama` MCP server from stdio child process to in-process server:
+  ```
+  // Before:
+  ollama: { command: 'node', args: [fileURLToPath(new URL('./ollama-mcp-stdio.js', import.meta.url))] },
+  // After:
+  ollama: ollamaMcpServer,
+  ```
 
-## Invariants (must-keep)
-- All existing allowedTools entries unchanged
-- nanoclaw MCP server config unchanged
-- All other query options (permissionMode, hooks, env, etc.) unchanged
-- MessageStream class unchanged
-- IPC polling logic unchanged
-- Session management unchanged
+### runQuery signature
+- Added: `ollamaMcpServer` parameter (in-process MCP server instance)
+
+### main()
+- Added: `const ollamaMcpServer = createOllamaMcpServer(transport);` alongside existing IPC MCP server creation
+- Updated: `runQuery` calls pass `ollamaMcpServer` as new parameter
+
+### allowedTools (inside runQuery -> query() call)
+- Unchanged: `'mcp__ollama__*'` still present to allow all Ollama MCP tools
+
+## Invariants
+- The in-process `nanoclaw` MCP server configuration is unchanged
+- All existing allowed tools are preserved
+- The query loop, JSON-RPC transport, MessageStream, and all other logic is untouched
+- Hooks (PreCompact, sanitize Bash) are unchanged
+- JSON-RPC transport initialization and drain loop unchanged
+
+## Must-keep
+- The in-process `nanoclaw` MCP server creation
+- All existing allowedTools entries
+- The hook system (PreCompact, PreToolUse sanitize)
+- JSON-RPC transport initialization and drain loop
+- The MessageStream class and query loop

@@ -1,12 +1,13 @@
 skill: add-compact
 version: 1.0.0
 description: "Add /compact command for manual context compaction via Claude Agent SDK"
-core_version: 1.2.10
+core_version: 1.2.12
 adds:
   - src/session-commands.ts
   - src/session-commands.test.ts
 modifies:
   - src/index.ts
+  - src/message-processor.ts
   - container/agent-runner/src/index.ts
 structured:
   npm_dependencies: {}

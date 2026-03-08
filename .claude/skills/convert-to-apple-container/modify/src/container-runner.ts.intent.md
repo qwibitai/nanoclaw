@@ -14,18 +14,18 @@ Apple Container (VirtioFS) only supports directory mounts, not file mounts. The 
 - Non-main containers: unchanged, still uses `--user` flag
 
 ### buildVolumeMounts
-- Removed: the `/dev/null` → `/workspace/project/.env` shadow mount (was in the committed `37228a9` fix)
+- Removed: the `/dev/null` → `/workspace/project/.env` shadow mount
 - The .env shadowing is now handled inside the container entrypoint instead
 
 ### runContainerAgent (call site)
 - Changed: `buildContainerArgs(mounts, containerName)` → `buildContainerArgs(mounts, containerName, input.isMain)`
 
 ## Invariants
-- All exported interfaces unchanged: `ContainerInput`, `ContainerOutput`, `runContainerAgent`, `writeTasksSnapshot`, `writeGroupsSnapshot`, `AvailableGroup`
+- All exported interfaces unchanged: `ContainerInput`, `ContainerOutput`, `runContainerAgent`, `AvailableGroup`
 - Non-main containers behave identically (still get `--user` flag)
-- Mount list for non-main containers is unchanged
+- JSON-RPC server/client setup unchanged
+- Handler registration unchanged
 - Credentials injected by host-side credential proxy, never in container env or stdin
-- Output parsing (streaming + legacy) unchanged
 
 ## Must-keep
 - The `isMain` parameter on `buildContainerArgs` (consumed by `runContainerAgent`)

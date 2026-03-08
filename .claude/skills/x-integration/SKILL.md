@@ -112,17 +112,16 @@ Paths relative to project root:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Container (Linux VM)                                       │
-│  └── agent.ts → MCP tool definitions (x_post, etc.)    │
-│      └── Writes IPC request to /workspace/ipc/tasks/       │
+│  └── agent.ts → MCP tool definitions (x_post, etc.)        │
+│      └── transport.sendRequest('x_post', { content })       │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ IPC (file system)
+                       │ JSON-RPC over stdio
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Host (macOS)                                               │
-│  └── src/ipc.ts → processTaskIpc()                         │
-│      └── host.ts → handleXIpc()                         │
-│          └── spawn subprocess → scripts/*.ts               │
-│              └── Playwright → Chrome → X Website           │
+│  └── host.ts → registerHandler('x_post', ...)               │
+│      └── spawn subprocess → scripts/*.ts                    │
+│          └── Playwright → Chrome → X Website                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -138,7 +137,7 @@ Paths relative to project root:
 ```
 .claude/skills/x-integration/
 ├── SKILL.md          # This documentation
-├── host.ts           # Host-side IPC handler
+├── host.ts           # Host-side JSON-RPC handler registration
 ├── agent.ts          # Container-side MCP tool definitions
 ├── lib/
 │   ├── config.ts     # Centralized configuration
@@ -158,30 +157,16 @@ To integrate this skill into NanoClaw, make the following modifications:
 
 ---
 
-**1. Host side: `src/ipc.ts`**
+**1. Host side: `src/ipc-handlers/index.ts`**
 
-Add import after other local imports:
+Import `host.ts` to trigger handler registration:
 ```typescript
-import { handleXIpc } from '../.claude/skills/x-integration/host.js';
-```
-
-Modify `processTaskIpc` function's switch statement default case:
-```typescript
-// Find:
-default:
-logger.warn({ type: data.type }, 'Unknown IPC task type');
-
-// Replace with:
-default:
-const handled = await handleXIpc(data, sourceGroup, isMain, DATA_DIR);
-if (!handled) {
-    logger.warn({ type: data.type }, 'Unknown IPC task type');
-}
+import '../../.claude/skills/x-integration/host.js';
 ```
 
 ---
 
-**2. Container side: `container/agent-runner/src/ipc-mcp.ts`**
+**2. Container side: `container/agent-runner/src/ipc-mcp-inprocess.ts`**
 
 Add import after `cron-parser` import:
 ```typescript
@@ -191,7 +176,7 @@ import { createXTools } from './skills/x-integration/agent.js';
 
 Add to the end of tools array (before the closing `]`):
 ```typescript
-    ...createXTools({ groupFolder, isMain })
+    ...createXTools({ groupFolder, isMain }, transport)
 ```
 
 ---
@@ -363,7 +348,7 @@ rm -f data/x-browser-profile/SingletonCookie
 
 ```bash
 # Host logs (relative to project root)
-grep -i "x_post\|x_like\|x_reply\|handleXIpc" logs/nanoclaw.log | tail -20
+grep -i "x_post\|x_like\|x_reply\|registerHandler" logs/nanoclaw.log | tail -20
 
 # Script errors
 grep -i "error\|failed" logs/nanoclaw.log | tail -20
@@ -408,6 +393,15 @@ If MCP tools not found in container:
 # Check container has the file
 docker run nanoclaw-agent ls -la /app/src/skills/
 ```
+
+## Removal
+
+To remove this skill from NanoClaw:
+
+1. Remove import from `src/ipc-handlers/index.ts`: delete the `import '../../.claude/skills/x-integration/host.js';` line
+2. Remove from `container/agent-runner/src/ipc-mcp-inprocess.ts`: delete the `createXTools` import and `...createXTools(...)` spread
+3. Remove COPY line from `container/Dockerfile`
+4. Rebuild: `./container/build.sh && npm run build`
 
 ## Security
 

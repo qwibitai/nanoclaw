@@ -1,13 +1,14 @@
 skill: ollama
-version: 1.0.0
-description: "Local Ollama model inference via MCP server"
+version: 2.0.0
+description: "Local Ollama model inference via in-process MCP server with IPC notifications"
 core_version: 0.1.0
 adds:
-  - container/agent-runner/src/ollama-mcp-stdio.ts
-  - scripts/ollama-watch.sh
+  - container/agent-runner/src/ollama-mcp-inprocess.ts
+  - src/ipc-handlers/ollama.ts
 modifies:
   - container/agent-runner/src/index.ts
   - src/container-runner.ts
+  - src/ipc-handlers/index.ts
 structured:
   npm_dependencies: {}
   env_additions:

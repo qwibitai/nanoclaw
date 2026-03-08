@@ -79,7 +79,7 @@ Real API credentials **never enter containers**. Instead, the host runs an HTTP 
 - WhatsApp session (`store/auth/`) - host only
 - Mount allowlist - external, never mounted
 - Any credentials matching blocked patterns
-- `.env` is shadowed with `/dev/null` in the project root mount
+- `.env` is shadowed in the project root mount so agents cannot read secrets from disk
 
 ## Privilege Comparison
 

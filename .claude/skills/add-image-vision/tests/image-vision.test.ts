@@ -15,7 +15,7 @@ describe('add-image-vision skill package', () => {
     it('has a valid manifest.yaml', () => {
       expect(fs.existsSync(path.join(SKILL_DIR, 'manifest.yaml'))).toBe(true);
       expect(content).toContain('skill: add-image-vision');
-      expect(content).toContain('version: 1.1.0');
+      expect(content).toContain('version: 1.2.0');
     });
 
     it('declares sharp as npm dependency', () => {
@@ -37,6 +37,7 @@ describe('add-image-vision skill package', () => {
       expect(content).toContain('src/channels/whatsapp.test.ts');
       expect(content).toContain('src/container-runner.ts');
       expect(content).toContain('src/index.ts');
+      expect(content).toContain('src/message-processor.ts');
       expect(content).toContain('container/agent-runner/src/index.ts');
     });
 
@@ -76,6 +77,7 @@ describe('add-image-vision skill package', () => {
       'src/channels/whatsapp.test.ts',
       'src/container-runner.ts',
       'src/index.ts',
+      'src/message-processor.ts',
       'container/agent-runner/src/index.ts',
     ];
 
@@ -93,6 +95,7 @@ describe('add-image-vision skill package', () => {
       'src/channels/whatsapp.test.ts.intent.md',
       'src/container-runner.ts.intent.md',
       'src/index.ts.intent.md',
+      'src/message-processor.ts.intent.md',
       'container/agent-runner/src/index.ts.intent.md',
     ];
 
@@ -215,12 +218,12 @@ describe('add-image-vision skill package', () => {
     });
   });
 
-  describe('modify/src/index.ts', () => {
+  describe('modify/src/message-processor.ts', () => {
     let content: string;
 
     beforeAll(() => {
       content = fs.readFileSync(
-        path.join(SKILL_DIR, 'modify', 'src', 'index.ts'),
+        path.join(SKILL_DIR, 'modify', 'src', 'message-processor.ts'),
         'utf-8',
       );
     });
@@ -233,13 +236,34 @@ describe('add-image-vision skill package', () => {
       expect(content).toContain('parseImageReferences(missedMessages)');
     });
 
+    it('adds imageAttachments to runAgent type signature', () => {
+      expect(content).toContain('imageAttachments?');
+    });
+
+    it('preserves core message-processor structure', () => {
+      expect(content).toContain('processGroupMessages');
+      expect(content).toContain('recoverPendingMessages');
+      expect(content).toContain('MessageProcessorDeps');
+    });
+  });
+
+  describe('modify/src/index.ts', () => {
+    let content: string;
+
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(SKILL_DIR, 'modify', 'src', 'index.ts'),
+        'utf-8',
+      );
+    });
+
     it('passes imageAttachments to runAgent', () => {
       expect(content).toContain('imageAttachments');
-      expect(content).toMatch(/runAgent\(group,\s*prompt,\s*chatJid,\s*imageAttachments/);
+      expect(content).toMatch(/function runAgent[\s\S]*?imageAttachments\?/);
     });
 
     it('spreads imageAttachments into container input', () => {
-      expect(content).toContain('...(imageAttachments.length > 0 && { imageAttachments })');
+      expect(content).toContain('...(imageAttachments && imageAttachments.length > 0 && { imageAttachments })');
     });
 
     it('preserves core index.ts structure', () => {
@@ -280,10 +304,21 @@ describe('add-image-vision skill package', () => {
       expect(content).toContain('stream.pushMultimodal(blocks)');
     });
 
+    it('uses JsonRpcTransport', () => {
+      expect(content).toContain('JsonRpcTransport');
+    });
+
+    it('uses createIpcMcpServer', () => {
+      expect(content).toContain('createIpcMcpServer');
+    });
+
+    it('filters remaining() to text-only', () => {
+      expect(content).toContain("typeof c === 'string'");
+    });
+
     it('preserves core structure', () => {
       expect(content).toContain('async function runQuery');
       expect(content).toContain('class MessageStream');
-      expect(content).toContain('function writeOutput');
       expect(content).toContain('function createPreCompactHook');
       expect(content).toContain('function createSanitizeBashHook');
       expect(content).toContain('async function main');
@@ -291,7 +326,6 @@ describe('add-image-vision skill package', () => {
 
     it('preserves core agent-runner exports', () => {
       expect(content).toContain('async function main');
-      expect(content).toContain('function writeOutput');
     });
   });
 });

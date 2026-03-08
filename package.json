@@ -21,6 +21,7 @@
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
+    "json-rpc-2.0": "^1.7.1",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
     "yaml": "^2.8.2",
@@ -31,10 +32,14 @@
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
     "prettier": "^3.8.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "src/**/*.ts": "prettier --write"
   },
   "engines": {
     "node": ">=20"
