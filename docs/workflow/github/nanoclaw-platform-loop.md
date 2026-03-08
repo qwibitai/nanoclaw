@@ -103,13 +103,20 @@ The Issue is eligible for the loop only when all are true:
 4. If the helper returns `noop`, Claude stops immediately with no work picked.
 5. If the helper returns a candidate, Claude generates a `request_id`, `run_id`, and branch via `node scripts/workflow/platform-loop.js ids ...`.
 6. Claude moves the board item to `In Progress` and sets `Agent=claude` using `node scripts/workflow/platform-loop.js set-status ...`.
+7. Claude immediately leaves an issue comment proving claim ownership:
+   - `request_id`
+   - `run_id`
+   - branch
+   - current board status
+   - next visible step
+8. If the board is missing the optional text fields (`Request ID`, `Run ID`, `Next Decision`), the issue comment is the temporary source of truth until the board schema is repaired.
 
 ### 4. Bounded Implementation
 
 1. Claude creates or reuses the dedicated issue branch.
 2. Claude works only within the scoped touch set.
 3. Claude runs the required checks from the Issue.
-4. On ambiguity, missing scope, or failed required checks, Claude sets `Status=Blocked`, writes the next decision, and stops.
+4. On ambiguity, missing scope, or failed required checks, Claude sets `Status=Blocked`, writes the next decision, comments on the issue with the exact blocker, and stops.
 
 ### 5. PR and Review Handoff
 
@@ -120,22 +127,32 @@ The Issue is eligible for the loop only when all are true:
    - risks
    - rollback notes
 3. Claude moves the item to `Review`.
-4. `Next Decision` must be a Codex review action, not a vague note.
+4. Claude leaves an issue comment with:
+   - PR URL
+   - branch
+   - `request_id`
+   - `run_id`
+   - checks run
+   - known risks
+5. `Next Decision` must be a Codex review action, not a vague note.
 
 ### 6. Loop Runtime
 
 1. The loop is session-scoped inside Claude Code.
 2. The repo tracks the command and bootstrap surfaces:
    - `.claude/commands/platform-pickup.md`
+   - `scripts/workflow/run-platform-claude-session.sh`
    - `scripts/workflow/start-platform-loop.sh`
    - `scripts/workflow/trigger-platform-pickup-now.sh`
    - `scripts/workflow/check-platform-loop.sh`
    - `launchd/com.nanoclaw-platform-loop.plist`
 3. The dedicated session is re-armed locally by the health/bootstrap scripts.
-4. `scripts/workflow/start-platform-loop.sh` syncs the loop command/helper into the dedicated worktree before launching Claude.
-5. `scripts/workflow/trigger-platform-pickup-now.sh` is the manual one-shot test trigger for the same pickup flow.
-6. The loop never merges PRs and never bypasses required checks.
-7. Use interactive Claude Code for the `/loop` lane. Do not try to run `/platform-pickup` through `claude -p`:
+4. The dedicated git worktree is the isolation boundary for the unattended loop. It prevents the platform lane from mutating the maintainer working tree, but it does not solve Claude permission prompts by itself.
+5. `scripts/workflow/run-platform-claude-session.sh` launches Claude inside that worktree using `--permission-mode bypassPermissions` by default and loads `CLAUDE_CODE_OAUTH_TOKEN` from the repo `.env` when present.
+6. `scripts/workflow/start-platform-loop.sh` syncs the loop command/helper into the dedicated worktree before launching Claude.
+7. `scripts/workflow/trigger-platform-pickup-now.sh` is the manual one-shot test trigger for the same pickup flow.
+8. The loop never merges PRs and never bypasses required checks.
+9. Use interactive Claude Code for the `/loop` lane. Do not try to run `/platform-pickup` through `claude -p`:
    - the official headless/programmatic CLI flow is `claude -p`
    - interactive slash commands are not available in `-p` mode
    - use headless mode only for non-interactive follow-up automation that does not depend on slash commands
@@ -147,8 +164,9 @@ This workflow is operating correctly when all are true:
 1. only one platform item can be active in the Claude lane at a time
 2. the loop never starts from an incomplete Issue
 3. every automation PR arrives in `Review` with evidence
-4. blocked states include a concrete next decision
-5. Codex review remains explicit and human merge remains mandatory
+4. every active Claude-owned item has a visible claim comment on the linked issue
+5. blocked states include a concrete next decision and a matching issue comment
+6. Codex review remains explicit and human merge remains mandatory
 
 ## Anti-Patterns
 

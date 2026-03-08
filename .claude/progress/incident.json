@@ -1,7 +1,50 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-08T07:55:35.447805+00:00",
+  "updated_at": "2026-03-08T11:21:59Z",
   "incidents": [
+    {
+      "id": "incident-20260308T111215Z",
+      "title": "Tooling-governance budget drift blocks PR #48 merge",
+      "status": "resolved",
+      "severity": "medium",
+      "created_at": "2026-03-08T11:12:15Z",
+      "updated_at": "2026-03-08T11:21:59Z",
+      "summary": {
+        "symptom": "PR #48 fails CI at scripts/check-tooling-governance.sh even though the scoped diff only adds src/extensions/jarvis/dispatch-service.test.ts.",
+        "suspected_cause": ".claude/settings.local.json currently exceeds the ratcheted tooling-governance budget for permissions.allow entries and wildcard permissions.",
+        "impact": "Codex review found no scoped code defects in PR #48, but the PR cannot become merge-ready until the governance-budget drift is corrected or intentionally re-budgeted.",
+        "next_action": "Prune .claude/settings.local.json allow entries or intentionally raise docs/operations/tooling-governance-budget.json with rationale, then rerun CI for PR #48."
+      },
+      "evidence": {
+        "bundle_count": 0
+      },
+      "context": {
+        "lane": "codex",
+        "issue": 38,
+        "pr": 48
+      },
+      "notes": [
+        {
+          "ts": "2026-03-08T11:12:15Z",
+          "author": "codex",
+          "text": "During Codex review of PR #48, required scoped checks passed locally (`npm run build`; `npm test -- src/extensions/jarvis/dispatch-service.test.ts src/jarvis-worker-dispatch.test.ts` => 114 passed). CI failure is at tooling-governance lint with `permissions.allow entries exceeded budget (53 > 50)` and `wildcard permissions exceeded budget (43 > 40)`. Branch diff against origin/main only contains src/extensions/jarvis/dispatch-service.test.ts, so the red check is unrelated baseline governance drift rather than a defect in the scoped implementation."
+        },
+        {
+          "ts": "2026-03-08T11:21:59Z",
+          "author": "codex",
+          "text": "Resolved during Codex review completion for PR #48. Pruned stale Claude allow rules back to budget, formatted the new dispatch contract test file, added the missing qrcode-terminal dependency and types, and fixed a time-relative stale-request cleanup test assertion that had started failing once 2026-03-08 crossed the 60-minute threshold. Final GitHub CI run 22820036731 passed on Node 20."
+        }
+      ],
+      "resolution": {
+        "summary": "PR #48 is merge-ready after clearing the governance budget drift and subsequent CI blockers discovered during review.",
+        "confirmed_by_user": "",
+        "confirmed_at": "2026-03-08T11:21:59Z",
+        "verification": "GitHub CI run 22820036731 PASS; project-sync PASS; governance, format, typecheck, and tests green on PR #48",
+        "fix_reference": "PR #48 commits 79bb735, 7b5f284, a38d0bd, 7c25c49",
+        "resolved_by": "codex"
+      },
+      "resolved_at": "2026-03-08T11:21:59Z"
+    },
     {
       "id": "incident-20260308T065300Z",
       "title": "Delivery board execution state not synced automatically from Andy/Jarvis runtime",

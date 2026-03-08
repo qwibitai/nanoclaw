@@ -49,6 +49,7 @@ Use the dedicated Claude `/loop` lane only for `NanoClaw Platform` issues that a
 Required runtime surfaces:
 
 - `.claude/commands/platform-pickup.md`
+- `scripts/workflow/run-platform-claude-session.sh`
 - `scripts/workflow/platform-loop.js`
 - `scripts/workflow/start-platform-loop.sh`
 - `scripts/workflow/trigger-platform-pickup-now.sh`
@@ -65,13 +66,17 @@ Operating rules:
 6. the loop must move active implementation to `In Progress` and set `Agent=claude`
 7. the loop must move review-ready PRs to `Review`
 8. on ambiguity or failed required checks, the loop must move the item to `Blocked` with a concrete `Next Decision`
-9. Codex is the default review lane after the loop finishes implementation
-10. merge remains human-only
+9. the loop must leave issue comments when it claims work, blocks, and hands off to review so monitoring never depends on the Claude terminal alone
+10. Codex is the default review lane after the loop finishes implementation
+11. merge remains human-only
 
 CLI mode rule:
 
 1. use an interactive Claude Code session for `/loop`
-2. do not use `claude -p` to invoke `/platform-pickup`, because headless mode is for non-interactive prompts and interactive slash commands are unavailable there
+2. run the unattended platform loop in a dedicated git worktree so Claude changes stay isolated from the maintainer working tree
+3. launch that dedicated loop session with `--permission-mode bypassPermissions` so the unattended run cannot stall on interactive tool prompts
+4. load the repo `CLAUDE_CODE_OAUTH_TOKEN` into that session when present so the platform loop uses the subscription auth lane deterministically
+5. do not use `claude -p` to invoke `/platform-pickup`, because headless mode is for non-interactive prompts and interactive slash commands are unavailable there
 
 ## Requirement-Based Review Decision
 

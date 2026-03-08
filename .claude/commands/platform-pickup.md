@@ -25,22 +25,28 @@ Execution flow:
 5. Run `node scripts/workflow/platform-loop.js ids --issue <issue-number> --title "<issue-title>"` and capture `requestId`, `runId`, and `branch`.
 6. Move the board item to `In Progress` and set `Agent=claude`:
    - `node scripts/workflow/platform-loop.js set-status --issue <issue-number> --status "In Progress" --agent claude --review-lane codex --request-id "<requestId>" --run-id "<runId>" --next-decision "Claude to open PR with evidence for Codex review"`
-7. Switch to the generated branch, creating it if needed from `main`.
-8. Implement only the scoped change.
-9. Run all checks required by the Issue. If the Issue is incomplete or the checks fail:
+7. Immediately leave an issue comment proving Claude claimed the work:
+   - include `request_id`, `run_id`, branch name, current board status, and the next visible step
+   - if the board is missing the text fields, the comment becomes the authoritative visibility record until the board schema is fixed
+8. Switch to the generated branch, creating it if needed from `main`.
+9. Implement only the scoped change.
+10. Run all checks required by the Issue. If the Issue is incomplete or the checks fail:
    - move the item to `Blocked`
+   - leave an issue comment with the shortest truthful blocked reason, the failed check if any, and the exact `Next Decision`
    - set a concrete `Next Decision`
    - stop
-10. Open or update a PR linked to the issue.
-11. Ensure the PR body includes:
+11. Open or update a PR linked to the issue.
+12. Ensure the PR body includes:
    - linked work item
    - summary
    - verification evidence
    - risks and rollback
-12. Move the board item to `Review`:
+13. Move the board item to `Review`:
    - `node scripts/workflow/platform-loop.js set-status --issue <issue-number> --status "Review" --agent claude --review-lane codex --request-id "<requestId>" --run-id "<runId>" --next-decision "Codex to review, patch if needed, and confirm merge readiness"`
-13. End with a concise review handoff for Codex, including issue number, branch, PR URL, checks run, and any known risks.
+14. Leave an issue comment for the review handoff:
+   - include branch, PR URL, `request_id`, `run_id`, checks run, and any known risks
+15. End with a concise review handoff for Codex, including issue number, branch, PR URL, checks run, and any known risks.
 
 Blocked-state rule:
 
-- If any required issue section is missing, or you cannot complete the requested checks, immediately move the item to `Blocked` with the shortest truthful reason and stop.
+- If any required issue section is missing, or you cannot complete the requested checks, immediately move the item to `Blocked`, comment the issue with the failure context, and stop.

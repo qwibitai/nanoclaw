@@ -81,3 +81,6 @@ container/worker/vendor/*.tgz
 
 # Session exports live in Obsidian vault
 Claude-Sessions/
+
+# Local loop/execution worktrees
+.worktrees/

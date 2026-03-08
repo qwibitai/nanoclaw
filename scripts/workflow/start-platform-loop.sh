@@ -11,6 +11,8 @@ LOOP_INTERVAL="${NANOCLAW_PLATFORM_LOOP_INTERVAL:-1h}"
 LOOP_COMMAND="${NANOCLAW_PLATFORM_LOOP_COMMAND:-/platform-pickup}"
 LAUNCH_LABEL="${NANOCLAW_PLATFORM_LOOP_LABEL:-com.nanoclaw.platform-loop}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
+CLAUDE_PERMISSION_MODE="${NANOCLAW_PLATFORM_CLAUDE_PERMISSION_MODE:-bypassPermissions}"
+SESSION_RUNNER="$ROOT_DIR/scripts/workflow/run-platform-claude-session.sh"
 LOG_DIR="$ROOT_DIR/logs"
 DRY_RUN=0
 
@@ -52,8 +54,20 @@ mkdir -p "$WORKTREE_PATH/.claude/commands" "$WORKTREE_PATH/scripts/workflow"
 cp "$ROOT_DIR/.claude/commands/platform-pickup.md" "$WORKTREE_PATH/.claude/commands/platform-pickup.md"
 cp "$ROOT_DIR/scripts/workflow/platform-loop.js" "$WORKTREE_PATH/scripts/workflow/platform-loop.js"
 
+WORKTREE_EXCLUDE_FILE="$(git -C "$WORKTREE_PATH" rev-parse --git-path info/exclude)"
+mkdir -p "$(dirname "$WORKTREE_EXCLUDE_FILE")"
+for pattern in \
+  ".claude/commands/platform-pickup.md" \
+  ".claude/scheduled_tasks.lock" \
+  "scripts/workflow/platform-loop.js"
+do
+  if ! grep -Fqx "$pattern" "$WORKTREE_EXCLUDE_FILE" 2>/dev/null; then
+    echo "$pattern" >>"$WORKTREE_EXCLUDE_FILE"
+  fi
+done
+
 LOOP_PROMPT="/loop ${LOOP_INTERVAL} ${LOOP_COMMAND}"
-SHELL_COMMAND="cd \"$WORKTREE_PATH\" && claude \"$LOOP_PROMPT\""
+SHELL_COMMAND="bash \"$SESSION_RUNNER\" --worktree \"$WORKTREE_PATH\" --gh-account \"$GH_ACCOUNT\" --permission-mode \"$CLAUDE_PERMISSION_MODE\" --prompt \"$LOOP_PROMPT\""
 
 json_escape() {
   python3 - <<'PY' "$1"
@@ -71,6 +85,8 @@ record_state() {
   "base_branch": $(json_escape "$BASE_BRANCH"),
   "loop_interval": $(json_escape "$LOOP_INTERVAL"),
   "loop_command": $(json_escape "$LOOP_COMMAND"),
+  "github_account": $(json_escape "$GH_ACCOUNT"),
+  "permission_mode": $(json_escape "$CLAUDE_PERMISSION_MODE"),
   "launched_at": $(json_escape "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"),
   "shell_command": $(json_escape "$SHELL_COMMAND")
 }
