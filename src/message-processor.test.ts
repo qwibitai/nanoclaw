@@ -75,6 +75,7 @@ function createDeps(
     assistantName: 'Andy',
     triggerPattern: /^@Andy\b/i,
     idleTimeout: 1800000,
+    timezone: 'UTC',
     ...overrides,
   };
 }

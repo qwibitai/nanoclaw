@@ -28,32 +28,38 @@ describe('escapeXml', () => {
 
 describe('formatMessages', () => {
   it('formats messages as XML', () => {
-    const result = formatMessages([
-      {
-        id: '1',
-        chat_jid: 'g@g.us',
-        sender: 'a@s',
-        sender_name: 'Alice',
-        content: 'hello',
-        timestamp: '2024-01-01T00:00:01.000Z',
-      },
-    ]);
+    const result = formatMessages(
+      [
+        {
+          id: '1',
+          chat_jid: 'g@g.us',
+          sender: 'a@s',
+          sender_name: 'Alice',
+          content: 'hello',
+          timestamp: '2024-01-01T00:00:01.000Z',
+        },
+      ],
+      'UTC',
+    );
     expect(result).toContain('<messages>');
     expect(result).toContain('sender="Alice"');
     expect(result).toContain('>hello</message>');
   });
 
   it('escapes XML in sender name and content', () => {
-    const result = formatMessages([
-      {
-        id: '1',
-        chat_jid: 'g@g.us',
-        sender: 'a@s',
-        sender_name: 'A & B',
-        content: '<script>alert(1)</script>',
-        timestamp: '2024-01-01T00:00:01.000Z',
-      },
-    ]);
+    const result = formatMessages(
+      [
+        {
+          id: '1',
+          chat_jid: 'g@g.us',
+          sender: 'a@s',
+          sender_name: 'A & B',
+          content: '<script>alert(1)</script>',
+          timestamp: '2024-01-01T00:00:01.000Z',
+        },
+      ],
+      'UTC',
+    );
     expect(result).toContain('sender="A &amp; B"');
     expect(result).toContain('&lt;script&gt;');
   });

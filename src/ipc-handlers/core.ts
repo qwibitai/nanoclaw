@@ -258,7 +258,10 @@ registerHandler(
     const updates: Parameters<typeof updateTask>[1] = {};
     if (params.prompt !== undefined) updates.prompt = params.prompt;
     if (params.schedule_type !== undefined)
-      updates.schedule_type = params.schedule_type as 'cron' | 'interval' | 'once';
+      updates.schedule_type = params.schedule_type as
+        | 'cron'
+        | 'interval'
+        | 'once';
     if (params.schedule_value !== undefined)
       updates.schedule_value = params.schedule_value;
 
