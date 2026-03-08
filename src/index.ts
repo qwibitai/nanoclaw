@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -24,6 +25,7 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -264,7 +266,36 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  let sessionId: string | undefined = sessions[group.folder];
+
+  // Rotate session if JSONL file exceeds size threshold to prevent
+  // container timeouts from unbounded append-only compaction growth
+  const MAX_SESSION_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+  if (sessionId) {
+    const sessionFile = path.join(
+      DATA_DIR,
+      'sessions',
+      group.folder,
+      '.claude',
+      'projects',
+      '-workspace-group',
+      `${sessionId}.jsonl`,
+    );
+    try {
+      const size = fs.statSync(sessionFile).size;
+      if (size > MAX_SESSION_FILE_SIZE) {
+        logger.info(
+          { group: group.folder, sizeBytes: size, sessionId },
+          'Session file exceeds size threshold, rotating to new session',
+        );
+        delete sessions[group.folder];
+        deleteSession(group.folder);
+        sessionId = undefined;
+      }
+    } catch {
+      // File doesn't exist or stat failed — proceed with existing sessionId
+    }
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
