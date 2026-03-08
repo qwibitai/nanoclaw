@@ -1,25 +1,22 @@
 # Intent: src/index.ts
 
 ## What Changed
-- Added `import { extractSessionCommand, handleSessionCommand, isSessionCommandAllowed } from './session-commands.js'`
-- Added `handleSessionCommand()` call in `processGroupMessages()` between `missedMessages.length === 0` check and trigger check
+- Added `extractSessionCommand, isSessionCommandAllowed` imports from `message-processor.js` (re-exported from session-commands)
 - Added session command interception in `startMessageLoop()` between `isMainGroup` check and `needsTrigger` block
 
 ## Key Sections
-- **Imports** (top of file): extractSessionCommand, handleSessionCommand, isSessionCommandAllowed from session-commands
-- **processGroupMessages**: Calls `handleSessionCommand()` with deps (sendMessage, runAgent, closeStdin, advanceCursor, formatMessages, canSenderInteract), returns early if handled
-- **startMessageLoop**: Session command detection, auth-gated closeStdin (prevents DoS), enqueue for processGroupMessages
+- **Imports** (top of file): extractSessionCommand, isSessionCommandAllowed from message-processor
+- **startMessageLoop**: Session command detection via `extractSessionCommand`, auth-gated `closeStdin` (prevents DoS by untrusted senders), enqueue for processGroupMessages which handles the actual command
+
+Note: `processGroupMessages` now lives in `message-processor.ts` (not inline in index.ts). Session command handling within processGroupMessages is covered by the message-processor.ts overlay.
 
 ## Invariants (must-keep)
-- State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp)
+- State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp, pendingSendCursor)
 - loadState/saveState functions
-- registerGroup function with folder validation
-- getAvailableGroups function
-- processGroupMessages trigger logic, cursor management, idle timer, error rollback with duplicate prevention
-- runAgent task/group snapshot writes, session tracking, wrappedOnOutput
-- startMessageLoop with dedup-by-group and piping logic
-- recoverPendingMessages startup recovery
-- main() with channel setup, scheduler, IPC watcher, queue
-- ensureContainerSystemRunning using container-runtime abstraction
-- Graceful shutdown with queue.shutdown
+- registerGroup/unregisterGroup functions
+- buildProcessorDeps/buildHandlerDeps factory functions
+- runAgent with session tracking, wrappedOnOutput, HandlerDeps, IPC fn registration
+- startMessageLoop with dedup-by-group, optimistic cursor, async piping
+- main() with credential proxy, channel setup, status tracker, scheduler, queue
+- Graceful shutdown with queue.shutdown, proxyServer.close
 - Sender allowlist integration (drop mode, trigger check)
