@@ -75,6 +75,7 @@ async function main() {
   console.log(`Querying relays: ${relays.join(', ')}`);
 
   await queryKind(0, 'Profile Metadata');
+  await queryKind(10002, 'NIP-65 Relay List');
   await queryKind(10051, 'KeyPackage Relay List');
   await queryKind(443, 'KeyPackage (MLS)');
 
