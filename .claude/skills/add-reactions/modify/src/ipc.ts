@@ -17,6 +17,11 @@ export interface IpcDeps {
     messageId: string | null,
     emoji: string,
   ) => Promise<void>;
+  editMessage?: (
+    jid: string,
+    newText: string,
+    originalTimestamp?: number,
+  ) => Promise<number>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -125,6 +130,49 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC reaction attempt blocked',
+                  );
+                }
+              } else if (
+                data.type === 'edit_message' &&
+                data.chatJid &&
+                data.newText
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  if (deps.editMessage) {
+                    const resolvedTs = await deps.editMessage(
+                      data.chatJid,
+                      data.newText as string,
+                      data.originalTimestamp
+                        ? Number(data.originalTimestamp)
+                        : undefined,
+                    );
+                    if (deps.sendReaction && resolvedTs) {
+                      await deps
+                        .sendReaction(
+                          data.chatJid,
+                          `signal-${resolvedTs}`,
+                          '✏️',
+                        )
+                        .catch((err) =>
+                          logger.warn(
+                            { err, chatJid: data.chatJid },
+                            'edit_message reaction failed',
+                          ),
+                        );
+                    }
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC edit_message sent',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC edit_message attempt blocked',
                   );
                 }
               }
