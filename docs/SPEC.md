@@ -276,7 +276,8 @@ nanoclaw/
 │   │   ├── tsconfig.json
 │   │   └── src/
 │   │       ├── index.ts           # Entry point (query loop, IPC polling, session resume)
-│   │       └── ipc-mcp-stdio.ts   # Stdio-based MCP server for host communication
+│   │       ├── ipc-mcp-inprocess.ts # In-process MCP server (JSON-RPC transport)
+│   │       └── jsonrpc-transport.ts # JSON-RPC 2.0 transport over stdio
 │   └── skills/
 │       └── agent-browser.md       # Browser automation skill
 │
