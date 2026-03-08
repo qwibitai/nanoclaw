@@ -11,18 +11,20 @@ describe('use-local-whisper skill package', () => {
 
     const content = fs.readFileSync(manifestPath, 'utf-8');
     expect(content).toContain('skill: use-local-whisper');
-    expect(content).toContain('version: 1.0.0');
+    expect(content).toContain('version: 2.0.0');
     expect(content).toContain('src/transcription.ts');
-    expect(content).toContain('voice-transcription');
+    expect(content).toContain('src/channels/telegram.ts');
+    expect(content).toContain('src/channels/telegram.test.ts');
   });
 
-  it('declares voice-transcription as a dependency', () => {
+  it('declares voice-transcription and telegram as dependencies', () => {
     const content = fs.readFileSync(
       path.join(skillDir, 'manifest.yaml'),
       'utf-8',
     );
     expect(content).toContain('depends:');
     expect(content).toContain('voice-transcription');
+    expect(content).toContain('telegram');
   });
 
   it('has no structured operations (no new npm deps needed)', () => {
@@ -38,15 +40,67 @@ describe('use-local-whisper skill package', () => {
     expect(fs.existsSync(filePath)).toBe(true);
   });
 
-  it('has an intent file for the modified file', () => {
-    const intentPath = path.join(skillDir, 'modify', 'src', 'transcription.ts.intent.md');
-    expect(fs.existsSync(intentPath)).toBe(true);
+  it('has the modified telegram channel file', () => {
+    const filePath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'telegram.ts',
+    );
+    expect(fs.existsSync(filePath)).toBe(true);
+  });
 
-    const content = fs.readFileSync(intentPath, 'utf-8');
-    expect(content).toContain('whisper.cpp');
-    expect(content).toContain('transcribeAudioMessage');
-    expect(content).toContain('isVoiceMessage');
-    expect(content).toContain('Invariants');
+  it('has the modified telegram test file', () => {
+    const filePath = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'telegram.test.ts',
+    );
+    expect(fs.existsSync(filePath)).toBe(true);
+  });
+
+  it('has intent files for all modified files', () => {
+    const transcriptionIntent = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'transcription.ts.intent.md',
+    );
+    const telegramIntent = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'telegram.ts.intent.md',
+    );
+    const testIntent = path.join(
+      skillDir,
+      'modify',
+      'src',
+      'channels',
+      'telegram.test.ts.intent.md',
+    );
+    expect(fs.existsSync(transcriptionIntent)).toBe(true);
+    expect(fs.existsSync(telegramIntent)).toBe(true);
+    expect(fs.existsSync(testIntent)).toBe(true);
+
+    const transcriptionContent = fs.readFileSync(transcriptionIntent, 'utf-8');
+    expect(transcriptionContent).toContain('whisper.cpp');
+    expect(transcriptionContent).toContain('transcribeAudioMessage');
+    expect(transcriptionContent).toContain('transcribeAudio');
+    expect(transcriptionContent).toContain('isVoiceMessage');
+    expect(transcriptionContent).toContain('Invariants');
+
+    const telegramContent = fs.readFileSync(telegramIntent, 'utf-8');
+    expect(telegramContent).toContain('transcribeAudio');
+    expect(telegramContent).toContain('Invariants');
+
+    const testContent = fs.readFileSync(testIntent, 'utf-8');
+    expect(testContent).toContain('mockTranscribeAudio');
+    expect(testContent).toContain('Invariants');
   });
 
   it('uses whisper-cli (not OpenAI) for transcription', () => {
@@ -69,7 +123,7 @@ describe('use-local-whisper skill package', () => {
     expect(content).not.toContain('readEnvFile');
   });
 
-  it('preserves the public API (transcribeAudioMessage and isVoiceMessage)', () => {
+  it('preserves the WhatsApp API (transcribeAudioMessage and isVoiceMessage)', () => {
     const content = fs.readFileSync(
       path.join(skillDir, 'modify', 'src', 'transcription.ts'),
       'utf-8',
@@ -81,6 +135,26 @@ describe('use-local-whisper skill package', () => {
     expect(content).toContain('Promise<string | null>');
     expect(content).toContain('export function isVoiceMessage(');
     expect(content).toContain('downloadMediaMessage');
+  });
+
+  it('exports channel-agnostic transcribeAudio(Buffer)', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'transcription.ts'),
+      'utf-8',
+    );
+
+    expect(content).toContain('export async function transcribeAudio(');
+    expect(content).toContain('audioBuffer: Buffer');
+  });
+
+  it('transcribeAudioMessage uses transcribeAudio internally', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'transcription.ts'),
+      'utf-8',
+    );
+
+    // transcribeAudioMessage should call transcribeAudio(buffer)
+    expect(content).toContain('await transcribeAudio(buffer)');
   });
 
   it('preserves fallback message strings', () => {
@@ -111,5 +185,45 @@ describe('use-local-whisper skill package', () => {
 
     expect(content).toContain('finally');
     expect(content).toContain('unlinkSync');
+  });
+
+  it('modified telegram.ts imports transcribeAudio', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'channels', 'telegram.ts'),
+      'utf-8',
+    );
+
+    expect(content).toContain("import { transcribeAudio }");
+    expect(content).toContain("'../transcription.js'");
+  });
+
+  it('modified telegram.ts has async voice handler with transcription', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'channels', 'telegram.ts'),
+      'utf-8',
+    );
+
+    expect(content).toContain("'message:voice'");
+    expect(content).toContain('transcribeAudio(buffer)');
+    expect(content).toContain('[Voice:');
+    expect(content).toContain(
+      '[Voice message - transcription unavailable]',
+    );
+    expect(content).toContain('ctx.api.getFile');
+  });
+
+  it('modified telegram.test.ts mocks transcription module', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'channels', 'telegram.test.ts'),
+      'utf-8',
+    );
+
+    expect(content).toContain('mockTranscribeAudio');
+    expect(content).toContain("vi.mock('../transcription.js'");
+    expect(content).toContain('transcribes voice message successfully');
+    expect(content).toContain('falls back when transcription returns null');
+    expect(content).toContain('falls back when voice download fails');
+    expect(content).toContain('includes caption with transcribed voice');
+    expect(content).toContain('ignores voice messages from unregistered');
   });
 });

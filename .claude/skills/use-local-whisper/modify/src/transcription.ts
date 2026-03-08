@@ -15,7 +15,12 @@ const WHISPER_MODEL =
 
 const FALLBACK_MESSAGE = '[Voice Message - transcription unavailable]';
 
-async function transcribeWithWhisperCpp(
+/**
+ * Channel-agnostic transcription: accepts a raw audio buffer (ogg/opus),
+ * converts to 16kHz mono WAV via ffmpeg, and transcribes with whisper.cpp.
+ * Returns the transcript text or null on failure.
+ */
+export async function transcribeAudio(
   audioBuffer: Buffer,
 ): Promise<string | null> {
   const tmpDir = os.tmpdir();
@@ -76,7 +81,7 @@ export async function transcribeAudioMessage(
 
     console.log(`Downloaded audio message: ${buffer.length} bytes`);
 
-    const transcript = await transcribeWithWhisperCpp(buffer);
+    const transcript = await transcribeAudio(buffer);
 
     if (!transcript) {
       return FALLBACK_MESSAGE;

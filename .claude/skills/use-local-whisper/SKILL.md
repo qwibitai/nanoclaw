@@ -1,22 +1,22 @@
 ---
 name: use-local-whisper
-description: Use when the user wants local voice transcription instead of OpenAI Whisper API. Switches to whisper.cpp running on Apple Silicon. WhatsApp only for now. Requires voice-transcription skill to be applied first.
+description: Use when the user wants local voice transcription instead of OpenAI Whisper API. Switches to whisper.cpp running on-device. Supports WhatsApp and Telegram channels. Requires voice-transcription and telegram skills to be applied first.
 ---
 
 # Use Local Whisper
 
 Switches voice transcription from OpenAI's Whisper API to local whisper.cpp. Runs entirely on-device — no API key, no network, no cost.
 
-**Channel support:** Currently WhatsApp only. The transcription module (`src/transcription.ts`) uses Baileys types for audio download. Other channels (Telegram, Discord, etc.) would need their own audio-download logic before this skill can serve them.
+**Channel support:** WhatsApp and Telegram. The transcription module exports a channel-agnostic `transcribeAudio(Buffer)` function that any channel can call. WhatsApp uses the existing `transcribeAudioMessage(WAMessage, WASocket)` wrapper. Telegram downloads voice files via the Bot API and passes the buffer directly.
 
 **Note:** The Homebrew package is `whisper-cpp`, but the CLI binary it installs is `whisper-cli`.
 
 ## Prerequisites
 
 - `voice-transcription` skill must be applied first (WhatsApp channel)
-- macOS with Apple Silicon (M1+) recommended
-- `whisper-cpp` installed: `brew install whisper-cpp` (provides the `whisper-cli` binary)
-- `ffmpeg` installed: `brew install ffmpeg`
+- `telegram` skill must be applied first (Telegram channel)
+- `whisper-cpp` CLI installed (see platform-specific instructions below)
+- `ffmpeg` installed
 - A GGML model file downloaded to `data/models/`
 
 ## Phase 1: Pre-flight
@@ -32,10 +32,31 @@ whisper-cli --help >/dev/null 2>&1 && echo "WHISPER_OK" || echo "WHISPER_MISSING
 ffmpeg -version >/dev/null 2>&1 && echo "FFMPEG_OK" || echo "FFMPEG_MISSING"
 ```
 
-If missing, install via Homebrew:
+If missing, install per platform:
+
+**macOS:**
 ```bash
 brew install whisper-cpp ffmpeg
 ```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt-get install -y ffmpeg
+```
+
+Then build whisper.cpp from source with static linking:
+
+```bash
+cd /tmp
+git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp
+cmake -B build -DBUILD_SHARED_LIBS=OFF
+cmake --build build --config Release -j$(nproc)
+sudo cp build/bin/whisper-cli /usr/local/bin/
+rm -rf /tmp/whisper.cpp
+```
+
+**Important on Linux**: Build with `-DBUILD_SHARED_LIBS=OFF` to produce a statically-linked binary. Without this, `whisper-cli` will fail at runtime with `libwhisper.so.1: cannot open shared object file`.
 
 ### Check for model file
 
@@ -57,7 +78,10 @@ For better accuracy at the cost of speed, use `ggml-small.bin` (466MB) or `ggml-
 npx tsx scripts/apply-skill.ts .claude/skills/use-local-whisper
 ```
 
-This modifies `src/transcription.ts` to use the `whisper-cli` binary instead of the OpenAI API.
+This modifies:
+- `src/transcription.ts` — replaces OpenAI API with whisper.cpp, adds channel-agnostic `transcribeAudio(Buffer)` export
+- `src/channels/telegram.ts` — replaces voice placeholder with download + transcription handler
+- `src/channels/telegram.test.ts` — adds transcription mock and 5 voice transcription tests
 
 ### Validate
 
@@ -68,31 +92,35 @@ npm run build
 
 ## Phase 3: Verify
 
-### Ensure launchd PATH includes Homebrew
+### Ensure service PATH includes whisper-cli and ffmpeg
 
-The NanoClaw launchd service runs with a restricted PATH. `whisper-cli` and `ffmpeg` are in `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel), which may not be in the plist's PATH.
+The NanoClaw service runs with a restricted PATH. Ensure `whisper-cli` and `ffmpeg` are accessible.
 
-Check the current PATH:
+**macOS (launchd):**
 ```bash
 grep -A1 'PATH' ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
+If `/opt/homebrew/bin` is missing, add it to the PATH in the plist, then reload.
 
-If `/opt/homebrew/bin` is missing, add it to the `<string>` value inside the `PATH` key in the plist. Then reload:
+**Linux (systemd):**
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+systemctl --user show nanoclaw | grep -i environment
 ```
+If `~/.local/bin` or `/usr/local/bin` is not in PATH, add `Environment="PATH=..."` to the service unit.
 
 ### Build and restart
 
 ```bash
 npm run build
+# macOS:
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+# Linux:
+systemctl --user restart nanoclaw
 ```
 
 ### Test
 
-Send a voice note in any registered group. The agent should receive it as `[Voice: <transcript>]`.
+Send a voice note in any registered WhatsApp or Telegram chat. The agent should receive it as `[Voice: <transcript>]`.
 
 ### Check logs
 
@@ -103,6 +131,7 @@ tail -f logs/nanoclaw.log | grep -i -E "voice|transcri|whisper"
 Look for:
 - `Transcribed voice message` — successful transcription
 - `whisper.cpp transcription failed` — check model path, ffmpeg, or PATH
+- `Voice download/transcription failed` — Telegram file download issue
 
 ## Configuration
 
@@ -115,14 +144,16 @@ Environment variables (optional, set in `.env`):
 
 ## Troubleshooting
 
-**"whisper.cpp transcription failed"**: Ensure both `whisper-cli` and `ffmpeg` are in PATH. The launchd service uses a restricted PATH — see Phase 3 above. Test manually:
+**"whisper.cpp transcription failed"**: Ensure both `whisper-cli` and `ffmpeg` are in PATH. The service uses a restricted PATH — see Phase 3 above. Test manually:
 ```bash
 ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t 1 -f wav /tmp/test.wav -y
 whisper-cli -m data/models/ggml-base.bin -f /tmp/test.wav --no-timestamps -nt
 ```
 
-**Transcription works in dev but not as service**: The launchd plist PATH likely doesn't include `/opt/homebrew/bin`. See "Ensure launchd PATH includes Homebrew" in Phase 3.
+**"libwhisper.so.1: cannot open shared object file"**: The whisper-cli binary was built with shared libraries. Rebuild with `-DBUILD_SHARED_LIBS=OFF` (see Phase 1).
 
-**Slow transcription**: The base model processes ~30s of audio in <1s on M1+. If slower, check CPU usage — another process may be competing.
+**Transcription works in dev but not as service**: The service PATH likely doesn't include the directory containing `whisper-cli`. See Phase 3 above.
 
-**Wrong language**: whisper.cpp auto-detects language. To force a language, you can set `WHISPER_LANG` and modify `src/transcription.ts` to pass `-l $WHISPER_LANG`.
+**Slow transcription**: The base model processes ~30s of audio in <1s on modern hardware. If slower, check CPU usage.
+
+**Wrong language**: whisper.cpp auto-detects language. To force a language, set `WHISPER_LANG` and modify `src/transcription.ts` to pass `-l $WHISPER_LANG`.

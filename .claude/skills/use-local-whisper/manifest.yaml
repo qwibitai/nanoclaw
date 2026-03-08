@@ -1,12 +1,15 @@
 skill: use-local-whisper
-version: 1.0.0
-description: "Switch voice transcription from OpenAI Whisper API to local whisper.cpp (WhatsApp only)"
+version: 2.0.0
+description: "Switch voice transcription from OpenAI Whisper API to local whisper.cpp. Supports WhatsApp and Telegram."
 core_version: 0.1.0
 adds: []
 modifies:
   - src/transcription.ts
+  - src/channels/telegram.ts
+  - src/channels/telegram.test.ts
 structured: {}
 conflicts: []
 depends:
   - voice-transcription
-test: "npx vitest run src/channels/whatsapp.test.ts"
+  - telegram
+test: "npx vitest run src/channels/whatsapp.test.ts src/channels/telegram.test.ts"
