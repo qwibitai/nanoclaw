@@ -429,7 +429,7 @@ export class SlackChannel implements Channel {
       });
 
       const messages = (result.messages || []).filter(
-        (m) => m.ts !== currentTs && m.text,
+        (m) => m.ts !== currentTs && (m.text || m.attachments?.length || m.blocks?.length),
       );
 
       if (messages.length === 0) return undefined;
@@ -443,7 +443,8 @@ export class SlackChannel implements Channel {
             : m.user
               ? (await this.resolveUserName(m.user)) || m.user
               : 'unknown';
-          return `${name}: ${m.text}`;
+          const text = m.text || this.extractFallbackText(m);
+          return `${name}: ${text}`;
         }),
       );
 
@@ -452,6 +453,42 @@ export class SlackChannel implements Channel {
       logger.warn({ channel, threadTs, err }, 'Failed to fetch thread history');
       return undefined;
     }
+  }
+
+  /**
+   * Extract readable text from attachments/blocks when m.text is empty.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private extractFallbackText(m: any): string {
+    // Try attachments first (common for bot/integration messages)
+    if (m.attachments?.length) {
+      const parts = m.attachments
+        .map((a: any) => a.text || a.fallback || a.pretext)
+        .filter(Boolean);
+      if (parts.length) return parts.join('\n');
+    }
+
+    // Try blocks (rich_text, section, etc.)
+    if (m.blocks?.length) {
+      const parts: string[] = [];
+      for (const block of m.blocks) {
+        if (block.text?.text) {
+          parts.push(block.text.text);
+        } else if (block.elements) {
+          for (const el of block.elements) {
+            if (el.text) {
+              parts.push(el.text);
+            } else if (el.elements) {
+              const inner = el.elements.map((e: any) => e.text).filter(Boolean).join('');
+              if (inner) parts.push(inner);
+            }
+          }
+        }
+      }
+      if (parts.length) return parts.join('\n');
+    }
+
+    return '(non-text message)';
   }
 
   private async resolveUserName(userId: string): Promise<string | undefined> {

@@ -84,21 +84,10 @@ export class GmailChannel implements Channel {
       'Gmail channel connected',
     );
 
-    // Start polling all accounts
-    const schedulePoll = () => {
-      const backoffMs = this.pollIntervalMs;
-      this.pollTimer = setTimeout(() => {
-        this.pollAllAccounts()
-          .catch((err) => logger.error({ err }, 'Gmail poll error'))
-          .finally(() => {
-            if (this.accounts.length > 0) schedulePoll();
-          });
-      }, backoffMs);
-    };
-
-    // Initial poll
-    await this.pollAllAccounts();
-    schedulePoll();
+    // Real-time polling disabled — email recaps run as daily scheduled tasks
+    // via Gmail MCP tools in the container agent. The channel stays alive
+    // for sending replies via threadMeta cache.
+    logger.info('Gmail polling disabled (daily digest mode)');
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
@@ -392,9 +381,11 @@ export class GmailChannel implements Channel {
       if (entry) return entry[0];
     }
 
-    // Fallback to first main group
-    const mainEntry = Object.entries(groups).find(([, g]) => g.isMain === true);
-    return mainEntry ? mainEntry[0] : null;
+    // Fallback to first main group, preferring Discord over other channels
+    const mainGroups = Object.entries(groups).filter(([, g]) => g.isMain === true);
+    const discordMain = mainGroups.find(([jid]) => jid.startsWith('dc:'));
+    if (discordMain) return discordMain[0];
+    return mainGroups[0]?.[0] ?? null;
   }
 
   private extractTextBody(
@@ -432,7 +423,7 @@ export class GmailChannel implements Channel {
  */
 const ACCOUNT_ROUTES: Record<string, string> = {
   sunday: 'sunday',
-  illysium: 'xzo',
+  illysium: 'illysium',
   numberdrinks: 'number-drinks',
   personal2: 'personal',
 };
@@ -453,7 +444,7 @@ function discoverCredentialDirs(
     fs.existsSync(path.join(primaryDir, 'gcp-oauth.keys.json')) &&
     fs.existsSync(path.join(primaryDir, 'credentials.json'))
   ) {
-    results.push({ label: 'primary', credDir: primaryDir });
+    results.push({ label: 'primary', credDir: primaryDir, routeToGroup: 'personal' });
   }
 
   // Additional accounts: ~/.gmail-mcp-*
