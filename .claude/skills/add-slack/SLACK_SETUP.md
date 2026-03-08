@@ -60,14 +60,24 @@ These scopes control what the bot is allowed to do.
 | `groups:read` | List private channels (for metadata sync) |
 | `users:read` | Look up user display names |
 
-## Step 5: Install to Workspace
+## Step 5: Enable Direct Messages (App Home)
+
+This step is required to allow users to DM the bot directly. Without it, Slack silently blocks DMs even if `message.im` is subscribed.
+
+1. In the sidebar, click **App Home**
+2. Scroll down to **Show Tabs**
+3. Check **Allow users to send Slash commands and messages from the messages tab**
+
+## Step 6: Install to Workspace
 
 1. In the sidebar, click **Install App**
 2. Click **Install to Workspace**
 3. Review the permissions and click **Allow**
 4. **Copy the Bot User OAuth Token** — it starts with `xoxb-`. Save this somewhere safe.
 
-## Step 6: Configure NanoClaw
+> **Note:** After changing scopes or event subscriptions, Slack sometimes shows a yellow banner prompting reinstallation. If you don't see the banner, go to **OAuth & Permissions** and click **Reinstall to Workspace** manually. The bot token (`xoxb-`) may change on reinstall — update `.env` if it does.
+
+## Step 7: Configure NanoClaw
 
 Add both tokens to your `.env` file:
 
@@ -88,7 +98,7 @@ Then sync the environment to the container:
 mkdir -p data/env && cp .env data/env/env
 ```
 
-## Step 7: Add the Bot to Channels
+## Step 8: Add the Bot to Channels
 
 The bot only receives messages from channels it has been explicitly added to.
 
@@ -99,7 +109,7 @@ The bot only receives messages from channels it has been explicitly added to.
 
 Repeat for each channel you want the bot in.
 
-## Step 8: Get Channel IDs for Registration
+## Step 9: Get Channel IDs for Registration
 
 You need the Slack channel ID to register it with NanoClaw.
 
@@ -133,7 +143,12 @@ The NanoClaw JID format is `slack:` followed by the channel ID, e.g., `slack:C01
 **Bot not receiving messages:**
 - Verify Socket Mode is enabled (Step 2)
 - Verify all three events are subscribed (Step 3)
-- Verify the bot has been added to the channel (Step 7)
+- Verify the bot has been added to the channel (Step 8)
+
+**Bot not responding to DMs:**
+- Go to **App Home** and ensure **"Allow users to send Slash commands and messages from the messages tab"** is checked (Step 5)
+- Verify `message.im` is in the bot event subscriptions (Step 3)
+- Reinstall the app after any changes — the yellow reinstall banner doesn't always appear; use **OAuth & Permissions → Reinstall to Workspace** manually if needed
 
 **"missing_scope" errors:**
 - Go back to **OAuth & Permissions** and add the missing scope

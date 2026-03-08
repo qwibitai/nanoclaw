@@ -67,7 +67,8 @@ Quick summary of what's needed:
 2. Enable Socket Mode and generate an App-Level Token (`xapp-...`)
 3. Subscribe to bot events: `message.channels`, `message.groups`, `message.im`
 4. Add OAuth scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`, `channels:read`, `groups:read`, `users:read`
-5. Install to workspace and copy the Bot Token (`xoxb-...`)
+5. In **App Home**, enable **"Allow users to send Slash commands and messages from the messages tab"** (required for DMs)
+6. Install to workspace and copy the Bot Token (`xoxb-...`)
 
 Wait for the user to provide both tokens.
 
