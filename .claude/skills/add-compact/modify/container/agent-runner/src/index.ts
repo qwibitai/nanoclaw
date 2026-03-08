@@ -1,23 +1,23 @@
 /**
  * NanoClaw Agent Runner
- * Runs inside a container, receives config via JSON-RPC over stdio
+ * Runs inside a container, receives config via stdin, outputs result to stdout
  *
  * Input protocol:
- *   JSON-RPC initialize request with ContainerInput as params
- *   Follow-up messages arrive as JSON-RPC 'input' notifications
- *   Session end signaled by JSON-RPC 'close' notification
+ *   Stdin: Full ContainerInput JSON (read until EOF, like before)
+ *   IPC:   Follow-up messages written as JSON files to /workspace/ipc/input/
+ *          Files: {type:"message", text:"..."}.json — polled and consumed
+ *          Sentinel: /workspace/ipc/input/_close — signals session end
  *
- * Output protocol:
- *   JSON-RPC notifications: 'output' (results), 'ipc' (MCP tool calls), 'log' (debug)
+ * Stdout protocol:
+ *   Each result is wrapped in OUTPUT_START_MARKER / OUTPUT_END_MARKER pairs.
+ *   Multiple results may be emitted (one per agent teams result).
+ *   Final marker after loop ends signals completion.
  */
-
-// MUST be first import — intercepts stdout before SDK or anything else captures it
-import { JsonRpcTransport } from './jsonrpc-transport.js';
 
 import fs from 'fs';
 import path from 'path';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
-import { createIpcMcpServer } from './ipc-mcp-inprocess.js';
+import { fileURLToPath } from 'url';
 
 interface ContainerInput {
   prompt: string;
@@ -55,6 +55,10 @@ interface SDKUserMessage {
   session_id: string;
 }
 
+const IPC_INPUT_DIR = '/workspace/ipc/input';
+const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
+const IPC_POLL_MS = 500;
+
 /**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
@@ -79,11 +83,6 @@ class MessageStream {
     this.waiting?.();
   }
 
-  /** Return any unconsumed messages still in the queue. */
-  remaining(): string[] {
-    return this.queue.splice(0).map(m => m.message.content);
-  }
-
   async *[Symbol.asyncIterator](): AsyncGenerator<SDKUserMessage> {
     while (true) {
       while (this.queue.length > 0) {
@@ -94,6 +93,25 @@ class MessageStream {
       this.waiting = null;
     }
   }
+}
+
+async function readStdin(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
+}
+
+const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
+const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+
+function writeOutput(output: ContainerOutput): void {
+  console.log(OUTPUT_START_MARKER);
+  console.log(JSON.stringify(output));
+  console.log(OUTPUT_END_MARKER);
 }
 
 function log(message: string): void {
@@ -167,15 +185,10 @@ function createPreCompactHook(assistantName?: string): HookCallback {
   };
 }
 
-// Auth-related env vars to strip from Bash tool subprocess environments.
-// These are needed by claude-code, but should never be visible to
-// agent-invoked shell commands.
-const SECRET_ENV_VARS = [
-  'ANTHROPIC_API_KEY',
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_BASE_URL',
-];
+// Secrets to strip from Bash tool subprocess environments.
+// These are needed by claude-code for API auth but should never
+// be visible to commands Kit runs.
+const SECRET_ENV_VARS = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'];
 
 function createSanitizeBashHook(): HookCallback {
   return async (input, _toolUseId, _context) => {
@@ -271,46 +284,107 @@ function formatTranscriptMarkdown(messages: ParsedMessage[], title?: string | nu
 }
 
 /**
- * Run a single query and stream results via transport notifications.
+ * Check for _close sentinel.
+ */
+function shouldClose(): boolean {
+  if (fs.existsSync(IPC_INPUT_CLOSE_SENTINEL)) {
+    try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Drain all pending IPC input messages.
+ * Returns messages found, or empty array.
+ */
+function drainIpcInput(): string[] {
+  try {
+    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+    const files = fs.readdirSync(IPC_INPUT_DIR)
+      .filter(f => f.endsWith('.json'))
+      .sort();
+
+    const messages: string[] = [];
+    for (const file of files) {
+      const filePath = path.join(IPC_INPUT_DIR, file);
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        fs.unlinkSync(filePath);
+        if (data.type === 'message' && data.text) {
+          messages.push(data.text);
+        }
+      } catch (err) {
+        log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+        try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      }
+    }
+    return messages;
+  } catch (err) {
+    log(`IPC drain error: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+/**
+ * Wait for a new IPC message or _close sentinel.
+ * Returns the messages as a single string, or null if _close.
+ */
+function waitForIpcMessage(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (shouldClose()) {
+        resolve(null);
+        return;
+      }
+      const messages = drainIpcInput();
+      if (messages.length > 0) {
+        resolve(messages.join('\n'));
+        return;
+      }
+      setTimeout(poll, IPC_POLL_MS);
+    };
+    poll();
+  });
+}
+
+/**
+ * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
  * allowing agent teams subagents to run to completion.
- * Also drains transport events (follow-up input, close) during the query.
+ * Also pipes IPC messages into the stream during the query.
  */
 async function runQuery(
   prompt: string,
   sessionId: string | undefined,
-  mcpServer: ReturnType<typeof createIpcMcpServer>,
+  mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
-  transport: JsonRpcTransport,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
-  // Drain transport events during query
-  let draining = true;
+  // Poll IPC for follow-up messages and _close sentinel during the query
+  let ipcPolling = true;
   let closedDuringQuery = false;
-  const drainLoop = async () => {
-    while (draining) {
-      const event = await transport.nextEvent();
-      if (!event) break;
-      if (event.type === 'close') {
-        log('Close received during query, ending stream');
-        closedDuringQuery = true;
-        stream.end();
-        draining = false;
-        break;
-      }
-      if (event.type === 'input') {
-        log(`Piping input into active query (${event.text.length} chars)`);
-        stream.push(event.text);
-      }
+  const pollIpcDuringQuery = () => {
+    if (!ipcPolling) return;
+    if (shouldClose()) {
+      log('Close sentinel detected during query, ending stream');
+      closedDuringQuery = true;
+      stream.end();
+      ipcPolling = false;
+      return;
     }
+    const messages = drainIpcInput();
+    for (const text of messages) {
+      log(`Piping IPC message into active query (${text.length} chars)`);
+      stream.push(text);
+    }
+    setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
   };
-  drainLoop().catch((err) => {
-    log(`drainLoop error: ${err instanceof Error ? err.message : String(err)}`);
-  });
+  setTimeout(pollIpcDuringQuery, IPC_POLL_MS);
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
@@ -365,7 +439,15 @@ async function runQuery(
       allowDangerouslySkipPermissions: true,
       settingSources: ['project', 'user'],
       mcpServers: {
-        nanoclaw: mcpServer,
+        nanoclaw: {
+          command: 'node',
+          args: [mcpServerPath],
+          env: {
+            NANOCLAW_CHAT_JID: containerInput.chatJid,
+            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+            NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+          },
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -395,7 +477,7 @@ async function runQuery(
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-      transport.sendNotification('output', {
+      writeOutput({
         status: 'success',
         result: textResult || null,
         newSessionId
@@ -403,35 +485,28 @@ async function runQuery(
     }
   }
 
-  draining = false;
-  transport.cancelWait();
-
-  // Re-queue any input that drainLoop pushed to stream but the SDK never consumed.
-  // Without this, a follow-up arriving as the query finishes would be silently dropped.
-  const leftover = stream.remaining();
-  if (leftover.length > 0) {
-    log(`Re-queuing ${leftover.length} unconsumed message(s) back to transport`);
-    transport.unshift(...leftover.map(text => ({ type: 'input' as const, text })));
-  }
-
+  ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
 async function main(): Promise<void> {
-  // Transport must be created first (stdout interception already active from import)
-  const transport = new JsonRpcTransport();
+  let containerInput: ContainerInput;
 
-  // Wait for host to send initialize request with ContainerInput
-  const INIT_TIMEOUT_MS = 30_000;
-  let initTimer: ReturnType<typeof setTimeout>;
-  const containerInput: ContainerInput = await Promise.race([
-    transport.initialized,
-    new Promise<never>((_, reject) => {
-      initTimer = setTimeout(() => reject(new Error('No initialize request received')), INIT_TIMEOUT_MS);
-    }),
-  ]).finally(() => clearTimeout(initTimer!));
-  log(`Received input for group: ${containerInput.groupFolder}`);
+  try {
+    const stdinData = await readStdin();
+    containerInput = JSON.parse(stdinData);
+    // Delete the temp file the entrypoint wrote — it contains secrets
+    try { fs.unlinkSync('/tmp/input.json'); } catch { /* may not exist */ }
+    log(`Received input for group: ${containerInput.groupFolder}`);
+  } catch (err) {
+    writeOutput({
+      status: 'error',
+      result: null,
+      error: `Failed to parse input: ${err instanceof Error ? err.message : String(err)}`
+    });
+    process.exit(1);
+  }
 
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
@@ -440,129 +515,174 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // Create in-process MCP server
-  const mcpServer = createIpcMcpServer(transport, {
-    chatJid: containerInput.chatJid,
-    groupFolder: containerInput.groupFolder,
-    isMain: containerInput.isMain,
-  });
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
   let sessionId = containerInput.sessionId;
+  fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
-  // Build initial prompt
+  // Clean up stale _close sentinel from previous container runs
+  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+
+  // Build initial prompt (drain any pending IPC messages too)
   let prompt = containerInput.prompt;
   if (containerInput.isScheduledTask) {
     prompt = `[SCHEDULED TASK - The following message was sent automatically and is not coming directly from the user or group.]\n\n${prompt}`;
   }
+  const pending = drainIpcInput();
+  if (pending.length > 0) {
+    log(`Draining ${pending.length} pending IPC messages into initial prompt`);
+    prompt += '\n' + pending.join('\n');
+  }
 
-  // Slash command handling — runs in isolation (no tools, no MCP)
+  // --- Slash command handling ---
+  // Only known session slash commands are handled here. This prevents
+  // accidental interception of user prompts that happen to start with '/'.
   const KNOWN_SESSION_COMMANDS = new Set(['/compact']);
   const trimmedPrompt = prompt.trim();
-  if (KNOWN_SESSION_COMMANDS.has(trimmedPrompt)) {
-    log(`Session command detected: ${trimmedPrompt}`);
+  const isSessionSlashCommand = KNOWN_SESSION_COMMANDS.has(trimmedPrompt);
 
+  if (isSessionSlashCommand) {
+    log(`Handling session command: ${trimmedPrompt}`);
+    let slashSessionId: string | undefined;
     let compactBoundarySeen = false;
     let hadError = false;
     let resultEmitted = false;
 
-    for await (const message of query({
-      prompt: trimmedPrompt,
-      options: {
-        cwd: '/workspace/group',
-        resume: sessionId,
-        allowedTools: [],
-        env: sdkEnv,
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        settingSources: ['project', 'user'],
-        hooks: {
-          PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+    try {
+      for await (const message of query({
+        prompt: trimmedPrompt,
+        options: {
+          cwd: '/workspace/group',
+          resume: sessionId,
+          systemPrompt: undefined,
+          allowedTools: [],
+          env: sdkEnv,
+          permissionMode: 'bypassPermissions' as const,
+          allowDangerouslySkipPermissions: true,
+          settingSources: ['project', 'user'] as const,
+          hooks: {
+            PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
+          },
         },
-      }
-    })) {
-      const msgType = message.type === 'system' ? `system/${(message as { subtype?: string }).subtype}` : message.type;
-      log(`[slash-cmd] type=${msgType}`);
+      })) {
+        const msgType = message.type === 'system'
+          ? `system/${(message as { subtype?: string }).subtype}`
+          : message.type;
+        log(`[slash-cmd] type=${msgType}`);
 
-      if (message.type === 'system' && message.subtype === 'init') {
-        sessionId = message.session_id;
-        log(`Session initialized: ${sessionId}`);
-      }
-
-      if (message.type === 'system' && message.subtype === 'compact_boundary') {
-        compactBoundarySeen = true;
-        log('Compact boundary observed');
-      }
-
-      if (message.type === 'result') {
-        const resultSubtype = message.subtype;
-        const textResult = 'result' in message ? (message as { result?: string }).result : null;
-        log(`Slash result: subtype=${resultSubtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
-
-        if (resultSubtype?.startsWith('error')) {
-          hadError = true;
-          transport.sendNotification('output', {
-            status: 'error', result: textResult || null, newSessionId: sessionId,
-          });
-        } else {
-          transport.sendNotification('output', {
-            status: 'success', result: textResult || null, newSessionId: sessionId,
-          });
+        if (message.type === 'system' && message.subtype === 'init') {
+          slashSessionId = message.session_id;
+          log(`Session after slash command: ${slashSessionId}`);
         }
-        resultEmitted = true;
+
+        // Observe compact_boundary to confirm compaction completed
+        if (message.type === 'system' && (message as { subtype?: string }).subtype === 'compact_boundary') {
+          compactBoundarySeen = true;
+          log('Compact boundary observed — compaction completed');
+        }
+
+        if (message.type === 'result') {
+          const resultSubtype = (message as { subtype?: string }).subtype;
+          const textResult = 'result' in message ? (message as { result?: string }).result : null;
+
+          if (resultSubtype?.startsWith('error')) {
+            hadError = true;
+            writeOutput({
+              status: 'error',
+              result: null,
+              error: textResult || 'Session command failed.',
+              newSessionId: slashSessionId,
+            });
+          } else {
+            writeOutput({
+              status: 'success',
+              result: textResult || 'Conversation compacted.',
+              newSessionId: slashSessionId,
+            });
+          }
+          resultEmitted = true;
+        }
       }
+    } catch (err) {
+      hadError = true;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      log(`Slash command error: ${errorMsg}`);
+      writeOutput({ status: 'error', result: null, error: errorMsg });
     }
 
-    if (!compactBoundarySeen) {
-      log('WARNING: compact_boundary was not observed');
+    log(`Slash command done. compactBoundarySeen=${compactBoundarySeen}, hadError=${hadError}`);
+
+    // Warn if compact_boundary was never observed — compaction may not have occurred
+    if (!hadError && !compactBoundarySeen) {
+      log('WARNING: compact_boundary was not observed. Compaction may not have completed.');
     }
-    if (!resultEmitted) {
-      transport.sendNotification('output', {
-        status: hadError ? 'error' : 'success',
-        result: compactBoundarySeen ? null : 'compact_boundary was not observed',
-        newSessionId: sessionId,
+
+    // Only emit final session marker if no result was emitted yet and no error occurred
+    if (!resultEmitted && !hadError) {
+      writeOutput({
+        status: 'success',
+        result: compactBoundarySeen
+          ? 'Conversation compacted.'
+          : 'Compaction requested but compact_boundary was not observed.',
+        newSessionId: slashSessionId,
       });
+    } else if (!hadError) {
+      // Emit session-only marker so host updates session tracking
+      writeOutput({ status: 'success', result: null, newSessionId: slashSessionId });
     }
-
     return;
   }
+  // --- End slash command handling ---
 
-  // Query loop: run query → wait for transport event → run new query → repeat
+  // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServer, containerInput, sdkEnv, transport, resumeAt);
-      if (queryResult.newSessionId) sessionId = queryResult.newSessionId;
-      if (queryResult.lastAssistantUuid) resumeAt = queryResult.lastAssistantUuid;
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      if (queryResult.newSessionId) {
+        sessionId = queryResult.newSessionId;
+      }
+      if (queryResult.lastAssistantUuid) {
+        resumeAt = queryResult.lastAssistantUuid;
+      }
 
+      // If _close was consumed during the query, exit immediately.
+      // Don't emit a session-update marker (it would reset the host's
+      // idle timer and cause a 30-min delay before the next _close).
       if (queryResult.closedDuringQuery) {
-        log('Close received during query, exiting');
+        log('Close sentinel consumed during query, exiting');
         break;
       }
 
       // Emit session update so host can track it
-      transport.sendNotification('output', { status: 'success', result: null, newSessionId: sessionId });
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
 
-      log('Query ended, waiting for next input...');
+      log('Query ended, waiting for next IPC message...');
 
-      const nextEvent = await transport.nextEvent();
-      if (!nextEvent || nextEvent.type === 'close') {
-        log('Close received, exiting');
+      // Wait for the next message or _close sentinel
+      const nextMessage = await waitForIpcMessage();
+      if (nextMessage === null) {
+        log('Close sentinel received, exiting');
         break;
       }
 
-      log(`Got new message (${nextEvent.text.length} chars), starting new query`);
-      prompt = nextEvent.text;
+      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      prompt = nextMessage;
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     log(`Agent error: ${errorMessage}`);
-    transport.sendNotification('output', {
-      status: 'error', result: null, newSessionId: sessionId, error: errorMessage
+    writeOutput({
+      status: 'error',
+      result: null,
+      newSessionId: sessionId,
+      error: errorMessage
     });
     process.exit(1);
   }
 }
 
-main().then(() => process.exit(0));
+main();

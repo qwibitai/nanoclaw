@@ -2,10 +2,17 @@ import { getMessagesSince } from './db.js';
 import { logger } from './logger.js';
 import { formatMessages } from './router.js';
 import { isTriggerAllowed, loadSenderAllowlist } from './sender-allowlist.js';
+import {
+  extractSessionCommand,
+  handleSessionCommand,
+  isSessionCommandAllowed,
+} from './session-commands.js';
 import type { Channel, RegisteredGroup } from './types.js';
 
+export { extractSessionCommand, isSessionCommandAllowed };
+
 export interface AgentOutput {
-  status: string;
+  status: 'success' | 'error';
   result?: string | null;
   error?: string | null;
 }
@@ -62,6 +69,39 @@ export async function processGroupMessages(
   );
 
   if (missedMessages.length === 0) return true;
+
+  // Session command interception (before trigger check)
+  const cmdResult = await handleSessionCommand({
+    missedMessages,
+    isMainGroup,
+    groupName: group.name,
+    triggerPattern: deps.triggerPattern,
+    timezone: deps.timezone,
+    deps: {
+      sendMessage: (text) => channel.sendMessage(chatJid, text),
+      setTyping: (typing) =>
+        channel.setTyping?.(chatJid, typing) ?? Promise.resolve(),
+      runAgent: (prompt, onOutput) =>
+        deps.runAgent(group, prompt, chatJid, (output) =>
+          onOutput({ status: output.status, result: output.result }),
+        ),
+      closeStdin: () => deps.queue.closeStdin(chatJid),
+      advanceCursor: (ts) => deps.setAgentCursor(chatJid, ts),
+      formatMessages,
+      canSenderInteract: (msg) => {
+        const hasTrigger = deps.triggerPattern.test(msg.content.trim());
+        const reqTrigger = !isMainGroup && group.requiresTrigger !== false;
+        return (
+          isMainGroup ||
+          !reqTrigger ||
+          (hasTrigger &&
+            (msg.is_from_me ||
+              isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
+        );
+      },
+    },
+  });
+  if (cmdResult.handled) return cmdResult.success;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
