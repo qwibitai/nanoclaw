@@ -375,6 +375,20 @@ export class NapCatChannel implements Channel {
         return null;
       }
 
+      // Check if the URL is actually a local file path (NapCat sometimes returns local paths)
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        // Local file path — copy instead of HTTP download
+        try {
+          await fs.promises.access(url, fs.constants.R_OK);
+          await fs.promises.copyFile(url, filePath);
+          logger.info({ filePath, source: url }, 'NapCat: file copied from local path');
+          return filePath;
+        } catch (copyErr) {
+          logger.warn({ source: url, err: copyErr }, 'NapCat: local file copy failed');
+          return null;
+        }
+      }
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
 

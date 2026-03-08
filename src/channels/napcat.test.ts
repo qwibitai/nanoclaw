@@ -1123,6 +1123,39 @@ describe('NapCatChannel', () => {
         expect.objectContaining({ content: 'Hello' }),
       );
     });
+
+    it('copies file from local path when URL is not HTTP', async () => {
+      const opts = createTestOpts();
+      const channel = new NapCatChannel('ws://localhost:6700', '', opts, tmpDir);
+      await connectChannel(channel);
+
+      // Create a local file to simulate NapCat's local path
+      const localFile = path.join(tmpDir, 'napcat-temp-doc.docx');
+      fs.writeFileSync(localFile, 'fake-docx-content');
+
+      const message = [
+        { type: 'file', data: { url: localFile, name: '工作计划.docx' } },
+      ];
+      currentWs().emit(
+        'message',
+        createGroupMessageEvent({ message, rawMessage: '[File]' }),
+      );
+
+      await vi.waitFor(() => {
+        expect(opts.onMessage).toHaveBeenCalled();
+      });
+
+      const call = (opts.onMessage as any).mock.calls[0];
+      const content = call[1].content;
+      expect(content).toMatch(/\[File: \/workspace\/group\/files\/\d+_____\.docx\]/);
+
+      // Verify file was actually copied
+      const filesDir = path.join(tmpDir, 'test-group', 'files');
+      const files = fs.readdirSync(filesDir);
+      expect(files.length).toBe(1);
+      const copiedContent = fs.readFileSync(path.join(filesDir, files[0]), 'utf-8');
+      expect(copiedContent).toBe('fake-docx-content');
+    });
   });
 
   // --- sendFile ---
