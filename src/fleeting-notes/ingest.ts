@@ -55,6 +55,7 @@ export function buildFleetingNoteContent(
   body: string,
   created: string,
   thingsUuid: string,
+  project?: string,
 ): string {
   const lines = [
     '---',
@@ -62,6 +63,7 @@ export function buildFleetingNoteContent(
     `created: ${created}`,
     `things_uuid: ${thingsUuid}`,
     'status: raw',
+    ...(project ? [`project: ${project}`] : []),
     '---',
     '',
     `# ${title.trim()}`,
@@ -113,10 +115,7 @@ export function findExistingUuids(vaultPath: string): Set<string> {
         walk(path.join(dir, entry.name));
       } else if (entry.name.endsWith('.md') && !entry.name.startsWith('_')) {
         try {
-          const content = fs.readFileSync(
-            path.join(dir, entry.name),
-            'utf-8',
-          );
+          const content = fs.readFileSync(path.join(dir, entry.name), 'utf-8');
           const match = content.match(/things_uuid:\s*(\S+)/);
           if (match) uuids.add(match[1]);
         } catch {
@@ -216,6 +215,7 @@ export async function ingestThingsToday(
       item.notes || '',
       createdStr,
       item.uuid,
+      project?.name,
     );
     fs.writeFileSync(absPath, content);
 
