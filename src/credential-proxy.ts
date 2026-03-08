@@ -23,7 +23,10 @@ export interface ProxyConfig {
   authMode: AuthMode;
 }
 
-export function startCredentialProxy(port: number): Promise<Server> {
+export function startCredentialProxy(
+  port: number,
+  host = '127.0.0.1',
+): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
@@ -106,8 +109,8 @@ export function startCredentialProxy(port: number): Promise<Server> {
       });
     });
 
-    server.listen(port, '127.0.0.1', () => {
-      logger.info({ port, authMode }, 'Credential proxy started');
+    server.listen(port, host, () => {
+      logger.info({ port, host, authMode }, 'Credential proxy started');
       resolve(server);
     });
 
