@@ -86,6 +86,8 @@ vi.mock('child_process', async () => {
 });
 
 import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { spawn } from 'child_process';
+import fs from 'fs';
 import type { RegisteredGroup } from './types.js';
 
 const testGroup: RegisteredGroup = {
@@ -109,6 +111,65 @@ function emitOutputMarker(
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
+
+describe('global directory mount', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    fakeProc = createFakeProcess();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function getSpawnArgs(): string[] {
+    const spawnMock = vi.mocked(spawn);
+    return spawnMock.mock.calls[0][1] as string[];
+  }
+
+  function startAgent(isMain: boolean) {
+    // Make existsSync return true for global CLAUDE.md
+    const existsMock = vi.mocked(fs.existsSync);
+    existsMock.mockImplementation((p: fs.PathLike) => {
+      const s = String(p);
+      if (s.endsWith('groups/CLAUDE.md')) return true;
+      return false;
+    });
+
+    const input = { ...testInput, isMain };
+    const promise = runContainerAgent(testGroup, input, () => {}, async () => {});
+
+    // Immediately close to resolve the promise
+    emitOutputMarker(fakeProc, { status: 'success', result: 'ok', newSessionId: 'sid' });
+    return promise;
+  }
+
+  it('mounts global directory read-only for non-main groups', async () => {
+    const promise = startAgent(false);
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await promise;
+
+    const args = getSpawnArgs().join(' ');
+    expect(args).toContain('/workspace/CLAUDE.md:ro');
+  });
+
+  it('mounts global directory writable for main groups', async () => {
+    const promise = startAgent(true);
+    await vi.advanceTimersByTimeAsync(10);
+    fakeProc.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(10);
+    await promise;
+
+    const args = getSpawnArgs();
+    // Should contain /workspace/CLAUDE.md mount without :ro suffix
+    const globalMountIdx = args.findIndex(a => a.includes('/workspace/CLAUDE.md'));
+    expect(globalMountIdx).toBeGreaterThan(-1);
+    expect(args[globalMountIdx]).not.toContain(':ro');
+  });
+});
 
 describe('container-runner timeout behavior', () => {
   beforeEach(() => {

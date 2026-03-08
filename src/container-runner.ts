@@ -98,17 +98,19 @@ function buildVolumeMounts(
       containerPath: '/workspace/group',
       readonly: false,
     });
+  }
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
-      });
-    }
+  // Global CLAUDE.md file
+  // Mounted as /workspace/CLAUDE.md so the SDK auto-discovers it
+  // (cwd=/workspace/group/ → SDK walks up to /workspace/CLAUDE.md).
+  // Main group can write, other groups get read-only access.
+  const globalClaudeMd = path.join(GROUPS_DIR, 'CLAUDE.md');
+  if (fs.existsSync(globalClaudeMd)) {
+    mounts.push({
+      hostPath: globalClaudeMd,
+      containerPath: '/workspace/CLAUDE.md',
+      readonly: !isMain,
+    });
   }
 
   // Per-group Claude sessions directory (isolated from other groups)

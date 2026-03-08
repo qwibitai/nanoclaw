@@ -391,16 +391,12 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
-  }
-
-  // Discover additional directories mounted at /workspace/extra/*
-  // These are passed to the SDK so their CLAUDE.md files are loaded automatically
+  // Discover additional directories to pass to the SDK.
+  // Their CLAUDE.md files are loaded automatically, and files are accessible to the agent.
+  // Note: /workspace/CLAUDE.md is auto-discovered by the SDK (walks up from cwd).
   const extraDirs: string[] = [];
+
+  // Additional directories mounted at /workspace/extra/*
   const extraBase = '/workspace/extra';
   if (fs.existsSync(extraBase)) {
     for (const entry of fs.readdirSync(extraBase)) {
@@ -421,9 +417,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+      systemPrompt: undefined,
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',

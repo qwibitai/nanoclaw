@@ -48,7 +48,7 @@ COPY agent-runner/ ./
 RUN npm run build
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it

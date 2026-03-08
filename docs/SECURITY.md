@@ -88,7 +88,7 @@ const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
 |------------|------------|----------------|
 | Project root access | `/workspace/project` (ro) | None |
 | Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
+| Global memory | `/workspace/CLAUDE.md` (rw) | `/workspace/CLAUDE.md` (ro) |
 | Additional mounts | Configurable | Read-only unless allowed |
 | Network access | Unrestricted | Unrestricted |
 | MCP tools | All | All |

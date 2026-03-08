@@ -54,7 +54,7 @@ COPY skills/pdf-reader/pdf-reader /usr/local/bin/pdf-reader
 RUN chmod +x /usr/local/bin/pdf-reader
 
 # Create workspace directories
-RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
+RUN mkdir -p /workspace/group /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 
 # Create entrypoint script
 # Secrets are passed via stdin JSON — temp file is deleted immediately after Node reads it

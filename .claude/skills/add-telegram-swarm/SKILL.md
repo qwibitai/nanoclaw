@@ -237,7 +237,7 @@ if (TELEGRAM_BOT_POOL.length > 0) {
 
 #### 5a. Add global message formatting rules
 
-Read `groups/global/CLAUDE.md` and add a Message Formatting section:
+Read `groups/CLAUDE.md` and add a Message Formatting section:
 
 ```markdown
 ## Message Formatting
@@ -261,7 +261,7 @@ In any group CLAUDE.md that has a "WhatsApp Formatting" section (e.g. `groups/ma
 
 #### 5c. Add Agent Teams instructions to Telegram groups
 
-For each Telegram group that will use agent teams, create or update its `groups/{folder}/CLAUDE.md` with these instructions. Read the existing CLAUDE.md first (or `groups/global/CLAUDE.md` as a base) and add the Agent Teams section:
+For each Telegram group that will use agent teams, create or update its `groups/{folder}/CLAUDE.md` with these instructions. Read the existing CLAUDE.md first (or `groups/CLAUDE.md` as a base) and add the Agent Teams section:
 
 ```markdown
 ## Agent Teams
