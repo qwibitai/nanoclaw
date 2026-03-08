@@ -10,7 +10,7 @@ export interface SplitMessageOpts {
 
 /**
  * Send a split response: short ack in group, full message in user's private DM.
- * 
+ *
  * Pattern for group vs private chat responses:
  * - In group: Send brief acknowledgment (e.g., "Got it, check your DMs ✓")
  * - In user's DM: Send full confirmation/details
@@ -37,8 +37,10 @@ export async function sendSplitMessage(
     // If private DM fails (user hasn't started chat with bot),
     // send fallback message to group
     const error = err as Error;
-    if (error.message?.includes('bot was blocked') || 
-        error.message?.includes("can't initiate conversation")) {
+    if (
+      error.message?.includes('bot was blocked') ||
+      error.message?.includes("can't initiate conversation")
+    ) {
       const fallbackMsg = `${groupAck}\n\n⚠️ I couldn't send you a private message. Please start a chat with me first by clicking my name and sending /start`;
       await channel.sendMessage(groupJid, fallbackMsg);
       logger.warn(
@@ -47,7 +49,10 @@ export async function sendSplitMessage(
       );
     } else {
       // Unexpected error — log and notify in group
-      logger.error({ groupJid, senderUserId, err }, 'Failed to send private DM');
+      logger.error(
+        { groupJid, senderUserId, err },
+        'Failed to send private DM',
+      );
       await channel.sendMessage(
         groupJid,
         `${groupAck}\n\n⚠️ Error sending private message. Please try again.`,

@@ -110,9 +110,7 @@ describe('telegram-messaging', () => {
       } as unknown as TelegramChannel;
 
       sendMessage.mockResolvedValueOnce(undefined);
-      sendMessage.mockRejectedValueOnce(
-        new Error('Network timeout'),
-      );
+      sendMessage.mockRejectedValueOnce(new Error('Network timeout'));
       sendMessage.mockResolvedValueOnce(undefined);
 
       await sendSplitMessage(mockChannel, {
