@@ -19,6 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@internet-privacy/marmot-ts": "^0.3.0",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "nostr-tools": "^2.23.3",
