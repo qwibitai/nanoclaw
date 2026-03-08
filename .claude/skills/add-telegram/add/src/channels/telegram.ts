@@ -1,4 +1,5 @@
 import { Bot } from 'grammy';
+import telegramifyMarkdown from 'telegramify-markdown';
 
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
@@ -200,15 +201,20 @@ export class TelegramChannel implements Channel {
     try {
       const numericId = jid.replace(/^tg:/, '');
 
+      const formatted = telegramifyMarkdown(text, 'escape');
+
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await this.bot.api.sendMessage(numericId, text);
+      if (formatted.length <= MAX_LENGTH) {
+        await this.bot.api.sendMessage(numericId, formatted, {
+          parse_mode: 'MarkdownV2',
+        });
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
+        for (let i = 0; i < formatted.length; i += MAX_LENGTH) {
           await this.bot.api.sendMessage(
             numericId,
-            text.slice(i, i + MAX_LENGTH),
+            formatted.slice(i, i + MAX_LENGTH),
+            { parse_mode: 'MarkdownV2' },
           );
         }
       }
