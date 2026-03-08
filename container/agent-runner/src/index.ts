@@ -16,6 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { spawn } from 'child_process';
 import { query, HookCallback, PreCompactHookInput, PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import { fileURLToPath } from 'url';
 
@@ -27,6 +28,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  runtime?: string;
   secrets?: Record<string, string>;
 }
 
@@ -58,6 +60,29 @@ interface SDKUserMessage {
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
+
+
+type AgentRuntime = 'claude' | 'codex' | 'gemini' | 'opencode';
+
+function normalizeRuntime(runtime?: string): AgentRuntime {
+  const value = (runtime || 'claude').toLowerCase();
+  if (value === 'codex' || value === 'gemini' || value === 'opencode') return value;
+  return 'claude';
+}
+
+function runtimeCommand(runtime: AgentRuntime): { cmd: string; args: string[] } {
+  switch (runtime) {
+    case 'codex':
+      return { cmd: 'codex', args: ['exec', '--json'] };
+    case 'gemini':
+      return { cmd: 'gemini', args: ['-p'] };
+    case 'opencode':
+      return { cmd: 'opencode', args: ['run', '--json'] };
+    case 'claude':
+    default:
+      return { cmd: 'claude', args: ['-p'] };
+  }
+}
 
 /**
  * Push-based async iterable for streaming user messages to the SDK.
@@ -490,6 +515,43 @@ async function runQuery(
   return { newSessionId, lastAssistantUuid, closedDuringQuery };
 }
 
+
+async function runGenericRuntimeQuery(
+  runtime: AgentRuntime,
+  prompt: string,
+  cwd: string,
+  sdkEnv: Record<string, string | undefined>,
+): Promise<string> {
+  const { cmd, args } = runtimeCommand(runtime);
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, [...args, prompt], {
+      cwd,
+      env: sdkEnv as NodeJS.ProcessEnv,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    proc.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('error', (err) => reject(err));
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`${cmd} exited with code ${code}: ${stderr.slice(-500)}`));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
+
 async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
@@ -535,34 +597,37 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  const runtime = normalizeRuntime(containerInput.runtime);
+
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      if (runtime === 'claude') {
+        log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
-      if (queryResult.newSessionId) {
-        sessionId = queryResult.newSessionId;
-      }
-      if (queryResult.lastAssistantUuid) {
-        resumeAt = queryResult.lastAssistantUuid;
-      }
+        const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+        if (queryResult.newSessionId) {
+          sessionId = queryResult.newSessionId;
+        }
+        if (queryResult.lastAssistantUuid) {
+          resumeAt = queryResult.lastAssistantUuid;
+        }
 
-      // If _close was consumed during the query, exit immediately.
-      // Don't emit a session-update marker (it would reset the host's
-      // idle timer and cause a 30-min delay before the next _close).
-      if (queryResult.closedDuringQuery) {
-        log('Close sentinel consumed during query, exiting');
-        break;
-      }
+        if (queryResult.closedDuringQuery) {
+          log('Close sentinel consumed during query, exiting');
+          break;
+        }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+        writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      } else {
+        log(`Starting ${runtime} query...`);
+        const result = await runGenericRuntimeQuery(runtime, prompt, '/workspace/group', sdkEnv);
+        writeOutput({ status: 'success', result: result || null, newSessionId: sessionId });
+        writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      }
 
       log('Query ended, waiting for next IPC message...');
-
-      // Wait for the next message or _close sentinel
       const nextMessage = await waitForIpcMessage();
       if (nextMessage === null) {
         log('Close sentinel received, exiting');

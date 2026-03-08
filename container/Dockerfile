@@ -31,7 +31,7 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+RUN npm install -g agent-browser @anthropic-ai/claude-code @openai/codex @google/gemini-cli opencode-ai
 
 # Create app directory
 WORKDIR /app

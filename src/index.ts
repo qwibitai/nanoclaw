@@ -51,6 +51,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { resolveAgentRuntime } from './agent-runtime.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -265,6 +266,7 @@ async function runAgent(
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
   const sessionId = sessions[group.folder];
+  const runtime = resolveAgentRuntime(group.containerConfig);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -312,6 +314,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        runtime,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
