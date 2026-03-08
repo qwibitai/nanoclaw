@@ -52,7 +52,10 @@ export function startHttpServer(port = 3100): http.Server {
 
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      logger.warn({ port }, `Port ${port} already in use, HTTP server not started`);
+      logger.warn(
+        { port },
+        `Port ${port} already in use, HTTP server not started`,
+      );
     } else {
       logger.error({ err }, 'HTTP server error');
     }
