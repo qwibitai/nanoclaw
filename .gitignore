@@ -26,6 +26,9 @@ groups/global/*
 # Pre-downloaded binaries for container build
 container/gh
 
+# Temp files
+.tmp-*
+
 # OS
 .DS_Store
 

@@ -30,7 +30,9 @@ Run `/update-nanoclaw` in Claude Code.
 
 **Conflict resolution**: opens only conflicted files, resolves the conflict markers, keeps your local customizations intact.
 
-**Validation**: runs `npm run build` and `npm test`, then rebuilds the container image.
+**Validation**: runs `npm run build` and `npm test`.
+
+**Breaking changes check**: after validation, reads CHANGELOG.md for any `[BREAKING]` entries introduced by the update. If found, shows each breaking change and offers to run the recommended skill to migrate.
 
 ## Rollback
 
@@ -66,7 +68,6 @@ This install has the following local customizations that MUST be preserved durin
 2. **Voice transcription** — Groq Whisper-based voice message transcription has been applied via the `/add-voice-transcription` skill. Check `.nanoclaw/state.yaml` for `voice-transcription` in `applied_skills`. Any upstream changes to the message processing pipeline should preserve the voice transcription hook.
 
 3. **launchd service** — The service runs via `~/Library/LaunchAgents/com.nanoclaw.plist`, not Docker Compose or systemd.
-
 # Step 0: Preflight (stop early if unsafe)
 Run:
 - `git status --porcelain`
@@ -146,7 +147,8 @@ If conflicts occur:
 - For each conflicted file:
   - Open the file.
   - Resolve only conflict markers.
-  - Preserve intentional local customizations (see "Local customizations to preserve" above).
+  - Preserve intentional local customizations.
+  - Preserve the Apple Container runtime, voice transcription, and launchd assumptions described above.
   - Incorporate upstream fixes/improvements.
   - Do not refactor surrounding code.
   - `git add <file>`
@@ -190,28 +192,43 @@ If build fails:
 - Do not refactor unrelated code.
 - If unclear, ask the user before making changes.
 
-# Step 5B: Rebuild container image
-The upstream PR skill does not cover this step. After a successful build, rebuild the container image so the agent runtime reflects the updated code:
+# Step 6: Breaking changes check
+After validation succeeds, check if the update introduced any breaking changes.
 
-```bash
-cd container && ./build.sh
+Determine which CHANGELOG entries are new by diffing against the backup tag:
+- `git diff <backup-tag-from-step-1>..HEAD -- CHANGELOG.md`
+
+Parse the diff output for lines starting with `+[BREAKING]`. Each such line is one breaking change entry. The format is:
+```
+[BREAKING] <description>. Run `/<skill-name>` to <action>.
 ```
 
-This uses Apple Container (the `container` CLI) by default via the `CONTAINER_RUNTIME` env var in `build.sh`. If the build fails:
-- Check if upstream changed the Dockerfile and resolve any issues.
-- Prune the build cache if stale layers are suspected: run the prune command, then re-run `./build.sh`.
+If no `[BREAKING]` lines are found:
+- Skip this step silently. Proceed to Step 7.
 
-# Step 6: Summary + rollback instructions
+If one or more `[BREAKING]` lines are found:
+- Display a warning header to the user: "This update includes breaking changes that may require action:"
+- For each breaking change, display the full description.
+- Collect all skill names referenced in the breaking change entries (the `/<skill-name>` part).
+- Use AskUserQuestion to ask the user which migration skills they want to run now. Options:
+  - One option per referenced skill (e.g., "Run /add-whatsapp to re-add WhatsApp channel")
+  - "Skip — I'll handle these manually"
+- Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.
+- For each skill the user selects, invoke it using the Skill tool.
+- After all selected skills complete (or if user chose Skip), proceed to Step 7.
+
+# Step 7: Summary + rollback instructions
 Show:
 - Backup tag: the tag name created in Step 1
 - New HEAD: `git rev-parse --short HEAD`
 - Upstream HEAD: `git rev-parse --short upstream/$UPSTREAM_BRANCH`
 - Conflicts resolved (list files, if any)
+- Breaking changes applied (list skills run, if any)
 - Remaining local diff vs upstream: `git diff --name-only upstream/$UPSTREAM_BRANCH..HEAD`
-- Container image rebuild: success or failure
 
 Tell the user:
 - To rollback: `git reset --hard <backup-tag-from-step-1>`
 - Backup branch also exists: `backup/pre-update-<HASH>-<TIMESTAMP>`
 - Restart the service to apply changes:
-  - `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
+  - If using launchd: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist && launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist`
+  - If running manually: restart `npm run dev`

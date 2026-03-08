@@ -1,4 +1,5 @@
 import { Channel, NewMessage } from './types.js';
+import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
   if (!s) return '';
@@ -11,15 +12,35 @@ export function escapeXml(s: string): string {
 
 export function formatMessages(
   messages: NewMessage[],
+  timezoneOrImagePathTransformer?:
+    | string
+    | ((hostPath: string) => string),
   imagePathTransformer?: (hostPath: string) => string,
 ): string {
+  const timezone =
+    typeof timezoneOrImagePathTransformer === 'string'
+      ? timezoneOrImagePathTransformer
+      : undefined;
+  const transformImagePath =
+    typeof timezoneOrImagePathTransformer === 'function'
+      ? timezoneOrImagePathTransformer
+      : imagePathTransformer;
+
   const lines = messages.map((m) => {
+    const displayTime = timezone
+      ? formatLocalTime(m.timestamp, timezone)
+      : m.timestamp;
     const imageAttr = m.image_path
-      ? ` image="${escapeXml(imagePathTransformer ? imagePathTransformer(m.image_path) : m.image_path)}"`
+      ? ` image="${escapeXml(transformImagePath ? transformImagePath(m.image_path) : m.image_path)}"`
       : '';
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"${imageAttr}>${escapeXml(m.content)}</message>`;
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}"${imageAttr}>${escapeXml(m.content)}</message>`;
   });
-  return `<messages>\n${lines.join('\n')}\n</messages>`;
+
+  const header = timezone
+    ? `<context timezone="${escapeXml(timezone)}" />\n`
+    : '';
+
+  return `${header}<messages>\n${lines.join('\n')}\n</messages>`;
 }
 
 export function stripInternalTags(text: string): string {

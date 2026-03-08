@@ -5,6 +5,7 @@ import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
   OnInboundMessage,
@@ -288,3 +289,12 @@ export class SlackChannel implements Channel {
     }
   }
 }
+
+registerChannel('slack', (opts: ChannelOpts) => {
+  const envVars = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN']);
+  if (!envVars.SLACK_BOT_TOKEN || !envVars.SLACK_APP_TOKEN) {
+    logger.warn('Slack: SLACK_BOT_TOKEN or SLACK_APP_TOKEN not set');
+    return null;
+  }
+  return new SlackChannel(opts);
+});
