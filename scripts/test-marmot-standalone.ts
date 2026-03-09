@@ -40,6 +40,8 @@ import {
   deserializeApplicationRumor,
   getNostrGroupIdHex,
   getMediaAttachments,
+  deriveMediaEncryptionKey,
+  decryptMediaFile,
   GROUP_EVENT_KIND,
   KEY_PACKAGE_KIND,
   KEY_PACKAGE_RELAY_LIST_KIND,
@@ -62,6 +64,68 @@ function ts(): string {
 function log(tag: string, msg: string, data?: Record<string, unknown>): void {
   const extra = data ? '  ' + JSON.stringify(data) : '';
   console.log(`[${ts()}] [${tag}] ${msg}${extra}`);
+}
+
+// Directory for saving decrypted media files
+const MEDIA_DIR = path.join(process.cwd(), 'marmot-media');
+
+/**
+ * Download an encrypted blob from Blossom, decrypt it with MIP-04, and save to disk.
+ */
+async function downloadAndDecryptMedia(
+  group: any,
+  attachment: any,
+): Promise<string | null> {
+  if (!attachment.url) {
+    log('MEDIA', 'No URL for attachment, skipping download');
+    return null;
+  }
+
+  try {
+    // 1. Download encrypted blob from Blossom
+    log('MEDIA', `Downloading from ${attachment.url}...`);
+    const response = await fetch(attachment.url);
+    if (!response.ok) {
+      log('ERROR', `Download failed: HTTP ${response.status} ${response.statusText}`);
+      return null;
+    }
+    const encryptedBuffer = await response.arrayBuffer();
+    const encrypted = new Uint8Array(encryptedBuffer);
+    log('MEDIA', `Downloaded ${encrypted.length} bytes (encrypted)`);
+
+    // 2. Derive file key from MLS epoch and decrypt
+    const fileKey = await deriveMediaEncryptionKey(
+      group.state,
+      group.ciphersuite,
+      attachment,
+    );
+    const decrypted = decryptMediaFile(encrypted, fileKey, attachment);
+    log('MEDIA', `Decrypted ${decrypted.length} bytes`);
+
+    // 3. Save to disk
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    const outputPath = path.join(MEDIA_DIR, attachment.filename);
+    // Avoid overwriting: add timestamp suffix if file exists
+    let finalPath = outputPath;
+    if (fs.existsSync(outputPath)) {
+      const ext = path.extname(attachment.filename);
+      const base = path.basename(attachment.filename, ext);
+      finalPath = path.join(MEDIA_DIR, `${base}_${Date.now()}${ext}`);
+    }
+    fs.writeFileSync(finalPath, decrypted);
+    log('MEDIA', `✅ Saved decrypted image: ${finalPath}`, {
+      size: decrypted.length,
+      dimensions: attachment.dimensions || 'unknown',
+    });
+
+    return finalPath;
+  } catch (err: any) {
+    log('ERROR', `Failed to download/decrypt media: ${err?.message}`, {
+      filename: attachment.filename,
+      url: attachment.url,
+    });
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +628,9 @@ async function main() {
                           dimensions: att.dimensions || 'unknown',
                           version: att.version,
                         });
+
+                        // Download encrypted blob from Blossom and decrypt with MIP-04
+                        await downloadAndDecryptMedia(group, att);
                       }
                     } else {
                       log('MSG', `[${groupName}] <${senderShort}> ${content}`, {
