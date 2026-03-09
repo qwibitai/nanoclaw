@@ -81,9 +81,7 @@ describe('ensureContainerRuntimeRunning', () => {
 describe('cleanupOrphans', () => {
   it('stops orphaned neopaw containers', () => {
     // docker ps returns container names, one per line
-    mockExecSync.mockReturnValueOnce(
-      'neopaw-group1-111\nneopaw-group2-222\n',
-    );
+    mockExecSync.mockReturnValueOnce('neopaw-group1-111\nneopaw-group2-222\n');
     // stop calls succeed
     mockExecSync.mockReturnValue('');
 

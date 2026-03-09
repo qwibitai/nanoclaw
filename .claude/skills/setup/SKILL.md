@@ -1,13 +1,73 @@
 ---
 name: setup
-description: Run initial NeoPaw setup. Use when user wants to install dependencies, authenticate messaging channels, register their main channel, or start the background services. Triggers on "setup", "install", "configure neopaw", or first-time setup requests.
+description: Run initial NeoPaw setup for AI+X learners. Use when user wants to install, configure, or set up their personal learning workstation. Triggers on "setup", "install", "configure neopaw", or first-time setup requests.
 ---
 
-# NeoPaw Setup
+# NeoPaw Setup — Personal Agent Workstation for AI+X Learners
 
-Run setup steps automatically. Only pause when user action is required (channel authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for all other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
+Run setup steps automatically. Only pause when user action is required (authentication, configuration choices). Setup uses `bash setup.sh` for bootstrap, then `npx tsx setup/index.ts --step <name>` for other steps. Steps emit structured status blocks to stdout. Verbose logs go to `logs/setup.log`.
 
-**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair. Ask the user for permission when needed, then do the work.
+**Principle:** When something is broken or missing, fix it. Don't tell the user to go fix it themselves unless it genuinely requires their manual action (e.g. authenticating a channel, pasting a secret token). If a dependency is missing, install it. If a service won't start, diagnose and repair.
+
+## 0. Choose Mode (NEW — ask first)
+
+Use `AskUserQuestion` to ask the learner:
+
+**"How would you like to use NeoPaw?"**
+
+| Option | Description |
+|--------|-------------|
+| **CLI only (Recommended for getting started)** | Run NeoPaw in your terminal. No containers needed. Fastest to set up. |
+| **Service mode (24/7)** | Run NeoPaw as a background service connected to a messaging channel (WhatsApp, Telegram, etc.). Requires Docker. |
+| **Both** | CLI for interactive local work + service mode for mobile access. |
+
+- If "CLI only": Skip steps 3-5 (container, channel, service). After step 2, create workspace (step 6), then done.
+- If "Service mode" or "Both": Continue with all steps.
+
+## 0b. Research API Key (Optional)
+
+After mode selection, ask:
+
+**"Do you have an OpenRouter API key for academic research? (Optional — enables the research-lookup skill)"**
+
+| Option | Description |
+|--------|-------------|
+| **Yes, I have one** | Prompt for the key and add `OPENROUTER_API_KEY=...` to `.env` |
+| **Skip for now** | Research-lookup will use WebSearch as fallback |
+
+## 0c. Create Learner Workspace
+
+After all setup steps complete, create the default workspace:
+
+```bash
+# Create workspace directories
+mkdir -p groups/cli/{modules,notes/memory,research,papers,conversations,logs}
+
+# Initialize progress tracking if not exists
+[ -f groups/cli/notes/progress.json ] || echo '{"modules":{}}' > groups/cli/notes/progress.json
+[ -f groups/cli/notes/kstar-traces.json ] || echo '{"traces":[],"skillProfile":{}}' > groups/cli/notes/kstar-traces.json
+[ -f groups/cli/notes/memory/cards.json ] || echo '{"cards":[]}' > groups/cli/notes/memory/cards.json
+```
+
+Then display a welcome message:
+
+```
+Welcome to NeoPaw! Your learning workstation is ready.
+
+Available commands:
+  npm run cli              — Start interactive session
+  npm run cli -- "prompt"  — Ask a question directly
+
+Built-in skills:
+  • run-module       — Start educational modules
+  • kstar-loop       — Track your learning progress
+  • qmd-memory       — Create flashcards and review
+  • research-lookup  — Search academic literature
+  • scientific-writing — Write manuscripts
+  • aix-explainer    — Understand AI+X
+
+Try: npm run cli -- "teach me about AI+X"
+```
 
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 

@@ -1,202 +1,135 @@
 <p align="center">
-  <img src="assets/neopaw-logo.png" alt="NeoPaw" width="400">
+  <strong>NeoPaw</strong><br>
+  <em>Personal Agent Workstation for AI+X Learners</em>
 </p>
 
 <p align="center">
-  An AI assistant that runs agents securely in their own containers. Lightweight, built to be easily understood and completely customized for your needs.
+  Built on the NEOLAF framework. Forked from <a href="https://github.com/qwibitai/nanoclaw">NanoClaw</a>.
 </p>
 
-<p align="center">
-  <a href="https://neopaw.dev">neopaw.dev</a>&nbsp; • &nbsp;
-  <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
-  <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
-  <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
-</p>
-Using Claude Code, NeoPaw can dynamically rewrite its code to customize its feature set for your needs.
-
-**New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
-
-## Why I Built NeoPaw
-
-[OpenClaw](https://github.com/openclaw/openclaw) is an impressive project, but I wouldn't have been able to sleep if I had given complex software I didn't understand full access to my life. OpenClaw has nearly half a million lines of code, 53 config files, and 70+ dependencies. Its security is at the application level (allowlists, pairing codes) rather than true OS-level isolation. Everything runs in one Node process with shared memory.
-
-NeoPaw provides that same core functionality, but in a codebase small enough to understand: one process and a handful of files. Claude agents run in their own Linux containers with filesystem isolation, not merely behind permission checks.
+NeoPaw is a 24/7 personal companion agent for AI+X program learners. It bundles educational skills — course delivery, scientific writing, research, memory management — into a secure container-based agent that's always available via messaging channels or CLI.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/qwibitai/NeoPaw.git
-cd NeoPaw
+git clone https://github.com/your-org/neopaw.git
+cd neopaw
 claude
 ```
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
+Then run `/setup`. Claude Code handles dependencies, authentication, and workspace creation.
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
+### CLI Mode (fastest)
 
-## Philosophy
-
-**Small enough to understand.** One process, a few source files and no microservices. If you want to understand the full NeoPaw codebase, just ask Claude Code to walk you through it.
-
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker) and they can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
-
-**Built for the individual user.** NeoPaw isn't a monolithic framework; it's software that fits each user's exact needs. Instead of becoming bloatware, NeoPaw is designed to be bespoke. You make your own fork and have Claude Code modify it to match your needs.
-
-**Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that it's safe to make changes.
-
-**AI-native.**
-- No installation wizard; Claude Code guides setup.
-- No monitoring dashboard; ask Claude what's happening.
-- No debugging tools; describe the problem and Claude fixes it.
-
-**Skills over features.** Instead of adding features (e.g. support for Telegram) to the codebase, contributors submit [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
-
-**Best harness, best model.** NeoPaw runs on the Claude Agent SDK, which means you're running Claude Code directly. Claude Code is highly capable and its coding and problem-solving capabilities allow it to modify and expand NeoPaw and tailor it to each user.
-
-## What It Supports
-
-- **Multi-channel messaging** - Talk to your assistant from WhatsApp, Telegram, Discord, Slack, or Gmail. Add channels with skills like `/add-whatsapp` or `/add-telegram`. Run one or many at the same time.
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted to it.
-- **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NeoPaw is the first personal AI assistant to support agent swarms.
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
-
-## Usage
-
-Talk to your assistant with the trigger word (default: `@Andy`):
-
-```
-@Andy send an overview of the sales pipeline every weekday morning at 9am (has access to my Obsidian vault folder)
-@Andy review the git history for the past week each Friday and update the README if there's drift
-@Andy every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
+```bash
+npm run cli
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+Launches NeoPaw directly in your terminal — no containers needed. Interactive educational agent with all NEOLAF skills.
+
+### Service Mode (24/7)
+
+Run `/setup` and choose a messaging channel (WhatsApp, Telegram, Slack, Discord). NeoPaw runs as a background service, responding to messages around the clock.
+
+## What NeoPaw Can Do
+
+### Educational Skills (built-in)
+
+| Skill | What It Does |
+|-------|-------------|
+| **run-module** | Deliver AI+X course modules using the seven-step pedagogical framework |
+| **kstar-loop** | Record KSTAR learning traces (Knowledge-Situation-Task-Action-Result) and build skill profiles |
+| **qmd-memory** | Create flashcards, spaced repetition reviews (SM-2), and concept maps |
+| **aix-explainer** | Explain the AI+X framework to any audience (30s pitch to 5min talk) |
+| **scientific-writing** | Write manuscripts with IMRAD structure, citations, reporting guidelines |
+| **research-lookup** | Search academic literature via Perplexity Sonar Pro |
+
+### Platform Features
+
+- **Dual mode** — CLI for interactive local use, channels for 24/7 mobile access
+- **Container isolation** — Agents run in Docker/Apple Container with filesystem isolation
+- **Per-group memory** — Each conversation group has its own isolated CLAUDE.md and workspace
+- **Scheduled tasks** — Recurring jobs (daily reviews, weekly summaries)
+- **Web access** — Search and fetch content from the web
+- **Customizable** — Modify code directly; small enough to understand
+
+## Learner Workspace
+
+NeoPaw creates a structured workspace for each learner:
+
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+groups/cli/
+├── CLAUDE.md           # NeoPaw agent identity
+├── modules/            # Course content and lesson plans
+├── notes/              # Study journal
+│   ├── progress.json   # Module progress tracker
+│   ├── kstar-traces.json  # Learning traces
+│   └── memory/         # QMD flashcards and concept maps
+├── research/           # Research outputs
+├── papers/             # Scientific writing drafts
+└── conversations/      # Archived transcripts
 ```
 
-## Customizing
+## Usage Examples
 
-NeoPaw doesn't use configuration files. To make changes, just tell Claude Code what you want:
+### CLI Mode
+```bash
+# Interactive session
+npm run cli
 
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
+# Single prompt
+npm run cli -- "teach me about neural networks"
+npm run cli -- "start module intro-to-ml"
+npm run cli -- "quiz me on what I learned yesterday"
+```
 
-Or run `/customize` for guided changes.
+### Channel Mode (via messaging)
+```
+@Paw start module intro-to-ai
+@Paw explain AI+X to me like I'm a business student
+@Paw help me write the methods section for my paper
+@Paw review my learning progress this week
+@Paw make flashcards from today's lesson
+```
 
-The codebase is small enough that Claude can safely modify it.
+## Architecture
 
-## Contributing
+```
+CLI Mode:     Terminal → cli.ts → claude CLI (direct, no container)
+Service Mode: Channel → index.ts → Container (Claude Agent SDK) → Response
+```
 
-**Don't add features. Add skills.**
-
-If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NeoPaw installation to use Telegram.
-
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
-
-### RFS (Request for Skills)
-
-Skills we'd like to see:
-
-**Communication Channels**
-- `/add-signal` - Add Signal as a channel
-
-**Session Management**
-- `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+Single Node.js process. Channels self-register at startup. Agents execute in isolated Linux containers. NEOLAF skills are synced from `container/skills/` into each agent's workspace. IPC via filesystem.
 
 ## Requirements
 
 - macOS or Linux
 - Node.js 20+
 - [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- Docker (for service mode) or [Apple Container](https://github.com/apple/container) (macOS)
 
-## Architecture
+### Optional
 
-```
-Channels --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
-```
+- `OPENROUTER_API_KEY` in `.env` — enables research-lookup skill (Perplexity Sonar)
 
-Single Node.js process. Channels are added via skills and self-register at startup — the orchestrator connects whichever ones have credentials present. Agents execute in isolated Linux containers with filesystem isolation. Only mounted directories are accessible. Per-group message queue with concurrency control. IPC via filesystem.
-
-For the full architecture details, see [docs/SPEC.md](docs/SPEC.md).
-
-Key files:
-- `src/index.ts` - Orchestrator: state, message loop, agent invocation
-- `src/channels/registry.ts` - Channel registry (self-registration at startup)
-- `src/ipc.ts` - IPC watcher and task processing
-- `src/router.ts` - Message formatting and outbound routing
-- `src/group-queue.ts` - Per-group queue with global concurrency limit
-- `src/container-runner.ts` - Spawns streaming agent containers
-- `src/task-scheduler.ts` - Runs scheduled tasks
-- `src/db.ts` - SQLite operations (messages, groups, sessions, state)
-- `groups/*/CLAUDE.md` - Per-group memory
-
-## FAQ
-
-**Why Docker?**
-
-Docker provides cross-platform support (macOS, Linux and even Windows via WSL2) and a mature ecosystem. On macOS, you can optionally switch to Apple Container via `/convert-to-apple-container` for a lighter-weight native runtime.
-
-**Can I run this on Linux?**
-
-Yes. Docker is the default runtime and works on both macOS and Linux. Just run `/setup`.
-
-**Is this secure?**
-
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
-
-**Why no configuration files?**
-
-We don't want configuration sprawl. Every user should customize NeoPaw so that the code does exactly what they want, rather than configuring a generic system. If you prefer having config files, you can tell Claude to add them.
-
-**Can I use third-party or open-source models?**
-
-Yes. NeoPaw supports any API-compatible model endpoint. Set these environment variables in your `.env` file:
+## Development
 
 ```bash
-ANTHROPIC_BASE_URL=https://your-api-endpoint.com
-ANTHROPIC_AUTH_TOKEN=your-token-here
+npm run cli          # CLI mode (no container)
+npm run dev          # Service mode with hot reload
+npm run build        # Compile TypeScript
+npm test             # Run tests
+./container/build.sh # Rebuild agent container
 ```
 
-This allows you to use:
-- Local models via [Ollama](https://ollama.ai) with an API proxy
-- Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
-- Custom model deployments with Anthropic-compatible APIs
+## Customizing
 
-Note: The model must support the Anthropic API format for best compatibility.
+Tell Claude Code what you want:
+- "Add Telegram as a channel" → `/add-telegram`
+- "Change the trigger word to @Neo"
+- "Add a new module about data science"
 
-**How do I debug issues?**
-
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NeoPaw.
-
-**Why isn't the setup working for me?**
-
-If you have issues, during setup, Claude will try to dynamically fix them. If that doesn't work, run `claude`, then run `/debug`. If Claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
-
-**What changes will be accepted into the codebase?**
-
-Only security fixes, bug fixes, and clear improvements will be accepted to the base configuration. That's all.
-
-Everything else (new capabilities, OS compatibility, hardware support, enhancements) should be contributed as skills.
-
-This keeps the base system minimal and lets every user customize their installation without inheriting features they don't want.
-
-## Community
-
-Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
+Or run `/customize` for guided changes.
 
 ## License
 
