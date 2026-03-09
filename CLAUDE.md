@@ -70,6 +70,7 @@ BEFORE editing Andy's groups/main/CLAUDE.md → read docs/workflow/docs-discipli
 BEFORE debugging Andy/Jarvis worker flow issues → read docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
 BEFORE debugging Apple Container build/runtime issues → read docs/troubleshooting/DEBUG_CHECKLIST.md and docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md
 BEFORE debugging container/auth/session/mount issues → read docs/workflow/runtime/nanoclaw-container-debugging.md
+AFTER task completion or BEFORE ending session, if you had to correct workflow mid-task → read docs/workflow/strategy/session-introspection-loop.md
 ```
 
 ## Key Files
