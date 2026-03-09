@@ -84,6 +84,7 @@ function createChat(replies: Array<string | null>): ChatIO & { sent: string[] } 
   return {
     sent,
     send: vi.fn(async (text: string) => { sent.push(text); }),
+    sendRaw: vi.fn(async (text: string) => { sent.push(text); }),
     receive: vi.fn(async () => {
       const reply = replyIndex < replies.length ? replies[replyIndex] : null;
       replyIndex++;

@@ -14,6 +14,8 @@ import type { ExecHandle } from './types.js';
 export interface ExecContainerOpts {
   /** Provider-specific bind mounts as [hostPath, containerPath, mode?] tuples. */
   mounts?: Array<[string, string, string?]>;
+  /** Override the default hard timeout (IDLE_TIMEOUT). */
+  timeoutMs?: number;
 }
 
 // Shim xdg-open: captures OAuth URL and exits 0 so CLI thinks browser opened.
@@ -107,18 +109,16 @@ export function execInContainer(
     stderr += data.toString();
   });
 
-  // Hard timeout — uses IDLE_TIMEOUT from config: auth is waiting for user
-  // input, same as an idle agent waiting for IPC. Same kill mechanics as
-  // container-runner.ts (docker stop → SIGKILL fallback).
+  const effectiveTimeout = opts.timeoutMs ?? IDLE_TIMEOUT;
   const killTimer = setTimeout(() => {
-    logger.warn({ containerName, timeoutMs: IDLE_TIMEOUT }, 'Auth container timeout, stopping gracefully');
+    logger.warn({ containerName, timeoutMs: effectiveTimeout }, 'Auth container timeout, stopping gracefully');
     exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
       if (err) {
         logger.warn({ containerName, err }, 'Graceful stop failed, force killing');
         proc.kill('SIGKILL');
       }
     });
-  }, IDLE_TIMEOUT);
+  }, effectiveTimeout);
 
   proc.on('close', () => clearTimeout(killTimer));
 

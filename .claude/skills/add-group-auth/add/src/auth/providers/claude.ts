@@ -556,11 +556,15 @@ export const claudeProvider: CredentialProvider = {
     // .claude/) and loops if missing. Use the shared stub.
     ensureClaudeConfigStub();
 
-    // Run a minimal CLI invocation to trigger OAuth token refresh
+    // Run claude interactively to trigger OAuth token refresh.
+    // `claude -p` does NOT refresh tokens — it just fails with 401.
+    // Interactive mode triggers the refresh on startup, before any prompt.
+    const REFRESH_TIMEOUT_MS = 30_000;
     const handle = execInContainer(
-      ['claude', '-p', 'ping', '--max-turns', '1', '--model', 'haiku'],
+      ['script', '-qc', 'stty columns 500 && claude', '/dev/null'],
       sessionDir,
       {
+        timeoutMs: REFRESH_TIMEOUT_MS,
         mounts: [
           [sessionDir, '/home/node/.claude'],
           [CLAUDE_CONFIG_STUB, '/home/node/.claude.json', 'ro'],
@@ -568,6 +572,55 @@ export const claudeProvider: CredentialProvider = {
       },
     );
 
+    // Wait for the CLI to initialize and refresh the token, then exit.
+    const output = { value: '' };
+    handle.onStdout((chunk) => { output.value += chunk; });
+
+    // Wait for the input prompt (❯ or similar) indicating CLI is ready
+    const ready = await waitForPattern(output, /[❯>]\s/, REFRESH_TIMEOUT_MS);
+    if (!ready) {
+      logger.warn({ scope, output: output.value.slice(-500) }, 'Refresh: CLI did not become ready in time');
+      handle.kill();
+      return false;
+    }
+
+    // Send a prompt that triggers an LLM call — the token refresh
+    // happens when the CLI hits the API, not on startup.
+    handle.stdin.write('reply: hi');
+    await new Promise((r) => setTimeout(r, 200));
+    handle.stdin.write('\r');
+
+    // Wait for: (a) expected "hi" reply = success, (b) any other output = done
+    // (refresh already happened or errored), (c) timeout = give up.
+    const outputAtSend = output.value.length;
+    const anyOutputOrHi = await new Promise<'hi' | 'other' | 'timeout'>((resolve) => {
+      const check = setInterval(() => {
+        const newOutput = output.value.slice(outputAtSend);
+        if (/hi/i.test(newOutput)) {
+          clearInterval(check);
+          clearTimeout(timer);
+          resolve('hi');
+        } else if (newOutput.trim().length > 0) {
+          clearInterval(check);
+          clearTimeout(timer);
+          resolve('other');
+        }
+      }, 500);
+      const timer = setTimeout(() => {
+        clearInterval(check);
+        resolve('timeout');
+      }, REFRESH_TIMEOUT_MS);
+    });
+
+    if (anyOutputOrHi === 'hi') {
+      logger.info({ scope }, 'Refresh: got expected reply');
+    } else if (anyOutputOrHi === 'other') {
+      logger.warn({ scope, output: output.value.slice(-500) }, 'Refresh: got unexpected output');
+    } else {
+      logger.warn({ scope }, 'Refresh: timed out waiting for response');
+    }
+
+    handle.kill();
     const result = await handle.wait();
 
     // Read back potentially refreshed credentials and clean up plaintext
@@ -711,8 +764,8 @@ export const claudeProvider: CredentialProvider = {
             return RESELECT;
           }
 
-          // Send public key first as a separate message so it's easy to copy
-          await ctx.chat.send(pubKey);
+          // Send public key without prefix so it's directly copy-pasteable
+          await ctx.chat.sendRaw(pubKey);
 
           await ctx.chat.send(
             'Paste a GPG-encrypted Anthropic API key.\n\n' +

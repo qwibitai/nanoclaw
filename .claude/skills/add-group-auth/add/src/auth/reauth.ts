@@ -6,6 +6,7 @@
 import { logger } from '../logger.js';
 import { getAllProviders } from './registry.js';
 import { execInContainer, authSessionDir } from './exec.js';
+import { deleteCredential } from './store.js';
 import type { AuthContext, AuthExecOpts, AuthOption, ChatIO, ExecHandle } from './types.js';
 import { RESELECT } from './types.js';
 
@@ -63,6 +64,10 @@ async function showMenuAndRun(
     optionBlocks.push(block);
   }
   optionBlocks.push(`${allOptions.length + 1}. Cancel`);
+  optionBlocks.push(`99. Delete credentials`);
+
+  const DELETE_CHOICE = 99;
+  const CANCEL_CHOICE = allOptions.length + 1;
 
   const scopeNote = scope === 'default'
     ? '⚠️ This will change the *default* credentials used by all groups that don\'t have their own.'
@@ -93,7 +98,18 @@ async function showMenuAndRun(
   chat.advanceCursor();
 
   const choice = parseInt(reply.trim(), 10);
-  if (isNaN(choice) || choice < 1 || choice > allOptions.length) {
+
+  if (choice === DELETE_CHOICE) {
+    const providers = getAllProviders();
+    for (const provider of providers) {
+      deleteCredential(scope, provider.service);
+    }
+    await chat.send(`${REAUTH_PREFIX} Credentials deleted for scope *${scope}*.`);
+    logger.info({ scope }, 'Credentials deleted via reauth menu');
+    return false;
+  }
+
+  if (isNaN(choice) || choice < 1 || choice > allOptions.length || choice === CANCEL_CHOICE) {
     await chat.send(`${REAUTH_PREFIX} Cancelled.`);
     return false;
   }
@@ -145,6 +161,7 @@ async function showMenuAndRun(
 function prefixedChat(chat: ChatIO): ChatIO {
   return {
     send: (text: string) => chat.send(`${REAUTH_PREFIX} ${text}`),
+    sendRaw: (text: string) => chat.send(text),
     receive: (timeoutMs?: number) => chat.receive(timeoutMs),
     advanceCursor: () => chat.advanceCursor(),
   };

@@ -153,6 +153,9 @@ function createChatIO(channel: Channel, chatJid: string): ChatIO {
     async send(text: string): Promise<void> {
       await channel.sendMessage(chatJid, text);
     },
+    async sendRaw(text: string): Promise<void> {
+      await channel.sendMessage(chatJid, text);
+    },
     async receive(timeoutMs = 120_000): Promise<string | null> {
       const start = Date.now();
       const cursor = getMessagesSince(chatJid, '', ASSISTANT_NAME);
