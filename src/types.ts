@@ -102,6 +102,9 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: clear per-JID thread redirect state after container processing completes.
+  // Prevents stale redirects from sending task/recap output into old threads.
+  clearThreadState?(parentJid: string): void;
 }
 
 // Callback type that channels use to deliver inbound messages

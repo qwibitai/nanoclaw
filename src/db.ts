@@ -98,6 +98,22 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_v2_activity ON sessions_v2(last_activity);
   `);
 
+  // Index for thread LIKE queries in getNewMessages (e.g. chat_jid LIKE 'slack:C123:thread:%')
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp)`,
+  );
+
+  // Discord thread origin persistence — maps thread channel IDs to their
+  // originating message so thread replies find the correct session after restart.
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS thread_origins (
+      thread_channel_id TEXT PRIMARY KEY,
+      origin_message_id TEXT NOT NULL,
+      parent_jid TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
   // Migrate existing sessions into sessions_v2 (idempotent — skips rows that already exist)
   const existingSessions = database
     .prepare('SELECT group_folder, session_id FROM sessions')
@@ -329,6 +345,13 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(msg: NewMessage): void {
+  // Thread JIDs (e.g. slack:C123:thread:ts) may not have a chats row yet.
+  // Auto-create one to satisfy the foreign key on messages.chat_jid.
+  if (msg.chat_jid.includes(':thread:')) {
+    db.prepare(
+      `INSERT OR IGNORE INTO chats (jid, last_message_time, channel, is_group) VALUES (?, ?, ?, 1)`,
+    ).run(msg.chat_jid, msg.timestamp, msg.chat_jid.startsWith('slack:') ? 'slack' : 'discord');
+  }
   db.prepare(
     `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
@@ -435,6 +458,95 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+/**
+ * Get a message by its ID and chat JID.
+ */
+export function getMessageById(
+  id: string,
+  chatJid: string,
+): NewMessage | undefined {
+  return db
+    .prepare(
+      `SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+       FROM messages WHERE id = ? AND chat_jid = ?`,
+    )
+    .get(id, chatJid) as NewMessage | undefined;
+}
+
+/**
+ * Find all pending thread JIDs for a parent channel.
+ * Returns thread JIDs with unprocessed messages, ordered by oldest first.
+ * Used only during startup recovery — normal flow passes exact processJid via the queue.
+ */
+export function findPendingThreadJids(
+  parentJid: string,
+  sinceTimestamps: Record<string, string>,
+  botPrefix: string,
+): string[] {
+  // Find distinct thread JIDs with pending messages
+  const sql = `
+    SELECT DISTINCT chat_jid
+    FROM messages
+    WHERE chat_jid LIKE ? AND is_bot_message = 0
+      AND content NOT LIKE ? AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp
+  `;
+  const rows = db
+    .prepare(sql)
+    .all(`${parentJid}:thread:%`, `${botPrefix}:%`) as Array<{ chat_jid: string }>;
+
+  const result: string[] = [];
+  for (const row of rows) {
+    const since = sinceTimestamps[row.chat_jid] || sinceTimestamps[parentJid] || '';
+    // Check if this thread has messages newer than what we've processed
+    const pending = db
+      .prepare(
+        `SELECT 1 FROM messages WHERE chat_jid = ? AND timestamp > ?
+         AND is_bot_message = 0 AND content NOT LIKE ?
+         AND content != '' AND content IS NOT NULL LIMIT 1`,
+      )
+      .get(row.chat_jid, since, `${botPrefix}:%`);
+    if (pending) result.push(row.chat_jid);
+  }
+  return result;
+}
+
+// --- Thread origin accessors (Discord thread → session mapping) ---
+
+export function setThreadOrigin(
+  threadChannelId: string,
+  originMessageId: string,
+  parentJid: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    'INSERT OR REPLACE INTO thread_origins (thread_channel_id, origin_message_id, parent_jid, created_at) VALUES (?, ?, ?, ?)',
+  ).run(threadChannelId, originMessageId, parentJid, now);
+}
+
+export function getThreadOrigin(
+  threadChannelId: string,
+): { origin_message_id: string; parent_jid: string } | undefined {
+  return db
+    .prepare(
+      'SELECT origin_message_id, parent_jid FROM thread_origins WHERE thread_channel_id = ?',
+    )
+    .get(threadChannelId) as
+    | { origin_message_id: string; parent_jid: string }
+    | undefined;
+}
+
+/**
+ * Delete thread_origins entries older than the given cutoff timestamp.
+ * Called during session sweep to prevent unbounded table growth.
+ */
+export function pruneThreadOrigins(cutoffIso: string): number {
+  const result = db
+    .prepare('DELETE FROM thread_origins WHERE created_at < ?')
+    .run(cutoffIso);
+  return result.changes;
 }
 
 export function createTask(

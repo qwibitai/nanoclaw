@@ -166,6 +166,28 @@ describe('GroupQueue', () => {
     expect(callCount).toBe(3);
   });
 
+  it('retries with thread processJid preserved (not parent JID)', async () => {
+    const processed: string[] = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      return false; // always fail
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Enqueue with a thread processJid
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // First call should receive the thread JID
+    expect(processed).toEqual(['dc:parent:thread:t1']);
+
+    // After retry delay (5000ms), the retry should also use the thread JID
+    await vi.advanceTimersByTimeAsync(5010);
+    expect(processed).toEqual(['dc:parent:thread:t1', 'dc:parent:thread:t1']);
+  });
+
   // --- Shutdown prevents new enqueues ---
 
   it('prevents new enqueues after shutdown', async () => {
@@ -479,6 +501,156 @@ describe('GroupQueue', () => {
     expect(closeWrites).toHaveLength(1);
 
     resolveProcess!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // --- processJid routing ---
+
+  it('passes processJid (not groupJid) to processMessagesFn', async () => {
+    const processed: string[] = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Enqueue with explicit processJid (thread JID)
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual(['dc:parent:thread:t1']);
+  });
+
+  it('defaults processJid to groupJid when not provided', async () => {
+    const processed: string[] = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    queue.enqueueMessageCheck('dc:parent');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual(['dc:parent']);
+  });
+
+  it('processes multiple thread JIDs sequentially via drain', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // First enqueue starts immediately
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // While active, enqueue two more thread JIDs
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t3');
+
+    // Complete first — should drain to t2
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Complete second — should drain to t3
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Complete third
+    completionCallbacks[2]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual([
+      'dc:parent:thread:t1',
+      'dc:parent:thread:t2',
+      'dc:parent:thread:t3',
+    ]);
+  });
+
+  it('deduplicates same processJid enqueued multiple times', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Start processing
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Enqueue same processJid twice while active
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
+
+    // Complete first
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Complete second (should be only t2, not two t2s)
+    completionCallbacks[1]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual([
+      'dc:parent:thread:t1',
+      'dc:parent:thread:t2',
+    ]);
+    expect(processMessages).toHaveBeenCalledTimes(2);
+  });
+
+  it('drainWaiting processes pendingProcessJids for waiting groups', async () => {
+    const processed: string[] = [];
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      processed.push(jid);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Fill both slots (MAX_CONCURRENT_CONTAINERS = 2)
+    queue.enqueueMessageCheck('group1@g.us', 'group1@g.us:thread:t1');
+    queue.enqueueMessageCheck('group2@g.us', 'group2@g.us:thread:t2');
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toEqual([
+      'group1@g.us:thread:t1',
+      'group2@g.us:thread:t2',
+    ]);
+
+    // At concurrency limit — this goes to waitingGroups
+    queue.enqueueMessageCheck('group3@g.us', 'group3@g.us:thread:t3');
+    await vi.advanceTimersByTimeAsync(10);
+
+    // group3 should NOT have been processed yet
+    expect(processed).toHaveLength(2);
+
+    // Free a slot — group3's thread JID should drain
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processed).toContain('group3@g.us:thread:t3');
+
+    // Cleanup
+    completionCallbacks[1]();
+    completionCallbacks[2]();
     await vi.advanceTimersByTimeAsync(10);
   });
 });

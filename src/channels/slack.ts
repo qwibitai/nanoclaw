@@ -207,6 +207,12 @@ export class SlackChannel implements Channel {
       if (!isBotMessage && hasBotMention) {
         this.replyThreadTs.set(baseJid, threadTs || msg.ts);
         this.lastUserMessageTs.set(baseJid, msg.ts);
+        // For thread messages, also key by the thread JID so setTyping
+        // can find the correct message when called with a thread JID.
+        if (threadTs) {
+          const threadJid = `slack:${msg.channel}:thread:${threadTs}`;
+          this.lastUserMessageTs.set(threadJid, msg.ts);
+        }
       }
 
       // If the message is inside a thread and thread sessions are NOT enabled,
@@ -344,6 +350,20 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
+  clearThreadState(parentJid: string): void {
+    this.replyThreadTs.delete(parentJid);
+    this.lastUserMessageTs.delete(parentJid);
+    this.typingMessageTs.delete(parentJid);
+    // Also clear thread-keyed entries (slack:{channel}:thread:{ts})
+    const threadPrefix = `${parentJid}:thread:`;
+    for (const key of this.lastUserMessageTs.keys()) {
+      if (key.startsWith(threadPrefix)) this.lastUserMessageTs.delete(key);
+    }
+    for (const key of this.typingMessageTs.keys()) {
+      if (key.startsWith(threadPrefix)) this.typingMessageTs.delete(key);
+    }
+  }
+
   // Slack doesn't have a typing indicator API for bots.
   // Instead, add/remove a reaction emoji on the triggering message
   // so the user knows the bot is processing.
@@ -355,15 +375,20 @@ export class SlackChannel implements Channel {
     // On start: snapshot the current user message ts so the ✅ swap
     // targets the same message even if new messages arrive while processing.
     // On stop: use the snapshot (fall back to latest if no snapshot).
+    // Check thread JID first (for thread messages), then baseJid.
+    const lookupKey = threadMatch ? jid : baseJid;
     let messageTs: string | undefined;
     if (isTyping) {
-      messageTs = this.lastUserMessageTs.get(baseJid);
-      if (messageTs) this.typingMessageTs.set(baseJid, messageTs);
+      messageTs =
+        this.lastUserMessageTs.get(lookupKey) ||
+        this.lastUserMessageTs.get(baseJid);
+      if (messageTs) this.typingMessageTs.set(lookupKey, messageTs);
     } else {
       messageTs =
-        this.typingMessageTs.get(baseJid) ||
+        this.typingMessageTs.get(lookupKey) ||
+        this.lastUserMessageTs.get(lookupKey) ||
         this.lastUserMessageTs.get(baseJid);
-      this.typingMessageTs.delete(baseJid);
+      this.typingMessageTs.delete(lookupKey);
     }
 
     if (!messageTs) {

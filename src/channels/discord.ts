@@ -13,6 +13,7 @@ import {
   escapeRegex,
   resolveAssistantName,
 } from '../config.js';
+import { getThreadOrigin, setThreadOrigin } from '../db.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -26,12 +27,26 @@ export class DiscordChannel implements Channel {
   private botToken: string;
   private memberCacheTime = new Map<string, number>();
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
-  // Track the last user message ID per channel for thread creation.
-  // When the first response is sent to a top-level JID, we create a thread
-  // from this message and redirect all subsequent sends there.
+  // ── Discord thread state maps ──────────────────────────────────
+  //
+  // lastUserMessageId: TRANSIENT. Tracks the user message to create a
+  //   thread from on first reply. Lives seconds between message receipt
+  //   and first response. Lost on restart = harmless (no thread created,
+  //   response goes to channel instead).
+  //
+  // createdThreadJid: TRANSIENT. Redirects subsequent sends for a parent
+  //   JID to the thread during a single container run. Not needed after
+  //   restart — thread replies arrive with thread JIDs directly.
+  //
+  // threadOriginMessage: PERSISTED (SQLite-backed with in-memory cache).
+  //   Maps threadChannelId → originalMsgId so thread replies resolve to
+  //   the same session as the top-level message. Critical for session
+  //   continuity across restarts — without it, Discord thread replies
+  //   after restart create orphaned sessions.
+  // ─────────────────────────────────────────────────────────────────
   private lastUserMessageId = new Map<string, string>();
-  // After thread creation, redirect sends for a parent JID to the thread JID
   private createdThreadJid = new Map<string, string>();
+  private threadOriginMessage = new Map<string, string>();
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(botToken: string, opts: ChannelOpts) {
@@ -65,11 +80,23 @@ export class DiscordChannel implements Channel {
       const msgId = message.id;
 
       // Thread detection: if the message is in a thread, use the parent channel
-      // for group lookup and encode the thread in the JID
+      // for group lookup and encode the thread in the JID.
+      // Use the original message ID (not thread channel ID) as the thread
+      // identifier so the session matches the top-level invocation.
       let chatJid: string;
       let isInThread = false;
       if (message.channel.isThread() && message.channel.parentId) {
-        chatJid = `dc:${message.channel.parentId}:thread:${channelId}`;
+        // Read-through: check in-memory cache first, then SQLite
+        let originMsgId = this.threadOriginMessage.get(channelId);
+        if (!originMsgId) {
+          const dbRow = getThreadOrigin(channelId);
+          if (dbRow) {
+            originMsgId = dbRow.origin_message_id;
+            this.threadOriginMessage.set(channelId, originMsgId); // cache
+          }
+        }
+        const effectiveOrigin = originMsgId || channelId; // fallback for pre-migration threads
+        chatJid = `dc:${message.channel.parentId}:thread:${effectiveOrigin}`;
         isInThread = true;
       } else {
         chatJid = `dc:${channelId}`;
@@ -194,11 +221,13 @@ export class DiscordChannel implements Channel {
         this.createdThreadJid.delete(parentJid);
       }
 
-      // Store messages with parent JID so getNewMessages() finds them
-      // (thread routing is handled by the orchestrator, not the DB)
-      this.opts.onMessage(parentJid, {
+      // Store messages with the most specific JID:
+      // - Thread messages use thread JID for session isolation
+      // - Top-level messages use parent JID (thread created on first reply)
+      const storeJid = isInThread ? chatJid : parentJid;
+      this.opts.onMessage(storeJid, {
         id: msgId,
-        chat_jid: parentJid,
+        chat_jid: storeJid,
         sender,
         sender_name: senderName,
         content,
@@ -317,6 +346,15 @@ export class DiscordChannel implements Channel {
             // Redirect future sends for this parent JID to the thread
             const threadJid = `dc:${channelId}:thread:${threadId}`;
             this.createdThreadJid.set(jid, threadJid);
+            // Map threadChannelId → originalMsgId so thread replies
+            // resolve to the same session as the top-level message.
+            // Write-through: persist to SQLite for restart survival.
+            this.threadOriginMessage.set(threadId, originalMsgId);
+            try {
+              setThreadOrigin(threadId, originalMsgId, jid);
+            } catch (err) {
+              logger.warn({ threadId, originalMsgId, jid, err }, 'Failed to persist thread origin to SQLite');
+            }
             return;
           }
           // Fallback: createThreadAndSend already sent to channel on failure
@@ -415,6 +453,11 @@ export class DiscordChannel implements Channel {
 
   ownsJid(jid: string): boolean {
     return jid.startsWith('dc:');
+  }
+
+  clearThreadState(parentJid: string): void {
+    this.createdThreadJid.delete(parentJid);
+    this.lastUserMessageId.delete(parentJid);
   }
 
   async disconnect(): Promise<void> {

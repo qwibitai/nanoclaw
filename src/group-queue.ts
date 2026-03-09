@@ -19,7 +19,7 @@ interface GroupState {
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
-  pendingMessages: boolean;
+  pendingProcessJids: string[]; // JIDs waiting to be processed (deduped, FIFO)
   pendingTasks: QueuedTask[];
   process: ChildProcess | null;
   containerName: string | null;
@@ -32,7 +32,7 @@ export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
   private waitingGroups: string[] = [];
-  private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
+  private processMessagesFn: ((processJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
 
@@ -44,7 +44,7 @@ export class GroupQueue {
         idleWaiting: false,
         isTaskContainer: false,
         runningTaskId: null,
-        pendingMessages: false,
+        pendingProcessJids: [],
         pendingTasks: [],
         process: null,
         containerName: null,
@@ -57,34 +57,39 @@ export class GroupQueue {
     return state;
   }
 
-  setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {
+  setProcessMessagesFn(fn: (processJid: string) => Promise<boolean>): void {
     this.processMessagesFn = fn;
   }
 
-  enqueueMessageCheck(groupJid: string): void {
+  enqueueMessageCheck(groupJid: string, processJid?: string): void {
     if (this.shuttingDown) return;
 
+    const pid = processJid || groupJid;
     const state = this.getGroup(groupJid);
 
     if (state.active) {
-      state.pendingMessages = true;
-      logger.debug({ groupJid }, 'Container active, message queued');
+      if (!state.pendingProcessJids.includes(pid)) {
+        state.pendingProcessJids.push(pid);
+      }
+      logger.debug({ groupJid, processJid: pid }, 'Container active, message queued');
       return;
     }
 
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
-      state.pendingMessages = true;
+      if (!state.pendingProcessJids.includes(pid)) {
+        state.pendingProcessJids.push(pid);
+      }
       if (!this.waitingGroups.includes(groupJid)) {
         this.waitingGroups.push(groupJid);
       }
       logger.debug(
-        { groupJid, activeCount: this.activeCount },
+        { groupJid, processJid: pid, activeCount: this.activeCount },
         'At concurrency limit, message queued',
       );
       return;
     }
 
-    this.runForGroup(groupJid, 'messages').catch((err) =>
+    this.runForGroup(groupJid, 'messages', pid).catch((err) =>
       logger.error({ groupJid, err }, 'Unhandled error in runForGroup'),
     );
   }
@@ -216,31 +221,31 @@ export class GroupQueue {
   private async runForGroup(
     groupJid: string,
     reason: 'messages' | 'drain',
+    processJid: string,
   ): Promise<void> {
     const state = this.getGroup(groupJid);
     state.active = true;
     state.idleWaiting = false;
     state.isTaskContainer = false;
-    state.pendingMessages = false;
     this.activeCount++;
 
     logger.debug(
-      { groupJid, reason, activeCount: this.activeCount },
+      { groupJid, processJid, reason, activeCount: this.activeCount },
       'Starting container for group',
     );
 
     try {
       if (this.processMessagesFn) {
-        const success = await this.processMessagesFn(groupJid);
+        const success = await this.processMessagesFn(processJid);
         if (success) {
           state.retryCount = 0;
         } else {
-          this.scheduleRetry(groupJid, state);
+          this.scheduleRetry(groupJid, state, processJid);
         }
       }
     } catch (err) {
-      logger.error({ groupJid, err }, 'Error processing messages for group');
-      this.scheduleRetry(groupJid, state);
+      logger.error({ groupJid, processJid, err }, 'Error processing messages for group');
+      this.scheduleRetry(groupJid, state, processJid);
     } finally {
       state.active = false;
       state.process = null;
@@ -282,11 +287,15 @@ export class GroupQueue {
     }
   }
 
-  private scheduleRetry(groupJid: string, state: GroupState): void {
+  private scheduleRetry(
+    groupJid: string,
+    state: GroupState,
+    processJid: string,
+  ): void {
     state.retryCount++;
     if (state.retryCount > MAX_RETRIES) {
       logger.error(
-        { groupJid, retryCount: state.retryCount },
+        { groupJid, processJid, retryCount: state.retryCount },
         'Max retries exceeded, dropping messages (will retry on next incoming message)',
       );
       state.retryCount = 0;
@@ -295,12 +304,12 @@ export class GroupQueue {
 
     const delayMs = BASE_RETRY_MS * Math.pow(2, state.retryCount - 1);
     logger.info(
-      { groupJid, retryCount: state.retryCount, delayMs },
+      { groupJid, processJid, retryCount: state.retryCount, delayMs },
       'Scheduling retry with backoff',
     );
     setTimeout(() => {
       if (!this.shuttingDown) {
-        this.enqueueMessageCheck(groupJid);
+        this.enqueueMessageCheck(groupJid, processJid);
       }
     }, delayMs);
   }
@@ -322,11 +331,12 @@ export class GroupQueue {
       return;
     }
 
-    // Then pending messages
-    if (state.pendingMessages) {
-      this.runForGroup(groupJid, 'drain').catch((err) =>
+    // Then pending messages (each processJid processed sequentially)
+    if (state.pendingProcessJids.length > 0) {
+      const nextProcessJid = state.pendingProcessJids.shift()!;
+      this.runForGroup(groupJid, 'drain', nextProcessJid).catch((err) =>
         logger.error(
-          { groupJid, err },
+          { groupJid, processJid: nextProcessJid, err },
           'Unhandled error in runForGroup (drain)',
         ),
       );
@@ -354,10 +364,11 @@ export class GroupQueue {
             'Unhandled error in runTask (waiting)',
           ),
         );
-      } else if (state.pendingMessages) {
-        this.runForGroup(nextJid, 'drain').catch((err) =>
+      } else if (state.pendingProcessJids.length > 0) {
+        const nextProcessJid = state.pendingProcessJids.shift()!;
+        this.runForGroup(nextJid, 'drain', nextProcessJid).catch((err) =>
           logger.error(
-            { groupJid: nextJid, err },
+            { groupJid: nextJid, processJid: nextProcessJid, err },
             'Unhandled error in runForGroup (waiting)',
           ),
         );

@@ -39,11 +39,14 @@ import {
   getAllSessionsV2,
   getAllTasks,
   getIdleSessions,
+  findPendingThreadJids,
+  getMessageById,
   getMessagesSince,
   getRecentMessages,
   getNewMessages,
   getRouterState,
   initDatabase,
+  pruneThreadOrigins,
   setRegisteredGroup,
   setRouterState,
   setSession,
@@ -85,10 +88,10 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 // Thread creation debounce: batch rapid messages before enqueuing
-// Key: parentJid, Value: { timer, chatJid (last seen thread JID) }
+// Key: parentJid, Value: debounce timer
 const debounceTimers = new Map<
   string,
-  { timer: ReturnType<typeof setTimeout>; chatJid: string }
+  ReturnType<typeof setTimeout>
 >();
 
 // Throttle touchSessionActivity to max once per 30s per session key
@@ -285,10 +288,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // - Discord threads: stored under parent JID → chatJid IS the parent JID
   //   (Discord emits thread JIDs on inbound but stores under parent)
   // - Top-level messages: chatJid = parentJid → same either way
-  const queryJid = chatJid;
+  let queryJid = chatJid;
   const sinceTimestamp =
     lastAgentTimestamp[chatJid] || lastAgentTimestamp[parentJid] || '';
-  const missedMessages = getMessagesSince(
+  let missedMessages = getMessagesSince(
     queryJid,
     sinceTimestamp,
     groupAssistantName,
@@ -356,6 +359,36 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
+  // ── effectiveThreadId decision tree ──────────────────────────
+  // 1. Thread reply (threadId from resolveGroup): use as-is
+  //    Session key: {folder}:thread:{threadId}
+  // 2. Top-level msg on thread-enabled channel: use triggerMsg.id
+  //    Slack: msg.ts = thread_ts for replies → same session
+  //    Discord: one-shot session (thread replies use threadOriginMessage)
+  // 3. Non-thread channel (WA/Telegram) or disabled: undefined
+  //    Uses group-level session; topic classifier handles resets
+  // ─────────────────────────────────────────────────────────────
+  let effectiveThreadId = threadId;
+  const isThreadEnabled = isThreadSessionEnabled(chatJid, group);
+  if (isThreadEnabled && !effectiveThreadId && missedMessages.length > 0) {
+    const triggerMsg = missedMessages[missedMessages.length - 1];
+    effectiveThreadId = triggerMsg.id;
+  }
+
+  // For thread sessions on first invocation (no existing session),
+  // prepend the parent message that started the thread for context.
+  // The parent message is stored under the parent JID with id = threadId (Slack ts).
+  if (effectiveThreadId && threadId) {
+    const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
+    const existingSession = sessions.get(sessionKey);
+    if (!existingSession) {
+      const parentMsg = getMessageById(effectiveThreadId, parentJid);
+      if (parentMsg && !missedMessages.some((m) => m.id === parentMsg.id)) {
+        missedMessages.unshift(parentMsg);
+      }
+    }
+  }
+
   const modelOverride = extractModelOverride(missedMessages);
   const model = resolveModel(group, modelOverride);
   const prompt = formatMessages(missedMessages);
@@ -368,15 +401,15 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   saveState();
 
   // Track thread ID on the queue so piping can check thread affinity
-  queue.setActiveThreadId(parentJid, threadId || null);
+  queue.setActiveThreadId(parentJid, effectiveThreadId || null);
 
-  const sessionKey = buildSessionKey(group.folder, threadId);
+  const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
   logger.info(
     {
       group: group.name,
       messageCount: missedMessages.length,
       sessionKey,
-      threadId,
+      threadId: effectiveThreadId,
     },
     'Processing messages',
   );
@@ -406,7 +439,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     prompt,
     chatJid,
     model,
-    threadId,
+    effectiveThreadId,
     async (result) => {
       // Streaming output callback — called for each agent result
       if (result.result) {
@@ -446,6 +479,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(sendJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Clear stale thread redirect state so the next conversation (or scheduled
+  // task) for this channel doesn't accidentally send into the old thread.
+  channel.clearThreadState?.(parentJid);
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -748,22 +785,22 @@ async function startMessageLoop(): Promise<void> {
             // creating a new thread. Batches multiple messages into one thread.
             const existing = debounceTimers.get(parentJid);
             if (existing) {
-              clearTimeout(existing.timer);
+              clearTimeout(existing);
             }
-            debounceTimers.set(parentJid, {
-              chatJid,
-              timer: setTimeout(() => {
-                debounceTimers.delete(parentJid);
-                queue.enqueueMessageCheck(parentJid);
-              }, THREAD_DEBOUNCE_MS),
-            });
+            debounceTimers.set(parentJid, setTimeout(() => {
+              debounceTimers.delete(parentJid);
+              queue.enqueueMessageCheck(parentJid);
+            }, THREAD_DEBOUNCE_MS));
             logger.debug(
               { chatJid, debounceMs: THREAD_DEBOUNCE_MS },
               'Debouncing thread creation for rapid messages',
             );
           } else {
-            // No active container or thread mismatch — enqueue for a new one
-            queue.enqueueMessageCheck(parentJid);
+            // No active container or thread mismatch — enqueue for a new one.
+            // Pass chatJid as processJid so the queue knows exactly which
+            // JID to process (thread JID or parent JID) without needing
+            // to rediscover it via LIKE queries.
+            queue.enqueueMessageCheck(parentJid, chatJid);
           }
         }
       }
@@ -777,18 +814,37 @@ async function startMessageLoop(): Promise<void> {
 /**
  * Startup recovery: check for unprocessed messages in registered groups.
  * Handles crash between advancing lastTimestamp and processing messages.
+ * For thread-capable channels (Discord/Slack), also discovers pending thread messages.
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
     const assistantName = resolveAssistantName(group.containerConfig);
     const sinceTimestamp = lastAgentTimestamp[chatJid] || '';
+
+    // Parent messages
     const pending = getMessagesSince(chatJid, sinceTimestamp, assistantName);
     if (pending.length > 0) {
       logger.info(
         { group: group.name, pendingCount: pending.length },
         'Recovery: found unprocessed messages',
       );
-      queue.enqueueMessageCheck(chatJid);
+      queue.enqueueMessageCheck(chatJid); // parent processes itself
+    }
+
+    // Thread messages (Discord and Slack channels only)
+    if (chatJid.startsWith('dc:') || chatJid.startsWith('slack:')) {
+      const threadJids = findPendingThreadJids(
+        chatJid,
+        lastAgentTimestamp,
+        assistantName,
+      );
+      for (const threadJid of threadJids) {
+        logger.info(
+          { group: group.name, threadJid },
+          'Recovery: found unprocessed thread messages',
+        );
+        queue.enqueueMessageCheck(chatJid, threadJid);
+      }
     }
   }
 }
@@ -861,6 +917,44 @@ function startSessionSweep(): void {
           },
           'Session swept (idle)',
         );
+      }
+      // Prune stale thread entries from lastAgentTimestamp and lastTouchTime.
+      // Use the max configured idle hours across all groups so we don't prune
+      // timestamps that a group with a longer idle window still needs.
+      const registeredJids = new Set(Object.keys(registeredGroups));
+      let maxIdleHours = Math.max(SESSION_IDLE_RESET_HOURS, THREAD_SESSION_IDLE_HOURS);
+      for (const group of Object.values(registeredGroups)) {
+        const h = group.containerConfig?.threadSessionIdleHours;
+        if (h && h > maxIdleHours) maxIdleHours = h;
+        const sh = group.containerConfig?.sessionIdleResetHours;
+        if (sh && sh > maxIdleHours) maxIdleHours = sh;
+      }
+      const pruneCutoff = Date.now() - maxIdleHours * 60 * 60 * 1000;
+      let pruned = 0;
+      for (const key of Object.keys(lastAgentTimestamp)) {
+        if (registeredJids.has(key)) continue; // Keep registered groups
+        const ts = new Date(lastAgentTimestamp[key]).getTime();
+        if (ts < pruneCutoff) {
+          delete lastAgentTimestamp[key];
+          pruned++;
+        }
+      }
+      for (const [key, ts] of lastTouchTime) {
+        if (ts < pruneCutoff) lastTouchTime.delete(key);
+      }
+      if (pruned > 0) {
+        saveState();
+        logger.debug({ pruned }, 'Pruned stale lastAgentTimestamp entries');
+      }
+
+      // Prune old thread_origins rows (7 days — they're immutable mappings,
+      // keep longer than sessions so restarts within a week still resolve)
+      const originsCutoff = new Date(
+        Date.now() - 7 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+      const originsPruned = pruneThreadOrigins(originsCutoff);
+      if (originsPruned > 0) {
+        logger.debug({ originsPruned }, 'Pruned stale thread_origins entries');
       }
     } catch (err) {
       logger.error({ err }, 'Error in session sweep');
