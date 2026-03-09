@@ -2,7 +2,7 @@ import { Channel, NewMessage } from './types.js';
 import { formatLocalTime } from './timezone.js';
 
 export function escapeXml(s: string): string {
-  if (!s) return '';
+  if (!s || typeof s !== 'string') return '';
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

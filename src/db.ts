@@ -571,7 +571,17 @@ export function getRegisteredGroup(
     trigger: row.trigger_pattern,
     added_at: row.added_at,
     containerConfig: row.container_config
-      ? JSON.parse(row.container_config)
+      ? (() => {
+          try {
+            return JSON.parse(row.container_config);
+          } catch {
+            logger.warn(
+              { jid: row.jid },
+              'Corrupt container_config JSON in DB, ignoring',
+            );
+            return undefined;
+          }
+        })()
       : undefined,
     requiresTrigger:
       row.requires_trigger === null ? undefined : row.requires_trigger === 1,
@@ -624,7 +634,17 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
       trigger: row.trigger_pattern,
       added_at: row.added_at,
       containerConfig: row.container_config
-        ? JSON.parse(row.container_config)
+        ? (() => {
+            try {
+              return JSON.parse(row.container_config);
+            } catch {
+              logger.warn(
+                { jid: row.jid },
+                'Corrupt container_config JSON in DB, ignoring',
+              );
+              return undefined;
+            }
+          })()
         : undefined,
       requiresTrigger:
         row.requires_trigger === null ? undefined : row.requires_trigger === 1,

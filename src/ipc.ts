@@ -71,16 +71,32 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of messageFiles) {
             const filePath = path.join(messagesDir, file);
+            // Claim the file first (at-most-once delivery: prevents duplicate
+            // processing if this loop runs again before processing completes)
+            let data: Record<string, unknown>;
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              fs.unlinkSync(filePath);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error reading/claiming IPC message file',
+              );
+              continue;
+            }
+            // Process after claiming
+            try {
               if (data.type === 'message' && data.chatJid && data.text) {
                 // Authorization: verify this group can send to this chatJid
-                const targetGroup = registeredGroups[data.chatJid];
+                const targetGroup = registeredGroups[data.chatJid as string];
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  await deps.sendMessage(
+                    data.chatJid as string,
+                    data.text as string,
+                  );
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
@@ -92,17 +108,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   );
                 }
               }
-              fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
-                'Error processing IPC message',
-              );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
+                'Error processing IPC message (file already consumed)',
               );
             }
           }
@@ -122,21 +131,26 @@ export function startIpcWatcher(deps: IpcDeps): void {
             .filter((f) => f.endsWith('.json'));
           for (const file of taskFiles) {
             const filePath = path.join(tasksDir, file);
+            // Claim the file first (at-most-once delivery)
+            let data: Record<string, unknown>;
             try {
-              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              // Pass source group identity to processTaskIpc for authorization
-              await processTaskIpc(data, sourceGroup, isMain, deps);
+              data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
               fs.unlinkSync(filePath);
             } catch (err) {
               logger.error(
                 { file, sourceGroup, err },
-                'Error processing IPC task',
+                'Error reading/claiming IPC task file',
               );
-              const errorDir = path.join(ipcBaseDir, 'errors');
-              fs.mkdirSync(errorDir, { recursive: true });
-              fs.renameSync(
-                filePath,
-                path.join(errorDir, `${sourceGroup}-${file}`),
+              continue;
+            }
+            // Process after claiming
+            try {
+              // Pass source group identity to processTaskIpc for authorization
+              await processTaskIpc(data, sourceGroup, isMain, deps);
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC task (file already consumed)',
               );
             }
           }
@@ -154,7 +168,15 @@ export function startIpcWatcher(deps: IpcDeps): void {
 }
 
 export async function processTaskIpc(
-  data: {
+  rawData: Record<string, unknown>,
+  sourceGroup: string, // Verified identity from IPC directory
+  isMain: boolean, // Verified from directory path
+  deps: IpcDeps,
+): Promise<void> {
+  // Cast to typed structure; all fields are validated at usage points below.
+  // We accept Record<string,unknown> so callers can pass JSON.parse() output
+  // without additional casts (at-most-once claim pattern in the caller).
+  const data = rawData as {
     type: string;
     taskId?: string;
     prompt?: string;
@@ -164,18 +186,13 @@ export async function processTaskIpc(
     groupFolder?: string;
     chatJid?: string;
     targetJid?: string;
-    // For register_group
     jid?: string;
     name?: string;
     folder?: string;
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
-  },
-  sourceGroup: string, // Verified identity from IPC directory
-  isMain: boolean, // Verified from directory path
-  deps: IpcDeps,
-): Promise<void> {
+  };
   const registeredGroups = deps.registeredGroups();
 
   switch (data.type) {
