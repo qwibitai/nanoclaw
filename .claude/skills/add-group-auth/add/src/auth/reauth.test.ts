@@ -108,7 +108,7 @@ describe('runReauth', () => {
 
   it('returns false when no providers registered', async () => {
     const chat = createChat([]);
-    const result = await runReauth('test-scope', chat, 'no creds');
+    const result = await runReauth('test-scope', chat, 'no creds', 'Test Provider');
     expect(result).toBe(false);
     expect(chat.sent[0]).toContain('No auth providers registered');
   });
@@ -120,7 +120,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']); // select option 1
-    await runReauth('test-scope', chat, 'test reason');
+    await runReauth('test-scope', chat, 'test reason', 'Test Provider');
 
     for (const msg of chat.sent) {
       expect(msg).toMatch(/^🔑🤖/);
@@ -134,7 +134,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']);
-    await runReauth('my-group', chat, 'test');
+    await runReauth('my-group', chat, 'test', 'Test Provider');
 
     expect(chat.sent[0]).toContain('Group: *my-group*');
   });
@@ -146,7 +146,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']);
-    await runReauth('default', chat, 'test');
+    await runReauth('default', chat, 'test', 'Test Provider');
 
     expect(chat.sent[0]).toContain('default');
     expect(chat.sent[0]).toContain('all groups');
@@ -160,7 +160,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['3']); // cancel
-    await runReauth('scope', chat, 'reason');
+    await runReauth('scope', chat, 'reason', 'Test Provider');
 
     const menu = chat.sent[0];
     expect(menu).toContain('1. *Option A*');
@@ -186,7 +186,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['2']); // cancel
-    await runReauth('scope', chat, 'reason');
+    await runReauth('scope', chat, 'reason', 'Test Provider');
 
     const menu = chat.sent[0];
     const cancelPos = menu.indexOf('Cancel');
@@ -201,7 +201,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['2']); // 2 = Cancel (1 option + Cancel)
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(false);
     expect(chat.sent.some((m) => m.includes('Cancelled'))).toBe(true);
   });
@@ -213,7 +213,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['abc']);
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(false);
   });
 
@@ -224,7 +224,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat([null]); // timeout
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(false);
     expect(chat.sent.some((m) => m.includes('Timed out'))).toBe(true);
   });
@@ -236,7 +236,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']);
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(true);
     expect(provider.storeResult).toHaveBeenCalledWith('scope', {
       auth_type: 'api_key',
@@ -252,7 +252,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']);
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(false);
     expect(chat.sent.some((m) => m.includes('cancelled or failed'))).toBe(true);
   });
@@ -264,7 +264,7 @@ describe('runReauth', () => {
     mockProviders.push(provider);
 
     const chat = createChat(['1']);
-    const result = await runReauth('scope', chat, 'reason');
+    const result = await runReauth('scope', chat, 'reason', 'Test Provider');
     expect(result).toBe(false);
     expect(chat.sent.some((m) => m.includes('Auth flow error') && m.includes('boom'))).toBe(true);
   });
@@ -288,7 +288,7 @@ describe('runReauth', () => {
       // First attempt: pick option 1 (returns RESELECT)
       // Second attempt: pick option 2 (succeeds)
       const chat = createChat(['1', '2']);
-      const result = await runReauth('scope', chat, 'reason');
+      const result = await runReauth('scope', chat, 'reason', 'Test Provider');
       expect(result).toBe(true);
       // Menu should have been shown twice
       const menuMessages = chat.sent.filter((m) => m.includes('Choose an authentication method'));
@@ -303,7 +303,7 @@ describe('runReauth', () => {
 
       // First: pick option 1 (RESELECT), second: pick cancel (2)
       const chat = createChat(['1', '2']);
-      const result = await runReauth('scope', chat, 'reason');
+      const result = await runReauth('scope', chat, 'reason', 'Test Provider');
       expect(result).toBe(false);
     });
 
@@ -320,7 +320,7 @@ describe('runReauth', () => {
       mockProviders.push(provider);
 
       const chat = createChat(['1']);
-      await runReauth('scope', chat, 'reason');
+      await runReauth('scope', chat, 'reason', 'Test Provider');
 
       const providerMsg = chat.sent.find((m) => m.includes('Hello from provider'));
       expect(providerMsg).toBeDefined();

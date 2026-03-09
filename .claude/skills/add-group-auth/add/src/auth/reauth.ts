@@ -20,6 +20,7 @@ export async function runReauth(
   scope: string,
   chat: ChatIO,
   reason: string,
+  providerHint: string,
 ): Promise<boolean> {
   const providers = getAllProviders();
   const allOptions: AuthOption[] = [];
@@ -37,7 +38,7 @@ export async function runReauth(
   // (e.g. missing prerequisite). The menu has Cancel + timeout to exit.
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const result = await showMenuAndRun(scope, chat, reason, allOptions);
+    const result = await showMenuAndRun(scope, chat, reason, allOptions, providerHint);
     if (result === 'reselect') continue;
     return result;
   }
@@ -49,6 +50,7 @@ async function showMenuAndRun(
   chat: ChatIO,
   reason: string,
   allOptions: AuthOption[],
+  providerHint: string,
 ): Promise<boolean | 'reselect'> {
   // Build numbered menu — each option separated by blank line
   const optionBlocks: string[] = [];
@@ -68,7 +70,7 @@ async function showMenuAndRun(
 
   await chat.send(
     [
-      `${REAUTH_PREFIX} *Authentication required*`,
+      `${REAUTH_PREFIX} *Authentication required for ${providerHint}*`,
       ``,
       scopeNote,
       `Reason: ${reason}`,

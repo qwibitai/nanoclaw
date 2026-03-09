@@ -17,7 +17,7 @@ import {
   loadCredential,
   saveCredential,
 } from '../store.js';
-import { authSessionDir, execInContainer } from '../exec.js';
+import { authSessionDir, CLAUDE_CONFIG_STUB, ensureClaudeConfigStub, execInContainer } from '../exec.js';
 import {
   ensureGpgKey,
   exportPublicKey,
@@ -552,11 +552,20 @@ export const claudeProvider: CredentialProvider = {
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(credsPath, plaintext, 'utf-8');
 
+    // The CLI expects .claude.json at /home/node/.claude.json (sibling to
+    // .claude/) and loops if missing. Use the shared stub.
+    ensureClaudeConfigStub();
+
     // Run a minimal CLI invocation to trigger OAuth token refresh
     const handle = execInContainer(
       ['claude', '-p', 'ping', '--max-turns', '1', '--model', 'haiku'],
       sessionDir,
-      { mounts: [[sessionDir, '/home/node/.claude']] },
+      {
+        mounts: [
+          [sessionDir, '/home/node/.claude'],
+          [CLAUDE_CONFIG_STUB, '/home/node/.claude.json', 'ro'],
+        ],
+      },
     );
 
     const result = await handle.wait();

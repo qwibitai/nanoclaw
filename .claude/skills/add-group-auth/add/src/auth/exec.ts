@@ -163,3 +163,18 @@ export function execInContainer(
 export function authSessionDir(scope: string): string {
   return path.join(DATA_DIR, 'sessions', scope, '.claude-auth');
 }
+
+/**
+ * Shared stub .claude.json — the CLI expects this at /home/node/.claude.json
+ * and loops if missing. A single empty object is sufficient.
+ * Created once on first access, reused across all scopes (read-only mount).
+ */
+export const CLAUDE_CONFIG_STUB = path.join(DATA_DIR, '.claude.json');
+
+/** Ensure the stub file exists. Call once at startup or lazily. */
+export function ensureClaudeConfigStub(): void {
+  if (!fs.existsSync(CLAUDE_CONFIG_STUB)) {
+    fs.mkdirSync(path.dirname(CLAUDE_CONFIG_STUB), { recursive: true });
+    fs.writeFileSync(CLAUDE_CONFIG_STUB, '{}', 'utf-8');
+  }
+}
