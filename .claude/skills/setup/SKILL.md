@@ -11,6 +11,45 @@ Run setup steps automatically. Only pause when user action is required (channel 
 
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
+## 0. Git & Fork Setup
+
+Check the git remote configuration to ensure the user has a fork and upstream is configured.
+
+Run:
+- `git remote -v`
+
+**Case A — `origin` points to `qwibitai/nanoclaw` (user cloned directly):**
+
+The user cloned instead of forking. AskUserQuestion: "You cloned NanoClaw directly. We recommend forking so you can push your customizations. Would you like to set up a fork?"
+- Fork now (recommended) — walk them through it
+- Continue without fork — they'll only have local changes
+
+If fork: instruct the user to fork `qwibitai/nanoclaw` on GitHub (they need to do this in their browser), then ask them for their GitHub username. Run:
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/<their-username>/nanoclaw.git
+git push --force origin main
+```
+Verify with `git remote -v`.
+
+If continue without fork: add upstream so they can still pull updates:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case B — `origin` points to user's fork, no `upstream` remote:**
+
+Add upstream:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case C — both `origin` (user's fork) and `upstream` (qwibitai) exist:**
+
+Already configured. Continue.
+
+**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
+
 ## 1. Bootstrap (Node.js + Dependencies)
 
 Run `bash setup.sh` and parse the status block.
@@ -83,7 +122,19 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 5. Set Up Channels
+## 5. Install Skills Marketplace
+
+Register and install the NanoClaw skills marketplace plugin so all feature skills (channel integrations, add-ons) are available:
+
+```bash
+claude plugin marketplace add qwibitai/nanoclaw-skills
+claude plugin marketplace update nanoclaw-skills
+claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
+```
+
+The marketplace update ensures the local cache is fresh before installing. This is hot-loaded — no restart needed. All feature skills become immediately available.
+
+## 6. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - WhatsApp (authenticates via QR code or pairing code)
@@ -101,22 +152,28 @@ For each selected channel, invoke its skill:
 - **Discord:** Invoke `/add-discord`
 
 Each skill will:
-1. Install the channel code (via `apply-skill`)
+1. Install the channel code (via `git merge` of the skill branch)
 2. Collect credentials/tokens and write to `.env`
 3. Authenticate (WhatsApp QR/pairing, or verify token-based connection)
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 6.
+**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
 
-## 6. Mount Allowlist
+```bash
+npm install && npm run build
+```
+
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 7.
+
+## 7. Mount Allowlist
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
-## 7. Start Service
+## 8. Start Service
 
 If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
@@ -146,23 +203,23 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 8. Verify
+## 9. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
-- SERVICE=not_found → re-run step 7
+- SERVICE=not_found → re-run step 8
 - CREDENTIALS=missing → re-run step 4
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
-- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
+- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 6
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 8), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
