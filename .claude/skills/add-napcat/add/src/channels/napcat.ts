@@ -197,7 +197,12 @@ export class NapCatChannel implements Channel {
   private callCounter = 0;
   private groupsDir: string;
 
-  constructor(wsUrl: string, accessToken: string, opts: NapCatChannelOpts, groupsDir: string = GROUPS_DIR) {
+  constructor(
+    wsUrl: string,
+    accessToken: string,
+    opts: NapCatChannelOpts,
+    groupsDir: string = GROUPS_DIR,
+  ) {
     this.wsUrl = wsUrl;
     this.accessToken = accessToken;
     this.opts = opts;
@@ -364,7 +369,8 @@ export class NapCatChannel implements Channel {
       await fs.promises.mkdir(filesDir, { recursive: true });
 
       // Sanitize filename and add timestamp prefix for uniqueness
-      const safeName = path.basename(filenameHint).replace(/[^\w.\-]/g, '_') || 'file';
+      const safeName =
+        path.basename(filenameHint).replace(/[^\w.\-]/g, '_') || 'file';
       const filename = `${Math.floor(Date.now() / 1000)}_${safeName}`;
       const filePath = path.join(filesDir, filename);
 
@@ -381,10 +387,16 @@ export class NapCatChannel implements Channel {
         try {
           await fs.promises.access(url, fs.constants.R_OK);
           await fs.promises.copyFile(url, filePath);
-          logger.info({ filePath, source: url }, 'NapCat: file copied from local path');
+          logger.info(
+            { filePath, source: url },
+            'NapCat: file copied from local path',
+          );
           return filePath;
         } catch (copyErr) {
-          logger.warn({ source: url, err: copyErr }, 'NapCat: local file copy failed');
+          logger.warn(
+            { source: url, err: copyErr },
+            'NapCat: local file copy failed',
+          );
           return null;
         }
       }
@@ -395,7 +407,10 @@ export class NapCatChannel implements Channel {
       try {
         const response = await fetch(url, { signal: controller.signal });
         if (!response.ok || !response.body) {
-          logger.warn({ url, status: response.status }, 'NapCat: file download failed');
+          logger.warn(
+            { url, status: response.status },
+            'NapCat: file download failed',
+          );
           return null;
         }
 
@@ -443,7 +458,10 @@ export class NapCatChannel implements Channel {
     if (!action) return null;
 
     try {
-      const resp = await this.callApi(action, { file_id: fileId, file: fileId });
+      const resp = await this.callApi(action, {
+        file_id: fileId,
+        file: fileId,
+      });
       if (resp.retcode === 0 && resp.data) {
         const url = resp.data.url || resp.data.file;
         const filename =
@@ -455,7 +473,10 @@ export class NapCatChannel implements Channel {
         if (url) return { url, filename };
       }
     } catch (err) {
-      logger.debug({ err, segment: segment.type }, 'NapCat: API file resolve failed');
+      logger.debug(
+        { err, segment: segment.type },
+        'NapCat: API file resolve failed',
+      );
     }
 
     return null;
@@ -614,9 +635,16 @@ export class NapCatChannel implements Channel {
     }
 
     // For registered groups, re-extract content with file downloads
-    if (Array.isArray(event.message) && event.message.some(
-      (seg: OneBotSegment) => seg.type === 'image' || seg.type === 'record' || seg.type === 'video' || seg.type === 'file',
-    )) {
+    if (
+      Array.isArray(event.message) &&
+      event.message.some(
+        (seg: OneBotSegment) =>
+          seg.type === 'image' ||
+          seg.type === 'record' ||
+          seg.type === 'video' ||
+          seg.type === 'file',
+      )
+    ) {
       content = await this.extractContentWithFiles(
         event.message,
         event.raw_message,
