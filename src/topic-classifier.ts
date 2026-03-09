@@ -69,15 +69,20 @@ export function checkUserOverride(content: string): 'new' | 'continue' | null {
   return null;
 }
 
+let cachedApiKey: string | undefined;
+function getApiKey(): string {
+  if (!cachedApiKey) {
+    cachedApiKey = readEnvFile(['ANTHROPIC_API_KEY']).ANTHROPIC_API_KEY;
+  }
+  if (!cachedApiKey) throw new Error('ANTHROPIC_API_KEY not available for topic classifier');
+  return cachedApiKey;
+}
+
 async function classifyWithHaiku(
   recentMessages: Array<{ content: string; is_from_me: boolean }>,
   newMessage: string,
 ): Promise<boolean> {
-  const env = readEnvFile(['ANTHROPIC_API_KEY']);
-  const apiKey = env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY not available for topic classifier');
-  }
+  const apiKey = getApiKey();
 
   // Build context from recent messages (last 5)
   const context = recentMessages
