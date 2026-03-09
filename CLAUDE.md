@@ -32,6 +32,10 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
 | `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
 
+## Git Workflow
+
+**IMPORTANT:** Never commit code automatically. Always ask the user explicitly if the feature is completed and ready to commit before creating any git commit. Wait for explicit confirmation before proceeding with the commit.
+
 ## Development
 
 Run commands directly—don't tell the user to run them.
