@@ -432,7 +432,9 @@ function buildVolumeMounts(
     }
   }
 
-  // Google Calendar MCP credentials — gated by tools config
+  // Google Calendar MCP credentials — gated by tools config.
+  // Calendar uses the same GCP OAuth app as Gmail, so mount the primary
+  // Gmail OAuth keys even when gmail tool is not enabled for this group.
   if (isToolEnabled(tools, 'calendar')) {
     const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
     fs.mkdirSync(calendarDir, { recursive: true });
@@ -441,6 +443,18 @@ function buildVolumeMounts(
       containerPath: '/home/node/.config/google-calendar-mcp',
       readonly: false,
     });
+    // Ensure OAuth keys are available for calendar even without gmail tool.
+    // Mount only the keys file — not the full dir (which has Gmail tokens).
+    if (!isToolEnabled(tools, 'gmail')) {
+      const oauthKeys = path.join(homeDir, '.gmail-mcp', 'gcp-oauth.keys.json');
+      if (fs.existsSync(oauthKeys)) {
+        mounts.push({
+          hostPath: oauthKeys,
+          containerPath: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+          readonly: true,
+        });
+      }
+    }
   }
 
   // Snowflake credentials — gated by tools config.

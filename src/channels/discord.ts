@@ -24,6 +24,7 @@ export class DiscordChannel implements Channel {
   private opts: ChannelOpts;
   private botToken: string;
   private memberCacheTime = new Map<string, number>();
+  private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(botToken: string, opts: ChannelOpts) {
@@ -288,6 +289,8 @@ export class DiscordChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    for (const interval of this.typingIntervals.values()) clearInterval(interval);
+    this.typingIntervals.clear();
     if (this.client) {
       this.client.destroy();
       this.client = null;
@@ -296,16 +299,28 @@ export class DiscordChannel implements Channel {
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
-    if (!this.client || !isTyping) return;
-    try {
-      const channelId = jid.replace(/^dc:/, '');
-      const channel = await this.client.channels.fetch(channelId);
-      if (channel && 'sendTyping' in channel) {
-        await (channel as TextChannel).sendTyping();
-      }
-    } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+    const existing = this.typingIntervals.get(jid);
+    if (existing) {
+      clearInterval(existing);
+      this.typingIntervals.delete(jid);
     }
+
+    if (!this.client || !isTyping) return;
+
+    const channelId = jid.replace(/^dc:/, '');
+    const sendTyping = async () => {
+      try {
+        const channel = await this.client!.channels.fetch(channelId);
+        if (channel && 'sendTyping' in channel) {
+          await (channel as TextChannel).sendTyping();
+        }
+      } catch (err) {
+        logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+      }
+    };
+
+    await sendTyping();
+    this.typingIntervals.set(jid, setInterval(sendTyping, 8000));
   }
 }
 
