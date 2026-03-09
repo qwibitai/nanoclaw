@@ -246,8 +246,7 @@ function refreshOAuthToken(
       // Update credentials file so future reads get the fresh token
       creds.claudeAiOauth.accessToken = data.access_token;
       if (data.expires_in) {
-        creds.claudeAiOauth.expiresAt =
-          Date.now() + data.expires_in * 1000;
+        creds.claudeAiOauth.expiresAt = Date.now() + data.expires_in * 1000;
       }
       if (data.refresh_token) {
         creds.claudeAiOauth.refreshToken = data.refresh_token;
@@ -256,7 +255,10 @@ function refreshOAuthToken(
       logger.info('OAuth token refreshed successfully');
       return data.access_token;
     }
-    logger.error({ response: data }, 'OAuth refresh: no access_token in response');
+    logger.error(
+      { response: data },
+      'OAuth refresh: no access_token in response',
+    );
   } catch (err) {
     logger.error({ error: err }, 'OAuth token refresh failed');
   }
