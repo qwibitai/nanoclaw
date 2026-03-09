@@ -156,7 +156,13 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 7.
+**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+
+```bash
+npm install && npm run build
+```
+
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 7.
 
 ## 7. Mount Allowlist
 
