@@ -449,23 +449,12 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const msg = message as {
-        subtype?: string;
-        is_error?: boolean;
-        result?: string;
-        errors?: string[];
-      };
-      const isError = msg.is_error || (msg.subtype !== 'success' && msg.subtype != null);
-      const textResult = msg.result ?? null;
-      const errorText = isError
-        ? (msg.errors?.join('; ') || textResult || msg.subtype || 'unknown error')
-        : null;
-      log(`Result #${resultCount}: subtype=${msg.subtype} is_error=${msg.is_error}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
-        status: isError ? 'error' : 'success',
-        result: textResult,
-        newSessionId,
-        ...(errorText ? { error: errorText } : {}),
+        status: 'success',
+        result: textResult || null,
+        newSessionId
       });
     }
   }
