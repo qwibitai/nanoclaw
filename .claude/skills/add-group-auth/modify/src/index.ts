@@ -3,14 +3,18 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   NEW_GROUPS_USE_DEFAULT_CREDENTIALS,
   POLL_INTERVAL,
+  TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
 import { initCredentialStore, importEnvToDefault, createAuthGuard } from './auth/index.js';
+import { resolveSecrets } from './auth/provision.js';
 import { claudeProvider } from './auth/providers/claude.js';
 import type { ChatIO } from './auth/types.js';
+import { startCredentialProxy, setCredentialResolver } from './credential-proxy.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -25,6 +29,7 @@ import {
 import {
   cleanupOrphans,
   ensureContainerRuntimeRunning,
+  PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
   getAllChats,
@@ -532,13 +537,30 @@ async function main(): Promise<void> {
   ensureContainerSystemRunning();
   initCredentialStore();
   importEnvToDefault();
+
+  // Wire per-group credential resolution into the proxy.
+  // The proxy calls this on every request to resolve the group's credentials.
+  // Scope is the group folder name (from the URL prefix set by container-runner).
+  setCredentialResolver((scope) => {
+    const group = Object.values(registeredGroups).find(g => g.folder === scope)
+      || { name: scope, folder: scope, trigger: '', added_at: '' };
+    return resolveSecrets(group);
+  });
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
 
+  // Start credential proxy (containers route API calls through this)
+  const proxyServer = await startCredentialProxy(
+    CREDENTIAL_PROXY_PORT,
+    PROXY_BIND_HOST,
+  );
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    proxyServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);

@@ -6,7 +6,9 @@ Six distinct modifications:
 ### 1. Imports (top of file)
 - `NEW_GROUPS_USE_DEFAULT_CREDENTIALS` from `./config.js`
 - `initCredentialStore`, `importEnvToDefault`, `createAuthGuard` from `./auth/index.js`
+- `resolveSecrets` from `./auth/provision.js`
 - `ChatIO` type from `./auth/types.js`
+- `setCredentialResolver` from `./credential-proxy.js`
 
 ### 2. registerGroup() — default credentials flag
 Sets `containerConfig.useDefaultCredentials` to `NEW_GROUPS_USE_DEFAULT_CREDENTIALS`
@@ -32,6 +34,9 @@ Three return points changed to return objects.
 
 ### 6. main() — initialization
 Added `initCredentialStore()` and `importEnvToDefault()` before `initDatabase()`.
+After `importEnvToDefault()`, calls `setCredentialResolver()` to wire the auth
+store's `resolveSecrets()` into the credential proxy. The resolver looks up the
+group by folder name (scope from URL prefix) and returns its credentials.
 
 ## Why
 Enables automatic detection of missing/expired credentials and interactive

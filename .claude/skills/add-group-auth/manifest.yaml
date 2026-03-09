@@ -19,6 +19,7 @@ adds:
 modifies:
   - src/config.ts
   - src/container-runner.ts
+  - src/credential-proxy.ts
   - src/index.ts
   - src/types.ts
 structured:
