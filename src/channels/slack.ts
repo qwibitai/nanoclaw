@@ -199,9 +199,12 @@ export class SlackChannel implements Channel {
         !isBotMessage &&
         content.includes(`<@${this.botUserId}>`);
 
-      // Track which thread to reply in. For threaded messages, reply in the
-      // same thread. For top-level messages, reply as a thread on that message.
-      if (!isBotMessage) {
+      // Track which thread to reply in and which message gets the emoji.
+      // Only update when the message mentions the bot — unrelated messages
+      // (even in threads) should not steal the thread anchor or emoji target.
+      // Slack channels are shared workspaces where teammates talk to each other;
+      // the bot only responds when explicitly tagged.
+      if (!isBotMessage && hasBotMention) {
         this.replyThreadTs.set(baseJid, threadTs || msg.ts);
         this.lastUserMessageTs.set(baseJid, msg.ts);
       }
