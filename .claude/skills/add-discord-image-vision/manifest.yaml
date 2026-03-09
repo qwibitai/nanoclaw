@@ -1,0 +1,16 @@
+skill: add-discord-image-vision
+version: 1.0.0
+description: "Add image vision to Discord messages — downloads and processes Discord image attachments as multimodal content blocks"
+core_version: 1.2.8
+adds: []
+modifies:
+  - src/channels/discord.ts
+  - src/channels/discord.test.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends:
+  - add-image-vision
+  - add-discord
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-discord-image-vision/tests/discord-image-vision.test.ts"
