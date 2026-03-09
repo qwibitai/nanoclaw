@@ -306,6 +306,16 @@ async function handlePairingCode(
     process.exit(3);
   }
 
+  // Write to file immediately so callers can read it without waiting for stdout
+  try {
+    fs.writeFileSync(
+      path.join(projectRoot, 'store', 'pairing-code.txt'),
+      pairingCode,
+    );
+  } catch {
+    /* non-fatal */
+  }
+
   // Emit pairing code immediately so the caller can display it to the user
   emitAuthStatus('pairing-code', 'pairing_code_ready', 'waiting', {
     PAIRING_CODE: pairingCode,

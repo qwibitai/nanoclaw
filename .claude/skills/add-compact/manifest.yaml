@@ -1,0 +1,16 @@
+skill: add-compact
+version: 1.0.0
+description: "Add /compact command for manual context compaction via Claude Agent SDK"
+core_version: 1.2.10
+adds:
+  - src/session-commands.ts
+  - src/session-commands.test.ts
+modifies:
+  - src/index.ts
+  - container/agent-runner/src/index.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends: []
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/add-compact/tests/add-compact.test.ts"

@@ -9,6 +9,20 @@ import { logger } from './logger.js';
 /** The container runtime binary name. */
 export const CONTAINER_RUNTIME_BIN = 'container';
 
+/**
+ * Hostname containers use to reach the host machine.
+ * Apple Container VMs access the host via the default gateway (192.168.64.1).
+ */
+export const CONTAINER_HOST_GATEWAY = '192.168.64.1';
+
+/**
+ * CLI args needed for the container to resolve the host gateway.
+ * Apple Container provides host networking natively on macOS — no extra args needed.
+ */
+export function hostGatewayArgs(): string[] {
+  return [];
+}
+
 /** Returns CLI args for a readonly bind mount. */
 export function readonlyMountArgs(hostPath: string, containerPath: string): string[] {
   return ['--mount', `type=bind,source=${hostPath},target=${containerPath},readonly`];
