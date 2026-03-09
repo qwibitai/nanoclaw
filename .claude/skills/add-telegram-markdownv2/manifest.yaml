@@ -1,0 +1,14 @@
+skill: telegram-markdownv2
+version: 1.0.0
+description: "MarkdownV2 formatting for Telegram outgoing messages"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/channels/telegram.ts
+structured:
+  npm_dependencies: {}
+  env_additions: []
+conflicts: []
+depends:
+  - telegram
+test: "npx vitest run src/channels/telegram.test.ts"
