@@ -76,7 +76,9 @@ export const TIMEZONE =
 
 // Marmot / White Noise configuration
 export const MARMOT_NOSTR_PRIVATE_KEY =
-  process.env.MARMOT_NOSTR_PRIVATE_KEY || envConfig.MARMOT_NOSTR_PRIVATE_KEY || '';
+  process.env.MARMOT_NOSTR_PRIVATE_KEY ||
+  envConfig.MARMOT_NOSTR_PRIVATE_KEY ||
+  '';
 
 export const MARMOT_NOSTR_RELAYS: string[] = (
   process.env.MARMOT_NOSTR_RELAYS ||
@@ -88,6 +90,8 @@ export const MARMOT_NOSTR_RELAYS: string[] = (
   .filter((r: string) => r.length > 0);
 
 export const MARMOT_POLL_INTERVAL_MS = parseInt(
-  process.env.MARMOT_POLL_INTERVAL_MS || envConfig.MARMOT_POLL_INTERVAL_MS || '5000',
+  process.env.MARMOT_POLL_INTERVAL_MS ||
+    envConfig.MARMOT_POLL_INTERVAL_MS ||
+    '5000',
   10,
 );

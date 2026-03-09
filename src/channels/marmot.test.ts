@@ -268,9 +268,7 @@ describe('MarmotChannel', () => {
     it('should warn when not connected', async () => {
       const { logger } = await import('../logger.js');
       await channel.sendMessage('marmot:abc123', 'hello');
-      expect(logger.warn).toHaveBeenCalledWith(
-        'Marmot client not initialized',
-      );
+      expect(logger.warn).toHaveBeenCalledWith('Marmot client not initialized');
     });
 
     it('should warn on invalid JID', async () => {
@@ -333,9 +331,8 @@ describe('MarmotChannel self-registration', () => {
 
 describe('MarmotChannel MLS integration', () => {
   it('should use kind 443 for KeyPackage, 445 for group messages', async () => {
-    const { GROUP_EVENT_KIND, KEY_PACKAGE_KIND } = await import(
-      '@internet-privacy/marmot-ts'
-    );
+    const { GROUP_EVENT_KIND, KEY_PACKAGE_KIND } =
+      await import('@internet-privacy/marmot-ts');
     expect(KEY_PACKAGE_KIND).toBe(443);
     expect(GROUP_EVENT_KIND).toBe(445);
   });

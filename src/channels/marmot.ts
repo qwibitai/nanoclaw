@@ -172,20 +172,14 @@ class MarmotNetworkAdapter implements NostrNetworkInterface {
     return results;
   }
 
-  async request(
-    relays: string[],
-    filters: any | any[],
-  ): Promise<any[]> {
+  async request(relays: string[], filters: any | any[]): Promise<any[]> {
     const targets = relays.length > 0 ? relays : this.defaultRelays;
     // querySync takes a single filter, not an array
     const filter = Array.isArray(filters) ? filters[0] : filters;
     return await this.pool.querySync(targets, filter);
   }
 
-  subscription(
-    relays: string[],
-    filters: any | any[],
-  ): Subscribable<any> {
+  subscription(relays: string[], filters: any | any[]): Subscribable<any> {
     const targets = relays.length > 0 ? relays : this.defaultRelays;
     const pool = this.pool;
     const filter = Array.isArray(filters) ? filters[0] : filters;
@@ -259,7 +253,7 @@ export class MarmotChannel implements Channel {
     if (!MARMOT_NOSTR_PRIVATE_KEY) {
       throw new Error(
         'MARMOT_NOSTR_PRIVATE_KEY is required. Generate with: ' +
-          'node -e "import(\'nostr-tools\').then(n => console.log(Buffer.from(n.generateSecretKey()).toString(\'hex\')))"',
+          "node -e \"import('nostr-tools').then(n => console.log(Buffer.from(n.generateSecretKey()).toString('hex')))\"",
       );
     }
 
@@ -328,7 +322,10 @@ export class MarmotChannel implements Channel {
       const relayListEvent = this.signer.signEvent(relayListUnsigned);
       await this.network.publish(MARMOT_NOSTR_RELAYS, relayListEvent);
       logger.info(
-        { kind: KEY_PACKAGE_RELAY_LIST_KIND, relayCount: MARMOT_NOSTR_RELAYS.length },
+        {
+          kind: KEY_PACKAGE_RELAY_LIST_KIND,
+          relayCount: MARMOT_NOSTR_RELAYS.length,
+        },
         'KeyPackage relay list published (kind 10051)',
       );
     } catch (err) {
@@ -391,7 +388,9 @@ export class MarmotChannel implements Channel {
 
     this.connected = true;
 
-    console.log(`\n  Marmot channel (MLS encrypted): npub ${pubkey.slice(0, 16)}...`);
+    console.log(
+      `\n  Marmot channel (MLS encrypted): npub ${pubkey.slice(0, 16)}...`,
+    );
     console.log(`  Relays: ${MARMOT_NOSTR_RELAYS.join(', ')}`);
     console.log(`  KeyPackage published (kind ${KEY_PACKAGE_KIND})`);
     console.log(
@@ -423,7 +422,10 @@ export class MarmotChannel implements Channel {
       // Send encrypted chat message (kind 9 rumor → MLS encrypted → kind 445)
       await group.sendChatMessage(text);
 
-      logger.info({ jid, length: text.length }, 'Marmot message sent (MLS encrypted)');
+      logger.info(
+        { jid, length: text.length },
+        'Marmot message sent (MLS encrypted)',
+      );
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Marmot message');
     }
@@ -520,9 +522,7 @@ export class MarmotChannel implements Channel {
         ) {
           // Decrypt success — deserialize the application rumor
           try {
-            const rumor = deserializeApplicationRumor(
-              result.result.message,
-            );
+            const rumor = deserializeApplicationRumor(result.result.message);
 
             const senderPubkey = rumor.pubkey || event.pubkey || 'unknown';
             const senderName = senderPubkey.slice(0, 12) + '...';
@@ -620,10 +620,11 @@ export class MarmotChannel implements Channel {
             // Join groups from welcome messages
             for (const invite of invites) {
               try {
-                const { group } =
-                  await this.marmotClient!.joinGroupFromWelcome({
+                const { group } = await this.marmotClient!.joinGroupFromWelcome(
+                  {
                     welcomeRumor: invite,
-                  });
+                  },
+                );
 
                 logger.info(
                   { groupId: group.idStr.slice(0, 16) },
