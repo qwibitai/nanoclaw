@@ -178,14 +178,20 @@ describe('TRIGGER_PATTERN', () => {
 describe('stripInternalTags', () => {
   it('strips single-line internal tags', () => {
     expect(stripInternalTags('hello <internal>secret</internal> world')).toBe(
-      'hello  world',
+      'hello world',
     );
   });
 
   it('strips multi-line internal tags', () => {
     expect(
       stripInternalTags('hello <internal>\nsecret\nstuff\n</internal> world'),
-    ).toBe('hello  world');
+    ).toBe('hello world');
+  });
+
+  it('collapses extra spaces left by tag removal', () => {
+    expect(
+      stripInternalTags('a <internal>x</internal>  <internal>y</internal> b'),
+    ).toBe('a b');
   });
 
   it('strips multiple internal tag blocks', () => {
