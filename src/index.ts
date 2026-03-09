@@ -280,9 +280,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const groupAssistantName = resolveAssistantName(group.containerConfig);
   const triggerPattern = buildTriggerPattern(groupAssistantName);
 
-  // For thread JIDs, query messages stored under the parent JID
-  // (thread messages are stored with parent JID — routing is handled by orchestrator)
-  const queryJid = parentJid;
+  // Query messages using the chatJid directly:
+  // - Slack threads: stored as slack:{channel}:thread:{ts} → query that JID
+  // - Discord threads: stored under parent JID → chatJid IS the parent JID
+  //   (Discord emits thread JIDs on inbound but stores under parent)
+  // - Top-level messages: chatJid = parentJid → same either way
+  const queryJid = chatJid;
   const sinceTimestamp =
     lastAgentTimestamp[chatJid] || lastAgentTimestamp[parentJid] || '';
   const missedMessages = getMessagesSince(
