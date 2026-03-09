@@ -310,7 +310,6 @@ nanoclaw/
 │
 ├── data/                          # Application state (gitignored)
 │   ├── sessions/                  # Per-group session data (.claude/ dirs with JSONL transcripts)
-│   ├── env/env                    # Copy of .env for container mounting
 │   └── ipc/                       # Container IPC (messages/, tasks/)
 │
 ├── logs/                          # Runtime logs (gitignored)
@@ -397,7 +396,7 @@ The token can be extracted from `~/.claude/.credentials.json` if you're logged i
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
+Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`) are extracted from `.env` by the host process and passed to the container via stdin JSON. They are never written to disk or mounted as files. The agent-runner reads them from stdin and sets them in the process environment. This ensures secrets are not exposed to agent Bash subprocesses.
 
 ### Changing the Assistant Name
 

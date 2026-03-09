@@ -82,12 +82,6 @@ If you want Slack to replace WhatsApp entirely (no WhatsApp channel), also add:
 SLACK_ONLY=true
 ```
 
-Then sync the environment to the container:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
 ## Step 7: Add the Bot to Channels
 
 The bot only receives messages from channels it has been explicitly added to.
@@ -146,4 +140,4 @@ The NanoClaw JID format is `slack:` followed by the channel ID, e.g., `slack:C01
 **Token not working:**
 - Bot tokens start with `xoxb-` — if yours doesn't, you may have copied the wrong token
 - App tokens start with `xapp-` — these are generated in the Socket Mode or Basic Information pages
-- If you regenerated a token, update `.env` and re-sync: `cp .env data/env/env`
+- If you regenerated a token, update `.env` and restart the service
