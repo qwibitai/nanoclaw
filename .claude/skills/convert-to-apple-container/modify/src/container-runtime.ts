@@ -11,9 +11,44 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 
 /**
  * Hostname containers use to reach the host machine.
- * Apple Container VMs access the host via the default gateway (192.168.64.1).
+ * Apple Container's default network subnet varies across machines (e.g. 192.168.64.0/24,
+ * 192.168.65.0/24). Detect the gateway (.1) from `container network ls` at startup.
  */
-export const CONTAINER_HOST_GATEWAY = '192.168.64.1';
+export const CONTAINER_HOST_GATEWAY = detectHostGateway();
+
+function detectHostGateway(): string {
+  try {
+    const output = execSync('container network ls --format json', {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const networks: {
+      id: string;
+      state: string;
+      status?: { ipv4Gateway?: string; ipv4Subnet?: string };
+    }[] = JSON.parse(output || '[]');
+    const defaultNet = networks.find((n) => n.id === 'default');
+    if (defaultNet?.status?.ipv4Gateway) {
+      logger.debug(
+        { gateway: defaultNet.status.ipv4Gateway, subnet: defaultNet.status.ipv4Subnet },
+        'Detected Apple Container gateway',
+      );
+      return defaultNet.status.ipv4Gateway;
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Failed to detect Apple Container gateway, using fallback');
+  }
+  return '192.168.64.1';
+}
+
+/**
+ * Address the credential proxy binds to.
+ * Apple Container VMs reach the host via the bridge gateway (detected above),
+ * so the proxy must listen on all interfaces to be reachable from the VM.
+ */
+export const PROXY_BIND_HOST =
+  process.env.CREDENTIAL_PROXY_HOST || '0.0.0.0';
 
 /**
  * CLI args needed for the container to resolve the host gateway.
