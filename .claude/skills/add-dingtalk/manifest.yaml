@@ -1,0 +1,19 @@
+skill: dingtalk
+version: 1.0.0
+description: "DingTalk app bot integration via Stream Mode for @-mention group messages"
+core_version: 0.1.0
+adds:
+  - src/channels/dingtalk.ts
+  - src/channels/dingtalk.test.ts
+modifies:
+  - src/channels/index.ts
+  - setup/verify.ts
+structured:
+  npm_dependencies:
+    dingtalk-stream: "^2.1.4"
+  env_additions:
+    - DINGTALK_CLIENT_ID
+    - DINGTALK_CLIENT_SECRET
+conflicts: []
+depends: []
+test: "npx vitest run src/channels/dingtalk.test.ts .claude/skills/add-dingtalk/tests/dingtalk.test.ts"
