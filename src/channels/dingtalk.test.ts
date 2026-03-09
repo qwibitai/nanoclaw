@@ -326,8 +326,41 @@ describe('DingTalkChannel', () => {
         expect.objectContaining({
           method: 'POST',
           body: JSON.stringify({
-            msgtype: 'text',
-            text: { content: 'hello back' },
+            msgtype: 'markdown',
+            markdown: {
+              title: 'hello back',
+              text: 'hello back',
+            },
+          }),
+        }),
+      );
+    });
+
+    it('derives a clean markdown title from formatted output', async () => {
+      const channel = new DingTalkChannel(
+        'client-id',
+        'client-secret',
+        createTestOpts(),
+      );
+      await channel.connect();
+
+      await triggerRobotMessage(createRobotPayload());
+      fetchMock.mockClear();
+
+      await channel.sendMessage(
+        'ding:cid-group',
+        '# Daily Brief\n- [36Kr](https://36kr.com) headline',
+      );
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://example.com/session',
+        expect.objectContaining({
+          body: JSON.stringify({
+            msgtype: 'markdown',
+            markdown: {
+              title: 'Daily Brief',
+              text: '# Daily Brief\n- [36Kr](https://36kr.com) headline',
+            },
           }),
         }),
       );
@@ -345,6 +378,61 @@ describe('DingTalkChannel', () => {
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(loggerRef.logger.warn).toHaveBeenCalled();
+    });
+
+    it('falls back to readable text when markdown is rejected', async () => {
+      const channel = new DingTalkChannel(
+        'client-id',
+        'client-secret',
+        createTestOpts(),
+      );
+      await channel.connect();
+
+      await triggerRobotMessage(createRobotPayload());
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          json: vi.fn().mockResolvedValue({}),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: vi.fn().mockResolvedValue({}),
+        });
+
+      await channel.sendMessage(
+        'ding:cid-group',
+        '# Daily Brief\n- **Alpha**\n- [36Kr](https://36kr.com)\n```ts\nconst x = 1;\n```',
+      );
+
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        1,
+        'https://example.com/session',
+        expect.objectContaining({
+          body: JSON.stringify({
+            msgtype: 'markdown',
+            markdown: {
+              title: 'Daily Brief',
+              text: '# Daily Brief\n- **Alpha**\n- [36Kr](https://36kr.com)\n```ts\nconst x = 1;\n```',
+            },
+          }),
+        }),
+      );
+      expect(fetchMock).toHaveBeenNthCalledWith(
+        2,
+        'https://example.com/session',
+        expect.objectContaining({
+          body: JSON.stringify({
+            msgtype: 'text',
+            text: {
+              content:
+                'Daily Brief\n• Alpha\n• 36Kr (https://36kr.com)\n[ts]\n    const x = 1;',
+            },
+          }),
+        }),
+      );
     });
 
     it('splits long outbound messages conservatively', async () => {

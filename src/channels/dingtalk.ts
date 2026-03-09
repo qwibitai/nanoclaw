@@ -12,6 +12,7 @@ import {
 } from '../types.js';
 
 const MAX_MESSAGE_LENGTH = 4000;
+const MAX_MARKDOWN_TITLE_LENGTH = 64;
 
 interface DingTalkRobotMessage {
   msgId?: string;
@@ -117,7 +118,7 @@ export class DingTalkChannel implements Channel {
     }
 
     try {
-      await this.postText(entry.webhook, text);
+      await this.postMarkdown(entry.webhook, text);
       logger.info({ jid, length: text.length }, 'DingTalk message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send DingTalk message');
@@ -335,6 +336,20 @@ export class DingTalkChannel implements Channel {
     const chunks = this.chunkText(text);
 
     for (const chunk of chunks) {
+      await this.postTextChunk(webhook, accessToken, chunk);
+    }
+  }
+
+  private async postMarkdown(webhook: string, text: string): Promise<void> {
+    if (!this.client) {
+      throw new Error('DingTalk client not initialized');
+    }
+
+    const accessToken = await Promise.resolve(this.client.getAccessToken());
+    const normalized = this.normalizeOutboundMarkdown(text);
+    const chunks = this.chunkText(normalized);
+
+    for (const chunk of chunks) {
       const response = await fetch(webhook, {
         method: 'POST',
         headers: {
@@ -342,14 +357,47 @@ export class DingTalkChannel implements Channel {
           'x-acs-dingtalk-access-token': accessToken,
         },
         body: JSON.stringify({
-          msgtype: 'text',
-          text: { content: chunk },
+          msgtype: 'markdown',
+          markdown: {
+            title: this.deriveMarkdownTitle(chunk),
+            text: chunk,
+          },
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`DingTalk webhook returned ${response.status}`);
+        logger.warn(
+          { status: response.status },
+          'DingTalk markdown send failed; falling back to text',
+        );
+        await this.postTextChunk(
+          webhook,
+          accessToken,
+          this.renderMarkdownAsText(chunk),
+        );
       }
+    }
+  }
+
+  private async postTextChunk(
+    webhook: string,
+    accessToken: string,
+    text: string,
+  ): Promise<void> {
+    const response = await fetch(webhook, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-acs-dingtalk-access-token': accessToken,
+      },
+      body: JSON.stringify({
+        msgtype: 'text',
+        text: { content: text },
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`DingTalk webhook returned ${response.status}`);
     }
   }
 
@@ -357,10 +405,83 @@ export class DingTalkChannel implements Channel {
     if (text.length <= MAX_MESSAGE_LENGTH) return [text];
 
     const chunks: string[] = [];
-    for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
-      chunks.push(text.slice(i, i + MAX_MESSAGE_LENGTH));
+    let remaining = text;
+
+    while (remaining.length > MAX_MESSAGE_LENGTH) {
+      const boundary = this.findChunkBoundary(remaining);
+      chunks.push(remaining.slice(0, boundary).trimEnd());
+      remaining = remaining.slice(boundary).trimStart();
     }
+
+    if (remaining) {
+      chunks.push(remaining);
+    }
+
     return chunks;
+  }
+
+  private findChunkBoundary(text: string): number {
+    const preferredBoundaries = ['\n\n', '\n', ' '];
+
+    for (const marker of preferredBoundaries) {
+      const index = text.lastIndexOf(marker, MAX_MESSAGE_LENGTH);
+      if (index >= Math.floor(MAX_MESSAGE_LENGTH / 2)) {
+        return index;
+      }
+    }
+
+    return MAX_MESSAGE_LENGTH;
+  }
+
+  private normalizeOutboundMarkdown(text: string): string {
+    const normalized = text.replace(/\r\n?/g, '\n').trim();
+    return normalized || '(empty response)';
+  }
+
+  private deriveMarkdownTitle(text: string): string {
+    const firstLine = text
+      .split('\n')
+      .map((line) => this.stripMarkdown(line))
+      .find((line) => line.length > 0);
+
+    return (firstLine || 'NanoClaw').slice(0, MAX_MARKDOWN_TITLE_LENGTH);
+  }
+
+  private stripMarkdown(text: string): string {
+    return text
+      .replace(/^(\s{0,3}(#{1,6})\s+|\s*[-*+]\s+|\s*\d+\.\s+|\s*>\s?)/, '')
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/(\*\*|__|\*|_|~~)/g, '')
+      .trim();
+  }
+
+  private renderMarkdownAsText(text: string): string {
+    return (
+      text
+        .replace(/\r\n?/g, '\n')
+        .replace(/```([^\n`]*)\n([\s\S]*?)```/g, (_match, lang, code) => {
+          const label = lang.trim() ? `[${lang.trim()}]` : '[code]';
+          const body = code
+            .trimEnd()
+            .split('\n')
+            .map((line: string) => `    ${line}`)
+            .join('\n');
+          return `${label}\n${body}`;
+        })
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1 ($2)')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+        .replace(/^\s{0,3}(#{1,6})\s+/gm, '')
+        .replace(/^\s*>\s?/gm, '| ')
+        .replace(/^\s*[-*+]\s+/gm, '• ')
+        .replace(/(\*\*|__)(.*?)\1/g, '$2')
+        .replace(/(\*|_)(.*?)\1/g, '$2')
+        .replace(/~~(.*?)~~/g, '$1')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim() || '(empty response)'
+    );
   }
 }
 
