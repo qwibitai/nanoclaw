@@ -1,4 +1,3 @@
-import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
@@ -19,6 +18,7 @@ import {
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
+import type { RuntimeInstance } from './runtime/runtime.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
 /**
@@ -81,7 +81,7 @@ export interface SchedulerDependencies {
   queue: GroupQueue;
   onProcess: (
     groupJid: string,
-    proc: ChildProcess,
+    instance: RuntimeInstance,
     containerName: string,
     groupFolder: string,
   ) => void;
@@ -195,8 +195,8 @@ async function runTask(
         isScheduledTask: true,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        deps.onProcess(task.chat_jid, proc, containerName, task.group_folder),
+      (instance, containerName) =>
+        deps.onProcess(task.chat_jid, instance, containerName, task.group_folder),
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;

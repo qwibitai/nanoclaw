@@ -1,8 +1,8 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in containers and handles IPC
+ * Spawns agent execution in containers/VMs and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { exec } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -19,12 +19,9 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import {
-  CONTAINER_RUNTIME_BIN,
-  readonlyMountArgs,
-  stopContainer,
-} from './container-runtime.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { getRuntime } from './runtime/index.js';
+import type { RuntimeInstance, VolumeMount } from './runtime/runtime.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -47,12 +44,6 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
-}
-
-interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
 }
 
 function buildVolumeMounts(
@@ -248,14 +239,11 @@ function readSecrets(): Record<string, string> {
   ]);
 }
 
-function buildContainerArgs(
-  mounts: VolumeMount[],
-  containerName: string,
-): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
-
-  // Pass host timezone so container's local time matches the user's
-  args.push('-e', `TZ=${TIMEZONE}`);
+/**
+ * Build the environment variables to pass into the runtime instance.
+ */
+function buildRuntimeEnv(): Record<string, string> {
+  const env: Record<string, string> = { TZ: TIMEZONE };
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -263,27 +251,17 @@ function buildContainerArgs(
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
-    args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
+    env._NANOCLAW_HOST_UID = `${hostUid}`;
+    env._NANOCLAW_HOST_GID = `${hostGid}`;
   }
 
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push(...readonlyMountArgs(mount.hostPath, mount.containerPath));
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-    }
-  }
-
-  args.push(CONTAINER_IMAGE);
-
-  return args;
+  return env;
 }
 
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (instance: RuntimeInstance, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
@@ -294,17 +272,20 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+
+  const runtimeType = group.containerConfig?.runtime || 'docker';
+  const runtime = getRuntime(runtimeType);
+  const runtimeEnv = buildRuntimeEnv();
 
   logger.debug(
     {
       group: group.name,
       containerName,
+      runtime: runtimeType,
       mounts: mounts.map(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
-      containerArgs: containerArgs.join(' '),
     },
     'Container mount configuration',
   );
@@ -313,6 +294,7 @@ export async function runContainerAgent(
     {
       group: group.name,
       containerName,
+      runtime: runtimeType,
       mountCount: mounts.length,
       isMain: input.isMain,
     },
@@ -322,12 +304,13 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
-  return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  const instance = await runtime.start(containerName, mounts, runtimeEnv, {
+    image: CONTAINER_IMAGE,
+    timeout: group.containerConfig?.timeout,
+  });
 
-    onProcess(container, containerName);
+  return new Promise((resolve) => {
+    onProcess(instance, containerName);
 
     let stdout = '';
     let stderr = '';
@@ -336,8 +319,8 @@ export async function runContainerAgent(
 
     // Pass secrets via stdin (never written to disk or mounted as files)
     input.secrets = readSecrets();
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+    instance.writeInput(JSON.stringify(input));
+    instance.closeInput();
     // Remove secrets from input so they don't appear in logs
     delete input.secrets;
 
@@ -346,7 +329,7 @@ export async function runContainerAgent(
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
-    container.stdout.on('data', (data) => {
+    instance.onStdout((data) => {
       const chunk = data.toString();
 
       // Always accumulate for logging
@@ -405,7 +388,7 @@ export async function runContainerAgent(
       }
     });
 
-    container.stderr.on('data', (data) => {
+    instance.onStderr((data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
@@ -440,13 +423,13 @@ export async function runContainerAgent(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
-      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+      exec(runtime.stopCommand(containerName), { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn(
             { group: group.name, containerName, err },
             'Graceful stop failed, force killing',
           );
-          container.kill('SIGKILL');
+          instance.kill('SIGKILL');
         }
       });
     };
@@ -459,7 +442,7 @@ export async function runContainerAgent(
       timeout = setTimeout(killOnTimeout, timeoutMs);
     };
 
-    container.on('close', (code) => {
+    instance.onClose((code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
@@ -520,6 +503,7 @@ export async function runContainerAgent(
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
+        `Runtime: ${runtimeType}`,
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Stdout Truncated: ${stdoutTruncated}`,
@@ -533,9 +517,6 @@ export async function runContainerAgent(
         logLines.push(
           `=== Input ===`,
           JSON.stringify(input, null, 2),
-          ``,
-          `=== Container Args ===`,
-          containerArgs.join(' '),
           ``,
           `=== Mounts ===`,
           mounts
@@ -654,7 +635,7 @@ export async function runContainerAgent(
       }
     });
 
-    container.on('error', (err) => {
+    instance.onError((err) => {
       clearTimeout(timeout);
       logger.error(
         { group: group.name, containerName, error: err },

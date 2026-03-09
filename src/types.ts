@@ -28,6 +28,7 @@ export interface AllowedRoot {
 }
 
 export interface ContainerConfig {
+  runtime?: 'docker' | 'qemu' | 'cloud';
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
 }

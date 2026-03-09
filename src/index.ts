@@ -14,10 +14,7 @@ import {
   getChannelFactory,
   getRegisteredChannelNames,
 } from './channels/registry.js';
-import {
-  ensureContainerRuntimeRunning,
-  cleanupOrphans,
-} from './container-runtime.js';
+import { getRuntime } from './runtime/index.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -320,8 +317,8 @@ async function runAgent(
         isMain,
         assistantName: ASSISTANT_NAME,
       },
-      (proc, containerName) =>
-        queue.registerProcess(chatJid, proc, containerName, group.folder),
+      (instance, containerName) =>
+        queue.registerProcess(chatJid, instance, containerName, group.folder),
       wrappedOnOutput,
     );
 
@@ -458,8 +455,9 @@ function recoverPendingMessages(): void {
 }
 
 async function main(): Promise<void> {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  const runtime = getRuntime('docker');
+  runtime.ensureRunning();
+  runtime.cleanupOrphans();
   initDatabase();
   logger.info('Database initialized');
 
@@ -538,8 +536,8 @@ async function main(): Promise<void> {
     registeredGroups: () => registeredGroups,
     getSessions: () => sessions,
     queue,
-    onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+    onProcess: (groupJid, instance, containerName, groupFolder) =>
+      queue.registerProcess(groupJid, instance, containerName, groupFolder),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
