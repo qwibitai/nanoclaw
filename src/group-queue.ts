@@ -344,6 +344,29 @@ export class GroupQueue {
     }
   }
 
+  /** List currently active containers (for dashboard). */
+  getActiveContainers(): Array<{
+    group: string;
+    containerName: string;
+    startedAt: number;
+  }> {
+    const result: Array<{
+      group: string;
+      containerName: string;
+      startedAt: number;
+    }> = [];
+    for (const [jid, state] of this.groups) {
+      if (state.active && state.containerName) {
+        result.push({
+          group: jid,
+          containerName: state.containerName,
+          startedAt: parseInt(state.containerName.split('-').pop() || '0', 10),
+        });
+      }
+    }
+    return result;
+  }
+
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 

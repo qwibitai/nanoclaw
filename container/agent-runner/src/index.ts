@@ -432,7 +432,9 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__fmp__*',
+        'mcp__perplexity__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -448,6 +450,24 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(sdkEnv['FMP_API_KEY'] ? {
+          fmp: {
+            command: 'node',
+            args: [path.join(path.dirname(mcpServerPath), 'fmp-mcp-stdio.js')],
+            env: {
+              FMP_API_KEY: sdkEnv['FMP_API_KEY']!,
+            },
+          },
+        } : {}),
+        ...(sdkEnv['PERPLEXITY_API_KEY'] ? {
+          perplexity: {
+            command: 'npx',
+            args: ['-y', '@perplexity-ai/mcp-server'],
+            env: {
+              PERPLEXITY_API_KEY: sdkEnv['PERPLEXITY_API_KEY']!,
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

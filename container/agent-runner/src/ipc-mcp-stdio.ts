@@ -63,6 +63,76 @@ server.tool(
 );
 
 server.tool(
+  'send_photo',
+  'Send a photo/image to the user or group. The image must be a file path inside the container (e.g., /tmp/chart.png). Use this after rendering charts or generating images.',
+  {
+    photo_path: z.string().describe('Absolute path to the image file inside the container'),
+    caption: z.string().optional().describe('Optional caption for the photo'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.photo_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.photo_path}` }],
+        isError: true,
+      };
+    }
+
+    const photoData = fs.readFileSync(args.photo_path);
+    const base64 = photoData.toString('base64');
+    const ext = path.extname(args.photo_path).replace('.', '') || 'png';
+
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'photo',
+      chatJid,
+      photoBase64: base64,
+      mimeType: `image/${ext}`,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { content: [{ type: 'text' as const, text: 'Photo sent.' }] };
+  },
+);
+
+server.tool(
+  'send_chart',
+  'Render an Apache ECharts chart and send it as a PNG image. Pass the ECharts option object as JSON. The chart is rendered on the host (not in the container) so this is the preferred way to create charts. See https://echarts.apache.org/en/option.html for the full option spec.',
+  {
+    chart_option: z.string().describe('ECharts option object as a JSON string (e.g. {"xAxis":{"type":"category","data":["Mon","Tue"]},"yAxis":{"type":"value"},"series":[{"type":"line","data":[150,230]}]})'),
+    caption: z.string().optional().describe('Optional caption for the chart image'),
+    width: z.number().optional().describe('Chart width in pixels (default: 800)'),
+    height: z.number().optional().describe('Chart height in pixels (default: 600)'),
+    background: z.string().optional().describe('Background color (default: white)'),
+  },
+  async (args) => {
+    // Validate JSON
+    try {
+      JSON.parse(args.chart_option);
+    } catch {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid JSON in chart_option' }],
+        isError: true,
+      };
+    }
+
+    writeIpcFile(MESSAGES_DIR, {
+      type: 'chart',
+      chatJid,
+      chartOption: args.chart_option,
+      caption: args.caption || undefined,
+      width: args.width || 800,
+      height: args.height || 600,
+      background: args.background || 'white',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { content: [{ type: 'text' as const, text: 'Chart rendering requested. The host will render and send the image.' }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 

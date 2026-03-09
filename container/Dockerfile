@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, and charting deps globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code puppeteer-core echarts
 
 # Create app directory
 WORKDIR /app
@@ -44,6 +44,9 @@ RUN npm install
 
 # Copy source code
 COPY agent-runner/ ./
+
+# Copy utility scripts (chart renderer, etc.)
+COPY scripts/ /app/scripts/
 
 # Build TypeScript
 RUN npm run build

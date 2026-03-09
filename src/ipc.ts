@@ -4,14 +4,16 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { renderChart } from './chart-renderer.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
-import { RegisteredGroup } from './types.js';
+import { PhotoPayload, RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendPhoto: (jid: string, photo: PhotoPayload) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -73,23 +75,59 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
-                // Authorization: verify this group can send to this chatJid
+              if (data.chatJid) {
                 const targetGroup = registeredGroups[data.chatJid];
-                if (
-                  isMain ||
-                  (targetGroup && targetGroup.folder === sourceGroup)
-                ) {
+                const authorized =
+                  isMain || (targetGroup && targetGroup.folder === sourceGroup);
+
+                if (!authorized) {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup, type: data.type },
+                    'Unauthorized IPC attempt blocked',
+                  );
+                } else if (data.type === 'message' && data.text) {
                   await deps.sendMessage(data.chatJid, data.text);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
                   );
-                } else {
-                  logger.warn(
+                } else if (data.type === 'photo' && data.photoBase64) {
+                  await deps.sendPhoto(data.chatJid, {
+                    base64: data.photoBase64,
+                    mimeType: data.mimeType || 'image/png',
+                    caption: data.caption,
+                  });
+                  logger.info(
                     { chatJid: data.chatJid, sourceGroup },
-                    'Unauthorized IPC message attempt blocked',
+                    'IPC photo sent',
                   );
+                } else if (data.type === 'chart' && data.chartOption) {
+                  try {
+                    const pngBuffer = await renderChart({
+                      chartOption: data.chartOption,
+                      width: data.width || 800,
+                      height: data.height || 600,
+                      background: data.background || 'white',
+                    });
+                    await deps.sendPhoto(data.chatJid, {
+                      base64: pngBuffer.toString('base64'),
+                      mimeType: 'image/png',
+                      caption: data.caption,
+                    });
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC chart rendered and sent',
+                    );
+                  } catch (chartErr) {
+                    logger.error(
+                      { chatJid: data.chatJid, sourceGroup, err: chartErr },
+                      'Failed to render chart',
+                    );
+                    await deps.sendMessage(
+                      data.chatJid,
+                      `[Chart rendering failed: ${chartErr instanceof Error ? chartErr.message : String(chartErr)}]`,
+                    );
+                  }
                 }
               }
               fs.unlinkSync(filePath);

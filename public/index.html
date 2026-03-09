@@ -1,0 +1,1072 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NanoClaw Dashboard</title>
+<style>
+  :root {
+    --bg: #f8f9fb;
+    --surface: #ffffff;
+    --border: #e2e5ea;
+    --text: #1a1d23;
+    --text-secondary: #5f6775;
+    --accent: #2563eb;
+    --accent-light: #eff4ff;
+    --green: #16a34a;
+    --green-light: #f0fdf4;
+    --amber: #d97706;
+    --amber-light: #fffbeb;
+    --red: #dc2626;
+    --red-light: #fef2f2;
+    --radius: 10px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+
+  /* Layout */
+  .app { display: flex; height: 100vh; }
+
+  .sidebar {
+    width: 220px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .sidebar-header {
+    padding: 20px 16px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-header h1 {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
+  .sidebar-header .subtitle {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+
+  .sidebar-nav { padding: 8px; flex: 1; }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.15s;
+    user-select: none;
+  }
+
+  .nav-item:hover { background: var(--bg); color: var(--text); }
+  .nav-item.active { background: var(--accent-light); color: var(--accent); }
+  .nav-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+  .sidebar-footer {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .status-dot {
+    display: inline-block;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  /* Main content */
+  .main { flex: 1; overflow-y: auto; padding: 24px 32px; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .page-title {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    margin-bottom: 20px;
+  }
+
+  /* Cards */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .card-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .card-value {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+
+  .card-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+  }
+
+  /* Tables */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th {
+    text-align: left;
+    padding: 10px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--bg); }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .badge-green { background: var(--green-light); color: var(--green); }
+  .badge-amber { background: var(--amber-light); color: var(--amber); }
+  .badge-red { background: var(--red-light); color: var(--red); }
+  .badge-blue { background: var(--accent-light); color: var(--accent); }
+
+  /* File viewer */
+  .file-viewer {
+    display: flex;
+    gap: 16px;
+    height: calc(100vh - 120px);
+  }
+
+  .file-tree {
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+
+  .file-tree-item {
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .file-tree-item:hover { background: var(--bg); }
+  .file-tree-item.active { background: var(--accent-light); color: var(--accent); }
+  .file-tree-item.group-header {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    background: var(--bg);
+    cursor: default;
+  }
+
+  .file-content {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .file-content-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--bg);
+  }
+
+  .file-content-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+  }
+
+  pre {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  /* Messages */
+  .msg-bubble {
+    padding: 10px 14px;
+    border-radius: 10px;
+    margin-bottom: 8px;
+    max-width: 80%;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .msg-incoming {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    align-self: flex-start;
+  }
+
+  .msg-outgoing {
+    background: var(--accent-light);
+    border: 1px solid #c7d7fe;
+    margin-left: auto;
+  }
+
+  .msg-sender {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+
+  .msg-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    text-align: right;
+  }
+
+  .msg-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px;
+  }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+    align-items: center;
+  }
+
+  .filter-input {
+    padding: 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    background: var(--surface);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .filter-input:focus { border-color: var(--accent); }
+
+  select.filter-input {
+    cursor: pointer;
+    appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%235f6775'%3E%3Cpath d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+
+  .btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    transition: all 0.15s;
+  }
+
+  .btn:hover { background: var(--bg); }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-primary:hover { background: #1d4ed8; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 48px 24px;
+    color: var(--text-secondary);
+  }
+
+  .empty-state .icon { font-size: 36px; margin-bottom: 12px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+  /* Log viewer */
+  .log-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    overflow: hidden;
+  }
+
+  .log-entry-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .log-entry-header:hover { background: var(--bg); }
+
+  .log-entry-body {
+    display: none;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .log-entry.open .log-entry-body { display: block; }
+
+  /* Trace entries */
+  .trace-entry {
+    margin-bottom: 6px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .trace-entry-header {
+    padding: 8px 14px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+  }
+  .trace-entry-header:hover { background: var(--bg); }
+  .trace-entry .trace-body {
+    display: none;
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .trace-entry.open .trace-body { display: block; }
+  .trace-type {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    min-width: 70px;
+    text-align: center;
+  }
+  .trace-type-user { background: #dbeafe; color: #1e40af; }
+  .trace-type-assistant { background: #f0fdf4; color: #166534; }
+  .trace-type-tool { background: #fef3c7; color: #92400e; }
+  .trace-type-tool-result { background: #fce7f3; color: #9d174d; }
+  .trace-type-mcp { background: #ede9fe; color: #6d28d9; }
+  .trace-summary {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+  .trace-body pre {
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    background: var(--surface);
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+
+  /* Watchlist pills */
+  .watchlist-pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--accent-light);
+    color: var(--accent);
+    margin-right: 4px;
+    margin-bottom: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>NanoClaw</h1>
+      <div class="subtitle" id="assistant-name">Loading...</div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-page="overview">
+        <span class="icon">&#9634;</span> Overview
+      </div>
+      <div class="nav-item" data-page="companies">
+        <span class="icon">&#9670;</span> Companies
+      </div>
+      <div class="nav-item" data-page="tasks">
+        <span class="icon">&#9881;</span> Tasks
+      </div>
+      <div class="nav-item" data-page="messages">
+        <span class="icon">&#9993;</span> Messages
+      </div>
+      <div class="nav-item" data-page="files">
+        <span class="icon">&#9783;</span> Files
+      </div>
+      <div class="nav-item" data-page="trace">
+        <span class="icon">&#9881;</span> Trace
+      </div>
+      <div class="nav-item" data-page="logs">
+        <span class="icon">&#9776;</span> Logs
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <span class="status-dot"></span>
+      <span id="status-text">Running</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <div class="page-title">Overview</div>
+      <div class="card-grid" id="overview-cards"></div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Registered Groups</h3></div>
+        <table>
+          <thead><tr><th>Name</th><th>JID</th><th>Folder</th><th>Role</th></tr></thead>
+          <tbody id="groups-table"></tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Active Containers</h3></div>
+        <table>
+          <thead><tr><th>Group</th><th>Container</th><th>Running</th></tr></thead>
+          <tbody id="containers-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- COMPANIES -->
+    <div class="page" id="page-companies">
+      <div class="page-title">Companies</div>
+      <div class="filters">
+        <input type="text" class="filter-input" id="company-search" placeholder="Search companies...">
+        <select class="filter-input" id="watchlist-filter">
+          <option value="">All watchlists</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Ticker</th><th>Market</th><th>Sector</th><th>Watchlists</th><th>Updated</th></tr></thead>
+          <tbody id="companies-table"></tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Company Tasks</h3></div>
+        <table>
+          <thead><tr><th>Company</th><th>Description</th><th>Due</th><th>Market</th><th>Status</th></tr></thead>
+          <tbody id="company-tasks-table"></tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Recent Attachments</h3></div>
+        <table>
+          <thead><tr><th>Company</th><th>Type</th><th>Content</th><th>Summary</th><th>Date</th></tr></thead>
+          <tbody id="attachments-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TASKS -->
+    <div class="page" id="page-tasks">
+      <div class="page-title">Scheduled Tasks</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Group</th><th>Type</th><th>Schedule</th><th>Next Run</th><th>Last Run</th><th>Status</th></tr></thead>
+          <tbody id="tasks-table"></tbody>
+        </table>
+      </div>
+      <div class="table-wrap">
+        <div class="table-header"><h3>Recent Runs</h3></div>
+        <table>
+          <thead><tr><th>Task</th><th>Run At</th><th>Duration</th><th>Status</th><th>Error</th></tr></thead>
+          <tbody id="task-runs-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- MESSAGES -->
+    <div class="page" id="page-messages">
+      <div class="page-title">Messages</div>
+      <div class="filters">
+        <select class="filter-input" id="messages-chat-filter">
+          <option value="">All chats</option>
+        </select>
+        <button class="btn" id="load-more-messages">Load more</button>
+      </div>
+      <div id="messages-container" class="table-wrap" style="max-height: calc(100vh - 180px); overflow-y: auto;">
+        <div class="msg-list" id="messages-list"></div>
+      </div>
+    </div>
+
+    <!-- FILES -->
+    <div class="page" id="page-files">
+      <div class="page-title">Files</div>
+      <div class="file-viewer">
+        <div class="file-tree" id="file-tree"></div>
+        <div class="file-content">
+          <div class="file-content-header" id="file-path">Select a file</div>
+          <div class="file-content-body">
+            <pre id="file-content-pre">Click a file on the left to view its contents.</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRACE -->
+    <div class="page" id="page-trace">
+      <div class="page-title">Agent Trace</div>
+      <div class="filters">
+        <select class="filter-input" id="trace-session-filter">
+          <option value="">Latest session</option>
+        </select>
+        <button class="btn" id="refresh-trace">Refresh</button>
+        <span id="trace-info" style="font-size:12px;color:var(--text-secondary);margin-left:12px;"></span>
+      </div>
+      <div id="trace-container" style="max-height: calc(100vh - 160px); overflow-y: auto;"></div>
+    </div>
+
+    <!-- LOGS -->
+    <div class="page" id="page-logs">
+      <div class="page-title">Container Logs</div>
+      <div class="filters">
+        <select class="filter-input" id="logs-group-filter">
+          <option value="main">main</option>
+        </select>
+        <button class="btn" id="refresh-logs">Refresh</button>
+      </div>
+      <div id="logs-container"></div>
+    </div>
+  </main>
+</div>
+
+<script>
+const API = '';
+let overviewData = null;
+let companiesData = null;
+let tasksData = null;
+let messagesOffset = 0;
+let allMessages = [];
+
+// --- Navigation ---
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('page-' + item.dataset.page).classList.add('active');
+    loadPage(item.dataset.page);
+  });
+});
+
+// --- Data loading ---
+async function api(path) {
+  const res = await fetch(API + path);
+  return res.json();
+}
+
+function formatTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' +
+         d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDuration(ms) {
+  if (!ms) return '-';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return (ms / 60000).toFixed(1) + 'min';
+}
+
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function truncate(s, len) {
+  if (!s) return '';
+  return s.length > len ? s.slice(0, len) + '...' : s;
+}
+
+// --- Overview ---
+async function loadOverview() {
+  overviewData = await api('/api/overview');
+  const d = overviewData;
+
+  document.getElementById('assistant-name').textContent = d.assistantName + ' | ' + d.timezone;
+
+  const cards = [
+    { label: 'Messages Today', value: d.messagesToday, sub: `${d.totalMessages} total` },
+    { label: 'Active Containers', value: d.activeContainers.length, sub: `of ${d.groupCount} groups` },
+    { label: 'Scheduled Tasks', value: d.activeTasks, sub: `${d.totalTasks} total` },
+    { label: 'Uptime', value: formatUptime(d.uptime), sub: 'since last restart' },
+    { label: 'Sessions', value: d.sessionCount, sub: 'agent sessions' },
+    { label: 'Known Chats', value: d.chatCount, sub: 'across all channels' },
+  ];
+
+  document.getElementById('overview-cards').innerHTML = cards.map(c =>
+    `<div class="card">
+      <div class="card-label">${c.label}</div>
+      <div class="card-value">${c.value}</div>
+      <div class="card-sub">${c.sub}</div>
+    </div>`
+  ).join('');
+
+  document.getElementById('groups-table').innerHTML = d.groups.map(g =>
+    `<tr>
+      <td><strong>${escapeHtml(g.name)}</strong></td>
+      <td style="font-family: monospace; font-size: 12px;">${escapeHtml(g.jid)}</td>
+      <td>${escapeHtml(g.folder)}</td>
+      <td>${g.isMain ? '<span class="badge badge-blue">Main</span>' : g.requiresTrigger ? '<span class="badge badge-amber">Trigger</span>' : '<span class="badge badge-green">Auto</span>'}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="4" class="empty-state">No groups registered</td></tr>';
+
+  document.getElementById('containers-table').innerHTML = d.activeContainers.map(c =>
+    `<tr>
+      <td>${escapeHtml(c.group)}</td>
+      <td style="font-family: monospace; font-size: 12px;">${escapeHtml(c.containerName)}</td>
+      <td>${formatDuration(Date.now() - c.startedAt)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="3" style="text-align:center; color:var(--text-secondary); padding:20px;">No active containers</td></tr>';
+}
+
+// --- Companies ---
+async function loadCompanies() {
+  companiesData = await api('/api/companies?group=main');
+  renderCompanies();
+}
+
+function renderCompanies() {
+  if (!companiesData) return;
+  const search = (document.getElementById('company-search').value || '').toLowerCase();
+  const wlFilter = document.getElementById('watchlist-filter').value;
+
+  // Populate watchlist filter
+  const wlSelect = document.getElementById('watchlist-filter');
+  if (wlSelect.options.length <= 1 && companiesData.watchlists.length > 0) {
+    companiesData.watchlists.forEach(w => {
+      const opt = document.createElement('option');
+      opt.value = w.name;
+      opt.textContent = w.name;
+      wlSelect.appendChild(opt);
+    });
+  }
+
+  let companies = companiesData.companies;
+  if (search) companies = companies.filter(c =>
+    (c.name || '').toLowerCase().includes(search) ||
+    (c.ticker || '').toLowerCase().includes(search) ||
+    (c.sector || '').toLowerCase().includes(search)
+  );
+  if (wlFilter) companies = companies.filter(c =>
+    (c.watchlists || '').split(', ').includes(wlFilter)
+  );
+
+  document.getElementById('companies-table').innerHTML = companies.map(c =>
+    `<tr>
+      <td><strong>${escapeHtml(c.name)}</strong></td>
+      <td style="font-family: monospace;">${escapeHtml(c.ticker || '-')}</td>
+      <td><span class="badge badge-blue">${escapeHtml(c.market || 'US')}</span></td>
+      <td>${escapeHtml(c.sector || '-')}</td>
+      <td>${(c.watchlists || '').split(', ').filter(Boolean).map(w => `<span class="watchlist-pill">${escapeHtml(w)}</span>`).join('') || '-'}</td>
+      <td>${formatTime(c.updated_at)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="6" class="empty-state">No companies tracked yet</td></tr>';
+
+  document.getElementById('company-tasks-table').innerHTML = (companiesData.tasks || []).map(t =>
+    `<tr>
+      <td>${escapeHtml(t.company_name || 'General')}</td>
+      <td>${escapeHtml(t.description)}</td>
+      <td>${t.due_date || '-'}</td>
+      <td>${t.market ? `<span class="badge badge-blue">${escapeHtml(t.market)}</span>` : '-'}</td>
+      <td>${t.completed ? '<span class="badge badge-green">Done</span>' : '<span class="badge badge-amber">Pending</span>'}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:20px;">No tasks</td></tr>';
+
+  document.getElementById('attachments-table').innerHTML = (companiesData.attachments || []).map(a =>
+    `<tr>
+      <td>${escapeHtml(a.company_name)}</td>
+      <td><span class="badge badge-blue">${escapeHtml(a.type)}</span></td>
+      <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(truncate(a.content, 80))}</td>
+      <td>${escapeHtml(truncate(a.summary || '', 60))}</td>
+      <td>${formatTime(a.created_at)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:20px;">No attachments</td></tr>';
+}
+
+document.getElementById('company-search').addEventListener('input', renderCompanies);
+document.getElementById('watchlist-filter').addEventListener('change', renderCompanies);
+
+// --- Tasks ---
+async function loadTasks() {
+  tasksData = await api('/api/tasks');
+
+  document.getElementById('tasks-table').innerHTML = tasksData.tasks.map(t =>
+    `<tr>
+      <td style="font-family: monospace; font-size: 12px;">${escapeHtml(truncate(t.id, 12))}</td>
+      <td>${escapeHtml(t.group_folder)}</td>
+      <td><span class="badge badge-blue">${escapeHtml(t.schedule_type)}</span></td>
+      <td style="font-family: monospace; font-size: 12px;">${escapeHtml(t.schedule_value)}</td>
+      <td>${formatTime(t.next_run)}</td>
+      <td>${formatTime(t.last_run)}</td>
+      <td>${t.status === 'active' ? '<span class="badge badge-green">Active</span>' :
+            t.status === 'paused' ? '<span class="badge badge-amber">Paused</span>' :
+            '<span class="badge badge-red">Completed</span>'}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="7" class="empty-state">No scheduled tasks</td></tr>';
+
+  document.getElementById('task-runs-table').innerHTML = (tasksData.recentRuns || []).map(r =>
+    `<tr>
+      <td style="font-family: monospace; font-size: 12px;">${escapeHtml(truncate(r.task_id, 12))}</td>
+      <td>${formatTime(r.run_at)}</td>
+      <td>${formatDuration(r.duration_ms)}</td>
+      <td>${r.status === 'success' ? '<span class="badge badge-green">Success</span>' : '<span class="badge badge-red">Error</span>'}</td>
+      <td>${escapeHtml(truncate(r.error || '', 60))}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="5" style="text-align:center; color:var(--text-secondary); padding:20px;">No recent runs</td></tr>';
+}
+
+// --- Messages ---
+async function loadMessages(append) {
+  if (!append) { messagesOffset = 0; allMessages = []; }
+  const chatFilter = document.getElementById('messages-chat-filter').value;
+  const params = `limit=50&offset=${messagesOffset}` + (chatFilter ? `&chat=${encodeURIComponent(chatFilter)}` : '');
+  const data = await api(`/api/messages?${params}`);
+  allMessages = append ? [...allMessages, ...data.messages] : data.messages;
+  messagesOffset += data.messages.length;
+
+  // Populate chat filter
+  if (!append && overviewData) {
+    const select = document.getElementById('messages-chat-filter');
+    if (select.options.length <= 1) {
+      const chats = await api('/api/overview');
+      chats.groups.forEach(g => {
+        const opt = document.createElement('option');
+        opt.value = g.jid;
+        opt.textContent = g.name + ' (' + g.jid + ')';
+        select.appendChild(opt);
+      });
+    }
+  }
+
+  renderMessages();
+}
+
+function renderMessages() {
+  const list = document.getElementById('messages-list');
+  list.innerHTML = allMessages.map(m => {
+    const isBot = m.is_from_me || m.is_bot_message;
+    return `<div class="msg-bubble ${isBot ? 'msg-outgoing' : 'msg-incoming'}">
+      <div class="msg-sender">${escapeHtml(m.sender_name || m.sender || 'Unknown')}</div>
+      <div>${escapeHtml(truncate(m.content, 500))}</div>
+      <div class="msg-time">${formatTime(m.timestamp)}</div>
+    </div>`;
+  }).join('') || '<div class="empty-state"><div class="icon">&#9993;</div>No messages yet</div>';
+}
+
+document.getElementById('messages-chat-filter').addEventListener('change', () => loadMessages(false));
+document.getElementById('load-more-messages').addEventListener('click', () => loadMessages(true));
+
+// --- Files ---
+async function loadFiles() {
+  const data = await api('/api/file-tree');
+  const tree = document.getElementById('file-tree');
+
+  let currentGroup = null;
+  let html = '';
+
+  data.tree.forEach(item => {
+    if (item.type === 'group') {
+      currentGroup = item.name;
+      html += `<div class="file-tree-item group-header">&#128193; ${escapeHtml(item.name)}</div>`;
+    } else {
+      const indent = currentGroup ? 'padding-left: 28px;' : '';
+      const icon = item.type === 'skill' ? '&#9889;' : '&#128196;';
+      html += `<div class="file-tree-item" style="${indent}" data-path="${escapeHtml(item.path)}">${icon} ${escapeHtml(item.name)}</div>`;
+    }
+  });
+
+  tree.innerHTML = html;
+
+  tree.querySelectorAll('.file-tree-item:not(.group-header)').forEach(el => {
+    el.addEventListener('click', async () => {
+      tree.querySelectorAll('.file-tree-item').forEach(i => i.classList.remove('active'));
+      el.classList.add('active');
+
+      const filePath = el.dataset.path;
+      document.getElementById('file-path').textContent = filePath;
+
+      const fileData = await api(`/api/files?path=${encodeURIComponent(filePath)}`);
+      if (fileData.type === 'file') {
+        document.getElementById('file-content-pre').textContent = fileData.content;
+      } else if (fileData.type === 'directory') {
+        document.getElementById('file-content-pre').textContent =
+          fileData.entries.map(e => `${e.isDirectory ? '[DIR] ' : '      '}${e.name}  (${e.size} bytes)`).join('\n');
+      } else if (fileData.error) {
+        document.getElementById('file-content-pre').textContent = 'Error: ' + fileData.error;
+      }
+    });
+  });
+}
+
+// --- Logs ---
+async function loadLogs() {
+  const group = document.getElementById('logs-group-filter').value;
+  const data = await api(`/api/logs?group=${encodeURIComponent(group)}`);
+  const container = document.getElementById('logs-container');
+
+  container.innerHTML = data.logs.map((log, i) =>
+    `<div class="log-entry" id="log-${i}">
+      <div class="log-entry-header" onclick="document.getElementById('log-${i}').classList.toggle('open')">
+        <span>
+          <strong>${escapeHtml(log.filename)}</strong>
+          ${log.Duration ? `<span style="margin-left:12px;color:var(--text-secondary)">${escapeHtml(log.Duration)}</span>` : ''}
+        </span>
+        <span>
+          ${log['Exit Code'] === '0' ? '<span class="badge badge-green">OK</span>' :
+            log['Exit Code'] ? '<span class="badge badge-red">Exit ' + escapeHtml(log['Exit Code']) + '</span>' : ''}
+        </span>
+      </div>
+      <div class="log-entry-body"><pre>${escapeHtml(log.preview)}</pre></div>
+    </div>`
+  ).join('') || '<div class="empty-state"><div class="icon">&#9776;</div>No logs found</div>';
+}
+
+document.getElementById('logs-group-filter').addEventListener('change', loadLogs);
+document.getElementById('refresh-logs').addEventListener('click', loadLogs);
+
+// --- Trace ---
+async function loadTrace() {
+  const sessionId = document.getElementById('trace-session-filter').value;
+  const params = sessionId ? `?session=${encodeURIComponent(sessionId)}` : '';
+  const data = await api(`/api/trace${params}`);
+
+  // Populate session dropdown
+  const select = document.getElementById('trace-session-filter');
+  if (data.availableSessions && select.options.length <= 1) {
+    data.availableSessions.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.id.slice(0, 8) + '... (' + formatTime(s.modified) + ', ' + (s.size / 1024).toFixed(0) + 'KB)';
+      select.appendChild(opt);
+    });
+  }
+
+  document.getElementById('trace-info').textContent = data.sessionId
+    ? `Session: ${data.sessionId.slice(0, 8)}... | ${data.entries.length} entries`
+    : '';
+
+  const container = document.getElementById('trace-container');
+
+  if (!data.entries || data.entries.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">&#9881;</div>No trace entries found</div>';
+    return;
+  }
+
+  container.innerHTML = data.entries.map((e, i) => {
+    let typeClass = '', typeLabel = '', summary = '', body = '';
+
+    if (e.type === 'user') {
+      typeClass = 'trace-type-user';
+      typeLabel = 'User';
+      summary = escapeHtml(truncate(e.text || '', 120));
+      body = `<pre>${escapeHtml(e.text || '')}</pre>`;
+    } else if (e.type === 'assistant_text') {
+      typeClass = 'trace-type-assistant';
+      typeLabel = e.model ? e.model.split('-').slice(0,2).join('-') : 'Assistant';
+      summary = escapeHtml(truncate(e.text || '', 120));
+      body = `<pre>${escapeHtml(e.text || '')}</pre>`;
+    } else if (e.type === 'tool_use') {
+      typeClass = 'trace-type-tool';
+      typeLabel = 'Tool';
+      summary = `<strong>${escapeHtml(e.toolName || '')}</strong> ${escapeHtml(truncate(e.toolInput || '', 80))}`;
+      body = `<div style="font-weight:600;margin-bottom:6px;">${escapeHtml(e.toolName || '')}</div><pre>${escapeHtml(e.toolInput || '')}</pre>`;
+    } else if (e.type === 'tool_result') {
+      typeClass = 'trace-type-tool-result';
+      typeLabel = 'Result';
+      summary = escapeHtml(truncate(e.toolResult || '', 120));
+      body = `<pre>${escapeHtml(e.toolResult || '')}</pre>`;
+    } else if (e.type === 'mcp_progress') {
+      typeClass = 'trace-type-mcp';
+      typeLabel = 'MCP';
+      summary = `<strong>${escapeHtml(e.toolName || '')}</strong> ${escapeHtml(e.text || '')}`;
+      return `<div class="trace-entry" style="opacity:0.6">
+        <div class="trace-entry-header">
+          <span class="trace-type ${typeClass}">${typeLabel}</span>
+          <span class="trace-summary">${summary}</span>
+        </div>
+      </div>`;
+    } else {
+      return '';
+    }
+
+    return `<div class="trace-entry" id="trace-${i}">
+      <div class="trace-entry-header" onclick="document.getElementById('trace-${i}').classList.toggle('open')">
+        <span class="trace-type ${typeClass}">${typeLabel}</span>
+        <span class="trace-summary">${summary}</span>
+      </div>
+      <div class="trace-body">${body}</div>
+    </div>`;
+  }).join('');
+
+  // Auto-scroll to bottom
+  container.scrollTop = container.scrollHeight;
+}
+
+document.getElementById('trace-session-filter').addEventListener('change', () => {
+  const select = document.getElementById('trace-session-filter');
+  // Reset options to force re-population on next load
+  while (select.options.length > 1) select.remove(1);
+  loadTrace();
+});
+document.getElementById('refresh-trace').addEventListener('click', loadTrace);
+
+// --- Page router ---
+function loadPage(page) {
+  switch (page) {
+    case 'overview': loadOverview(); break;
+    case 'companies': loadCompanies(); break;
+    case 'tasks': loadTasks(); break;
+    case 'messages': loadMessages(false); break;
+    case 'files': loadFiles(); break;
+    case 'trace': loadTrace(); break;
+    case 'logs': loadLogs(); break;
+  }
+}
+
+// Auto-refresh overview every 10s
+setInterval(() => {
+  const activePage = document.querySelector('.nav-item.active');
+  if (activePage && activePage.dataset.page === 'overview') loadOverview();
+}, 10000);
+
+// Initial load
+loadOverview();
+</script>
+</body>
+</html>
