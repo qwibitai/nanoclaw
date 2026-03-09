@@ -3,114 +3,154 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
- * Two auth modes:
- *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
- *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ * Data flow:
+ *   Container (ANTHROPIC_BASE_URL=http://host.docker.internal:<port>)
+ *     → This proxy (replaces auth headers)
+ *       → api.anthropic.com (real credentials)
+ *         → SSE streams back through proxy to container
+ *
+ * Security model (OAuth):
+ *   The SDK's normal OAuth flow calls /api/oauth/claude_cli/create_api_key to
+ *   exchange an OAuth token for a temporary API key, then uses that key for
+ *   subsequent requests. In our setup the container is untrusted — if we allowed
+ *   the exchange, the response body would deliver a working temp API key into
+ *   the container, defeating credential isolation entirely.
+ *
+ *   Instead, we inject the real credential on every outbound request. The SDK
+ *   inside the container only ever has a placeholder key, which is worthless
+ *   outside this proxy. No credential ever enters the container.
  */
-import { createServer, Server } from 'http';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { request as httpsRequest } from 'https';
 import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-export type AuthMode = 'api-key' | 'oauth';
-
-export interface ProxyConfig {
-  authMode: AuthMode;
-}
+const REQUEST_TIMEOUT = 600_000; // 10 minutes for long agent conversations
 
 export function startCredentialProxy(
   port: number,
   host = '127.0.0.1',
 ): Promise<Server> {
-  const secrets = readEnvFile([
-    'ANTHROPIC_API_KEY',
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-  ]);
-
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
-
   const upstreamUrl = new URL(
-    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+    process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {
-    const server = createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        const body = Buffer.concat(chunks);
-        const headers: Record<string, string | number | string[] | undefined> =
-          {
-            ...(req.headers as Record<string, string>),
-            host: upstreamUrl.host,
-            'content-length': body.length,
-          };
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      const start = Date.now();
 
-        // Strip hop-by-hop headers that must not be forwarded by proxies
-        delete headers['connection'];
-        delete headers['keep-alive'];
-        delete headers['transfer-encoding'];
+      // Health check
+      if (req.method === 'GET' && req.url === '/health') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+        return;
+      }
 
-        if (authMode === 'api-key') {
-          // API key mode: inject x-api-key on every request
-          delete headers['x-api-key'];
-          headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
-        } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
-          if (headers['authorization']) {
-            delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
-            }
-          }
-        }
+      // Read credentials from .env on each request (never loaded into process.env
+      // to prevent leaking to child processes — see env.ts).
+      // Re-reading per request means rotated tokens take effect immediately.
+      const creds = readEnvFile([
+        'ANTHROPIC_API_KEY',
+        'CLAUDE_CODE_OAUTH_TOKEN',
+        'ANTHROPIC_AUTH_TOKEN',
+      ]);
+      const apiKey = creds.ANTHROPIC_API_KEY;
+      const oauthToken =
+        creds.CLAUDE_CODE_OAUTH_TOKEN || creds.ANTHROPIC_AUTH_TOKEN;
 
-        const upstream = makeRequest(
-          {
-            hostname: upstreamUrl.hostname,
-            port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
-            method: req.method,
-            headers,
-          } as RequestOptions,
-          (upRes) => {
-            res.writeHead(upRes.statusCode!, upRes.headers);
-            upRes.pipe(res);
-          },
+      if (!apiKey && !oauthToken) {
+        res.writeHead(503, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'No credentials configured on host' }));
+        return;
+      }
+
+      // Build forwarded headers — replace auth
+      const headers: Record<string, string | string[] | undefined> = {
+        ...req.headers,
+      };
+      // Strip hop-by-hop headers that must not be forwarded (RFC 2616 §13.5.1).
+      // transfer-encoding is critical: we stream via req.pipe(), so forwarding the
+      // client's chunked framing header while the upstream negotiates its own would
+      // cause mismatches.
+      delete headers.host;
+      delete headers.connection;
+      delete headers['keep-alive'];
+      delete headers['transfer-encoding'];
+
+      // Credential injection — always unconditional, never exchange-based.
+      //
+      // See module docstring for security rationale. We inject the real credential
+      // on every request. The container SDK only has a placeholder, so the OAuth
+      // exchange endpoint (/api/oauth/claude_cli/create_api_key) is never called —
+      // no temp API key ever enters the container.
+      if (apiKey) {
+        headers['x-api-key'] = apiKey;
+        delete headers['authorization'];
+      } else if (oauthToken) {
+        headers['authorization'] = `Bearer ${oauthToken}`;
+        // OAuth on the Messages API requires this beta feature flag.
+        // Without it, api.anthropic.com returns 401 "OAuth authentication is
+        // currently not supported." The SDK normally sends this itself, but since
+        // we bypass the exchange flow (the SDK thinks it has an API key via the
+        // placeholder), it won't. We must inject it.
+        // If Anthropic graduates OAuth out of beta, this becomes a no-op.
+        headers['anthropic-beta'] = 'oauth-2025-04-20';
+        delete headers['x-api-key'];
+      }
+
+      const upstream = makeRequest(
+        {
+          hostname: upstreamUrl.hostname,
+          port: upstreamUrl.port || (isHttps ? 443 : 80),
+          path: req.url,
+          method: req.method,
+          headers,
+        } as RequestOptions,
+        (upRes) => {
+          res.writeHead(upRes.statusCode!, upRes.headers);
+          upRes.pipe(res); // Stream SSE without buffering
+        },
+      );
+
+      upstream.setTimeout(REQUEST_TIMEOUT, () => {
+        logger.warn({ path: req.url }, 'Proxy request timed out');
+        upstream.destroy();
+      });
+
+      upstream.on('error', (err) => {
+        const duration = Date.now() - start;
+        logger.error(
+          { err, path: req.url, duration },
+          'Credential proxy upstream error',
         );
+        if (!res.headersSent) {
+          res.writeHead(502, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ error: `Proxy error: ${err.message}` }));
+        }
+      });
 
-        upstream.on('error', (err) => {
-          logger.error(
-            { err, url: req.url },
-            'Credential proxy upstream error',
-          );
-          if (!res.headersSent) {
-            res.writeHead(502);
-            res.end('Bad Gateway');
-          }
-        });
+      req.pipe(upstream); // Stream request body (handles large base64 images)
 
-        upstream.write(body);
-        upstream.end();
+      res.on('finish', () => {
+        const duration = Date.now() - start;
+        logger.debug(
+          {
+            method: req.method,
+            path: req.url,
+            status: res.statusCode,
+            duration,
+          },
+          'Proxied API request',
+        );
       });
     });
 
     server.listen(port, host, () => {
-      logger.info({ port, host, authMode }, 'Credential proxy started');
+      logger.info({ port, host }, 'Credential proxy started');
       resolve(server);
     });
 
@@ -119,7 +159,7 @@ export function startCredentialProxy(
 }
 
 /** Detect which auth mode the host is configured for. */
-export function detectAuthMode(): AuthMode {
+export function detectAuthMode(): 'api-key' | 'oauth' {
   const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
   return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
 }
