@@ -65,6 +65,14 @@ describe('escapeXml', () => {
   it('handles empty string', () => {
     expect(escapeXml('')).toBe('');
   });
+
+  it('escapes newlines', () => {
+    expect(escapeXml('line1\nline2')).toBe('line1&#10;line2');
+  });
+
+  it('escapes carriage returns', () => {
+    expect(escapeXml('line1\r\nline2')).toBe('line1&#13;&#10;line2');
+  });
 });
 
 // --- formatMessages ---
@@ -115,6 +123,15 @@ describe('formatMessages', () => {
     expect(result).toContain(
       '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;',
     );
+  });
+
+  it('escapes newlines in sender names and content', () => {
+    const result = formatMessages(
+      [makeMsg({ sender_name: 'Alice\nBob', content: 'line1\nline2' })],
+      TZ,
+    );
+    expect(result).toContain('sender="Alice&#10;Bob"');
+    expect(result).toContain('>line1&#10;line2</message>');
   });
 
   it('handles empty array', () => {
