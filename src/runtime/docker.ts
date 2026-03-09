@@ -164,7 +164,9 @@ export class DockerRuntime implements Runtime {
     // Mount volumes
     for (const mount of mounts) {
       if (mount.readonly) {
-        args.push(...this.readonlyMountArgs(mount.hostPath, mount.containerPath));
+        args.push(
+          ...this.readonlyMountArgs(mount.hostPath, mount.containerPath),
+        );
       } else {
         args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
       }

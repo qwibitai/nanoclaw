@@ -34,4 +34,9 @@ export function getRuntime(type: RuntimeType = 'docker'): Runtime {
 }
 
 // Re-export types
-export type { Runtime, RuntimeConfig, RuntimeInstance, VolumeMount } from './runtime.js';
+export type {
+  Runtime,
+  RuntimeConfig,
+  RuntimeInstance,
+  VolumeMount,
+} from './runtime.js';
