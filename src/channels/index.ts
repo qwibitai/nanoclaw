@@ -9,4 +9,7 @@
 
 // telegram
 
+// dingtalk
+import './dingtalk.js';
+
 // whatsapp

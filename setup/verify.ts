@@ -112,6 +112,8 @@ export async function run(_args: string[]): Promise<void> {
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
     'DISCORD_BOT_TOKEN',
+    'DINGTALK_CLIENT_ID',
+    'DINGTALK_CLIENT_SECRET',
   ]);
 
   const channelAuth: Record<string, string> = {};
@@ -134,6 +136,12 @@ export async function run(_args: string[]): Promise<void> {
   }
   if (process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN) {
     channelAuth.discord = 'configured';
+  }
+  if (
+    (process.env.DINGTALK_CLIENT_ID || envVars.DINGTALK_CLIENT_ID) &&
+    (process.env.DINGTALK_CLIENT_SECRET || envVars.DINGTALK_CLIENT_SECRET)
+  ) {
+    channelAuth.dingtalk = 'configured';
   }
 
   const configuredChannels = Object.keys(channelAuth);
