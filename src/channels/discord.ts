@@ -289,7 +289,8 @@ export class DiscordChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
-    for (const interval of this.typingIntervals.values()) clearInterval(interval);
+    for (const interval of this.typingIntervals.values())
+      clearInterval(interval);
     this.typingIntervals.clear();
     if (this.client) {
       this.client.destroy();

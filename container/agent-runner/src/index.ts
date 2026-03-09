@@ -433,6 +433,7 @@ function buildMcpServers(
       args: ['-y', '@cocal/google-calendar-mcp'],
       env: {
         GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+        GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
       },
     };
   }
