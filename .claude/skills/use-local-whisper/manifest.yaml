@@ -9,4 +9,4 @@ structured: {}
 conflicts: []
 depends:
   - voice-transcription
-test: "npx vitest run src/channels/whatsapp.test.ts"
+test: "npx vitest run --config vitest.skills.config.ts .claude/skills/use-local-whisper/tests/use-local-whisper.test.ts"

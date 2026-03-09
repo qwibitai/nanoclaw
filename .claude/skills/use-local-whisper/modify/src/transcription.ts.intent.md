@@ -6,13 +6,14 @@ Replaced the OpenAI Whisper API backend with local whisper.cpp CLI execution. Au
 ## Key sections
 
 ### Imports
-- Removed: `readEnvFile` from `./env.js` (no API key needed)
+- Removed: `openai` dependency
 - Added: `execFile` from `child_process`, `fs`, `os`, `path`, `promisify` from `util`
 
 ### Configuration
 - Removed: `TranscriptionConfig` interface and `DEFAULT_CONFIG` (no model/enabled/fallback config)
-- Added: `WHISPER_BIN` constant (env `WHISPER_BIN` or `'whisper-cli'`)
-- Added: `WHISPER_MODEL` constant (env `WHISPER_MODEL` or `data/models/ggml-base.bin`)
+- Changed: `readEnvFile` now reads `['WHISPER_BIN', 'WHISPER_MODEL']` instead of `['OPENAI_API_KEY']`
+- Added: `WHISPER_BIN` constant (from `.env` via `readEnvFile`, default `'whisper-cli'`)
+- Added: `WHISPER_MODEL` constant (from `.env` via `readEnvFile`, default `data/models/ggml-base.bin`)
 - Added: `FALLBACK_MESSAGE` constant
 
 ### transcribeWithWhisperCpp (replaces transcribeWithOpenAI)

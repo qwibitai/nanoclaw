@@ -66,7 +66,19 @@ describe('use-local-whisper skill package', () => {
     expect(content).not.toContain('openai');
     expect(content).not.toContain('OpenAI');
     expect(content).not.toContain('OPENAI_API_KEY');
-    expect(content).not.toContain('readEnvFile');
+  });
+
+  it('reads WHISPER_MODEL and WHISPER_BIN from .env via readEnvFile', () => {
+    const content = fs.readFileSync(
+      path.join(skillDir, 'modify', 'src', 'transcription.ts'),
+      'utf-8',
+    );
+
+    expect(content).toContain("import { readEnvFile } from './env.js'");
+    expect(content).toContain("readEnvFile(['WHISPER_BIN', 'WHISPER_MODEL'])");
+    // Must not read these from process.env (not populated by the service)
+    expect(content).not.toContain('process.env.WHISPER_MODEL');
+    expect(content).not.toContain('process.env.WHISPER_BIN');
   });
 
   it('preserves the public API (transcribeAudioMessage and isVoiceMessage)', () => {
