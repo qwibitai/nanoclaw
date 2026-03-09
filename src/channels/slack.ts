@@ -154,7 +154,8 @@ export class SlackChannel implements Channel {
     await this.flushOutgoingQueue();
 
     // Sync channel names on startup
-    await this.syncChannelMetadata();
+    // Non-blocking: don't delay pool-bot init and scheduler startup
+    void this.syncChannelMetadata();
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
