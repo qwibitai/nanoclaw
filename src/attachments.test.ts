@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import { buildAttachmentFilename, mimeToExt } from './utils.js';
-import { _initTestDatabase, storeMessage, getMessagesSince, storeChatMetadata } from './db.js';
+import {
+  _initTestDatabase,
+  storeMessage,
+  getMessagesSince,
+  storeChatMetadata,
+} from './db.js';
 
 describe('mimeToExt', () => {
   it('returns known extensions', () => {
@@ -15,19 +20,33 @@ describe('mimeToExt', () => {
 
 describe('buildAttachmentFilename', () => {
   it('prefixes ID when filename provided', () => {
-    const result = buildAttachmentFilename({ id: 'abc123', contentType: 'image/jpeg', filename: 'photo.jpg' });
+    const result = buildAttachmentFilename({
+      id: 'abc123',
+      contentType: 'image/jpeg',
+      filename: 'photo.jpg',
+    });
     expect(result).toBe('abc123-photo.jpg');
   });
   it('uses sanitized ID when ID has extension', () => {
-    const result = buildAttachmentFilename({ id: 'pfZsYQLdsQM4.webp', contentType: 'image/webp' });
+    const result = buildAttachmentFilename({
+      id: 'pfZsYQLdsQM4.webp',
+      contentType: 'image/webp',
+    });
     expect(result).toBe('pfZsYQLdsQM4.webp');
   });
   it('appends mime extension when no filename and no extension in ID', () => {
-    const result = buildAttachmentFilename({ id: 'abc123', contentType: 'image/png' });
+    const result = buildAttachmentFilename({
+      id: 'abc123',
+      contentType: 'image/png',
+    });
     expect(result).toBe('abc123-attachment.png');
   });
   it('sanitizes special characters in ID and filename', () => {
-    const result = buildAttachmentFilename({ id: 'abc/123', contentType: 'image/jpeg', filename: 'my photo!.jpg' });
+    const result = buildAttachmentFilename({
+      id: 'abc/123',
+      contentType: 'image/jpeg',
+      filename: 'my photo!.jpg',
+    });
     expect(result).toBe('abc_123-my_photo_.jpg');
   });
 });
@@ -51,7 +70,9 @@ describe('db round-trip', () => {
 
     const rows = getMessagesSince('g@g.us', '2024-01-01T00:00:00.000Z', 'Bot');
     expect(rows).toHaveLength(1);
-    expect(rows[0].attachments).toEqual([{ id: 'att-1', contentType: 'image/jpeg', size: 12345 }]);
+    expect(rows[0].attachments).toEqual([
+      { id: 'att-1', contentType: 'image/jpeg', size: 12345 },
+    ]);
   });
 
   it('handles missing attachments_json gracefully', () => {
@@ -77,5 +98,7 @@ describe('orchestrator download loop', () => {
   it.todo('logs warning and continues if downloadAttachment throws');
   it.todo('appends [file: ...] lines to message content');
   it.todo('does not modify content if no downloads succeeded');
-  it.todo('skips download loop entirely for channels without downloadAttachment');
+  it.todo(
+    'skips download loop entirely for channels without downloadAttachment',
+  );
 });

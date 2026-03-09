@@ -44,16 +44,16 @@ export interface RegisteredGroup {
 
 /** Channel-agnostic attachment metadata */
 export interface Attachment {
-  id: string;            // Channel-specific ID (signal-cli long, WhatsApp mediaKey, Telegram file_id)
-  contentType: string;   // MIME type
-  filename?: string;     // Original filename if provided by sender
-  size?: number;         // Bytes
-  width?: number;        // Pixels (images/video)
-  height?: number;       // Pixels (images/video)
-  duration?: number;     // Seconds (audio/video)
+  id: string; // Channel-specific ID (signal-cli long, WhatsApp mediaKey, Telegram file_id)
+  contentType: string; // MIME type
+  filename?: string; // Original filename if provided by sender
+  size?: number; // Bytes
+  width?: number; // Pixels (images/video)
+  height?: number; // Pixels (images/video)
+  duration?: number; // Seconds (audio/video)
   isVoiceNote?: boolean; // Audio recorded in-app as voice note
-  caption?: string;      // Caption text (WhatsApp/Telegram support this natively)
-  localPath?: string;    // Absolute path after download; set by orchestrator
+  caption?: string; // Caption text (WhatsApp/Telegram support this natively)
+  localPath?: string; // Absolute path after download; set by orchestrator
 }
 
 export interface NewMessage {
@@ -110,7 +110,10 @@ export interface Channel {
    * Return null if the attachment cannot be fetched.
    * The orchestrator calls this after getMessagesSince, before formatMessages.
    */
-  downloadAttachment?(attachment: Attachment, destDir: string): Promise<string | null>;
+  downloadAttachment?(
+    attachment: Attachment,
+    destDir: string,
+  ): Promise<string | null>;
 }
 
 // Callback type that channels use to deliver inbound messages

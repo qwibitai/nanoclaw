@@ -336,7 +336,9 @@ export function getNewMessages(
 
   const rows = db
     .prepare(sql)
-    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as (NewMessage & { attachments_json?: string })[];
+    .all(lastTimestamp, ...jids, `${botPrefix}:%`, limit) as (NewMessage & {
+    attachments_json?: string;
+  })[];
 
   let newTimestamp = lastTimestamp;
   for (const row of rows) {
@@ -344,7 +346,9 @@ export function getNewMessages(
     if (row.attachments_json) {
       try {
         row.attachments = JSON.parse(row.attachments_json);
-      } catch { /* ignore malformed JSON */ }
+      } catch {
+        /* ignore malformed JSON */
+      }
     }
   }
 
@@ -373,12 +377,16 @@ export function getMessagesSince(
   `;
   const rows = db
     .prepare(sql)
-    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as (NewMessage & { attachments_json?: string })[];
+    .all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as (NewMessage & {
+    attachments_json?: string;
+  })[];
   for (const row of rows) {
     if (row.attachments_json) {
       try {
         row.attachments = JSON.parse(row.attachments_json);
-      } catch { /* ignore malformed JSON */ }
+      } catch {
+        /* ignore malformed JSON */
+      }
     }
   }
   return rows;

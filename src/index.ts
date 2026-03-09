@@ -177,7 +177,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Download attachments for any channel that supports it
   if (channel.downloadAttachment) {
-    const destDir = path.join(resolveGroupFolderPath(group.folder), 'attachments');
+    const destDir = path.join(
+      resolveGroupFolderPath(group.folder),
+      'attachments',
+    );
 
     for (const msg of missedMessages) {
       if (!msg.attachments?.length) continue;
@@ -189,7 +192,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           const localPath = await channel.downloadAttachment(att, destDir);
           if (localPath) att.localPath = localPath;
         } catch (err) {
-          logger.warn({ attachmentId: att.id, err }, 'Failed to download attachment');
+          logger.warn(
+            { attachmentId: att.id, err },
+            'Failed to download attachment',
+          );
         }
       }
 
