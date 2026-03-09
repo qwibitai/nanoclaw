@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, exec, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -111,6 +111,15 @@ function buildVolumeMounts(
     }
   }
 
+  // Persistent uv cache across container restarts (shared across all groups)
+  const uvCacheDir = path.join(DATA_DIR, 'cache', 'uv');
+  fs.mkdirSync(uvCacheDir, { recursive: true });
+  mounts.push({
+    hostPath: uvCacheDir,
+    containerPath: '/home/node/.cache/uv',
+    readonly: false,
+  });
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -211,16 +220,96 @@ function buildVolumeMounts(
 }
 
 /**
+ * Refresh an OAuth token using the standard OAuth2 refresh_token grant.
+ * Updates the credentials file on success so other processes benefit.
+ */
+function refreshOAuthToken(
+  refreshToken: string,
+  credentialsPath: string,
+  creds: Record<string, any>,
+): string | null {
+  try {
+    // Standard OAuth2 refresh_token grant against Claude's token endpoint.
+    // Pass token via stdin (not CLI arg) to avoid exposure in process list.
+    const result = execSync(
+      `curl -s -X POST https://platform.claude.com/v1/oauth/token ` +
+        `-H "Content-Type: application/x-www-form-urlencoded" ` +
+        `--data-urlencode @-`,
+      {
+        input: `grant_type=refresh_token&refresh_token=${refreshToken}`,
+        timeout: 10_000,
+        encoding: 'utf-8',
+      },
+    );
+    const data = JSON.parse(result);
+    if (data.access_token) {
+      // Update credentials file so future reads get the fresh token
+      creds.claudeAiOauth.accessToken = data.access_token;
+      if (data.expires_in) {
+        creds.claudeAiOauth.expiresAt =
+          Date.now() + data.expires_in * 1000;
+      }
+      if (data.refresh_token) {
+        creds.claudeAiOauth.refreshToken = data.refresh_token;
+      }
+      fs.writeFileSync(credentialsPath, JSON.stringify(creds, null, 2));
+      logger.info('OAuth token refreshed successfully');
+      return data.access_token;
+    }
+    logger.error({ response: data }, 'OAuth refresh: no access_token in response');
+  } catch (err) {
+    logger.error({ error: err }, 'OAuth token refresh failed');
+  }
+  return null;
+}
+
+/**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
+  const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
   ]);
+
+  // Read OAuth token from Claude Code's credentials file.
+  // Checks expiration and refreshes automatically if needed.
+  // Falls back to .env CLAUDE_CODE_OAUTH_TOKEN if the file doesn't exist.
+  const credentialsPath = path.join(
+    process.env.HOME || '/home/node',
+    '.claude',
+    '.credentials.json',
+  );
+  try {
+    const creds = JSON.parse(fs.readFileSync(credentialsPath, 'utf-8'));
+    const oauth = creds.claudeAiOauth;
+    if (oauth?.accessToken) {
+      // Check if token is expired or expiring within 5 minutes
+      const expiresAt = oauth.expiresAt || 0;
+      const isExpired = Date.now() > expiresAt - 5 * 60 * 1000;
+
+      if (isExpired && oauth.refreshToken) {
+        const refreshed = refreshOAuthToken(
+          oauth.refreshToken,
+          credentialsPath,
+          creds,
+        );
+        secrets.CLAUDE_CODE_OAUTH_TOKEN = refreshed || oauth.accessToken;
+      } else {
+        secrets.CLAUDE_CODE_OAUTH_TOKEN = oauth.accessToken;
+      }
+    }
+  } catch {
+    // Credentials file missing or unparseable — fall back to .env
+    const envSecrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN']);
+    if (envSecrets.CLAUDE_CODE_OAUTH_TOKEN) {
+      secrets.CLAUDE_CODE_OAUTH_TOKEN = envSecrets.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(
@@ -362,7 +451,16 @@ export async function runContainerAgent(
             resetTimeout();
             // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
-            outputChain = outputChain.then(() => onOutput(parsed));
+            outputChain = outputChain.then(async () => {
+              try {
+                await onOutput(parsed);
+              } catch (err) {
+                logger.error(
+                  { group: group.name, error: err },
+                  'Error in output callback',
+                );
+              }
+            });
           } catch (err) {
             logger.warn(
               { group: group.name, error: err },
@@ -455,13 +553,20 @@ export async function runContainerAgent(
             { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
-          outputChain.then(() => {
-            resolve({
-              status: 'success',
-              result: null,
-              newSessionId,
+          outputChain
+            .catch((err) => {
+              logger.error(
+                { group: group.name, error: err },
+                'Output chain error',
+              );
+            })
+            .then(() => {
+              resolve({
+                status: 'success',
+                result: null,
+                newSessionId,
+              });
             });
-          });
           return;
         }
 
@@ -559,17 +664,24 @@ export async function runContainerAgent(
 
       // Streaming mode: wait for output chain to settle, return completion marker
       if (onOutput) {
-        outputChain.then(() => {
-          logger.info(
-            { group: group.name, duration, newSessionId },
-            'Container completed (streaming mode)',
-          );
-          resolve({
-            status: 'success',
-            result: null,
-            newSessionId,
+        outputChain
+          .catch((err) => {
+            logger.error(
+              { group: group.name, error: err },
+              'Output chain error',
+            );
+          })
+          .then(() => {
+            logger.info(
+              { group: group.name, duration, newSessionId },
+              'Container completed (streaming mode)',
+            );
+            resolve({
+              status: 'success',
+              result: null,
+              newSessionId,
+            });
           });
-        });
         return;
       }
 

@@ -185,8 +185,14 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          try {
+            await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          } catch (err) {
+            logger.error(
+              { taskId: task.id, err },
+              'Failed to send task output',
+            );
+          }
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
