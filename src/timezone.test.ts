@@ -26,4 +26,22 @@ describe('formatLocalTime', () => {
     expect(ny).toContain('8:00');
     expect(tokyo).toContain('9:00');
   });
+
+  it('returns raw string for invalid timestamp', () => {
+    const result = formatLocalTime('not-a-date', 'America/New_York');
+    expect(result).toBe('not-a-date');
+  });
+
+  it('returns "unknown time" for empty timestamp', () => {
+    const result = formatLocalTime('', 'America/New_York');
+    expect(result).toBe('unknown time');
+  });
+
+  it('falls back to ISO string for invalid timezone', () => {
+    const result = formatLocalTime(
+      '2026-02-04T18:30:00.000Z',
+      'Not/A_Timezone',
+    );
+    expect(result).toBe('2026-02-04T18:30:00.000Z');
+  });
 });
