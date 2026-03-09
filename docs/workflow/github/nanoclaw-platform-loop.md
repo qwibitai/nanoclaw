@@ -33,9 +33,9 @@ It does not replace:
 ## Verification
 
 - `node scripts/workflow/platform-loop.js next`
-- `node scripts/workflow/platform-loop.js cleanup-candidates`
 - `node scripts/workflow/platform-loop.js ids --issue 1 --title "example"`
-- `npm test -- src/platform-loop.test.ts src/github-project-sync.test.ts`
+- `bash scripts/workflow/platform-loop-sync.sh --dry-run`
+- `npm test -- src/platform-loop.test.ts src/platform-loop-sync.test.ts src/github-project-sync.test.ts`
 - `bash scripts/check-workflow-contracts.sh`
 - `bash scripts/check-claude-codex-mirror.sh`
 - `bash scripts/check-tooling-governance.sh`
@@ -100,35 +100,27 @@ The Issue is eligible for the loop only when all are true:
 
 1. The dedicated Claude session runs `/loop 1h /platform-pickup`.
 2. `/platform-pickup` must begin by confirming the active GitHub account is `ingpoc`.
-3. `/platform-pickup` first runs `node scripts/workflow/platform-loop.js cleanup-candidates`.
-4. For each returned cleanup item, Claude runs `bash scripts/workflow/platform-loop-worktree.sh cleanup --issue ... --branch ...`.
-5. Cleanup is local-only:
-   - remove the clean per-issue execution worktree
-   - delete the matching local issue branch
-   - prune stale worktree metadata
-   - never touch the control worktree
-6. `/platform-pickup` then runs `node scripts/workflow/platform-loop.js next`.
-7. If the helper returns `noop`, Claude stops immediately with no work picked.
-8. If the helper returns a candidate, Claude must prepare the issue execution worktree from the issue `Base Branch`:
-   - run `bash scripts/workflow/platform-loop-worktree.sh prepare --issue ... --branch ... --base <Base Branch>`
-   - fetch `origin/<Base Branch>` first
-   - block instead of guessing if the remote base branch or worktree state is invalid
-9. After preparation succeeds, Claude generates a `request_id`, `run_id`, and branch via `node scripts/workflow/platform-loop.js ids ...`.
-10. Claude moves the board item to `In Progress` and sets `Agent=claude` using `node scripts/workflow/platform-loop.js set-status ...`.
-11. Claude immediately leaves an issue comment proving claim ownership:
+3. `/platform-pickup` then refreshes the dedicated worktree from `origin/main` via `bash scripts/workflow/platform-loop-sync.sh`.
+4. If the sync fails, Claude stops immediately instead of using stale code.
+5. `/platform-pickup` then runs `node scripts/workflow/platform-loop.js next`.
+6. If the helper returns `noop`, Claude stops immediately with no work picked.
+7. If the helper returns a candidate, Claude generates a `request_id`, `run_id`, and branch via `node scripts/workflow/platform-loop.js ids ...`.
+8. Claude moves the board item to `In Progress` and sets `Agent=claude` using `node scripts/workflow/platform-loop.js set-status ...`.
+9. Claude immediately leaves an issue comment proving claim ownership:
    - `request_id`
    - `run_id`
    - branch
    - current board status
    - next visible step
-12. If the board is missing the optional text fields (`Request ID`, `Run ID`, `Next Decision`), the issue comment is the temporary source of truth until the board schema is repaired.
+10. If the board is missing the optional text fields (`Request ID`, `Run ID`, `Next Decision`), the issue comment is the temporary source of truth until the board schema is repaired.
 
 ### 4. Bounded Implementation
 
-1. Claude creates or reuses the dedicated issue branch only after the execution worktree is prepared from the latest `origin/<Base Branch>`.
+1. Claude creates or reuses the dedicated issue branch.
+   The branch must be created from the freshly synced loop base, not stale local state.
 2. Claude works only within the scoped touch set.
 3. Claude runs the required checks from the Issue.
-4. On ambiguity, missing scope, failed required checks, or base/worktree preparation failure, Claude sets `Status=Blocked`, writes the next decision, comments on the issue with the exact blocker, and stops.
+4. On ambiguity, missing scope, or failed required checks, Claude sets `Status=Blocked`, writes the next decision, comments on the issue with the exact blocker, and stops.
 
 ### 5. PR and Review Handoff
 
@@ -154,19 +146,20 @@ The Issue is eligible for the loop only when all are true:
 2. The repo tracks the command and bootstrap surfaces:
    - `.claude/commands/platform-pickup.md`
    - `scripts/workflow/run-platform-claude-session.sh`
+   - `scripts/workflow/platform-loop-sync.sh`
    - `scripts/workflow/start-platform-loop.sh`
    - `scripts/workflow/trigger-platform-pickup-now.sh`
-   - `scripts/workflow/platform-loop-worktree.sh`
    - `scripts/workflow/check-platform-loop.sh`
    - `launchd/com.nanoclaw-platform-loop.plist`
 3. The dedicated session is re-armed locally by the health/bootstrap scripts.
 4. The dedicated git worktree is the isolation boundary for the unattended loop. It prevents the platform lane from mutating the maintainer working tree, but it does not solve Claude permission prompts by itself.
 5. `scripts/workflow/run-platform-claude-session.sh` launches Claude inside that worktree using `--permission-mode bypassPermissions` by default and loads `CLAUDE_CODE_OAUTH_TOKEN` from the repo `.env` when present.
-6. `scripts/workflow/start-platform-loop.sh` syncs the loop command/helper scripts into the dedicated control worktree before launching Claude.
-7. `scripts/workflow/trigger-platform-pickup-now.sh` is the manual one-shot test trigger for the same pickup flow.
-8. The persistent control worktree is not the implementation workspace for picked issues; issue code changes happen in `.worktrees/platform-<issue>`.
-9. The loop never merges PRs and never bypasses required checks.
-10. Use interactive Claude Code for the `/loop` lane. Do not try to run `/platform-pickup` through `claude -p`:
+6. `scripts/workflow/platform-loop-sync.sh` is the single source of truth for refreshing the dedicated loop worktree from `origin/main` and overlaying the command/helper files from the source repo root.
+7. `scripts/workflow/start-platform-loop.sh` calls that sync helper before launching Claude.
+8. `scripts/workflow/trigger-platform-pickup-now.sh` is the manual one-shot test trigger for the same freshness + pickup flow.
+9. The loop must fail closed on sync failure instead of picking work from stale code.
+10. The loop never merges PRs and never bypasses required checks.
+11. Use interactive Claude Code for the `/loop` lane. Do not try to run `/platform-pickup` through `claude -p`:
    - the official headless/programmatic CLI flow is `claude -p`
    - interactive slash commands are not available in `-p` mode
    - use headless mode only for non-interactive follow-up automation that does not depend on slash commands

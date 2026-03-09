@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-07T21:13:31.610Z
+Generated: 2026-03-09T06:02:12.152Z
 Project: nanoclaw
 
 ## Features
@@ -569,6 +569,9 @@ Project: nanoclaw
   - none
 - Shared Files:
   - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
+- Validation Warnings:
+  - missing file: .claude/skills/get-qodo-rules/SKILL.md
+  - missing file: .claude/skills/qodo-pr-resolver/SKILL.md
 - Suggested Verify:
   - npm run typecheck
 
@@ -617,7 +620,8 @@ Project: nanoclaw
 - Risk: high
 - Summary: Issue-first Project board automation, discussion scaffolding, and governance docs for Claude/Codex collaboration.
 - Keywords: github project, discussions, control plane, collaboration, workflow, project sync
-- Files (17):
+- Files (28):
+  - .claude/commands/platform-pickup.md
   - .claude/progress/feature-catalog.seed.json
   - .github/DISCUSSION_TEMPLATE/general.yml
   - .github/DISCUSSION_TEMPLATE/ideas.yml
@@ -633,10 +637,22 @@ Project: nanoclaw
   - docs/workflow/github/github-agent-collaboration-loop.md
   - docs/workflow/github/github-multi-agent-collaboration-loop.md
   - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/github/nanoclaw-platform-loop.md
+  - launchd/com.nanoclaw-platform-loop.plist
+  - scripts/workflow/check-platform-loop.sh
   - scripts/workflow/github-project-sync.js
-  - setup/github-project-sync.test.ts
-- Tests (1):
-  - setup/github-project-sync.test.ts
+  - scripts/workflow/platform-loop-sync.sh
+  - scripts/workflow/platform-loop.js
+  - scripts/workflow/run-platform-claude-session.sh
+  - scripts/workflow/start-platform-loop.sh
+  - scripts/workflow/trigger-platform-pickup-now.sh
+  - src/github-project-sync.test.ts
+  - src/platform-loop-sync.test.ts
+  - src/platform-loop.test.ts
+- Tests (3):
+  - src/github-project-sync.test.ts
+  - src/platform-loop-sync.test.ts
+  - src/platform-loop.test.ts
 - Shared Files:
   - .claude/progress/feature-catalog.seed.json
   - AGENTS.md
@@ -649,7 +665,7 @@ Project: nanoclaw
   - docs/workflow/github/nanoclaw-github-control-plane.md
 - Suggested Verify:
   - npm run typecheck
-  - npx vitest run setup/github-project-sync.test.ts
+  - npx vitest run src/github-project-sync.test.ts src/platform-loop-sync.test.ts src/platform-loop.test.ts
 
 ### channel-extension-skills - Channel and Integration Extension Skills
 - Risk: medium

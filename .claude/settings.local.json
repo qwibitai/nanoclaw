@@ -29,7 +29,9 @@
       "Bash(container logs:*)",
       "Bash(test:*)",
       "Bash(./scripts/jarvis-status.sh:*)",
+      "Bash(./scripts/jarvis-ops.sh status:*)",
       "Bash(./scripts/jarvis-worker-probe.sh:*)",
+      "Bash(launchctl list:*)",
       "Bash(launchctl:*)",
       "Bash(lsof:*)",
       "mcp__exa__web_search_exa",
@@ -41,6 +43,7 @@
       "Bash(qmd:*)",
       "Bash(mkdir:*)",
       "Bash(pip3 install:*)",
+      "Bash(qmd status:*)",
       "Bash(node-gyp rebuild:*)",
       "Bash(chmod +x:*)",
       "Bash(find:*)",
@@ -50,7 +53,9 @@
       "Bash(opencode run:*)",
       "Bash(gh api:*)",
       "Bash(gh project:*)",
-      "Bash(gh issue:*)"
+      "Bash(gh issue:*)",
+      "mcp__exa__get_code_context_exa",
+      "Bash(gh pr:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -32,7 +32,6 @@ const PLATFORM_REQUIRED_SECTIONS = [
   'Scope',
   'Acceptance Criteria',
   'Expected Productivity Gain',
-  'Base Branch',
   'Required Checks',
   'Required Evidence',
   'Blocked If',
@@ -75,10 +74,6 @@ export function buildPlatformBranchName(issueNumber, title) {
   return `claude-platform-${issueNumber}-${slugify(title)}`;
 }
 
-export function buildPlatformWorktreePath(issueNumber) {
-  return `.worktrees/platform-${issueNumber}`;
-}
-
 function formatTimestamp(now) {
   const iso = now.toISOString().replace(/[-:]/g, '');
   return iso.replace(/\.\d{3}Z$/, 'Z');
@@ -101,34 +96,6 @@ export function missingPlatformSections(body) {
   return PLATFORM_REQUIRED_SECTIONS.filter(
     (sectionName) => !sectionPattern(sectionName).test(body || ''),
   );
-}
-
-export function extractIssueSectionValue(body, sectionName) {
-  if (!body) return '';
-  const lines = body.split(/\r?\n/);
-  const normalizedTarget = sectionName.trim().toLowerCase();
-  let collecting = false;
-  const collected = [];
-
-  for (const line of lines) {
-    const headingMatch = line.match(/^##+\s+(.+?)\s*$/);
-    if (headingMatch) {
-      const normalizedHeading = headingMatch[1].trim().toLowerCase();
-      if (collecting) break;
-      collecting = normalizedHeading === normalizedTarget;
-      continue;
-    }
-
-    if (collecting) {
-      collected.push(line);
-    }
-  }
-
-  return collected.join('\n').trim();
-}
-
-export function extractPlatformBaseBranch(body) {
-  return extractIssueSectionValue(body, 'Base Branch').split('\n')[0]?.trim() || '';
 }
 
 function labelNames(labelConnection) {
@@ -338,26 +305,9 @@ export function selectPlatformCandidate(items) {
       requestId: selected.requestId,
       runId: selected.runId,
       nextDecision: selected.nextDecision,
-      baseBranch: selected.baseBranch,
       branch: buildPlatformBranchName(selected.number, selected.title),
-      worktreePath: buildPlatformWorktreePath(selected.number),
     },
   };
-}
-
-export function selectCleanupCandidates(items) {
-  return items
-    .filter((item) => item.agent === 'claude')
-    .filter((item) => item.state === 'CLOSED' || statusMatches(item.status, 'done'))
-    .map((item) => ({
-      number: item.number,
-      title: item.title,
-      status: item.status,
-      state: item.state,
-      branch: buildPlatformBranchName(item.number, item.title),
-      worktreePath: buildPlatformWorktreePath(item.number),
-    }))
-    .sort((left, right) => left.number - right.number);
 }
 
 async function getPlatformProject() {
@@ -474,7 +424,6 @@ async function getPlatformProject() {
         requestId: fieldValues.get('Request ID')?.value || '',
         runId: fieldValues.get('Run ID')?.value || '',
         nextDecision: fieldValues.get('Next Decision')?.value || '',
-        baseBranch: extractPlatformBaseBranch(issue.body || ''),
         missingSections: missingPlatformSections(issue.body || ''),
       };
     });
@@ -560,13 +509,6 @@ async function handleNext() {
   const project = await getPlatformProject();
   const selection = selectPlatformCandidate(project.items);
   process.stdout.write(`${JSON.stringify(selection, null, 2)}\n`);
-}
-
-async function handleCleanupCandidates() {
-  const project = await getPlatformProject();
-  process.stdout.write(
-    `${JSON.stringify({ action: 'cleanup', items: selectCleanupCandidates(project.items) }, null, 2)}\n`,
-  );
 }
 
 async function handleIds(options) {
@@ -664,7 +606,7 @@ async function handleSetStatus(options) {
 }
 
 async function main() {
-  const command = requireCommand('next|ids|set-status|cleanup-candidates');
+  const command = requireCommand('next|ids|set-status');
   const options = parseArgs(process.argv.slice(3));
 
   if (command === 'next') {
@@ -682,13 +624,8 @@ async function main() {
     return;
   }
 
-  if (command === 'cleanup-candidates') {
-    await handleCleanupCandidates();
-    return;
-  }
-
   throw new Error(
-    `Unknown command "${command}". Use next, ids, set-status, or cleanup-candidates.`,
+    `Unknown command "${command}". Use next, ids, or set-status.`,
   );
 }
 

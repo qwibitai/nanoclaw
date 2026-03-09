@@ -7,6 +7,18 @@ MAX_AGE_HOURS="${NANOCLAW_PLATFORM_LOOP_MAX_AGE_HOURS:-60}"
 START_SCRIPT="$ROOT_DIR/scripts/workflow/start-platform-loop.sh"
 PROCESS_MATCH="${NANOCLAW_PLATFORM_LOOP_PROCESS_MATCH:-claude.*platform-pickup}"
 
+start_loop() {
+  local start_output
+  if ! start_output="$(bash "$START_SCRIPT" 2>&1)"; then
+    printf '%s\n' "$start_output" >&2
+    echo "platform-loop-health: failed to (re)start the dedicated Claude session" >&2
+    exit 1
+  fi
+  if [[ -n "$start_output" ]]; then
+    printf '%s\n' "$start_output"
+  fi
+}
+
 age_hours() {
   python3 - <<'PY' "$1"
 from datetime import datetime, timezone
@@ -34,7 +46,7 @@ if pgrep -f "$PROCESS_MATCH" >/dev/null 2>&1; then
     if (( age >= MAX_AGE_HOURS )); then
       pkill -f "$PROCESS_MATCH" || true
       sleep 2
-      bash "$START_SCRIPT"
+      start_loop
       echo "rearmed"
       exit 0
     fi
@@ -44,5 +56,5 @@ if pgrep -f "$PROCESS_MATCH" >/dev/null 2>&1; then
   exit 0
 fi
 
-bash "$START_SCRIPT"
+start_loop
 echo "started"

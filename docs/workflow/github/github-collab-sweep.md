@@ -92,6 +92,28 @@ The sweep reads `<!-- agent-handoff -->` markers in recent Issue comments and su
 | Handoffs from other agent | Acknowledge and act or comment with status |
 | Blocked items | Assess if you can unblock; if not, leave comment |
 
+### Review Lane Resolution Rule
+
+If `Needs My Review` contains an item, resolve that review lane before starting unrelated task work.
+
+Required review flow:
+
+1. Open the Project item and inspect its `linked pull requests` field first.
+2. If a linked PR exists, open that PR immediately and perform the review there.
+3. Use repo-qualified GitHub commands for lookups and review actions in this repository, for example:
+   - `gh pr view -R ingpoc/nanoclaw <number>`
+   - `gh pr diff -R ingpoc/nanoclaw <number>`
+4. Do not rely on unqualified `gh pr view <number>` in this checkout because multiple remotes/default repos can resolve the same number to the wrong repository.
+5. If the authenticated account cannot file a formal review because it owns the PR, leave an equivalent blocking or approval PR comment instead.
+6. If no linked PR exists yet, leave an Issue comment or handoff comment stating the missing review artifact and next action.
+7. If the review finding is on a Claude-authored PR and fixing it benefits from Claude's original implementation context, immediately switch into `docs/workflow/delivery/claude-cli-resume-consult-lane.md` and resume the exact Claude implementation session in an isolated PR worktree.
+
+The review lane is only considered handled once one of these is true:
+
+- the PR review is completed
+- an equivalent PR comment is posted when formal review is not possible
+- a concrete handoff comment with timeline/blocker is posted
+
 ## Stale Discussion Rule
 
 A discussion is stale if:

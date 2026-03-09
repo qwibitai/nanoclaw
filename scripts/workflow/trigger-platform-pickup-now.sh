@@ -7,10 +7,12 @@ STATE_FILE="$STATE_DIR/platform-pickup-manual-state.json"
 WORKTREE_PATH="${NANOCLAW_PLATFORM_LOOP_WORKTREE:-$ROOT_DIR/.worktrees/platform-loop}"
 WORKTREE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BRANCH:-claude-platform-loop}"
 BASE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BASE_BRANCH:-main}"
+REMOTE_NAME="${NANOCLAW_PLATFORM_LOOP_REMOTE:-origin}"
 PICKUP_COMMAND="${NANOCLAW_PLATFORM_PICKUP_COMMAND:-/platform-pickup}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
 CLAUDE_PERMISSION_MODE="${NANOCLAW_PLATFORM_CLAUDE_PERMISSION_MODE:-bypassPermissions}"
 SESSION_RUNNER="$ROOT_DIR/scripts/workflow/run-platform-claude-session.sh"
+SYNC_HELPER="$ROOT_DIR/scripts/workflow/platform-loop-sync.sh"
 DRY_RUN=0
 
 while (($#)); do
@@ -47,30 +49,23 @@ if command -v gh >/dev/null 2>&1; then
   gh auth switch --user "$GH_ACCOUNT" >/dev/null
 fi
 
-if [[ ! -d "$WORKTREE_PATH" ]]; then
-  mkdir -p "$(dirname "$WORKTREE_PATH")"
-  git -C "$ROOT_DIR" worktree add -B "$WORKTREE_BRANCH" "$WORKTREE_PATH" "$BASE_BRANCH"
+if [[ ! -x "$SYNC_HELPER" ]]; then
+  echo "platform loop sync helper is missing or not executable: $SYNC_HELPER" >&2
+  exit 1
 fi
 
-mkdir -p "$WORKTREE_PATH/.claude/commands" "$WORKTREE_PATH/scripts/workflow"
-cp "$ROOT_DIR/.claude/commands/platform-pickup.md" "$WORKTREE_PATH/.claude/commands/platform-pickup.md"
-cp "$ROOT_DIR/scripts/workflow/platform-loop.js" "$WORKTREE_PATH/scripts/workflow/platform-loop.js"
-cp "$ROOT_DIR/scripts/workflow/platform-loop-worktree.sh" "$WORKTREE_PATH/scripts/workflow/platform-loop-worktree.sh"
+sync_args=()
+if [[ "$DRY_RUN" == "1" ]]; then
+  sync_args+=(--dry-run)
+fi
+NANOCLAW_PLATFORM_LOOP_SOURCE_ROOT="$ROOT_DIR" \
+NANOCLAW_PLATFORM_LOOP_WORKTREE="$WORKTREE_PATH" \
+NANOCLAW_PLATFORM_LOOP_BRANCH="$WORKTREE_BRANCH" \
+NANOCLAW_PLATFORM_LOOP_BASE_BRANCH="$BASE_BRANCH" \
+NANOCLAW_PLATFORM_LOOP_REMOTE="$REMOTE_NAME" \
+bash "$SYNC_HELPER" "${sync_args[@]}"
 
-WORKTREE_EXCLUDE_FILE="$(git -C "$WORKTREE_PATH" rev-parse --git-path info/exclude)"
-mkdir -p "$(dirname "$WORKTREE_EXCLUDE_FILE")"
-for pattern in \
-  ".claude/commands/platform-pickup.md" \
-  ".claude/scheduled_tasks.lock" \
-  "scripts/workflow/platform-loop.js" \
-  "scripts/workflow/platform-loop-worktree.sh"
-do
-  if ! grep -Fqx "$pattern" "$WORKTREE_EXCLUDE_FILE" 2>/dev/null; then
-    echo "$pattern" >>"$WORKTREE_EXCLUDE_FILE"
-  fi
-done
-
-SHELL_COMMAND="bash \"$SESSION_RUNNER\" --worktree \"$WORKTREE_PATH\" --gh-account \"$GH_ACCOUNT\" --permission-mode \"$CLAUDE_PERMISSION_MODE\" --prompt \"$PICKUP_COMMAND\""
+SHELL_COMMAND="NANOCLAW_PLATFORM_LOOP_SOURCE_ROOT=\"$ROOT_DIR\" NANOCLAW_PLATFORM_LOOP_WORKTREE=\"$WORKTREE_PATH\" NANOCLAW_PLATFORM_LOOP_BRANCH=\"$WORKTREE_BRANCH\" NANOCLAW_PLATFORM_LOOP_BASE_BRANCH=\"$BASE_BRANCH\" NANOCLAW_PLATFORM_LOOP_REMOTE=\"$REMOTE_NAME\" bash \"$SESSION_RUNNER\" --worktree \"$WORKTREE_PATH\" --gh-account \"$GH_ACCOUNT\" --permission-mode \"$CLAUDE_PERMISSION_MODE\" --prompt \"$PICKUP_COMMAND\""
 
 json_escape() {
   python3 - <<'PY' "$1"
@@ -84,6 +79,9 @@ record_state() {
 {
   "worktree_path": $(json_escape "$WORKTREE_PATH"),
   "worktree_branch": $(json_escape "$WORKTREE_BRANCH"),
+  "base_branch": $(json_escape "$BASE_BRANCH"),
+  "remote_name": $(json_escape "$REMOTE_NAME"),
+  "source_root": $(json_escape "$ROOT_DIR"),
   "pickup_command": $(json_escape "$PICKUP_COMMAND"),
   "github_account": $(json_escape "$GH_ACCOUNT"),
   "permission_mode": $(json_escape "$CLAUDE_PERMISSION_MODE"),

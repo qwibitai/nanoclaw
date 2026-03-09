@@ -683,6 +683,7 @@
         ".github/DISCUSSION_TEMPLATE/ideas.yml",
         ".github/DISCUSSION_TEMPLATE/q-a.yml",
         ".github/ISSUE_TEMPLATE/config.yml",
+        ".claude/commands/platform-pickup.md",
         ".github/workflows/project-intake-sync.yml",
         ".github/workflows/project-status-sync.yml",
         ".claude/progress/feature-catalog.seed.json",
@@ -694,11 +695,23 @@
         "docs/workflow/github/github-agent-collaboration-loop.md",
         "docs/workflow/github/github-multi-agent-collaboration-loop.md",
         "docs/workflow/github/nanoclaw-github-control-plane.md",
+        "docs/workflow/github/nanoclaw-platform-loop.md",
+        "launchd/com.nanoclaw-platform-loop.plist",
+        "scripts/workflow/check-platform-loop.sh",
+        "scripts/workflow/platform-loop-sync.sh",
+        "scripts/workflow/platform-loop.js",
+        "scripts/workflow/run-platform-claude-session.sh",
+        "scripts/workflow/start-platform-loop.sh",
+        "scripts/workflow/trigger-platform-pickup-now.sh",
         "scripts/workflow/github-project-sync.js",
-        "setup/github-project-sync.test.ts"
+        "src/github-project-sync.test.ts",
+        "src/platform-loop-sync.test.ts",
+        "src/platform-loop.test.ts"
       ],
       "tests": [
-        "setup/github-project-sync.test.ts"
+        "src/github-project-sync.test.ts",
+        "src/platform-loop-sync.test.ts",
+        "src/platform-loop.test.ts"
       ]
     },
     {

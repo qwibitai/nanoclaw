@@ -13,6 +13,26 @@ Andy-developer may directly change:
 
 Andy-developer must not directly implement product source code.
 
+## Project Board Split
+
+Use separate boards only when they represent different domains:
+
+- `NanoClaw Platform`:
+  - NanoClaw functionality and features
+  - runtime/worker contracts
+  - SDK/tooling adoption
+  - GitHub governance/control-plane changes
+- `Andy/Jarvis Delivery`:
+  - user-provided project work
+  - project delivery tasks and follow-ups
+
+Rules:
+
+1. one execution item belongs to one board only
+2. if delivery work is blocked by platform work, create a linked platform Issue instead of duplicating the item on both boards
+3. SDK/tooling discussions promote to `NanoClaw Platform` by default unless explicitly scoped to project delivery
+4. `Andy/Jarvis Delivery` board state is host-managed from runtime request/worker transitions, not worker-authored GitHub edits
+
 ## Standard Sequence
 
 1. Define objective and required checks.
@@ -31,6 +51,36 @@ Required runtime surfaces:
 - `.claude/commands/platform-pickup.md`
 - `scripts/workflow/run-platform-claude-session.sh`
 - `scripts/workflow/platform-loop.js`
+<<<<<<< HEAD
+- `scripts/workflow/start-platform-loop.sh`
+- `scripts/workflow/trigger-platform-pickup-now.sh`
+- `scripts/workflow/check-platform-loop.sh`
+- `launchd/com.nanoclaw-platform-loop.plist`
+
+Operating rules:
+
+1. the loop confirms local GitHub auth is `ingpoc` before reading or mutating the NanoClaw platform board
+2. unanimous discussion promotion creates the platform Issue, but does not make it `Ready`
+3. before an issue can be marked `Ready`, Codex must write or normalize the scope, acceptance, checks, evidence, blocked conditions, and checked `Ready Checklist` on the Issue body
+4. the loop claims only one `Ready` platform issue at a time
+5. if any Claude-owned platform item is already `Review`, the loop must no-op
+6. the loop must move active implementation to `In Progress` and set `Agent=claude`
+7. the loop must move review-ready PRs to `Review`
+8. on ambiguity or failed required checks, the loop must move the item to `Blocked` with a concrete `Next Decision`
+9. the loop must leave issue comments when it claims work, blocks, and hands off to review so monitoring never depends on the Claude terminal alone
+10. Codex is the default review lane after the loop finishes implementation
+11. merge remains human-only
+
+CLI mode rule:
+
+1. use an interactive Claude Code session for `/loop`
+2. run the unattended platform loop in a dedicated git worktree so Claude changes stay isolated from the maintainer working tree
+3. launch that dedicated loop session with `--permission-mode bypassPermissions` so the unattended run cannot stall on interactive tool prompts
+4. load the repo `CLAUDE_CODE_OAUTH_TOKEN` into that session when present so the platform loop uses the subscription auth lane deterministically
+5. do not use `claude -p` to invoke `/platform-pickup`, because headless mode is for non-interactive prompts and interactive slash commands are unavailable there
+
+||||||| 7476e8b
+=======
 - `scripts/workflow/platform-loop-worktree.sh`
 - `scripts/workflow/start-platform-loop.sh`
 - `scripts/workflow/trigger-platform-pickup-now.sh`
@@ -60,6 +110,7 @@ CLI mode rule:
 3. launch that dedicated loop session with `--permission-mode bypassPermissions` so the unattended run cannot stall on interactive tool prompts
 4. load the repo `CLAUDE_CODE_OAUTH_TOKEN` into that session when present so the platform loop uses the subscription auth lane deterministically
 5. do not use `claude -p` to invoke `/platform-pickup`, because headless mode is for non-interactive prompts and interactive slash commands are unavailable there
+>>>>>>> origin/main
 ## Requirement-Based Review Decision
 
 | Profile | `@claude` Review |

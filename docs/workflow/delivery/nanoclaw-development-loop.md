@@ -86,10 +86,32 @@ If an incident is involved, `resolve` is allowed only after:
 3. Prevention note (how recurrence is blocked).
 4. Lesson reference (where CLAUDE/docs was updated).
 
+## Phase 7: Pre-Push Validation Gate
+
+Before invoking the `push` skill or equivalent git operations:
+
+1. **Format validation**: `npm run format:check`
+2. **Syntax validation** (for JS/TS): `node -c scripts/**/*.js` and `npm run build` if applicable
+3. **Tooling governance**: `bash scripts/check-tooling-governance.sh`
+4. **Remote verification**: Ensure you're pushing to `origin` (ingpoc/nanoclaw), NOT `upstream` (qwibitai/nanoclaw)
+5. **Merge conflict cleanup**: If merging main, verify `git diff --check` passes (no conflict markers)
+6. **PR body requirements**: Ensure PR body includes either:
+   - Linked issue number (`#123`)
+   - Or maintenance fallback: `No issue: <category>` (automation/docs/governance/admin/maintenance)
+
+**Fix strategy if gate fails:**
+
+- Format: Run `npm run format:fix`
+- Syntax: Fix compilation errors before pushing
+- Governance: Adjust budget in `docs/operations/tooling-governance-budget.json` with justification
+- Merge conflicts: Resolve manually or use origin/main version if appropriate
+- Remote: Verify git config; never push to upstream
+
 ## Exit Criteria
 
 A change is done when all are true:
 
 1. Acceptance gate manifest status is `pass`.
-2. Required contract/docs/test sync is complete.
-3. Incident state is updated correctly (open/resolved with evidence).
+2. Pre-push validation gate passes (all 6 checks).
+3. Required contract/docs/test sync is complete.
+4. Incident state is updated correctly (open/resolved with evidence).

@@ -3,10 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPlatformBranchName,
   buildPlatformRunContext,
-  buildPlatformWorktreePath,
-  extractPlatformBaseBranch,
   missingPlatformSections,
-  selectCleanupCandidates,
   selectPlatformCandidate,
 } from '../scripts/workflow/platform-loop.js';
 
@@ -38,7 +35,6 @@ describe('platform-loop helpers', () => {
       ),
     ).toEqual([
       'Expected Productivity Gain',
-      'Base Branch',
       'Required Checks',
       'Required Evidence',
       'Blocked If',
@@ -61,9 +57,6 @@ describe('platform-loop helpers', () => {
           '## Expected Productivity Gain',
           'Gain',
           '',
-          '## Base Branch',
-          'release/platform-pilot',
-          '',
           '## Required Checks',
           '- npm run build',
           '',
@@ -75,20 +68,6 @@ describe('platform-loop helpers', () => {
         ].join('\n'),
       ),
     ).toEqual([]);
-  });
-
-  it('extracts the issue base branch from issue-form sections', () => {
-    expect(
-      extractPlatformBaseBranch(
-        [
-          '## Problem Statement',
-          'X',
-          '',
-          '## Base Branch',
-          'release/platform-pilot',
-        ].join('\n'),
-      ),
-    ).toBe('release/platform-pilot');
   });
 
   it('prefers review queue blocks before picking new work', () => {
@@ -135,7 +114,6 @@ describe('platform-loop helpers', () => {
         requestId: '',
         runId: '',
         nextDecision: '',
-        baseBranch: 'main',
       },
       {
         number: 21,
@@ -150,7 +128,6 @@ describe('platform-loop helpers', () => {
         requestId: '',
         runId: '',
         nextDecision: '',
-        baseBranch: 'release/platform-pilot',
       },
     ]);
 
@@ -168,9 +145,7 @@ describe('platform-loop helpers', () => {
         requestId: '',
         runId: '',
         nextDecision: '',
-        baseBranch: 'release/platform-pilot',
         branch: 'claude-platform-21-adopt-loop-over-another-command',
-        worktreePath: '.worktrees/platform-21',
       },
     });
   });
@@ -190,7 +165,6 @@ describe('platform-loop helpers', () => {
         requestId: '',
         runId: '',
         nextDecision: '',
-        baseBranch: 'main',
       },
     ]);
 
@@ -207,54 +181,5 @@ describe('platform-loop helpers', () => {
         },
       ],
     });
-  });
-
-  it('lists done claude-owned items for cleanup', () => {
-    expect(
-      selectCleanupCandidates([
-        {
-          number: 38,
-          title: 'Structured outputs for dispatch',
-          state: 'OPEN',
-          status: 'Done',
-          agent: 'claude',
-        },
-        {
-          number: 39,
-          title: 'Human-owned done item',
-          state: 'OPEN',
-          status: 'Done',
-          agent: 'human',
-        },
-        {
-          number: 40,
-          title: 'Merged platform PR',
-          state: 'CLOSED',
-          status: 'Review',
-          agent: 'claude',
-        },
-      ]),
-    ).toEqual([
-      {
-        number: 38,
-        title: 'Structured outputs for dispatch',
-        status: 'Done',
-        state: 'OPEN',
-        branch: 'claude-platform-38-structured-outputs-for-dispatch',
-        worktreePath: '.worktrees/platform-38',
-      },
-      {
-        number: 40,
-        title: 'Merged platform PR',
-        status: 'Review',
-        state: 'CLOSED',
-        branch: 'claude-platform-40-merged-platform-pr',
-        worktreePath: '.worktrees/platform-40',
-      },
-    ]);
-  });
-
-  it('builds stable per-issue worktree paths', () => {
-    expect(buildPlatformWorktreePath(52)).toBe('.worktrees/platform-52');
   });
 });

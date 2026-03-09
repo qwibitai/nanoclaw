@@ -6,12 +6,9 @@
     <string>com.nanoclaw.platform-loop</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/zsh</string>
-        <string>-lc</string>
+        <string>/bin/bash</string>
         <string>{{PROJECT_ROOT}}/scripts/workflow/check-platform-loop.sh</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>{{PROJECT_ROOT}}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>StartInterval</key>
