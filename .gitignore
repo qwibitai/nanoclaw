@@ -41,6 +41,10 @@ agents-sdk-docs
 
 .claude/skills/brainstorming
 .claude/skills/gitnexus
+.claude/skills/skill-creator
+
+.cursor/
+.agents/
 
 # Channels - only track registry and index; others come from skills
 src/channels/*
