@@ -21,15 +21,23 @@ Replaced Docker runtime with Apple Container runtime. This is a full file replac
 - Apple Container returns JSON with `{ status, configuration: { id } }` structure
 
 ### CONTAINER_HOST_GATEWAY
-- Set to `'192.168.64.1'` — the default gateway for Apple Container VMs to reach the host
+- Dynamically detected at startup via `container network ls --format json`
+- Reads `status.ipv4Gateway` from the `default` network (e.g. `192.168.65.1`)
+- The subnet varies across machines — cannot be hardcoded
+- Falls back to `192.168.64.1` if detection fails
 - Docker uses `'host.docker.internal'` which is resolved differently
+
+### PROXY_BIND_HOST
+- Set to `'0.0.0.0'` — Apple Container VMs reach the host via the bridge gateway, so the proxy must listen on all interfaces
+- Docker (macOS) uses `'127.0.0.1'` because Docker Desktop routes `host.docker.internal` to loopback
+- Overridable via `CREDENTIAL_PROXY_HOST` env var
 
 ### hostGatewayArgs
 - Returns `[]` — Apple Container provides host networking natively on macOS
 - Docker version returns `['--add-host=host.docker.internal:host-gateway']` on Linux
 
 ## Invariants
-- All exports remain identical: `CONTAINER_RUNTIME_BIN`, `CONTAINER_HOST_GATEWAY`, `readonlyMountArgs`, `stopContainer`, `hostGatewayArgs`, `ensureContainerRuntimeRunning`, `cleanupOrphans`
+- All exports remain identical: `CONTAINER_RUNTIME_BIN`, `CONTAINER_HOST_GATEWAY`, `PROXY_BIND_HOST`, `readonlyMountArgs`, `stopContainer`, `hostGatewayArgs`, `ensureContainerRuntimeRunning`, `cleanupOrphans`
 - `stopContainer` implementation is unchanged (`<bin> stop <name>`)
 - Logger usage pattern is unchanged
 - Error handling pattern is unchanged
