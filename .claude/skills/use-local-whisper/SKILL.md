@@ -23,7 +23,13 @@ Switches voice transcription from OpenAI's Whisper API to local whisper.cpp. Run
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `use-local-whisper` is in `applied_skills`, skip to Phase 3 (Verify).
+Check if `src/transcription.ts` already uses `whisper-cli`:
+
+```bash
+grep 'whisper-cli' src/transcription.ts && echo "Already applied" || echo "Not applied"
+```
+
+If already applied, skip to Phase 3 (Verify).
 
 ### Check dependencies are installed
 
@@ -33,7 +39,6 @@ ffmpeg -version >/dev/null 2>&1 && echo "FFMPEG_OK" || echo "FFMPEG_MISSING"
 ```
 
 If missing, install via Homebrew:
-
 ```bash
 brew install whisper-cpp ffmpeg
 ```
@@ -45,7 +50,6 @@ ls data/models/ggml-*.bin 2>/dev/null || echo "NO_MODEL"
 ```
 
 If no model exists, download the base model (148MB, good balance of speed and accuracy):
-
 ```bash
 mkdir -p data/models
 curl -L -o data/models/ggml-base.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
@@ -55,8 +59,23 @@ For better accuracy at the cost of speed, use `ggml-small.bin` (466MB) or `ggml-
 
 ## Phase 2: Apply Code Changes
 
+### Ensure WhatsApp fork remote
+
 ```bash
-pnpm exec tsx scripts/apply-skill.ts .claude/skills/use-local-whisper
+git remote -v
+```
+
+If `whatsapp` is missing, add it:
+
+```bash
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+```
+
+### Merge the skill branch
+
+```bash
+git fetch whatsapp skill/local-whisper
+git merge whatsapp/skill/local-whisper
 ```
 
 This modifies `src/transcription.ts` to use the `whisper-cli` binary instead of the OpenAI API.
@@ -64,8 +83,7 @@ This modifies `src/transcription.ts` to use the `whisper-cli` binary instead of 
 ### Validate
 
 ```bash
-pnpm test
-pnpm run build
+npm run build
 ```
 
 ## Phase 3: Verify
@@ -75,13 +93,11 @@ pnpm run build
 The NanoClaw launchd service runs with a restricted PATH. `whisper-cli` and `ffmpeg` are in `/opt/homebrew/bin/` (Apple Silicon) or `/usr/local/bin/` (Intel), which may not be in the plist's PATH.
 
 Check the current PATH:
-
 ```bash
 grep -A1 'PATH' ~/Library/LaunchAgents/com.nanoclaw.plist
 ```
 
 If `/opt/homebrew/bin` is missing, add it to the `<string>` value inside the `PATH` key in the plist. Then reload:
-
 ```bash
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
@@ -90,7 +106,7 @@ launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 ### Build and restart
 
 ```bash
-pnpm run build
+npm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
@@ -105,7 +121,6 @@ tail -f logs/nanoclaw.log | grep -i -E "voice|transcri|whisper"
 ```
 
 Look for:
-
 - `Transcribed voice message` — successful transcription
 - `whisper.cpp transcription failed` — check model path, ffmpeg, or PATH
 
@@ -113,15 +128,14 @@ Look for:
 
 Environment variables (optional, set in `.env`):
 
-| Variable        | Default                     | Description                |
-| --------------- | --------------------------- | -------------------------- |
-| `WHISPER_BIN`   | `whisper-cli`               | Path to whisper.cpp binary |
-| `WHISPER_MODEL` | `data/models/ggml-base.bin` | Path to GGML model file    |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WHISPER_BIN` | `whisper-cli` | Path to whisper.cpp binary |
+| `WHISPER_MODEL` | `data/models/ggml-base.bin` | Path to GGML model file |
 
 ## Troubleshooting
 
 **"whisper.cpp transcription failed"**: Ensure both `whisper-cli` and `ffmpeg` are in PATH. The launchd service uses a restricted PATH — see Phase 3 above. Test manually:
-
 ```bash
 ffmpeg -f lavfi -i anullsrc=r=16000:cl=mono -t 1 -f wav /tmp/test.wav -y
 whisper-cli -m data/models/ggml-base.bin -f /tmp/test.wav --no-timestamps -nt

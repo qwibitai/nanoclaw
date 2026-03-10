@@ -8,7 +8,6 @@ description: Add Ollama MCP server so the container agent can call local models 
 This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models.
 
 Tools added:
-
 - `ollama_list_models` — lists installed Ollama models
 - `ollama_generate` — sends a prompt to a specified model and returns the response
 
@@ -16,7 +15,7 @@ Tools added:
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `ollama` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
+Check if `container/agent-runner/src/ollama-mcp-stdio.ts` exists. If it does, skip to Phase 3 (Configure).
 
 ### Check prerequisites
 
@@ -40,34 +39,33 @@ If no models are installed, suggest pulling one:
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure upstream remote
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-### Apply the skill
+If `upstream` is missing, add it:
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
-This deterministically:
+### Merge the skill branch
 
-- Adds `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
-- Adds `scripts/ollama-watch.sh` (macOS notification watcher)
-- Three-way merges Ollama MCP config into `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
-- Three-way merges `[OLLAMA]` log surfacing into `src/container-runner.ts`
-- Records the application in `.nanoclaw/state.yaml`
+```bash
+git fetch upstream skill/ollama-tool
+git merge upstream/skill/ollama-tool
+```
 
-If the apply reports merge conflicts, read the intent files:
+This merges in:
+- `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
+- `scripts/ollama-watch.sh` (macOS notification watcher)
+- Ollama MCP config in `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
+- `[OLLAMA]` log surfacing in `src/container-runner.ts`
+- `OLLAMA_HOST` in `.env.example`
 
-- `modify/container/agent-runner/src/index.ts.intent.md` — what changed and invariants
-- `modify/src/container-runner.ts.intent.md` — what changed and invariants
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Copy to per-group agent-runner
 
@@ -83,7 +81,7 @@ done
 ### Validate code changes
 
 ```bash
-pnpm run build
+npm run build
 ./container/build.sh
 ```
 
@@ -131,7 +129,6 @@ tail -f logs/nanoclaw.log | grep -i ollama
 ```
 
 Look for:
-
 - `Agent output: ... Ollama ...` — agent used Ollama successfully
 - `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
 - `[OLLAMA] <<< Done` — generation completed
@@ -141,7 +138,6 @@ Look for:
 ### Agent says "Ollama is not installed"
 
 The agent is trying to run `ollama` CLI inside the container instead of using the MCP tools. This means:
-
 1. The MCP server wasn't registered — check `container/agent-runner/src/index.ts` has the `ollama` entry in `mcpServers`
 2. The per-group source wasn't updated — re-copy files (see Phase 2)
 3. The container wasn't rebuilt — run `./container/build.sh`

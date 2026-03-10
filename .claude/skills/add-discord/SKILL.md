@@ -1,12 +1,17 @@
+---
+name: add-discord
+description: Add Discord bot channel integration to NanoClaw.
+---
+
 # Add Discord Channel
 
-This skill adds Discord support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Discord support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/discord.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -18,41 +23,40 @@ If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `discord` is missing, add it:
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-discord
+git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
 ```
 
-This deterministically:
+### Merge the skill branch
 
-- Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
-- Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
-- Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
-- Installs the `discord.js` npm dependency
-- Records the application in `.nanoclaw/state.yaml`
+```bash
+git fetch discord main
+git merge discord/main
+```
 
-If the apply reports merge conflicts, read the intent file:
+This merges in:
+- `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
+- `src/channels/discord.test.ts` (unit tests with discord.js mock)
+- `import './discord.js'` appended to the channel barrel file `src/channels/index.ts`
+- `discord.js` npm dependency in `package.json`
+- `DISCORD_BOT_TOKEN` in `.env.example`
 
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-pnpm test
-pnpm run build
+npm install
+npm run build
+npx vitest run src/channels/discord.test.ts
 ```
 
 All tests must pass (including the new Discord tests) and build must be clean before proceeding.
@@ -100,7 +104,7 @@ The container reads environment from `data/env/env`, not `.env` directly.
 ### Build and restart
 
 ```bash
-pnpm run build
+npm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
@@ -156,7 +160,6 @@ registerGroup("dc:<channel-id>", {
 Tell the user:
 
 > Send a message in your registered Discord channel:
->
 > - For main channel: Any message works
 > - For non-main: @mention the bot in Discord
 >
@@ -181,14 +184,12 @@ tail -f logs/nanoclaw.log
 ### Bot only responds to @mentions
 
 This is the default behavior for non-main channels (`requiresTrigger: true`). To change:
-
 - Update the registered group's `requiresTrigger` to `false`
 - Or register the channel as the main channel
 
 ### Message Content Intent not enabled
 
 If the bot connects but can't read messages, ensure:
-
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Select your application > **Bot** tab
 3. Under **Privileged Gateway Intents**, enable **Message Content Intent**
@@ -197,14 +198,12 @@ If the bot connects but can't read messages, ensure:
 ### Getting Channel ID
 
 If you can't copy the channel ID:
-
 - Ensure **Developer Mode** is enabled: User Settings > Advanced > Developer Mode
 - Right-click the channel name in the server sidebar > Copy Channel ID
 
 ## After Setup
 
 The Discord bot supports:
-
 - Text messages in registered channels
 - Attachment descriptions (images, videos, files shown as placeholders)
 - Reply context (shows who the user is replying to)

@@ -9,45 +9,60 @@ Adds the ability for NanoClaw agents to see and understand images sent via Whats
 
 ## Phase 1: Pre-flight
 
-1. Check `.nanoclaw/state.yaml` for `add-image-vision` — skip if already applied
+1. Check if `src/image.ts` exists — skip to Phase 3 if already applied
 2. Confirm `sharp` is installable (native bindings require build tools)
+
+**Prerequisite:** WhatsApp must be installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
 ## Phase 2: Apply Code Changes
 
-1. Initialize the skills system if not already done:
+### Ensure WhatsApp fork remote
 
-   ```bash
-   pnpm exec tsx -e "import { initNanoclawDir } from './skills-engine/init.ts'; initNanoclawDir();"
-   ```
+```bash
+git remote -v
+```
 
-2. Apply the skill:
+If `whatsapp` is missing, add it:
 
-   ```bash
-   pnpm exec tsx skills-engine/apply-skill.ts add-image-vision
-   ```
+```bash
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+```
 
-3. Install new dependency:
+### Merge the skill branch
 
-   ```bash
-   pnpm add sharp
-   ```
+```bash
+git fetch whatsapp skill/image-vision
+git merge whatsapp/skill/image-vision
+```
 
-4. Validate:
-   ```bash
-   pnpm run typecheck
-   pnpm test
-   ```
+This merges in:
+- `src/image.ts` (image download, resize via sharp, base64 encoding)
+- `src/image.test.ts` (8 unit tests)
+- Image attachment handling in `src/channels/whatsapp.ts`
+- Image passing to agent in `src/index.ts` and `src/container-runner.ts`
+- Image content block support in `container/agent-runner/src/index.ts`
+- `sharp` npm dependency in `package.json`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
+
+### Validate code changes
+
+```bash
+npm install
+npm run build
+npx vitest run src/image.test.ts
+```
+
+All tests must pass and build must be clean before proceeding.
 
 ## Phase 3: Configure
 
 1. Rebuild the container (agent-runner changes need a rebuild):
-
    ```bash
    ./container/build.sh
    ```
 
 2. Sync agent-runner source to group caches:
-
    ```bash
    for dir in data/sessions/*/agent-runner-src/; do
      cp container/agent-runner/src/*.ts "$dir"
@@ -71,5 +86,5 @@ Adds the ability for NanoClaw agents to see and understand images sent via Whats
 ## Troubleshooting
 
 - **"Image - download failed"**: Check WhatsApp connection stability. The download may timeout on slow connections.
-- **"Image - processing failed"**: Sharp may not be installed correctly. Run `pnpm ls sharp` to verify.
+- **"Image - processing failed"**: Sharp may not be installed correctly. Run `npm ls sharp` to verify.
 - **Agent doesn't mention image content**: Check container logs for "Loaded image" messages. If missing, ensure agent-runner source was synced to group caches.

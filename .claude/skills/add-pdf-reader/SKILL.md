@@ -9,46 +9,44 @@ Adds PDF reading capability to all container agents using poppler-utils (pdftote
 
 ## Phase 1: Pre-flight
 
-### Check if already applied
-
-Read `.nanoclaw/state.yaml`. If `add-pdf-reader` is in `applied_skills`, skip to Phase 3 (Verify).
+1. Check if `container/skills/pdf-reader/pdf-reader` exists — skip to Phase 3 if already applied
+2. Confirm WhatsApp is installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
 ## Phase 2: Apply Code Changes
 
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist:
+### Ensure WhatsApp fork remote
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-### Apply the skill
+If `whatsapp` is missing, add it:
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-pdf-reader
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 ```
 
-This deterministically:
+### Merge the skill branch
 
-- Adds `container/skills/pdf-reader/SKILL.md` (agent-facing documentation)
-- Adds `container/skills/pdf-reader/pdf-reader` (CLI script)
-- Three-way merges `poppler-utils` + COPY into `container/Dockerfile`
-- Three-way merges PDF attachment download into `src/channels/whatsapp.ts`
-- Three-way merges PDF tests into `src/channels/whatsapp.test.ts`
-- Records application in `.nanoclaw/state.yaml`
+```bash
+git fetch whatsapp skill/pdf-reader
+git merge whatsapp/skill/pdf-reader
+```
 
-If merge conflicts occur, read the intent files:
+This merges in:
+- `container/skills/pdf-reader/SKILL.md` (agent-facing documentation)
+- `container/skills/pdf-reader/pdf-reader` (CLI script)
+- `poppler-utils` in `container/Dockerfile`
+- PDF attachment download in `src/channels/whatsapp.ts`
+- PDF tests in `src/channels/whatsapp.test.ts`
 
-- `modify/container/Dockerfile.intent.md`
-- `modify/src/channels/whatsapp.ts.intent.md`
-- `modify/src/channels/whatsapp.test.ts.intent.md`
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate
 
 ```bash
-pnpm test
-pnpm run build
+npm run build
+npx vitest run src/channels/whatsapp.test.ts
 ```
 
 ### Rebuild container
@@ -69,7 +67,6 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 ### Test PDF extraction
 
 Send a PDF file in any registered WhatsApp chat. The agent should:
-
 1. Download the PDF to `attachments/`
 2. Respond acknowledging the PDF
 3. Be able to extract text when asked
@@ -85,7 +82,6 @@ tail -f logs/nanoclaw.log | grep -i pdf
 ```
 
 Look for:
-
 - `Downloaded PDF attachment` — successful download
 - `Failed to download PDF attachment` — media download issue
 

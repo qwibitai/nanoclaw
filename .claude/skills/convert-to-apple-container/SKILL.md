@@ -8,7 +8,6 @@ description: Switch from Docker to Apple Container for macOS-native container is
 This skill switches NanoClaw's container runtime from Docker to Apple Container (macOS-only). It uses the skills engine for deterministic code changes, then walks through verification.
 
 **What this changes:**
-
 - Container runtime binary: `docker` → `container`
 - Mount syntax: `-v path:path:ro` → `--mount type=bind,source=...,target=...,readonly`
 - Startup check: `docker info` → `container system status` (with auto-start)
@@ -18,7 +17,6 @@ This skill switches NanoClaw's container runtime from Docker to Apple Container 
 - Container runner: main-group containers start as root for `mount --bind`, then drop privileges via `setpriv`
 
 **What stays the same:**
-
 - Mount security/allowlist validation
 - All exported interfaces and IPC protocol
 - Non-main container behavior (still uses `--user` flag)
@@ -33,7 +31,6 @@ container --version && echo "Apple Container ready" || echo "Install Apple Conta
 ```
 
 If not installed:
-
 - Download from https://github.com/apple/container/releases
 - Install the `.pkg` file
 - Verify: `container --version`
@@ -44,10 +41,6 @@ Apple Container requires macOS. It does not work on Linux.
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `convert-to-apple-container` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
-
-### Check current runtime
-
 ```bash
 grep "CONTAINER_RUNTIME_BIN" src/container-runtime.ts
 ```
@@ -56,45 +49,39 @@ If it already shows `'container'`, the runtime is already Apple Container. Skip 
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure upstream remote
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `upstream` is missing, add it:
 
 ```bash
-pnpm exec tsx scripts/apply-skill.ts .claude/skills/convert-to-apple-container
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
-This deterministically:
+### Merge the skill branch
 
-- Replaces `src/container-runtime.ts` with the Apple Container implementation
-- Replaces `src/container-runtime.test.ts` with Apple Container-specific tests
-- Updates `src/container-runner.ts` with .env shadow mount fix and privilege dropping
-- Updates `container/Dockerfile` with entrypoint that shadows .env via `mount --bind`
-- Updates `container/build.sh` to default to `container` runtime
-- Records the application in `.nanoclaw/state.yaml`
+```bash
+git fetch upstream skill/apple-container
+git merge upstream/skill/apple-container
+```
 
-If the apply reports merge conflicts, read the intent files:
+This merges in:
+- `src/container-runtime.ts` — Apple Container implementation (replaces Docker)
+- `src/container-runtime.test.ts` — Apple Container-specific tests
+- `src/container-runner.ts` — .env shadow mount fix and privilege dropping
+- `container/Dockerfile` — entrypoint that shadows .env via `mount --bind`
+- `container/build.sh` — default runtime set to `container`
 
-- `modify/src/container-runtime.ts.intent.md` — what changed and invariants
-- `modify/src/container-runner.ts.intent.md` — .env shadow and privilege drop changes
-- `modify/container/Dockerfile.intent.md` — entrypoint changes for .env shadowing
-- `modify/container/build.sh.intent.md` — what changed for build script
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-pnpm test
-pnpm run build
+npm test
+npm run build
 ```
 
 All tests must pass and build must be clean before proceeding.
@@ -148,7 +135,7 @@ Expected: Both operations succeed.
 ### Full integration test
 
 ```bash
-pnpm run build
+npm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
@@ -157,20 +144,17 @@ Send a message via WhatsApp and verify the agent responds.
 ## Troubleshooting
 
 **Apple Container not found:**
-
 - Download from https://github.com/apple/container/releases
 - Install the `.pkg` file
 - Verify: `container --version`
 
 **Runtime won't start:**
-
 ```bash
 container system start
 container system status
 ```
 
 **Image build fails:**
-
 ```bash
 # Clean rebuild — Apple Container caches aggressively
 container builder stop && container builder rm && container builder start
@@ -182,10 +166,10 @@ Check directory permissions on the host. The container runs as uid 1000.
 
 ## Summary of Changed Files
 
-| File                            | Type of Change                                                               |
-| ------------------------------- | ---------------------------------------------------------------------------- |
-| `src/container-runtime.ts`      | Full replacement — Docker → Apple Container API                              |
-| `src/container-runtime.test.ts` | Full replacement — tests for Apple Container behavior                        |
-| `src/container-runner.ts`       | .env shadow mount removed, main containers start as root with privilege drop |
-| `container/Dockerfile`          | Entrypoint: `mount --bind` for .env shadowing, `setpriv` privilege drop      |
-| `container/build.sh`            | Default runtime: `docker` → `container`                                      |
+| File | Type of Change |
+|------|----------------|
+| `src/container-runtime.ts` | Full replacement — Docker → Apple Container API |
+| `src/container-runtime.test.ts` | Full replacement — tests for Apple Container behavior |
+| `src/container-runner.ts` | .env shadow mount removed, main containers start as root with privilege drop |
+| `container/Dockerfile` | Entrypoint: `mount --bind` for .env shadowing, `setpriv` privilege drop |
+| `container/build.sh` | Default runtime: `docker` → `container` |
