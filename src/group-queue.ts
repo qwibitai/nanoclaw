@@ -164,6 +164,7 @@ export class GroupQueue {
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      fs.chownSync(tempPath, 1000, 1000);
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {
@@ -181,7 +182,9 @@ export class GroupQueue {
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
-      fs.writeFileSync(path.join(inputDir, '_close'), '');
+      const closePath = path.join(inputDir, '_close');
+      fs.writeFileSync(closePath, '');
+      fs.chownSync(closePath, 1000, 1000);
     } catch {
       // ignore
     }

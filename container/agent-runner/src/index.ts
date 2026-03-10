@@ -510,9 +510,13 @@ async function main(): Promise<void> {
 
   // Build SDK env: merge secrets into process.env for the SDK only.
   // Secrets never touch process.env itself, so Bash subprocesses can't see them.
+  // Exception: GITHUB_TOKEN is set on process.env so `gh` CLI can use it.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
   for (const [key, value] of Object.entries(containerInput.secrets || {})) {
     sdkEnv[key] = value;
+    if (key === 'GITHUB_TOKEN') {
+      process.env.GITHUB_TOKEN = value;
+    }
   }
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));

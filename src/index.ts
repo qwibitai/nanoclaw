@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  PROGRESS_UPDATE_INTERVAL,
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
@@ -193,6 +194,24 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
+  // Periodic "still working" timer — sends a status message when the agent
+  // has been silent for PROGRESS_UPDATE_INTERVAL ms so the user knows it's alive.
+  let progressTimer: ReturnType<typeof setInterval> | null = null;
+  const startProgressTimer = () => {
+    if (progressTimer) clearInterval(progressTimer);
+    progressTimer = setInterval(async () => {
+      try {
+        await channel.sendMessage(chatJid, '⏳ Still working...');
+      } catch (err) {
+        logger.warn({ group: group.name, err }, 'Failed to send progress update');
+      }
+    }, PROGRESS_UPDATE_INTERVAL);
+  };
+  const resetProgressTimer = () => {
+    startProgressTimer();
+  };
+  startProgressTimer();
+
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -206,6 +225,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       if (text) {
         await channel.sendMessage(chatJid, text);
         outputSentToUser = true;
+        resetProgressTimer();
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -220,6 +240,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   });
 
+  if (progressTimer) clearInterval(progressTimer);
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
 

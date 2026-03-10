@@ -17,6 +17,12 @@ groups/main/*
 groups/global/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/geodesic-copilot/
+groups/geodesic-copilot/*
+!groups/geodesic-copilot/CLAUDE.md
+!groups/dayzero/
+groups/dayzero/*
+!groups/dayzero/CLAUDE.md
 
 # Secrets
 *.keys.json

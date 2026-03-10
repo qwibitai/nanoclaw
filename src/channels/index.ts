@@ -5,7 +5,14 @@
 
 // gmail
 
+// dayzero
+import './dayzero.js';
+
+// geodesic
+import './geodesic.js';
+
 // slack
+import './slack.js';
 
 // telegram
 

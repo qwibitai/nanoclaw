@@ -120,6 +120,8 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Ensure the mounted .claude dir is writable by the container's node user (uid 1000)
+  fs.chownSync(groupSessionsDir, 1000, 1000);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
@@ -164,9 +166,12 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  for (const sub of ['messages', 'tasks', 'input']) {
+    const dir = path.join(groupIpcDir, sub);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chownSync(dir, 1000, 1000);
+  }
+  fs.chownSync(groupIpcDir, 1000, 1000);
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
@@ -220,6 +225,13 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
+    'GITHUB_TOKEN',
+    'GEODESIC_AUTH_TENANT_ID',
+    'GEODESIC_AUTH_CLIENT_ID',
+    'GEODESIC_AUTH_CLIENT_SECRET',
+    'GEODESIC_AUTH_SCOPE',
+    'GEODESIC_ENDPOINT',
+    'GEODESIC_DATA_TENANT',
   ]);
 }
 
@@ -661,6 +673,7 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+  fs.chownSync(tasksFile, 1000, 1000);
 }
 
 export interface AvailableGroup {
@@ -699,4 +712,5 @@ export function writeGroupsSnapshot(
       2,
     ),
   );
+  fs.chownSync(groupsFile, 1000, 1000);
 }
