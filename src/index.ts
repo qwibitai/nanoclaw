@@ -418,7 +418,7 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
-            logger.debug(
+            logger.info(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
@@ -433,6 +433,7 @@ async function startMessageLoop(): Promise<void> {
               );
           } else {
             // No active container — enqueue for a new one
+            logger.info({ chatJid, count: messagesToSend.length }, 'Message received, starting new container');
             queue.enqueueMessageCheck(chatJid);
           }
         }

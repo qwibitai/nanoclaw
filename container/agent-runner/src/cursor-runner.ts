@@ -175,7 +175,7 @@ export async function main(): Promise<void> {
     while (true) {
       const prompt = isFirstPrompt
         ? buildPrompt(containerInput, currentPromptText)
-        : applyScheduledTaskPrefix(currentPromptText, containerInput.isScheduledTask);
+        : currentPromptText;
       isFirstPrompt = false;
       log(`Sending prompt (session: ${sessionId}, chars: ${prompt.length})`);
 
