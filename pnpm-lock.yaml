@@ -27,9 +27,6 @@ importers:
       pino-pretty:
         specifier: ^13.0.0
         version: 13.1.3
-      yaml:
-        specifier: ^2.8.2
-        version: 2.8.2
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13

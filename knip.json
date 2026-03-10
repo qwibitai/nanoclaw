@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@latest/schema.json",
-  "entry": ["scripts/*.ts", "skills-engine/index.ts"],
-  "project": ["src/**/*.ts", "setup/**/*.ts", "skills-engine/**/*.ts", "scripts/**/*.ts"],
+  "entry": ["scripts/*.ts"],
+  "project": ["src/**/*.ts", "setup/**/*.ts", "scripts/**/*.ts"],
   "ignoreDependencies": ["pino-pretty", "@vitest/coverage-v8"],
   "ignoreExportsUsedInFile": true,
   "rules": {
