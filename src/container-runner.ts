@@ -40,6 +40,7 @@ export interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   secrets?: Record<string, string>;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
 export interface ContainerOutput {
@@ -162,6 +163,16 @@ function buildVolumeMounts(
     });
   }
 
+  // gogcli config directory (OAuth tokens and keyring for gog CLI)
+  const gogcliDir = path.join(homeDir, '.config', 'gogcli');
+  if (fs.existsSync(gogcliDir)) {
+    mounts.push({
+      hostPath: gogcliDir,
+      containerPath: '/home/node/.config/gogcli',
+      readonly: false, // keyring may rotate refresh tokens
+    });
+  }
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -216,7 +227,13 @@ function buildVolumeMounts(
  * Secrets are never written to disk or mounted as files.
  */
 function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
+  return readEnvFile([
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GOG_KEYRING_PASSWORD',
+    'GOG_ACCOUNT',
+  ]);
 }
 
 function buildContainerArgs(
