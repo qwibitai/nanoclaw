@@ -13,10 +13,19 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/gentech_agency/
+!groups/gentech_labs/
+!groups/gentech_strategies/
 groups/main/*
 groups/global/*
+groups/gentech_agency/*
+groups/gentech_labs/*
+groups/gentech_strategies/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/gentech_agency/CLAUDE.md
+!groups/gentech_labs/CLAUDE.md
+!groups/gentech_strategies/CLAUDE.md
 
 # Secrets
 *.keys.json
