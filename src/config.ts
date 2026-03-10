@@ -3,8 +3,10 @@ import path from 'path';
 import { parseIntEnv, readEnvFile } from './env.js';
 
 // Read config values from .env (falls back to process.env).
-// Secrets are NOT read here — they stay on disk and are loaded only
-// where needed (container-runner.ts) to avoid leaking to child processes.
+// Secrets (API keys, tokens) are NOT read here — they are loaded only
+// by the credential proxy (credential-proxy.ts), never exposed to containers.
+// TELEGRAM_BOT_TOKEN and TELEGRAM_ONLY are host-side config used by the
+// Telegram channel, not secrets passed to containers.
 const envConfig = readEnvFile([
   'ASSISTANT_NAME',
   'ASSISTANT_HAS_OWN_NUMBER',
@@ -48,6 +50,10 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseIntEnv(
   'CONTAINER_MAX_OUTPUT_SIZE',
   10485760,
 ); // 10MB default
+export const CREDENTIAL_PROXY_PORT = parseInt(
+  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  10,
+);
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseIntEnv('IDLE_TIMEOUT', 1800000); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
