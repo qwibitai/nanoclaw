@@ -32,9 +32,19 @@
         "promising investment opportunities"
       ]
     },
-    "custom_tracking": {
+    "culture": {
       "enabled": true,
       "priority": 4,
+      "topics": [
+        "new music releases and album reviews",
+        "box office hits and movie reviews",
+        "art exhibitions and cultural events",
+        "streaming shows and entertainment news"
+      ]
+    },
+    "custom_tracking": {
+      "enabled": true,
+      "priority": 5,
       "topics": [
         "Claude AI and Anthropic developments",
         "WhatsApp Business API updates"
