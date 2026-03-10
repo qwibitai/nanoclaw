@@ -222,6 +222,7 @@ function readSecrets(): Record<string, string> {
     'ANTHROPIC_AUTH_TOKEN',
     'GOOGLE_SERVICE_ACCOUNT_KEY',
     'GOOGLE_DRIVE_FOLDER_ID',
+    'XAI_API_KEY',
   ]);
 }
 

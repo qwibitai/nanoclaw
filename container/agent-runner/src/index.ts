@@ -417,6 +417,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: process.env.CLAUDE_MODEL || 'claude-opus-4-6',
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
@@ -427,7 +428,7 @@ async function runQuery(
       allowedTools: [
         'Bash',
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
-        'WebSearch', 'WebFetch',
+        'WebFetch',
         'Task', 'TaskOutput', 'TaskStop',
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
@@ -446,6 +447,7 @@ async function runQuery(
             NANOCLAW_CHAT_JID: containerInput.chatJid,
             NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+            XAI_API_KEY: sdkEnv['XAI_API_KEY'] || '',
           },
         },
       },

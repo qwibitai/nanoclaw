@@ -10,6 +10,7 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { grokWebSearch } from './grok-web-search.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -19,6 +20,7 @@ const TASKS_DIR = path.join(IPC_DIR, 'tasks');
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
 const groupFolder = process.env.NANOCLAW_GROUP_FOLDER!;
 const isMain = process.env.NANOCLAW_IS_MAIN === '1';
+const xaiApiKey = process.env.XAI_API_KEY || '';
 
 function writeIpcFile(dir: string, data: object): string {
   fs.mkdirSync(dir, { recursive: true });
@@ -276,6 +278,28 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+    };
+  },
+);
+
+server.tool(
+  'web_search',
+  'Search the web using Grok (xAI). Uses xAI\'s native web_search tool via the Responses API for real-time results with inline citations. Use for current events, fact-checking, or any question needing up-to-date information.',
+  {
+    query: z.string().describe('The search query'),
+  },
+  async (args) => {
+    if (!xaiApiKey) {
+      return {
+        content: [{ type: 'text' as const, text: 'Web search unavailable: XAI_API_KEY not configured.' }],
+        isError: true,
+      };
+    }
+
+    const result = await grokWebSearch(args.query, xaiApiKey);
+    return {
+      content: [{ type: 'text' as const, text: result.text }],
+      isError: result.isError,
     };
   },
 );
