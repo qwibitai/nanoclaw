@@ -4,6 +4,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 const mockCreate = vi.fn().mockResolvedValue({ data: { message_id: 'msg_1' } });
 const mockStart = vi.fn();
 
+// Mock readEnvFile so tests don't read the real .env file
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn().mockReturnValue({}),
+}));
+
 vi.mock('@larksuiteoapi/node-sdk', () => {
   // Must use function() (not arrow) so they work with `new`
   function MockClient() {

@@ -12,6 +12,7 @@
 
 import * as Lark from '@larksuiteoapi/node-sdk';
 
+import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import type { Channel, NewMessage } from '../types.js';
 import type { ChannelOpts } from './registry.js';
@@ -232,11 +233,24 @@ class FeishuChannel implements Channel {
 
 // --- Self-registration ---
 // The channel is automatically enabled when FEISHU_APP_ID is set.
+// Reads from .env file (via readEnvFile) with process.env fallback,
+// matching NanoClaw's convention of not leaking secrets into process.env.
 registerChannel('feishu', (opts) => {
-  const appId = process.env.FEISHU_APP_ID?.trim();
-  const appSecret = process.env.FEISHU_APP_SECRET?.trim();
+  const envCfg = readEnvFile([
+    'FEISHU_APP_ID',
+    'FEISHU_APP_SECRET',
+    'FEISHU_DOMAIN',
+  ]);
+  const appId = (process.env.FEISHU_APP_ID ?? envCfg.FEISHU_APP_ID)?.trim();
+  const appSecret = (
+    process.env.FEISHU_APP_SECRET ?? envCfg.FEISHU_APP_SECRET
+  )?.trim();
   if (!appId || !appSecret) return null;
 
-  const domain = (process.env.FEISHU_DOMAIN ?? 'feishu').toLowerCase();
+  const domain = (
+    process.env.FEISHU_DOMAIN ??
+    envCfg.FEISHU_DOMAIN ??
+    'feishu'
+  ).toLowerCase();
   return new FeishuChannel(opts, appId, appSecret, domain);
 });
