@@ -97,7 +97,11 @@ export async function sendPoolMessage(
       'Pool message sent',
     );
   } catch (err) {
-    logger.error({ chatId, sender, err }, 'Failed to send pool message');
+    logger.error({ chatId, sender, err }, 'Failed to send pool message, falling back to main bot');
+    if (_mainBotApi) {
+      const numericId = chatId.replace(/^tg:/, '');
+      await _mainBotApi.sendMessage(numericId, `[${sender}] ${text}`);
+    }
   }
 }
 
