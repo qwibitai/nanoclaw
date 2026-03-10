@@ -149,6 +149,13 @@ function buildVolumeMounts(
     );
   }
 
+  // Pre-create and chmod debug directory for Agent SDK trace files.
+  // When running as root on Linux, the container's node user (uid 1000) cannot
+  // write to directories created by the host without explicit permissions.
+  const debugDir = path.join(groupSessionsDir, 'debug');
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.chmodSync(debugDir, 0o777);
+
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
@@ -169,9 +176,13 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
+  // When running as root on Linux, chmod these to 777 so the container's
+  // node user (uid 1000) can unlink() processed IPC files.
+  for (const ipcSubdir of ['messages', 'tasks', 'input']) {
+    const dir = path.join(groupIpcDir, ipcSubdir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.chmodSync(dir, 0o777);
+  }
   mounts.push({
     hostPath: groupIpcDir,
     containerPath: '/workspace/ipc',
