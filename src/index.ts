@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -465,7 +466,73 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/** PID lockfile path for single-instance enforcement */
+const PID_LOCKFILE = path.join(DATA_DIR, 'nanoclaw.pid');
+
+/**
+ * Check if a process with the given PID is alive.
+ * Uses process.kill(pid, 0) which doesn't send a signal but checks if process exists.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Acquire exclusive lock via PID file.
+ * Enforces single-instance behavior and prevents duplicate runs.
+ */
+function acquireLock(): void {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  if (fs.existsSync(PID_LOCKFILE)) {
+    const existingPid = parseInt(
+      fs.readFileSync(PID_LOCKFILE, 'utf-8').trim(),
+      10,
+    );
+    if (!isNaN(existingPid) && isProcessAlive(existingPid)) {
+      console.error(
+        `\n╔════════════════════════════════════════════════════════════════╗
+║  ERROR: NanoClaw is already running (PID ${existingPid})           ║
+║                                                                ║
+║  Only one instance is allowed to run at a time.                  ║
+║  If you're sure this is an error, delete:                        ║
+║    ${PID_LOCKFILE}               ║
+╚════════════════════════════════════════════════════════════════╝\n`,
+      );
+      process.exit(1);
+    }
+    // Stale lockfile - process is dead, will be overwritten
+  }
+
+  // Write current PID with secure permissions (owner read/write only)
+  fs.writeFileSync(PID_LOCKFILE, String(process.pid), { mode: 0o600 });
+
+  // Release lock on exit
+  const releaseLockOnExit = () => {
+    if (fs.existsSync(PID_LOCKFILE)) {
+      const content = fs.readFileSync(PID_LOCKFILE, 'utf-8').trim();
+      if (parseInt(content, 10) === process.pid) {
+        fs.unlinkSync(PID_LOCKFILE);
+      }
+    }
+  };
+
+  // Register cleanup handlers for all exit scenarios
+  process.once('SIGTERM', releaseLockOnExit);
+  process.once('SIGINT', releaseLockOnExit);
+  process.once('exit', releaseLockOnExit);
+  process.once('uncaughtException', releaseLockOnExit);
+}
+
 async function main(): Promise<void> {
+  // Enforce single-instance behavior before any initialization
+  acquireLock();
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
