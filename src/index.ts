@@ -6,9 +6,11 @@ import {
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { initBotPool } from './channels/telegram.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -175,7 +177,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     const groupTrigger = buildGroupTriggerPattern(group);
     const hasTrigger = missedMessages.some(
       (m) =>
-        (TRIGGER_PATTERN.test(m.content.trim()) || groupTrigger.test(m.content.trim())) &&
+        (TRIGGER_PATTERN.test(m.content.trim()) ||
+          groupTrigger.test(m.content.trim())) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -404,7 +407,8 @@ async function startMessageLoop(): Promise<void> {
             const groupTrigger = buildGroupTriggerPattern(group);
             const hasTrigger = groupMessages.some(
               (m) =>
-                (TRIGGER_PATTERN.test(m.content.trim()) || groupTrigger.test(m.content.trim())) &&
+                (TRIGGER_PATTERN.test(m.content.trim()) ||
+                  groupTrigger.test(m.content.trim())) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
@@ -545,6 +549,10 @@ async function main(): Promise<void> {
   if (channels.length === 0) {
     logger.fatal('No channels connected');
     process.exit(1);
+  }
+
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
   }
 
   // Start subsystems (independently of connection handler)
