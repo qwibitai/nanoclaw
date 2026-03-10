@@ -3,6 +3,9 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
+ * Service routing: URL path prefix identifies the service (e.g. /claude/).
+ * The prefix is stripped before forwarding to the upstream.
+ *
  * Two auth modes:
  *   API key:  Proxy injects x-api-key on every request.
  *   OAuth:    Container CLI exchanges its placeholder token for a temp
@@ -21,6 +24,13 @@ export type AuthMode = 'api-key' | 'oauth';
 
 export interface ProxyConfig {
   authMode: AuthMode;
+}
+
+/** Parse service prefix from URL path (e.g. /claude/v1/messages → { service: 'claude', path: '/v1/messages' }). */
+function parseServicePrefix(url: string): { service: string; path: string } | null {
+  const match = url.match(/^\/([a-z][a-z0-9-]*)(\/.*)?$/);
+  if (!match) return null;
+  return { service: match[1], path: match[2] || '/' };
 }
 
 export function startCredentialProxy(
@@ -50,6 +60,21 @@ export function startCredentialProxy(
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
         const body = Buffer.concat(chunks);
+
+        // Parse service prefix from URL
+        const parsed = parseServicePrefix(req.url || '/');
+        if (!parsed) {
+          res.writeHead(400);
+          res.end('Bad Request: missing service prefix (e.g. /claude/)');
+          return;
+        }
+
+        if (parsed.service !== 'claude') {
+          res.writeHead(404);
+          res.end(`Unknown service: ${parsed.service}`);
+          return;
+        }
+
         const headers: Record<string, string | number | string[] | undefined> =
           {
             ...(req.headers as Record<string, string>),
@@ -79,11 +104,12 @@ export function startCredentialProxy(
           }
         }
 
+        // Forward to upstream with service prefix stripped
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: parsed.path,
             method: req.method,
             headers,
           } as RequestOptions,

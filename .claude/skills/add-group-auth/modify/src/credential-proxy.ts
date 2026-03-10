@@ -3,11 +3,12 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
- * Group-aware: containers set ANTHROPIC_BASE_URL to
- *   http://host:3001/scope/<group-folder>/
- * The proxy strips the /scope/<id>/ prefix, resolves credentials for
- * that group via the credential store (with fallback to .env), and
- * forwards to the real upstream.
+ * Identification:
+ *   Container → group: Docker bridge IP (req.socket.remoteAddress)
+ *   Service routing:   URL path prefix (e.g. /claude/v1/messages)
+ *
+ * Currently supported services:
+ *   /claude/*  — Anthropic API (api-key or OAuth mode)
  *
  * Two auth modes (resolved per-request from the group's credentials):
  *   API key:  Proxy injects x-api-key on every request.
@@ -48,11 +49,34 @@ export function setCredentialResolver(resolver: CredentialResolver): void {
   credentialResolver = resolver;
 }
 
-/** Parse /scope/<id>/ prefix from URL. Returns { scope, path } or null if no prefix. */
-function parseScopedUrl(url: string): { scope: string; path: string } | null {
-  const match = url.match(/^\/scope\/([^/]+)(\/.*)?$/);
+// --- Container IP → group scope registry ---
+// Each Docker container on a bridge network gets a unique IP assigned by the kernel.
+// container-runner registers the mapping after spawn; we look it up on each request.
+const containerIpToScope = new Map<string, string>();
+
+/** Register a container IP → group scope mapping (called by container-runner after spawn). */
+export function registerContainerIP(ip: string, scope: string): void {
+  containerIpToScope.set(ip, scope);
+  logger.debug({ ip, scope }, 'Registered container IP');
+}
+
+/** Unregister a container IP mapping (called on container exit). */
+export function unregisterContainerIP(ip: string): void {
+  containerIpToScope.delete(ip);
+  logger.debug({ ip }, 'Unregistered container IP');
+}
+
+/** Normalize IPv4-mapped IPv6 addresses (e.g. ::ffff:172.17.0.2 → 172.17.0.2). */
+function normalizeIP(raw: string): string {
+  if (raw.startsWith('::ffff:')) return raw.slice(7);
+  return raw;
+}
+
+/** Parse service prefix from URL path. Returns { service, path } or null. */
+function parseServicePrefix(url: string): { service: string; path: string } | null {
+  const match = url.match(/^\/([a-z][a-z0-9-]*)(\/.*)?$/);
   if (!match) return null;
-  return { scope: decodeURIComponent(match[1]), path: match[2] || '/' };
+  return { service: match[1], path: match[2] || '/' };
 }
 
 export function startCredentialProxy(
@@ -74,14 +98,31 @@ export function startCredentialProxy(
       req.on('end', () => {
         const body = Buffer.concat(chunks);
 
-        // Extract group scope from URL prefix — reject requests without it
-        const parsed = parseScopedUrl(req.url || '/');
+        // Parse service prefix from URL (e.g. /claude/v1/messages)
+        const parsed = parseServicePrefix(req.url || '/');
         if (!parsed) {
           res.writeHead(400);
-          res.end('Bad Request: missing /scope/<group>/ prefix');
+          res.end('Bad Request: missing service prefix (e.g. /claude/)');
           return;
         }
-        const { scope, path: upstreamPath } = parsed;
+
+        // Currently only /claude/ is supported
+        if (parsed.service !== 'claude') {
+          res.writeHead(404);
+          res.end(`Unknown service: ${parsed.service}`);
+          return;
+        }
+
+        // Identify which container is calling by its bridge IP
+        const remoteIP = normalizeIP(req.socket.remoteAddress || '');
+        const scope = containerIpToScope.get(remoteIP) || 'default';
+
+        if (!containerIpToScope.has(remoteIP)) {
+          logger.warn(
+            { remoteIP, service: parsed.service, url: req.url },
+            'Request from unknown container IP, using default credentials',
+          );
+        }
 
         // Resolve credentials for this scope
         const secrets = credentialResolver(scope);
@@ -120,11 +161,12 @@ export function startCredentialProxy(
           }
         }
 
+        // Forward to upstream with service prefix stripped
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: upstreamPath,
+            path: parsed.path,
             method: req.method,
             headers,
           } as RequestOptions,
@@ -136,7 +178,7 @@ export function startCredentialProxy(
 
         upstream.on('error', (err) => {
           logger.error(
-            { err, url: req.url, scope },
+            { err, url: req.url, scope, service: parsed.service },
             'Credential proxy upstream error',
           );
           if (!res.headersSent) {

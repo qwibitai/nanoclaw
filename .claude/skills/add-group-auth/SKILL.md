@@ -43,8 +43,8 @@ This deterministically:
 - Adds `src/auth/` module (types, store, registry, exec, gpg, guard, provision, reauth, providers)
 - Adds `container/shims/xdg-open` (blocks browser opening for console-friendly OAuth)
 - Modifies `src/config.ts` to read `NEW_GROUPS_USE_DEFAULT_CREDENTIALS`
-- Modifies `src/credential-proxy.ts` to make the proxy group-aware (scope from URL prefix, pluggable credential resolver)
-- Modifies `src/container-runner.ts` to pass group scope in `ANTHROPIC_BASE_URL` path prefix
+- Modifies `src/credential-proxy.ts` to make the proxy group-aware (container IP → group scope, `/claude/` service prefix, pluggable credential resolver)
+- Modifies `src/container-runner.ts` to register container IP with proxy after spawn and set `ANTHROPIC_BASE_URL` with `/claude` service prefix
 - Modifies `src/index.ts` to integrate auth checks, reauth, credential resolver wiring, and initialization
 - Modifies `src/types.ts` to add `useDefaultCredentials` to `ContainerConfig`
 - Adds `NEW_GROUPS_USE_DEFAULT_CREDENTIALS` to `.env.example`
@@ -114,7 +114,7 @@ NEW_GROUPS_USE_DEFAULT_CREDENTIALS=false
 
 ## How It Works
 
-**Credential proxy**: Containers route all API traffic through a host-side HTTP proxy. Each container's `ANTHROPIC_BASE_URL` includes a `/scope/<group-folder>/` prefix. The proxy strips the prefix, resolves credentials for that group from the encrypted store (falling back to `.env`-imported defaults), and injects them into the upstream request. Containers never see real credentials.
+**Credential proxy**: Containers route all API traffic through a host-side HTTP proxy. Two-axis identification: the URL path prefix identifies the service (`/claude/`, stripped before forwarding upstream), and the container's Docker bridge IP (`req.socket.remoteAddress`) identifies the group. The container-runner registers the IP → group mapping after spawn and unregisters on exit. The proxy looks up the group, resolves credentials from the encrypted store (falling back to `.env`-imported defaults), and injects them into the upstream request. Containers never see real credentials.
 
 **Credential scoping**: Each group's scope is its folder name (e.g., `whatsapp_main`). The `default` scope holds credentials imported from `.env`. Resolution: group-specific → default (if allowed).
 
