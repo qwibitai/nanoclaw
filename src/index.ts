@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -466,7 +467,109 @@ function ensureContainerSystemRunning(): void {
   cleanupOrphans();
 }
 
+/**
+ * PID lockfile to prevent multiple instances from running simultaneously.
+ *
+ * Prevents duplicate instances when restart signals don't propagate
+ * (e.g., distrobox-enter, systemd user service restarts).
+ *
+ * Lockfile: data/nanoclaw.pid contains the running process's PID.
+ */
+const PID_LOCKFILE = path.join(DATA_DIR, 'nanoclaw.pid');
+
+/**
+ * Check if a process with the given PID is currently running.
+ */
+function isProcessAlive(pid: number): boolean {
+  try {
+    // Sending signal 0 checks if process exists without killing it
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    // ESRCH: no such process, PID is stale
+    return false;
+  }
+}
+
+/**
+ * Acquire the PID lockfile. Exits if another instance is running.
+ *
+ * @throws {Error} If lockfile cannot be created or another instance is running
+ */
+function acquireLock(): void {
+  // Ensure data directory exists
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+
+  // Check if lockfile exists
+  if (fs.existsSync(PID_LOCKFILE)) {
+    try {
+      const content = fs.readFileSync(PID_LOCKFILE, 'utf-8').trim();
+      const existingPid = parseInt(content, 10);
+
+      if (!isNaN(existingPid) && isProcessAlive(existingPid)) {
+        console.error(
+          `\n╔════════════════════════════════════════════════════════════════╗\n` +
+          `║  ERROR: NanoClaw is already running (PID ${existingPid})            ║\n` +
+          `║                                                                ║\n` +
+          `║  Only one instance is allowed to run at a time.                 ║\n` +
+          `║  To start a new instance, first stop the existing one:            ║\n` +
+          `║    - macOS/Linux: kill ${existingPid}                                      ║\n` +
+          `║    - Or find and kill: pkill -f "node.*nanoclaw"                   ║\n` +
+          `║                                                                ║\n` +
+          `║  If you're certain no other instance is running, delete:            ║\n` +
+          `║    rm ${PID_LOCKFILE}\n` +
+          `╚════════════════════════════════════════════════════════════════╝\n`,
+        );
+        process.exit(1);
+      }
+
+      // Stale lockfile (process not alive), log and overwrite
+      logger.warn(
+        { existingPid },
+        'Found stale PID lockfile (process not alive), overwriting',
+      );
+    } catch (err) {
+      // Lockfile exists but is corrupted/unreadable, log warning
+      logger.warn({ err }, 'Failed to read PID lockfile, overwriting');
+    }
+  }
+
+  // Write current PID to lockfile with restrictive permissions
+  try {
+    fs.writeFileSync(
+      PID_LOCKFILE,
+      String(process.pid),
+      { mode: 0o600 }, // rw------- (owner only)
+    );
+  } catch (err) {
+    logger.fatal({ err, lockfile: PID_LOCKFILE }, 'Failed to create PID lockfile');
+    console.error('\nERROR: Cannot create PID lockfile. Check permissions for:\n  ' + PID_LOCKFILE);
+    process.exit(1);
+  }
+
+  // Register cleanup handler for all exit paths
+  const releaseLockOnExit = () => {
+    try {
+      if (fs.existsSync(PID_LOCKFILE)) {
+        const content = fs.readFileSync(PID_LOCKFILE, 'utf-8').trim();
+        if (parseInt(content, 10) === process.pid) {
+          fs.unlinkSync(PID_LOCKFILE);
+        }
+      }
+    } catch {
+      // Best-effort cleanup, don't block exit
+    }
+  };
+
+  // Clean up on all exit signals and events
+  process.once('SIGTERM', releaseLockOnExit);
+  process.once('SIGINT', releaseLockOnExit);
+  process.once('exit', releaseLockOnExit);
+  process.once('uncaughtException', releaseLockOnExit);
+}
+
 async function main(): Promise<void> {
+  acquireLock();
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
