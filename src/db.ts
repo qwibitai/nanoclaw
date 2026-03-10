@@ -620,9 +620,7 @@ export function getThreadMessages(
  * Look up a single message by its platform-specific ID across all chats.
  * Used when we have a message ID but don't know the chat_jid (e.g., Discord link).
  */
-export function findMessageById(
-  id: string,
-):
+export function findMessageById(id: string):
   | {
       chat_jid: string;
       timestamp: string;

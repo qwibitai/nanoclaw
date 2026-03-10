@@ -346,13 +346,12 @@ function parseSlackUrl(url: string): { channelId: string; threadTs: string } | n
  * Format: https://discord.com/channels/{guildId}/{channelId}/{messageId}
  * The channelId may be a regular channel or a thread channel.
  */
-function parseDiscordUrl(url: string): { guildId: string; channelId: string; messageId?: string } | null {
-  const match = url.match(/https?:\/\/(?:ptb\.|canary\.)?discord\.com\/channels\/(\d+)\/(\d+)(?:\/(\d+))?/);
+function parseDiscordUrl(url: string): { channelId: string; messageId?: string } | null {
+  const match = url.match(/https?:\/\/(?:ptb\.|canary\.)?discord\.com\/channels\/\d+\/(\d+)(?:\/(\d+))?/);
   if (!match) return null;
   return {
-    guildId: match[1],
-    channelId: match[2],
-    messageId: match[3] || undefined,
+    channelId: match[1],
+    messageId: match[2] || undefined,
   };
 }
 

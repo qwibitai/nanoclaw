@@ -403,10 +403,11 @@ export class SlackChannel implements Channel {
         this.lastUserMessageTs.get(baseJid);
       if (messageTs) this.typingMessageTs.set(lookupKey, messageTs);
     } else {
-      messageTs =
-        this.typingMessageTs.get(lookupKey) ||
-        this.lastUserMessageTs.get(lookupKey) ||
-        this.lastUserMessageTs.get(baseJid);
+      // Only clear if we have an active typing indicator (idempotent stop).
+      // Without this check, repeated setTyping(false) calls would make
+      // redundant Slack API calls on every streaming output chunk.
+      if (!this.typingMessageTs.has(lookupKey)) return;
+      messageTs = this.typingMessageTs.get(lookupKey);
       this.typingMessageTs.delete(lookupKey);
     }
 

@@ -468,6 +468,28 @@ function writeQueryResponse(
   fs.renameSync(tempPath, filepath);
 }
 
+/** Convert DB message rows to IPC wire format. */
+function formatMessagesForIpc(
+  messages: Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: number;
+  }>,
+): Array<{
+  sender: string;
+  content: string;
+  timestamp: string;
+  is_from_me: boolean;
+}> {
+  return messages.map((m) => ({
+    sender: m.sender_name,
+    content: m.content,
+    timestamp: m.timestamp,
+    is_from_me: m.is_from_me === 1,
+  }));
+}
+
 function processQueryIpc(
   data: {
     type: string;
@@ -526,12 +548,7 @@ function processQueryIpc(
       writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
         status: 'ok',
         chatJid: threadJid,
-        messages: messages.map((m) => ({
-          sender: m.sender_name,
-          content: m.content,
-          timestamp: m.timestamp,
-          is_from_me: m.is_from_me === 1,
-        })),
+        messages: formatMessagesForIpc(messages),
       });
       break;
     }
@@ -569,12 +586,7 @@ function processQueryIpc(
       writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
         status: 'ok',
         chatJid: data.chatJid,
-        messages: msgs.map((m) => ({
-          sender: m.sender_name,
-          content: m.content,
-          timestamp: m.timestamp,
-          is_from_me: m.is_from_me === 1,
-        })),
+        messages: formatMessagesForIpc(msgs),
       });
       break;
     }
@@ -631,12 +643,7 @@ function processQueryIpc(
       writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
         status: 'ok',
         chatJid,
-        messages: messages.map((m) => ({
-          sender: m.sender_name,
-          content: m.content,
-          timestamp: m.timestamp,
-          is_from_me: m.is_from_me === 1,
-        })),
+        messages: formatMessagesForIpc(messages),
       });
       break;
     }
