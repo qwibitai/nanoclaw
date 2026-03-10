@@ -1010,9 +1010,17 @@ export async function runContainerAgent(
     }
   }
 
-  // Create thread-specific IPC input directory before container launch
+  // Create thread-specific IPC input directory before container launch.
+  // chown to 1000 (container user) so the container can delete consumed files.
   const ipcInputDir = resolveGroupIpcInputPath(group.folder, ipcInputSubdir);
   fs.mkdirSync(ipcInputDir, { recursive: true });
+  if (process.getuid?.() === 0) {
+    try {
+      fs.chownSync(ipcInputDir, 1000, 1000);
+    } catch {
+      // best-effort
+    }
+  }
 
   const mounts = buildVolumeMounts(
     group,

@@ -336,10 +336,10 @@ function drainIpcInput(): string[] {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
         const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
         }
+        try { fs.unlinkSync(filePath); } catch { /* ignore delete failures */ }
       } catch (err) {
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         try { fs.unlinkSync(filePath); } catch { /* ignore */ }

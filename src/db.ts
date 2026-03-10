@@ -358,7 +358,10 @@ const knownThreadChats = new Set<string>();
 export function storeMessage(msg: NewMessage): void {
   // Thread JIDs (e.g. slack:C123:thread:ts) may not have a chats row yet.
   // Auto-create one to satisfy the foreign key on messages.chat_jid.
-  if (msg.chat_jid.includes(':thread:') && !knownThreadChats.has(msg.chat_jid)) {
+  if (
+    msg.chat_jid.includes(':thread:') &&
+    !knownThreadChats.has(msg.chat_jid)
+  ) {
     db.prepare(
       `INSERT OR IGNORE INTO chats (jid, last_message_time, channel, is_group) VALUES (?, ?, ?, 1)`,
     ).run(

@@ -74,7 +74,8 @@ function getApiKey(): string {
   if (!cachedApiKey) {
     cachedApiKey = readEnvFile(['ANTHROPIC_API_KEY']).ANTHROPIC_API_KEY;
   }
-  if (!cachedApiKey) throw new Error('ANTHROPIC_API_KEY not available for topic classifier');
+  if (!cachedApiKey)
+    throw new Error('ANTHROPIC_API_KEY not available for topic classifier');
   return cachedApiKey;
 }
 

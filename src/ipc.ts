@@ -3,7 +3,12 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE, getParentJid } from './config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+  getParentJid,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
   createTask,
@@ -195,7 +200,10 @@ export function startIpcWatcher(deps: IpcDeps): void {
           }
         }
       } catch (err) {
-        logger.error({ err, sourceGroup }, 'Error reading IPC queries directory');
+        logger.error(
+          { err, sourceGroup },
+          'Error reading IPC queries directory',
+        );
       }
     }
 
