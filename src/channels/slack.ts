@@ -154,8 +154,11 @@ export class SlackChannel implements Channel {
 
       // After filtering, event is either GenericMessageEvent or BotMessageEvent
       const msg = event as HandledMessageEvent;
+      const msgAny = msg as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-      if (!msg.text) return;
+      // Skip messages with no content at all (no text, attachments, or blocks)
+      if (!msg.text && !msgAny.attachments?.length && !msgAny.blocks?.length)
+        return;
 
       const baseJid = `slack:${msg.channel}`;
       // thread_ts is present when the message is inside a thread.
@@ -179,11 +182,16 @@ export class SlackChannel implements Channel {
       const threadSessionsEnabled =
         group.containerConfig?.enableThreadSessions !== false;
 
-      const isBotMessage = !!msg.bot_id || msg.user === this.botUserId;
+      // Distinguish our bot from external bots (dbt Cloud, GitHub, etc.)
+      const isOurBot = msg.user === this.botUserId;
+      const isAnyBot = !!msg.bot_id || isOurBot;
 
       let senderName: string;
-      if (isBotMessage) {
+      if (isOurBot) {
         senderName = assistantName;
+      } else if (isAnyBot) {
+        senderName =
+          (msg as any).username || (msg as any).bot_profile?.name || msg.bot_id || 'bot'; // eslint-disable-line @typescript-eslint/no-explicit-any
       } else {
         senderName =
           (msg.user ? await this.resolveUserName(msg.user) : undefined) ||
@@ -191,13 +199,14 @@ export class SlackChannel implements Channel {
           'unknown';
       }
 
-      let content = msg.text;
+      // Extract content — fall back to attachments/blocks for integration messages
+      let content = msg.text || this.extractFallbackText(msgAny);
 
       // Check for bot mention in the raw message BEFORE wrapping with thread
       // context, so old @mentions in the thread history don't false-trigger.
       const hasBotMention =
         !!this.botUserId &&
-        !isBotMessage &&
+        !isAnyBot &&
         content.includes(`<@${this.botUserId}>`);
 
       // Track which thread to reply in and which message gets the emoji.
@@ -205,7 +214,7 @@ export class SlackChannel implements Channel {
       // (even in threads) should not steal the thread anchor or emoji target.
       // Slack channels are shared workspaces where teammates talk to each other;
       // the bot only responds when explicitly tagged.
-      if (!isBotMessage && hasBotMention) {
+      if (!isAnyBot && hasBotMention) {
         this.replyThreadTs.set(baseJid, threadTs || msg.ts);
         this.lastUserMessageTs.set(baseJid, msg.ts);
         // For thread messages, also key by the thread JID so setTyping
@@ -220,7 +229,7 @@ export class SlackChannel implements Channel {
       // fetch thread history so the agent has full context of the conversation.
       // When thread sessions ARE enabled, the session already has context —
       // skip the expensive history fetch.
-      if (threadTs && !isBotMessage && !threadSessionsEnabled) {
+      if (threadTs && !isAnyBot && !threadSessionsEnabled) {
         const threadContext = await this.fetchThreadHistory(
           msg.channel,
           threadTs,
@@ -254,8 +263,8 @@ export class SlackChannel implements Channel {
         sender_name: senderName,
         content,
         timestamp,
-        is_from_me: isBotMessage,
-        is_bot_message: isBotMessage,
+        is_from_me: isOurBot,
+        is_bot_message: isOurBot,
       });
     });
   }
@@ -480,6 +489,49 @@ export class SlackChannel implements Channel {
       );
     } catch (err) {
       logger.error({ err }, 'Failed to sync Slack channel metadata');
+    }
+  }
+
+  async fetchMessage(
+    jid: string,
+    messageId: string,
+  ): Promise<import('../types.js').NewMessage | undefined> {
+    const parsed = parseThreadJid(jid);
+    const channelId = parsed ? parsed.parentId : jid.replace(/^slack:/, '');
+    try {
+      const result = await this.app.client.conversations.history({
+        channel: channelId,
+        latest: messageId,
+        inclusive: true,
+        limit: 1,
+      });
+      const msg = result.messages?.[0];
+      if (!msg || msg.ts !== messageId) return undefined;
+
+      const isBotMsg = !!msg.bot_id || msg.user === this.botUserId;
+      const isOurBot = msg.user === this.botUserId;
+      const senderName = isBotMsg
+        ? isOurBot
+          ? resolveAssistantName()
+          : msg.username || msg.bot_id || 'bot'
+        : msg.user
+          ? (await this.resolveUserName(msg.user)) || msg.user
+          : 'unknown';
+      const content = msg.text || this.extractFallbackText(msg);
+
+      return {
+        id: msg.ts!,
+        chat_jid: `slack:${channelId}`,
+        sender: msg.user || msg.bot_id || '',
+        sender_name: senderName,
+        content,
+        timestamp: new Date(parseFloat(msg.ts!) * 1000).toISOString(),
+        is_from_me: isOurBot,
+        is_bot_message: isOurBot,
+      };
+    } catch (err) {
+      logger.warn({ jid, messageId, err }, 'Failed to fetch Slack message');
+      return undefined;
     }
   }
 

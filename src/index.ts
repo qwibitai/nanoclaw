@@ -359,12 +359,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // For thread sessions on first invocation (no existing session),
   // prepend the parent message that started the thread for context.
   // The parent message is stored under the parent JID with id = threadId (Slack ts).
+  // Falls back to fetching from the channel API when the message isn't in the DB
+  // (e.g. external bot messages like dbt Cloud, GitHub, etc. that were never stored).
   if (effectiveThreadId && threadId) {
     const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
     const existingSession = sessions.get(sessionKey);
     if (!existingSession) {
-      const parentMsg = getMessageById(effectiveThreadId, parentJid);
-      if (parentMsg && !missedMessages.some((m) => m.id === parentMsg.id)) {
+      let parentMsg = getMessageById(effectiveThreadId, parentJid);
+      if (!parentMsg) {
+        const channel = findChannel(channels, parentJid);
+        if (channel?.fetchMessage) {
+          parentMsg = await channel.fetchMessage(parentJid, effectiveThreadId);
+        }
+      }
+      if (parentMsg && !missedMessages.some((m) => m.id === parentMsg!.id)) {
         missedMessages.unshift(parentMsg);
       }
     }

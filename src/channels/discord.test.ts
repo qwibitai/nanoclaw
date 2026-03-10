@@ -12,11 +12,17 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  GROUP_THREAD_KEY: '__group__',
   escapeRegex: (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
   buildTriggerPattern: (name: string) =>
     new RegExp(`^@${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
   resolveAssistantName: (config?: { assistantName?: string }) =>
     config?.assistantName || 'Andy',
+  parseThreadJid: (jid: string) => {
+    const match = jid.match(/^(dc|slack):([^:]+):thread:(.+)$/);
+    if (!match) return null;
+    return { channel: match[1], parentId: match[2], threadId: match[3] };
+  },
 }));
 
 // Mock logger
@@ -27,6 +33,13 @@ vi.mock('../logger.js', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
+}));
+
+// Mock db (getThreadOrigin/setThreadOrigin used for thread origin tracking)
+vi.mock('../db.js', () => ({
+  getThreadOrigin: vi.fn(() => null),
+  setThreadOrigin: vi.fn(),
+  updateChatName: vi.fn(),
 }));
 
 // --- discord.js mock ---
@@ -168,6 +181,8 @@ function createMessage(overrides: {
     guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? 'general',
+      isThread: () => false,
+      parentId: null,
       messages: {
         fetch: vi.fn().mockResolvedValue({
           author: { username: 'Bob', displayName: 'Bob' },
@@ -274,7 +289,7 @@ describe('DiscordChannel', () => {
           chat_jid: 'dc:1234567890123456',
           sender: '55512345',
           sender_name: 'Alice',
-          content: 'Hello everyone',
+          content: '@Andy Hello everyone',
           is_from_me: false,
         }),
       );
@@ -449,7 +464,7 @@ describe('DiscordChannel', () => {
       );
     });
 
-    it('does not translate when bot is not mentioned', async () => {
+    it('prepends trigger even when bot is not @mentioned', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -463,7 +478,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: 'hello everyone',
+          content: '@Andy hello everyone',
         }),
       );
     });
@@ -510,7 +525,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Image: photo.png]',
+          content: '@Andy [Image: photo.png]',
         }),
       );
     });
@@ -533,7 +548,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Video: clip.mp4]',
+          content: '@Andy [Video: clip.mp4]',
         }),
       );
     });
@@ -556,7 +571,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[File: report.pdf]',
+          content: '@Andy [File: report.pdf]',
         }),
       );
     });
@@ -579,7 +594,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: 'Check this out\n[Image: photo.jpg]',
+          content: '@Andy Check this out\n[Image: photo.jpg]',
         }),
       );
     });
@@ -603,7 +618,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Image: a.png]\n[File: b.txt]',
+          content: '@Andy [Image: a.png]\n[File: b.txt]',
         }),
       );
     });
@@ -627,7 +642,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Reply to Bob] I agree with that',
+          content: '@Andy [Reply to Bob] I agree with that',
         }),
       );
     });

@@ -12,11 +12,13 @@ vi.mock('./config.js', () => ({
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
   DATA_DIR: '/tmp/nanoclaw-test-data',
+  GROUP_THREAD_KEY: '__group__',
   GROUPS_DIR: '/tmp/nanoclaw-test-groups',
   IDLE_TIMEOUT: 1800000, // 30min
   PLUGIN_DIR: '/tmp/nanoclaw-test-plugin',
   RESIDENTIAL_PROXY_URL: undefined,
   TIMEZONE: 'America/Los_Angeles',
+  WORKTREES_DIR: '/tmp/nanoclaw-test-worktrees',
   escapeRegex: (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
 }));
 

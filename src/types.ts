@@ -106,6 +106,9 @@ export interface Channel {
   // Prevents stale redirects from sending task/recap output into old threads.
   // When threadId is provided, only clear state for that specific thread.
   clearThreadState?(parentJid: string, threadId?: string): void;
+  // Optional: fetch a single message by ID from the platform API.
+  // Used as fallback when the message isn't in the local DB (e.g. external bot messages).
+  fetchMessage?(jid: string, messageId: string): Promise<NewMessage | undefined>;
 }
 
 // Callback type that channels use to deliver inbound messages
