@@ -29,6 +29,7 @@ import {
   cleanupOrphanWorktrees,
   cleanupThreadWorkspace,
   runContainerAgent,
+  withGroupMutex,
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
@@ -457,7 +458,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Clear stale thread redirect state so the next conversation (or scheduled
   // task) for this channel doesn't accidentally send into the old thread.
-  channel.clearThreadState?.(parentJid);
+  // Pass effectiveThreadId so only that thread's state is cleared — other
+  // concurrent threads in the same channel keep their emoji tracking intact.
+  channel.clearThreadState?.(parentJid, effectiveThreadId);
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —
@@ -561,9 +564,13 @@ async function runAgent(
 
     if (output.newSessionId) persistSession(output.newSessionId);
 
-    // Clean up worktree workspace (if one was created)
+    // Clean up worktree workspace (if one was created).
+    // Must use withGroupMutex to serialize against prepareThreadWorkspace —
+    // both touch .git/worktrees/ and CLAUDE.md merge-back.
     if (threadId) {
-      cleanupThreadWorkspace(group.folder, threadId).catch((err) =>
+      withGroupMutex(group.folder, () =>
+        cleanupThreadWorkspace(group.folder, threadId),
+      ).catch((err) =>
         logger.warn(
           { group: group.name, threadId, err },
           'Worktree cleanup error',

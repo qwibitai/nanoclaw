@@ -348,17 +348,24 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
-  clearThreadState(parentJid: string): void {
-    this.replyThreadTs.delete(parentJid);
-    this.lastUserMessageTs.delete(parentJid);
-    this.typingMessageTs.delete(parentJid);
-    // Also clear thread-keyed entries (slack:{channel}:thread:{ts})
-    const threadPrefix = `${parentJid}:thread:`;
-    for (const key of this.lastUserMessageTs.keys()) {
-      if (key.startsWith(threadPrefix)) this.lastUserMessageTs.delete(key);
-    }
-    for (const key of this.typingMessageTs.keys()) {
-      if (key.startsWith(threadPrefix)) this.typingMessageTs.delete(key);
+  clearThreadState(parentJid: string, threadId?: string): void {
+    if (threadId) {
+      // Per-thread cleanup: only clear state for this specific thread
+      const threadJid = `${parentJid}:thread:${threadId}`;
+      this.lastUserMessageTs.delete(threadJid);
+      this.typingMessageTs.delete(threadJid);
+    } else {
+      // No thread specified: clear parent-level state and all thread entries
+      this.replyThreadTs.delete(parentJid);
+      this.lastUserMessageTs.delete(parentJid);
+      this.typingMessageTs.delete(parentJid);
+      const threadPrefix = `${parentJid}:thread:`;
+      for (const key of this.lastUserMessageTs.keys()) {
+        if (key.startsWith(threadPrefix)) this.lastUserMessageTs.delete(key);
+      }
+      for (const key of this.typingMessageTs.keys()) {
+        if (key.startsWith(threadPrefix)) this.typingMessageTs.delete(key);
+      }
     }
   }
 
@@ -367,7 +374,9 @@ export class SlackChannel implements Channel {
   // so the user knows the bot is processing.
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     const parsedJid = parseThreadJid(jid);
-    const channelId = parsedJid ? parsedJid.parentId : jid.replace(/^slack:/, '');
+    const channelId = parsedJid
+      ? parsedJid.parentId
+      : jid.replace(/^slack:/, '');
     const baseJid = parsedJid ? `slack:${parsedJid.parentId}` : jid;
 
     // On start: snapshot the current user message ts so the ✅ swap

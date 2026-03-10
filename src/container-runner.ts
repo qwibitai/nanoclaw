@@ -204,7 +204,7 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
 // Per-group mutex for serializing worktree creation (git locks .git/worktrees/)
 const worktreeMutex = new Map<string, Promise<void>>();
 
-function withGroupMutex<T>(
+export function withGroupMutex<T>(
   groupFolder: string,
   fn: () => Promise<T>,
 ): Promise<T> {

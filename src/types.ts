@@ -104,7 +104,8 @@ export interface Channel {
   syncGroups?(force: boolean): Promise<void>;
   // Optional: clear per-JID thread redirect state after container processing completes.
   // Prevents stale redirects from sending task/recap output into old threads.
-  clearThreadState?(parentJid: string): void;
+  // When threadId is provided, only clear state for that specific thread.
+  clearThreadState?(parentJid: string, threadId?: string): void;
 }
 
 // Callback type that channels use to deliver inbound messages

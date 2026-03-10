@@ -462,9 +462,16 @@ export class DiscordChannel implements Channel {
     return jid.startsWith('dc:');
   }
 
-  clearThreadState(parentJid: string): void {
-    this.createdThreadJid.delete(parentJid);
-    this.lastUserMessageId.delete(parentJid);
+  clearThreadState(parentJid: string, threadId?: string): void {
+    if (threadId) {
+      // Per-thread cleanup: only clear state for this specific thread
+      const threadJid = `${parentJid}:thread:${threadId}`;
+      this.lastUserMessageId.delete(threadJid);
+    } else {
+      // No thread specified: clear parent-level state and all thread entries
+      this.createdThreadJid.delete(parentJid);
+      this.lastUserMessageId.delete(parentJid);
+    }
   }
 
   async disconnect(): Promise<void> {
