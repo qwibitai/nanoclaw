@@ -5,7 +5,9 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-const SCRIPT_PATH = path.resolve('scripts/workflow/run-platform-claude-session.sh');
+const SCRIPT_PATH = path.resolve(
+  'scripts/workflow/run-platform-claude-session.sh',
+);
 
 function writeExecutable(filePath: string, content: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -97,13 +99,7 @@ exit "\${FAKE_CLAUDE_EXIT_CODE:-0}"
   function runSession(extraEnv: Record<string, string> = {}) {
     return execFileSync(
       'bash',
-      [
-        SCRIPT_PATH,
-        '--worktree',
-        worktreePath,
-        '--prompt',
-        '/platform-pickup',
-      ],
+      [SCRIPT_PATH, '--worktree', worktreePath, '--prompt', '/platform-pickup'],
       {
         encoding: 'utf8',
         env: {
@@ -119,13 +115,7 @@ exit "\${FAKE_CLAUDE_EXIT_CODE:-0}"
   function runSessionCaptured(extraEnv: Record<string, string> = {}) {
     return spawnSync(
       'bash',
-      [
-        SCRIPT_PATH,
-        '--worktree',
-        worktreePath,
-        '--prompt',
-        '/platform-pickup',
-      ],
+      [SCRIPT_PATH, '--worktree', worktreePath, '--prompt', '/platform-pickup'],
       {
         encoding: 'utf8',
         env: {

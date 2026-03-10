@@ -119,7 +119,9 @@ exit 0
       FAKE_WORKTREE_LIST_PRESENT: '1',
     });
 
-    expect(output).toContain('session-start: pruned stale platform-loop worktree entry');
+    expect(output).toContain(
+      'session-start: pruned stale platform-loop worktree entry',
+    );
   });
 
   it('removes a clean leftover worktree', () => {
