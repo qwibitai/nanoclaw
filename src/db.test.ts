@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import {
   _initTestDatabase,
@@ -9,6 +12,8 @@ import {
   getMessagesSince,
   getNewMessages,
   getTaskById,
+  indexConversations,
+  searchConversations,
   setRegisteredGroup,
   storeChatMetadata,
   storeMessage,
@@ -480,5 +485,170 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- Conversation indexing and search ---
+
+describe('conversation indexing and search', () => {
+  let tmpDir: string;
+  let groupDir: string;
+  let conversationsDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-test-'));
+    groupDir = path.join(tmpDir, 'groups', 'test-group');
+    conversationsDir = path.join(groupDir, 'conversations');
+    fs.mkdirSync(conversationsDir, { recursive: true });
+  });
+
+  function writeConversation(filename: string, content: string): void {
+    fs.writeFileSync(path.join(conversationsDir, filename), content);
+  }
+
+  it('indexes new conversation files', () => {
+    writeConversation(
+      '2026-03-01-stripe-setup.md',
+      '# Stripe Setup\n\nConfigured the Stripe webhook endpoint for payment processing.',
+    );
+    writeConversation(
+      '2026-03-02-deploy-fix.md',
+      '# Deploy Fix\n\nFixed the deployment pipeline by updating the Docker image.',
+    );
+
+    const count = indexConversations('test-group', conversationsDir);
+    expect(count).toBe(2);
+  });
+
+  it('skips already-indexed files (idempotent)', () => {
+    writeConversation(
+      '2026-03-01-stripe-setup.md',
+      '# Stripe Setup\n\nConfigured Stripe.',
+    );
+
+    const first = indexConversations('test-group', conversationsDir);
+    expect(first).toBe(1);
+
+    const second = indexConversations('test-group', conversationsDir);
+    expect(second).toBe(0);
+  });
+
+  it('searches indexed conversations by keyword', () => {
+    writeConversation(
+      '2026-03-01-stripe-setup.md',
+      '# Stripe Setup\n\nConfigured the Stripe webhook endpoint for payment processing.',
+    );
+    writeConversation(
+      '2026-03-02-deploy-fix.md',
+      '# Deploy Fix\n\nFixed the deployment pipeline by updating the Docker image.',
+    );
+
+    indexConversations('test-group', conversationsDir);
+
+    const results = searchConversations('test-group', 'Stripe webhook');
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].filename).toBe('2026-03-01-stripe-setup.md');
+    expect(results[0].date).toBe('2026-03-01');
+    expect(results[0].snippet).toBeDefined();
+  });
+
+  it('returns empty array when no matches', () => {
+    writeConversation(
+      '2026-03-01-stripe-setup.md',
+      '# Stripe Setup\n\nConfigured Stripe.',
+    );
+    indexConversations('test-group', conversationsDir);
+
+    const results = searchConversations('test-group', 'kubernetes helm chart');
+    expect(results).toHaveLength(0);
+  });
+
+  it('isolates results by group folder', () => {
+    // Index for test-group
+    writeConversation(
+      '2026-03-01-stripe-setup.md',
+      '# Stripe Setup\n\nConfigured Stripe.',
+    );
+    indexConversations('test-group', conversationsDir);
+
+    // Create and index for another group
+    const otherConvDir = path.join(tmpDir, 'groups', 'other-group', 'conversations');
+    fs.mkdirSync(otherConvDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(otherConvDir, '2026-03-01-stripe-other.md'),
+      '# Other Stripe\n\nDifferent Stripe config.',
+    );
+    indexConversations('other-group', otherConvDir);
+
+    // Search scoped to test-group
+    const results = searchConversations('test-group', 'Stripe');
+    expect(results).toHaveLength(1);
+    expect(results[0].filename).toBe('2026-03-01-stripe-setup.md');
+
+    // Search scoped to other-group
+    const otherResults = searchConversations('other-group', 'Stripe');
+    expect(otherResults).toHaveLength(1);
+    expect(otherResults[0].filename).toBe('2026-03-01-stripe-other.md');
+  });
+
+  it('extracts date from filename pattern YYYY-MM-DD-*.md', () => {
+    writeConversation(
+      '2026-01-15-planning-meeting.md',
+      '# Planning\n\nDiscussed roadmap.',
+    );
+    indexConversations('test-group', conversationsDir);
+
+    const results = searchConversations('test-group', 'roadmap');
+    expect(results).toHaveLength(1);
+    expect(results[0].date).toBe('2026-01-15');
+  });
+
+  it('handles files without date prefix gracefully', () => {
+    writeConversation('random-notes.md', '# Notes\n\nSome random notes.');
+    indexConversations('test-group', conversationsDir);
+
+    const results = searchConversations('test-group', 'random notes');
+    expect(results).toHaveLength(1);
+    expect(results[0].date).toBeNull();
+    expect(results[0].filename).toBe('random-notes.md');
+  });
+
+  it('respects limit parameter', () => {
+    for (let i = 1; i <= 5; i++) {
+      writeConversation(
+        `2026-03-0${i}-topic.md`,
+        `# Topic ${i}\n\nDiscussion about the important topic number ${i}.`,
+      );
+    }
+    indexConversations('test-group', conversationsDir);
+
+    const results = searchConversations('test-group', 'important topic', 2);
+    expect(results).toHaveLength(2);
+  });
+
+  it('handles empty conversations directory', () => {
+    const count = indexConversations('test-group', conversationsDir);
+    expect(count).toBe(0);
+  });
+
+  it('handles non-existent conversations directory', () => {
+    const nonExistent = path.join(tmpDir, 'no-such-dir');
+    const count = indexConversations('test-group', nonExistent);
+    expect(count).toBe(0);
+  });
+
+  it('only indexes .md files', () => {
+    writeConversation('2026-03-01-valid.md', '# Valid\n\nMarkdown content.');
+    fs.writeFileSync(
+      path.join(conversationsDir, 'notes.txt'),
+      'plain text file',
+    );
+    fs.writeFileSync(
+      path.join(conversationsDir, 'data.json'),
+      '{"key": "value"}',
+    );
+
+    const count = indexConversations('test-group', conversationsDir);
+    expect(count).toBe(1);
   });
 });

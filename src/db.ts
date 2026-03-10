@@ -65,6 +65,16 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs ON task_run_logs(task_id, run_at);
 
+    CREATE TABLE IF NOT EXISTS conversations (
+      id INTEGER PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      date TEXT,
+      content TEXT NOT NULL,
+      indexed_at REAL NOT NULL,
+      UNIQUE(group_folder, filename)
+    );
+
     CREATE TABLE IF NOT EXISTS router_state (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -138,6 +148,28 @@ function createSchema(database: Database.Database): void {
     );
   } catch {
     /* columns already exist */
+  }
+
+  // FTS5 virtual table for conversation search
+  // Using content-sync triggers to keep FTS index in sync with conversations table
+  try {
+    database.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(
+        content,
+        content=conversations,
+        content_rowid=id
+      );
+
+      CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGIN
+        INSERT INTO conversations_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
+        INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.id, old.content);
+      END;
+    `);
+  } catch {
+    /* FTS5 already exists */
   }
 }
 
@@ -632,6 +664,94 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Conversation indexing and search ---
+
+/**
+ * Extract date from conversation filename pattern: YYYY-MM-DD-*.md
+ * Returns null if filename doesn't match the pattern.
+ */
+function extractDateFromFilename(filename: string): string | null {
+  const match = filename.match(/^(\d{4}-\d{2}-\d{2})-/);
+  return match ? match[1] : null;
+}
+
+export interface ConversationSearchResult {
+  filename: string;
+  date: string | null;
+  snippet: string;
+}
+
+/**
+ * Index conversation markdown files from a directory.
+ * Skips files already indexed (by group_folder + filename).
+ * Returns the number of newly indexed files.
+ */
+export function indexConversations(
+  groupFolder: string,
+  conversationsDir: string,
+): number {
+  if (!fs.existsSync(conversationsDir)) return 0;
+
+  const files = fs
+    .readdirSync(conversationsDir)
+    .filter((f) => f.endsWith('.md'));
+
+  if (files.length === 0) return 0;
+
+  const insertStmt = db.prepare(`
+    INSERT OR IGNORE INTO conversations (group_folder, filename, date, content, indexed_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+
+  let indexed = 0;
+
+  const insertAll = db.transaction(() => {
+    for (const file of files) {
+      const filePath = path.join(conversationsDir, file);
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const date = extractDateFromFilename(file);
+      const result = insertStmt.run(
+        groupFolder,
+        file,
+        date,
+        content,
+        Date.now(),
+      );
+      if (result.changes > 0) indexed++;
+    }
+  });
+
+  insertAll();
+  return indexed;
+}
+
+/**
+ * Search indexed conversations using FTS5 full-text search.
+ * Results are scoped to the specified group folder.
+ * Returns matches with filename, date, and a content snippet.
+ */
+export function searchConversations(
+  groupFolder: string,
+  query: string,
+  limit: number = 3,
+): ConversationSearchResult[] {
+  const rows = db
+    .prepare(
+      `
+    SELECT c.filename, c.date, snippet(conversations_fts, 0, '>>>', '<<<', '...', 32) AS snippet
+    FROM conversations_fts
+    JOIN conversations c ON c.id = conversations_fts.rowid
+    WHERE conversations_fts MATCH ?
+      AND c.group_folder = ?
+    ORDER BY rank
+    LIMIT ?
+  `,
+    )
+    .all(query, groupFolder, limit) as ConversationSearchResult[];
+
+  return rows;
 }
 
 // --- JSON migration ---
