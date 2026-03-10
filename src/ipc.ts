@@ -5,7 +5,13 @@ import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE, getParentJid } from './config.js';
 import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  createTask,
+  deleteTask,
+  getTaskById,
+  getThreadMessages,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -62,6 +68,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
       const isMain = folderIsMain.get(sourceGroup) === true;
       const messagesDir = path.join(ipcBaseDir, sourceGroup, 'messages');
       const tasksDir = path.join(ipcBaseDir, sourceGroup, 'tasks');
+      const queriesDir = path.join(ipcBaseDir, sourceGroup, 'queries');
 
       // Process messages from this group's IPC directory
       try {
@@ -146,6 +153,49 @@ export function startIpcWatcher(deps: IpcDeps): void {
         }
       } catch (err) {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
+      }
+
+      // Process queries from this group's IPC directory (request-response pattern)
+      try {
+        if (fs.existsSync(queriesDir)) {
+          const queryFiles = fs
+            .readdirSync(queriesDir)
+            .filter((f) => f.endsWith('.json'));
+          for (const file of queryFiles) {
+            const filePath = path.join(queriesDir, file);
+            let requestId: string | undefined;
+            try {
+              const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+              requestId = data.requestId;
+              processQueryIpc(
+                data,
+                sourceGroup,
+                isMain,
+                ipcBaseDir,
+                registeredGroups,
+              );
+            } catch (err) {
+              logger.error(
+                { file, sourceGroup, err },
+                'Error processing IPC query',
+              );
+              if (requestId) {
+                writeQueryResponse(ipcBaseDir, sourceGroup, requestId, {
+                  status: 'error',
+                  error: 'Internal processing error',
+                });
+              }
+            } finally {
+              try {
+                fs.unlinkSync(filePath);
+              } catch {
+                /* already deleted */
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.error({ err, sourceGroup }, 'Error reading IPC queries directory');
       }
     }
 
@@ -388,5 +438,140 @@ export async function processTaskIpc(
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+// --- IPC Query handling (request-response pattern) ---
+
+function writeQueryResponse(
+  ipcBaseDir: string,
+  groupFolder: string,
+  requestId: string,
+  response: object,
+): void {
+  const responseDir = path.join(ipcBaseDir, groupFolder, 'query_responses');
+  fs.mkdirSync(responseDir, { recursive: true });
+  const filepath = path.join(responseDir, `${requestId}.json`);
+  const tempPath = `${filepath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(response));
+  fs.renameSync(tempPath, filepath);
+}
+
+function processQueryIpc(
+  data: {
+    type: string;
+    requestId: string;
+    channelId?: string;
+    threadTs?: string;
+    chatJid?: string;
+    limit?: number;
+  },
+  sourceGroup: string,
+  isMain: boolean,
+  ipcBaseDir: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): void {
+  if (!data.requestId) {
+    logger.warn({ data }, 'IPC query missing requestId');
+    return;
+  }
+
+  switch (data.type) {
+    case 'read_thread': {
+      // Resolve thread JID from Slack channel ID + thread ts
+      if (!data.channelId || !data.threadTs) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing channelId or threadTs',
+        });
+        break;
+      }
+
+      const parentJid = `slack:${data.channelId}`;
+      const threadJid = `slack:${data.channelId}:thread:${data.threadTs}`;
+
+      // Authorization: verify this group can read from this channel
+      const targetGroup =
+        registeredGroups[parentJid] ||
+        registeredGroups[getParentJid(parentJid)];
+      if (!isMain && (!targetGroup || targetGroup.folder !== sourceGroup)) {
+        logger.warn(
+          { sourceGroup, parentJid },
+          'Unauthorized read_thread attempt blocked',
+        );
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Unauthorized: channel not accessible to this group',
+        });
+        break;
+      }
+
+      const messages = getThreadMessages(threadJid, data.limit || 100);
+      logger.info(
+        { sourceGroup, threadJid, count: messages.length },
+        'IPC read_thread query served',
+      );
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'ok',
+        threadJid,
+        messages: messages.map((m) => ({
+          sender: m.sender_name,
+          content: m.content,
+          timestamp: m.timestamp,
+          is_from_me: m.is_from_me === 1,
+        })),
+      });
+      break;
+    }
+
+    case 'read_messages': {
+      // Read messages from a specific JID (parent channel or thread)
+      if (!data.chatJid) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Missing chatJid',
+        });
+        break;
+      }
+
+      const targetGroup2 =
+        registeredGroups[data.chatJid] ||
+        registeredGroups[getParentJid(data.chatJid)];
+      if (!isMain && (!targetGroup2 || targetGroup2.folder !== sourceGroup)) {
+        logger.warn(
+          { sourceGroup, chatJid: data.chatJid },
+          'Unauthorized read_messages attempt blocked',
+        );
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Unauthorized: channel not accessible to this group',
+        });
+        break;
+      }
+
+      const msgs = getThreadMessages(data.chatJid, data.limit || 100);
+      logger.info(
+        { sourceGroup, chatJid: data.chatJid, count: msgs.length },
+        'IPC read_messages query served',
+      );
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'ok',
+        chatJid: data.chatJid,
+        messages: msgs.map((m) => ({
+          sender: m.sender_name,
+          content: m.content,
+          timestamp: m.timestamp,
+          is_from_me: m.is_from_me === 1,
+        })),
+      });
+      break;
+    }
+
+    default:
+      logger.warn({ type: data.type }, 'Unknown IPC query type');
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'error',
+        error: `Unknown query type: ${data.type}`,
+      });
   }
 }

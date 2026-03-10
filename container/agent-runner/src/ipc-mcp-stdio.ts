@@ -280,6 +280,134 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- Query helpers (request-response IPC) ---
+
+const QUERIES_DIR = path.join(IPC_DIR, 'queries');
+const RESPONSES_DIR = path.join(IPC_DIR, 'query_responses');
+const QUERY_POLL_MS = 200;
+const QUERY_TIMEOUT_MS = 10_000;
+
+// Pre-create response dir so it's owned by this user (container uid).
+// Host writes responses into it; we need write permission to unlink after reading.
+fs.mkdirSync(RESPONSES_DIR, { recursive: true });
+
+function writeQueryFile(data: object): string {
+  fs.mkdirSync(QUERIES_DIR, { recursive: true });
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const filename = `${requestId}.json`;
+  const filepath = path.join(QUERIES_DIR, filename);
+  const tempPath = `${filepath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify({ ...data, requestId }));
+  fs.renameSync(tempPath, filepath);
+  return requestId;
+}
+
+async function waitForResponse(requestId: string): Promise<object> {
+  const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
+  const deadline = Date.now() + QUERY_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    if (fs.existsSync(responsePath)) {
+      const content = fs.readFileSync(responsePath, 'utf-8');
+      try { fs.unlinkSync(responsePath); } catch { /* host will clean up */ }
+      return JSON.parse(content);
+    }
+    await new Promise((resolve) => setTimeout(resolve, QUERY_POLL_MS));
+  }
+  throw new Error('Query timed out waiting for host response');
+}
+
+/**
+ * Parse a Slack message URL into channel ID and thread timestamp.
+ * Handles both thread links and standalone message links.
+ */
+function parseSlackUrl(url: string): { channelId: string; threadTs: string } | null {
+  // https://workspace.slack.com/archives/C0AJA89MN2E/p1773071476205929
+  // https://workspace.slack.com/archives/C0AJA89MN2E/p1773071476205929?thread_ts=1773071476.205929
+  const archiveMatch = url.match(/\/archives\/([A-Z0-9]+)\/p(\d+)/);
+  if (!archiveMatch) return null;
+
+  const channelId = archiveMatch[1];
+
+  // Prefer explicit thread_ts from URL params
+  const threadTsMatch = url.match(/[?&]thread_ts=([0-9.]+)/);
+  if (threadTsMatch) {
+    return { channelId, threadTs: threadTsMatch[1] };
+  }
+
+  // Convert p-timestamp to Slack ts: p1773071476205929 → 1773071476.205929
+  const pTs = archiveMatch[2];
+  const threadTs = pTs.slice(0, 10) + '.' + pTs.slice(10);
+  return { channelId, threadTs };
+}
+
+server.tool(
+  'read_thread',
+  `Read messages from a Slack thread. Provide a Slack message URL (copy link from Slack).
+Returns the full conversation in the thread including all replies.
+
+Use this when you need to:
+• Reference a discussion from another thread
+• Get context from a related conversation
+• Answer questions about what was discussed elsewhere`,
+  {
+    slack_url: z.string().describe('Slack message URL (e.g., https://workspace.slack.com/archives/C0AJA89MN2E/p1773071476205929)'),
+    limit: z.number().optional().default(100).describe('Maximum number of messages to return (default: 100)'),
+  },
+  async (args) => {
+    const parsed = parseSlackUrl(args.slack_url);
+    if (!parsed) {
+      return {
+        content: [{ type: 'text' as const, text: 'Invalid Slack URL. Expected format: https://workspace.slack.com/archives/CHANNEL_ID/pTIMESTAMP' }],
+        isError: true,
+      };
+    }
+
+    try {
+      const requestId = writeQueryFile({
+        type: 'read_thread',
+        channelId: parsed.channelId,
+        threadTs: parsed.threadTs,
+        limit: args.limit,
+      });
+
+      const response = await waitForResponse(requestId) as {
+        status: string;
+        error?: string;
+        threadJid?: string;
+        messages?: Array<{ sender: string; content: string; timestamp: string; is_from_me: boolean }>;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${response.error || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const messages = response.messages || [];
+      if (messages.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: `No messages found in thread (${response.threadJid}). The thread may not be monitored or may have no stored messages.` }],
+        };
+      }
+
+      const formatted = messages
+        .map((m) => `[${m.timestamp}] ${m.sender}: ${m.content}`)
+        .join('\n\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `Thread messages (${messages.length} total from ${response.threadJid}):\n\n${formatted}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error reading thread: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

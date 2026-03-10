@@ -568,6 +568,35 @@ export function pruneThreadOrigins(cutoffIso: string): number {
   return result.changes;
 }
 
+/**
+ * Get all messages in a thread (or channel), including bot replies.
+ * Used by IPC read_thread queries so container agents can see full conversations.
+ */
+export function getThreadMessages(
+  chatJid: string,
+  limit: number = 100,
+): Array<{
+  sender_name: string;
+  content: string;
+  timestamp: string;
+  is_from_me: number;
+}> {
+  return db
+    .prepare(
+      `SELECT sender_name, content, timestamp, is_from_me
+       FROM messages
+       WHERE chat_jid = ? AND content != '' AND content IS NOT NULL
+       ORDER BY timestamp
+       LIMIT ?`,
+    )
+    .all(chatJid, limit) as Array<{
+    sender_name: string;
+    content: string;
+    timestamp: string;
+    is_from_me: number;
+  }>;
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
