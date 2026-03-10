@@ -6,5 +6,8 @@
         "repo": "qwibitai/nanoclaw-skills"
       }
     }
+  },
+  "enabledPlugins": {
+    "nanoclaw-skills@nanoclaw-skills": true
   }
 }

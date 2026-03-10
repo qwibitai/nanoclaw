@@ -54,6 +54,7 @@ import {
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
+import { startWebhookServer } from './webhook-server.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -477,10 +478,14 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start webhook server (receives Linear, Slack, etc. webhooks from external services)
+  const webhookServer = startWebhookServer();
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    webhookServer.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
