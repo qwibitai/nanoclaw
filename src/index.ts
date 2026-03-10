@@ -1,9 +1,11 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -260,6 +262,44 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Check if session file exceeds size threshold and rotate if needed.
+ * Session file path: data/sessions/{group}/.claude/projects/-workspace-group/{sessionId}.jsonl
+ */
+function maybeRotateSession(groupFolder: string): void {
+  const sessionId = sessions[groupFolder];
+  if (!sessionId) return;
+
+  const sessionFilePath = path.resolve(
+    DATA_DIR,
+    'sessions',
+    groupFolder,
+    '.claude',
+    'projects',
+    '-workspace-group',
+    `${sessionId}.jsonl`,
+  );
+
+  try {
+    const stats = fs.statSync(sessionFilePath);
+    const fileSizeMB = stats.size / (1024 * 1024);
+
+    // Rotate session if it exceeds 5 MB
+    if (fileSizeMB > 5) {
+      const newSessionId = crypto.randomUUID();
+      logger.info(
+        { groupFolder, oldSessionId: sessionId, newSessionId, fileSizeMB: fileSizeMB.toFixed(2) },
+        'Rotating oversized session file',
+      );
+      sessions[groupFolder] = newSessionId;
+      setSession(groupFolder, newSessionId);
+    }
+  } catch (err) {
+    // File doesn't exist yet or other error - no rotation needed
+    logger.debug({ groupFolder, sessionId, err }, 'Session file check');
+  }
+}
+
 async function runAgent(
   group: RegisteredGroup,
   prompt: string,
@@ -267,6 +307,10 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
+
+  // Rotate session if file is too large before spawning container
+  maybeRotateSession(group.folder);
+
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
