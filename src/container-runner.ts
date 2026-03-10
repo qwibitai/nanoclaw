@@ -211,6 +211,21 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Persist compiled agent-runner output across container runs.
+  // The entrypoint hashes /app/src and skips tsc when the hash matches.
+  const groupAgentRunnerDistDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-dist',
+  );
+  fs.mkdirSync(groupAgentRunnerDistDir, { recursive: true });
+  mounts.push({
+    hostPath: groupAgentRunnerDistDir,
+    containerPath: '/tmp/dist-cache',
+    readonly: false,
+  });
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
