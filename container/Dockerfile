@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
 # Install Snowflake CLI (snow)
 RUN apt-get update && apt-get install -y python3 python3-pip python3-venv \
     && python3 -m venv /opt/snow-venv \
-    && /opt/snow-venv/bin/pip install snowflake-cli \
+    && /opt/snow-venv/bin/pip install snowflake-cli==3.15.0 \
     && ln -s /opt/snow-venv/bin/snow /usr/local/bin/snow \
     && rm -rf /var/lib/apt/lists/*
 
@@ -49,8 +49,15 @@ RUN apt-get update && apt-get install -y unzip \
     && curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash \
     && rm -rf /var/lib/apt/lists/*
 
-# Install agent-browser and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code
+# Install agent-browser, claude-code, and MCP server packages globally.
+# Pre-installing MCP servers avoids npx downloading them at runtime,
+# which is slow and intermittently fails (causing "no Gmail MCP tools" errors).
+# Pinned versions — build.sh checks for updates automatically.
+RUN npm install -g \
+    agent-browser@0.17.1 \
+    @anthropic-ai/claude-code \
+    @gongrzhe/server-gmail-autoauth-mcp@1.1.11 \
+    @cocal/google-calendar-mcp@2.6.1
 
 # Create app directory
 WORKDIR /app
@@ -78,6 +85,11 @@ RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
 RUN chown -R node:node /workspace && chmod 777 /home/node
+
+# Claude Code user settings (applied via settingSources: ['user'])
+RUN mkdir -p /home/node/.claude && \
+    echo '{"includeCoAuthoredBy": false}' > /home/node/.claude/settings.json && \
+    chown -R node:node /home/node/.claude
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node

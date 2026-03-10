@@ -424,8 +424,8 @@ function buildMcpServers(
     // Primary account
     const primaryDir = '/home/node/.gmail-mcp';
     servers.gmail = {
-      command: 'npx',
-      args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+      command: 'gmail-mcp',
+      args: [],
       env: {
         GMAIL_OAUTH_PATH: `${primaryDir}/gcp-oauth.keys.json`,
         GMAIL_CREDENTIALS_PATH: `${primaryDir}/credentials.json`,
@@ -439,8 +439,8 @@ function buildMcpServers(
         const accountName = entry.replace('.gmail-mcp-', '');
         const dir = `/home/node/${entry}`;
         servers[`gmail-${accountName}`] = {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+          command: 'gmail-mcp',
+          args: [],
           env: {
             GMAIL_OAUTH_PATH: `${dir}/gcp-oauth.keys.json`,
             GMAIL_CREDENTIALS_PATH: `${dir}/credentials.json`,
@@ -453,8 +453,8 @@ function buildMcpServers(
   }
   if (isToolEnabled(tools, 'calendar')) {
     servers['google-calendar'] = {
-      command: 'npx',
-      args: ['-y', '@cocal/google-calendar-mcp'],
+      command: 'google-calendar-mcp',
+      args: [],
       env: {
         GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
         GOOGLE_CALENDAR_MCP_TOKEN_PATH: '/home/node/.config/google-calendar-mcp/tokens.json',
