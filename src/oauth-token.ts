@@ -3,6 +3,9 @@
  *
  * Reads OAuth tokens from ~/.claude/.credentials.json and automatically
  * refreshes them when expired.
+ *
+ * Thread-safety: Uses in-memory locking to prevent concurrent refreshes.
+ * File writes are atomic (write temp + rename) to prevent corruption.
  */
 import fs from 'fs';
 import os from 'os';
@@ -24,6 +27,9 @@ interface ClaudeCredentials {
 const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 
+// In-memory lock to prevent concurrent refresh operations
+let refreshLock: Promise<unknown> = Promise.resolve();
+
 /**
  * Get a fresh OAuth access token, refreshing if necessary.
  *
@@ -32,6 +38,9 @@ const OAUTH_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
  * - If refresh fails, falls back to .env value
  * - If API key mode (ANTHROPIC_API_KEY set), returns null
  *
+ * Thread-safe: Multiple concurrent calls will wait for an in-progress
+ * refresh rather than triggering multiple refresh operations.
+ *
  * @returns Fresh OAuth access token, or null if using API key mode
  */
 export async function getFreshOAuthToken(): Promise<string | null> {
@@ -39,6 +48,9 @@ export async function getFreshOAuthToken(): Promise<string | null> {
   if (process.env.ANTHROPIC_API_KEY) {
     return null;
   }
+
+  // Wait for any in-progress refresh, then start our own lock
+  await refreshLock;
 
   // Try to read from credentials file
   let credentials: ClaudeCredentials;
@@ -66,26 +78,43 @@ export async function getFreshOAuthToken(): Promise<string | null> {
     return oauth.accessToken;
   }
 
-  // Token is expired, refresh it
+  // Token is expired, refresh it with locking
   logger.info('OAuth token expired, refreshing...');
-  try {
-    const newToken = await refreshOAuthToken(oauth.refreshToken);
 
-    // Update credentials file with new token
-    credentials.claudeAiOauth = {
-      ...oauth,
-      accessToken: newToken.accessToken,
-      expiresAt: newToken.expiresAt,
-    };
+  // Create a new lock for this refresh operation
+  refreshLock = (async () => {
+    try {
+      const newToken = await refreshOAuthToken(oauth.refreshToken);
 
-    fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(credentials, null, 2));
-    logger.info('OAuth token refreshed successfully');
+      // Re-read credentials file in case another process updated it
+      let updatedCredentials: ClaudeCredentials;
+      try {
+        const content = fs.readFileSync(CREDENTIALS_FILE, 'utf-8');
+        updatedCredentials = JSON.parse(content);
+      } catch {
+        // If read fails, use in-memory credentials
+        updatedCredentials = credentials;
+      }
 
-    return newToken.accessToken;
-  } catch (err) {
-    logger.error({ err }, 'Failed to refresh OAuth token, falling back to .env');
-    return getEnvToken();
-  }
+      // Update with new token
+      updatedCredentials.claudeAiOauth = {
+        ...updatedCredentials.claudeAiOauth!,
+        accessToken: newToken.accessToken,
+        expiresAt: newToken.expiresAt,
+      };
+
+      // Atomic write: write to temp file, then rename
+      writeCredentialsAtomic(updatedCredentials);
+      logger.info('OAuth token refreshed successfully');
+
+      return newToken.accessToken;
+    } catch (err) {
+      logger.error({ err }, 'Failed to refresh OAuth token, falling back to .env');
+      return getEnvToken();
+    }
+  })();
+
+  return refreshLock as Promise<string | null>;
 }
 
 interface RefreshResponse {
@@ -148,6 +177,32 @@ async function refreshOAuthToken(refreshToken: string): Promise<{
     req.write(postData);
     req.end();
   });
+}
+
+/**
+ * Write credentials file atomically to prevent corruption.
+ *
+ * Writes to a temporary file, then renames over the target.
+ * On POSIX systems, rename is atomic.
+ */
+function writeCredentialsAtomic(credentials: ClaudeCredentials): void {
+  const tempFile = CREDENTIALS_FILE + '.tmp.' + Date.now();
+  const content = JSON.stringify(credentials, null, 2);
+
+  try {
+    // Write to temp file
+    fs.writeFileSync(tempFile, content, 'utf-8');
+    // Atomic rename
+    fs.renameSync(tempFile, CREDENTIALS_FILE);
+  } catch (err) {
+    // Clean up temp file on error
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch {}
+    throw err;
+  }
 }
 
 /**
