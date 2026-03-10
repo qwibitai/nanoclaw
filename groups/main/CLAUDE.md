@@ -11,6 +11,7 @@ You are Andy, a personal assistant. You help with tasks, answer questions, and c
 - Run bash commands in your sandbox
 - Schedule tasks to run later or on a recurring basis
 - Send messages back to the chat
+- **Analyze files** sent via WhatsApp — run `python3 /workspace/group/nanoclaw-skills/file-analyzer/skill.py <command>`
 
 ## Communication
 
@@ -244,3 +245,33 @@ When scheduling tasks for other groups, use the `target_group_jid` parameter wit
 - `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "120363336345536173@g.us")`
 
 The task will run in that group's context with access to their files and memory.
+
+---
+
+## File Analyzer Skill
+
+When a user sends a file via WhatsApp, nanoclaw automatically downloads it to `/workspace/group/files/{type}/`. You can analyze these files using:
+
+```bash
+python3 /workspace/group/nanoclaw-skills/file-analyzer/skill.py <command>
+```
+
+### Commands
+
+- `list` — Show recently received files
+- `analyze <file-path>` — Analyze a specific file
+- `analyze-last` — Analyze the most recently received file
+
+### What it analyzes
+
+- **PDFs** — Summary, key points, page count, extracted text
+- **Images** — Description, OCR text extraction, chart/table detection
+- **CSV/data files** — Row/column stats, data insights
+- **Code files** — Language detection, review, security issues, suggestions
+- **Documents** (.txt, .json, etc.) — Summary and key content
+
+### When a user sends a file
+
+1. The file is automatically saved to `/workspace/group/files/`
+2. If the user says "analyze this" or asks about the file, run the analyzer
+3. Send back a concise summary with the key findings
