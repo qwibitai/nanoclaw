@@ -53,8 +53,8 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { startWebhookServer } from './webhook-server.js';
+import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -478,7 +478,7 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
-  // Start webhook server (receives Linear, Slack, etc. webhooks from external services)
+  // Start webhook server (receives events from external services)
   const webhookServer = startWebhookServer();
 
   // Graceful shutdown handlers
