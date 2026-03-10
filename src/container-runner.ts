@@ -18,6 +18,7 @@ import {
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
+import { applyOneCLIConfig } from '@onecli-sh/sdk';
 import {
   CONTAINER_RUNTIME_BIN,
   readonlyMountArgs,
@@ -223,10 +224,10 @@ function readSecrets(): Record<string, string> {
   ]);
 }
 
-function buildContainerArgs(
+async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): string[] {
+): Promise<string[]> {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -241,6 +242,10 @@ function buildContainerArgs(
     args.push('--user', `${hostUid}:${hostGid}`);
     args.push('-e', 'HOME=/home/node');
   }
+
+  // OneCLI support: the SDK fetches /container-config and applies env + mounts.
+  const onecliUrl = readEnvFile(['ONECLI_URL']).ONECLI_URL;
+  const proxyActive = await applyOneCLIConfig(args, onecliUrl);
 
   for (const mount of mounts) {
     if (mount.readonly) {
@@ -269,7 +274,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = await buildContainerArgs(mounts, containerName);
 
   logger.debug(
     {
