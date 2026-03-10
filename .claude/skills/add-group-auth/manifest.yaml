@@ -24,6 +24,7 @@ modifies:
   - src/config.ts
   - src/container-runner.ts
   - src/credential-proxy.ts
+  - src/credential-proxy.test.ts
   - src/index.ts
   - src/types.ts
 structured:

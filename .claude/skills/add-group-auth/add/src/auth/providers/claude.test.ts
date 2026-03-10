@@ -176,9 +176,12 @@ describe('claudeProvider', () => {
 
   describe('importEnv', () => {
     it('imports .env values into scope', () => {
-      vi.mocked(readEnvFile).mockReturnValueOnce({
-        ANTHROPIC_API_KEY: 'sk-ant-api03-from-env',
-      });
+      // First call is from initUpstream() inside importEnv, second is the actual import
+      vi.mocked(readEnvFile)
+        .mockReturnValueOnce({})
+        .mockReturnValueOnce({
+          ANTHROPIC_API_KEY: 'sk-ant-api03-from-env',
+        });
 
       claudeProvider.importEnv!('default');
       expect(claudeProvider.hasAuth('default')).toBe(true);
