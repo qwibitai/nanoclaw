@@ -87,14 +87,6 @@ TELEGRAM_BOT_TOKEN=<their-token>
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
-
 ### Disable Group Privacy (for group chats)
 
 Tell the user:
@@ -131,6 +123,8 @@ Wait for the user to provide the chat ID (format: `tg:123456789` or `tg:-1001234
 
 Use the IPC register flow or register directly. The chat ID, name, and folder name are needed.
 
+**Important:** `name` is the human-readable display name (e.g. "Dev Team"). `folder` is a machine-friendly slug used for the filesystem directory under `groups/` — use only lowercase letters, numbers, and underscores (e.g. `telegram_dev_team`). Do NOT pass the display name as `folder`.
+
 For a main chat (responds to all messages):
 
 ```typescript
@@ -148,8 +142,8 @@ For additional chats (trigger-only):
 
 ```typescript
 registerGroup("tg:<chat-id>", {
-  name: "<chat-name>",
-  folder: "telegram_<group-name>",
+  name: "<chat-display-name>",
+  folder: "telegram_<slug>",  // e.g. "telegram_dev_team", NOT "telegram_Dev Team"
   trigger: `@${ASSISTANT_NAME}`,
   added_at: new Date().toISOString(),
   requiresTrigger: true,
@@ -179,7 +173,7 @@ tail -f logs/nanoclaw.log
 ### Bot not responding
 
 Check:
-1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+1. `TELEGRAM_BOT_TOKEN` is set in `.env`
 2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
 4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)

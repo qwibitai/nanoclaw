@@ -166,12 +166,6 @@ test -f store/auth/creds.json && echo "Authentication successful" || echo "Authe
 
 Channels auto-enable when their credentials are present — WhatsApp activates when `store/auth/creds.json` exists.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
 ## Phase 4: Registration
 
 ### Configure trigger and channel type
@@ -225,6 +219,8 @@ The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (n
 
 ### Register the chat
 
+**Important:** `--name` is the human-readable display name (e.g. "Family Chat"). `--folder` is a machine-friendly slug used for the filesystem directory under `groups/` — use only lowercase letters, numbers, and underscores (e.g. `whatsapp_family_chat`). Do NOT pass the display name as `--folder`.
+
 ```bash
 npx tsx setup/index.ts --step register \
   --jid "<jid>" \
@@ -242,10 +238,11 @@ For additional groups (trigger-required):
 ```bash
 npx tsx setup/index.ts --step register \
   --jid "<group-jid>" \
-  --name "<group-name>" \
+  --name "<group-display-name>" \
   --trigger "@<trigger>" \
-  --folder "whatsapp_<group-name>" \
+  --folder "whatsapp_<slug>" \
   --channel whatsapp
+# Example: --name "Work Projects" --folder "whatsapp_work_projects"
 ```
 
 ## Phase 5: Verify
@@ -364,5 +361,4 @@ To remove WhatsApp integration:
 
 1. Delete auth credentials: `rm -rf store/auth/`
 2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+3. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
