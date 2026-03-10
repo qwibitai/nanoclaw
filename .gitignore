@@ -13,10 +13,16 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/telegram_main/
+!groups/telegram_group-family/
 groups/main/*
 groups/global/*
+groups/telegram_main/*
+groups/telegram_group-family/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/telegram_main/CLAUDE.md
+!groups/telegram_group-family/CLAUDE.md
 
 # Secrets
 *.keys.json
