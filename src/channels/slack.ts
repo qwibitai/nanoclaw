@@ -257,13 +257,15 @@ export class SlackChannel implements Channel {
 
       // Download attached files (images, documents)
       const downloadedAttachments: Attachment[] = [];
-      const files = (msg as any).files as Array<{
-        id: string;
-        name?: string;
-        mimetype?: string;
-        url_private_download?: string;
-        size?: number;
-      }> | undefined;
+      const files = (msg as any).files as
+        | Array<{
+            id: string;
+            name?: string;
+            mimetype?: string;
+            url_private_download?: string;
+            size?: number;
+          }>
+        | undefined;
       if (files && files.length > 0 && !isAnyBot) {
         const slackBotToken = this.botToken;
         const downloads = await Promise.all(
@@ -309,9 +311,7 @@ export class SlackChannel implements Channel {
         is_from_me: isOurBot,
         is_bot_message: isOurBot,
         attachments:
-          downloadedAttachments.length > 0
-            ? downloadedAttachments
-            : undefined,
+          downloadedAttachments.length > 0 ? downloadedAttachments : undefined,
       });
     });
   }

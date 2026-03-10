@@ -165,7 +165,8 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
-        attachments: attachments && attachments.length > 0 ? attachments : undefined,
+        attachments:
+          attachments && attachments.length > 0 ? attachments : undefined,
       });
     };
 

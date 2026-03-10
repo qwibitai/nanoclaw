@@ -242,13 +242,18 @@ export class WhatsAppChannel implements Channel {
                 });
                 if (att) downloadedAttachments.push(att);
               } catch (err) {
-                logger.warn({ chatJid, err }, 'Failed to download WhatsApp image');
+                logger.warn(
+                  { chatJid, err },
+                  'Failed to download WhatsApp image',
+                );
               }
             }
 
             if (normalized.documentMessage) {
               const docName = normalized.documentMessage.fileName || 'document';
-              const docMime = normalized.documentMessage.mimetype || 'application/octet-stream';
+              const docMime =
+                normalized.documentMessage.mimetype ||
+                'application/octet-stream';
               if (!content) content = `[Document: ${docName}]`;
               try {
                 const att = await downloadAttachment({
@@ -267,7 +272,10 @@ export class WhatsAppChannel implements Channel {
                 });
                 if (att) downloadedAttachments.push(att);
               } catch (err) {
-                logger.warn({ chatJid, err }, 'Failed to download WhatsApp document');
+                logger.warn(
+                  { chatJid, err },
+                  'Failed to download WhatsApp document',
+                );
               }
             }
 

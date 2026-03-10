@@ -259,9 +259,7 @@ export class DiscordChannel implements Channel {
         timestamp,
         is_from_me: false,
         attachments:
-          downloadedAttachments.length > 0
-            ? downloadedAttachments
-            : undefined,
+          downloadedAttachments.length > 0 ? downloadedAttachments : undefined,
       });
 
       logger.info(

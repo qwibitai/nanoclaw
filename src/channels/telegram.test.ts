@@ -629,7 +629,13 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createMediaCtx({
-        extra: { document: { file_id: 'test-doc-id', file_name: 'report.pdf', mime_type: 'application/pdf' } },
+        extra: {
+          document: {
+            file_id: 'test-doc-id',
+            file_name: 'report.pdf',
+            mime_type: 'application/pdf',
+          },
+        },
       });
       await triggerMediaMessage('message:document', ctx);
 
@@ -644,7 +650,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createMediaCtx({ extra: { document: { file_id: 'test-doc-id' } } });
+      const ctx = createMediaCtx({
+        extra: { document: { file_id: 'test-doc-id' } },
+      });
       await triggerMediaMessage('message:document', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
