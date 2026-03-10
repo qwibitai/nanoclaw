@@ -93,14 +93,6 @@ DISCORD_BOT_TOKEN=<their-token>
 
 Channels auto-enable when their credentials are present — no extra configuration needed.
 
-Sync to container environment:
-
-```bash
-mkdir -p data/env && cp .env data/env/env
-```
-
-The container reads environment from `data/env/env`, not `.env` directly.
-
 ### Build and restart
 
 ```bash
@@ -128,6 +120,8 @@ Wait for the user to provide the channel ID (format: `dc:1234567890123456`).
 
 Use the IPC register flow or register directly. The channel ID, name, and folder name are needed.
 
+**Important:** `name` is the human-readable display name (e.g. "My Server #general"). `folder` is a machine-friendly slug used for the filesystem directory under `groups/` — use only lowercase letters, numbers, and underscores (e.g. `discord_general`). Do NOT pass the display name as `folder`.
+
 For a main channel (responds to all messages):
 
 ```typescript
@@ -145,8 +139,8 @@ For additional channels (trigger-only):
 
 ```typescript
 registerGroup("dc:<channel-id>", {
-  name: "<server-name> #<channel-name>",
-  folder: "discord_<channel-name>",
+  name: "<server-name> #<channel-display-name>",
+  folder: "discord_<slug>",  // e.g. "discord_general", NOT "discord_#general"
   trigger: `@${ASSISTANT_NAME}`,
   added_at: new Date().toISOString(),
   requiresTrigger: true,
@@ -175,7 +169,7 @@ tail -f logs/nanoclaw.log
 
 ### Bot not responding
 
-1. Check `DISCORD_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
+1. Check `DISCORD_BOT_TOKEN` is set in `.env`
 2. Check channel is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'dc:%'"`
 3. For non-main channels: message must include trigger pattern (@mention the bot)
 4. Service is running: `launchctl list | grep nanoclaw`

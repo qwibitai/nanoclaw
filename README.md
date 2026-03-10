@@ -116,9 +116,6 @@ Users then run `/add-telegram` on their fork and get clean code that does exactl
 
 Skills we'd like to see:
 
-**Communication Channels**
-- `/add-signal` - Add Signal as a channel
-
 **Session Management**
 - `/clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
 
