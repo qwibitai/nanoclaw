@@ -4,7 +4,7 @@ on:
   # Triggered by upstream repo via repository_dispatch
   repository_dispatch:
     types: [upstream-main-updated]
-  # Fallback: run on schedule in case dispatch isn't configured
+  # Fallback: run on a schedule in case dispatch isn't configured
   schedule:
     - cron: '0 */6 * * *'  # every 6 hours
   # Also run when fork's main is pushed directly
@@ -166,8 +166,7 @@ jobs:
                 'npm run build && npm test',
                 'git push',
                 '```',
-              ].join('
-'),
+              ].join('\n'),
               labels: ['upstream-sync']
             });
 
@@ -191,8 +190,7 @@ jobs:
                 ''
               ]).flat(),
               '```',
-            ].join('
-');
+            ].join('\n');
 
             await github.rest.issues.create({
               owner: context.repo.owner,
