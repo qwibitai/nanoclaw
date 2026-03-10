@@ -328,7 +328,9 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          const storedSessionId = encodeSessionIdForStorage(output.newSessionId);
+          const storedSessionId = encodeSessionIdForStorage(
+            output.newSessionId,
+          );
           sessions[group.folder] = storedSessionId;
           setSession(group.folder, storedSessionId);
         }

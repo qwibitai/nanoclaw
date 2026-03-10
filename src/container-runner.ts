@@ -297,10 +297,16 @@ function buildContainerArgs(
 function redactContainerArgs(args: string[]): string[] {
   const redacted = [...args];
   for (let i = 0; i < redacted.length; i++) {
-    if (redacted[i] === '-e' && redacted[i + 1]?.startsWith('OPENAI_API_KEY=')) {
+    if (
+      redacted[i] === '-e' &&
+      redacted[i + 1]?.startsWith('OPENAI_API_KEY=')
+    ) {
       redacted[i + 1] = 'OPENAI_API_KEY=[REDACTED]';
     }
-    if (redacted[i] === '-e' && redacted[i + 1]?.startsWith('ANTHROPIC_API_KEY=')) {
+    if (
+      redacted[i] === '-e' &&
+      redacted[i + 1]?.startsWith('ANTHROPIC_API_KEY=')
+    ) {
       redacted[i + 1] = 'ANTHROPIC_API_KEY=[REDACTED]';
     }
     if (
