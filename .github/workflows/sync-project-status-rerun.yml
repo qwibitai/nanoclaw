@@ -1,0 +1,53 @@
+name: Sync Project Status Auto Rerun
+
+on:
+  workflow_run:
+    workflows: ["Project Status Sync"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: sync-project-status-rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  rerun-sync-project-status:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rerun failed sync-project-status once
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if ((run.run_attempt || 1) > 1) {
+              core.info('Skipping rerun because this workflow run has already been retried.');
+              return;
+            }
+
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+
+            const syncProjectStatusFailed = jobs.some(
+              (job) => job.name === 'sync-project-status' && job.conclusion === 'failure',
+            );
+
+            if (!syncProjectStatusFailed) {
+              core.info('workflow_run did not fail on sync-project-status; nothing to rerun.');
+              return;
+            }
+
+            await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+            });
+
+            core.notice(`Reran failed jobs for Project Status Sync workflow run ${run.id}.`);

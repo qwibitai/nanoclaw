@@ -1,0 +1,105 @@
+name: PR Linked Issue Autofix
+
+on:
+  workflow_run:
+    workflows: ["Multi-Agent Governance"]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-linked-issue-autofix-${{ github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+jobs:
+  repair-pr-linked-issue:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Apply deterministic maintenance fallback when safe
+        uses: actions/github-script@v7
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if ((run.run_attempt || 1) > 1) {
+              core.info('Skipping autofix because this workflow run has already been retried.');
+              return;
+            }
+
+            const prs = run.pull_requests || [];
+            if (prs.length === 0) {
+              core.info('No associated PR found for this workflow_run.');
+              return;
+            }
+
+            const prNumber = prs[0].number;
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+
+            const prLinkedIssueFailed = jobs.some(
+              (job) => job.name === 'pr-linked-issue' && job.conclusion === 'failure',
+            );
+
+            if (!prLinkedIssueFailed) {
+              core.info('workflow_run did not fail on pr-linked-issue; nothing to autofix.');
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const helper = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/workflow/pr-linked-issue-autofix.js`
+            );
+
+            const plan = helper.planPrLinkedIssueAutofix({
+              title: pr.title,
+              body: pr.body || '',
+              files: files.map((file) => file.filename),
+            });
+
+            core.info(`Autofix plan reason: ${plan.reason}`);
+
+            if (!plan.shouldFix) {
+              core.info('No safe deterministic autofix available.');
+              return;
+            }
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              body: plan.updatedBody,
+            });
+
+            await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs', {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+            });
+
+            core.notice(
+              `Applied deterministic pr-linked-issue autofix to PR #${pr.number} and reran failed jobs for workflow run ${run.id}.`,
+            );

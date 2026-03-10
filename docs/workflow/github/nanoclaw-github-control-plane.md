@@ -141,6 +141,82 @@ Use instead:
 - Store API key in `OPENAI_API_KEY` repository secret.
 - This repository keeps the repair lane scaffold at `.github/workflows/codex-repair.yml`, but it is intentionally disabled until `OPENAI_API_KEY` is provisioned.
 
+## Autonomous Repair Boundary
+
+Use this rule for all PR failure handling in GitHub-hosted automation:
+
+1. Anything that is deterministic, bounded, reversible, and easy to verify should be autonomous.
+2. Anything that requires product judgment, architecture judgment, policy interpretation, or non-trivial behavioral change should stay human-owned or explicit `@codex fix`.
+
+### Autonomous First
+
+Default to autonomous repair when all are true:
+
+1. the failure maps to a known check or step with a stable repair command
+2. the repair is low-risk and repo-scoped
+3. the repair can be validated by rerunning the same deterministic check
+4. the change does not require choosing between multiple plausible product behaviors
+
+Preferred autonomous actions:
+
+1. one-shot rerun for known flaky or stateful checks
+2. formatter or lint `--fix`
+3. generated file refresh with a deterministic command
+4. PR metadata normalization
+5. issue/link/body/label repair for governance checks
+
+### Keep Human or `@codex fix`
+
+Do not make these autonomous by default:
+
+1. failing tests with unclear root cause
+2. type or build failures that require code judgment
+3. architecture boundary or policy failures
+4. security-sensitive fixes
+5. runtime/reliability regressions
+6. any repair that changes product behavior without a deterministic contract
+
+### Escalation Ladder
+
+Use this order for PR self-healing:
+
+1. deterministic auto-fix command
+2. single rerun when the failure class is known to be flaky or API-stateful
+3. explicit `@codex fix` for bounded reasoning-based repair
+4. human handoff when the repair remains ambiguous or high-impact
+
+Codex should be second-line repair, not first-line cleanup for trivial failures.
+
+### Repository Default Matrix
+
+Use this default classification unless a more specific workflow contract overrides it:
+
+| Failure Surface | Default Owner | Default Action |
+|-----------------|---------------|----------------|
+| `pr-linked-issue` | autonomous | deterministic repair of PR metadata / linked issue reference, then rerun failed validation |
+| `sync-project-status` | autonomous | rerun once automatically, then stop if still failing |
+| formatter / import-order / auto-fixable lint step | autonomous | run the bounded fix command, push diff, let checks rerun |
+| generated artifact drift | autonomous | run deterministic regeneration command, push diff, let checks rerun |
+| umbrella `ci` failure without deterministic subclassification | human or `@codex fix` | inspect failing job/step first; do not auto-fix the whole bucket blindly |
+| test / build / type failures requiring code decisions | `@codex fix` or human | bounded reasoning-based repair only after deterministic auto-fix options are exhausted |
+
+This repository now ships the deterministic `pr-linked-issue` repair lane at `.github/workflows/pr-linked-issue-autofix.yml`.
+The repair is intentionally narrow:
+
+1. it only runs after `Multi-Agent Governance` fails on `pr-linked-issue`
+2. it only applies `No issue: maintenance` when the PR diff is limited to non-product governance/docs/workflow surfaces
+3. the governance check reads the live PR body from the GitHub API, not only the original event payload
+4. after applying the safe body repair, the workflow explicitly reruns failed jobs once
+5. it leaves ambiguous PRs untouched so issue linkage remains a human or explicit `@codex fix` decision
+
+This repository also ships the one-shot `sync-project-status` rerun lane at `.github/workflows/sync-project-status-rerun.yml`.
+That lane:
+
+1. only runs after `Project Status Sync` fails
+2. only reruns when the failed job is `sync-project-status`
+3. only reruns on the first attempt (`run_attempt == 1`)
+4. stops after one retry instead of looping
+
 ## Workflow Selection Matrix (Andy-Owned)
 
 | Requirement Profile | Workflow Bundle | Claude Review Mode |
