@@ -67,8 +67,14 @@ export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
 );
+export const MAX_THREADS_PER_GROUP = Math.max(
+  1,
+  parseInt(process.env.MAX_THREADS_PER_GROUP || '3', 10) || 3,
+);
+export const WORKTREES_DIR = path.resolve(DATA_DIR, 'worktrees');
+export const GROUP_THREAD_KEY = '__group__';
 
 export function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

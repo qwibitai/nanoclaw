@@ -6,6 +6,14 @@ import { GroupQueue } from './group-queue.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  MAX_THREADS_PER_GROUP: 3,
+  GROUP_THREAD_KEY: '__group__',
+}));
+
+// Mock group-folder to avoid real path resolution
+vi.mock('./group-folder.js', () => ({
+  resolveGroupIpcInputPath: (folder: string, threadId: string) =>
+    `/tmp/nanoclaw-test-data/ipc/${folder}/input/${threadId}`,
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -34,16 +42,15 @@ describe('GroupQueue', () => {
     vi.useRealTimers();
   });
 
-  // --- Single group at a time ---
+  // --- Single group at a time (non-threaded) ---
 
-  it('only runs one container per group at a time', async () => {
+  it('only runs one container per group at a time for non-threaded channels', async () => {
     let concurrentCount = 0;
     let maxConcurrent = 0;
 
     const processMessages = vi.fn(async (groupJid: string) => {
       concurrentCount++;
       maxConcurrent = Math.max(maxConcurrent, concurrentCount);
-      // Simulate async work
       await new Promise((resolve) => setTimeout(resolve, 100));
       concurrentCount--;
       return true;
@@ -51,15 +58,54 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue two messages for the same group
+    // Enqueue two messages for the same group (no threadId = GROUP_THREAD_KEY)
     queue.enqueueMessageCheck('group1@g.us');
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Advance timers to let the first process complete
     await vi.advanceTimersByTimeAsync(200);
 
     // Second enqueue should have been queued, not concurrent
     expect(maxConcurrent).toBe(1);
+  });
+
+  // --- Per-thread concurrency ---
+
+  it('runs concurrent containers for different threads in same group', async () => {
+    let activeCount = 0;
+    let maxActive = 0;
+    const completionCallbacks: Array<() => void> = [];
+
+    const processMessages = vi.fn(async (jid: string) => {
+      activeCount++;
+      maxActive = Math.max(maxActive, activeCount);
+      await new Promise<void>((resolve) => completionCallbacks.push(resolve));
+      activeCount--;
+      return true;
+    });
+
+    queue.setProcessMessagesFn(processMessages);
+
+    // Enqueue 3 messages for different threads in the same group
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1', 't1');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2', 't2');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t3', 't3');
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    // All 3 should be active (MAX_THREADS_PER_GROUP = 3, MAX_CONCURRENT = 2
+    // but we have 2 global slots... so only 2 should run)
+    expect(maxActive).toBe(2);
+
+    // Complete first — third should start
+    completionCallbacks[0]();
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(processMessages).toHaveBeenCalledTimes(3);
+
+    // Cleanup
+    completionCallbacks[1]();
+    completionCallbacks[2]();
+    await vi.advanceTimersByTimeAsync(10);
   });
 
   // --- Global concurrency limit ---
@@ -84,7 +130,6 @@ describe('GroupQueue', () => {
     queue.enqueueMessageCheck('group2@g.us');
     queue.enqueueMessageCheck('group3@g.us');
 
-    // Let promises settle
     await vi.advanceTimersByTimeAsync(10);
 
     // Only 2 should be active (MAX_CONCURRENT_CONTAINERS = 2)
@@ -106,7 +151,6 @@ describe('GroupQueue', () => {
 
     const processMessages = vi.fn(async (groupJid: string) => {
       if (executionOrder.length === 0) {
-        // First call: block until we release it
         await new Promise<void>((resolve) => {
           resolveFirst = resolve;
         });
@@ -132,10 +176,8 @@ describe('GroupQueue', () => {
     resolveFirst!();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Task should have run before the second message check
-    expect(executionOrder[0]).toBe('messages'); // first call
-    expect(executionOrder[1]).toBe('task'); // task runs first in drain
-    // Messages would run after task completes
+    expect(executionOrder[0]).toBe('messages');
+    expect(executionOrder[1]).toBe('task');
   });
 
   // --- Retry with backoff on failure ---
@@ -145,50 +187,47 @@ describe('GroupQueue', () => {
 
     const processMessages = vi.fn(async () => {
       callCount++;
-      return false; // failure
+      return false;
     });
 
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // First call happens immediately
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(1);
 
-    // First retry after 5000ms (BASE_RETRY_MS * 2^0)
+    // First retry after 5000ms
     await vi.advanceTimersByTimeAsync(5000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(2);
 
-    // Second retry after 10000ms (BASE_RETRY_MS * 2^1)
+    // Second retry after 10000ms
     await vi.advanceTimersByTimeAsync(10000);
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(3);
   });
 
-  it('retries with thread processJid preserved (not parent JID)', async () => {
+  it('retries with thread processJid preserved', async () => {
     const processed: string[] = [];
 
     const processMessages = vi.fn(async (jid: string) => {
       processed.push(jid);
-      return false; // always fail
+      return false;
     });
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue with a thread processJid
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1', 't1');
     await vi.advanceTimersByTimeAsync(10);
 
-    // First call should receive the thread JID
     expect(processed).toEqual(['dc:parent:thread:t1']);
 
-    // After retry delay (5000ms), the retry should also use the thread JID
+    // After retry delay, should use the thread JID
     await vi.advanceTimersByTimeAsync(5010);
     expect(processed).toEqual(['dc:parent:thread:t1', 'dc:parent:thread:t1']);
   });
 
-  // --- Shutdown prevents new enqueues ---
+  // --- Shutdown ---
 
   it('prevents new enqueues after shutdown', async () => {
     const processMessages = vi.fn(async () => true);
@@ -209,31 +248,27 @@ describe('GroupQueue', () => {
 
     const processMessages = vi.fn(async () => {
       callCount++;
-      return false; // always fail
+      return false;
     });
 
     queue.setProcessMessagesFn(processMessages);
     queue.enqueueMessageCheck('group1@g.us');
 
-    // Run through all 5 retries (MAX_RETRIES = 5)
-    // Initial call
     await vi.advanceTimersByTimeAsync(10);
     expect(callCount).toBe(1);
 
-    // Retry 1: 5000ms, Retry 2: 10000ms, Retry 3: 20000ms, Retry 4: 40000ms, Retry 5: 80000ms
     const retryDelays = [5000, 10000, 20000, 40000, 80000];
     for (let i = 0; i < retryDelays.length; i++) {
       await vi.advanceTimersByTimeAsync(retryDelays[i] + 10);
       expect(callCount).toBe(i + 2);
     }
 
-    // After 5 retries (6 total calls), should stop — no more retries
     const countAfterMaxRetries = callCount;
-    await vi.advanceTimersByTimeAsync(200000); // Wait a long time
+    await vi.advanceTimersByTimeAsync(200000);
     expect(callCount).toBe(countAfterMaxRetries);
   });
 
-  // --- Waiting groups get drained when slots free up ---
+  // --- Waiting groups drained ---
 
   it('drains waiting groups when active slots free up', async () => {
     const processed: string[] = [];
@@ -265,7 +300,7 @@ describe('GroupQueue', () => {
     expect(processed).toContain('group3@g.us');
   });
 
-  // --- Running task dedup (Issue #138) ---
+  // --- Running task dedup ---
 
   it('rejects duplicate enqueue of a currently-running task', async () => {
     let resolveTask: () => void;
@@ -278,25 +313,19 @@ describe('GroupQueue', () => {
       });
     });
 
-    // Start the task (runs immediately — slot available)
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
     expect(taskCallCount).toBe(1);
 
-    // Scheduler poll re-discovers the same task while it's running —
-    // this must be silently dropped
     const dupFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', dupFn);
     await vi.advanceTimersByTimeAsync(10);
 
-    // Duplicate was NOT queued
     expect(dupFn).not.toHaveBeenCalled();
 
-    // Complete the original task
     resolveTask!();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Only one execution total
     expect(taskCallCount).toBe(1);
   });
 
@@ -315,23 +344,20 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Start processing (takes the active slot)
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // Register a process so closeStdin has a groupFolder
     queue.registerProcess(
       'group1@g.us',
+      undefined,
       {} as any,
       'container-1',
       'test-group',
     );
 
-    // Enqueue a task while container is active but NOT idle
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close should NOT have been written (container is working, not idle)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
@@ -355,27 +381,24 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Start processing
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // Register process and mark idle
     queue.registerProcess(
       'group1@g.us',
+      undefined,
       {} as any,
       'container-1',
       'test-group',
     );
     queue.notifyIdle('group1@g.us');
 
-    // Clear previous writes, then enqueue a task
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     writeFileSync.mockClear();
 
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
 
-    // _close SHOULD have been written (container is idle)
     const closeWrites = writeFileSync.mock.calls.filter(
       (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
     );
@@ -385,7 +408,7 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  it('sendMessage resets idleWaiting so a subsequent task enqueue does not preempt', async () => {
+  it('sendMessage resets idleWaiting so subsequent task enqueue does not preempt', async () => {
     const fs = await import('fs');
     let resolveProcess: () => void;
 
@@ -401,18 +424,17 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
+      undefined,
       {} as any,
       'container-1',
       'test-group',
     );
 
-    // Container becomes idle
     queue.notifyIdle('group1@g.us');
 
-    // A new user message arrives — resets idleWaiting
-    queue.sendMessage('group1@g.us', 'hello');
+    // sendMessage with threadId=undefined (GROUP_THREAD_KEY)
+    queue.sendMessage('group1@g.us', undefined, 'hello');
 
-    // Task enqueued after message reset — should NOT preempt (agent is working)
     const writeFileSync = vi.mocked(fs.default.writeFileSync);
     writeFileSync.mockClear();
 
@@ -437,18 +459,17 @@ describe('GroupQueue', () => {
       });
     });
 
-    // Start a task (sets isTaskContainer = true)
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
     queue.registerProcess(
       'group1@g.us',
+      undefined,
       {} as any,
       'container-1',
       'test-group',
     );
 
-    // sendMessage should return false — user messages must not go to task containers
-    const result = queue.sendMessage('group1@g.us', 'hello');
+    const result = queue.sendMessage('group1@g.us', undefined, 'hello');
     expect(result).toBe(false);
 
     resolveTask!();
@@ -468,13 +489,12 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Start processing
     queue.enqueueMessageCheck('group1@g.us');
     await vi.advanceTimersByTimeAsync(10);
 
-    // Register process and enqueue a task (no idle yet — no preemption)
     queue.registerProcess(
       'group1@g.us',
+      undefined,
       {} as any,
       'container-1',
       'test-group',
@@ -491,7 +511,6 @@ describe('GroupQueue', () => {
     );
     expect(closeWrites).toHaveLength(0);
 
-    // Now container becomes idle — should preempt because task is pending
     writeFileSync.mockClear();
     queue.notifyIdle('group1@g.us');
 
@@ -516,8 +535,7 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Enqueue with explicit processJid (thread JID)
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1', 't1');
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toEqual(['dc:parent:thread:t1']);
@@ -539,43 +557,25 @@ describe('GroupQueue', () => {
     expect(processed).toEqual(['dc:parent']);
   });
 
-  it('processes multiple thread JIDs sequentially via drain', async () => {
-    const processed: string[] = [];
+  it('isThreadActive returns true for active thread, false otherwise', async () => {
     const completionCallbacks: Array<() => void> = [];
 
-    const processMessages = vi.fn(async (jid: string) => {
-      processed.push(jid);
+    const processMessages = vi.fn(async () => {
       await new Promise<void>((resolve) => completionCallbacks.push(resolve));
       return true;
     });
 
     queue.setProcessMessagesFn(processMessages);
 
-    // First enqueue starts immediately
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1', 't1');
     await vi.advanceTimersByTimeAsync(10);
 
-    // While active, enqueue two more thread JIDs
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t3');
+    expect(queue.isThreadActive('dc:parent', 't1')).toBe(true);
+    expect(queue.isThreadActive('dc:parent', 't2')).toBe(false);
+    expect(queue.isThreadActive('dc:parent', undefined)).toBe(false);
 
-    // Complete first — should drain to t2
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
-
-    // Complete second — should drain to t3
-    completionCallbacks[1]();
-    await vi.advanceTimersByTimeAsync(10);
-
-    // Complete third
-    completionCallbacks[2]();
-    await vi.advanceTimersByTimeAsync(10);
-
-    expect(processed).toEqual([
-      'dc:parent:thread:t1',
-      'dc:parent:thread:t2',
-      'dc:parent:thread:t3',
-    ]);
   });
 
   it('deduplicates same processJid enqueued multiple times', async () => {
@@ -590,19 +590,16 @@ describe('GroupQueue', () => {
 
     queue.setProcessMessagesFn(processMessages);
 
-    // Start processing
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t1', 't1');
     await vi.advanceTimersByTimeAsync(10);
 
     // Enqueue same processJid twice while active
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
-    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2', 't2');
+    queue.enqueueMessageCheck('dc:parent', 'dc:parent:thread:t2', 't2');
 
-    // Complete first
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 
-    // Complete second (should be only t2, not two t2s)
     completionCallbacks[1]();
     await vi.advanceTimersByTimeAsync(10);
 
@@ -623,8 +620,8 @@ describe('GroupQueue', () => {
     queue.setProcessMessagesFn(processMessages);
 
     // Fill both slots (MAX_CONCURRENT_CONTAINERS = 2)
-    queue.enqueueMessageCheck('group1@g.us', 'group1@g.us:thread:t1');
-    queue.enqueueMessageCheck('group2@g.us', 'group2@g.us:thread:t2');
+    queue.enqueueMessageCheck('group1@g.us', 'group1@g.us:thread:t1', 't1');
+    queue.enqueueMessageCheck('group2@g.us', 'group2@g.us:thread:t2', 't2');
     await vi.advanceTimersByTimeAsync(10);
 
     expect(processed).toEqual([
@@ -633,13 +630,12 @@ describe('GroupQueue', () => {
     ]);
 
     // At concurrency limit — this goes to waitingGroups
-    queue.enqueueMessageCheck('group3@g.us', 'group3@g.us:thread:t3');
+    queue.enqueueMessageCheck('group3@g.us', 'group3@g.us:thread:t3', 't3');
     await vi.advanceTimersByTimeAsync(10);
 
-    // group3 should NOT have been processed yet
     expect(processed).toHaveLength(2);
 
-    // Free a slot — group3's thread JID should drain
+    // Free a slot
     completionCallbacks[0]();
     await vi.advanceTimersByTimeAsync(10);
 

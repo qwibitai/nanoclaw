@@ -36,3 +36,6 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Worktrees (per-thread git worktrees)
+data/worktrees/

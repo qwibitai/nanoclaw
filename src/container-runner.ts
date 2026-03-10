@@ -12,15 +12,23 @@ import {
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
+  GROUP_THREAD_KEY,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   PLUGIN_DIR,
   RESIDENTIAL_PROXY_URL,
   TIMEZONE,
+  WORKTREES_DIR,
   escapeRegex,
 } from './config.js';
 import { readEnvFile } from './env.js';
-import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import {
+  assertValidThreadId,
+  resolveGroupFolderPath,
+  resolveGroupIpcInputPath,
+  resolveGroupIpcPath,
+  resolveWorktreePath,
+} from './group-folder.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -193,44 +201,291 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
   return tools.some((t) => t === name || t.startsWith(name + ':'));
 }
 
+// Per-group mutex for serializing worktree creation (git locks .git/worktrees/)
+const worktreeMutex = new Map<string, Promise<void>>();
+
+function withGroupMutex<T>(
+  groupFolder: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = worktreeMutex.get(groupFolder) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  worktreeMutex.set(
+    groupFolder,
+    next.then(
+      () => {},
+      () => {},
+    ),
+  );
+  return next;
+}
+
+function execAsync(cmd: string, options?: { cwd?: string }): Promise<string> {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { timeout: 30_000, ...options }, (err, stdout, stderr) => {
+      if (err) reject(new Error(`${cmd}: ${stderr || err.message}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+/**
+ * Prepare a per-thread worktree workspace for concurrent container access.
+ * Creates git worktrees for repos, copies CLAUDE.md/conversations, symlinks others.
+ * Returns the worktree base path to mount as /workspace/group.
+ *
+ * MUST be called inside withGroupMutex() to prevent concurrent git worktree add
+ * on the same repos (git locks .git/worktrees/).
+ */
+export async function prepareThreadWorkspace(
+  groupFolder: string,
+  threadId: string,
+): Promise<string> {
+  assertValidThreadId(threadId);
+  const groupDir = resolveGroupFolderPath(groupFolder);
+  const worktreeBase = resolveWorktreePath(groupFolder, threadId);
+
+  fs.mkdirSync(worktreeBase, { recursive: true });
+
+  const createdWorktrees: Array<{ repoDir: string; wtPath: string }> = [];
+
+  try {
+    const entries = fs.readdirSync(groupDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const srcPath = path.join(groupDir, entry.name);
+
+      if (entry.isDirectory()) {
+        // Check if it's a git repo
+        const gitDir = path.join(srcPath, '.git');
+        if (fs.existsSync(gitDir)) {
+          // Git repo: create worktree
+          const wtPath = path.join(worktreeBase, entry.name);
+          await execAsync('git config gc.auto 0', { cwd: srcPath });
+          await execAsync(`git worktree add --detach "${wtPath}" HEAD`, {
+            cwd: srcPath,
+          });
+          createdWorktrees.push({ repoDir: srcPath, wtPath });
+        } else if (entry.name === 'conversations' || entry.name === 'threads') {
+          // Copy directories that get written to concurrently
+          const dstPath = path.join(worktreeBase, entry.name);
+          fs.cpSync(srcPath, dstPath, { recursive: true });
+        } else {
+          // Symlink other directories (logs, etc.)
+          const dstPath = path.join(worktreeBase, entry.name);
+          if (!fs.existsSync(dstPath)) {
+            fs.symlinkSync(srcPath, dstPath);
+          }
+        }
+      } else if (entry.isFile()) {
+        if (entry.name === 'CLAUDE.md') {
+          // Copy CLAUDE.md (written by agent auto-memory)
+          fs.copyFileSync(srcPath, path.join(worktreeBase, entry.name));
+        } else {
+          // Symlink other files
+          const dstPath = path.join(worktreeBase, entry.name);
+          if (!fs.existsSync(dstPath)) {
+            fs.symlinkSync(srcPath, dstPath);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // Rollback: clean up any created worktrees
+    for (const { repoDir, wtPath } of createdWorktrees) {
+      try {
+        await execAsync(`git worktree remove --force "${wtPath}"`, {
+          cwd: repoDir,
+        });
+      } catch {
+        try {
+          fs.rmSync(wtPath, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
+        try {
+          await execAsync('git worktree prune', { cwd: repoDir });
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    try {
+      fs.rmSync(worktreeBase, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+
+  return worktreeBase;
+}
+
+/**
+ * Clean up a per-thread worktree workspace.
+ * Removes git worktrees, merges CLAUDE.md changes back, removes directory.
+ */
+export async function cleanupThreadWorkspace(
+  groupFolder: string,
+  threadId: string,
+): Promise<void> {
+  const groupDir = resolveGroupFolderPath(groupFolder);
+  const worktreeBase = resolveWorktreePath(groupFolder, threadId);
+
+  if (!fs.existsSync(worktreeBase)) return;
+
+  // Merge CLAUDE.md changes back (last-write-wins for the entire file)
+  const wtClaudeMd = path.join(worktreeBase, 'CLAUDE.md');
+  const mainClaudeMd = path.join(groupDir, 'CLAUDE.md');
+  if (fs.existsSync(wtClaudeMd)) {
+    try {
+      const wtContent = fs.readFileSync(wtClaudeMd, 'utf-8');
+      const mainContent = fs.existsSync(mainClaudeMd)
+        ? fs.readFileSync(mainClaudeMd, 'utf-8')
+        : '';
+      // Only overwrite if worktree version has new content
+      if (wtContent !== mainContent && wtContent.length >= mainContent.length) {
+        fs.writeFileSync(mainClaudeMd, wtContent);
+      }
+    } catch {
+      // best-effort merge
+    }
+  }
+
+  // Remove git worktrees
+  try {
+    const entries = fs.readdirSync(worktreeBase, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const wtPath = path.join(worktreeBase, entry.name);
+      // Check if it's a git worktree (has .git file, not directory)
+      const gitFile = path.join(wtPath, '.git');
+      if (fs.existsSync(gitFile) && fs.statSync(gitFile).isFile()) {
+        const mainRepoDir = path.join(groupDir, entry.name);
+        try {
+          await execAsync(`git worktree remove --force "${wtPath}"`, {
+            cwd: mainRepoDir,
+          });
+        } catch {
+          try {
+            fs.rmSync(wtPath, { recursive: true, force: true });
+          } catch {
+            /* ignore */
+          }
+          try {
+            await execAsync('git worktree prune', { cwd: mainRepoDir });
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore readdir errors
+  }
+
+  // Remove worktree directory
+  try {
+    fs.rmSync(worktreeBase, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Startup cleanup: prune orphan worktrees from all groups.
+ */
+export async function cleanupOrphanWorktrees(): Promise<void> {
+  if (!fs.existsSync(WORKTREES_DIR)) return;
+
+  let cleaned = 0;
+  try {
+    const groupFolders = fs.readdirSync(WORKTREES_DIR);
+    for (const gf of groupFolders) {
+      const gfPath = path.join(WORKTREES_DIR, gf);
+      if (!fs.statSync(gfPath).isDirectory()) continue;
+
+      // Also prune git's internal worktree metadata for each repo in the group
+      const groupDir = path.join(GROUPS_DIR, gf);
+      if (fs.existsSync(groupDir)) {
+        const entries = fs.readdirSync(groupDir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (!entry.isDirectory()) continue;
+          const repoGit = path.join(groupDir, entry.name, '.git');
+          if (fs.existsSync(repoGit)) {
+            try {
+              await execAsync('git worktree prune', {
+                cwd: path.join(groupDir, entry.name),
+              });
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+      }
+
+      // Remove stale worktree directories
+      const threadDirs = fs.readdirSync(gfPath);
+      for (const td of threadDirs) {
+        const tdPath = path.join(gfPath, td);
+        if (!fs.statSync(tdPath).isDirectory()) continue;
+        try {
+          fs.rmSync(tdPath, { recursive: true, force: true });
+          cleaned++;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // Remove empty group worktree dir
+      try {
+        fs.rmdirSync(gfPath);
+      } catch {
+        /* not empty or already removed */
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Error during orphan worktree cleanup');
+  }
+
+  if (cleaned > 0) {
+    logger.info({ cleaned }, 'Cleaned up orphan worktrees');
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
   threadId?: string,
+  worktreePath?: string,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
   const homeDir = os.homedir();
   const groupDir = resolveGroupFolderPath(group.folder);
 
+  // Mount group folder: use worktree path if provided (per-thread isolation),
+  // otherwise mount the main group folder directly.
+  const effectiveGroupDir = worktreePath || groupDir;
+
   if (isMain) {
-    // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
-    // Read-only prevents the agent from modifying host application code
-    // (src/, dist/, package.json, etc.) which would bypass the sandbox
-    // entirely on next restart.
     mounts.push({
       hostPath: projectRoot,
       containerPath: '/workspace/project',
       readonly: true,
     });
 
-    // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: groupDir,
+      hostPath: effectiveGroupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
-    // Other groups only get their own folder
     mounts.push({
-      hostPath: groupDir,
+      hostPath: effectiveGroupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
 
-    // Global memory directory (read-only for non-main)
-    // Only directory mounts are supported, not file mounts
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -242,7 +497,8 @@ function buildVolumeMounts(
   }
 
   // Thread workspace: mount thread-specific directory for thread sessions.
-  // Used for thread-scoped conversation archives and context.
+  // Always use the main group dir for threads (not the worktree) since
+  // thread data is per-thread scoped, not per-repo.
   if (threadId) {
     const threadDir = path.join(groupDir, 'threads', threadId);
     fs.mkdirSync(threadDir, { recursive: true });
@@ -602,26 +858,29 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Copy agent-runner source into a per-group writable location so agents
-  // can customize it (add tools, change behavior) without affecting other
-  // groups. Recompiled on container startup via entrypoint.sh.
+  // Copy agent-runner source into a per-group (or per-thread) writable
+  // location so agents can customize it without affecting other groups.
   const agentRunnerSrc = path.join(
     projectRoot,
     'container',
     'agent-runner',
     'src',
   );
-  const groupAgentRunnerDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    'agent-runner-src',
-  );
+  const agentRunnerBase = threadId
+    ? path.join(
+        DATA_DIR,
+        'sessions',
+        group.folder,
+        'threads',
+        threadId,
+        'agent-runner-src',
+      )
+    : path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
   if (fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    fs.cpSync(agentRunnerSrc, agentRunnerBase, { recursive: true });
   }
   mounts.push({
-    hostPath: groupAgentRunnerDir,
+    hostPath: agentRunnerBase,
     containerPath: '/app/src',
     readonly: false,
   });
@@ -654,6 +913,7 @@ function readSecrets(): Record<string, string> {
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  ipcInputSubdir: string,
 ): string[] {
   const args: string[] = [
     'run',
@@ -666,6 +926,9 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Pass IPC input subdirectory so container reads from the right thread-specific dir
+  args.push('-e', `IPC_INPUT_SUBDIR=${ipcInputSubdir}`);
 
   // Pass residential proxy URL for browser automation on geo-fenced sites
   if (RESIDENTIAL_PROXY_URL) {
@@ -718,7 +981,41 @@ export async function runContainerAgent(
     granolaAccessToken = (await getGranolaAccessToken()) || undefined;
   }
 
-  const mounts = buildVolumeMounts(group, input.isMain, input.threadId);
+  // Determine IPC input subdirectory for this container
+  const ipcInputSubdir = input.threadId || GROUP_THREAD_KEY;
+
+  // Prepare worktree workspace for thread-based concurrency.
+  // Non-threaded channels (threadId undefined) mount the group folder directly.
+  let worktreePath: string | undefined;
+  if (input.threadId) {
+    try {
+      worktreePath = await withGroupMutex(group.folder, () =>
+        prepareThreadWorkspace(group.folder, input.threadId!),
+      );
+      logger.debug(
+        { group: group.name, threadId: input.threadId, worktreePath },
+        'Thread worktree prepared',
+      );
+    } catch (err) {
+      logger.error(
+        { group: group.name, threadId: input.threadId, err },
+        'Failed to prepare thread worktree, falling back to direct mount',
+      );
+      // Fall back to direct mount (no concurrency isolation)
+      worktreePath = undefined;
+    }
+  }
+
+  // Create thread-specific IPC input directory before container launch
+  const ipcInputDir = resolveGroupIpcInputPath(group.folder, ipcInputSubdir);
+  fs.mkdirSync(ipcInputDir, { recursive: true });
+
+  const mounts = buildVolumeMounts(
+    group,
+    input.isMain,
+    input.threadId,
+    worktreePath,
+  );
 
   // When running as root (UID 0), writable mount directories are owned by root,
   // but the container runs as `node` (UID 1000). chown them so the container can write.
@@ -745,7 +1042,11 @@ export async function runContainerAgent(
 
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(
+    mounts,
+    containerName,
+    ipcInputSubdir,
+  );
 
   logger.debug(
     {

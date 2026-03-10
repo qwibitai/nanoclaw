@@ -59,7 +59,12 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+const IPC_INPUT_SUBDIR = process.env.IPC_INPUT_SUBDIR;
+if (!IPC_INPUT_SUBDIR) {
+  console.error('[agent-runner] FATAL: IPC_INPUT_SUBDIR env var is required');
+  process.exit(1);
+}
+const IPC_INPUT_DIR = `/workspace/ipc/input/${IPC_INPUT_SUBDIR}`;
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 

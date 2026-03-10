@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   DATA_DIR,
   DEFAULT_MODEL,
+  GROUP_THREAD_KEY,
   IDLE_TIMEOUT,
   MODEL_ALIASES,
   MODEL_OVERRIDE_PATTERN,
@@ -25,6 +26,8 @@ import {
 } from './channels/registry.js';
 import {
   ContainerOutput,
+  cleanupOrphanWorktrees,
+  cleanupThreadWorkspace,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
@@ -135,7 +138,6 @@ function isThreadSessionEnabled(jid: string, group: RegisteredGroup): boolean {
   // Default: on for Discord and Slack, off for others
   return jid.startsWith('dc:') || jid.startsWith('slack:');
 }
-
 
 /**
  * Extract a per-message model override from raw message content.
@@ -378,9 +380,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages[missedMessages.length - 1].timestamp;
   saveState();
 
-  // Track thread ID on the queue so piping can check thread affinity
-  queue.setActiveThreadId(parentJid, effectiveThreadId || null);
-
   const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
   logger.info(
     {
@@ -402,7 +401,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Idle timeout, closing container stdin',
       );
-      queue.closeStdin(parentJid);
+      queue.closeStdin(parentJid, effectiveThreadId);
     }, IDLE_TIMEOUT);
   };
 
@@ -444,7 +443,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       throttledTouchActivity(sessionKey);
 
       if (result.status === 'success') {
-        queue.notifyIdle(parentJid);
+        queue.notifyIdle(parentJid, effectiveThreadId);
       }
 
       if (result.status === 'error') {
@@ -550,11 +549,27 @@ async function runAgent(
         model,
       },
       (proc, containerName) =>
-        queue.registerProcess(parentJid, proc, containerName, group.folder),
+        queue.registerProcess(
+          parentJid,
+          threadId,
+          proc,
+          containerName,
+          group.folder,
+        ),
       wrappedOnOutput,
     );
 
     if (output.newSessionId) persistSession(output.newSessionId);
+
+    // Clean up worktree workspace (if one was created)
+    if (threadId) {
+      cleanupThreadWorkspace(group.folder, threadId).catch((err) =>
+        logger.warn(
+          { group: group.name, threadId, err },
+          'Worktree cleanup error',
+        ),
+      );
+    }
 
     if (output.status === 'error') {
       // Auto-recovery: if prompt_too_long, delete broken session and retry fresh
@@ -588,6 +603,7 @@ async function runAgent(
             (proc, containerName) =>
               queue.registerProcess(
                 parentJid,
+                threadId,
                 proc,
                 containerName,
                 group.folder,
@@ -684,7 +700,9 @@ async function startMessageLoop(): Promise<void> {
 
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-          const groupAssistantName = resolveAssistantName(group.containerConfig);
+          const groupAssistantName = resolveAssistantName(
+            group.containerConfig,
+          );
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
@@ -701,11 +719,10 @@ async function startMessageLoop(): Promise<void> {
             if (!hasTrigger) continue;
           }
 
-          // Thread-aware piping: if a container is active for this group,
-          // check if the incoming message belongs to the same thread.
-          // Only pipe if thread affinity matches; otherwise enqueue new invocation.
-          const activeThreadId = queue.getActiveThreadId(parentJid);
+          // Thread-aware piping: check if this specific thread already has
+          // an active container. If so, pipe into it. Otherwise enqueue new.
           const isThreadEnabled = isThreadSessionEnabled(parentJid, group);
+          const incomingThreadId = resolved.threadId || undefined;
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
@@ -718,16 +735,14 @@ async function startMessageLoop(): Promise<void> {
             allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessages(messagesToSend);
 
-          // Thread-aware piping decision:
-          // - If thread sessions enabled and active container is handling a different thread,
-          //   DON'T pipe — enqueue for a new container instead.
-          // - Top-level messages (no threadId) on thread-enabled channels should NOT
-          //   pipe into a thread container.
-          const incomingThreadId = resolved.threadId || null;
-          const canPipe =
-            !isThreadEnabled || activeThreadId === incomingThreadId;
+          // Pipe into active container only if same thread has an active slot.
+          // For non-threaded channels, this checks the GROUP_THREAD_KEY slot.
+          const canPipe = queue.isThreadActive(parentJid, incomingThreadId);
 
-          if (canPipe && queue.sendMessage(parentJid, formatted)) {
+          if (
+            canPipe &&
+            queue.sendMessage(parentJid, incomingThreadId, formatted)
+          ) {
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -757,7 +772,7 @@ async function startMessageLoop(): Promise<void> {
               parentJid,
               setTimeout(() => {
                 debounceTimers.delete(parentJid);
-                queue.enqueueMessageCheck(parentJid);
+                queue.enqueueMessageCheck(parentJid, undefined, undefined);
               }, THREAD_DEBOUNCE_MS),
             );
             logger.debug(
@@ -766,10 +781,9 @@ async function startMessageLoop(): Promise<void> {
             );
           } else {
             // No active container or thread mismatch — enqueue for a new one.
-            // Pass chatJid as processJid so the queue knows exactly which
-            // JID to process (thread JID or parent JID) without needing
-            // to rediscover it via LIKE queries.
-            queue.enqueueMessageCheck(parentJid, chatJid);
+            // Pass chatJid as processJid and incomingThreadId so the queue
+            // knows which JID and thread to process.
+            queue.enqueueMessageCheck(parentJid, chatJid, incomingThreadId);
           }
         }
       }
@@ -808,11 +822,12 @@ function recoverPendingMessages(): void {
         assistantName,
       );
       for (const threadJid of threadJids) {
+        const parsedThread = parseThreadJid(threadJid);
         logger.info(
           { group: group.name, threadJid },
           'Recovery: found unprocessed thread messages',
         );
-        queue.enqueueMessageCheck(chatJid, threadJid);
+        queue.enqueueMessageCheck(chatJid, threadJid, parsedThread?.threadId);
       }
     }
   }
@@ -965,6 +980,8 @@ async function main(): Promise<void> {
   fs.writeFileSync(pidFile, String(process.pid));
 
   ensureContainerSystemRunning();
+  // Clean up orphan worktrees from previous crash/restart
+  await cleanupOrphanWorktrees();
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -1064,7 +1081,13 @@ async function main(): Promise<void> {
     getSessions: () => Object.fromEntries(sessions),
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
-      queue.registerProcess(groupJid, proc, containerName, groupFolder),
+      queue.registerProcess(
+        groupJid,
+        undefined,
+        proc,
+        containerName,
+        groupFolder,
+      ),
     sendMessage: async (jid, rawText) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
