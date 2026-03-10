@@ -220,6 +220,20 @@ describe('stripInternalTags', () => {
   it('returns empty string when text is only internal tags', () => {
     expect(stripInternalTags('<internal>only this</internal>')).toBe('');
   });
+
+  it('preserves indentation in code blocks', () => {
+    const input =
+      '<internal>thinking</internal>Here is the code:\n    def foo():\n        return 42';
+    expect(stripInternalTags(input)).toBe(
+      'Here is the code:\n    def foo():\n        return 42',
+    );
+  });
+
+  it('preserves multiple spaces inside content', () => {
+    expect(stripInternalTags('col1    col2    col3')).toBe(
+      'col1    col2    col3',
+    );
+  });
 });
 
 describe('formatOutbound', () => {
