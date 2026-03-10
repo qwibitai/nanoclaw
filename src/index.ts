@@ -398,7 +398,10 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false && !DISABLE_TRIGGERS;
+          const needsTrigger =
+            !isMainGroup &&
+            group.requiresTrigger !== false &&
+            !DISABLE_TRIGGERS;
 
           // For non-main groups, only act on trigger messages.
           // Non-trigger messages accumulate in DB and get pulled as
