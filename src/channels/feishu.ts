@@ -220,7 +220,8 @@ class FeishuChannel implements Channel {
       'Feishu message received',
     );
 
-    this.opts.onMessage(jid, msg);
+    // onChatMetadata must come first — it creates the chat record in SQLite
+    // that onMessage's storeMessage references via foreign key.
     this.opts.onChatMetadata(
       jid,
       timestamp,
@@ -228,6 +229,7 @@ class FeishuChannel implements Channel {
       'feishu',
       chatType === 'group',
     );
+    this.opts.onMessage(jid, msg);
   }
 }
 
