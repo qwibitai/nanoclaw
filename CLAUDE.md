@@ -23,7 +23,7 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Zoom, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
@@ -85,7 +85,7 @@ The container buildkit caches the build context aggressively. `--no-cache` alone
 <!-- gitnexus:start -->
 # GitNexus MCP
 
-This project is indexed by GitNexus as **nanoclaw** (677 symbols, 1451 relationships, 44 execution flows).
+This project is indexed by GitNexus as **nanoclaw-zoom** (818 symbols, 1687 relationships, 52 execution flows).
 
 ## Always Start Here
 

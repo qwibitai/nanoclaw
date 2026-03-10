@@ -1,87 +1,42 @@
 /**
- * Cursor CLI Agent Runner
- * Receives ContainerInput via stdin, runs Cursor CLI headless, outputs ContainerOutput via stdout.
- * Reuses ipc-mcp-stdio.js as MCP server so the Cursor agent has the same send_message/create_task tools.
+ * Cursor ACP Agent Runner
+ * Receives ContainerInput via stdin, runs `agent acp` as a persistent daemon,
+ * and outputs ContainerOutput via stdout using the IPC marker protocol.
+ * Uses @agentclientprotocol/sdk ClientSideConnection (JSON-RPC 2.0 over stdio).
  */
 import { spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { Readable, Writable } from 'stream';
 import { fileURLToPath } from 'url';
+
+import * as acp from '@agentclientprotocol/sdk';
 
 import {
   ContainerInput,
-  readStdin,
-  writeOutput,
-  drainIpcInput,
-  waitForIpcMessage,
-  shouldClose,
-  loadSystemContext,
   applyScheduledTaskPrefix,
+  drainIpcInput,
+  loadSystemContext,
+  readStdin,
+  waitForIpcMessage,
+  writeOutput,
 } from './shared.js';
 
 const IPC_INPUT_DIR = path.join(process.env.NANOCLAW_IPC_DIR ?? '', 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
-const REAL_HOME = os.userInfo().homedir;
-const GLOBAL_MCP_PATH = path.join(REAL_HOME, '.cursor', 'mcp.json');
 
 function log(message: string): void {
   console.error(`[cursor-runner] ${message}`);
 }
 
-let previousMcpContent: string | null = null;
-
-function writeConfigs(groupDir: string, mcpServerPath: string, containerInput: ContainerInput): void {
-  const cursorDir = path.join(groupDir, '.cursor');
-  fs.mkdirSync(cursorDir, { recursive: true });
-
-  const globalCursorDir = path.join(REAL_HOME, '.cursor');
-  fs.mkdirSync(globalCursorDir, { recursive: true });
-
-  if (fs.existsSync(GLOBAL_MCP_PATH)) {
-    previousMcpContent = fs.readFileSync(GLOBAL_MCP_PATH, 'utf-8');
-  }
-
-  const mcpConfig = {
-    mcpServers: {
-      nanoclaw: {
-        command: 'node',
-        args: [mcpServerPath],
-        env: {
-          NANOCLAW_IPC_DIR: process.env.NANOCLAW_IPC_DIR ?? '',
-          NANOCLAW_CHAT_JID: containerInput.chatJid,
-          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-        },
-      },
-    },
-  };
-
-  fs.writeFileSync(GLOBAL_MCP_PATH, JSON.stringify(mcpConfig, null, 2));
-
-  const ctx = loadSystemContext(containerInput);
-  const sandboxConfig = {
-    additionalReadwritePaths: ctx.extraDirs,
-  };
-  fs.writeFileSync(
-    path.join(cursorDir, 'sandbox.json'),
-    JSON.stringify(sandboxConfig, null, 2),
-  );
-}
-
-function cleanupConfigs(): void {
+function serializeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
   try {
-    if (previousMcpContent !== null) {
-      fs.writeFileSync(GLOBAL_MCP_PATH, previousMcpContent);
-    } else {
-      fs.unlinkSync(GLOBAL_MCP_PATH);
-    }
-  } catch { /* ignore */ }
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
 }
-
-process.on('exit', cleanupConfigs);
-process.on('SIGTERM', () => { cleanupConfigs(); process.exit(0); });
-process.on('SIGINT', () => { cleanupConfigs(); process.exit(0); });
 
 function buildPrompt(containerInput: ContainerInput, promptText: string): string {
   const ctx = loadSystemContext(containerInput);
@@ -90,146 +45,31 @@ function buildPrompt(containerInput: ContainerInput, promptText: string): string
     ctx.globalClaudeMd,
     ctx.bootstrapContent,
     ctx.toolsContent,
-  ].filter(Boolean).join('\n\n');
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const text = applyScheduledTaskPrefix(promptText, containerInput.isScheduledTask);
   return systemPrefix ? `${systemPrefix}\n\n---\n\n${text}` : text;
 }
 
-interface SpawnResult {
-  newSessionId?: string;
-  fatalError?: boolean;
-}
-
-async function spawnAgent(
-  prompt: string,
-  sessionId: string | undefined,
-  groupDir: string,
-  spawnEnv: Record<string, string | undefined>,
-): Promise<SpawnResult> {
-  const args = [
-    prompt,
-    '--print',
-    '--output-format', 'stream-json',
-    '--force',
-    '--trust',
-    '--approve-mcps',
-    '--workspace', groupDir,
+function buildMcpServers(
+  mcpServerPath: string,
+  containerInput: ContainerInput,
+): acp.McpServerStdio[] {
+  return [
+    {
+      name: 'nanoclaw',
+      command: 'node',
+      args: [mcpServerPath],
+      env: [
+        { name: 'NANOCLAW_IPC_DIR', value: process.env.NANOCLAW_IPC_DIR ?? '' },
+        { name: 'NANOCLAW_CHAT_JID', value: containerInput.chatJid },
+        { name: 'NANOCLAW_GROUP_FOLDER', value: containerInput.groupFolder },
+        { name: 'NANOCLAW_IS_MAIN', value: containerInput.isMain ? '1' : '0' },
+      ],
+    },
   ];
-
-  if (sessionId) {
-    args.unshift('--resume', sessionId);
-  }
-
-  log(`Spawning agent with workspace=${groupDir}, resume=${sessionId ?? 'none'}`);
-
-  return new Promise<SpawnResult>((resolve, reject) => {
-    const proc = spawn('agent', args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: spawnEnv as NodeJS.ProcessEnv,
-    });
-
-    let newSessionId: string | undefined;
-    let lineBuffer = '';
-    let messageCount = 0;
-    let resultCount = 0;
-    let hadOutput = false;
-    let hadAssistantOutput = false;
-    let stderrBuffer = '';
-    let lastEventHint = '';
-
-    proc.stdout.on('data', (chunk: Buffer) => {
-      lineBuffer += chunk.toString();
-      const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const event = JSON.parse(trimmed);
-          handleEvent(event);
-        } catch { /* non-JSON line, ignore */ }
-      }
-    });
-
-    function handleEvent(event: Record<string, unknown>): void {
-      const type = event.type as string;
-      messageCount++;
-      log(`[msg #${messageCount}] type=${type}`);
-
-      if (type === 'system' && event.subtype === 'init') {
-        newSessionId = event.session_id as string;
-        log(`Session initialized: ${newSessionId}`);
-        return;
-      }
-
-      if (type === 'assistant') {
-        const message = event.message as { content?: Array<{ type: string; text?: string }> };
-        const text = message?.content
-          ?.filter(c => c.type === 'text')
-          .map(c => c.text ?? '')
-          .join('') ?? '';
-        if (text) {
-          hadOutput = true;
-          hadAssistantOutput = true;
-          writeOutput({ status: 'success', result: text, newSessionId });
-        }
-        return;
-      }
-
-      if (type === 'result') {
-        resultCount++;
-        hadOutput = true;
-        const isError = event.is_error as boolean;
-        log(`Result #${resultCount}: isError=${isError}`);
-        if (isError) {
-          const errText = (event.result as string | undefined) || lastEventHint || stderrBuffer || 'Cursor agent returned an error';
-          writeOutput({ status: 'error', result: null, error: errText, newSessionId });
-        } else if (!hadAssistantOutput) {
-          // No streaming chunks yet — send the full result text
-          writeOutput({ status: 'success', result: (event.result as string | null) ?? null, newSessionId });
-        } else {
-          // Already streamed via type=assistant — just signal completion
-          writeOutput({ status: 'success', result: null, newSessionId });
-        }
-        return;
-      }
-
-      // For unhandled event types, try to extract any text that might describe an error
-      try {
-        const raw = JSON.stringify(event);
-        if (raw.length < 500) lastEventHint = `[${type}] ${raw}`;
-      } catch { /* ignore */ }
-    }
-
-    proc.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString().trim();
-      stderrBuffer += (stderrBuffer ? '\n' : '') + text;
-      log(`stderr: ${text}`);
-    });
-
-    proc.on('error', (err) => {
-      reject(err);
-    });
-
-    proc.on('close', (code) => {
-      if (lineBuffer.trim()) {
-        try {
-          handleEvent(JSON.parse(lineBuffer.trim()));
-        } catch { /* ignore */ }
-      }
-      log(`agent process exited with code ${code}`);
-      let fatalError = false;
-      if (!hadOutput && code !== 0) {
-        const errMsg = stderrBuffer || lastEventHint || `Cursor agent exited with code ${code}`;
-        log(`No output produced, reporting error: ${errMsg}`);
-        writeOutput({ status: 'error', result: null, error: errMsg, newSessionId });
-        fatalError = true;
-      }
-      resolve({ newSessionId, fatalError });
-    });
-  });
 }
 
 export async function main(): Promise<void> {
@@ -251,15 +91,18 @@ export async function main(): Promise<void> {
   const groupDir = process.env.NANOCLAW_GROUP_DIR ?? containerInput.groupFolder;
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
+  const mcpServers = buildMcpServers(mcpServerPath, containerInput);
 
   const spawnEnv: Record<string, string | undefined> = {
     ...process.env,
     ...(containerInput.secrets ?? {}),
   };
 
-  writeConfigs(groupDir, mcpServerPath, containerInput);
-
-  try { fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(IPC_INPUT_CLOSE_SENTINEL);
+  } catch {
+    /* ignore */
+  }
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
   const pending = drainIpcInput(IPC_INPUT_DIR);
@@ -269,34 +112,101 @@ export async function main(): Promise<void> {
     initialPromptText += '\n' + pending.join('\n');
   }
 
+  log('Spawning agent acp');
+  const agentProc = spawn('agent', ['acp'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: spawnEnv as NodeJS.ProcessEnv,
+  });
+
+  agentProc.stderr.on('data', (chunk: Buffer) => {
+    const text = chunk.toString().trim();
+    if (text) log(`stderr: ${text}`);
+  });
+
+  const stream = acp.ndJsonStream(
+    Writable.toWeb(agentProc.stdin!) as WritableStream<Uint8Array>,
+    Readable.toWeb(agentProc.stdout!) as ReadableStream<Uint8Array>,
+  );
+
   let sessionId = containerInput.sessionId;
-  let currentPromptText = initialPromptText;
+  let textBuffer = '';
+
+  const client: acp.Client = {
+    async sessionUpdate(params) {
+      const update = params.update;
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+        textBuffer += update.content.text;
+      }
+    },
+    async requestPermission(params) {
+      const allowOnce =
+        params.options.find((o: acp.PermissionOption) => o.kind === 'allow_once') ??
+        params.options[0];
+      return { outcome: { outcome: 'selected', optionId: allowOnce.optionId } };
+    },
+  };
+
+  const connection = new acp.ClientSideConnection((_agent) => client, stream);
 
   try {
-    while (true) {
-      log(`Starting query (session: ${sessionId ?? 'new'})...`);
-      const prompt = buildPrompt(containerInput, currentPromptText);
-      const result = await spawnAgent(prompt, sessionId, groupDir, spawnEnv);
-      if (result.newSessionId) {
-        sessionId = result.newSessionId;
-      }
+    await connection.initialize({ protocolVersion: acp.PROTOCOL_VERSION });
 
-      log('Query ended, waiting for next IPC message...');
+    if (sessionId) {
+      try {
+        log(`Loading session: ${sessionId}`);
+        await connection.loadSession({ sessionId, cwd: groupDir, mcpServers });
+      } catch (loadErr) {
+        log(`Session load failed (${serializeError(loadErr)}), creating new session`);
+        sessionId = undefined;
+        const r = await connection.newSession({ cwd: groupDir, mcpServers });
+        sessionId = r.sessionId;
+        log(`New session created: ${sessionId}`);
+      }
+    } else {
+      log('Creating new session');
+      const r = await connection.newSession({ cwd: groupDir, mcpServers });
+      sessionId = r.sessionId;
+      log(`New session created: ${sessionId}`);
+    }
+
+    let currentPromptText = initialPromptText;
+    let isFirstPrompt = true;
+
+    while (true) {
+      const prompt = isFirstPrompt
+        ? buildPrompt(containerInput, currentPromptText)
+        : applyScheduledTaskPrefix(currentPromptText, containerInput.isScheduledTask);
+      isFirstPrompt = false;
+      log(`Sending prompt (session: ${sessionId}, chars: ${prompt.length})`);
+
+      textBuffer = '';
+      await connection.prompt({
+        sessionId,
+        prompt: [{ type: 'text', text: prompt }],
+      });
+
+      if (textBuffer) {
+        writeOutput({ status: 'success', result: textBuffer, newSessionId: sessionId });
+        textBuffer = '';
+      }
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+
+      log('Prompt complete, waiting for next IPC message...');
       const nextMessage = await waitForIpcMessage(IPC_INPUT_DIR, IPC_INPUT_CLOSE_SENTINEL);
       if (nextMessage === null) {
         log('Close sentinel received, exiting');
         break;
       }
 
-      log(`Got new message (${nextMessage.length} chars), starting new query`);
+      log(`Got new message (${nextMessage.length} chars)`);
       currentPromptText = nextMessage;
     }
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
+    const errorMessage = serializeError(err);
     log(`Agent error: ${errorMessage}`);
     writeOutput({ status: 'error', result: null, newSessionId: sessionId, error: errorMessage });
     process.exit(1);
   } finally {
-    cleanupConfigs();
+    agentProc.kill();
   }
 }

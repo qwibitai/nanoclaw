@@ -12,3 +12,6 @@
 // telegram
 
 // whatsapp
+
+// zoom
+import './zoom.js';

@@ -386,10 +386,7 @@ export async function runContainerAgent(
 
     agentProcess.stderr.on('data', (data) => {
       const chunk = data.toString();
-      const lines = chunk.trim().split('\n');
-      for (const line of lines) {
-        if (line) logger.debug({ process: group.folder }, line);
-      }
+      logger.debug({ process: group.folder }, chunk.trim());
       // Don't reset timeout on stderr — SDK writes debug logs continuously.
       // Timeout only resets on actual output (OUTPUT_MARKER in stdout).
       if (stderrTruncated) return;
