@@ -44,6 +44,7 @@ git merge gmail/main
 ```
 
 This merges in:
+
 - `src/channels/gmail.ts` (GmailChannel class with self-registration via `registerChannel`)
 - `src/channels/gmail.test.ts` (unit tests)
 - `import './gmail.js'` appended to the channel barrel file `src/channels/index.ts`

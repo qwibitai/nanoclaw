@@ -22,9 +22,11 @@ Run `/update-skills` in Claude Code.
 ---
 
 # Goal
+
 Help users update their installed skill branches from upstream without losing local customizations.
 
 # Operating principles
+
 - Never proceed with a dirty working tree.
 - Only offer updates for skills the user has already merged (installed).
 - Use git-native operations. Do not manually rewrite files except conflict markers.
@@ -33,27 +35,34 @@ Help users update their installed skill branches from upstream without losing lo
 # Step 0: Preflight
 
 Run:
+
 - `git status --porcelain`
 
 If output is non-empty:
+
 - Tell the user to commit or stash first, then stop.
 
 Check remotes:
+
 - `git remote -v`
 
 If `upstream` is missing:
+
 - Ask the user for the upstream repo URL (default: `https://github.com/qwibitai/nanoclaw.git`).
 - `git remote add upstream <url>`
 
 Fetch:
+
 - `git fetch upstream --prune`
 
 # Step 1: Detect installed skills with available updates
 
 List all upstream skill branches:
+
 - `git branch -r --list 'upstream/skill/*'`
 
 For each `upstream/skill/<name>`:
+
 1. Check if the user has merged this skill branch before:
    - `git merge-base --is-ancestor upstream/skill/<name>~1 HEAD` — if this succeeds (exit 0) for any ancestor commit of the skill branch, the user has merged it at some point. A simpler check: `git log --oneline --merges --grep="skill/<name>" HEAD` to see if there's a merge commit referencing this branch.
    - Alternative: `MERGE_BASE=$(git merge-base HEAD upstream/skill/<name>)` — if the merge base is NOT the initial commit and the merge base includes commits unique to the skill branch, it has been merged.
@@ -63,6 +72,7 @@ For each `upstream/skill/<name>`:
    - If this produces output, there are updates available.
 
 Build three lists:
+
 - **Updates available**: skills that are merged AND have new commits
 - **Up to date**: skills that are merged and have no new commits
 - **Not installed**: skills that have never been merged
@@ -70,11 +80,13 @@ Build three lists:
 # Step 2: Present results
 
 If no skills have updates available:
+
 - Tell the user all installed skills are up to date. List them.
 - If there are uninstalled skills, mention them briefly (e.g., "3 other skills available in upstream that you haven't installed").
 - Stop here.
 
 If updates are available:
+
 - Show the list of skills with updates, including the number of new commits for each:
   ```
   skill/<name>: 3 new commits
@@ -103,6 +115,7 @@ For each selected skill (process one at a time):
    - Complete the merge: `git commit --no-edit`
 
 If a merge fails badly (e.g., cannot resolve conflicts):
+
 - `git merge --abort`
 - Tell the user this skill could not be auto-updated and they should resolve it manually.
 - Continue with the remaining skills.
@@ -110,10 +123,12 @@ If a merge fails badly (e.g., cannot resolve conflicts):
 # Step 4: Validation
 
 After all selected skills are merged:
-- `npm run build`
-- `npm test` (do not fail the flow if tests are not configured)
+
+- `pnpm run build`
+- `pnpm test` (do not fail the flow if tests are not configured)
 
 If build fails:
+
 - Show the error.
 - Only fix issues clearly caused by the merge (missing imports, type mismatches).
 - Do not refactor unrelated code.
@@ -122,6 +137,7 @@ If build fails:
 # Step 5: Summary
 
 Show:
+
 - Skills updated (list)
 - Skills skipped or failed (if any)
 - New HEAD: `git rev-parse --short HEAD`

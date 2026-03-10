@@ -8,6 +8,7 @@ description: Add Ollama MCP server so the container agent can call local models 
 This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models.
 
 Tools added:
+
 - `ollama_list_models` — lists installed Ollama models
 - `ollama_generate` — sends a prompt to a specified model and returns the response
 
@@ -59,6 +60,7 @@ git merge upstream/skill/ollama-tool
 ```
 
 This merges in:
+
 - `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
 - `scripts/ollama-watch.sh` (macOS notification watcher)
 - Ollama MCP config in `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
@@ -129,6 +131,7 @@ tail -f logs/nanoclaw.log | grep -i ollama
 ```
 
 Look for:
+
 - `Agent output: ... Ollama ...` — agent used Ollama successfully
 - `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
 - `[OLLAMA] <<< Done` — generation completed
@@ -138,6 +141,7 @@ Look for:
 ### Agent says "Ollama is not installed"
 
 The agent is trying to run `ollama` CLI inside the container instead of using the MCP tools. This means:
+
 1. The MCP server wasn't registered — check `container/agent-runner/src/index.ts` has the `ollama` entry in `mcpServers`
 2. The per-group source wasn't updated — re-copy files (see Phase 2)
 3. The container wasn't rebuilt — run `./container/build.sh`

@@ -26,11 +26,13 @@ Each skill branch contains all the code changes for that skill: new files, modif
 Skills are split into two categories:
 
 **Operational skills** (on `main`, always available):
+
 - `/setup`, `/debug`, `/update-nanoclaw`, `/customize`, `/update-skills`
 - These are instruction-only SKILL.md files — no code changes, just workflows
 - Live in `.claude/skills/` on `main`, immediately available to every user
 
 **Feature skills** (in marketplace, installed on demand):
+
 - `/add-discord`, `/add-telegram`, `/add-slack`, `/add-gmail`, etc.
 - Each has a SKILL.md with setup instructions and a corresponding `skill/*` branch with code
 - Live in the marketplace repo (`qwibitai/nanoclaw-skills`)
@@ -148,6 +150,7 @@ done
 This requires no state — it uses git history to determine which skills were previously merged and whether they have new commits.
 
 This logic is available in two ways:
+
 - Built into `/update-nanoclaw` — after merging main, optionally check for skill updates
 - Standalone `/update-skills` — check and merge skill updates independently
 
@@ -190,6 +193,7 @@ A GitHub Action runs on every push to `main`:
 5. If a skill fails (conflict, build error, test failure), open a GitHub issue for manual resolution
 
 **Why merge-forward instead of rebase:**
+
 - No force-push — preserves history for users who already merged the skill
 - Users can re-merge a skill branch to pick up skill updates (bug fixes, improvements)
 - Git has proper common ancestors throughout the merge graph
@@ -237,17 +241,20 @@ Users who previously applied skills via the `skills-engine/` system have skill c
 **For existing old-engine skills**, two migration paths:
 
 **Option A: Per-skill reapply (keep your fork)**
+
 1. For each old-engine skill: identify and revert the old changes, then merge the skill branch fresh
 2. Claude assists with identifying what to revert and resolving any conflicts
 3. Custom modifications (non-skill changes) are preserved
 
 **Option B: Fresh start (cleanest)**
+
 1. Create a new fork from upstream
 2. Merge the skill branches you want
 3. Manually re-apply your custom (non-skill) changes
 4. Claude assists by diffing your old fork against the new one to identify custom changes
 
 In both cases:
+
 - Delete the `.nanoclaw/` directory (no longer needed)
 - The `skills-engine/` code will be removed from upstream once all skills are migrated
 - `/update-skills` only tracks skills applied via branch merge — old-engine skills won't appear in update checks
@@ -333,6 +340,7 @@ When a skill PR is reviewed and approved:
 4. Add the skill's SKILL.md to the marketplace repo (`qwibitai/nanoclaw-skills`)
 
 This way:
+
 - The contributor gets merge credit (their PR is merged)
 - They're added to CONTRIBUTORS.md automatically by the maintainer
 - The skill branch is created from their work
@@ -429,6 +437,7 @@ A flavor is a curated fork of NanoClaw — a combination of skills, custom chang
 During `/setup`, users are offered a choice of flavors before any configuration happens. The setup skill reads `flavors.yaml` from the repo (shipped with upstream, always up to date) and presents options:
 
 AskUserQuestion: "Start with a flavor or default NanoClaw?"
+
 - Default NanoClaw
 - NanoClaw for Sales — Gmail + Slack + CRM (maintained by alice)
 - NanoClaw Minimal — Telegram-only, lightweight (maintained by bob)
@@ -446,6 +455,7 @@ Then setup continues normally (dependencies, auth, container, service).
 **This choice is only offered on a fresh fork** — when the user's main matches or is close to upstream's main with no local commits. If `/setup` detects significant local changes (re-running setup on an existing install), it skips the flavor selection and goes straight to configuration.
 
 After installation, the user's fork has three remotes:
+
 - `origin` — their fork (push customizations here)
 - `upstream` — `qwibitai/nanoclaw` (core updates)
 - `<flavor-name>` — the flavor fork (flavor updates)
@@ -491,20 +501,20 @@ Migration from the old skills engine to branches is complete. All feature skills
 
 ### Skill branches
 
-| Branch | Base | Description |
-|--------|------|-------------|
-| `skill/whatsapp` | `main` | WhatsApp channel |
-| `skill/telegram` | `main` | Telegram channel |
-| `skill/slack` | `main` | Slack channel |
-| `skill/discord` | `main` | Discord channel |
-| `skill/gmail` | `main` | Gmail channel |
-| `skill/voice-transcription` | `skill/whatsapp` | OpenAI Whisper voice transcription |
-| `skill/image-vision` | `skill/whatsapp` | Image attachment processing |
-| `skill/pdf-reader` | `skill/whatsapp` | PDF attachment reading |
-| `skill/local-whisper` | `skill/voice-transcription` | Local whisper.cpp transcription |
-| `skill/ollama-tool` | `main` | Ollama MCP server for local models |
-| `skill/apple-container` | `main` | Apple Container runtime |
-| `skill/reactions` | `main` | WhatsApp emoji reactions |
+| Branch                      | Base                        | Description                        |
+| --------------------------- | --------------------------- | ---------------------------------- |
+| `skill/whatsapp`            | `main`                      | WhatsApp channel                   |
+| `skill/telegram`            | `main`                      | Telegram channel                   |
+| `skill/slack`               | `main`                      | Slack channel                      |
+| `skill/discord`             | `main`                      | Discord channel                    |
+| `skill/gmail`               | `main`                      | Gmail channel                      |
+| `skill/voice-transcription` | `skill/whatsapp`            | OpenAI Whisper voice transcription |
+| `skill/image-vision`        | `skill/whatsapp`            | Image attachment processing        |
+| `skill/pdf-reader`          | `skill/whatsapp`            | PDF attachment reading             |
+| `skill/local-whisper`       | `skill/voice-transcription` | Local whisper.cpp transcription    |
+| `skill/ollama-tool`         | `main`                      | Ollama MCP server for local models |
+| `skill/apple-container`     | `main`                      | Apple Container runtime            |
+| `skill/reactions`           | `main`                      | WhatsApp emoji reactions           |
 
 ### What was removed
 
@@ -522,6 +532,7 @@ Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-sk
 ### README Quick Start
 
 Before:
+
 ```bash
 git clone https://github.com/qwibitai/NanoClaw.git
 cd NanoClaw
@@ -529,6 +540,7 @@ claude
 ```
 
 After:
+
 ```
 1. Fork qwibitai/nanoclaw on GitHub
 2. git clone https://github.com/<you>/nanoclaw.git
@@ -596,6 +608,7 @@ Operational skills (`setup`, `debug`, `update-nanoclaw`, `customize`, `update-sk
 The update skill gets simpler with the branch-based approach. The old skills engine required replaying all applied skills after merging core updates — that entire step disappears. Skill changes are already in the user's git history, so `git merge upstream/main` just works.
 
 **What stays the same:**
+
 - Preflight (clean working tree, upstream remote)
 - Backup branch + tag
 - Preview (git log, git diff, file buckets)
@@ -606,10 +619,12 @@ The update skill gets simpler with the branch-based approach. The old skills eng
 - Rollback instructions
 
 **What's removed:**
+
 - Skill replay step (was needed by the old skills engine to re-apply skills after core update)
 - Re-running structured operations (npm deps, env vars — these are part of git history now)
 
 **What's added:**
+
 - Optional step at the end: "Check for skill updates?" which runs the `/update-skills` logic
 - This checks whether any previously-merged skill branches have new commits (bug fixes, improvements to the skill itself — not just merge-forwards from main)
 
@@ -627,6 +642,7 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > We've simplified how skills work in NanoClaw. Instead of a custom skills engine, skills are now git branches that you merge in.
 >
 > **What this means for you:**
+>
 > - Applying a skill: `git fetch upstream skill/discord && git merge upstream/skill/discord`
 > - Updating core: `git fetch upstream main && git merge upstream/main`
 > - Checking for skill updates: `/update-skills`
@@ -635,6 +651,7 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > **We now recommend forking instead of cloning.** This gives you a remote to push your customizations to.
 >
 > **If you currently have a clone with local changes**, migrate to a fork:
+>
 > 1. Fork `qwibitai/nanoclaw` on GitHub
 > 2. Run:
 >    ```
@@ -653,6 +670,7 @@ Users only need to re-merge a skill branch if the skill itself was updated (not 
 > **Contributing skills**
 >
 > To contribute a skill:
+>
 > 1. Fork `qwibitai/nanoclaw`
 > 2. Branch from `main` and make your code changes
 > 3. Open a regular PR
