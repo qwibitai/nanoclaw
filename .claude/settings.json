@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "nanoclaw-skills": {
+      "source": {
+        "source": "github",
+        "repo": "qwibitai/nanoclaw-skills"
+      }
+    }
+  }
+}

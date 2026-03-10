@@ -7,6 +7,7 @@
  * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
  */
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import pino from 'pino';
 
@@ -121,7 +122,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
  * Expand ~ to home directory and resolve to absolute path
  */
 function expandPath(p: string): string {
-  const homeDir = process.env.HOME || '/Users/user';
+  const homeDir = process.env.HOME || os.homedir();
   if (p.startsWith('~/')) {
     return path.join(homeDir, p.slice(2));
   }
@@ -221,6 +222,7 @@ export interface MountValidationResult {
   allowed: boolean;
   reason: string;
   realHostPath?: string;
+  resolvedContainerPath?: string;
   effectiveReadonly?: boolean;
 }
 
@@ -242,11 +244,14 @@ export function validateMount(
     };
   }
 
-  // Validate container path first (cheap check)
-  if (!isValidContainerPath(mount.containerPath)) {
+  // Derive containerPath from hostPath basename if not specified
+  const containerPath = mount.containerPath || path.basename(mount.hostPath);
+
+  // Validate container path (cheap check)
+  if (!isValidContainerPath(containerPath)) {
     return {
       allowed: false,
-      reason: `Invalid container path: "${mount.containerPath}" - must be relative, non-empty, and not contain ".."`,
+      reason: `Invalid container path: "${containerPath}" - must be relative, non-empty, and not contain ".."`,
     };
   }
 
@@ -318,6 +323,7 @@ export function validateMount(
     allowed: true,
     reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ''}`,
     realHostPath: realPath,
+    resolvedContainerPath: containerPath,
     effectiveReadonly,
   };
 }
@@ -348,7 +354,7 @@ export function validateAdditionalMounts(
     if (result.allowed) {
       validatedMounts.push({
         hostPath: result.realHostPath!,
-        containerPath: `/workspace/extra/${mount.containerPath}`,
+        containerPath: `/workspace/extra/${result.resolvedContainerPath}`,
         readonly: result.effectiveReadonly!,
       });
 
@@ -356,7 +362,7 @@ export function validateAdditionalMounts(
         {
           group: groupName,
           hostPath: result.realHostPath,
-          containerPath: mount.containerPath,
+          containerPath: result.resolvedContainerPath,
           readonly: result.effectiveReadonly,
           reason: result.reason,
         },
