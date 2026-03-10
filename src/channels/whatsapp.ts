@@ -542,10 +542,15 @@ export class WhatsAppChannel implements Channel {
     const fileName = originalName || `${Date.now()}${ext}`;
     const filePath = path.join(typeDir, `${Date.now()}_${fileName}`);
 
-    const buffer = (await downloadMediaMessage(msg, 'buffer', {}, {
-      logger,
-      reuploadRequest: this.sock.updateMediaMessage,
-    })) as Buffer;
+    const buffer = (await downloadMediaMessage(
+      msg,
+      'buffer',
+      {},
+      {
+        logger,
+        reuploadRequest: this.sock.updateMediaMessage,
+      },
+    )) as Buffer;
 
     fs.writeFileSync(filePath, buffer);
 
