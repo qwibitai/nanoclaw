@@ -325,10 +325,9 @@ export async function prepareThreadWorkspace(
         // Use remote default branch if available, otherwise local HEAD
         let ref = 'HEAD';
         try {
-          ref = await execAsync(
-            'git symbolic-ref refs/remotes/origin/HEAD',
-            { cwd: srcPath },
-          ); // e.g. refs/remotes/origin/main
+          ref = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
+            cwd: srcPath,
+          }); // e.g. refs/remotes/origin/main
         } catch {
           // origin/HEAD not set — use local HEAD
         }
