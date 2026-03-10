@@ -170,8 +170,13 @@ function buildVolumeMounts(
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
+  // Ensure container's node user (uid 1000) can write IPC messages and tasks
+  const ipcMessagesDir = path.join(groupIpcDir, 'messages');
+  fs.mkdirSync(ipcMessagesDir, { recursive: true });
+  fs.chmodSync(ipcMessagesDir, 0o777);
+  const ipcTasksDir = path.join(groupIpcDir, 'tasks');
+  fs.mkdirSync(ipcTasksDir, { recursive: true });
+  fs.chmodSync(ipcTasksDir, 0o777);
   const ipcInputDir = path.join(groupIpcDir, 'input');
   fs.mkdirSync(ipcInputDir, { recursive: true });
   // Ensure container's node user (uid 1000) can delete processed input files
