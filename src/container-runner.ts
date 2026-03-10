@@ -122,8 +122,10 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
-  // Ensure debug dir exists so the SDK can write debug files
-  fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
+  // Ensure debug dir exists and is writable by container's node user (uid 1000)
+  const debugDir = path.join(groupSessionsDir, 'debug');
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.chmodSync(debugDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
