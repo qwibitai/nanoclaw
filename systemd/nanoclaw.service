@@ -1,0 +1,20 @@
+[Unit]
+Description=NanoClaw AI Agent
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/GenTech_Agency
+ExecStart=/usr/bin/node /root/GenTech_Agency/dist/index.js
+Restart=always
+RestartSec=5
+StandardOutput=append:/root/GenTech_Agency/logs/nanoclaw.log
+StandardError=append:/root/GenTech_Agency/logs/nanoclaw.error.log
+EnvironmentFile=/root/GenTech_Agency/.env
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin
+
+[Install]
+WantedBy=multi-user.target
