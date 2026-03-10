@@ -126,31 +126,18 @@ Wait for the user to provide the channel ID (format: `dc:1234567890123456`).
 
 ### Register the channel
 
-Use the IPC register flow or register directly. The channel ID, name, and folder name are needed.
+The channel ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main channel (responds to all messages):
 
-```typescript
-registerGroup("dc:<channel-id>", {
-  name: "<server-name> #<channel-name>",
-  folder: "discord_main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  isMain: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_main" --trigger "@${ASSISTANT_NAME}" --channel discord --no-trigger-required --is-main
 ```
 
 For additional channels (trigger-only):
 
-```typescript
-registerGroup("dc:<channel-id>", {
-  name: "<server-name> #<channel-name>",
-  folder: "discord_<channel-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "dc:<channel-id>" --name "<server-name> #<channel-name>" --folder "discord_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel discord
 ```
 
 ## Phase 5: Verify
