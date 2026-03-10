@@ -9,10 +9,15 @@ This skill helps users add capabilities or modify behavior. Use AskUserQuestion 
 
 ## Workflow
 
-1. **Understand the request** - Ask clarifying questions
-2. **Plan the changes** - Identify files to modify
-3. **Implement** - Make changes directly to the code
-4. **Test guidance** - Tell user how to verify
+1. **Install marketplace** - If feature skills aren't available yet, install the marketplace plugin:
+   ```bash
+   claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
+   ```
+   This is hot-loaded — all feature skills become immediately available.
+2. **Understand the request** - Ask clarifying questions
+3. **Plan the changes** - Identify files to modify. If a skill exists for the request (e.g., `/add-telegram` for adding Telegram), invoke it instead of implementing manually.
+4. **Implement** - Make changes directly to the code
+5. **Test guidance** - Tell user how to verify
 
 ## Key Files
 

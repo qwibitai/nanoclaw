@@ -1,12 +1,17 @@
+---
+name: add-discord
+description: Add Discord bot channel integration to NanoClaw.
+---
+
 # Add Discord Channel
 
-This skill adds Discord support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Discord support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `discord` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/discord.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -18,39 +23,40 @@ If they have one, collect it now. If not, we'll create one in Phase 3.
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `discord` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-discord
+git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
 ```
 
-This deterministically:
-- Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
-- Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
-- Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
-- Installs the `discord.js` npm dependency
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent file:
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+```bash
+git fetch discord main
+git merge discord/main
+```
+
+This merges in:
+- `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
+- `src/channels/discord.test.ts` (unit tests with discord.js mock)
+- `import './discord.js'` appended to the channel barrel file `src/channels/index.ts`
+- `discord.js` npm dependency in `package.json`
+- `DISCORD_BOT_TOKEN` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/discord.test.ts
 ```
 
 All tests must pass (including the new Discord tests) and build must be clean before proceeding.
