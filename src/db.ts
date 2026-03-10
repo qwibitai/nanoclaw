@@ -348,6 +348,22 @@ export function setLastGroupSync(): void {
 }
 
 /**
+ * Check whether a user message with the given exact timestamp exists in a JID.
+ * Used during startup to detect cursors that are stuck at a message boundary
+ * due to a SIGTERM killing the container before it could respond.
+ */
+export function hasUserMessageAtTimestamp(
+  chatJid: string,
+  timestamp: string,
+): boolean {
+  return !!db
+    .prepare(
+      `SELECT 1 FROM messages WHERE chat_jid = ? AND timestamp = ? AND is_bot_message = 0 LIMIT 1`,
+    )
+    .get(chatJid, timestamp);
+}
+
+/**
  * Store a message with full content.
  * Only call this for registered groups where message history is needed.
  */

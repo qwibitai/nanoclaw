@@ -52,6 +52,7 @@ import {
   getNewMessages,
   getRouterState,
   initDatabase,
+  hasUserMessageAtTimestamp,
   pruneThreadOrigins,
   setRegisteredGroup,
   setRouterState,
@@ -382,12 +383,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const model = resolveModel(group, modelOverride);
   const prompt = formatMessages(missedMessages);
 
-  // Advance cursor so the piping path in startMessageLoop won't re-fetch
-  // these messages. Save the old cursor so we can roll back on error.
+  // Advance cursor in-memory so concurrent checks for this group won't
+  // re-fetch these messages while the container is running. We deliberately
+  // do NOT call saveState() here — persisting happens only after the container
+  // completes. This way a SIGTERM/crash mid-run leaves the DB cursor at the
+  // previous value, allowing startup recovery to re-process the messages.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-  saveState();
 
   const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
   logger.info(
@@ -478,11 +481,12 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      saveState();
       return true;
     }
-    // Roll back cursor so retries can re-process these messages
+    // Roll back in-memory cursor so retries can re-process these messages.
+    // No saveState() needed — we never persisted the advance.
     lastAgentTimestamp[chatJid] = previousCursor;
-    saveState();
     logger.warn(
       { group: group.name },
       'Agent error, rolled back message cursor for retry',
@@ -490,6 +494,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  // Success — persist the cursor advance now that the container has completed.
+  saveState();
   return true;
 }
 
@@ -762,9 +768,12 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
             );
+            // Advance cursor in-memory only — the running container's
+            // processGroupMessages will persist via saveState() on completion.
+            // NOT calling saveState() here so a SIGTERM doesn't strand the cursor
+            // past messages the container never responded to.
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
-            saveState();
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)
@@ -843,6 +852,26 @@ function recoverPendingMessages(): void {
           'Recovery: found unprocessed thread messages',
         );
         queue.enqueueMessageCheck(chatJid, threadJid, parsedThread?.threadId);
+      }
+
+      // Unstick cursors where the cursor exactly matches the latest user message
+      // timestamp. This happens when a SIGTERM kills the container after the
+      // cursor was advanced in-memory but before saveState() was called. Since
+      // the old code saved state eagerly, the DB cursor ends up pointing exactly
+      // at an unanswered message. Nudge the cursor back 1ms so recovery picks it up.
+      for (const [jid, ts] of Object.entries(lastAgentTimestamp)) {
+        if (!jid.startsWith(chatJid + ':thread:')) continue;
+        if (!ts) continue;
+        if (hasUserMessageAtTimestamp(jid, ts)) {
+          const prevMs = new Date(ts).getTime() - 1;
+          lastAgentTimestamp[jid] = new Date(prevMs).toISOString();
+          const parsedThread = parseThreadJid(jid);
+          logger.info(
+            { group: group.name, threadJid: jid },
+            'Recovery: unstuck stuck thread cursor',
+          );
+          queue.enqueueMessageCheck(chatJid, jid, parsedThread?.threadId);
+        }
       }
     }
   }
