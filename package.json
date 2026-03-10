@@ -1,7 +1,7 @@
 {
   "name": "nanoclaw",
   "version": "1.2.12",
-  "description": "Personal Claude assistant. Lightweight, secure, customizable.",
+  "description": "Personal Codex/Claude assistant. Lightweight, secure, customizable.",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

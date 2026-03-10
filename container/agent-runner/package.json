@@ -2,7 +2,7 @@
   "name": "nanoclaw-agent-runner",
   "version": "1.0.0",
   "type": "module",
-  "description": "Container-side agent runner for NanoClaw",
+  "description": "Container-side Codex/Claude runner for NanoClaw",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

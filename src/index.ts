@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  AGENT_PROVIDER,
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
@@ -64,12 +65,14 @@ let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+let persistedAgentProvider = '';
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
+  persistedAgentProvider = getRouterState('agent_provider') || '';
   const agentTs = getRouterState('last_agent_timestamp');
   try {
     lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
@@ -88,6 +91,33 @@ function loadState(): void {
 function saveState(): void {
   setRouterState('last_timestamp', lastTimestamp);
   setRouterState('last_agent_timestamp', JSON.stringify(lastAgentTimestamp));
+  setRouterState('agent_provider', AGENT_PROVIDER);
+}
+
+function encodeSessionIdForStorage(sessionId: string): string {
+  return `${AGENT_PROVIDER}:${sessionId}`;
+}
+
+function decodeSessionIdForProvider(
+  storedSessionId: string | undefined,
+): string | undefined {
+  if (!storedSessionId) return undefined;
+
+  if (storedSessionId.startsWith('codex:')) {
+    return AGENT_PROVIDER === 'codex'
+      ? storedSessionId.slice('codex:'.length)
+      : undefined;
+  }
+  if (storedSessionId.startsWith('claude:')) {
+    return AGENT_PROVIDER === 'claude'
+      ? storedSessionId.slice('claude:'.length)
+      : undefined;
+  }
+
+  if (persistedAgentProvider && persistedAgentProvider !== AGENT_PROVIDER) {
+    return undefined;
+  }
+  return storedSessionId;
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -267,7 +297,7 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const sessionId = decodeSessionIdForProvider(sessions[group.folder]);
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
@@ -298,8 +328,9 @@ async function runAgent(
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
-          sessions[group.folder] = output.newSessionId;
-          setSession(group.folder, output.newSessionId);
+          const storedSessionId = encodeSessionIdForStorage(output.newSessionId);
+          sessions[group.folder] = storedSessionId;
+          setSession(group.folder, storedSessionId);
         }
         await onOutput(output);
       }
@@ -322,8 +353,9 @@ async function runAgent(
     );
 
     if (output.newSessionId) {
-      sessions[group.folder] = output.newSessionId;
-      setSession(group.folder, output.newSessionId);
+      const storedSessionId = encodeSessionIdForStorage(output.newSessionId);
+      sessions[group.folder] = storedSessionId;
+      setSession(group.folder, storedSessionId);
     }
 
     if (output.status === 'error') {
@@ -472,15 +504,15 @@ async function main(): Promise<void> {
   loadState();
 
   // Start credential proxy (containers route API calls through this)
-  const proxyServer = await startCredentialProxy(
-    CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
-  );
+  const proxyServer =
+    AGENT_PROVIDER === 'claude'
+      ? await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST)
+      : null;
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
-    proxyServer.close();
+    proxyServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -543,7 +575,15 @@ async function main(): Promise<void> {
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
-    getSessions: () => sessions,
+    getSessions: () =>
+      Object.fromEntries(
+        Object.entries(sessions)
+          .map(([folder, storedSessionId]) => [
+            folder,
+            decodeSessionIdForProvider(storedSessionId),
+          ])
+          .filter(([, sessionId]) => sessionId),
+      ) as Record<string, string>,
     queue,
     onProcess: (groupJid, proc, containerName, groupFolder) =>
       queue.registerProcess(groupJid, proc, containerName, groupFolder),

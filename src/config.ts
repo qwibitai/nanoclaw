@@ -6,7 +6,21 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'AGENT_PROVIDER',
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+]);
+
+export type AgentProvider = 'codex' | 'claude';
+
+function parseAgentProvider(value: string | undefined): AgentProvider {
+  return value === 'claude' ? 'claude' : 'codex';
+}
+
+export const AGENT_PROVIDER = parseAgentProvider(
+  process.env.AGENT_PROVIDER || envConfig.AGENT_PROVIDER,
+);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';

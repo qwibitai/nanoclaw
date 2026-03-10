@@ -4,9 +4,12 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
+  AGENT_PROVIDER,
+  type AgentProvider,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -16,6 +19,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -56,6 +60,15 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+function getSessionMountConfig(provider: AgentProvider): {
+  hostDirName: '.codex' | '.claude';
+  containerPath: '/home/node/.codex' | '/home/node/.claude';
+} {
+  return provider === 'claude'
+    ? { hostDirName: '.claude', containerPath: '/home/node/.claude' }
+    : { hostDirName: '.codex', containerPath: '/home/node/.codex' };
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -66,7 +79,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (group folder, IPC, .claude/) are mounted separately below.
+    // (group folder, IPC, .codex/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -113,40 +126,52 @@ function buildVolumeMounts(
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
+  const sessionMount = getSessionMountConfig(AGENT_PROVIDER);
+  // Per-group agent home directory (isolated from other groups)
+  // Each group gets its own tool home to prevent cross-group session access.
   const groupSessionsDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
-    '.claude',
+    sessionMount.hostDirName,
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
-  const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+
+  if (AGENT_PROVIDER === 'codex') {
+    const hostCodexHome =
+      process.env.CODEX_HOME ||
+      path.join(process.env.HOME || os.homedir(), '.codex');
+    const hostAuthFile = path.join(hostCodexHome, 'auth.json');
+    const groupAuthFile = path.join(groupSessionsDir, 'auth.json');
+    if (fs.existsSync(hostAuthFile)) {
+      fs.copyFileSync(hostAuthFile, groupAuthFile);
+    }
+    const hostConfigFile = path.join(hostCodexHome, 'config.toml');
+    const groupConfigFile = path.join(groupSessionsDir, 'config.toml');
+    if (fs.existsSync(hostConfigFile)) {
+      fs.copyFileSync(hostConfigFile, groupConfigFile);
+    }
+  } else {
+    const settingsFile = path.join(groupSessionsDir, 'settings.json');
+    if (!fs.existsSync(settingsFile)) {
+      fs.writeFileSync(
+        settingsFile,
+        JSON.stringify(
+          {
+            env: {
+              CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+              CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+              CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+            },
           },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+          null,
+          2,
+        ) + '\n',
+      );
+    }
   }
 
-  // Sync skills from container/skills/ into each group's .claude/skills/
+  // Sync skills from container/skills/ into each group's agent home.
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
   const skillsDst = path.join(groupSessionsDir, 'skills');
   if (fs.existsSync(skillsSrc)) {
@@ -159,7 +184,7 @@ function buildVolumeMounts(
   }
   mounts.push({
     hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
+    containerPath: sessionMount.containerPath,
     readonly: false,
   });
 
@@ -220,26 +245,32 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+  args.push('-e', 'HOME=/home/node');
+  args.push('-e', `AGENT_PROVIDER=${AGENT_PROVIDER}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  if (AGENT_PROVIDER === 'codex') {
+    args.push('-e', 'CODEX_HOME=/home/node/.codex');
 
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    const codexEnv = readEnvFile(['OPENAI_API_KEY', 'OPENAI_BASE_URL']);
+    if (codexEnv.OPENAI_API_KEY) {
+      args.push('-e', `OPENAI_API_KEY=${codexEnv.OPENAI_API_KEY}`);
+    }
+    if (codexEnv.OPENAI_BASE_URL) {
+      args.push('-e', `OPENAI_BASE_URL=${codexEnv.OPENAI_BASE_URL}`);
+    }
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
+    args.push(...hostGatewayArgs());
   }
-
-  // Runtime-specific args for host gateway resolution
-  args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -248,7 +279,6 @@ function buildContainerArgs(
   const hostGid = process.getgid?.();
   if (hostUid != null && hostUid !== 0 && hostUid !== 1000) {
     args.push('--user', `${hostUid}:${hostGid}`);
-    args.push('-e', 'HOME=/home/node');
   }
 
   for (const mount of mounts) {
@@ -262,6 +292,25 @@ function buildContainerArgs(
   args.push(CONTAINER_IMAGE);
 
   return args;
+}
+
+function redactContainerArgs(args: string[]): string[] {
+  const redacted = [...args];
+  for (let i = 0; i < redacted.length; i++) {
+    if (redacted[i] === '-e' && redacted[i + 1]?.startsWith('OPENAI_API_KEY=')) {
+      redacted[i + 1] = 'OPENAI_API_KEY=[REDACTED]';
+    }
+    if (redacted[i] === '-e' && redacted[i + 1]?.startsWith('ANTHROPIC_API_KEY=')) {
+      redacted[i + 1] = 'ANTHROPIC_API_KEY=[REDACTED]';
+    }
+    if (
+      redacted[i] === '-e' &&
+      redacted[i + 1]?.startsWith('CLAUDE_CODE_OAUTH_TOKEN=')
+    ) {
+      redacted[i + 1] = 'CLAUDE_CODE_OAUTH_TOKEN=[REDACTED]';
+    }
+  }
+  return redacted;
 }
 
 export async function runContainerAgent(
@@ -279,6 +328,7 @@ export async function runContainerAgent(
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
+  const safeContainerArgs = redactContainerArgs(containerArgs);
 
   logger.debug(
     {
@@ -288,7 +338,7 @@ export async function runContainerAgent(
         (m) =>
           `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
       ),
-      containerArgs: containerArgs.join(' '),
+      containerArgs: safeContainerArgs.join(' '),
     },
     'Container mount configuration',
   );
@@ -508,7 +558,7 @@ export async function runContainerAgent(
           JSON.stringify(input, null, 2),
           ``,
           `=== Container Args ===`,
-          containerArgs.join(' '),
+          safeContainerArgs.join(' '),
           ``,
           `=== Mounts ===`,
           mounts
