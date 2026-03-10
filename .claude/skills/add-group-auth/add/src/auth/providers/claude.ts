@@ -10,6 +10,9 @@ import fs from 'fs';
 import net from 'net';
 import path from 'path';
 
+import { request as httpsRequest } from 'https';
+import { request as httpRequest, IncomingMessage, RequestOptions, ServerResponse } from 'http';
+
 import {
   decrypt,
   encrypt,
@@ -449,15 +452,99 @@ async function runOAuthFlow(
   return { handle, output, sessionDir };
 }
 
+// ── Proxy service: handles /claude/* requests ───────────────────────
+
+// Upstream config — initialized in importEnv(), not at module load.
+let upstreamUrl: URL;
+
+function initUpstream(): void {
+  if (upstreamUrl) return;
+  const env = readEnvFile(['ANTHROPIC_BASE_URL']);
+  upstreamUrl = new URL(env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
+}
+
+function forwardToClaude(
+  req: IncomingMessage,
+  res: ServerResponse,
+  path: string,
+  body: Buffer,
+  secrets: Record<string, string>,
+): void {
+  const headers: Record<string, string | number | string[] | undefined> = {
+    ...(req.headers as Record<string, string>),
+    host: upstreamUrl.host,
+    'content-length': body.length,
+  };
+
+  // Strip hop-by-hop headers that must not be forwarded by proxies
+  delete headers['connection'];
+  delete headers['keep-alive'];
+  delete headers['transfer-encoding'];
+
+  // Inject credentials
+  if (secrets.ANTHROPIC_API_KEY) {
+    delete headers['x-api-key'];
+    headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+  } else {
+    // OAuth mode: replace placeholder Bearer token with the real one
+    // only when the container actually sends an Authorization header
+    // (exchange request + auth probes). Post-exchange requests use
+    // x-api-key only, so they pass through without token injection.
+    const oauthToken = secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+    if (headers['authorization']) {
+      delete headers['authorization'];
+      if (oauthToken) {
+        headers['authorization'] = `Bearer ${oauthToken}`;
+      }
+    }
+  }
+
+  const isHttps = upstreamUrl.protocol === 'https:';
+  const upstream = (isHttps ? httpsRequest : httpRequest)(
+    {
+      hostname: upstreamUrl.hostname,
+      port: upstreamUrl.port || (isHttps ? 443 : 80),
+      path,
+      method: req.method,
+      headers,
+    } as RequestOptions,
+    (upRes) => {
+      res.writeHead(upRes.statusCode!, upRes.headers);
+      upRes.pipe(res);
+    },
+  );
+
+  upstream.on('error', (err) => {
+    logger.error({ err, path }, 'Claude proxy upstream error');
+    if (!res.headersSent) {
+      res.writeHead(502);
+      res.end('Bad Gateway');
+    }
+  });
+
+  upstream.write(body);
+  upstream.end();
+}
+
+// ── Provider ────────────────────────────────────────────────────────
+
 export const claudeProvider: CredentialProvider = {
   service: SERVICE,
   displayName: 'Claude',
+
+  proxyService: {
+    prefix: 'claude',
+    forward: forwardToClaude,
+  },
 
   hasAuth(scope: string): boolean {
     return hasCredential(scope, SERVICE);
   },
 
   importEnv(scope: string): void {
+    // Initialize upstream URL config on first call (env is available now).
+    initUpstream();
+
     if (hasCredential(scope, SERVICE)) return;
 
     const envVars = readEnvFile(ENV_FALLBACK_KEYS);

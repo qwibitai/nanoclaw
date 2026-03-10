@@ -10,11 +10,21 @@ export interface StoredCredential {
   updated_at: string;
 }
 
+/** Re-export ProxyService so providers can reference it without importing credential-proxy directly. */
+export type { ProxyService } from '../credential-proxy.js';
+
 /** Pluggable per-service credential provider. */
 export interface CredentialProvider {
   /** File basename: 'claude_oauth', 'anthropic_api_key' */
   service: string;
   displayName: string;
+
+  /**
+   * Proxy service this provider supplies credentials for.
+   * When the provider is registered, its proxyService is also registered
+   * with the credential proxy so it can handle requests at /<prefix>/.
+   */
+  proxyService?: import('../credential-proxy.js').ProxyService;
 
   /** Does this scope have usable credentials? */
   hasAuth(scope: string): boolean;
