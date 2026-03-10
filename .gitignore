@@ -33,3 +33,10 @@ groups/global/*
 .nanoclaw/
 
 agents-sdk-docs
+
+# Jarvis voice assistant
+jarvis/vosk-models/
+jarvis/*.log
+jarvis/__pycache__/
+jarvis/*.pyc
+jarvis/*.bak

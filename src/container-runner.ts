@@ -10,210 +10,29 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
-  MAX_CONCURRENT_CONTAINERS,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
-import { CONTAINER_RUNTIME_BIN, readonlyMountArgs, stopContainer } from './container-runtime.js';
+import {
+  CONTAINER_HOST_GATEWAY,
+  CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
+  readonlyMountArgs,
+  stopContainer,
+  supportsDevNullMounts,
+} from './container-runtime.js';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
-
-// Warm container pool for low-latency API responses
-interface WarmContainer {
-  containerName: string;
-  process: ChildProcess;
-  groupFolder: string;
-  lastUsed: number;
-  busy: boolean;
-  stdin: NodeJS.WritableStream;
-  stdout: NodeJS.ReadableStream;
-  onOutput?: (output: ContainerMessage) => Promise<void>;
-  parseBuffer: string;
-  newSessionId?: string;
-  outputChain: Promise<void>;
-}
-
-const warmPool: WarmContainer[] = [];
-const MAX_WARM_CONTAINERS = 2; // Pre-warm up to 2 containers
-const WARM_CONTAINER_TTL = 5 * 60 * 1000; // 5 minutes
-
-// Export the WarmContainer type
-export type { WarmContainer };
-
-// Clean up stale warm containers periodically
-setInterval(() => {
-  const now = Date.now();
-  for (let i = warmPool.length - 1; i >= 0; i--) {
-    const warm = warmPool[i];
-    if (!warm.busy && now - warm.lastUsed > WARM_CONTAINER_TTL) {
-      logger.debug({ containerName: warm.containerName }, 'Removing stale warm container');
-      try {
-        warm.process.kill();
-        exec(stopContainer(warm.containerName), { timeout: 15000 }, () => {});
-      } catch {}
-      warmPool.splice(i, 1);
-    }
-  }
-}, 60000); // Check every minute
-
-/**
- * Pre-warm a container for low-latency API responses.
- * The container starts up and waits for stdin input.
- * Returns true if a warm container was created or already exists.
- */
-export async function prewarmContainer(
-  group: RegisteredGroup,
-  isMain: boolean,
-): Promise<boolean> {
-  const groupFolder = group.folder;
-
-  // Check if we already have an idle warm container for this group
-  const existing = warmPool.find(
-    (w) => w.groupFolder === groupFolder && !w.busy,
-  );
-  if (existing) {
-    logger.debug({ groupFolder }, 'Warm container already available');
-    return true;
-  }
-
-  // Check if we're at capacity
-  const idleCount = warmPool.filter((w) => !w.busy).length;
-  if (idleCount >= MAX_WARM_CONTAINERS) {
-    // Remove oldest idle container to make room
-    const oldest = warmPool
-      .filter((w) => !w.busy)
-      .sort((a, b) => a.lastUsed - b.lastUsed)[0];
-    if (oldest) {
-      logger.debug({ containerName: oldest.containerName }, 'Evicting oldest warm container');
-      try {
-        oldest.process.kill();
-        exec(stopContainer(oldest.containerName), { timeout: 15000 }, () => {});
-      } catch {}
-      const idx = warmPool.indexOf(oldest);
-      if (idx !== -1) warmPool.splice(idx, 1);
-    }
-  }
-
-  // Spawn a new warm container
-  const groupDir = resolveGroupFolderPath(group.folder);
-  fs.mkdirSync(groupDir, { recursive: true });
-
-  const mounts = buildVolumeMounts(group, isMain);
-  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-warm-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
-
-  logger.info({ groupFolder, containerName }, 'Pre-warming container');
-
-  return new Promise((resolve) => {
-    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    let stderr = '';
-    let ready = false;
-    const readyTimeout = setTimeout(() => {
-      if (!ready) {
-        logger.warn({ containerName }, 'Warm container ready timeout');
-        container.kill();
-        resolve(false);
-      }
-    }, 30000); // 30s to become ready
-
-    container.stderr.on('data', (data) => {
-      stderr += data.toString();
-      // Agent runner logs "[agent-runner] Session initialized: xxx" when ready
-      if (!ready && stderr.includes('Session initialized:')) {
-        ready = true;
-        clearTimeout(readyTimeout);
-        warmPool.push({
-          containerName,
-          process: container,
-          groupFolder,
-          lastUsed: Date.now(),
-          busy: false,
-          stdin: container.stdin,
-          stdout: container.stdout,
-          parseBuffer: '',
-          outputChain: Promise.resolve(),
-        });
-        logger.info({ containerName, groupFolder }, 'Warm container ready');
-        resolve(true);
-      }
-    });
-
-    container.on('close', (code) => {
-      clearTimeout(readyTimeout);
-      const idx = warmPool.findIndex((w) => w.containerName === containerName);
-      if (idx !== -1) warmPool.splice(idx, 1);
-      if (!ready) {
-        logger.warn({ containerName, code, stderr }, 'Warm container failed to start');
-        resolve(false);
-      }
-    });
-
-    container.on('error', (err) => {
-      clearTimeout(readyTimeout);
-      logger.error({ containerName, error: err }, 'Warm container spawn error');
-      resolve(false);
-    });
-  });
-}
-
-/**
- * Get a warm container for immediate use.
- * Returns null if no warm container is available.
- */
-export function getWarmContainer(groupFolder: string): WarmContainer | null {
-  const warm = warmPool.find(
-    (w) => w.groupFolder === groupFolder && !w.busy,
-  );
-  if (warm) {
-    warm.busy = true;
-    warm.lastUsed = Date.now();
-    return warm;
-  }
-  return null;
-}
-
-/**
- * Release a warm container back to the pool after use.
- */
-export function releaseWarmContainer(containerName: string): void {
-  const warm = warmPool.find((w) => w.containerName === containerName);
-  if (warm) {
-    warm.busy = false;
-    warm.lastUsed = Date.now();
-    warm.parseBuffer = '';
-    warm.onOutput = undefined;
-    logger.debug({ containerName }, 'Warm container released');
-  }
-}
-
-/**
- * Remove a warm container from the pool (e.g., on error).
- */
-export function removeWarmContainer(containerName: string): void {
-  const idx = warmPool.findIndex((w) => w.containerName === containerName);
-  if (idx !== -1) {
-    const warm = warmPool[idx];
-    try {
-      warm.process.kill();
-      exec(stopContainer(containerName), { timeout: 15000 }, () => {});
-    } catch {}
-    warmPool.splice(idx, 1);
-    logger.debug({ containerName }, 'Warm container removed');
-  }
-}
 
 export interface ContainerInput {
   prompt: string;
@@ -223,7 +42,6 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -232,16 +50,6 @@ export interface ContainerOutput {
   newSessionId?: string;
   error?: string;
 }
-
-// Streaming delta from agent (for real-time TTS)
-export interface ContainerDelta {
-  type: 'delta';
-  text: string;
-  newSessionId?: string;
-}
-
-// Union type for parsed messages
-export type ContainerMessage = ContainerOutput | ContainerDelta;
 
 interface VolumeMount {
   hostPath: string;
@@ -268,6 +76,19 @@ function buildVolumeMounts(
       containerPath: '/workspace/project',
       readonly: true,
     });
+
+    // Shadow .env so the agent cannot read secrets from the mounted project root.
+    // Credentials are injected by the credential proxy, never exposed to containers.
+    // Note: Apple Container doesn't support /dev/null mounts, so we skip this shadowing
+    // for that runtime. Secrets remain protected via stdin-only passing.
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile) && supportsDevNullMounts()) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
 
     // Main also gets its group folder as the working directory
     mounts.push({
@@ -306,19 +127,26 @@ function buildVolumeMounts(
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, JSON.stringify({
-      env: {
-        // Enable agent swarms (subagent orchestration)
-        // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        // Load CLAUDE.md from additional mounted directories
-        // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        // Enable Claude's memory feature (persists user preferences between sessions)
-        // https://code.claude.com/docs/en/memory#manage-auto-memory
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-      },
-    }, null, 2) + '\n');
+    fs.writeFileSync(
+      settingsFile,
+      JSON.stringify(
+        {
+          env: {
+            // Enable agent swarms (subagent orchestration)
+            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+            // Load CLAUDE.md from additional mounted directories
+            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+            // Enable Claude's memory feature (persists user preferences between sessions)
+            // https://code.claude.com/docs/en/memory#manage-auto-memory
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+          },
+        },
+        null,
+        2,
+      ) + '\n',
+    );
   }
 
   // Sync skills from container/skills/ into each group's .claude/skills/
@@ -350,46 +178,21 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Environment file directory (workaround for Apple Container -i env var bug)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
-  fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = [
-      'CLAUDE_CODE_OAUTH_TOKEN',
-      'ANTHROPIC_API_KEY',
-      'ANTHROPIC_BASE_URL',
-      'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-      'ANTHROPIC_DEFAULT_SONNET_MODEL',
-      'ANTHROPIC_DEFAULT_OPUS_MODEL',
-      'API_TIMEOUT_MS',
-    ];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
-    });
-
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
-      });
-    }
-  }
-
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(projectRoot, 'container', 'agent-runner', 'src');
-  const groupAgentRunnerDir = path.join(DATA_DIR, 'sessions', group.folder, 'agent-runner-src');
+  const agentRunnerSrc = path.join(
+    projectRoot,
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const groupAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    group.folder,
+    'agent-runner-src',
+  );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
@@ -412,19 +215,34 @@ function buildVolumeMounts(
   return mounts;
 }
 
-/**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
- */
-function readSecrets(): Record<string, string> {
-  return readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']);
-}
-
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Route API traffic through the credential proxy (containers never see real secrets)
+  args.push(
+    '-e',
+    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+  );
+
+  // Mirror the host's auth method with a placeholder value.
+  // API key mode: SDK sends x-api-key, proxy replaces with real key.
+  // OAuth mode:   SDK exchanges placeholder token for temp API key,
+  //               proxy injects real OAuth token on that exchange request.
+  const authMode = detectAuthMode();
+  if (authMode === 'api-key') {
+    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  } else {
+    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Runtime-specific args for host gateway resolution
+  args.push(...hostGatewayArgs());
 
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
@@ -449,16 +267,11 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
   return args;
 }
 
-/**
- * Run container agent with optional warm container support.
- * @param warmContainer - Optional pre-warmed container to use
- */
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
-  onOutput?: (output: ContainerMessage) => Promise<void>,
-  warmContainer?: WarmContainer,
+  onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -497,51 +310,26 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    // Use warm container if provided, otherwise spawn new one
-    let container: ChildProcess;
-    let actualContainerName: string;
+    const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 
-    if (warmContainer) {
-      container = warmContainer.process;
-      actualContainerName = warmContainer.containerName;
-      logger.info(
-        { group: group.name, containerName: actualContainerName },
-        'Using pre-warmed container',
-      );
-    } else {
-      container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      actualContainerName = containerName;
-    }
-
-    onProcess(container, actualContainerName);
+    onProcess(container, containerName);
 
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
-    if (container.stdin) {
-      container.stdin.write(JSON.stringify(input));
-      // For warm containers, don't end stdin - they stay alive for IPC messages
-      // For new containers, end stdin to signal end of initial input
-      if (!warmContainer) {
-        container.stdin.end();
-      }
-    }
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
+    container.stdin.write(JSON.stringify(input));
+    container.stdin.end();
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
 
-    if (container.stdout) {
-      container.stdout.on('data', (data) => {
+    container.stdout.on('data', (data) => {
       const chunk = data.toString();
 
       // Always accumulate for logging
@@ -573,20 +361,14 @@ export async function runContainerAgent(
           parseBuffer = parseBuffer.slice(endIdx + OUTPUT_END_MARKER.length);
 
           try {
-            const parsed: ContainerMessage = JSON.parse(jsonStr);
-            // Handle session ID updates (present in both types)
-            if ('newSessionId' in parsed && parsed.newSessionId) {
+            const parsed: ContainerOutput = JSON.parse(jsonStr);
+            if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
             }
-            // Track streaming output for both result and delta types
-            const isOutput = 'status' in parsed;
-            const isDelta = 'type' in parsed && (parsed as ContainerDelta).type === 'delta';
-            if (isOutput || isDelta) {
-              hadStreamingOutput = true;
-            }
+            hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
             resetTimeout();
-            // Call onOutput for all markers (including null results and deltas)
+            // Call onOutput for all markers (including null results)
             // so idle timers start even for "silent" query completions.
             outputChain = outputChain.then(() => onOutput(parsed));
           } catch (err) {
@@ -598,9 +380,7 @@ export async function runContainerAgent(
         }
       }
     });
-    }
 
-    if (container.stderr) {
     container.stderr.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
@@ -622,7 +402,6 @@ export async function runContainerAgent(
         stderr += chunk;
       }
     });
-    }
 
     let timedOut = false;
     let hadStreamingOutput = false;
@@ -633,10 +412,16 @@ export async function runContainerAgent(
 
     const killOnTimeout = () => {
       timedOut = true;
-      logger.error({ group: group.name, containerName: actualContainerName }, 'Container timeout, stopping gracefully');
-      exec(stopContainer(actualContainerName), { timeout: 15000 }, (err) => {
+      logger.error(
+        { group: group.name, containerName },
+        'Container timeout, stopping gracefully',
+      );
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
         if (err) {
-          logger.warn({ group: group.name, containerName: actualContainerName, err }, 'Graceful stop failed, force killing');
+          logger.warn(
+            { group: group.name, containerName, err },
+            'Graceful stop failed, force killing',
+          );
           container.kill('SIGKILL');
         }
       });
@@ -657,22 +442,25 @@ export async function runContainerAgent(
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
         const timeoutLog = path.join(logsDir, `container-${ts}.log`);
-        fs.writeFileSync(timeoutLog, [
-          `=== Container Run Log (TIMEOUT) ===`,
-          `Timestamp: ${new Date().toISOString()}`,
-          `Group: ${group.name}`,
-          `Container: ${actualContainerName}`,
-          `Duration: ${duration}ms`,
-          `Exit Code: ${code}`,
-          `Had Streaming Output: ${hadStreamingOutput}`,
-        ].join('\n'));
+        fs.writeFileSync(
+          timeoutLog,
+          [
+            `=== Container Run Log (TIMEOUT) ===`,
+            `Timestamp: ${new Date().toISOString()}`,
+            `Group: ${group.name}`,
+            `Container: ${containerName}`,
+            `Duration: ${duration}ms`,
+            `Exit Code: ${code}`,
+            `Had Streaming Output: ${hadStreamingOutput}`,
+          ].join('\n'),
+        );
 
         // Timeout after output = idle cleanup, not failure.
         // The agent already sent its response; this is just the
         // container being reaped after the idle period expired.
         if (hadStreamingOutput) {
           logger.info(
-            { group: group.name, containerName: actualContainerName, duration, code },
+            { group: group.name, containerName, duration, code },
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
@@ -686,7 +474,7 @@ export async function runContainerAgent(
         }
 
         logger.error(
-          { group: group.name, containerName: actualContainerName, duration, code },
+          { group: group.name, containerName, duration, code },
           'Container timed out with no output',
         );
 
@@ -700,7 +488,8 @@ export async function runContainerAgent(
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const logFile = path.join(logsDir, `container-${timestamp}.log`);
-      const isVerbose = process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
+      const isVerbose =
+        process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
 
       const logLines = [
         `=== Container Run Log ===`,
@@ -843,7 +632,10 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
-      logger.error({ group: group.name, containerName: actualContainerName, error: err }, 'Container spawn error');
+      logger.error(
+        { group: group.name, containerName, error: err },
+        'Container spawn error',
+      );
       resolve({
         status: 'error',
         result: null,

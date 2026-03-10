@@ -336,3 +336,18 @@ export class WhatsAppChannel implements Channel {
     }
   }
 }
+
+import { registerChannel } from './registry.js';
+import type { ChannelOpts } from './registry.js';
+import { existsSync } from 'fs';
+import { join } from 'path';
+
+registerChannel('whatsapp', (opts: ChannelOpts) => {
+  // Check if WhatsApp auth credentials exist
+  const credsPath = join(STORE_DIR, 'auth', 'creds.json');
+  if (!existsSync(credsPath)) {
+    return null;
+  }
+
+  return new WhatsAppChannel(opts);
+});

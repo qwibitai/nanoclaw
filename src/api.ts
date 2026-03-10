@@ -3,24 +3,21 @@
  * Provides REST endpoints for external integrations (e.g., Jarvis voice pipeline)
  */
 import express, { Request, Response } from 'express';
-import { EventEmitter } from 'events';
 
-import { ASSISTANT_NAME, MAIN_GROUP_FOLDER } from './config.js';
+import { ASSISTANT_NAME } from './config.js';
 import {
   ContainerOutput,
-  ContainerMessage,
-  ContainerDelta,
   runContainerAgent,
   writeGroupsSnapshot,
   writeTasksSnapshot,
   AvailableGroup,
-  WarmContainer,
-  getWarmContainer,
-  prewarmContainer,
 } from './container-runner.js';
 import { getAllTasks, getSession, setSession } from './db.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+
+// Main group folder name (was removed from config exports)
+const MAIN_GROUP_FOLDER = 'main';
 
 export interface ApiOptions {
   registeredGroups: () => Record<string, RegisteredGroup>;
@@ -105,11 +102,7 @@ export function createApi(options: ApiOptions): express.Application {
     const isMain = session === MAIN_GROUP_FOLDER;
     const sessionId = sessions[session] || getSession(session);
 
-    // Try to get a warm container for faster response
-    const warmContainer = getWarmContainer(session);
-
-    logger.info({ session, textLength: text.length, stream, warmContainer: !!warmContainer }, 'API chat request');
-
+    logger.info({ session, textLength: text.length, stream }, 'API chat request');
 
     try {
       // Write task snapshots for container
@@ -137,224 +130,56 @@ export function createApi(options: ApiOptions): express.Application {
         new Set(Object.keys(groups)),
       );
 
-      if (stream) {
-        // Streaming mode - use Server-Sent Events
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.flushHeaders?.();
+      // Run container agent - simplified without streaming deltas
+      const output = await runContainerAgent(
+        group,
+        {
+          prompt: text,
+          sessionId,
+          groupFolder: session,
+          chatJid,
+          isMain,
+          assistantName: ASSISTANT_NAME,
+        },
+        (_proc, _containerName) => {
+          // Process tracking callback - can be used for logging
+        },
+        async (message: ContainerOutput) => {
+          // Output callback - called for each complete output
+          if (message.newSessionId) {
+            sessions[session] = message.newSessionId;
+            setSession(session, message.newSessionId);
+          }
+        },
+      );
 
-        const eventEmitter = new EventEmitter();
-        let fullResponse = '';
-        let containerProcess: import('child_process').ChildProcess | undefined;
+      // Extract response from output
+      const raw = typeof output.result === 'string'
+        ? output.result
+        : JSON.stringify(output.result);
+      const responseText = raw
+        .replace(/<internal>[\s\S]*?<\/internal>/g, '')
+        .trim();
 
-        // Run container in background - we'll wait for complete event instead
-        const containerPromise = runContainerAgent(
-          group,
-          {
-            prompt: text,
-            sessionId,
-            groupFolder: session,
-            chatJid,
-            isMain,
-            assistantName: ASSISTANT_NAME,
-          },
-          (proc) => {
-            containerProcess = proc;
-          }, // Track process for early termination
-          async (message: ContainerMessage) => {
-            // Debug: log all messages
-            logger.debug({ message: JSON.stringify(message).slice(0, 200), fullResponse }, 'API received message');
-
-            // Handle streaming deltas
-            if ('type' in message && message.type === 'delta') {
-              const delta = message as ContainerDelta;
-              const responseText = delta.text
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-
-              if (responseText) {
-                fullResponse += responseText;
-                // Send SSE event with delta
-                res.write(`data: ${JSON.stringify({ type: 'delta', text: responseText })}\n\n`);
-              }
-              if (delta.newSessionId) {
-                sessions[session] = delta.newSessionId;
-                setSession(session, delta.newSessionId);
-              }
-              return;
-            }
-
-            // Handle complete outputs
-            const output = message as ContainerOutput;
-            if (output.result) {
-              const raw =
-                typeof output.result === 'string'
-                  ? output.result
-                  : JSON.stringify(output.result);
-              // Strip <internal> blocks
-              const responseText = raw
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-
-              if (responseText) {
-                fullResponse += responseText;
-              }
-            }
-
-            if (output.newSessionId) {
-              sessions[session] = output.newSessionId;
-              setSession(session, output.newSessionId);
-            }
-
-            // Emit complete when we get a success/error status with response content
-            // This handles the case where container stays alive waiting for IPC
-            if (output.status === 'success' && fullResponse) {
-              eventEmitter.emit('complete');
-            }
-            if (output.status === 'error') {
-              eventEmitter.emit('complete');
-            }
-          },
-          warmContainer ?? undefined, // Pass warm container if available
-        );
-
-        // Wait for completion event OR timeout (don't wait for container to exit)
-        await new Promise<void>((resolve) => {
-          eventEmitter.once('complete', () => {
-            // Kill container after emitting done
-            setTimeout(() => {
-              if (containerProcess) {
-                containerProcess.kill();
-              }
-            }, 100);
-            resolve();
-          });
-          // Timeout after 60 seconds
-          setTimeout(() => {
-            if (containerProcess) {
-              containerProcess.kill();
-            }
-            resolve();
-          }, 60000);
-        });
-
-        res.write(`data: ${JSON.stringify({ type: 'done', fullResponse })}\n\n`);
-        res.end();
-
-        // Clean up container promise in background
-        containerPromise.catch(() => {}); // Ignore errors from killed container
-      } else {
-        // Non-streaming mode - collect full response using event-based completion
-        const eventEmitter = new EventEmitter();
-        let fullResponse = '';
-        let newSessionId: string | undefined;
-        let hadError = false;
-        let containerProcess: import('child_process').ChildProcess | undefined;
-
-        // Run container in background - we'll wait for complete event instead
-        const containerPromise = runContainerAgent(
-          group,
-          {
-            prompt: text,
-            sessionId,
-            groupFolder: session,
-            chatJid,
-            isMain,
-            assistantName: ASSISTANT_NAME,
-          },
-          (proc) => {
-            containerProcess = proc;
-          }, // Track process for early termination
-          async (message: ContainerMessage) => {
-            // Handle streaming deltas
-            if ('type' in message && message.type === 'delta') {
-              const delta = message as ContainerDelta;
-              const responseText = delta.text
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-
-              if (responseText) {
-                fullResponse += responseText;
-              }
-              if (delta.newSessionId) {
-                newSessionId = delta.newSessionId;
-              }
-              return;
-            }
-
-            // Handle complete outputs (only use if no deltas were received)
-            const output = message as ContainerOutput;
-            if (output.result && !fullResponse) {
-              const raw =
-                typeof output.result === 'string'
-                  ? output.result
-                  : JSON.stringify(output.result);
-              // Strip <internal> blocks
-              const responseText = raw
-                .replace(/<internal>[\s\S]*?<\/internal>/g, '')
-                .trim();
-
-              if (responseText) {
-                fullResponse = responseText;
-              }
-            }
-
-            if (output.newSessionId) {
-              newSessionId = output.newSessionId;
-            }
-
-            // Emit complete when we get a success/error status with response content
-            if (output.status === 'success' && fullResponse) {
-              eventEmitter.emit('complete');
-            }
-            if (output.status === 'error') {
-              hadError = true;
-              eventEmitter.emit('complete');
-            }
-          },
-          warmContainer ?? undefined, // Pass warm container if available
-        );
-
-        // Wait for completion event OR timeout (don't wait for container to exit)
-        await new Promise<void>((resolve) => {
-          eventEmitter.once('complete', () => {
-            // Kill container after emitting done
-            setTimeout(() => {
-              if (containerProcess) {
-                containerProcess.kill();
-              }
-            }, 100);
-            resolve();
-          });
-          // Timeout after 30 seconds for non-streaming
-          setTimeout(() => {
-            if (containerProcess) {
-              containerProcess.kill();
-            }
-            resolve();
-          }, 30000);
-        });
-
-        // Clean up container promise in background
-        containerPromise.catch(() => {}); // Ignore errors from killed container
-
-        if (hadError && !fullResponse) {
-          res.status(500).json({ error: 'Agent processing failed' });
-          return;
-        }
-
-        // Update session
-        if (newSessionId) {
-          sessions[session] = newSessionId;
-          setSession(session, newSessionId);
-        }
-
-        res.json({
-          response: fullResponse,
-          session: newSessionId || sessionId,
-        });
+      // Update session if changed
+      if (output.newSessionId) {
+        sessions[session] = output.newSessionId;
+        setSession(session, output.newSessionId);
       }
+
+      // Handle error status
+      if (output.status === 'error') {
+        res.status(500).json({
+          error: output.error || 'Agent processing failed',
+        });
+        return;
+      }
+
+      // Return successful response
+      res.json({
+        response: responseText,
+        session: output.newSessionId || sessionId,
+      });
     } catch (err) {
       logger.error({ session, err }, 'API chat error');
       res.status(500).json({

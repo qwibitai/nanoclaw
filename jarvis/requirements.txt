@@ -1,0 +1,19 @@
+# Wake word detection
+openwakeword==0.5.0
+
+# Speech recognition (transcription)
+# macOS native Speech framework via pyobjc
+pyobjc-framework-Speech==10.0
+
+# Audio handling
+sounddevice==0.4.6
+numpy==1.24.0
+
+# HTTP requests
+requests==2.31.0
+
+# Speech recognition (fallback)
+vosk==0.3.45
+
+# Configuration
+pyyaml==6.0
