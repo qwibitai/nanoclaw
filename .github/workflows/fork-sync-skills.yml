@@ -89,6 +89,9 @@ jobs:
       - name: Merge main into skill branches
         id: merge
         run: |
+          # Re-fetch to pick up any changes pushed since job start
+          git fetch origin
+
           FAILED=""
           SUCCEEDED=""
 
