@@ -27,10 +27,30 @@ Run `bash setup.sh` and parse the status block.
 
 Run `npx tsx setup/index.ts --step environment` and parse the status block.
 
-- If HAS_AUTH=true → WhatsApp is already configured, note for step 4
+- If HAS_AUTH=true → WhatsApp is already configured, note for step 5
 - If HAS_REGISTERED_GROUPS=true → note existing config, offer to skip or reconfigure
 
-## 3. Claude Authentication (Optional)
+## 3. Agent Backend
+
+AskUserQuestion (singleSelect): Which agent backend would you like to use?
+- **Claude** (default) — Uses Claude Agent SDK. Requires `ANTHROPIC_API_KEY` or claude CLI login.
+- **Cursor** — Uses Cursor CLI headless mode (`agent` command). Requires Cursor to be installed and logged in.
+
+**If Claude selected:** continue to Step 4.
+
+**If Cursor selected:**
+
+1. Check if `agent` CLI is available: `which agent`
+   - If missing: `AskUserQuestion: agent CLI not found. Install Cursor now via curl https://cursor.com/install -fsS | bash?`
+     - If confirmed: run `curl https://cursor.com/install -fsS | bash`, then verify `which agent` succeeds
+     - If declined: inform user to install manually from https://cursor.com, then halt
+2. Check login status: `agent --version`
+   - If not logged in: prompt user to run `agent login` in another terminal, then confirm when done
+3. Write `AGENT_BACKEND=cursor` to `.env`
+4. If `.env` already has `ANTHROPIC_API_KEY`, inform user it is not needed for Cursor mode but leave it in place
+5. Skip Step 4 (Claude Authentication) — continue directly to Step 5
+
+## 4. Claude Authentication (Optional)
 
 Check if claude CLI is already logged in by running `claude auth status`. Parse the JSON output.
 
@@ -52,13 +72,14 @@ AskUserQuestion: How would you like to authenticate?
 
 **Note:** If `.env` already has `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, confirm with user: keep or reconfigure?
 
-## 4. Set Up Channels
+## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - WhatsApp (authenticates via QR code or pairing code)
 - Telegram (authenticates via bot token from @BotFather)
 - Slack (authenticates via Slack app with Socket Mode)
 - Discord (authenticates via Discord bot token)
+- Feishu (authenticates via self-built app with App ID and App Secret)
 
 **Delegate to each selected channel's own skill.** Each channel skill handles its own code installation, authentication, registration, and JID resolution. This avoids duplicating channel-specific logic and ensures JIDs are always correct.
 
@@ -68,6 +89,7 @@ For each selected channel, invoke its skill:
 - **Telegram:** Invoke `/add-telegram`
 - **Slack:** Invoke `/add-slack`
 - **Discord:** Invoke `/add-discord`
+- **Feishu:** Invoke `/add-feishu`
 
 Each skill will:
 1. Install the channel code (via `apply-skill`)
@@ -76,9 +98,9 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 5.
+**After all channel skills complete**, continue to step 6.
 
-## 5. Identity Setup
+## 6. Identity Setup
 
 Check if `groups/main/IDENTITY.md` exists and has a non-empty, non-placeholder `Name` field. If it already has a name, skip this step.
 
@@ -95,14 +117,14 @@ Then guide through these four fields **one at a time**, offering suggestions if 
 
 After collecting answers, write `IDENTITY.md` to `groups/main/IDENTITY.md`. Skip any field the user doesn't answer — do not write placeholder text.
 
-## 6. Mount Allowlist
+## 7. Mount Allowlist
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
-## 7. Start Service
+## 8. Start Service
 
 If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
@@ -118,26 +140,28 @@ Run `npx tsx setup/index.ts --step service` and parse the status block.
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 8. Verify
+## 9. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
-- SERVICE=not_found → re-run step 7
-- CREDENTIALS=missing → re-run step 3
+- SERVICE=not_found → re-run step 8
+- CREDENTIALS=missing → re-run step 4
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
-- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 4
+- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 6), missing `.env` (step 3), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
 
 **No response to messages:** Check trigger pattern. Main channel doesn't need prefix. Check DB: `npx tsx setup/index.ts --step verify`. Check `logs/nanoclaw.log`.
 
 **Channel not connecting:** Verify the channel's credentials are set in `.env`. Channels auto-enable when their credentials are present. For WhatsApp: check `store/auth/creds.json` exists. For token-based channels: check token values in `.env`. Restart the service after any `.env` change.
+
+**Wrong agent backend:** Check `AGENT_BACKEND` in `.env`. Valid values: `claude` (default) or `cursor`. Restart the service after changing.
 
 **Unload service:** macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist` | Linux: `systemctl --user stop nanoclaw`
