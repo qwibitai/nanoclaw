@@ -41,7 +41,10 @@ class TelegramChannel implements Channel {
   private bot: Bot;
   private connected = false;
 
-  constructor(private token: string, private opts: ChannelOpts) {
+  constructor(
+    private token: string,
+    private opts: ChannelOpts,
+  ) {
     this.bot = new Bot(token);
     this.setupHandlers();
   }
@@ -54,7 +57,8 @@ class TelegramChannel implements Channel {
       const msg = ctx.message;
       const chatJid = `tg:${msg.chat.id}`;
       const timestamp = new Date(msg.date * 1000).toISOString();
-      const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+      const isGroup =
+        msg.chat.type === 'group' || msg.chat.type === 'supergroup';
       const chatName = 'title' in msg.chat ? msg.chat.title : undefined;
 
       onChatMetadata(chatJid, timestamp, chatName, 'telegram', isGroup);
@@ -66,7 +70,8 @@ class TelegramChannel implements Channel {
       const msg = ctx.message;
       const chatJid = `tg:${msg.chat.id}`;
       const timestamp = new Date(msg.date * 1000).toISOString();
-      const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
+      const isGroup =
+        msg.chat.type === 'group' || msg.chat.type === 'supergroup';
       const chatName = 'title' in msg.chat ? msg.chat.title : undefined;
 
       const caption = msg.caption ? ` "${msg.caption}"` : '';
