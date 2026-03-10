@@ -4,7 +4,14 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123","content":"Great post!"}' | npx tsx reply.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, validateContent, config, ScriptResult } from '../lib/browser.js';
+import {
+  getBrowserContext,
+  navigateToTweet,
+  runScript,
+  validateContent,
+  config,
+  ScriptResult,
+} from "../lib/browser.js";
 
 interface ReplyInput {
   tweetUrl: string;
@@ -15,10 +22,10 @@ async function replyToTweet(input: ReplyInput): Promise<ScriptResult> {
   const { tweetUrl, content } = input;
 
   if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
+    return { success: false, message: "Please provide a tweet URL" };
   }
 
-  const validationError = validateContent(content, 'Reply');
+  const validationError = validateContent(content, "Reply");
   if (validationError) return validationError;
 
   let context = null;
@@ -27,7 +34,7 @@ async function replyToTweet(input: ReplyInput): Promise<ScriptResult> {
     const { page, success, error } = await navigateToTweet(context, tweetUrl);
 
     if (!success) {
-      return { success: false, message: error || 'Navigation failed' };
+      return { success: false, message: error || "Navigation failed" };
     }
 
     // Click reply button
@@ -53,9 +60,12 @@ async function replyToTweet(input: ReplyInput): Promise<ScriptResult> {
     const submitButton = dialog.locator('[data-testid="tweetButton"]');
     await submitButton.waitFor({ timeout: config.timeouts.elementWait });
 
-    const isDisabled = await submitButton.getAttribute('aria-disabled');
-    if (isDisabled === 'true') {
-      return { success: false, message: 'Submit button disabled. Content may be empty or exceed character limit.' };
+    const isDisabled = await submitButton.getAttribute("aria-disabled");
+    if (isDisabled === "true") {
+      return {
+        success: false,
+        message: "Submit button disabled. Content may be empty or exceed character limit.",
+      };
     }
 
     await submitButton.click();
@@ -63,9 +73,8 @@ async function replyToTweet(input: ReplyInput): Promise<ScriptResult> {
 
     return {
       success: true,
-      message: `Reply posted: ${content.slice(0, 50)}${content.length > 50 ? '...' : ''}`
+      message: `Reply posted: ${content.slice(0, 50)}${content.length > 50 ? "..." : ""}`,
     };
-
   } finally {
     if (context) await context.close();
   }

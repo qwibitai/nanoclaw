@@ -30,10 +30,12 @@ Check whether the environment is headless (no display server):
 Use `AskUserQuestion` to collect configuration. **Adapt auth options based on environment:**
 
 If IS_HEADLESS=true AND not WSL → AskUserQuestion: How do you want to authenticate WhatsApp?
+
 - **Pairing code** (Recommended) - Enter a numeric code on your phone (no camera needed, requires phone number)
 - **QR code in terminal** - Displays QR code in the terminal (can be too small on some displays)
 
 Otherwise (macOS, desktop Linux, or WSL) → AskUserQuestion: How do you want to authenticate WhatsApp?
+
 - **QR code in browser** (Recommended) - Opens a browser window with a large, scannable QR code
 - **Pairing code** - Enter a numeric code on your phone (no camera needed, requires phone number)
 - **QR code in terminal** - Displays QR code in the terminal (can be too small on some displays)
@@ -47,7 +49,7 @@ AskUserQuestion: What is your phone number? (Include country code without +, e.g
 Apply the skill to install the WhatsApp channel code and dependencies:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-whatsapp
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-whatsapp
 ```
 
 Verify the code was placed correctly:
@@ -65,13 +67,13 @@ node -e "require('@whiskeysockets/baileys')" 2>/dev/null && echo "Baileys instal
 If not installed:
 
 ```bash
-npm install @whiskeysockets/baileys qrcode qrcode-terminal
+pnpm add @whiskeysockets/baileys qrcode qrcode-terminal
 ```
 
 ### Validate build
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Build must be clean before proceeding.
@@ -89,7 +91,7 @@ rm -rf store/auth/
 For QR code in browser (recommended):
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 (Bash timeout: 150000ms)
@@ -105,10 +107,10 @@ Tell the user:
 For QR code in terminal:
 
 ```bash
-npx tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
+pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-terminal
 ```
 
-Tell the user to run `npm run auth` in another terminal, then:
+Tell the user to run `pnpm run auth` in another terminal, then:
 
 > 1. Open WhatsApp > **Settings** > **Linked Devices** > **Link a Device**
 > 2. Scan the QR code displayed in the terminal
@@ -120,7 +122,7 @@ Tell the user to have WhatsApp open on **Settings > Linked Devices > Link a Devi
 Run the auth process in the background and poll `store/pairing-code.txt` for the code:
 
 ```bash
-rm -f store/pairing-code.txt && npx tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
+rm -f store/pairing-code.txt && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method pairing-code --phone <their-phone-number> > /tmp/wa-auth.log 2>&1 &
 ```
 
 Then immediately poll for the code (do NOT wait for the background command to finish):
@@ -168,15 +170,18 @@ mkdir -p data/env && cp .env data/env/env
 Get the bot's WhatsApp number: `node -e "const c=require('./store/auth/creds.json');console.log(c.me.id.split(':')[0].split('@')[0])"`
 
 AskUserQuestion: Is this a shared phone number (personal WhatsApp) or a dedicated number (separate device)?
+
 - **Shared number** - Your personal WhatsApp number (recommended: use self-chat or a solo group)
 - **Dedicated number** - A separate phone/SIM for the assistant
 
 AskUserQuestion: What trigger word should activate the assistant?
+
 - **@Andy** - Default trigger
 - **@Claw** - Short and easy
 - **@Claude** - Match the AI name
 
 AskUserQuestion: What should the assistant call itself?
+
 - **Andy** - Default name
 - **Claw** - Short and easy
 - **Claude** - Match the AI name
@@ -184,11 +189,13 @@ AskUserQuestion: What should the assistant call itself?
 AskUserQuestion: Where do you want to chat with the assistant?
 
 **Shared number options:**
+
 - **Self-chat** (Recommended) - Chat in your own "Message Yourself" conversation
 - **Solo group** - A group with just you and the linked device
 - **Existing group** - An existing WhatsApp group
 
 **Dedicated number options:**
+
 - **DM with bot** (Recommended) - Direct message the bot's number
 - **Solo group** - A group with just you and the bot
 - **Existing group** - An existing WhatsApp group
@@ -206,8 +213,8 @@ node -e "const c=JSON.parse(require('fs').readFileSync('store/auth/creds.json','
 **Group (solo, existing):** Run group sync and list available groups:
 
 ```bash
-npx tsx setup/index.ts --step groups
-npx tsx setup/index.ts --step groups --list
+pnpm exec tsx setup/index.ts --step groups
+pnpm exec tsx setup/index.ts --step groups --list
 ```
 
 The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (names only, not JIDs).
@@ -215,7 +222,7 @@ The output shows `JID|GroupName` pairs. Present candidates as AskUserQuestion (n
 ### Register the chat
 
 ```bash
-npx tsx setup/index.ts --step register \
+pnpm exec tsx setup/index.ts --step register \
   --jid "<jid>" \
   --name "<chat-name>" \
   --trigger "@<trigger>" \
@@ -229,7 +236,7 @@ npx tsx setup/index.ts --step register \
 For additional groups (trigger-required):
 
 ```bash
-npx tsx setup/index.ts --step register \
+pnpm exec tsx setup/index.ts --step register \
   --jid "<group-jid>" \
   --name "<group-name>" \
   --trigger "@<trigger>" \
@@ -242,7 +249,7 @@ npx tsx setup/index.ts --step register \
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Restart the service:
@@ -263,6 +270,7 @@ bash start-nanoclaw.sh
 Tell the user:
 
 > Send a message to your registered WhatsApp chat:
+>
 > - For self-chat / main: Any message works
 > - For groups: Use the trigger word (e.g., "@Andy hello")
 >
@@ -281,7 +289,7 @@ tail -f logs/nanoclaw.log
 QR codes expire after ~60 seconds. Re-run the auth command:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
+rm -rf store/auth/ && pnpm exec tsx src/whatsapp-auth.ts
 ```
 
 ### Pairing code not working
@@ -289,10 +297,11 @@ rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts
 Codes expire in ~60 seconds. To retry:
 
 ```bash
-rm -rf store/auth/ && npx tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
+rm -rf store/auth/ && pnpm exec tsx src/whatsapp-auth.ts --pairing-code --phone <phone>
 ```
 
 Enter the code **immediately** when it appears. Also ensure:
+
 1. Phone number includes country code without `+` (e.g., `1234567890`)
 2. Phone has internet access
 3. WhatsApp is updated to the latest version
@@ -300,7 +309,7 @@ Enter the code **immediately** when it appears. Also ensure:
 If pairing code keeps failing, switch to QR-browser auth instead:
 
 ```bash
-rm -rf store/auth/ && npx tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
+rm -rf store/auth/ && pnpm exec tsx setup/index.ts --step whatsapp-auth -- --method qr-browser
 ```
 
 ### "conflict" disconnection
@@ -315,35 +324,36 @@ pkill -f "node dist/index.js"
 ### Bot not responding
 
 Check:
+
 1. Auth credentials exist: `ls store/auth/creds.json`
-3. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE '%whatsapp%' OR jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
-4. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
-5. Logs: `tail -50 logs/nanoclaw.log`
+2. Chat is registered: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE '%whatsapp%' OR jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
+3. Service is running: `launchctl list | grep nanoclaw` (macOS) or `systemctl --user status nanoclaw` (Linux)
+4. Logs: `tail -50 logs/nanoclaw.log`
 
 ### Group names not showing
 
 Run group metadata sync:
 
 ```bash
-npx tsx setup/index.ts --step groups
+pnpm exec tsx setup/index.ts --step groups
 ```
 
 This fetches all group names from WhatsApp. Runs automatically every 24 hours.
 
 ## After Setup
 
-If running `npm run dev` while the service is active:
+If running `pnpm run dev` while the service is active:
 
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
+pnpm run dev
 # When done testing:
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 
 # Linux:
 # systemctl --user stop nanoclaw
-# npm run dev
+# pnpm run dev
 # systemctl --user start nanoclaw
 ```
 
@@ -354,4 +364,4 @@ To remove WhatsApp integration:
 1. Delete auth credentials: `rm -rf store/auth/`
 2. Remove WhatsApp registrations: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE '%@g.us' OR jid LIKE '%@s.whatsapp.net'"`
 3. Sync env: `mkdir -p data/env && cp .env data/env/env`
-4. Rebuild and restart: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+4. Rebuild and restart: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)

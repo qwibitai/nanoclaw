@@ -1,7 +1,7 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-import { LOCK_FILE } from './constants.js';
+import { LOCK_FILE } from "./constants.js";
 
 const STALE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -35,12 +35,12 @@ export function acquireLock(): () => void {
 
   try {
     // Atomic creation — fails if file already exists
-    fs.writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: 'wx' });
+    fs.writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: "wx" });
     return () => releaseLock();
   } catch {
     // Lock file exists — check if it's stale or from a dead process
     try {
-      const existing: LockInfo = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      const existing: LockInfo = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
       if (!isStale(existing) && isProcessAlive(existing.pid)) {
         throw new Error(
           `Operation in progress (pid ${existing.pid}, started ${new Date(existing.timestamp).toISOString()}). If this is stale, delete ${LOCK_FILE}`,
@@ -48,10 +48,7 @@ export function acquireLock(): () => void {
       }
       // Stale or dead process — overwrite
     } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.startsWith('Operation in progress')
-      ) {
+      if (err instanceof Error && err.message.startsWith("Operation in progress")) {
         throw err;
       }
       // Corrupt or unreadable — overwrite
@@ -63,11 +60,9 @@ export function acquireLock(): () => void {
       /* already gone */
     }
     try {
-      fs.writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: 'wx' });
+      fs.writeFileSync(lockPath, JSON.stringify(lockInfo), { flag: "wx" });
     } catch {
-      throw new Error(
-        'Lock contention: another process acquired the lock. Retry.',
-      );
+      throw new Error("Lock contention: another process acquired the lock. Retry.");
     }
     return () => releaseLock();
   }
@@ -77,7 +72,7 @@ export function releaseLock(): void {
   const lockPath = getLockPath();
   if (fs.existsSync(lockPath)) {
     try {
-      const lock: LockInfo = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      const lock: LockInfo = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
       // Only release our own lock
       if (lock.pid === process.pid) {
         fs.unlinkSync(lockPath);
@@ -98,7 +93,7 @@ export function isLocked(): boolean {
   if (!fs.existsSync(lockPath)) return false;
 
   try {
-    const lock: LockInfo = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    const lock: LockInfo = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
     return !isStale(lock) && isProcessAlive(lock.pid);
   } catch {
     return false;

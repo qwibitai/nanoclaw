@@ -30,16 +30,17 @@ Run the skills engine to apply this skill's code package.
 If `.nanoclaw/` directory doesn't exist yet:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-voice-transcription
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-voice-transcription
 ```
 
 This deterministically:
+
 - Adds `src/transcription.ts` (voice transcription module using OpenAI Whisper)
 - Three-way merges voice handling into `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
 - Three-way merges transcription tests into `src/channels/whatsapp.test.ts` (mock + 3 test cases)
@@ -48,14 +49,15 @@ This deterministically:
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
+
 - `modify/src/channels/whatsapp.ts.intent.md` — what changed and invariants for whatsapp.ts
 - `modify/src/channels/whatsapp.test.ts.intent.md` — what changed for whatsapp.test.ts
 
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass (including the 3 new voice transcription tests) and build must be clean before proceeding.
@@ -96,7 +98,7 @@ The container reads environment from `data/env/env`, not `.env` directly.
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -116,6 +118,7 @@ tail -f logs/nanoclaw.log | grep -i voice
 ```
 
 Look for:
+
 - `Transcribed voice message` — successful transcription with character count
 - `OPENAI_API_KEY not set` — key missing from `.env`
 - `OpenAI transcription failed` — API error (check key validity, billing)
@@ -132,6 +135,7 @@ Look for:
 ### Voice notes show "[Voice Message - transcription failed]"
 
 Check logs for the specific error. Common causes:
+
 - Network timeout — transient, will work on next message
 - Invalid API key — regenerate at https://platform.openai.com/api-keys
 - Rate limiting — wait and retry

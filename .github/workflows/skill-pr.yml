@@ -4,8 +4,8 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - '.claude/skills/**'
-      - 'skills-engine/**'
+      - ".claude/skills/**"
+      - "skills-engine/**"
 
 jobs:
   # ── Job 1: Policy gate ────────────────────────────────────────────────
@@ -24,7 +24,7 @@ jobs:
             | grep '^\\.claude/skills/' || true)
           CHANGED=$(git diff --name-only origin/main...HEAD)
           SOURCE=$(echo "$CHANGED" \
-            | grep -E '^src/|^container/|^package\.json|^package-lock\.json' || true)
+            | grep -E '^src/|^container/|^package\.json|^pnpm-lock\.yaml' || true)
 
           if [ -n "$ADDED_SKILLS" ] && [ -n "$SOURCE" ]; then
             echo "::error::PRs that add new skills should not modify source files."
@@ -94,26 +94,27 @@ jobs:
         skill: ${{ fromJson(needs.detect-changed.outputs.skills) }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
       - name: Initialize skills system
         run: >-
-          npx tsx -e
+          pnpm exec tsx -e
           "import { initNanoclawDir } from './skills-engine/index'; initNanoclawDir();"
 
       - name: Apply skill
-        run: npx tsx scripts/apply-skill.ts ".claude/skills/${{ matrix.skill }}"
+        run: pnpm exec tsx scripts/apply-skill.ts ".claude/skills/${{ matrix.skill }}"
 
       - name: Typecheck after apply
-        run: npx tsc --noEmit
+        run: pnpm exec tsgo --noEmit
 
       - name: Run skill tests
         run: |
-          TEST_CMD=$(npx tsx -e "
+          TEST_CMD=$(pnpm exec tsx -e "
             import { parse } from 'yaml';
             import fs from 'fs';
             const m = parse(fs.readFileSync('.claude/skills/${{ matrix.skill }}/manifest.yaml', 'utf-8'));

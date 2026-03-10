@@ -56,7 +56,7 @@ export interface MergeResult {
 }
 
 export interface FileOperation {
-  type: 'rename' | 'delete' | 'move';
+  type: "rename" | "delete" | "move";
   from?: string;
   to?: string;
   path?: string;

@@ -1,25 +1,24 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import fs from 'fs';
-import path from 'path';
-import { stringify } from 'yaml';
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import fs from "fs";
+import path from "path";
+import { stringify } from "yaml";
 import {
   readManifest,
   checkCoreVersion,
   checkDependencies,
   checkConflicts,
   checkSystemVersion,
-} from '../manifest.js';
+} from "../manifest.js";
 import {
   createTempDir,
   setupNanoclawDir,
   createMinimalState,
   createSkillPackage,
   cleanup,
-  writeState,
-} from './test-helpers.js';
-import { recordSkillApplication } from '../state.js';
+} from "./test-helpers.js";
+import { recordSkillApplication } from "../state.js";
 
-describe('manifest', () => {
+describe("manifest", () => {
   let tmpDir: string;
   const originalCwd = process.cwd();
 
@@ -35,29 +34,29 @@ describe('manifest', () => {
     cleanup(tmpDir);
   });
 
-  it('parses a valid manifest', () => {
+  it("parses a valid manifest", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'telegram',
-      version: '2.0.0',
-      core_version: '1.0.0',
-      adds: ['src/telegram.ts'],
-      modifies: ['src/config.ts'],
+      skill: "telegram",
+      version: "2.0.0",
+      core_version: "1.0.0",
+      adds: ["src/telegram.ts"],
+      modifies: ["src/config.ts"],
     });
     const manifest = readManifest(skillDir);
-    expect(manifest.skill).toBe('telegram');
-    expect(manifest.version).toBe('2.0.0');
-    expect(manifest.adds).toEqual(['src/telegram.ts']);
-    expect(manifest.modifies).toEqual(['src/config.ts']);
+    expect(manifest.skill).toBe("telegram");
+    expect(manifest.version).toBe("2.0.0");
+    expect(manifest.adds).toEqual(["src/telegram.ts"]);
+    expect(manifest.modifies).toEqual(["src/config.ts"]);
   });
 
-  it('throws on missing skill field', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on missing skill field", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        version: '1.0.0',
-        core_version: '1.0.0',
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
         modifies: [],
       }),
@@ -65,14 +64,14 @@ describe('manifest', () => {
     expect(() => readManifest(dir)).toThrow();
   });
 
-  it('throws on missing version field', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on missing version field", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        core_version: '1.0.0',
+        skill: "test",
+        core_version: "1.0.0",
         adds: [],
         modifies: [],
       }),
@@ -80,14 +79,14 @@ describe('manifest', () => {
     expect(() => readManifest(dir)).toThrow();
   });
 
-  it('throws on missing core_version field', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on missing core_version field", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
         adds: [],
         modifies: [],
       }),
@@ -95,89 +94,89 @@ describe('manifest', () => {
     expect(() => readManifest(dir)).toThrow();
   });
 
-  it('throws on missing adds field', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on missing adds field", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         modifies: [],
       }),
     );
     expect(() => readManifest(dir)).toThrow();
   });
 
-  it('throws on missing modifies field', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on missing modifies field", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
       }),
     );
     expect(() => readManifest(dir)).toThrow();
   });
 
-  it('throws on path traversal in adds', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on path traversal in adds", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
-        adds: ['../etc/passwd'],
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
+        adds: ["../etc/passwd"],
         modifies: [],
       }),
     );
-    expect(() => readManifest(dir)).toThrow('Invalid path');
+    expect(() => readManifest(dir)).toThrow("Invalid path");
   });
 
-  it('throws on path traversal in modifies', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on path traversal in modifies", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
-        modifies: ['../../secret.ts'],
+        modifies: ["../../secret.ts"],
       }),
     );
-    expect(() => readManifest(dir)).toThrow('Invalid path');
+    expect(() => readManifest(dir)).toThrow("Invalid path");
   });
 
-  it('throws on absolute path in adds', () => {
-    const dir = path.join(tmpDir, 'bad-pkg');
+  it("throws on absolute path in adds", () => {
+    const dir = path.join(tmpDir, "bad-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
-        adds: ['/etc/passwd'],
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
+        adds: ["/etc/passwd"],
         modifies: [],
       }),
     );
-    expect(() => readManifest(dir)).toThrow('Invalid path');
+    expect(() => readManifest(dir)).toThrow("Invalid path");
   });
 
-  it('defaults conflicts and depends to empty arrays', () => {
+  it("defaults conflicts and depends to empty arrays", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
     });
@@ -186,11 +185,11 @@ describe('manifest', () => {
     expect(manifest.depends).toEqual([]);
   });
 
-  it('checkCoreVersion returns warning when manifest targets newer core', () => {
+  it("checkCoreVersion returns warning when manifest targets newer core", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '2.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "2.0.0",
       adds: [],
       modifies: [],
     });
@@ -199,11 +198,11 @@ describe('manifest', () => {
     expect(result.warning).toBeTruthy();
   });
 
-  it('checkCoreVersion returns no warning when versions match', () => {
+  it("checkCoreVersion returns no warning when versions match", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
     });
@@ -213,15 +212,15 @@ describe('manifest', () => {
     expect(result.warning).toBeFalsy();
   });
 
-  it('checkDependencies satisfied when deps present', () => {
-    recordSkillApplication('dep-skill', '1.0.0', {});
+  it("checkDependencies satisfied when deps present", () => {
+    recordSkillApplication("dep-skill", "1.0.0", {});
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
-      depends: ['dep-skill'],
+      depends: ["dep-skill"],
     });
     const manifest = readManifest(skillDir);
     const result = checkDependencies(manifest);
@@ -229,26 +228,26 @@ describe('manifest', () => {
     expect(result.missing).toEqual([]);
   });
 
-  it('checkDependencies missing when deps not present', () => {
+  it("checkDependencies missing when deps not present", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
-      depends: ['missing-skill'],
+      depends: ["missing-skill"],
     });
     const manifest = readManifest(skillDir);
     const result = checkDependencies(manifest);
     expect(result.ok).toBe(false);
-    expect(result.missing).toContain('missing-skill');
+    expect(result.missing).toContain("missing-skill");
   });
 
-  it('checkConflicts ok when no conflicts', () => {
+  it("checkConflicts ok when no conflicts", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
       conflicts: [],
@@ -259,53 +258,53 @@ describe('manifest', () => {
     expect(result.conflicting).toEqual([]);
   });
 
-  it('checkConflicts detects conflicting skill', () => {
-    recordSkillApplication('bad-skill', '1.0.0', {});
+  it("checkConflicts detects conflicting skill", () => {
+    recordSkillApplication("bad-skill", "1.0.0", {});
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
-      conflicts: ['bad-skill'],
+      conflicts: ["bad-skill"],
     });
     const manifest = readManifest(skillDir);
     const result = checkConflicts(manifest);
     expect(result.ok).toBe(false);
-    expect(result.conflicting).toContain('bad-skill');
+    expect(result.conflicting).toContain("bad-skill");
   });
 
-  it('parses new optional fields (author, license, etc)', () => {
-    const dir = path.join(tmpDir, 'full-pkg');
+  it("parses new optional fields (author, license, etc)", () => {
+    const dir = path.join(tmpDir, "full-pkg");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
         modifies: [],
-        author: 'tester',
-        license: 'MIT',
-        min_skills_system_version: '0.1.0',
-        tested_with: ['telegram', 'discord'],
-        post_apply: ['echo done'],
+        author: "tester",
+        license: "MIT",
+        min_skills_system_version: "0.1.0",
+        tested_with: ["telegram", "discord"],
+        post_apply: ["echo done"],
       }),
     );
     const manifest = readManifest(dir);
-    expect(manifest.author).toBe('tester');
-    expect(manifest.license).toBe('MIT');
-    expect(manifest.min_skills_system_version).toBe('0.1.0');
-    expect(manifest.tested_with).toEqual(['telegram', 'discord']);
-    expect(manifest.post_apply).toEqual(['echo done']);
+    expect(manifest.author).toBe("tester");
+    expect(manifest.license).toBe("MIT");
+    expect(manifest.min_skills_system_version).toBe("0.1.0");
+    expect(manifest.tested_with).toEqual(["telegram", "discord"]);
+    expect(manifest.post_apply).toEqual(["echo done"]);
   });
 
-  it('checkSystemVersion passes when not set', () => {
+  it("checkSystemVersion passes when not set", () => {
     const skillDir = createSkillPackage(tmpDir, {
-      skill: 'test',
-      version: '1.0.0',
-      core_version: '1.0.0',
+      skill: "test",
+      version: "1.0.0",
+      core_version: "1.0.0",
       adds: [],
       modifies: [],
     });
@@ -314,18 +313,18 @@ describe('manifest', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('checkSystemVersion passes when engine is new enough', () => {
-    const dir = path.join(tmpDir, 'sys-ok');
+  it("checkSystemVersion passes when engine is new enough", () => {
+    const dir = path.join(tmpDir, "sys-ok");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
         modifies: [],
-        min_skills_system_version: '0.1.0',
+        min_skills_system_version: "0.1.0",
       }),
     );
     const manifest = readManifest(dir);
@@ -333,23 +332,23 @@ describe('manifest', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('checkSystemVersion fails when engine is too old', () => {
-    const dir = path.join(tmpDir, 'sys-fail');
+  it("checkSystemVersion fails when engine is too old", () => {
+    const dir = path.join(tmpDir, "sys-fail");
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'manifest.yaml'),
+      path.join(dir, "manifest.yaml"),
       stringify({
-        skill: 'test',
-        version: '1.0.0',
-        core_version: '1.0.0',
+        skill: "test",
+        version: "1.0.0",
+        core_version: "1.0.0",
         adds: [],
         modifies: [],
-        min_skills_system_version: '99.0.0',
+        min_skills_system_version: "99.0.0",
       }),
     );
     const manifest = readManifest(dir);
     const result = checkSystemVersion(manifest);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('99.0.0');
+    expect(result.error).toContain("99.0.0");
   });
 });

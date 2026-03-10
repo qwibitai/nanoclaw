@@ -3,10 +3,10 @@
  * Used by all X scripts
  */
 
-import { chromium, BrowserContext, Page } from 'playwright';
-import fs from 'fs';
-import path from 'path';
-import { config } from './config.js';
+import { chromium, BrowserContext, Page } from "playwright";
+import fs from "fs";
+import path from "path";
+import { config } from "./config.js";
 
 export { config };
 
@@ -21,17 +21,19 @@ export interface ScriptResult {
  */
 export async function readInput<T>(): Promise<T> {
   return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("end", () => {
       try {
         resolve(JSON.parse(data));
       } catch (err) {
         reject(new Error(`Invalid JSON input: ${err}`));
       }
     });
-    process.stdin.on('error', reject);
+    process.stdin.on("error", reject);
   });
 }
 
@@ -46,10 +48,12 @@ export function writeResult(result: ScriptResult): void {
  * Clean up browser lock files
  */
 export function cleanupLockFiles(): void {
-  for (const lockFile of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+  for (const lockFile of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
     const lockPath = path.join(config.browserDataDir, lockFile);
     if (fs.existsSync(lockPath)) {
-      try { fs.unlinkSync(lockPath); } catch {}
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {}
     }
   }
 }
@@ -57,12 +61,15 @@ export function cleanupLockFiles(): void {
 /**
  * Validate tweet/reply content
  */
-export function validateContent(content: string | undefined, type = 'Tweet'): ScriptResult | null {
+export function validateContent(content: string | undefined, type = "Tweet"): ScriptResult | null {
   if (!content || content.length === 0) {
     return { success: false, message: `${type} content cannot be empty` };
   }
   if (content.length > config.limits.tweetMaxLength) {
-    return { success: false, message: `${type} exceeds ${config.limits.tweetMaxLength} character limit (current: ${content.length})` };
+    return {
+      success: false,
+      message: `${type} exceeds ${config.limits.tweetMaxLength} character limit (current: ${content.length})`,
+    };
   }
   return null; // Valid
 }
@@ -72,7 +79,7 @@ export function validateContent(content: string | undefined, type = 'Tweet'): Sc
  */
 export async function getBrowserContext(): Promise<BrowserContext> {
   if (!fs.existsSync(config.authPath)) {
-    throw new Error('X authentication not configured. Run /x-integration to complete login.');
+    throw new Error("X authentication not configured. Run /x-integration to complete login.");
   }
 
   cleanupLockFiles();
@@ -103,37 +110,47 @@ export function extractTweetId(input: string): string | null {
  */
 export async function navigateToTweet(
   context: BrowserContext,
-  tweetUrl: string
+  tweetUrl: string,
 ): Promise<{ page: Page; success: boolean; error?: string }> {
-  const page = context.pages()[0] || await context.newPage();
+  const page = context.pages()[0] || (await context.newPage());
 
   let url = tweetUrl;
   const tweetId = extractTweetId(tweetUrl);
-  if (tweetId && !tweetUrl.startsWith('http')) {
+  if (tweetId && !tweetUrl.startsWith("http")) {
     url = `https://x.com/i/status/${tweetId}`;
   }
 
   try {
-    await page.goto(url, { timeout: config.timeouts.navigation, waitUntil: 'domcontentloaded' });
+    await page.goto(url, { timeout: config.timeouts.navigation, waitUntil: "domcontentloaded" });
     await page.waitForTimeout(config.timeouts.pageLoad);
 
-    const exists = await page.locator('article[data-testid="tweet"]').first().isVisible().catch(() => false);
+    const exists = await page
+      .locator('article[data-testid="tweet"]')
+      .first()
+      .isVisible()
+      .catch(() => false);
     if (!exists) {
-      return { page, success: false, error: 'Tweet not found. It may have been deleted or the URL is invalid.' };
+      return {
+        page,
+        success: false,
+        error: "Tweet not found. It may have been deleted or the URL is invalid.",
+      };
     }
 
     return { page, success: true };
   } catch (err) {
-    return { page, success: false, error: `Navigation failed: ${err instanceof Error ? err.message : String(err)}` };
+    return {
+      page,
+      success: false,
+      error: `Navigation failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
 /**
  * Run script with error handling
  */
-export async function runScript<T>(
-  handler: (input: T) => Promise<ScriptResult>
-): Promise<void> {
+export async function runScript<T>(handler: (input: T) => Promise<ScriptResult>): Promise<void> {
   try {
     const input = await readInput<T>();
     const result = await handler(input);
@@ -141,7 +158,7 @@ export async function runScript<T>(
   } catch (err) {
     writeResult({
       success: false,
-      message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`
+      message: `Script execution failed: ${err instanceof Error ? err.message : String(err)}`,
     });
     process.exit(1);
   }

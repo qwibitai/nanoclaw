@@ -20,16 +20,17 @@ Read `.nanoclaw/state.yaml`. If `add-pdf-reader` is in `applied_skills`, skip to
 If `.nanoclaw/` directory doesn't exist:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-pdf-reader
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-pdf-reader
 ```
 
 This deterministically:
+
 - Adds `container/skills/pdf-reader/SKILL.md` (agent-facing documentation)
 - Adds `container/skills/pdf-reader/pdf-reader` (CLI script)
 - Three-way merges `poppler-utils` + COPY into `container/Dockerfile`
@@ -38,6 +39,7 @@ This deterministically:
 - Records application in `.nanoclaw/state.yaml`
 
 If merge conflicts occur, read the intent files:
+
 - `modify/container/Dockerfile.intent.md`
 - `modify/src/channels/whatsapp.ts.intent.md`
 - `modify/src/channels/whatsapp.test.ts.intent.md`
@@ -45,8 +47,8 @@ If merge conflicts occur, read the intent files:
 ### Validate
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 ### Rebuild container
@@ -67,6 +69,7 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 ### Test PDF extraction
 
 Send a PDF file in any registered WhatsApp chat. The agent should:
+
 1. Download the PDF to `attachments/`
 2. Respond acknowledging the PDF
 3. Be able to extract text when asked
@@ -82,6 +85,7 @@ tail -f logs/nanoclaw.log | grep -i pdf
 ```
 
 Look for:
+
 - `Downloaded PDF attachment` — successful download
 - `Failed to download PDF attachment` — media download issue
 

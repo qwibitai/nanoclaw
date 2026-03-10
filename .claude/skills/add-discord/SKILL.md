@@ -25,7 +25,7 @@ Run the skills engine to apply this skill's code package. The package files are 
 If `.nanoclaw/` directory doesn't exist yet:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
@@ -33,10 +33,11 @@ Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-discord
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-discord
 ```
 
 This deterministically:
+
 - Adds `src/channels/discord.ts` (DiscordChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/discord.test.ts` (unit tests with discord.js mock)
 - Appends `import './discord.js'` to the channel barrel file `src/channels/index.ts`
@@ -44,13 +45,14 @@ This deterministically:
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent file:
+
 - `modify/src/channels/index.ts.intent.md` — what changed and invariants
 
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass (including the new Discord tests) and build must be clean before proceeding.
@@ -98,7 +100,7 @@ The container reads environment from `data/env/env`, not `.env` directly.
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
@@ -154,6 +156,7 @@ registerGroup("dc:<channel-id>", {
 Tell the user:
 
 > Send a message in your registered Discord channel:
+>
 > - For main channel: Any message works
 > - For non-main: @mention the bot in Discord
 >
@@ -178,12 +181,14 @@ tail -f logs/nanoclaw.log
 ### Bot only responds to @mentions
 
 This is the default behavior for non-main channels (`requiresTrigger: true`). To change:
+
 - Update the registered group's `requiresTrigger` to `false`
 - Or register the channel as the main channel
 
 ### Message Content Intent not enabled
 
 If the bot connects but can't read messages, ensure:
+
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Select your application > **Bot** tab
 3. Under **Privileged Gateway Intents**, enable **Message Content Intent**
@@ -192,12 +197,14 @@ If the bot connects but can't read messages, ensure:
 ### Getting Channel ID
 
 If you can't copy the channel ID:
+
 - Ensure **Developer Mode** is enabled: User Settings > Advanced > Developer Mode
 - Right-click the channel name in the server sidebar > Copy Channel ID
 
 ## After Setup
 
 The Discord bot supports:
+
 - Text messages in registered channels
 - Attachment descriptions (images, videos, files shown as placeholders)
 - Reply context (shows who the user is replying to)

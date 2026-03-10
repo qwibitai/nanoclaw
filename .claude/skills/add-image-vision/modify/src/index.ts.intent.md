@@ -1,16 +1,19 @@
 # Intent: src/index.ts
 
 ## What Changed
+
 - Added `import { parseImageReferences } from './image.js'`
 - In `processGroupMessages`: extract image references after formatting, pass `imageAttachments` to `runAgent`
 - In `runAgent`: added `imageAttachments` parameter, conditionally spread into `runContainerAgent` input
 
 ## Key Sections
+
 - **Imports** (top of file): parseImageReferences
 - **processGroupMessages**: Image extraction, threading to runAgent
 - **runAgent**: Signature change + imageAttachments in input
 
 ## Invariants (must-keep)
+
 - State management (lastTimestamp, sessions, registeredGroups, lastAgentTimestamp)
 - loadState/saveState functions
 - registerGroup function with folder validation

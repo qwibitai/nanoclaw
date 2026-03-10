@@ -1,19 +1,18 @@
-import crypto from 'crypto';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
-import { copyDir } from './fs-utils.js';
-import { readManifest } from './manifest.js';
-import { mergeFile } from './merge.js';
-import { loadPathRemap, resolvePathRemap } from './path-remap.js';
+import { BASE_DIR } from "./constants.js";
+import { readManifest } from "./manifest.js";
+import { mergeFile } from "./merge.js";
+import { loadPathRemap, resolvePathRemap } from "./path-remap.js";
 import {
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
   runNpmInstall,
-} from './structured.js';
+} from "./structured.js";
 
 export interface ReplayOptions {
   skills: string[];
@@ -31,18 +30,15 @@ export interface ReplayResult {
 /**
  * Scan .claude/skills/ for a directory whose manifest.yaml has skill: <skillName>.
  */
-export function findSkillDir(
-  skillName: string,
-  projectRoot?: string,
-): string | null {
+export function findSkillDir(skillName: string, projectRoot?: string): string | null {
   const root = projectRoot ?? process.cwd();
-  const skillsRoot = path.join(root, '.claude', 'skills');
+  const skillsRoot = path.join(root, ".claude", "skills");
   if (!fs.existsSync(skillsRoot)) return null;
 
   for (const entry of fs.readdirSync(skillsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const dir = path.join(skillsRoot, entry.name);
-    const manifestPath = path.join(dir, 'manifest.yaml');
+    const manifestPath = path.join(dir, "manifest.yaml");
     if (!fs.existsSync(manifestPath)) continue;
 
     try {
@@ -60,9 +56,7 @@ export function findSkillDir(
  * Replay a list of skills from clean base state.
  * Used by uninstall (replay-without) and rebase.
  */
-export async function replaySkills(
-  options: ReplayOptions,
-): Promise<ReplayResult> {
+export async function replaySkills(options: ReplayOptions): Promise<ReplayResult> {
   const projectRoot = options.projectRoot ?? process.cwd();
   const baseDir = path.join(projectRoot, BASE_DIR);
   const pathRemap = loadPathRemap();
@@ -121,12 +115,12 @@ export async function replaySkills(
 
       // Execute file_ops
       if (manifest.file_ops && manifest.file_ops.length > 0) {
-        const { executeFileOps } = await import('./file-ops.js');
+        const { executeFileOps } = await import("./file-ops.js");
         const fileOpsResult = executeFileOps(manifest.file_ops, projectRoot);
         if (!fileOpsResult.success) {
           perSkill[skillName] = {
             success: false,
-            error: `File operations failed: ${fileOpsResult.errors.join('; ')}`,
+            error: `File operations failed: ${fileOpsResult.errors.join("; ")}`,
           };
           return {
             success: false,
@@ -137,7 +131,7 @@ export async function replaySkills(
       }
 
       // Copy add/ files
-      const addDir = path.join(skillDir, 'add');
+      const addDir = path.join(skillDir, "add");
       if (fs.existsSync(addDir)) {
         for (const relPath of manifest.adds) {
           const resolvedDest = resolvePathRemap(relPath, pathRemap);
@@ -157,7 +151,7 @@ export async function replaySkills(
         const resolvedPath = resolvePathRemap(relPath, pathRemap);
         const currentPath = path.join(projectRoot, resolvedPath);
         const basePath = path.join(baseDir, resolvedPath);
-        const skillPath = path.join(skillDir, 'modify', relPath);
+        const skillPath = path.join(skillDir, "modify", relPath);
 
         if (!fs.existsSync(skillPath)) {
           skillConflicts.push(relPath);
@@ -197,7 +191,7 @@ export async function replaySkills(
         allMergeConflicts.push(...skillConflicts);
         perSkill[skillName] = {
           success: false,
-          error: `Merge conflicts: ${skillConflicts.join(', ')}`,
+          error: `Merge conflicts: ${skillConflicts.join(", ")}`,
         };
         // Stop on first conflict — later skills would merge against conflict markers
         break;
@@ -214,10 +208,7 @@ export async function replaySkills(
         allEnvAdditions.push(...manifest.structured.env_additions);
       }
       if (manifest.structured?.docker_compose_services) {
-        Object.assign(
-          allDockerServices,
-          manifest.structured.docker_compose_services,
-        );
+        Object.assign(allDockerServices, manifest.structured.docker_compose_services);
       }
     } catch (err) {
       perSkill[skillName] = {
@@ -237,23 +228,23 @@ export async function replaySkills(
       success: false,
       perSkill,
       mergeConflicts: allMergeConflicts,
-      error: `Unresolved merge conflicts: ${allMergeConflicts.join(', ')}`,
+      error: `Unresolved merge conflicts: ${allMergeConflicts.join(", ")}`,
     };
   }
 
   // 4. Apply aggregated structured operations (only if no conflicts)
   if (hasNpmDeps) {
-    const pkgPath = path.join(projectRoot, 'package.json');
+    const pkgPath = path.join(projectRoot, "package.json");
     mergeNpmDependencies(pkgPath, allNpmDeps);
   }
 
   if (allEnvAdditions.length > 0) {
-    const envPath = path.join(projectRoot, '.env.example');
+    const envPath = path.join(projectRoot, ".env.example");
     mergeEnvAdditions(envPath, allEnvAdditions);
   }
 
   if (Object.keys(allDockerServices).length > 0) {
-    const composePath = path.join(projectRoot, 'docker-compose.yml');
+    const composePath = path.join(projectRoot, "docker-compose.yml");
     mergeDockerComposeServices(composePath, allDockerServices);
   }
 

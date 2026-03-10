@@ -8,6 +8,6 @@
 // slack
 
 // telegram
-import './telegram.js';
+import "./telegram.js";
 
 // whatsapp

@@ -58,13 +58,14 @@ export interface ScheduledTask {
   group_folder: string;
   chat_jid: string;
   prompt: string;
-  schedule_type: 'cron' | 'interval' | 'once';
+  schedule_type: "cron" | "interval" | "once";
   schedule_value: string;
-  context_mode: 'group' | 'isolated';
+  context_mode: "group" | "isolated";
   next_run: string | null;
   last_run: string | null;
   last_result: string | null;
-  status: 'active' | 'paused' | 'completed';
+  status: "active" | "paused" | "completed";
+  pause_reason?: string;
   created_at: string;
 }
 
@@ -72,12 +73,17 @@ export interface TaskRunLog {
   task_id: string;
   run_at: string;
   duration_ms: number;
-  status: 'success' | 'error';
+  status: "success" | "error";
   result: string | null;
   error: string | null;
 }
 
 // --- Channel abstraction ---
+
+export interface PurgeOptions {
+  count?: number; // last N messages
+  since?: Date; // messages since this time
+}
 
 export interface Channel {
   name: string;
@@ -90,6 +96,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: purge messages from a channel (admin cleanup).
+  purgeMessages?(jid: string, options?: PurgeOptions): Promise<number>;
 }
 
 // Callback type that channels use to deliver inbound messages

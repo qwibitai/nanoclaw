@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from "vitest";
 
-import Database from 'better-sqlite3';
+import Database from "better-sqlite3";
 
 /**
  * Tests for the register step.
@@ -10,7 +10,7 @@ import Database from 'better-sqlite3';
  */
 
 function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
+  const db = new Database(":memory:");
   db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
     jid TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -24,30 +24,21 @@ function createTestDb(): Database.Database {
   return db;
 }
 
-describe('parameterized SQL registration', () => {
+describe("parameterized SQL registration", () => {
   let db: Database.Database;
 
   beforeEach(() => {
     db = createTestDb();
   });
 
-  it('registers a group with parameterized query', () => {
+  it("registers a group with parameterized query", () => {
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      '123@g.us',
-      'Test Group',
-      'test-group',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-    );
+    ).run("123@g.us", "Test Group", "test-group", "@Andy", "2024-01-01T00:00:00.000Z", 1);
 
-    const row = db
-      .prepare('SELECT * FROM registered_groups WHERE jid = ?')
-      .get('123@g.us') as {
+    const row = db.prepare("SELECT * FROM registered_groups WHERE jid = ?").get("123@g.us") as {
       jid: string;
       name: string;
       folder: string;
@@ -55,150 +46,111 @@ describe('parameterized SQL registration', () => {
       requires_trigger: number;
     };
 
-    expect(row.jid).toBe('123@g.us');
-    expect(row.name).toBe('Test Group');
-    expect(row.folder).toBe('test-group');
-    expect(row.trigger_pattern).toBe('@Andy');
+    expect(row.jid).toBe("123@g.us");
+    expect(row.name).toBe("Test Group");
+    expect(row.folder).toBe("test-group");
+    expect(row.trigger_pattern).toBe("@Andy");
     expect(row.requires_trigger).toBe(1);
   });
 
-  it('handles apostrophes in group names safely', () => {
+  it("handles apostrophes in group names safely", () => {
     const name = "O'Brien's Group";
 
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      '456@g.us',
-      name,
-      'obriens-group',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      0,
-    );
+    ).run("456@g.us", name, "obriens-group", "@Andy", "2024-01-01T00:00:00.000Z", 0);
 
-    const row = db
-      .prepare('SELECT name FROM registered_groups WHERE jid = ?')
-      .get('456@g.us') as {
+    const row = db.prepare("SELECT name FROM registered_groups WHERE jid = ?").get("456@g.us") as {
       name: string;
     };
 
     expect(row.name).toBe(name);
   });
 
-  it('prevents SQL injection in JID field', () => {
+  it("prevents SQL injection in JID field", () => {
     const maliciousJid = "'; DROP TABLE registered_groups; --";
 
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(maliciousJid, 'Evil', 'evil', '@Andy', '2024-01-01T00:00:00.000Z', 1);
+    ).run(maliciousJid, "Evil", "evil", "@Andy", "2024-01-01T00:00:00.000Z", 1);
 
     // Table should still exist and have the row
-    const count = db
-      .prepare('SELECT COUNT(*) as count FROM registered_groups')
-      .get() as {
+    const count = db.prepare("SELECT COUNT(*) as count FROM registered_groups").get() as {
       count: number;
     };
     expect(count.count).toBe(1);
 
-    const row = db.prepare('SELECT jid FROM registered_groups').get() as {
+    const row = db.prepare("SELECT jid FROM registered_groups").get() as {
       jid: string;
     };
     expect(row.jid).toBe(maliciousJid);
   });
 
-  it('handles requiresTrigger=false', () => {
+  it("handles requiresTrigger=false", () => {
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      '789@s.whatsapp.net',
-      'Personal',
-      'main',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      0,
-    );
+    ).run("789@s.whatsapp.net", "Personal", "main", "@Andy", "2024-01-01T00:00:00.000Z", 0);
 
     const row = db
-      .prepare('SELECT requires_trigger FROM registered_groups WHERE jid = ?')
-      .get('789@s.whatsapp.net') as { requires_trigger: number };
+      .prepare("SELECT requires_trigger FROM registered_groups WHERE jid = ?")
+      .get("789@s.whatsapp.net") as { requires_trigger: number };
 
     expect(row.requires_trigger).toBe(0);
   });
 
-  it('stores is_main flag', () => {
+  it("stores is_main flag", () => {
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
        VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
     ).run(
-      '789@s.whatsapp.net',
-      'Personal',
-      'whatsapp_main',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
+      "789@s.whatsapp.net",
+      "Personal",
+      "whatsapp_main",
+      "@Andy",
+      "2024-01-01T00:00:00.000Z",
       0,
       1,
     );
 
     const row = db
-      .prepare('SELECT is_main FROM registered_groups WHERE jid = ?')
-      .get('789@s.whatsapp.net') as { is_main: number };
+      .prepare("SELECT is_main FROM registered_groups WHERE jid = ?")
+      .get("789@s.whatsapp.net") as { is_main: number };
 
     expect(row.is_main).toBe(1);
   });
 
-  it('defaults is_main to 0', () => {
+  it("defaults is_main to 0", () => {
     db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
-    ).run(
-      '123@g.us',
-      'Some Group',
-      'whatsapp_some-group',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-    );
+    ).run("123@g.us", "Some Group", "whatsapp_some-group", "@Andy", "2024-01-01T00:00:00.000Z", 1);
 
     const row = db
-      .prepare('SELECT is_main FROM registered_groups WHERE jid = ?')
-      .get('123@g.us') as { is_main: number };
+      .prepare("SELECT is_main FROM registered_groups WHERE jid = ?")
+      .get("123@g.us") as { is_main: number };
 
     expect(row.is_main).toBe(0);
   });
 
-  it('upserts on conflict', () => {
+  it("upserts on conflict", () => {
     const stmt = db.prepare(
       `INSERT OR REPLACE INTO registered_groups
        (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger)
        VALUES (?, ?, ?, ?, ?, NULL, ?)`,
     );
 
-    stmt.run(
-      '123@g.us',
-      'Original',
-      'main',
-      '@Andy',
-      '2024-01-01T00:00:00.000Z',
-      1,
-    );
-    stmt.run(
-      '123@g.us',
-      'Updated',
-      'main',
-      '@Bot',
-      '2024-02-01T00:00:00.000Z',
-      0,
-    );
+    stmt.run("123@g.us", "Original", "main", "@Andy", "2024-01-01T00:00:00.000Z", 1);
+    stmt.run("123@g.us", "Updated", "main", "@Bot", "2024-02-01T00:00:00.000Z", 0);
 
-    const rows = db.prepare('SELECT * FROM registered_groups').all();
+    const rows = db.prepare("SELECT * FROM registered_groups").all();
     expect(rows).toHaveLength(1);
 
     const row = rows[0] as {
@@ -206,49 +158,46 @@ describe('parameterized SQL registration', () => {
       trigger_pattern: string;
       requires_trigger: number;
     };
-    expect(row.name).toBe('Updated');
-    expect(row.trigger_pattern).toBe('@Bot');
+    expect(row.name).toBe("Updated");
+    expect(row.trigger_pattern).toBe("@Bot");
     expect(row.requires_trigger).toBe(0);
   });
 });
 
-describe('file templating', () => {
-  it('replaces assistant name in CLAUDE.md content', () => {
-    let content = '# Andy\n\nYou are Andy, a personal assistant.';
+describe("file templating", () => {
+  it("replaces assistant name in CLAUDE.md content", () => {
+    let content = "# Andy\n\nYou are Andy, a personal assistant.";
 
-    content = content.replace(/^# Andy$/m, '# Nova');
-    content = content.replace(/You are Andy/g, 'You are Nova');
+    content = content.replace(/^# Andy$/m, "# Nova");
+    content = content.replace(/You are Andy/g, "You are Nova");
 
-    expect(content).toBe('# Nova\n\nYou are Nova, a personal assistant.');
+    expect(content).toBe("# Nova\n\nYou are Nova, a personal assistant.");
   });
 
-  it('handles names with special regex characters', () => {
-    let content = '# Andy\n\nYou are Andy.';
+  it("handles names with special regex characters", () => {
+    let content = "# Andy\n\nYou are Andy.";
 
-    const newName = 'C.L.A.U.D.E';
+    const newName = "C.L.A.U.D.E";
     content = content.replace(/^# Andy$/m, `# ${newName}`);
     content = content.replace(/You are Andy/g, `You are ${newName}`);
 
-    expect(content).toContain('# C.L.A.U.D.E');
-    expect(content).toContain('You are C.L.A.U.D.E.');
+    expect(content).toContain("# C.L.A.U.D.E");
+    expect(content).toContain("You are C.L.A.U.D.E.");
   });
 
-  it('updates .env ASSISTANT_NAME line', () => {
+  it("updates .env ASSISTANT_NAME line", () => {
     let envContent = 'SOME_KEY=value\nASSISTANT_NAME="Andy"\nOTHER=test';
 
-    envContent = envContent.replace(
-      /^ASSISTANT_NAME=.*$/m,
-      'ASSISTANT_NAME="Nova"',
-    );
+    envContent = envContent.replace(/^ASSISTANT_NAME=.*$/m, 'ASSISTANT_NAME="Nova"');
 
     expect(envContent).toContain('ASSISTANT_NAME="Nova"');
-    expect(envContent).toContain('SOME_KEY=value');
+    expect(envContent).toContain("SOME_KEY=value");
   });
 
-  it('appends ASSISTANT_NAME to .env if not present', () => {
-    let envContent = 'SOME_KEY=value\n';
+  it("appends ASSISTANT_NAME to .env if not present", () => {
+    let envContent = "SOME_KEY=value\n";
 
-    if (!envContent.includes('ASSISTANT_NAME=')) {
+    if (!envContent.includes("ASSISTANT_NAME=")) {
       envContent += '\nASSISTANT_NAME="Nova"';
     }
 

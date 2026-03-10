@@ -1,13 +1,13 @@
 /**
  * Step: whatsapp-auth — WhatsApp interactive auth (QR code / pairing code).
  */
-import { execSync, spawn } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync, spawn } from "child_process";
+import fs from "fs";
+import path from "path";
 
-import { logger } from '../src/logger.js';
-import { openBrowser, isHeadless } from './platform.js';
-import { emitStatus } from './status.js';
+import { logger } from "../src/logger.js";
+import { openBrowser, isHeadless } from "./platform.js";
+import { emitStatus } from "./status.js";
 
 const QR_AUTH_TEMPLATE = `<!DOCTYPE html>
 <html><head><title>NanoClaw - WhatsApp Auth</title>
@@ -62,14 +62,14 @@ const SUCCESS_HTML = `<!DOCTYPE html>
 </body></html>`;
 
 function parseArgs(args: string[]): { method: string; phone: string } {
-  let method = '';
-  let phone = '';
+  let method = "";
+  let phone = "";
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--method' && args[i + 1]) {
+    if (args[i] === "--method" && args[i + 1]) {
       method = args[i + 1];
       i++;
     }
-    if (args[i] === '--phone' && args[i + 1]) {
+    if (args[i] === "--phone" && args[i + 1]) {
       phone = args[i + 1];
       i++;
     }
@@ -83,27 +83,24 @@ function sleep(ms: number): Promise<void> {
 
 function readFileSafe(filePath: string): string {
   try {
-    return fs.readFileSync(filePath, 'utf-8');
+    return fs.readFileSync(filePath, "utf-8");
   } catch {
-    return '';
+    return "";
   }
 }
 
 function getPhoneNumber(projectRoot: string): string {
   try {
     const creds = JSON.parse(
-      fs.readFileSync(
-        path.join(projectRoot, 'store', 'auth', 'creds.json'),
-        'utf-8',
-      ),
+      fs.readFileSync(path.join(projectRoot, "store", "auth", "creds.json"), "utf-8"),
     );
     if (creds.me?.id) {
-      return creds.me.id.split(':')[0].split('@')[0];
+      return creds.me.id.split(":")[0].split("@")[0];
     }
   } catch {
     // Not available yet
   }
-  return '';
+  return "";
 }
 
 function emitAuthStatus(
@@ -117,49 +114,49 @@ function emitAuthStatus(
     AUTH_STATUS: authStatus,
     ...extra,
     STATUS: status,
-    LOG: 'logs/setup.log',
+    LOG: "logs/setup.log",
   };
-  emitStatus('AUTH_WHATSAPP', fields);
+  emitStatus("AUTH_WHATSAPP", fields);
 }
 
 export async function run(args: string[]): Promise<void> {
   const projectRoot = process.cwd();
 
   const { method, phone } = parseArgs(args);
-  const statusFile = path.join(projectRoot, 'store', 'auth-status.txt');
-  const qrFile = path.join(projectRoot, 'store', 'qr-data.txt');
+  const statusFile = path.join(projectRoot, "store", "auth-status.txt");
+  const qrFile = path.join(projectRoot, "store", "qr-data.txt");
 
   if (!method) {
-    emitAuthStatus('unknown', 'failed', 'failed', {
-      ERROR: 'missing_method_flag',
+    emitAuthStatus("unknown", "failed", "failed", {
+      ERROR: "missing_method_flag",
     });
     process.exit(4);
   }
 
   // qr-terminal is a manual flow
-  if (method === 'qr-terminal') {
-    emitAuthStatus('qr-terminal', 'manual', 'manual', {
+  if (method === "qr-terminal") {
+    emitAuthStatus("qr-terminal", "manual", "manual", {
       PROJECT_PATH: projectRoot,
     });
     return;
   }
 
-  if (method === 'pairing-code' && !phone) {
-    emitAuthStatus('pairing-code', 'failed', 'failed', {
-      ERROR: 'missing_phone_number',
+  if (method === "pairing-code" && !phone) {
+    emitAuthStatus("pairing-code", "failed", "failed", {
+      ERROR: "missing_phone_number",
     });
     process.exit(4);
   }
 
-  if (!['qr-browser', 'pairing-code'].includes(method)) {
-    emitAuthStatus(method, 'failed', 'failed', { ERROR: 'unknown_method' });
+  if (!["qr-browser", "pairing-code"].includes(method)) {
+    emitAuthStatus(method, "failed", "failed", { ERROR: "unknown_method" });
     process.exit(4);
   }
 
   // Clean stale state
-  logger.info({ method }, 'Starting channel authentication');
+  logger.info({ method }, "Starting channel authentication");
   try {
-    fs.rmSync(path.join(projectRoot, 'store', 'auth'), {
+    fs.rmSync(path.join(projectRoot, "store", "auth"), {
       recursive: true,
       force: true,
     });
@@ -179,18 +176,18 @@ export async function run(args: string[]): Promise<void> {
 
   // Start auth process in background
   const authArgs =
-    method === 'pairing-code'
-      ? ['src/whatsapp-auth.ts', '--pairing-code', '--phone', phone]
-      : ['src/whatsapp-auth.ts'];
+    method === "pairing-code"
+      ? ["src/whatsapp-auth.ts", "--pairing-code", "--phone", phone]
+      : ["src/whatsapp-auth.ts"];
 
-  const authProc = spawn('npx', ['tsx', ...authArgs], {
+  const authProc = spawn("npx", ["tsx", ...authArgs], {
     cwd: projectRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ["ignore", "pipe", "pipe"],
     detached: false,
   });
 
-  const logFile = path.join(projectRoot, 'logs', 'setup.log');
-  const logStream = fs.createWriteStream(logFile, { flags: 'a' });
+  const logFile = path.join(projectRoot, "logs", "setup.log");
+  const logStream = fs.createWriteStream(logFile, { flags: "a" });
   authProc.stdout?.pipe(logStream);
   authProc.stderr?.pipe(logStream);
 
@@ -202,17 +199,17 @@ export async function run(args: string[]): Promise<void> {
       /* ok */
     }
   };
-  process.on('exit', cleanup);
+  process.on("exit", cleanup);
 
   try {
-    if (method === 'qr-browser') {
+    if (method === "qr-browser") {
       await handleQrBrowser(projectRoot, statusFile, qrFile);
     } else {
       await handlePairingCode(projectRoot, statusFile, phone);
     }
   } finally {
     cleanup();
-    process.removeListener('exit', cleanup);
+    process.removeListener("exit", cleanup);
   }
 }
 
@@ -225,8 +222,8 @@ async function handleQrBrowser(
   let qrReady = false;
   for (let i = 0; i < 15; i++) {
     const statusContent = readFileSafe(statusFile);
-    if (statusContent === 'already_authenticated') {
-      emitAuthStatus('qr-browser', 'already_authenticated', 'success');
+    if (statusContent === "already_authenticated") {
+      emitAuthStatus("qr-browser", "already_authenticated", "success");
       return;
     }
     if (fs.existsSync(qrFile)) {
@@ -237,40 +234,36 @@ async function handleQrBrowser(
   }
 
   if (!qrReady) {
-    emitAuthStatus('qr-browser', 'failed', 'failed', { ERROR: 'qr_timeout' });
+    emitAuthStatus("qr-browser", "failed", "failed", { ERROR: "qr_timeout" });
     process.exit(3);
   }
 
   // Generate QR SVG and HTML
-  const qrData = fs.readFileSync(qrFile, 'utf-8');
+  const qrData = fs.readFileSync(qrFile, "utf-8");
   try {
     const svg = execSync(
       `node -e "const QR=require('qrcode');const data='${qrData}';QR.toString(data,{type:'svg'},(e,s)=>{if(e)process.exit(1);process.stdout.write(s)})"`,
-      { cwd: projectRoot, encoding: 'utf-8' },
+      { cwd: projectRoot, encoding: "utf-8" },
     );
-    const html = QR_AUTH_TEMPLATE.replace('{{QR_SVG}}', svg);
-    const htmlPath = path.join(projectRoot, 'store', 'qr-auth.html');
+    const html = QR_AUTH_TEMPLATE.replace("{{QR_SVG}}", svg);
+    const htmlPath = path.join(projectRoot, "store", "qr-auth.html");
     fs.writeFileSync(htmlPath, html);
 
     // Open in browser (cross-platform)
     if (!isHeadless()) {
       const opened = openBrowser(htmlPath);
       if (!opened) {
-        logger.warn(
-          'Could not open browser — display QR in terminal as fallback',
-        );
+        logger.warn("Could not open browser — display QR in terminal as fallback");
       }
     } else {
-      logger.info(
-        'Headless environment — QR HTML saved but browser not opened',
-      );
+      logger.info("Headless environment — QR HTML saved but browser not opened");
     }
   } catch (err) {
-    logger.error({ err }, 'Failed to generate QR HTML');
+    logger.error({ err }, "Failed to generate QR HTML");
   }
 
   // Poll for completion (120s)
-  await pollAuthCompletion('qr-browser', statusFile, projectRoot);
+  await pollAuthCompletion("qr-browser", statusFile, projectRoot);
 }
 
 async function handlePairingCode(
@@ -279,20 +272,20 @@ async function handlePairingCode(
   phone: string,
 ): Promise<void> {
   // Poll for pairing code (15s)
-  let pairingCode = '';
+  let pairingCode = "";
   for (let i = 0; i < 15; i++) {
     const statusContent = readFileSafe(statusFile);
-    if (statusContent === 'already_authenticated') {
-      emitAuthStatus('pairing-code', 'already_authenticated', 'success');
+    if (statusContent === "already_authenticated") {
+      emitAuthStatus("pairing-code", "already_authenticated", "success");
       return;
     }
-    if (statusContent.startsWith('pairing_code:')) {
-      pairingCode = statusContent.replace('pairing_code:', '');
+    if (statusContent.startsWith("pairing_code:")) {
+      pairingCode = statusContent.replace("pairing_code:", "");
       break;
     }
-    if (statusContent.startsWith('failed:')) {
-      emitAuthStatus('pairing-code', 'failed', 'failed', {
-        ERROR: statusContent.replace('failed:', ''),
+    if (statusContent.startsWith("failed:")) {
+      emitAuthStatus("pairing-code", "failed", "failed", {
+        ERROR: statusContent.replace("failed:", ""),
       });
       process.exit(1);
     }
@@ -300,34 +293,26 @@ async function handlePairingCode(
   }
 
   if (!pairingCode) {
-    emitAuthStatus('pairing-code', 'failed', 'failed', {
-      ERROR: 'pairing_code_timeout',
+    emitAuthStatus("pairing-code", "failed", "failed", {
+      ERROR: "pairing_code_timeout",
     });
     process.exit(3);
   }
 
   // Write to file immediately so callers can read it without waiting for stdout
   try {
-    fs.writeFileSync(
-      path.join(projectRoot, 'store', 'pairing-code.txt'),
-      pairingCode,
-    );
+    fs.writeFileSync(path.join(projectRoot, "store", "pairing-code.txt"), pairingCode);
   } catch {
     /* non-fatal */
   }
 
   // Emit pairing code immediately so the caller can display it to the user
-  emitAuthStatus('pairing-code', 'pairing_code_ready', 'waiting', {
+  emitAuthStatus("pairing-code", "pairing_code_ready", "waiting", {
     PAIRING_CODE: pairingCode,
   });
 
   // Poll for completion (120s)
-  await pollAuthCompletion(
-    'pairing-code',
-    statusFile,
-    projectRoot,
-    pairingCode,
-  );
+  await pollAuthCompletion("pairing-code", statusFile, projectRoot, pairingCode);
 }
 
 async function pollAuthCompletion(
@@ -342,27 +327,27 @@ async function pollAuthCompletion(
   for (let i = 0; i < 60; i++) {
     const content = readFileSafe(statusFile);
 
-    if (content === 'authenticated' || content === 'already_authenticated') {
+    if (content === "authenticated" || content === "already_authenticated") {
       // Write success page if qr-auth.html exists
-      const htmlPath = path.join(projectRoot, 'store', 'qr-auth.html');
+      const htmlPath = path.join(projectRoot, "store", "qr-auth.html");
       if (fs.existsSync(htmlPath)) {
         fs.writeFileSync(htmlPath, SUCCESS_HTML);
       }
       const phoneNumber = getPhoneNumber(projectRoot);
       if (phoneNumber) extra.PHONE_NUMBER = phoneNumber;
-      emitAuthStatus(method, content, 'success', extra);
+      emitAuthStatus(method, content, "success", extra);
       return;
     }
 
-    if (content.startsWith('failed:')) {
-      const error = content.replace('failed:', '');
-      emitAuthStatus(method, 'failed', 'failed', { ERROR: error, ...extra });
+    if (content.startsWith("failed:")) {
+      const error = content.replace("failed:", "");
+      emitAuthStatus(method, "failed", "failed", { ERROR: error, ...extra });
       process.exit(1);
     }
 
     await sleep(2000);
   }
 
-  emitAuthStatus(method, 'failed', 'failed', { ERROR: 'timeout', ...extra });
+  emitAuthStatus(method, "failed", "failed", { ERROR: "timeout", ...extra });
   process.exit(3);
 }

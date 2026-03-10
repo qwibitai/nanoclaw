@@ -1,18 +1,18 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { EventEmitter } from "events";
 
 // --- Mocks ---
 
 // Mock config
-vi.mock('../config.js', () => ({
-  STORE_DIR: '/tmp/nanoclaw-test-store',
-  ASSISTANT_NAME: 'Andy',
+vi.mock("../config.js", () => ({
+  STORE_DIR: "/tmp/nanoclaw-test-store",
+  ASSISTANT_NAME: "Andy",
   ASSISTANT_HAS_OWN_NUMBER: false,
-  GROUPS_DIR: '/tmp/test-groups',
+  GROUPS_DIR: "/tmp/test-groups",
 }));
 
 // Mock logger
-vi.mock('../logger.js', () => ({
+vi.mock("../logger.js", () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -22,21 +22,24 @@ vi.mock('../logger.js', () => ({
 }));
 
 // Mock db
-vi.mock('../db.js', () => ({
+vi.mock("../db.js", () => ({
   getLastGroupSync: vi.fn(() => null),
   setLastGroupSync: vi.fn(),
   updateChatName: vi.fn(),
 }));
 
 // Mock image module
-vi.mock('../image.js', () => ({
+vi.mock("../image.js", () => ({
   isImageMessage: vi.fn().mockReturnValue(false),
-  processImage: vi.fn().mockResolvedValue({ content: '[Image: attachments/test.jpg]', relativePath: 'attachments/test.jpg' }),
+  processImage: vi.fn().mockResolvedValue({
+    content: "[Image: attachments/test.jpg]",
+    relativePath: "attachments/test.jpg",
+  }),
 }));
 
 // Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
   return {
     ...actual,
     default: {
@@ -48,7 +51,7 @@ vi.mock('fs', async () => {
 });
 
 // Mock child_process (used for osascript notification)
-vi.mock('child_process', () => ({
+vi.mock("child_process", () => ({
   exec: vi.fn(),
 }));
 
@@ -62,8 +65,8 @@ function createFakeSocket() {
       },
     },
     user: {
-      id: '1234567890:1@s.whatsapp.net',
-      lid: '9876543210:1@lid',
+      id: "1234567890:1@s.whatsapp.net",
+      lid: "9876543210:1@lid",
     },
     sendMessage: vi.fn().mockResolvedValue(undefined),
     sendPresenceUpdate: vi.fn().mockResolvedValue(undefined),
@@ -79,10 +82,10 @@ function createFakeSocket() {
 let fakeSocket: ReturnType<typeof createFakeSocket>;
 
 // Mock Baileys
-vi.mock('@whiskeysockets/baileys', () => {
+vi.mock("@whiskeysockets/baileys", () => {
   return {
     default: vi.fn(() => fakeSocket),
-    Browsers: { macOS: vi.fn(() => ['macOS', 'Chrome', '']) },
+    Browsers: { macOS: vi.fn(() => ["macOS", "Chrome", ""]) },
     DisconnectReason: {
       loggedOut: 401,
       badSession: 500,
@@ -92,10 +95,8 @@ vi.mock('@whiskeysockets/baileys', () => {
       timedOut: 408,
       restartRequired: 515,
     },
-    fetchLatestWaWebVersion: vi
-      .fn()
-      .mockResolvedValue({ version: [2, 3000, 0] }),
-    downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from('image-data')),
+    fetchLatestWaWebVersion: vi.fn().mockResolvedValue({ version: [2, 3000, 0] }),
+    downloadMediaMessage: vi.fn().mockResolvedValue(Buffer.from("image-data")),
     normalizeMessageContent: vi.fn((content: unknown) => content),
     makeCacheableSignalKeyStore: vi.fn((keys: unknown) => keys),
     useMultiFileAuthState: vi.fn().mockResolvedValue({
@@ -108,25 +109,23 @@ vi.mock('@whiskeysockets/baileys', () => {
   };
 });
 
-import { WhatsAppChannel, WhatsAppChannelOpts } from './whatsapp.js';
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
-import { getLastGroupSync, updateChatName, setLastGroupSync } from '../db.js';
-import { isImageMessage, processImage } from '../image.js';
+import { WhatsAppChannel, WhatsAppChannelOpts } from "./whatsapp.js";
+import { downloadMediaMessage } from "@whiskeysockets/baileys";
+import { getLastGroupSync, updateChatName, setLastGroupSync } from "../db.js";
+import { isImageMessage, processImage } from "../image.js";
 
 // --- Test helpers ---
 
-function createTestOpts(
-  overrides?: Partial<WhatsAppChannelOpts>,
-): WhatsAppChannelOpts {
+function createTestOpts(overrides?: Partial<WhatsAppChannelOpts>): WhatsAppChannelOpts {
   return {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
     registeredGroups: vi.fn(() => ({
-      'registered@g.us': {
-        name: 'Test Group',
-        folder: 'test-group',
-        trigger: '@Andy',
-        added_at: '2024-01-01T00:00:00.000Z',
+      "registered@g.us": {
+        name: "Test Group",
+        folder: "test-group",
+        trigger: "@Andy",
+        added_at: "2024-01-01T00:00:00.000Z",
       },
     })),
     ...overrides,
@@ -134,12 +133,12 @@ function createTestOpts(
 }
 
 function triggerConnection(state: string, extra?: Record<string, unknown>) {
-  fakeSocket._ev.emit('connection.update', { connection: state, ...extra });
+  fakeSocket._ev.emit("connection.update", { connection: state, ...extra });
 }
 
 function triggerDisconnect(statusCode: number) {
-  fakeSocket._ev.emit('connection.update', {
-    connection: 'close',
+  fakeSocket._ev.emit("connection.update", {
+    connection: "close",
     lastDisconnect: {
       error: { output: { statusCode } },
     },
@@ -147,14 +146,14 @@ function triggerDisconnect(statusCode: number) {
 }
 
 async function triggerMessages(messages: unknown[]) {
-  fakeSocket._ev.emit('messages.upsert', { messages });
+  fakeSocket._ev.emit("messages.upsert", { messages });
   // Flush microtasks so the async messages.upsert handler completes
   await new Promise((r) => setTimeout(r, 0));
 }
 
 // --- Tests ---
 
-describe('WhatsAppChannel', () => {
+describe("WhatsAppChannel", () => {
   beforeEach(() => {
     fakeSocket = createFakeSocket();
     vi.mocked(getLastGroupSync).mockReturnValue(null);
@@ -172,29 +171,25 @@ describe('WhatsAppChannel', () => {
     const p = channel.connect();
     // Flush microtasks so connectInternal completes its await and registers handlers
     await new Promise((r) => setTimeout(r, 0));
-    triggerConnection('open');
+    triggerConnection("open");
     return p;
   }
 
   // --- Version fetch ---
 
-  describe('version fetch', () => {
-    it('connects with fetched version', async () => {
+  describe("version fetch", () => {
+    it("connects with fetched version", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
       await connectChannel(channel);
 
-      const { fetchLatestWaWebVersion } =
-        await import('@whiskeysockets/baileys');
+      const { fetchLatestWaWebVersion } = await import("@whiskeysockets/baileys");
       expect(fetchLatestWaWebVersion).toHaveBeenCalledWith({});
     });
 
-    it('falls back gracefully when version fetch fails', async () => {
-      const { fetchLatestWaWebVersion } =
-        await import('@whiskeysockets/baileys');
-      vi.mocked(fetchLatestWaWebVersion).mockRejectedValueOnce(
-        new Error('network error'),
-      );
+    it("falls back gracefully when version fetch fails", async () => {
+      const { fetchLatestWaWebVersion } = await import("@whiskeysockets/baileys");
+      vi.mocked(fetchLatestWaWebVersion).mockRejectedValueOnce(new Error("network error"));
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -207,8 +202,8 @@ describe('WhatsAppChannel', () => {
 
   // --- Connection lifecycle ---
 
-  describe('connection lifecycle', () => {
-    it('resolves connect() when connection opens', async () => {
+  describe("connection lifecycle", () => {
+    it("resolves connect() when connection opens", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -217,7 +212,7 @@ describe('WhatsAppChannel', () => {
       expect(channel.isConnected()).toBe(true);
     });
 
-    it('sets up LID to phone mapping on open', async () => {
+    it("sets up LID to phone mapping on open", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -228,7 +223,7 @@ describe('WhatsAppChannel', () => {
       // and checking the translated JID in the callback
     });
 
-    it('flushes outgoing queue on reconnect', async () => {
+    it("flushes outgoing queue on reconnect", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -238,7 +233,7 @@ describe('WhatsAppChannel', () => {
       (channel as any).connected = false;
 
       // Queue a message while disconnected
-      await channel.sendMessage('test@g.us', 'Queued message');
+      await channel.sendMessage("test@g.us", "Queued message");
       expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
 
       // Reconnect
@@ -246,12 +241,12 @@ describe('WhatsAppChannel', () => {
       await (channel as any).flushOutgoingQueue();
 
       // Group messages get prefixed when flushed
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
-        text: 'Andy: Queued message',
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith("test@g.us", {
+        text: "Andy: Queued message",
       });
     });
 
-    it('disconnects cleanly', async () => {
+    it("disconnects cleanly", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -265,12 +260,10 @@ describe('WhatsAppChannel', () => {
 
   // --- QR code and auth ---
 
-  describe('authentication', () => {
-    it('exits process when QR code is emitted (no auth state)', async () => {
+  describe("authentication", () => {
+    it("exits process when QR code is emitted (no auth state)", async () => {
       vi.useFakeTimers();
-      const mockExit = vi
-        .spyOn(process, 'exit')
-        .mockImplementation(() => undefined as never);
+      const mockExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -282,7 +275,7 @@ describe('WhatsAppChannel', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // Emit QR code event
-      fakeSocket._ev.emit('connection.update', { qr: 'some-qr-data' });
+      fakeSocket._ev.emit("connection.update", { qr: "some-qr-data" });
 
       // Advance timer past the 1000ms setTimeout before exit
       await vi.advanceTimersByTimeAsync(1500);
@@ -295,8 +288,8 @@ describe('WhatsAppChannel', () => {
 
   // --- Reconnection behavior ---
 
-  describe('reconnection', () => {
-    it('reconnects on non-loggedOut disconnect', async () => {
+  describe("reconnection", () => {
+    it("reconnects on non-loggedOut disconnect", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -311,10 +304,8 @@ describe('WhatsAppChannel', () => {
       // The channel should attempt to reconnect (calls connectInternal again)
     });
 
-    it('exits on loggedOut disconnect', async () => {
-      const mockExit = vi
-        .spyOn(process, 'exit')
-        .mockImplementation(() => undefined as never);
+    it("exits on loggedOut disconnect", async () => {
+      const mockExit = vi.spyOn(process, "exit").mockImplementation(() => undefined as never);
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -329,7 +320,7 @@ describe('WhatsAppChannel', () => {
       mockExit.mockRestore();
     });
 
-    it('retries reconnection after 5s on failure', async () => {
+    it("retries reconnection after 5s on failure", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -345,8 +336,8 @@ describe('WhatsAppChannel', () => {
 
   // --- Message handling ---
 
-  describe('message handling', () => {
-    it('delivers message for registered group', async () => {
+  describe("message handling", () => {
+    it("delivers message for registered group", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -355,36 +346,36 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-1',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-1",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
-          message: { conversation: 'Hello Andy' },
-          pushName: 'Alice',
+          message: { conversation: "Hello Andy" },
+          pushName: "Alice",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.any(String),
         undefined,
-        'whatsapp',
+        "whatsapp",
         true,
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.objectContaining({
-          id: 'msg-1',
-          content: 'Hello Andy',
-          sender_name: 'Alice',
+          id: "msg-1",
+          content: "Hello Andy",
+          sender_name: "Alice",
           is_from_me: false,
         }),
       );
     });
 
-    it('only emits metadata for unregistered groups', async () => {
+    it("only emits metadata for unregistered groups", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -393,28 +384,28 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-2',
-            remoteJid: 'unregistered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-2",
+            remoteJid: "unregistered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
-          message: { conversation: 'Hello' },
-          pushName: 'Bob',
+          message: { conversation: "Hello" },
+          pushName: "Bob",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'unregistered@g.us',
+        "unregistered@g.us",
         expect.any(String),
         undefined,
-        'whatsapp',
+        "whatsapp",
         true,
       );
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('ignores status@broadcast messages', async () => {
+    it("ignores status@broadcast messages", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -423,11 +414,11 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-3',
-            remoteJid: 'status@broadcast',
+            id: "msg-3",
+            remoteJid: "status@broadcast",
             fromMe: false,
           },
-          message: { conversation: 'Status update' },
+          message: { conversation: "Status update" },
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
@@ -436,7 +427,7 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('ignores messages with no content', async () => {
+    it("ignores messages with no content", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -445,8 +436,8 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-4',
-            remoteJid: 'registered@g.us',
+            id: "msg-4",
+            remoteJid: "registered@g.us",
             fromMe: false,
           },
           message: null,
@@ -457,7 +448,7 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('extracts text from extendedTextMessage', async () => {
+    it("extracts text from extendedTextMessage", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -466,26 +457,26 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-5',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-5",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
-            extendedTextMessage: { text: 'A reply message' },
+            extendedTextMessage: { text: "A reply message" },
           },
-          pushName: 'Charlie',
+          pushName: "Charlie",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ content: 'A reply message' }),
+        "registered@g.us",
+        expect.objectContaining({ content: "A reply message" }),
       );
     });
 
-    it('extracts caption from imageMessage', async () => {
+    it("extracts caption from imageMessage", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -494,29 +485,29 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-6',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-6",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
             imageMessage: {
-              caption: 'Check this photo',
-              mimetype: 'image/jpeg',
+              caption: "Check this photo",
+              mimetype: "image/jpeg",
             },
           },
-          pushName: 'Diana',
+          pushName: "Diana",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ content: 'Check this photo' }),
+        "registered@g.us",
+        expect.objectContaining({ content: "Check this photo" }),
       );
     });
 
-    it('extracts caption from videoMessage', async () => {
+    it("extracts caption from videoMessage", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -525,26 +516,26 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-7',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-7",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
-            videoMessage: { caption: 'Watch this', mimetype: 'video/mp4' },
+            videoMessage: { caption: "Watch this", mimetype: "video/mp4" },
           },
-          pushName: 'Eve',
+          pushName: "Eve",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ content: 'Watch this' }),
+        "registered@g.us",
+        expect.objectContaining({ content: "Watch this" }),
       );
     });
 
-    it('handles message with no extractable text (e.g. voice note without caption)', async () => {
+    it("handles message with no extractable text (e.g. voice note without caption)", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -553,15 +544,15 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-8',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-8",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
-            audioMessage: { mimetype: 'audio/ogg; codecs=opus', ptt: true },
+            audioMessage: { mimetype: "audio/ogg; codecs=opus", ptt: true },
           },
-          pushName: 'Frank',
+          pushName: "Frank",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
@@ -570,7 +561,7 @@ describe('WhatsAppChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('uses sender JID when pushName is absent', async () => {
+    it("uses sender JID when pushName is absent", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -579,24 +570,24 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-9',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-9",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
-          message: { conversation: 'No push name' },
+          message: { conversation: "No push name" },
           // pushName is undefined
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
-        expect.objectContaining({ sender_name: '5551234' }),
+        "registered@g.us",
+        expect.objectContaining({ sender_name: "5551234" }),
       );
     });
 
-    it('downloads and processes image attachments', async () => {
+    it("downloads and processes image attachments", async () => {
       vi.mocked(isImageMessage).mockReturnValue(true);
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -606,18 +597,18 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-img-1',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-img-1",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
             imageMessage: {
-              caption: 'Check this',
-              mimetype: 'image/jpeg',
+              caption: "Check this",
+              mimetype: "image/jpeg",
             },
           },
-          pushName: 'Alice',
+          pushName: "Alice",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
@@ -625,16 +616,16 @@ describe('WhatsAppChannel', () => {
       expect(downloadMediaMessage).toHaveBeenCalled();
       expect(processImage).toHaveBeenCalled();
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.objectContaining({
-          content: '[Image: attachments/test.jpg]',
+          content: "[Image: attachments/test.jpg]",
         }),
       );
 
       vi.mocked(isImageMessage).mockReturnValue(false);
     });
 
-    it('handles image without caption', async () => {
+    it("handles image without caption", async () => {
       vi.mocked(isImageMessage).mockReturnValue(true);
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -644,41 +635,35 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-img-2',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-img-2",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
             imageMessage: {
-              mimetype: 'image/jpeg',
+              mimetype: "image/jpeg",
             },
           },
-          pushName: 'Bob',
+          pushName: "Bob",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
-      expect(processImage).toHaveBeenCalledWith(
-        expect.any(Buffer),
-        expect.any(String),
-        '',
-      );
+      expect(processImage).toHaveBeenCalledWith(expect.any(Buffer), expect.any(String), "");
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.objectContaining({
-          content: '[Image: attachments/test.jpg]',
+          content: "[Image: attachments/test.jpg]",
         }),
       );
 
       vi.mocked(isImageMessage).mockReturnValue(false);
     });
 
-    it('handles image download failure gracefully', async () => {
+    it("handles image download failure gracefully", async () => {
       vi.mocked(isImageMessage).mockReturnValue(true);
-      vi.mocked(downloadMediaMessage).mockRejectedValueOnce(
-        new Error('Download failed'),
-      );
+      vi.mocked(downloadMediaMessage).mockRejectedValueOnce(new Error("Download failed"));
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -687,34 +672,34 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-img-3',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-img-3",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
             imageMessage: {
-              caption: 'Will fail',
-              mimetype: 'image/jpeg',
+              caption: "Will fail",
+              mimetype: "image/jpeg",
             },
           },
-          pushName: 'Charlie',
+          pushName: "Charlie",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       // Image download failed but caption is still there as content
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.objectContaining({
-          content: 'Will fail',
+          content: "Will fail",
         }),
       );
 
       vi.mocked(isImageMessage).mockReturnValue(false);
     });
 
-    it('falls back to caption when processImage returns null', async () => {
+    it("falls back to caption when processImage returns null", async () => {
       vi.mocked(isImageMessage).mockReturnValue(true);
       vi.mocked(processImage).mockResolvedValueOnce(null);
       const opts = createTestOpts();
@@ -725,27 +710,27 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-img-4',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-img-4",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
           message: {
             imageMessage: {
-              caption: 'Fallback caption',
-              mimetype: 'image/jpeg',
+              caption: "Fallback caption",
+              mimetype: "image/jpeg",
             },
           },
-          pushName: 'Diana',
+          pushName: "Diana",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       // processImage returned null, so original caption content is used
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.objectContaining({
-          content: 'Fallback caption',
+          content: "Fallback caption",
         }),
       );
 
@@ -755,15 +740,15 @@ describe('WhatsAppChannel', () => {
 
   // --- LID ↔ JID translation ---
 
-  describe('LID to JID translation', () => {
-    it('translates known LID to phone JID', async () => {
+  describe("LID to JID translation", () => {
+    it("translates known LID to phone JID", async () => {
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({
-          '1234567890@s.whatsapp.net': {
-            name: 'Self Chat',
-            folder: 'self-chat',
-            trigger: '@Andy',
-            added_at: '2024-01-01T00:00:00.000Z',
+          "1234567890@s.whatsapp.net": {
+            name: "Self Chat",
+            folder: "self-chat",
+            trigger: "@Andy",
+            added_at: "2024-01-01T00:00:00.000Z",
           },
         })),
       });
@@ -776,27 +761,27 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-lid',
-            remoteJid: '9876543210@lid',
+            id: "msg-lid",
+            remoteJid: "9876543210@lid",
             fromMe: false,
           },
-          message: { conversation: 'From LID' },
-          pushName: 'Self',
+          message: { conversation: "From LID" },
+          pushName: "Self",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       // Should be translated to phone JID
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        '1234567890@s.whatsapp.net',
+        "1234567890@s.whatsapp.net",
         expect.any(String),
         undefined,
-        'whatsapp',
+        "whatsapp",
         false,
       );
     });
 
-    it('passes through non-LID JIDs unchanged', async () => {
+    it("passes through non-LID JIDs unchanged", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -805,27 +790,27 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-normal',
-            remoteJid: 'registered@g.us',
-            participant: '5551234@s.whatsapp.net',
+            id: "msg-normal",
+            remoteJid: "registered@g.us",
+            participant: "5551234@s.whatsapp.net",
             fromMe: false,
           },
-          message: { conversation: 'Normal JID' },
-          pushName: 'Grace',
+          message: { conversation: "Normal JID" },
+          pushName: "Grace",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'registered@g.us',
+        "registered@g.us",
         expect.any(String),
         undefined,
-        'whatsapp',
+        "whatsapp",
         true,
       );
     });
 
-    it('passes through unknown LID JIDs unchanged', async () => {
+    it("passes through unknown LID JIDs unchanged", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
@@ -834,22 +819,22 @@ describe('WhatsAppChannel', () => {
       await triggerMessages([
         {
           key: {
-            id: 'msg-unknown-lid',
-            remoteJid: '0000000000@lid',
+            id: "msg-unknown-lid",
+            remoteJid: "0000000000@lid",
             fromMe: false,
           },
-          message: { conversation: 'Unknown LID' },
-          pushName: 'Unknown',
+          message: { conversation: "Unknown LID" },
+          pushName: "Unknown",
           messageTimestamp: Math.floor(Date.now() / 1000),
         },
       ]);
 
       // Unknown LID passes through unchanged
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        '0000000000@lid',
+        "0000000000@lid",
         expect.any(String),
         undefined,
-        'whatsapp',
+        "whatsapp",
         false,
       );
     });
@@ -857,66 +842,65 @@ describe('WhatsAppChannel', () => {
 
   // --- Outgoing message queue ---
 
-  describe('outgoing message queue', () => {
-    it('sends message directly when connected', async () => {
+  describe("outgoing message queue", () => {
+    it("sends message directly when connected", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      await channel.sendMessage('test@g.us', 'Hello');
+      await channel.sendMessage("test@g.us", "Hello");
       // Group messages get prefixed with assistant name
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith('test@g.us', {
-        text: 'Andy: Hello',
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith("test@g.us", {
+        text: "Andy: Hello",
       });
     });
 
-    it('prefixes direct chat messages on shared number', async () => {
+    it("prefixes direct chat messages on shared number", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      await channel.sendMessage('123@s.whatsapp.net', 'Hello');
+      await channel.sendMessage("123@s.whatsapp.net", "Hello");
       // Shared number: DMs also get prefixed (needed for self-chat distinction)
-      expect(fakeSocket.sendMessage).toHaveBeenCalledWith(
-        '123@s.whatsapp.net',
-        { text: 'Andy: Hello' },
-      );
+      expect(fakeSocket.sendMessage).toHaveBeenCalledWith("123@s.whatsapp.net", {
+        text: "Andy: Hello",
+      });
     });
 
-    it('queues message when disconnected', async () => {
+    it("queues message when disconnected", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       // Don't connect — channel starts disconnected
-      await channel.sendMessage('test@g.us', 'Queued');
+      await channel.sendMessage("test@g.us", "Queued");
       expect(fakeSocket.sendMessage).not.toHaveBeenCalled();
     });
 
-    it('queues message on send failure', async () => {
+    it("queues message on send failure", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
       // Make sendMessage fail
-      fakeSocket.sendMessage.mockRejectedValueOnce(new Error('Network error'));
+      fakeSocket.sendMessage.mockRejectedValueOnce(new Error("Network error"));
 
-      await channel.sendMessage('test@g.us', 'Will fail');
+      await channel.sendMessage("test@g.us", "Will fail");
 
       // Should not throw, message queued for retry
       // The queue should have the message
     });
 
-    it('flushes multiple queued messages in order', async () => {
+    it("flushes multiple queued messages in order", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       // Queue messages while disconnected
-      await channel.sendMessage('test@g.us', 'First');
-      await channel.sendMessage('test@g.us', 'Second');
-      await channel.sendMessage('test@g.us', 'Third');
+      await channel.sendMessage("test@g.us", "First");
+      await channel.sendMessage("test@g.us", "Second");
+      await channel.sendMessage("test@g.us", "Third");
 
       // Connect — flush happens automatically on open
       await connectChannel(channel);
@@ -926,25 +910,25 @@ describe('WhatsAppChannel', () => {
 
       expect(fakeSocket.sendMessage).toHaveBeenCalledTimes(3);
       // Group messages get prefixed
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, 'test@g.us', {
-        text: 'Andy: First',
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(1, "test@g.us", {
+        text: "Andy: First",
       });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, 'test@g.us', {
-        text: 'Andy: Second',
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(2, "test@g.us", {
+        text: "Andy: Second",
       });
-      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, 'test@g.us', {
-        text: 'Andy: Third',
+      expect(fakeSocket.sendMessage).toHaveBeenNthCalledWith(3, "test@g.us", {
+        text: "Andy: Third",
       });
     });
   });
 
   // --- Group metadata sync ---
 
-  describe('group metadata sync', () => {
-    it('syncs group metadata on first connection', async () => {
+  describe("group metadata sync", () => {
+    it("syncs group metadata on first connection", async () => {
       fakeSocket.groupFetchAllParticipating.mockResolvedValue({
-        'group1@g.us': { subject: 'Group One' },
-        'group2@g.us': { subject: 'Group Two' },
+        "group1@g.us": { subject: "Group One" },
+        "group2@g.us": { subject: "Group Two" },
       });
 
       const opts = createTestOpts();
@@ -956,12 +940,12 @@ describe('WhatsAppChannel', () => {
       await new Promise((r) => setTimeout(r, 50));
 
       expect(fakeSocket.groupFetchAllParticipating).toHaveBeenCalled();
-      expect(updateChatName).toHaveBeenCalledWith('group1@g.us', 'Group One');
-      expect(updateChatName).toHaveBeenCalledWith('group2@g.us', 'Group Two');
+      expect(updateChatName).toHaveBeenCalledWith("group1@g.us", "Group One");
+      expect(updateChatName).toHaveBeenCalledWith("group2@g.us", "Group Two");
       expect(setLastGroupSync).toHaveBeenCalled();
     });
 
-    it('skips sync when synced recently', async () => {
+    it("skips sync when synced recently", async () => {
       // Last sync was 1 hour ago (within 24h threshold)
       vi.mocked(getLastGroupSync).mockReturnValue(
         new Date(Date.now() - 60 * 60 * 1000).toISOString(),
@@ -977,13 +961,13 @@ describe('WhatsAppChannel', () => {
       expect(fakeSocket.groupFetchAllParticipating).not.toHaveBeenCalled();
     });
 
-    it('forces sync regardless of cache', async () => {
+    it("forces sync regardless of cache", async () => {
       vi.mocked(getLastGroupSync).mockReturnValue(
         new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       );
 
       fakeSocket.groupFetchAllParticipating.mockResolvedValue({
-        'group@g.us': { subject: 'Forced Group' },
+        "group@g.us": { subject: "Forced Group" },
       });
 
       const opts = createTestOpts();
@@ -994,13 +978,11 @@ describe('WhatsAppChannel', () => {
       await channel.syncGroupMetadata(true);
 
       expect(fakeSocket.groupFetchAllParticipating).toHaveBeenCalled();
-      expect(updateChatName).toHaveBeenCalledWith('group@g.us', 'Forced Group');
+      expect(updateChatName).toHaveBeenCalledWith("group@g.us", "Forced Group");
     });
 
-    it('handles group sync failure gracefully', async () => {
-      fakeSocket.groupFetchAllParticipating.mockRejectedValue(
-        new Error('Network timeout'),
-      );
+    it("handles group sync failure gracefully", async () => {
+      fakeSocket.groupFetchAllParticipating.mockRejectedValue(new Error("Network timeout"));
 
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
@@ -1011,11 +993,11 @@ describe('WhatsAppChannel', () => {
       await expect(channel.syncGroupMetadata(true)).resolves.toBeUndefined();
     });
 
-    it('skips groups with no subject', async () => {
+    it("skips groups with no subject", async () => {
       fakeSocket.groupFetchAllParticipating.mockResolvedValue({
-        'group1@g.us': { subject: 'Has Subject' },
-        'group2@g.us': { subject: '' },
-        'group3@g.us': {},
+        "group1@g.us": { subject: "Has Subject" },
+        "group2@g.us": { subject: "" },
+        "group3@g.us": {},
       });
 
       const opts = createTestOpts();
@@ -1029,89 +1011,81 @@ describe('WhatsAppChannel', () => {
       await channel.syncGroupMetadata(true);
 
       expect(updateChatName).toHaveBeenCalledTimes(1);
-      expect(updateChatName).toHaveBeenCalledWith('group1@g.us', 'Has Subject');
+      expect(updateChatName).toHaveBeenCalledWith("group1@g.us", "Has Subject");
     });
   });
 
   // --- JID ownership ---
 
-  describe('ownsJid', () => {
-    it('owns @g.us JIDs (WhatsApp groups)', () => {
+  describe("ownsJid", () => {
+    it("owns @g.us JIDs (WhatsApp groups)", () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.ownsJid('12345@g.us')).toBe(true);
+      expect(channel.ownsJid("12345@g.us")).toBe(true);
     });
 
-    it('owns @s.whatsapp.net JIDs (WhatsApp DMs)', () => {
+    it("owns @s.whatsapp.net JIDs (WhatsApp DMs)", () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.ownsJid('12345@s.whatsapp.net')).toBe(true);
+      expect(channel.ownsJid("12345@s.whatsapp.net")).toBe(true);
     });
 
-    it('does not own Telegram JIDs', () => {
+    it("does not own Telegram JIDs", () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.ownsJid('tg:12345')).toBe(false);
+      expect(channel.ownsJid("tg:12345")).toBe(false);
     });
 
-    it('does not own unknown JID formats', () => {
+    it("does not own unknown JID formats", () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.ownsJid('random-string')).toBe(false);
+      expect(channel.ownsJid("random-string")).toBe(false);
     });
   });
 
   // --- Typing indicator ---
 
-  describe('setTyping', () => {
-    it('sends composing presence when typing', async () => {
+  describe("setTyping", () => {
+    it("sends composing presence when typing", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      await channel.setTyping('test@g.us', true);
-      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith(
-        'composing',
-        'test@g.us',
-      );
+      await channel.setTyping("test@g.us", true);
+      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith("composing", "test@g.us");
     });
 
-    it('sends paused presence when stopping', async () => {
+    it("sends paused presence when stopping", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      await channel.setTyping('test@g.us', false);
-      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith(
-        'paused',
-        'test@g.us',
-      );
+      await channel.setTyping("test@g.us", false);
+      expect(fakeSocket.sendPresenceUpdate).toHaveBeenCalledWith("paused", "test@g.us");
     });
 
-    it('handles typing indicator failure gracefully', async () => {
+    it("handles typing indicator failure gracefully", async () => {
       const opts = createTestOpts();
       const channel = new WhatsAppChannel(opts);
 
       await connectChannel(channel);
 
-      fakeSocket.sendPresenceUpdate.mockRejectedValueOnce(new Error('Failed'));
+      fakeSocket.sendPresenceUpdate.mockRejectedValueOnce(new Error("Failed"));
 
       // Should not throw
-      await expect(
-        channel.setTyping('test@g.us', true),
-      ).resolves.toBeUndefined();
+      await expect(channel.setTyping("test@g.us", true)).resolves.toBeUndefined();
     });
   });
 
   // --- Channel properties ---
 
-  describe('channel properties', () => {
+  describe("channel properties", () => {
     it('has name "whatsapp"', () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect(channel.name).toBe('whatsapp');
+      expect(channel.name).toBe("whatsapp");
     });
 
-    it('does not expose prefixAssistantName (prefix handled internally)', () => {
+    it("does not expose prefixAssistantName (prefix handled internally)", () => {
       const channel = new WhatsAppChannel(createTestOpts());
-      expect('prefixAssistantName' in channel).toBe(false);
+      expect("prefixAssistantName" in channel).toBe(false);
     });
   });
 });

@@ -72,6 +72,7 @@ claude
 ```
 
 在主频道（您的self-chat）中，可以管理群组和任务：
+
 ```
 @Andy 列出所有群组的计划任务
 @Andy 暂停周一简报任务
@@ -104,9 +105,11 @@ claude
 我们希望看到的技能：
 
 **通信渠道**
+
 - `/add-signal` - 添加 Signal 作为渠道
 
 **会话管理**
+
 - `/clear` - 添加一个 `/clear` 命令，用于压缩会话（在同一会话中总结上下文，同时保留关键信息）。这需要研究如何通过 Claude Agent SDK 以编程方式触发压缩。
 
 ## 系统要求
@@ -127,6 +130,7 @@ claude
 完整架构详情请见 [docs/SPEC.md](docs/SPEC.md)。
 
 关键文件：
+
 - `src/index.ts` - 编排器：状态管理、消息循环、智能体调用
 - `src/channels/registry.ts` - 渠道注册表（启动时自注册）
 - `src/ipc.ts` - IPC 监听与任务处理
@@ -165,6 +169,7 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
 这使您能够使用：
+
 - 通过 [Ollama](https://ollama.ai) 配合 API 代理运行的本地模型
 - 托管在 [Together AI](https://together.ai)、[Fireworks](https://fireworks.ai) 等平台上的开源模型
 - 兼容 Anthropic API 格式的自定义模型部署

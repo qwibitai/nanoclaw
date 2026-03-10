@@ -1,5 +1,5 @@
 #!/usr/bin/env npx tsx
-import { rebase } from '../skills-engine/rebase.js';
+import { rebase } from "../skills-engine/rebase.js";
 
 async function main() {
   const newBasePath = process.argv[2]; // optional
@@ -7,7 +7,7 @@ async function main() {
   if (newBasePath) {
     console.log(`Rebasing with new base from: ${newBasePath}`);
   } else {
-    console.log('Rebasing current state...');
+    console.log("Rebasing current state...");
   }
 
   const result = await rebase(newBasePath);

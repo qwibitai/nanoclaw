@@ -20,7 +20,7 @@ If the current working directory is inside a `modules/*` subdirectory relative t
 
 The API returns all rules matching the query scope via prefix matching:
 
-| Query scope | Rules returned |
-|---|---|
+| Query scope                | Rules returned                            |
+| -------------------------- | ----------------------------------------- |
 | `/org/repo/modules/rules/` | universal + org + repo + path-level rules |
-| `/org/repo/` | universal + org + repo-level rules |
+| `/org/repo/`               | universal + org + repo-level rules        |

@@ -1,29 +1,29 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import { stringify } from 'yaml';
+import { execSync } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import { stringify } from "yaml";
 
 export function createTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'nanoclaw-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "nanoclaw-test-"));
 }
 
 export function setupNanoclawDir(tmpDir: string): void {
-  fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'base', 'src'), {
+  fs.mkdirSync(path.join(tmpDir, ".nanoclaw", "base", "src"), {
     recursive: true,
   });
-  fs.mkdirSync(path.join(tmpDir, '.nanoclaw', 'backup'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, ".nanoclaw", "backup"), { recursive: true });
 }
 
 export function writeState(tmpDir: string, state: any): void {
-  const statePath = path.join(tmpDir, '.nanoclaw', 'state.yaml');
-  fs.writeFileSync(statePath, stringify(state), 'utf-8');
+  const statePath = path.join(tmpDir, ".nanoclaw", "state.yaml");
+  fs.writeFileSync(statePath, stringify(state), "utf-8");
 }
 
 export function createMinimalState(tmpDir: string): void {
   writeState(tmpDir, {
-    skills_system_version: '0.1.0',
-    core_version: '1.0.0',
+    skills_system_version: "0.1.0",
+    core_version: "1.0.0",
     applied_skills: [],
   });
 }
@@ -48,14 +48,14 @@ export function createSkillPackage(
     dirName?: string;
   },
 ): string {
-  const skillDir = path.join(tmpDir, opts.dirName ?? 'skill-pkg');
+  const skillDir = path.join(tmpDir, opts.dirName ?? "skill-pkg");
   fs.mkdirSync(skillDir, { recursive: true });
 
   const manifest: Record<string, unknown> = {
-    skill: opts.skill ?? 'test-skill',
-    version: opts.version ?? '1.0.0',
-    description: 'Test skill',
-    core_version: opts.core_version ?? '1.0.0',
+    skill: opts.skill ?? "test-skill",
+    version: opts.version ?? "1.0.0",
+    description: "Test skill",
+    core_version: opts.core_version ?? "1.0.0",
     adds: opts.adds ?? [],
     modifies: opts.modifies ?? [],
     conflicts: opts.conflicts ?? [],
@@ -68,10 +68,10 @@ export function createSkillPackage(
   if (opts.min_skills_system_version)
     manifest.min_skills_system_version = opts.min_skills_system_version;
 
-  fs.writeFileSync(path.join(skillDir, 'manifest.yaml'), stringify(manifest));
+  fs.writeFileSync(path.join(skillDir, "manifest.yaml"), stringify(manifest));
 
   if (opts.addFiles) {
-    const addDir = path.join(skillDir, 'add');
+    const addDir = path.join(skillDir, "add");
     for (const [relPath, content] of Object.entries(opts.addFiles)) {
       const fullPath = path.join(addDir, relPath);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -80,7 +80,7 @@ export function createSkillPackage(
   }
 
   if (opts.modifyFiles) {
-    const modDir = path.join(skillDir, 'modify');
+    const modDir = path.join(skillDir, "modify");
     for (const [relPath, content] of Object.entries(opts.modifyFiles)) {
       const fullPath = path.join(modDir, relPath);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
@@ -92,15 +92,15 @@ export function createSkillPackage(
 }
 
 export function initGitRepo(dir: string): void {
-  execSync('git init', { cwd: dir, stdio: 'pipe' });
+  execSync("git init", { cwd: dir, stdio: "pipe" });
   execSync('git config user.email "test@test.com"', {
     cwd: dir,
-    stdio: 'pipe',
+    stdio: "pipe",
   });
-  execSync('git config user.name "Test"', { cwd: dir, stdio: 'pipe' });
-  execSync('git config rerere.enabled true', { cwd: dir, stdio: 'pipe' });
-  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules\n');
-  execSync('git add -A && git commit -m "init"', { cwd: dir, stdio: 'pipe' });
+  execSync('git config user.name "Test"', { cwd: dir, stdio: "pipe" });
+  execSync("git config rerere.enabled true", { cwd: dir, stdio: "pipe" });
+  fs.writeFileSync(path.join(dir, ".gitignore"), "node_modules\n");
+  execSync('git add -A && git commit -m "init"', { cwd: dir, stdio: "pipe" });
 }
 
 export function cleanup(dir: string): void {

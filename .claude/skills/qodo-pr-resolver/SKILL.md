@@ -23,18 +23,21 @@ Fetch Qodo review issues for your current branch's PR/MR, fix them interactively
 ## Prerequisites
 
 ### Required Tools:
+
 - **Git** - For branch operations
 - **Git Provider CLI** - One of: `gh` (GitHub), `glab` (GitLab), `bb` (Bitbucket), or `az` (Azure DevOps)
 
 **Installation and authentication details:** See [providers.md](./resources/providers.md) for provider-specific setup instructions.
 
 ### Required Context:
+
 - Must be in a git repository
 - Repository must be hosted on a supported git provider (GitHub, GitLab, Bitbucket, or Azure DevOps)
 - Current branch must have an open PR/MR
 - PR/MR must have been reviewed by Qodo (pr-agent-pro bot, qodo-merge[bot], etc.)
 
 ### Quick Check:
+
 ```bash
 git --version                                    # Check git installed
 git remote get-url origin                        # Identify git provider
@@ -47,9 +50,11 @@ See [providers.md](./resources/providers.md) for provider-specific verification 
 Qodo (formerly Codium AI) is an AI-powered code review tool that analyzes PRs/MRs with compliance checks, bug detection, and code quality suggestions.
 
 ### Bot Identifiers
+
 Look for comments from: **`pr-agent-pro`**, **`pr-agent-pro-staging`**, **`qodo-merge[bot]`**, **`qodo-ai[bot]`**
 
 ### Review Comment Types
+
 1. **PR Compliance Guide** 🔍 - Security/ticket/custom compliance with 🟢/🟡/🔴/⚪ indicators
 2. **PR Code Suggestions** ✨ - Categorized improvements with importance ratings
 3. **Code Review by Qodo** - Structured issues with 🐞/📘/📎 sections and agent prompts (most detailed)
@@ -152,11 +157,13 @@ Derive severity from Qodo's action level and position:
    - All "Other" issues are treated as ⚪ LOW regardless of position
 
 **Example:** 7 "Action required" issues would be split as:
+
 - Issues 1-3: 🔴 CRITICAL
 - Issues 4-7: 🟠 HIGH
 - Result: No MEDIUM or LOW issues (because there are no "Review recommended" or "Other" issues)
 
 **Example:** 5 "Action required" + 3 "Review recommended" + 2 "Other" issues would be split as:
+
 - Issues 1-2 or 1-3: 🔴 CRITICAL (first ~half of "Action required")
 - Issues 3-5 or 4-5: 🟠 HIGH (second ~half of "Action required")
 - Issues 6-7: 🟡 MEDIUM (first ~half of "Review recommended")
@@ -164,6 +171,7 @@ Derive severity from Qodo's action level and position:
 - Issues 9-10: ⚪ LOW (all "Other" issues)
 
 **Action guidelines:**
+
 - 🔴 CRITICAL / 🟠 HIGH ("Action required"): Always "Fix"
 - 🟡 MEDIUM ("Review recommended"): Usually "Fix", can "Defer" if low impact
 - ⚪ LOW ("Review recommended" or "Other"): Can be "Defer" unless quick to fix; "Other" issues are lowest priority
@@ -187,11 +195,13 @@ Qodo Issues for PR #123: [PR Title]
 After displaying the table, ask the user how they want to proceed using AskUserQuestion:
 
 **Options:**
+
 - 🔍 "Review each issue" - Review and approve/defer each issue individually (recommended for careful review)
 - ⚡ "Auto-fix all" - Automatically apply all fixes marked as "Fix" without individual approval (faster, but less control)
 - ❌ "Cancel" - Exit without making changes
 
 **Based on the user's choice:**
+
 - If "Review each issue": Proceed to Step 6 (manual review)
 - If "Auto-fix all": Skip to Step 7 (auto-fix mode - apply all "Fix" issues automatically using Qodo's agent prompts)
 - If "Cancel": Exit the skill
@@ -232,6 +242,7 @@ If "Review each issue" was selected:
 #### Important notes
 
 **Single-step approval with AskUserQuestion:**
+
 - NO native Edit UI (no persistent permissions possible)
 - Each fix requires explicit approval via custom question
 - Clearer options, no risk of accidental auto-approval
@@ -275,6 +286,7 @@ If resolve fails (comment not found, API error), continue — the summary commen
 ### Step 9: Push to remote
 
 If any fixes were applied (commits were created in Steps 6/7), ask the user if they want to push:
+
 - If yes: `git push`
 - If no: Inform them they can push later with `git push`
 

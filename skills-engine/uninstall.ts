@@ -1,18 +1,16 @@
-import { execFileSync, execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execFileSync, execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
-import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
-import { acquireLock } from './lock.js';
-import { loadPathRemap, resolvePathRemap } from './path-remap.js';
-import { computeFileHash, readState, writeState } from './state.js';
-import { findSkillDir, replaySkills } from './replay.js';
-import type { UninstallResult } from './types.js';
+import { clearBackup, createBackup, restoreBackup } from "./backup.js";
+import { BASE_DIR } from "./constants.js";
+import { acquireLock } from "./lock.js";
+import { loadPathRemap, resolvePathRemap } from "./path-remap.js";
+import { computeFileHash, readState, writeState } from "./state.js";
+import { findSkillDir, replaySkills } from "./replay.js";
+import type { UninstallResult } from "./types.js";
 
-export async function uninstallSkill(
-  skillName: string,
-): Promise<UninstallResult> {
+export async function uninstallSkill(skillName: string): Promise<UninstallResult> {
   const projectRoot = process.cwd();
   const state = readState();
 
@@ -22,7 +20,7 @@ export async function uninstallSkill(
       success: false,
       skill: skillName,
       error:
-        'Cannot uninstall individual skills after rebase. The base includes all skill modifications. To remove a skill, start from a clean core and re-apply the skills you want.',
+        "Cannot uninstall individual skills after rebase. The base includes all skill modifications. To remove a skill, start from a clean core and re-apply the skills you want.",
     };
   }
 
@@ -41,7 +39,7 @@ export async function uninstallSkill(
     return {
       success: false,
       skill: skillName,
-      customPatchWarning: `Skill "${skillName}" has a custom patch (${skillEntry.custom_patch_description ?? 'no description'}). Uninstalling will lose these customizations. Re-run with confirmation to proceed.`,
+      customPatchWarning: `Skill "${skillName}" has a custom patch (${skillEntry.custom_patch_description ?? "no description"}). Uninstalling will lose these customizations. Re-run with confirmation to proceed.`,
     };
   }
 
@@ -64,9 +62,7 @@ export async function uninstallSkill(
       }
     }
 
-    const filesToBackup = [...allTouchedFiles].map((f) =>
-      path.join(projectRoot, f),
-    );
+    const filesToBackup = [...allTouchedFiles].map((f) => path.join(projectRoot, f));
     createBackup(filesToBackup);
 
     // 5. Build remaining skill list (original order, minus removed)
@@ -142,8 +138,8 @@ export async function uninstallSkill(
         const patchPath = path.join(projectRoot, mod.patch_file);
         if (fs.existsSync(patchPath)) {
           try {
-            execFileSync('git', ['apply', '--3way', patchPath], {
-              stdio: 'pipe',
+            execFileSync("git", ["apply", "--3way", patchPath], {
+              stdio: "pipe",
               cwd: projectRoot,
             });
           } catch {
@@ -157,14 +153,12 @@ export async function uninstallSkill(
     const replayResults: Record<string, boolean> = {};
     for (const skill of state.applied_skills) {
       if (skill.name === skillName) continue;
-      const outcomes = skill.structured_outcomes as
-        | Record<string, unknown>
-        | undefined;
+      const outcomes = skill.structured_outcomes as Record<string, unknown> | undefined;
       if (!outcomes?.test) continue;
 
       try {
         execSync(outcomes.test as string, {
-          stdio: 'pipe',
+          stdio: "pipe",
           cwd: projectRoot,
           timeout: 120_000,
         });
@@ -175,9 +169,7 @@ export async function uninstallSkill(
     }
 
     // Check for test failures
-    const testFailures = Object.entries(replayResults).filter(
-      ([, passed]) => !passed,
-    );
+    const testFailures = Object.entries(replayResults).filter(([, passed]) => !passed);
     if (testFailures.length > 0) {
       restoreBackup();
       clearBackup();
@@ -185,14 +177,12 @@ export async function uninstallSkill(
         success: false,
         skill: skillName,
         replayResults,
-        error: `Tests failed after uninstall: ${testFailures.map(([n]) => n).join(', ')}`,
+        error: `Tests failed after uninstall: ${testFailures.map(([n]) => n).join(", ")}`,
       };
     }
 
     // 11. Update state
-    state.applied_skills = state.applied_skills.filter(
-      (s) => s.name !== skillName,
-    );
+    state.applied_skills = state.applied_skills.filter((s) => s.name !== skillName);
 
     // Update file hashes for remaining skills
     for (const skill of state.applied_skills) {
@@ -214,8 +204,7 @@ export async function uninstallSkill(
     return {
       success: true,
       skill: skillName,
-      replayResults:
-        Object.keys(replayResults).length > 0 ? replayResults : undefined,
+      replayResults: Object.keys(replayResults).length > 0 ? replayResults : undefined,
     };
   } catch (err) {
     restoreBackup();

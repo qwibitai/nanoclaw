@@ -3,12 +3,15 @@
 ## Known Issues (2026-02-08)
 
 ### 1. [FIXED] Resume branches from stale tree position
+
 When agent teams spawns subagent CLI processes, they write to the same session JSONL. On subsequent `query()` resumes, the CLI reads the JSONL but may pick a stale branch tip (from before the subagent activity), causing the agent's response to land on a branch the host never receives a `result` for. **Fix**: pass `resumeSessionAt` with the last assistant message UUID to explicitly anchor each resume.
 
 ### 2. IDLE_TIMEOUT == CONTAINER_TIMEOUT (both 30 min)
+
 Both timers fire at the same time, so containers always exit via hard SIGKILL (code 137) instead of graceful `_close` sentinel shutdown. The idle timeout should be shorter (e.g., 5 min) so containers wind down between messages, while container timeout stays at 30 min as a safety net for stuck agents.
 
 ### 3. Cursor advanced before agent succeeds
+
 `processGroupMessages` advances `lastAgentTimestamp` before the agent runs. If the container times out, retries find no messages (cursor already past them). Messages are permanently lost on timeout.
 
 ## Quick Status Check
@@ -120,7 +123,7 @@ grep 'QR\|authentication required\|qr' logs/nanoclaw.log | tail -5
 ls -la store/auth/
 
 # Re-authenticate if needed
-npm run auth
+pnpm run auth
 ```
 
 ## Service Management
@@ -139,5 +142,23 @@ launchctl bootout gui/$(id -u)/com.nanoclaw
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.nanoclaw.plist
 
 # Rebuild after code changes
-npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+## Tooling Health Checks
+
+```bash
+# Run all checks in parallel (format, lint, typecheck, test)
+pnpm run check
+
+# Individual checks
+pnpm run format:check  # oxfmt formatting
+pnpm run lint          # oxlint correctness
+pnpm run typecheck     # tsgo type-check
+pnpm run test          # vitest unit tests
+
+# Dead code and dependency health
+pnpm run knip          # Unused exports, deps, files
+pnpm outdated          # Outdated dependencies
+pnpm audit             # Known CVEs
 ```

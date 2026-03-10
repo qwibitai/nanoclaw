@@ -35,9 +35,11 @@ Before any operation, all affected files are copied to `.nanoclaw/backup/`. On s
 ## Two Types of Changes
 
 ### Code Files (Three-Way Merge)
+
 Source code where skills weave in logic. Merged via `git merge-file` against the shared base. Skills carry full modified files.
 
 ### Structured Data (Deterministic Operations)
+
 Files like `package.json`, `docker-compose.yml`, `.env.example`. Skills declare requirements in the manifest; the system applies them programmatically. Multiple skills' declarations are batched — dependencies merged, `package.json` written once, `npm install` run once.
 
 ```yaml
@@ -69,9 +71,11 @@ skills/add-whatsapp/
 ```
 
 ### Intent Files
+
 Each modified file has a `.intent.md` with structured headings: **What this skill adds**, **Key sections**, **Invariants**, and **Must-keep sections**. These give Claude Code specific guidance during conflict resolution.
 
 ### Manifest
+
 Declares: skill metadata, core version compatibility, files added/modified, file operations, structured operations, skill relationships (conflicts, depends, tested_with), post-apply commands, and test command.
 
 ## Customization and Layering
@@ -104,6 +108,7 @@ Renames, deletes, and moves are declared in the manifest and run **before** code
 `.nanoclaw/resolutions/` ships pre-computed, verified conflict resolutions with **hash enforcement** — a cached resolution only applies if base, current, and skill input hashes match exactly. This means most users never encounter unresolved conflicts for common skill combinations.
 
 ### rerere Adapter
+
 `git rerere` requires unmerged index entries that `git merge-file` doesn't create. An adapter sets up the required index state after `merge-file` produces a conflict, enabling rerere caching. This requires the project to be a git repository; users without `.git/` lose caching but not functionality.
 
 ## State Tracking
@@ -119,6 +124,7 @@ Direct edits are detected via hash comparison before any operation. Users can re
 Most changes propagate automatically through three-way merge. **Breaking changes** require a **migration skill** — a regular skill that preserves the old behavior, authored against the new core. Migrations are declared in `migrations.yaml` and applied automatically during updates.
 
 ### Update Flow
+
 1. Preview changes (git-only, no files modified)
 2. Backup → file operations → three-way merge → conflict resolution
 3. Re-apply custom patches (`git apply --3way`)

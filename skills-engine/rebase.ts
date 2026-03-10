@@ -1,16 +1,16 @@
-import { execFileSync } from 'child_process';
-import crypto from 'crypto';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import { execFileSync } from "child_process";
+import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { BASE_DIR, NANOCLAW_DIR } from './constants.js';
-import { copyDir } from './fs-utils.js';
-import { acquireLock } from './lock.js';
-import { mergeFile } from './merge.js';
-import { computeFileHash, readState, writeState } from './state.js';
-import type { RebaseResult } from './types.js';
+import { clearBackup, createBackup, restoreBackup } from "./backup.js";
+import { BASE_DIR, NANOCLAW_DIR } from "./constants.js";
+import { copyDir } from "./fs-utils.js";
+import { acquireLock } from "./lock.js";
+import { mergeFile } from "./merge.js";
+import { computeFileHash, readState, writeState } from "./state.js";
+import type { RebaseResult } from "./types.js";
 
 function walkDir(dir: string, root: string): string[] {
   const results: string[] = [];
@@ -55,7 +55,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
     return {
       success: false,
       filesInPatch: 0,
-      error: 'No skills applied. Nothing to rebase.',
+      error: "No skills applied. Nothing to rebase.",
     };
   }
 
@@ -79,27 +79,27 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       const baseFilePath = path.join(baseAbsDir, relPath);
       if (fs.existsSync(baseFilePath)) filesToBackup.push(baseFilePath);
     }
-    const stateFilePath = path.join(projectRoot, NANOCLAW_DIR, 'state.yaml');
+    const stateFilePath = path.join(projectRoot, NANOCLAW_DIR, "state.yaml");
     filesToBackup.push(stateFilePath);
     createBackup(filesToBackup);
 
     try {
       // Generate unified diff: base vs working tree (archival record)
-      let combinedPatch = '';
+      let combinedPatch = "";
       let filesInPatch = 0;
 
       for (const relPath of trackedFiles) {
         const basePath = path.join(baseAbsDir, relPath);
         const workingPath = path.join(projectRoot, relPath);
 
-        const oldPath = fs.existsSync(basePath) ? basePath : '/dev/null';
-        const newPath = fs.existsSync(workingPath) ? workingPath : '/dev/null';
+        const oldPath = fs.existsSync(basePath) ? basePath : "/dev/null";
+        const newPath = fs.existsSync(workingPath) ? workingPath : "/dev/null";
 
-        if (oldPath === '/dev/null' && newPath === '/dev/null') continue;
+        if (oldPath === "/dev/null" && newPath === "/dev/null") continue;
 
         try {
-          const diff = execFileSync('diff', ['-ruN', oldPath, newPath], {
-            encoding: 'utf-8',
+          const diff = execFileSync("diff", ["-ruN", oldPath, newPath], {
+            encoding: "utf-8",
           });
           if (diff.trim()) {
             combinedPatch += diff;
@@ -117,8 +117,8 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
       }
 
       // Save combined patch
-      const patchPath = path.join(projectRoot, NANOCLAW_DIR, 'combined.patch');
-      fs.writeFileSync(patchPath, combinedPatch, 'utf-8');
+      const patchPath = path.join(projectRoot, NANOCLAW_DIR, "combined.patch");
+      fs.writeFileSync(patchPath, combinedPatch, "utf-8");
 
       if (newBasePath) {
         // --- Rebase with new base: three-way merge with resolution model ---
@@ -128,7 +128,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
         for (const relPath of trackedFiles) {
           const workingPath = path.join(projectRoot, relPath);
           if (fs.existsSync(workingPath)) {
-            savedContent[relPath] = fs.readFileSync(workingPath, 'utf-8');
+            savedContent[relPath] = fs.readFileSync(workingPath, "utf-8");
           }
         }
 
@@ -160,17 +160,11 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
             continue;
           }
 
-          const newBaseContent = fs.readFileSync(newBaseSrc, 'utf-8');
+          const newBaseContent = fs.readFileSync(newBaseSrc, "utf-8");
           if (newBaseContent === saved) continue; // No diff
 
           // Find old base content from backup
-          const oldBasePath = path.join(
-            projectRoot,
-            '.nanoclaw',
-            'backup',
-            BASE_DIR,
-            relPath,
-          );
+          const oldBasePath = path.join(projectRoot, ".nanoclaw", "backup", BASE_DIR, relPath);
           if (!fs.existsSync(oldBasePath)) {
             // No old base — keep saved content
             fs.writeFileSync(currentPath, saved);
@@ -200,7 +194,7 @@ export async function rebase(newBasePath?: string): Promise<RebaseResult> {
             filesInPatch,
             mergeConflicts,
             backupPending: true,
-            error: `Merge conflicts in: ${mergeConflicts.join(', ')}. Resolve manually then call clearBackup(), or restoreBackup() + clearBackup() to abort.`,
+            error: `Merge conflicts in: ${mergeConflicts.join(", ")}. Resolve manually then call clearBackup(), or restoreBackup() + clearBackup() to abort.`,
           };
         }
       } else {

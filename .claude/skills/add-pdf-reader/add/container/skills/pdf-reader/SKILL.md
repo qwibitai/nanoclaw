@@ -29,6 +29,7 @@ pdf-reader extract <file> --layout --pages 2-10  # Layout + page range
 ```
 
 Options:
+
 - `--layout` — Maintains spatial positioning. Essential for tables, spreadsheets, multi-column docs.
 - `--pages N-M` — Extract only pages N through M (1-based, inclusive).
 

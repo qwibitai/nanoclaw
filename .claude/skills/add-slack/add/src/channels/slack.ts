@@ -1,17 +1,12 @@
-import { App, LogLevel } from '@slack/bolt';
-import type { GenericMessageEvent, BotMessageEvent } from '@slack/types';
+import { App, LogLevel } from "@slack/bolt";
+import type { GenericMessageEvent, BotMessageEvent } from "@slack/types";
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { updateChatName } from '../db.js';
-import { readEnvFile } from '../env.js';
-import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnInboundMessage,
-  OnChatMetadata,
-  RegisteredGroup,
-} from '../types.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from "../config.js";
+import { updateChatName } from "../db.js";
+import { readEnvFile } from "../env.js";
+import { logger } from "../logger.js";
+import { registerChannel, ChannelOpts } from "./registry.js";
+import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from "../types.js";
 
 // Slack's chat.postMessage API limits text to ~4000 characters per call.
 // Messages exceeding this are split into sequential chunks.
@@ -29,7 +24,7 @@ export interface SlackChannelOpts {
 }
 
 export class SlackChannel implements Channel {
-  name = 'slack';
+  name = "slack";
 
   private app: App;
   private botUserId: string | undefined;
@@ -45,14 +40,12 @@ export class SlackChannel implements Channel {
 
     // Read tokens from .env (not process.env — keeps secrets off the environment
     // so they don't leak to child processes, matching NanoClaw's security pattern)
-    const env = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN']);
+    const env = readEnvFile(["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]);
     const botToken = env.SLACK_BOT_TOKEN;
     const appToken = env.SLACK_APP_TOKEN;
 
     if (!botToken || !appToken) {
-      throw new Error(
-        'SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set in .env',
-      );
+      throw new Error("SLACK_BOT_TOKEN and SLACK_APP_TOKEN must be set in .env");
     }
 
     this.app = new App({
@@ -68,11 +61,11 @@ export class SlackChannel implements Channel {
   private setupEventHandlers(): void {
     // Use app.event('message') instead of app.message() to capture all
     // message subtypes including bot_message (needed to track our own output)
-    this.app.event('message', async ({ event }) => {
+    this.app.event("message", async ({ event }) => {
       // Bolt's event type is the full MessageEvent union (17+ subtypes).
       // We filter on subtype first, then narrow to the two types we handle.
       const subtype = (event as { subtype?: string }).subtype;
-      if (subtype && subtype !== 'bot_message') return;
+      if (subtype && subtype !== "bot_message") return;
 
       // After filtering, event is either GenericMessageEvent or BotMessageEvent
       const msg = event as HandledMessageEvent;
@@ -85,26 +78,22 @@ export class SlackChannel implements Channel {
 
       const jid = `slack:${msg.channel}`;
       const timestamp = new Date(parseFloat(msg.ts) * 1000).toISOString();
-      const isGroup = msg.channel_type !== 'im';
+      const isGroup = msg.channel_type !== "im";
 
       // Always report metadata for group discovery
-      this.opts.onChatMetadata(jid, timestamp, undefined, 'slack', isGroup);
+      this.opts.onChatMetadata(jid, timestamp, undefined, "slack", isGroup);
 
       // Only deliver full messages for registered groups
       const groups = this.opts.registeredGroups();
       if (!groups[jid]) return;
 
-      const isBotMessage =
-        !!msg.bot_id || msg.user === this.botUserId;
+      const isBotMessage = !!msg.bot_id || msg.user === this.botUserId;
 
       let senderName: string;
       if (isBotMessage) {
         senderName = ASSISTANT_NAME;
       } else {
-        senderName =
-          (await this.resolveUserName(msg.user)) ||
-          msg.user ||
-          'unknown';
+        senderName = (await this.resolveUserName(msg.user)) || msg.user || "unknown";
       }
 
       // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
@@ -121,7 +110,7 @@ export class SlackChannel implements Channel {
       this.opts.onMessage(jid, {
         id: msg.ts,
         chat_jid: jid,
-        sender: msg.user || msg.bot_id || '',
+        sender: msg.user || msg.bot_id || "",
         sender_name: senderName,
         content,
         timestamp,
@@ -140,12 +129,9 @@ export class SlackChannel implements Channel {
     try {
       const auth = await this.app.client.auth.test();
       this.botUserId = auth.user_id as string;
-      logger.info({ botUserId: this.botUserId }, 'Connected to Slack');
+      logger.info({ botUserId: this.botUserId }, "Connected to Slack");
     } catch (err) {
-      logger.warn(
-        { err },
-        'Connected to Slack but failed to get bot user ID',
-      );
+      logger.warn({ err }, "Connected to Slack but failed to get bot user ID");
     }
 
     this.connected = true;
@@ -158,13 +144,13 @@ export class SlackChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const channelId = jid.replace(/^slack:/, '');
+    const channelId = jid.replace(/^slack:/, "");
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text });
       logger.info(
         { jid, queueSize: this.outgoingQueue.length },
-        'Slack disconnected, message queued',
+        "Slack disconnected, message queued",
       );
       return;
     }
@@ -181,12 +167,12 @@ export class SlackChannel implements Channel {
           });
         }
       }
-      logger.info({ jid, length: text.length }, 'Slack message sent');
+      logger.info({ jid, length: text.length }, "Slack message sent");
     } catch (err) {
       this.outgoingQueue.push({ jid, text });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
-        'Failed to send Slack message, queued',
+        "Failed to send Slack message, queued",
       );
     }
   }
@@ -196,7 +182,7 @@ export class SlackChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('slack:');
+    return jid.startsWith("slack:");
   }
 
   async disconnect(): Promise<void> {
@@ -217,13 +203,13 @@ export class SlackChannel implements Channel {
    */
   async syncChannelMetadata(): Promise<void> {
     try {
-      logger.info('Syncing channel metadata from Slack...');
+      logger.info("Syncing channel metadata from Slack...");
       let cursor: string | undefined;
       let count = 0;
 
       do {
         const result = await this.app.client.conversations.list({
-          types: 'public_channel,private_channel',
+          types: "public_channel,private_channel",
           exclude_archived: true,
           limit: 200,
           cursor,
@@ -239,15 +225,13 @@ export class SlackChannel implements Channel {
         cursor = result.response_metadata?.next_cursor || undefined;
       } while (cursor);
 
-      logger.info({ count }, 'Slack channel metadata synced');
+      logger.info({ count }, "Slack channel metadata synced");
     } catch (err) {
-      logger.error({ err }, 'Failed to sync Slack channel metadata');
+      logger.error({ err }, "Failed to sync Slack channel metadata");
     }
   }
 
-  private async resolveUserName(
-    userId: string,
-  ): Promise<string | undefined> {
+  private async resolveUserName(userId: string): Promise<string | undefined> {
     if (!userId) return undefined;
 
     const cached = this.userNameCache.get(userId);
@@ -259,7 +243,7 @@ export class SlackChannel implements Channel {
       if (name) this.userNameCache.set(userId, name);
       return name;
     } catch (err) {
-      logger.debug({ userId, err }, 'Failed to resolve Slack user name');
+      logger.debug({ userId, err }, "Failed to resolve Slack user name");
       return undefined;
     }
   }
@@ -268,21 +252,15 @@ export class SlackChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info(
-        { count: this.outgoingQueue.length },
-        'Flushing Slack outgoing queue',
-      );
+      logger.info({ count: this.outgoingQueue.length }, "Flushing Slack outgoing queue");
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
-        const channelId = item.jid.replace(/^slack:/, '');
+        const channelId = item.jid.replace(/^slack:/, "");
         await this.app.client.chat.postMessage({
           channel: channelId,
           text: item.text,
         });
-        logger.info(
-          { jid: item.jid, length: item.text.length },
-          'Queued Slack message sent',
-        );
+        logger.info({ jid: item.jid, length: item.text.length }, "Queued Slack message sent");
       }
     } finally {
       this.flushing = false;
@@ -290,10 +268,10 @@ export class SlackChannel implements Channel {
   }
 }
 
-registerChannel('slack', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN']);
+registerChannel("slack", (opts: ChannelOpts) => {
+  const envVars = readEnvFile(["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]);
   if (!envVars.SLACK_BOT_TOKEN || !envVars.SLACK_APP_TOKEN) {
-    logger.warn('Slack: SLACK_BOT_TOKEN or SLACK_APP_TOKEN not set');
+    logger.warn("Slack: SLACK_BOT_TOKEN or SLACK_APP_TOKEN not set");
     return null;
   }
   return new SlackChannel(opts);

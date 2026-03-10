@@ -14,4 +14,4 @@ structured:
     - OLLAMA_HOST
 conflicts: []
 depends: []
-test: "npm run build"
+test: "pnpm run build"

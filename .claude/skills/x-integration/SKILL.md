@@ -11,13 +11,13 @@ Browser automation for X interactions via WhatsApp.
 
 ## Features
 
-| Action | Tool | Description |
-|--------|------|-------------|
-| Post | `x_post` | Publish new tweets |
-| Like | `x_like` | Like any tweet |
-| Reply | `x_reply` | Reply to tweets |
-| Retweet | `x_retweet` | Retweet without comment |
-| Quote | `x_quote` | Quote tweet with comment |
+| Action  | Tool        | Description              |
+| ------- | ----------- | ------------------------ |
+| Post    | `x_post`    | Publish new tweets       |
+| Like    | `x_like`    | Like any tweet           |
+| Reply   | `x_reply`   | Reply to tweets          |
+| Retweet | `x_retweet` | Retweet without comment  |
+| Quote   | `x_quote`   | Quote tweet with comment |
 
 ## Prerequisites
 
@@ -26,7 +26,7 @@ Before using this skill, ensure:
 1. **NanoClaw is installed and running** - WhatsApp connected, service active
 2. **Dependencies installed**:
    ```bash
-   npm ls playwright dotenv-cli || npm install playwright dotenv-cli
+   pnpm ls playwright dotenv-cli || pnpm add playwright dotenv-cli
    ```
 3. **CHROME_PATH configured** in `.env` (if Chrome is not at default location):
    ```bash
@@ -40,7 +40,7 @@ Before using this skill, ensure:
 
 ```bash
 # 1. Setup authentication (interactive)
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: data/x-auth.json should exist after successful login
 
 # 2. Rebuild container to include skill
@@ -48,7 +48,7 @@ npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
 # Verify: Output shows "COPY .claude/skills/x-integration/agent.ts"
 
 # 3. Rebuild host and restart service
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 # Verify: launchctl list | grep nanoclaw (macOS) or systemctl --user status nanoclaw (Linux)
@@ -58,11 +58,11 @@ launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CHROME_PATH` | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome executable path |
-| `NANOCLAW_ROOT` | `process.cwd()` | Project root directory |
-| `LOG_LEVEL` | `info` | Logging level (debug, info, warn, error) |
+| Variable        | Default                                                        | Description                              |
+| --------------- | -------------------------------------------------------------- | ---------------------------------------- |
+| `CHROME_PATH`   | `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` | Chrome executable path                   |
+| `NANOCLAW_ROOT` | `process.cwd()`                                                | Project root directory                   |
+| `LOG_LEVEL`     | `info`                                                         | Logging level (debug, info, warn, error) |
 
 Set in `.env` file (loaded via `dotenv-cli` at runtime):
 
@@ -77,23 +77,23 @@ Edit `lib/config.ts` to modify defaults:
 
 ```typescript
 export const config = {
-    // Browser viewport
-    viewport: { width: 1280, height: 800 },
+  // Browser viewport
+  viewport: { width: 1280, height: 800 },
 
-    // Timeouts (milliseconds)
-    timeouts: {
-        navigation: 30000,    // Page navigation
-        elementWait: 5000,    // Wait for element
-        afterClick: 1000,     // Delay after click
-        afterFill: 1000,      // Delay after form fill
-        afterSubmit: 3000,    // Delay after submit
-        pageLoad: 3000,       // Initial page load
-    },
+  // Timeouts (milliseconds)
+  timeouts: {
+    navigation: 30000, // Page navigation
+    elementWait: 5000, // Wait for element
+    afterClick: 1000, // Delay after click
+    afterFill: 1000, // Delay after form fill
+    afterSubmit: 3000, // Delay after submit
+    pageLoad: 3000, // Initial page load
+  },
 
-    // Tweet limits
-    limits: {
-        tweetMaxLength: 280,
-    },
+  // Tweet limits
+  limits: {
+    tweetMaxLength: 280,
+  },
 };
 ```
 
@@ -101,11 +101,11 @@ export const config = {
 
 Paths relative to project root:
 
-| Path | Purpose | Git |
-|------|---------|-----|
-| `data/x-browser-profile/` | Chrome profile with X session | Ignored |
-| `data/x-auth.json` | Auth state marker | Ignored |
-| `logs/nanoclaw.log` | Service logs (contains X operation logs) | Ignored |
+| Path                      | Purpose                                  | Git     |
+| ------------------------- | ---------------------------------------- | ------- |
+| `data/x-browser-profile/` | Chrome profile with X session            | Ignored |
+| `data/x-auth.json`        | Auth state marker                        | Ignored |
+| `logs/nanoclaw.log`       | Service logs (contains X operation logs) | Ignored |
 
 ## Architecture
 
@@ -161,11 +161,13 @@ To integrate this skill into NanoClaw, make the following modifications:
 **1. Host side: `src/ipc.ts`**
 
 Add import after other local imports:
+
 ```typescript
-import { handleXIpc } from '../.claude/skills/x-integration/host.js';
+import { handleXIpc } from "../.claude/skills/x-integration/host.js";
 ```
 
 Modify `processTaskIpc` function's switch statement default case:
+
 ```typescript
 // Find:
 default:
@@ -184,12 +186,14 @@ if (!handled) {
 **2. Container side: `container/agent-runner/src/ipc-mcp.ts`**
 
 Add import after `cron-parser` import:
+
 ```typescript
 // @ts-ignore - Copied during Docker build from .claude/skills/x-integration/
-import { createXTools } from './skills/x-integration/agent.js';
+import { createXTools } from "./skills/x-integration/agent.js";
 ```
 
 Add to the end of tools array (before the closing `]`):
+
 ```typescript
     ...createXTools({ groupFolder, isMain })
 ```
@@ -199,6 +203,7 @@ Add to the end of tools array (before the closing `]`):
 **3. Build script: `container/build.sh`**
 
 Change build context from `container/` to project root (required to access `.claude/skills/`):
+
 ```bash
 # Find:
 docker build -t "${IMAGE_NAME}:${TAG}" .
@@ -213,6 +218,7 @@ docker build -t "${IMAGE_NAME}:${TAG}" -f container/Dockerfile .
 **4. Dockerfile: `container/Dockerfile`**
 
 First, update the build context paths (required to access `.claude/skills/` from project root):
+
 ```dockerfile
 # Find:
 COPY agent-runner/package*.json ./
@@ -225,7 +231,8 @@ COPY container/agent-runner/package*.json ./
 COPY container/agent-runner/ ./
 ```
 
-Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN npm run build`:
+Then add COPY line after `COPY container/agent-runner/ ./` and before `RUN pnpm run build`:
+
 ```dockerfile
 # Copy skill MCP tools
 COPY .claude/skills/x-integration/agent.ts ./src/skills/x-integration/
@@ -247,12 +254,13 @@ echo "Chrome not found - update CHROME_PATH in .env"
 ### 2. Run Authentication
 
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 ```
 
 This opens Chrome for manual X login. Session saved to `data/x-browser-profile/`.
 
 **Verify success:**
+
 ```bash
 cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ```
@@ -264,6 +272,7 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ```
 
 **Verify success:**
+
 ```bash
 ./container/build.sh 2>&1 | grep -i "agent.ts"  # Should show COPY line
 ```
@@ -271,12 +280,13 @@ cat data/x-auth.json  # Should show {"authenticated": true, ...}
 ### 4. Restart Service
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
 
 **Verify success:**
+
 ```bash
 launchctl list | grep nanoclaw  # macOS — should show PID and exit code 0 or -
 # Linux: systemctl --user status nanoclaw
@@ -317,26 +327,26 @@ ls -la data/x-browser-profile/ 2>/dev/null | head -5
 ### Re-authenticate (if expired)
 
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 ```
 
 ### Test Post (will actually post)
 
 ```bash
-echo '{"content":"Test tweet - please ignore"}' | npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/post.ts
+echo '{"content":"Test tweet - please ignore"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
 ```
 
 ### Test Like
 
 ```bash
-echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/like.ts
+echo '{"tweetUrl":"https://x.com/user/status/123"}' | pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/like.ts
 ```
 
 Or export `CHROME_PATH` manually before running:
 
 ```bash
 export CHROME_PATH="/path/to/chrome"
-echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
+echo '{"content":"Test"}' | pnpm exec tsx .claude/skills/x-integration/scripts/post.ts
 ```
 
 ## Troubleshooting
@@ -344,7 +354,7 @@ echo '{"content":"Test"}' | npx tsx .claude/skills/x-integration/scripts/post.ts
 ### Authentication Expired
 
 ```bash
-npx dotenv -e .env -- npx tsx .claude/skills/x-integration/scripts/setup.ts
+pnpm exec dotenv -e .env -- pnpm exec tsx .claude/skills/x-integration/scripts/setup.ts
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -375,27 +385,27 @@ Default timeout is 2 minutes (120s). Increase in `host.ts`:
 
 ```typescript
 const timer = setTimeout(() => {
-  proc.kill('SIGTERM');
-  resolve({ success: false, message: 'Script timed out (120s)' });
-}, 120000);  // ← Increase this value
+  proc.kill("SIGTERM");
+  resolve({ success: false, message: "Script timed out (120s)" });
+}, 120000); // ← Increase this value
 ```
 
 ### X UI Selector Changes
 
 If X updates their UI, selectors in scripts may break. Current selectors:
 
-| Element | Selector |
-|---------|----------|
-| Tweet input | `[data-testid="tweetTextarea_0"]` |
-| Post button | `[data-testid="tweetButtonInline"]` |
-| Reply button | `[data-testid="reply"]` |
-| Like | `[data-testid="like"]` |
-| Unlike | `[data-testid="unlike"]` |
-| Retweet | `[data-testid="retweet"]` |
-| Unretweet | `[data-testid="unretweet"]` |
-| Confirm retweet | `[data-testid="retweetConfirm"]` |
-| Modal dialog | `[role="dialog"][aria-modal="true"]` |
-| Modal submit | `[data-testid="tweetButton"]` |
+| Element         | Selector                             |
+| --------------- | ------------------------------------ |
+| Tweet input     | `[data-testid="tweetTextarea_0"]`    |
+| Post button     | `[data-testid="tweetButtonInline"]`  |
+| Reply button    | `[data-testid="reply"]`              |
+| Like            | `[data-testid="like"]`               |
+| Unlike          | `[data-testid="unlike"]`             |
+| Retweet         | `[data-testid="retweet"]`            |
+| Unretweet       | `[data-testid="unretweet"]`          |
+| Confirm retweet | `[data-testid="retweetConfirm"]`     |
+| Modal dialog    | `[role="dialog"][aria-modal="true"]` |
+| Modal submit    | `[data-testid="tweetButton"]`        |
 
 ### Container Build Issues
 

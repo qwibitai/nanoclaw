@@ -1,38 +1,32 @@
-import { execSync } from 'child_process';
-import crypto from 'crypto';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import { execSync } from "child_process";
+import crypto from "crypto";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-import { clearBackup, createBackup, restoreBackup } from './backup.js';
-import { NANOCLAW_DIR, STATE_FILE } from './constants.js';
-import { copyDir } from './fs-utils.js';
-import { isCustomizeActive } from './customize.js';
-import { initNanoclawDir } from './init.js';
-import { executeFileOps } from './file-ops.js';
-import { acquireLock } from './lock.js';
+import { clearBackup, createBackup, restoreBackup } from "./backup.js";
+import { NANOCLAW_DIR, STATE_FILE } from "./constants.js";
+import { isCustomizeActive } from "./customize.js";
+import { initNanoclawDir } from "./init.js";
+import { executeFileOps } from "./file-ops.js";
+import { acquireLock } from "./lock.js";
 import {
   checkConflicts,
   checkCoreVersion,
   checkDependencies,
   checkSystemVersion,
   readManifest,
-} from './manifest.js';
-import { loadPathRemap, resolvePathRemap } from './path-remap.js';
-import { mergeFile } from './merge.js';
-import {
-  computeFileHash,
-  readState,
-  recordSkillApplication,
-  writeState,
-} from './state.js';
+} from "./manifest.js";
+import { loadPathRemap, resolvePathRemap } from "./path-remap.js";
+import { mergeFile } from "./merge.js";
+import { computeFileHash, readState, recordSkillApplication, writeState } from "./state.js";
 import {
   mergeDockerComposeServices,
   mergeEnvAdditions,
   mergeNpmDependencies,
   runNpmInstall,
-} from './structured.js';
-import { ApplyResult } from './types.js';
+} from "./structured.js";
+import { ApplyResult } from "./types.js";
 
 export async function applySkill(skillDir: string): Promise<ApplyResult> {
   const projectRoot = process.cwd();
@@ -44,7 +38,6 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   if (!fs.existsSync(statePath)) {
     initNanoclawDir();
   }
-  const currentState = readState();
 
   // Check skills system version compatibility
   const sysCheck = checkSystemVersion(manifest);
@@ -69,8 +62,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       success: false,
       skill: manifest.skill,
       version: manifest.version,
-      error:
-        'A customize session is active. Run commitCustomize() or abortCustomize() first.',
+      error: "A customize session is active. Run commitCustomize() or abortCustomize() first.",
     };
   }
 
@@ -80,7 +72,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       success: false,
       skill: manifest.skill,
       version: manifest.version,
-      error: `Missing dependencies: ${deps.missing.join(', ')}`,
+      error: `Missing dependencies: ${deps.missing.join(", ")}`,
     };
   }
 
@@ -90,7 +82,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
       success: false,
       skill: manifest.skill,
       version: manifest.version,
-      error: `Conflicting skills: ${conflicts.conflicting.join(', ')}`,
+      error: `Conflicting skills: ${conflicts.conflicting.join(", ")}`,
     };
   }
 
@@ -102,7 +94,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   for (const relPath of manifest.modifies) {
     const resolvedPath = resolvePathRemap(relPath, pathRemap);
     const currentPath = path.join(projectRoot, resolvedPath);
-    const basePath = path.join(projectRoot, NANOCLAW_DIR, 'base', resolvedPath);
+    const basePath = path.join(projectRoot, NANOCLAW_DIR, "base", resolvedPath);
 
     if (fs.existsSync(currentPath) && fs.existsSync(basePath)) {
       const currentHash = computeFileHash(currentPath);
@@ -114,8 +106,8 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   }
 
   if (driftFiles.length > 0) {
-    console.log(`Drift detected in: ${driftFiles.join(', ')}`);
-    console.log('Three-way merge will be used to reconcile changes.');
+    console.log(`Drift detected in: ${driftFiles.join(", ")}`);
+    console.log("Three-way merge will be used to reconcile changes.");
   }
 
   // --- Acquire lock ---
@@ -127,21 +119,15 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
   try {
     // --- Backup ---
     const filesToBackup = [
-      ...manifest.modifies.map((f) =>
-        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
-      ),
-      ...manifest.adds.map((f) =>
-        path.join(projectRoot, resolvePathRemap(f, pathRemap)),
-      ),
+      ...manifest.modifies.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
+      ...manifest.adds.map((f) => path.join(projectRoot, resolvePathRemap(f, pathRemap))),
       ...(manifest.file_ops || [])
         .filter((op) => op.from)
-        .map((op) =>
-          path.join(projectRoot, resolvePathRemap(op.from!, pathRemap)),
-        ),
-      path.join(projectRoot, 'package.json'),
-      path.join(projectRoot, 'package-lock.json'),
-      path.join(projectRoot, '.env.example'),
-      path.join(projectRoot, 'docker-compose.yml'),
+        .map((op) => path.join(projectRoot, resolvePathRemap(op.from!, pathRemap))),
+      path.join(projectRoot, "package.json"),
+      path.join(projectRoot, "pnpm-lock.yaml"),
+      path.join(projectRoot, ".env.example"),
+      path.join(projectRoot, "docker-compose.yml"),
     ];
     createBackup(filesToBackup);
 
@@ -155,13 +141,13 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
           success: false,
           skill: manifest.skill,
           version: manifest.version,
-          error: `File operations failed: ${fileOpsResult.errors.join('; ')}`,
+          error: `File operations failed: ${fileOpsResult.errors.join("; ")}`,
         };
       }
     }
 
     // --- Copy new files from add/ ---
-    const addDir = path.join(skillDir, 'add');
+    const addDir = path.join(skillDir, "add");
     if (fs.existsSync(addDir)) {
       for (const relPath of manifest.adds) {
         const resolvedDest = resolvePathRemap(relPath, pathRemap);
@@ -184,14 +170,9 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     for (const relPath of manifest.modifies) {
       const resolvedPath = resolvePathRemap(relPath, pathRemap);
       const currentPath = path.join(projectRoot, resolvedPath);
-      const basePath = path.join(
-        projectRoot,
-        NANOCLAW_DIR,
-        'base',
-        resolvedPath,
-      );
+      const basePath = path.join(projectRoot, NANOCLAW_DIR, "base", resolvedPath);
       // skillPath uses original relPath — skill packages are never mutated
-      const skillPath = path.join(skillDir, 'modify', relPath);
+      const skillPath = path.join(skillDir, "modify", relPath);
 
       if (!fs.existsSync(skillPath)) {
         throw new Error(`Skill modified file not found: ${skillPath}`);
@@ -240,27 +221,24 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         mergeConflicts,
         backupPending: true,
         untrackedChanges: driftFiles.length > 0 ? driftFiles : undefined,
-        error: `Merge conflicts in: ${mergeConflicts.join(', ')}. Resolve manually then run recordSkillApplication(). Call clearBackup() after resolution or restoreBackup() + clearBackup() to abort.`,
+        error: `Merge conflicts in: ${mergeConflicts.join(", ")}. Resolve manually then run recordSkillApplication(). Call clearBackup() after resolution or restoreBackup() + clearBackup() to abort.`,
       };
     }
 
     // --- Structured operations ---
     if (manifest.structured?.npm_dependencies) {
-      const pkgPath = path.join(projectRoot, 'package.json');
+      const pkgPath = path.join(projectRoot, "package.json");
       mergeNpmDependencies(pkgPath, manifest.structured.npm_dependencies);
     }
 
     if (manifest.structured?.env_additions) {
-      const envPath = path.join(projectRoot, '.env.example');
+      const envPath = path.join(projectRoot, ".env.example");
       mergeEnvAdditions(envPath, manifest.structured.env_additions);
     }
 
     if (manifest.structured?.docker_compose_services) {
-      const composePath = path.join(projectRoot, 'docker-compose.yml');
-      mergeDockerComposeServices(
-        composePath,
-        manifest.structured.docker_compose_services,
-      );
+      const composePath = path.join(projectRoot, "docker-compose.yml");
+      mergeDockerComposeServices(composePath, manifest.structured.docker_compose_services);
     }
 
     // Run npm install if dependencies were added
@@ -275,7 +253,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     if (manifest.post_apply && manifest.post_apply.length > 0) {
       for (const cmd of manifest.post_apply) {
         try {
-          execSync(cmd, { stdio: 'pipe', cwd: projectRoot, timeout: 120_000 });
+          execSync(cmd, { stdio: "pipe", cwd: projectRoot, timeout: 120_000 });
         } catch (postErr: any) {
           // Rollback on post_apply failure
           for (const f of addedFiles) {
@@ -308,9 +286,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     }
 
     // Store structured outcomes including the test command
-    const outcomes: Record<string, unknown> = manifest.structured
-      ? { ...manifest.structured }
-      : {};
+    const outcomes: Record<string, unknown> = manifest.structured ? { ...manifest.structured } : {};
     if (manifest.test) {
       outcomes.test = manifest.test;
     }
@@ -326,7 +302,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
     if (manifest.test) {
       try {
         execSync(manifest.test, {
-          stdio: 'pipe',
+          stdio: "pipe",
           cwd: projectRoot,
           timeout: 120_000,
         });
@@ -342,9 +318,7 @@ export async function applySkill(skillDir: string): Promise<ApplyResult> {
         restoreBackup();
         // Re-read state and remove the skill we just recorded
         const state = readState();
-        state.applied_skills = state.applied_skills.filter(
-          (s) => s.name !== manifest.skill,
-        );
+        state.applied_skills = state.applied_skills.filter((s) => s.name !== manifest.skill);
         writeState(state);
 
         clearBackup();

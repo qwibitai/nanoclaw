@@ -1,32 +1,26 @@
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
-import {
-  BACKUP_DIR,
-  BASE_DIR,
-  BASE_INCLUDES,
-  NANOCLAW_DIR,
-} from './constants.js';
-import { isGitRepo } from './merge.js';
-import { writeState } from './state.js';
-import { SkillState } from './types.js';
+import { BACKUP_DIR, BASE_DIR, BASE_INCLUDES } from "./constants.js";
+import { isGitRepo } from "./merge.js";
+import { writeState } from "./state.js";
+import { SkillState } from "./types.js";
 
 // Directories/files to always exclude from base snapshot
 const BASE_EXCLUDES = [
-  'node_modules',
-  '.nanoclaw',
-  '.git',
-  'dist',
-  'data',
-  'groups',
-  'store',
-  'logs',
+  "node_modules",
+  ".nanoclaw",
+  ".git",
+  "dist",
+  "data",
+  "groups",
+  "store",
+  "logs",
 ];
 
 export function initNanoclawDir(): void {
   const projectRoot = process.cwd();
-  const nanoclawDir = path.join(projectRoot, NANOCLAW_DIR);
   const baseDir = path.join(projectRoot, BASE_DIR);
 
   // Create structure
@@ -57,7 +51,7 @@ export function initNanoclawDir(): void {
   // Create initial state
   const coreVersion = getCoreVersion(projectRoot);
   const initialState: SkillState = {
-    skills_system_version: '0.1.0',
+    skills_system_version: "0.1.0",
     core_version: coreVersion,
     applied_skills: [],
   };
@@ -66,7 +60,7 @@ export function initNanoclawDir(): void {
   // Enable git rerere if in a git repo
   if (isGitRepo()) {
     try {
-      execSync('git config --local rerere.enabled true', { stdio: 'pipe' });
+      execSync("git config --local rerere.enabled true", { stdio: "pipe" });
     } catch {
       // Non-fatal
     }
@@ -92,10 +86,10 @@ function copyDirFiltered(src: string, dest: string, excludes: string[]): void {
 
 function getCoreVersion(projectRoot: string): string {
   try {
-    const pkgPath = path.join(projectRoot, 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    return pkg.version || '0.0.0';
+    const pkgPath = path.join(projectRoot, "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    return pkg.version || "0.0.0";
   } catch {
-    return '0.0.0';
+    return "0.0.0";
   }
 }

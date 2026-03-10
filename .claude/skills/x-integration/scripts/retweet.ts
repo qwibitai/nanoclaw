@@ -4,7 +4,13 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123"}' | npx tsx retweet.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, config, ScriptResult } from '../lib/browser.js';
+import {
+  getBrowserContext,
+  navigateToTweet,
+  runScript,
+  config,
+  ScriptResult,
+} from "../lib/browser.js";
 
 interface RetweetInput {
   tweetUrl: string;
@@ -14,7 +20,7 @@ async function retweet(input: RetweetInput): Promise<ScriptResult> {
   const { tweetUrl } = input;
 
   if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
+    return { success: false, message: "Please provide a tweet URL" };
   }
 
   let context = null;
@@ -23,7 +29,7 @@ async function retweet(input: RetweetInput): Promise<ScriptResult> {
     const { page, success, error } = await navigateToTweet(context, tweetUrl);
 
     if (!success) {
-      return { success: false, message: error || 'Navigation failed' };
+      return { success: false, message: error || "Navigation failed" };
     }
 
     const tweet = page.locator('article[data-testid="tweet"]').first();
@@ -33,7 +39,7 @@ async function retweet(input: RetweetInput): Promise<ScriptResult> {
     // Check if already retweeted
     const alreadyRetweeted = await unretweetButton.isVisible().catch(() => false);
     if (alreadyRetweeted) {
-      return { success: true, message: 'Tweet already retweeted' };
+      return { success: true, message: "Tweet already retweeted" };
     }
 
     await retweetButton.waitFor({ timeout: config.timeouts.elementWait });
@@ -49,11 +55,10 @@ async function retweet(input: RetweetInput): Promise<ScriptResult> {
     // Verify
     const nowRetweeted = await unretweetButton.isVisible().catch(() => false);
     if (nowRetweeted) {
-      return { success: true, message: 'Retweet successful' };
+      return { success: true, message: "Retweet successful" };
     }
 
-    return { success: false, message: 'Retweet action completed but could not verify success' };
-
+    return { success: false, message: "Retweet action completed but could not verify success" };
   } finally {
     if (context) await context.close();
   }

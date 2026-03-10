@@ -4,21 +4,14 @@
  *
  * Fixes: Root→system systemd, WSL nohup fallback, no `|| true` swallowing errors.
  */
-import { execSync } from 'child_process';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
+import { execSync } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
-import { logger } from '../src/logger.js';
-import {
-  getPlatform,
-  getNodePath,
-  getServiceManager,
-  hasSystemd,
-  isRoot,
-  isWSL,
-} from './platform.js';
-import { emitStatus } from './status.js';
+import { logger } from "../src/logger.js";
+import { getPlatform, getNodePath, getServiceManager, isRoot } from "./platform.js";
+import { emitStatus } from "./status.js";
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
@@ -26,59 +19,50 @@ export async function run(_args: string[]): Promise<void> {
   const nodePath = getNodePath();
   const homeDir = os.homedir();
 
-  logger.info({ platform, nodePath, projectRoot }, 'Setting up service');
+  logger.info({ platform, nodePath, projectRoot }, "Setting up service");
 
   // Build first
-  logger.info('Building TypeScript');
+  logger.info("Building TypeScript");
   try {
-    execSync('npm run build', {
+    execSync("pnpm run build", {
       cwd: projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
     });
-    logger.info('Build succeeded');
+    logger.info("Build succeeded");
   } catch {
-    logger.error('Build failed');
-    emitStatus('SETUP_SERVICE', {
-      SERVICE_TYPE: 'unknown',
+    logger.error("Build failed");
+    emitStatus("SETUP_SERVICE", {
+      SERVICE_TYPE: "unknown",
       NODE_PATH: nodePath,
       PROJECT_PATH: projectRoot,
-      STATUS: 'failed',
-      ERROR: 'build_failed',
-      LOG: 'logs/setup.log',
+      STATUS: "failed",
+      ERROR: "build_failed",
+      LOG: "logs/setup.log",
     });
     process.exit(1);
   }
 
-  fs.mkdirSync(path.join(projectRoot, 'logs'), { recursive: true });
+  fs.mkdirSync(path.join(projectRoot, "logs"), { recursive: true });
 
-  if (platform === 'macos') {
+  if (platform === "macos") {
     setupLaunchd(projectRoot, nodePath, homeDir);
-  } else if (platform === 'linux') {
+  } else if (platform === "linux") {
     setupLinux(projectRoot, nodePath, homeDir);
   } else {
-    emitStatus('SETUP_SERVICE', {
-      SERVICE_TYPE: 'unknown',
+    emitStatus("SETUP_SERVICE", {
+      SERVICE_TYPE: "unknown",
       NODE_PATH: nodePath,
       PROJECT_PATH: projectRoot,
-      STATUS: 'failed',
-      ERROR: 'unsupported_platform',
-      LOG: 'logs/setup.log',
+      STATUS: "failed",
+      ERROR: "unsupported_platform",
+      LOG: "logs/setup.log",
     });
     process.exit(1);
   }
 }
 
-function setupLaunchd(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
-  const plistPath = path.join(
-    homeDir,
-    'Library',
-    'LaunchAgents',
-    'com.nanoclaw.plist',
-  );
+function setupLaunchd(projectRoot: string, nodePath: string, homeDir: string): void {
+  const plistPath = path.join(homeDir, "Library", "LaunchAgents", "com.nanoclaw.plist");
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
@@ -113,45 +97,41 @@ function setupLaunchd(
 </plist>`;
 
   fs.writeFileSync(plistPath, plist);
-  logger.info({ plistPath }, 'Wrote launchd plist');
+  logger.info({ plistPath }, "Wrote launchd plist");
 
   try {
     execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
-      stdio: 'ignore',
+      stdio: "ignore",
     });
-    logger.info('launchctl load succeeded');
+    logger.info("launchctl load succeeded");
   } catch {
-    logger.warn('launchctl load failed (may already be loaded)');
+    logger.warn("launchctl load failed (may already be loaded)");
   }
 
   // Verify
   let serviceLoaded = false;
   try {
-    const output = execSync('launchctl list', { encoding: 'utf-8' });
-    serviceLoaded = output.includes('com.nanoclaw');
+    const output = execSync("launchctl list", { encoding: "utf-8" });
+    serviceLoaded = output.includes("com.nanoclaw");
   } catch {
     // launchctl list failed
   }
 
-  emitStatus('SETUP_SERVICE', {
-    SERVICE_TYPE: 'launchd',
+  emitStatus("SETUP_SERVICE", {
+    SERVICE_TYPE: "launchd",
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     PLIST_PATH: plistPath,
     SERVICE_LOADED: serviceLoaded,
-    STATUS: 'success',
-    LOG: 'logs/setup.log',
+    STATUS: "success",
+    LOG: "logs/setup.log",
   });
 }
 
-function setupLinux(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
+function setupLinux(projectRoot: string, nodePath: string, homeDir: string): void {
   const serviceManager = getServiceManager();
 
-  if (serviceManager === 'systemd') {
+  if (serviceManager === "systemd") {
     setupSystemd(projectRoot, nodePath, homeDir);
   } else {
     // WSL without systemd or other Linux without systemd
@@ -166,9 +146,9 @@ function setupLinux(
 function killOrphanedProcesses(projectRoot: string): void {
   try {
     execSync(`pkill -f '${projectRoot}/dist/index\\.js' || true`, {
-      stdio: 'ignore',
+      stdio: "ignore",
     });
-    logger.info('Stopped any orphaned nanoclaw processes');
+    logger.info("Stopped any orphaned nanoclaw processes");
   } catch {
     // pkill not available or no orphans
   }
@@ -185,15 +165,15 @@ function killOrphanedProcesses(projectRoot: string): void {
  */
 function checkDockerGroupStale(): boolean {
   try {
-    execSync('systemd-run --user --pipe --wait docker info', {
-      stdio: 'pipe',
+    execSync("systemd-run --user --pipe --wait docker info", {
+      stdio: "pipe",
       timeout: 10000,
     });
     return false; // Docker works from systemd session
   } catch {
     // Check if docker works from the current shell (to distinguish stale group vs broken docker)
     try {
-      execSync('docker info', { stdio: 'pipe', timeout: 5000 });
+      execSync("docker info", { stdio: "pipe", timeout: 5000 });
       return true; // Works in shell but not systemd session → stale group
     } catch {
       return false; // Docker itself is not working, different issue
@@ -201,11 +181,7 @@ function checkDockerGroupStale(): boolean {
   }
 }
 
-function setupSystemd(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
+function setupSystemd(projectRoot: string, nodePath: string, homeDir: string): void {
   const runningAsRoot = isRoot();
 
   // Root uses system-level service, non-root uses user-level
@@ -213,24 +189,22 @@ function setupSystemd(
   let systemctlPrefix: string;
 
   if (runningAsRoot) {
-    unitPath = '/etc/systemd/system/nanoclaw.service';
-    systemctlPrefix = 'systemctl';
-    logger.info('Running as root — installing system-level systemd unit');
+    unitPath = "/etc/systemd/system/nanoclaw.service";
+    systemctlPrefix = "systemctl";
+    logger.info("Running as root — installing system-level systemd unit");
   } else {
     // Check if user-level systemd session is available
     try {
-      execSync('systemctl --user daemon-reload', { stdio: 'pipe' });
+      execSync("systemctl --user daemon-reload", { stdio: "pipe" });
     } catch {
-      logger.warn(
-        'systemd user session not available — falling back to nohup wrapper',
-      );
+      logger.warn("systemd user session not available — falling back to nohup wrapper");
       setupNohupFallback(projectRoot, nodePath, homeDir);
       return;
     }
-    const unitDir = path.join(homeDir, '.config', 'systemd', 'user');
+    const unitDir = path.join(homeDir, ".config", "systemd", "user");
     fs.mkdirSync(unitDir, { recursive: true });
-    unitPath = path.join(unitDir, 'nanoclaw.service');
-    systemctlPrefix = 'systemctl --user';
+    unitPath = path.join(unitDir, "nanoclaw.service");
+    systemctlPrefix = "systemctl --user";
   }
 
   const unit = `[Unit]
@@ -249,16 +223,16 @@ StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
 [Install]
-WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
+WantedBy=${runningAsRoot ? "multi-user.target" : "default.target"}`;
 
   fs.writeFileSync(unitPath, unit);
-  logger.info({ unitPath }, 'Wrote systemd unit');
+  logger.info({ unitPath }, "Wrote systemd unit");
 
   // Detect stale docker group before starting (user systemd only)
   const dockerGroupStale = !runningAsRoot && checkDockerGroupStale();
   if (dockerGroupStale) {
     logger.warn(
-      'Docker group not active in systemd session — user was likely added to docker group mid-session',
+      "Docker group not active in systemd session — user was likely added to docker group mid-session",
     );
   }
 
@@ -267,95 +241,91 @@ WantedBy=${runningAsRoot ? 'multi-user.target' : 'default.target'}`;
 
   // Enable and start
   try {
-    execSync(`${systemctlPrefix} daemon-reload`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} daemon-reload`, { stdio: "ignore" });
   } catch (err) {
-    logger.error({ err }, 'systemctl daemon-reload failed');
+    logger.error({ err }, "systemctl daemon-reload failed");
   }
 
   try {
-    execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} enable nanoclaw`, { stdio: "ignore" });
   } catch (err) {
-    logger.error({ err }, 'systemctl enable failed');
+    logger.error({ err }, "systemctl enable failed");
   }
 
   try {
-    execSync(`${systemctlPrefix} start nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} start nanoclaw`, { stdio: "ignore" });
   } catch (err) {
-    logger.error({ err }, 'systemctl start failed');
+    logger.error({ err }, "systemctl start failed");
   }
 
   // Verify
   let serviceLoaded = false;
   try {
-    execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: 'ignore' });
+    execSync(`${systemctlPrefix} is-active nanoclaw`, { stdio: "ignore" });
     serviceLoaded = true;
   } catch {
     // Not active
   }
 
-  emitStatus('SETUP_SERVICE', {
-    SERVICE_TYPE: runningAsRoot ? 'systemd-system' : 'systemd-user',
+  emitStatus("SETUP_SERVICE", {
+    SERVICE_TYPE: runningAsRoot ? "systemd-system" : "systemd-user",
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     UNIT_PATH: unitPath,
     SERVICE_LOADED: serviceLoaded,
     ...(dockerGroupStale ? { DOCKER_GROUP_STALE: true } : {}),
-    STATUS: 'success',
-    LOG: 'logs/setup.log',
+    STATUS: "success",
+    LOG: "logs/setup.log",
   });
 }
 
-function setupNohupFallback(
-  projectRoot: string,
-  nodePath: string,
-  homeDir: string,
-): void {
-  logger.warn('No systemd detected — generating nohup wrapper script');
+function setupNohupFallback(projectRoot: string, nodePath: string, _homeDir: string): void {
+  logger.warn("No systemd detected — generating nohup wrapper script");
 
-  const wrapperPath = path.join(projectRoot, 'start-nanoclaw.sh');
-  const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+  const wrapperPath = path.join(projectRoot, "start-nanoclaw.sh");
+  const pidFile = path.join(projectRoot, "nanoclaw.pid");
 
   const lines = [
-    '#!/bin/bash',
-    '# start-nanoclaw.sh — Start NanoClaw without systemd',
+    "#!/bin/bash",
+    "# start-nanoclaw.sh — Start NanoClaw without systemd",
     `# To stop: kill \\$(cat ${pidFile})`,
-    '',
-    'set -euo pipefail',
-    '',
+    "",
+    "set -euo pipefail",
+    "",
     `cd ${JSON.stringify(projectRoot)}`,
-    '',
-    '# Stop existing instance if running',
+    "",
+    "# Stop existing instance if running",
     `if [ -f ${JSON.stringify(pidFile)} ]; then`,
     `  OLD_PID=$(cat ${JSON.stringify(pidFile)} 2>/dev/null || echo "")`,
     '  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then',
     '    echo "Stopping existing NanoClaw (PID $OLD_PID)..."',
     '    kill "$OLD_PID" 2>/dev/null || true',
-    '    sleep 2',
-    '  fi',
-    'fi',
-    '',
+    "    sleep 2",
+    "  fi",
+    "fi",
+    "",
     'echo "Starting NanoClaw..."',
-    `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + '/dist/index.js')} \\`,
-    `  >> ${JSON.stringify(projectRoot + '/logs/nanoclaw.log')} \\`,
-    `  2>> ${JSON.stringify(projectRoot + '/logs/nanoclaw.error.log')} &`,
-    '',
+    `nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot + "/dist/index.js")} \\`,
+    `  >> ${JSON.stringify(projectRoot + "/logs/nanoclaw.log")} \\`,
+    `  2>> ${JSON.stringify(projectRoot + "/logs/nanoclaw.error.log")} &`,
+    "",
     `echo $! > ${JSON.stringify(pidFile)}`,
     'echo "NanoClaw started (PID $!)"',
     `echo "Logs: tail -f ${projectRoot}/logs/nanoclaw.log"`,
   ];
-  const wrapper = lines.join('\n') + '\n';
+  const wrapper = lines.join("\n") + "\n";
 
   fs.writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
-  logger.info({ wrapperPath }, 'Wrote nohup wrapper script');
+  logger.info({ wrapperPath }, "Wrote nohup wrapper script");
 
-  emitStatus('SETUP_SERVICE', {
-    SERVICE_TYPE: 'nohup',
+  emitStatus("SETUP_SERVICE", {
+    SERVICE_TYPE: "nohup",
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
     WRAPPER_PATH: wrapperPath,
     SERVICE_LOADED: false,
-    FALLBACK: 'wsl_no_systemd',
-    STATUS: 'success',
-    LOG: 'logs/setup.log',
+    FALLBACK: "wsl_no_systemd",
+    STATUS: "success",
+    LOG: "logs/setup.log",
   });
 }

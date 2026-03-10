@@ -18,6 +18,7 @@ These rules must be applied during code generation based on severity:
 Group rules into three sections and print each non-empty section:
 
 **ERROR** (`severity == "error"`):
+
 ```
 ## ❌ ERROR Rules (Must Comply) - {count}
 
@@ -25,6 +26,7 @@ Group rules into three sections and print each non-empty section:
 ```
 
 **WARNING** (`severity == "warning"`):
+
 ```
 ## ⚠️  WARNING Rules (Should Comply) - {count}
 
@@ -32,6 +34,7 @@ Group rules into three sections and print each non-empty section:
 ```
 
 **RECOMMENDATION** (`severity == "recommendation"`):
+
 ```
 ## 💡 RECOMMENDATION Rules (Consider) - {count}
 

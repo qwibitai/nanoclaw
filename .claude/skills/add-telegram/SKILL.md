@@ -30,7 +30,7 @@ Run the skills engine to apply this skill's code package. The package files are 
 If `.nanoclaw/` directory doesn't exist yet:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
@@ -38,10 +38,11 @@ Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-telegram
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-telegram
 ```
 
 This deterministically:
+
 - Adds `src/channels/telegram.ts` (TelegramChannel class with self-registration via `registerChannel`)
 - Adds `src/channels/telegram.test.ts` (46 unit tests)
 - Appends `import './telegram.js'` to the channel barrel file `src/channels/index.ts`
@@ -50,13 +51,14 @@ This deterministically:
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent file:
+
 - `modify/src/channels/index.ts.intent.md` — what changed and invariants
 
 ### Validate code changes
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass (including the new telegram tests) and build must be clean before proceeding.
@@ -110,7 +112,7 @@ Tell the user:
 ### Build and restart
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -163,6 +165,7 @@ registerGroup("tg:<chat-id>", {
 Tell the user:
 
 > Send a message to your registered Telegram chat:
+>
 > - For main chat: Any message works
 > - For non-main: `@Andy hello` or @mention the bot
 >
@@ -179,6 +182,7 @@ tail -f logs/nanoclaw.log
 ### Bot not responding
 
 Check:
+
 1. `TELEGRAM_BOT_TOKEN` is set in `.env` AND synced to `data/env/env`
 2. Chat is registered in SQLite (check with: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE jid LIKE 'tg:%'"`)
 3. For non-main chats: message includes trigger pattern
@@ -187,27 +191,30 @@ Check:
 ### Bot only responds to @mentions in groups
 
 Group Privacy is enabled (default). Fix:
+
 1. `@BotFather` > `/mybots` > select bot > **Bot Settings** > **Group Privacy** > **Turn off**
 2. Remove and re-add the bot to the group (required for the change to take effect)
 
 ### Getting chat ID
 
 If `/chatid` doesn't work:
+
 - Verify token: `curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe"`
 - Check bot is started: `tail -f logs/nanoclaw.log`
 
 ## After Setup
 
-If running `npm run dev` while the service is active:
+If running `pnpm run dev` while the service is active:
+
 ```bash
 # macOS:
 launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-npm run dev
+pnpm run dev
 # When done testing:
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
 # Linux:
 # systemctl --user stop nanoclaw
-# npm run dev
+# pnpm run dev
 # systemctl --user start nanoclaw
 ```
 
@@ -227,5 +234,5 @@ To remove Telegram integration:
 2. Remove `import './telegram.js'` from `src/channels/index.ts`
 3. Remove `TELEGRAM_BOT_TOKEN` from `.env`
 4. Remove Telegram registrations from SQLite: `sqlite3 store/messages.db "DELETE FROM registered_groups WHERE jid LIKE 'tg:%'"`
-5. Uninstall: `npm uninstall grammy`
-6. Rebuild: `npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `npm run build && systemctl --user restart nanoclaw` (Linux)
+5. Uninstall: `pnpm remove grammy`
+6. Rebuild: `pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `pnpm run build && systemctl --user restart nanoclaw` (Linux)

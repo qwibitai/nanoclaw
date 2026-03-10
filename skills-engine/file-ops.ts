@@ -1,6 +1,6 @@
-import fs from 'fs';
-import path from 'path';
-import type { FileOperation, FileOpsResult } from './types.js';
+import fs from "fs";
+import path from "path";
+import type { FileOperation, FileOpsResult } from "./types.js";
 
 function isWithinRoot(rootPath: string, targetPath: string): boolean {
   return targetPath === rootPath || targetPath.startsWith(rootPath + path.sep);
@@ -22,9 +22,7 @@ function nearestExistingPathOrSymlink(candidateAbsPath: string): string {
   }
 }
 
-function resolveRealPathWithSymlinkAwareAnchor(
-  candidateAbsPath: string,
-): string {
+function resolveRealPathWithSymlinkAwareAnchor(candidateAbsPath: string): string {
   const anchorPath = nearestExistingPathOrSymlink(candidateAbsPath);
   const anchorStat = fs.lstatSync(anchorPath);
   let realAnchor: string;
@@ -38,13 +36,11 @@ function resolveRealPathWithSymlinkAwareAnchor(
   }
 
   const relativeRemainder = path.relative(anchorPath, candidateAbsPath);
-  return relativeRemainder
-    ? path.resolve(realAnchor, relativeRemainder)
-    : realAnchor;
+  return relativeRemainder ? path.resolve(realAnchor, relativeRemainder) : realAnchor;
 }
 
 function safePath(projectRoot: string, relativePath: string): string | null {
-  if (typeof relativePath !== 'string' || relativePath.trim() === '') {
+  if (typeof relativePath !== "string" || relativePath.trim() === "") {
     return null;
   }
 
@@ -58,9 +54,7 @@ function safePath(projectRoot: string, relativePath: string): string | null {
   }
 
   const realRoot = fs.realpathSync(root);
-  const realParent = resolveRealPathWithSymlinkAwareAnchor(
-    path.dirname(resolved),
-  );
+  const realParent = resolveRealPathWithSymlinkAwareAnchor(path.dirname(resolved));
   if (!isWithinRoot(realRoot, realParent)) {
     return null;
   }
@@ -68,10 +62,7 @@ function safePath(projectRoot: string, relativePath: string): string | null {
   return resolved;
 }
 
-export function executeFileOps(
-  ops: FileOperation[],
-  projectRoot: string,
-): FileOpsResult {
+export function executeFileOps(ops: FileOperation[], projectRoot: string): FileOpsResult {
   const result: FileOpsResult = {
     success: true,
     executed: [],
@@ -83,7 +74,7 @@ export function executeFileOps(
 
   for (const op of ops) {
     switch (op.type) {
-      case 'rename': {
+      case "rename": {
         if (!op.from || !op.to) {
           result.errors.push(`rename: requires 'from' and 'to'`);
           result.success = false;
@@ -116,7 +107,7 @@ export function executeFileOps(
         break;
       }
 
-      case 'delete': {
+      case "delete": {
         if (!op.path) {
           result.errors.push(`delete: requires 'path'`);
           result.success = false;
@@ -129,9 +120,7 @@ export function executeFileOps(
           return result;
         }
         if (!fs.existsSync(delPath)) {
-          result.warnings.push(
-            `delete: file does not exist (skipped): ${op.path}`,
-          );
+          result.warnings.push(`delete: file does not exist (skipped): ${op.path}`);
           result.executed.push(op);
           break;
         }
@@ -140,7 +129,7 @@ export function executeFileOps(
         break;
       }
 
-      case 'move': {
+      case "move": {
         if (!op.from || !op.to) {
           result.errors.push(`move: requires 'from' and 'to'`);
           result.success = false;
@@ -178,9 +167,7 @@ export function executeFileOps(
       }
 
       default: {
-        result.errors.push(
-          `unknown operation type: ${(op as FileOperation).type}`,
-        );
+        result.errors.push(`unknown operation type: ${(op as FileOperation).type}`);
         result.success = false;
         return result;
       }

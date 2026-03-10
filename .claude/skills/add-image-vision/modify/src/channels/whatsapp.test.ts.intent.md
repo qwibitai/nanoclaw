@@ -1,6 +1,7 @@
 # Intent: src/channels/whatsapp.test.ts
 
 ## What Changed
+
 - Added `GROUPS_DIR` to config mock
 - Added `../image.js` mock (isImageMessage defaults false, processImage returns stub)
 - Added `updateMediaMessage` to fake socket (needed by downloadMediaMessage)
@@ -10,10 +11,12 @@
 - Added image test cases: downloads/processes, no caption, download failure, processImage null fallback
 
 ## Key Sections
+
 - **Mock setup** (top of file): New image mock, extended Baileys mock, extended fakeSocket
 - **Message handling tests**: Image test cases
 
 ## Invariants (must-keep)
+
 - All existing test sections and describe blocks
 - Existing mock structure (config, logger, db, fs, child_process, Baileys)
 - Test helpers (createTestOpts, triggerConnection, triggerDisconnect, triggerMessages, connectChannel)

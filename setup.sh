@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # setup.sh — Bootstrap script for NanoClaw
-# Handles Node.js/npm setup, then hands off to the Node.js setup modules.
+# Handles Node.js/pnpm setup, then hands off to the Node.js setup modules.
 # This is the only bash script in the setup flow.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -59,32 +59,44 @@ check_node() {
   fi
 }
 
-# --- npm install ---
+# --- pnpm check ---
+
+check_pnpm() {
+  PNPM_OK="false"
+
+  if command -v pnpm >/dev/null 2>&1; then
+    PNPM_OK="true"
+    log "pnpm found at $(command -v pnpm) ($(pnpm --version))"
+  else
+    log "pnpm not found — install via: npm install -g pnpm, or corepack enable"
+    echo "WARNING: pnpm not found. Install it with: npm install -g pnpm (or: corepack enable)"
+  fi
+}
+
+# --- pnpm install ---
 
 install_deps() {
   DEPS_OK="false"
   NATIVE_OK="false"
 
   if [ "$NODE_OK" = "false" ]; then
-    log "Skipping npm install — Node not available"
+    log "Skipping pnpm install — Node not available"
+    return
+  fi
+
+  if [ "$PNPM_OK" = "false" ]; then
+    log "Skipping pnpm install — pnpm not available"
     return
   fi
 
   cd "$PROJECT_ROOT"
 
-  # npm install with --unsafe-perm if root (needed for native modules)
-  local npm_flags=""
-  if [ "$IS_ROOT" = "true" ]; then
-    npm_flags="--unsafe-perm"
-    log "Running as root, using --unsafe-perm"
-  fi
-
-  log "Running npm install $npm_flags"
-  if npm install $npm_flags >> "$LOG_FILE" 2>&1; then
+  log "Running pnpm install"
+  if pnpm install >> "$LOG_FILE" 2>&1; then
     DEPS_OK="true"
-    log "npm install succeeded"
+    log "pnpm install succeeded"
   else
-    log "npm install failed"
+    log "pnpm install failed"
     return
   fi
 
@@ -122,6 +134,7 @@ log "=== Bootstrap started ==="
 
 detect_platform
 check_node
+check_pnpm
 install_deps
 check_build_tools
 
@@ -129,6 +142,8 @@ check_build_tools
 STATUS="success"
 if [ "$NODE_OK" = "false" ]; then
   STATUS="node_missing"
+elif [ "$PNPM_OK" = "false" ]; then
+  STATUS="pnpm_missing"
 elif [ "$DEPS_OK" = "false" ]; then
   STATUS="deps_failed"
 elif [ "$NATIVE_OK" = "false" ]; then
@@ -143,6 +158,7 @@ IS_ROOT: $IS_ROOT
 NODE_VERSION: $NODE_VERSION
 NODE_OK: $NODE_OK
 NODE_PATH: ${NODE_PATH_FOUND:-not_found}
+PNPM_OK: $PNPM_OK
 DEPS_OK: $DEPS_OK
 NATIVE_OK: $NATIVE_OK
 HAS_BUILD_TOOLS: $HAS_BUILD_TOOLS
@@ -154,6 +170,9 @@ EOF
 log "=== Bootstrap completed: $STATUS ==="
 
 if [ "$NODE_OK" = "false" ]; then
+  exit 2
+fi
+if [ "$PNPM_OK" = "false" ]; then
   exit 2
 fi
 if [ "$DEPS_OK" = "false" ] || [ "$NATIVE_OK" = "false" ]; then

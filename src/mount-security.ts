@@ -6,17 +6,17 @@
  *
  * Allowlist location: ~/.config/nanoclaw/mount-allowlist.json
  */
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
-import pino from 'pino';
+import fs from "fs";
+import os from "os";
+import path from "path";
+import pino from "pino";
 
-import { MOUNT_ALLOWLIST_PATH } from './config.js';
-import { AdditionalMount, AllowedRoot, MountAllowlist } from './types.js';
+import { MOUNT_ALLOWLIST_PATH } from "./config.js";
+import { AdditionalMount, AllowedRoot, MountAllowlist } from "./types.js";
 
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: { target: 'pino-pretty', options: { colorize: true } },
+  level: process.env.LOG_LEVEL || "info",
+  transport: { target: "pino-pretty", options: { colorize: true } },
 });
 
 // Cache the allowlist in memory - only reloads on process restart
@@ -27,23 +27,23 @@ let allowlistLoadError: string | null = null;
  * Default blocked patterns - paths that should never be mounted
  */
 const DEFAULT_BLOCKED_PATTERNS = [
-  '.ssh',
-  '.gnupg',
-  '.gpg',
-  '.aws',
-  '.azure',
-  '.gcloud',
-  '.kube',
-  '.docker',
-  'credentials',
-  '.env',
-  '.netrc',
-  '.npmrc',
-  '.pypirc',
-  'id_rsa',
-  'id_ed25519',
-  'private_key',
-  '.secret',
+  ".ssh",
+  ".gnupg",
+  ".gpg",
+  ".aws",
+  ".azure",
+  ".gcloud",
+  ".kube",
+  ".docker",
+  "credentials",
+  ".env",
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  "id_rsa",
+  "id_ed25519",
+  "private_key",
+  ".secret",
 ];
 
 /**
@@ -66,26 +66,26 @@ export function loadMountAllowlist(): MountAllowlist | null {
       allowlistLoadError = `Mount allowlist not found at ${MOUNT_ALLOWLIST_PATH}`;
       logger.warn(
         { path: MOUNT_ALLOWLIST_PATH },
-        'Mount allowlist not found - additional mounts will be BLOCKED. ' +
-          'Create the file to enable additional mounts.',
+        "Mount allowlist not found - additional mounts will be BLOCKED. " +
+          "Create the file to enable additional mounts.",
       );
       return null;
     }
 
-    const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, 'utf-8');
+    const content = fs.readFileSync(MOUNT_ALLOWLIST_PATH, "utf-8");
     const allowlist = JSON.parse(content) as MountAllowlist;
 
     // Validate structure
     if (!Array.isArray(allowlist.allowedRoots)) {
-      throw new Error('allowedRoots must be an array');
+      throw new Error("allowedRoots must be an array");
     }
 
     if (!Array.isArray(allowlist.blockedPatterns)) {
-      throw new Error('blockedPatterns must be an array');
+      throw new Error("blockedPatterns must be an array");
     }
 
-    if (typeof allowlist.nonMainReadOnly !== 'boolean') {
-      throw new Error('nonMainReadOnly must be a boolean');
+    if (typeof allowlist.nonMainReadOnly !== "boolean") {
+      throw new Error("nonMainReadOnly must be a boolean");
     }
 
     // Merge with default blocked patterns
@@ -101,7 +101,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
         allowedRoots: allowlist.allowedRoots.length,
         blockedPatterns: allowlist.blockedPatterns.length,
       },
-      'Mount allowlist loaded successfully',
+      "Mount allowlist loaded successfully",
     );
 
     return cachedAllowlist;
@@ -112,7 +112,7 @@ export function loadMountAllowlist(): MountAllowlist | null {
         path: MOUNT_ALLOWLIST_PATH,
         error: allowlistLoadError,
       },
-      'Failed to load mount allowlist - additional mounts will be BLOCKED',
+      "Failed to load mount allowlist - additional mounts will be BLOCKED",
     );
     return null;
   }
@@ -123,10 +123,10 @@ export function loadMountAllowlist(): MountAllowlist | null {
  */
 function expandPath(p: string): string {
   const homeDir = process.env.HOME || os.homedir();
-  if (p.startsWith('~/')) {
+  if (p.startsWith("~/")) {
     return path.join(homeDir, p.slice(2));
   }
-  if (p === '~') {
+  if (p === "~") {
     return homeDir;
   }
   return path.resolve(p);
@@ -147,10 +147,7 @@ function getRealPath(p: string): string | null {
 /**
  * Check if a path matches any blocked pattern
  */
-function matchesBlockedPattern(
-  realPath: string,
-  blockedPatterns: string[],
-): string | null {
+function matchesBlockedPattern(realPath: string, blockedPatterns: string[]): string | null {
   const pathParts = realPath.split(path.sep);
 
   for (const pattern of blockedPatterns) {
@@ -173,10 +170,7 @@ function matchesBlockedPattern(
 /**
  * Check if a real path is under an allowed root
  */
-function findAllowedRoot(
-  realPath: string,
-  allowedRoots: AllowedRoot[],
-): AllowedRoot | null {
+function findAllowedRoot(realPath: string, allowedRoots: AllowedRoot[]): AllowedRoot | null {
   for (const root of allowedRoots) {
     const expandedRoot = expandPath(root.path);
     const realRoot = getRealPath(expandedRoot);
@@ -188,7 +182,7 @@ function findAllowedRoot(
 
     // Check if realPath is under realRoot
     const relative = path.relative(realRoot, realPath);
-    if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+    if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
       return root;
     }
   }
@@ -201,17 +195,17 @@ function findAllowedRoot(
  */
 function isValidContainerPath(containerPath: string): boolean {
   // Must not contain .. to prevent path traversal
-  if (containerPath.includes('..')) {
+  if (containerPath.includes("..")) {
     return false;
   }
 
   // Must not be absolute (it will be prefixed with /workspace/extra/)
-  if (containerPath.startsWith('/')) {
+  if (containerPath.startsWith("/")) {
     return false;
   }
 
   // Must not be empty
-  if (!containerPath || containerPath.trim() === '') {
+  if (!containerPath || containerPath.trim() === "") {
     return false;
   }
 
@@ -230,10 +224,7 @@ export interface MountValidationResult {
  * Validate a single additional mount against the allowlist.
  * Returns validation result with reason.
  */
-export function validateMount(
-  mount: AdditionalMount,
-  isMain: boolean,
-): MountValidationResult {
+export function validateMount(mount: AdditionalMount, isMain: boolean): MountValidationResult {
   const allowlist = loadMountAllowlist();
 
   // If no allowlist, block all additional mounts
@@ -267,10 +258,7 @@ export function validateMount(
   }
 
   // Check against blocked patterns
-  const blockedMatch = matchesBlockedPattern(
-    realPath,
-    allowlist.blockedPatterns,
-  );
+  const blockedMatch = matchesBlockedPattern(realPath, allowlist.blockedPatterns);
   if (blockedMatch !== null) {
     return {
       allowed: false,
@@ -285,7 +273,7 @@ export function validateMount(
       allowed: false,
       reason: `Path "${realPath}" is not under any allowed root. Allowed roots: ${allowlist.allowedRoots
         .map((r) => expandPath(r.path))
-        .join(', ')}`,
+        .join(", ")}`,
     };
   }
 
@@ -301,7 +289,7 @@ export function validateMount(
         {
           mount: mount.hostPath,
         },
-        'Mount forced to read-only for non-main group',
+        "Mount forced to read-only for non-main group",
       );
     } else if (!allowedRoot.allowReadWrite) {
       // Root doesn't allow read-write
@@ -311,7 +299,7 @@ export function validateMount(
           mount: mount.hostPath,
           root: allowedRoot.path,
         },
-        'Mount forced to read-only - root does not allow read-write',
+        "Mount forced to read-only - root does not allow read-write",
       );
     } else {
       // Read-write allowed
@@ -321,7 +309,7 @@ export function validateMount(
 
   return {
     allowed: true,
-    reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ''}`,
+    reason: `Allowed under root "${allowedRoot.path}"${allowedRoot.description ? ` (${allowedRoot.description})` : ""}`,
     realHostPath: realPath,
     resolvedContainerPath: containerPath,
     effectiveReadonly,
@@ -366,7 +354,7 @@ export function validateAdditionalMounts(
           readonly: result.effectiveReadonly,
           reason: result.reason,
         },
-        'Mount validated successfully',
+        "Mount validated successfully",
       );
     } else {
       logger.warn(
@@ -376,7 +364,7 @@ export function validateAdditionalMounts(
           containerPath: mount.containerPath,
           reason: result.reason,
         },
-        'Additional mount REJECTED',
+        "Additional mount REJECTED",
       );
     }
   }
@@ -391,26 +379,26 @@ export function generateAllowlistTemplate(): string {
   const template: MountAllowlist = {
     allowedRoots: [
       {
-        path: '~/projects',
+        path: "~/projects",
         allowReadWrite: true,
-        description: 'Development projects',
+        description: "Development projects",
       },
       {
-        path: '~/repos',
+        path: "~/repos",
         allowReadWrite: true,
-        description: 'Git repositories',
+        description: "Git repositories",
       },
       {
-        path: '~/Documents/work',
+        path: "~/Documents/work",
         allowReadWrite: false,
-        description: 'Work documents (read-only)',
+        description: "Work documents (read-only)",
       },
     ],
     blockedPatterns: [
       // Additional patterns beyond defaults
-      'password',
-      'secret',
-      'token',
+      "password",
+      "secret",
+      "token",
     ],
     nonMainReadOnly: true,
   };

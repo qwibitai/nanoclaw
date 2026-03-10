@@ -34,11 +34,11 @@ This tells Slack which messages to forward to your bot.
 2. Toggle **Enable Events** to **On**
 3. Under **Subscribe to bot events**, click **Add Bot User Event** and add these three events:
 
-| Event | What it does |
-|-------|-------------|
-| `message.channels` | Receive messages in public channels the bot is in |
-| `message.groups` | Receive messages in private channels the bot is in |
-| `message.im` | Receive direct messages to the bot |
+| Event              | What it does                                       |
+| ------------------ | -------------------------------------------------- |
+| `message.channels` | Receive messages in public channels the bot is in  |
+| `message.groups`   | Receive messages in private channels the bot is in |
+| `message.im`       | Receive direct messages to the bot                 |
 
 4. Click **Save Changes** at the bottom of the page
 
@@ -50,15 +50,15 @@ These scopes control what the bot is allowed to do.
 2. Scroll down to **Scopes** > **Bot Token Scopes**
 3. Click **Add an OAuth Scope** and add each of these:
 
-| Scope | Why it's needed |
-|-------|----------------|
-| `chat:write` | Send messages to channels and DMs |
-| `channels:history` | Read messages in public channels |
-| `groups:history` | Read messages in private channels |
-| `im:history` | Read direct messages |
-| `channels:read` | List channels (for metadata sync) |
-| `groups:read` | List private channels (for metadata sync) |
-| `users:read` | Look up user display names |
+| Scope              | Why it's needed                           |
+| ------------------ | ----------------------------------------- |
+| `chat:write`       | Send messages to channels and DMs         |
+| `channels:history` | Read messages in public channels          |
+| `groups:history`   | Read messages in private channels         |
+| `im:history`       | Read direct messages                      |
+| `channels:read`    | List channels (for metadata sync)         |
+| `groups:read`      | List private channels (for metadata sync) |
+| `users:read`       | Look up user display names                |
 
 ## Step 5: Install to Workspace
 
@@ -105,15 +105,18 @@ You need the Slack channel ID to register it with NanoClaw.
 
 **Option A — From the URL:**
 Open the channel in Slack on the web. The URL looks like:
+
 ```
 https://app.slack.com/client/TXXXXXXX/C0123456789
 ```
+
 The `C0123456789` part is the channel ID.
 
 **Option B — Right-click:**
 Right-click the channel name in Slack > **Copy link** > the channel ID is the last path segment.
 
 **Option C — Via API:**
+
 ```bash
 curl -s -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
   "https://slack.com/api/conversations.list" | jq '.channels[] | {id, name}'
@@ -123,27 +126,31 @@ The NanoClaw JID format is `slack:` followed by the channel ID, e.g., `slack:C01
 
 ## Token Reference
 
-| Token | Prefix | Where to find it |
-|-------|--------|-----------------|
-| Bot User OAuth Token | `xoxb-` | **OAuth & Permissions** > **Bot User OAuth Token** |
-| App-Level Token | `xapp-` | **Basic Information** > **App-Level Tokens** (or during Socket Mode setup) |
+| Token                | Prefix  | Where to find it                                                           |
+| -------------------- | ------- | -------------------------------------------------------------------------- |
+| Bot User OAuth Token | `xoxb-` | **OAuth & Permissions** > **Bot User OAuth Token**                         |
+| App-Level Token      | `xapp-` | **Basic Information** > **App-Level Tokens** (or during Socket Mode setup) |
 
 ## Troubleshooting
 
 **Bot not receiving messages:**
+
 - Verify Socket Mode is enabled (Step 2)
 - Verify all three events are subscribed (Step 3)
 - Verify the bot has been added to the channel (Step 7)
 
 **"missing_scope" errors:**
+
 - Go back to **OAuth & Permissions** and add the missing scope
 - After adding scopes, you must **reinstall the app** to your workspace (Slack will show a banner prompting you to do this)
 
 **Bot can't send messages:**
+
 - Verify the `chat:write` scope is added
 - Verify the bot has been added to the target channel
 
 **Token not working:**
+
 - Bot tokens start with `xoxb-` — if yours doesn't, you may have copied the wrong token
 - App tokens start with `xapp-` — these are generated in the Socket Mode or Basic Information pages
 - If you regenerated a token, update `.env` and re-sync: `cp .env data/env/env`

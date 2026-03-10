@@ -1,24 +1,24 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'events';
-import { PassThrough } from 'stream';
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { EventEmitter } from "events";
+import { PassThrough } from "stream";
 
 // Sentinel markers must match container-runner.ts
-const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
-const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const OUTPUT_START_MARKER = "---NANOCLAW_OUTPUT_START---";
+const OUTPUT_END_MARKER = "---NANOCLAW_OUTPUT_END---";
 
 // Mock config
-vi.mock('./config.js', () => ({
-  CONTAINER_IMAGE: 'nanoclaw-agent:latest',
+vi.mock("./config.js", () => ({
+  CONTAINER_IMAGE: "nanoclaw-agent:latest",
   CONTAINER_MAX_OUTPUT_SIZE: 10485760,
   CONTAINER_TIMEOUT: 1800000, // 30min
-  DATA_DIR: '/tmp/nanoclaw-test-data',
-  GROUPS_DIR: '/tmp/nanoclaw-test-groups',
+  DATA_DIR: "/tmp/nanoclaw-test-data",
+  GROUPS_DIR: "/tmp/nanoclaw-test-groups",
   IDLE_TIMEOUT: 1800000, // 30min
-  TIMEZONE: 'America/Los_Angeles',
+  TIMEZONE: "America/Los_Angeles",
 }));
 
 // Mock logger
-vi.mock('./logger.js', () => ({
+vi.mock("./logger.js", () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -28,8 +28,8 @@ vi.mock('./logger.js', () => ({
 }));
 
 // Mock fs
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
+vi.mock("fs", async () => {
+  const actual = await vi.importActual<typeof import("fs")>("fs");
   return {
     ...actual,
     default: {
@@ -37,7 +37,7 @@ vi.mock('fs', async () => {
       existsSync: vi.fn(() => false),
       mkdirSync: vi.fn(),
       writeFileSync: vi.fn(),
-      readFileSync: vi.fn(() => ''),
+      readFileSync: vi.fn(() => ""),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
@@ -46,7 +46,7 @@ vi.mock('fs', async () => {
 });
 
 // Mock mount-security
-vi.mock('./mount-security.js', () => ({
+vi.mock("./mount-security.js", () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
@@ -70,47 +70,41 @@ function createFakeProcess() {
 let fakeProc: ReturnType<typeof createFakeProcess>;
 
 // Mock child_process.spawn
-vi.mock('child_process', async () => {
-  const actual =
-    await vi.importActual<typeof import('child_process')>('child_process');
+vi.mock("child_process", async () => {
+  const actual = await vi.importActual<typeof import("child_process")>("child_process");
   return {
     ...actual,
     spawn: vi.fn(() => fakeProc),
-    exec: vi.fn(
-      (_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
-        if (cb) cb(null);
-        return new EventEmitter();
-      },
-    ),
+    exec: vi.fn((_cmd: string, _opts: unknown, cb?: (err: Error | null) => void) => {
+      if (cb) cb(null);
+      return new EventEmitter();
+    }),
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
-import type { RegisteredGroup } from './types.js';
+import { runContainerAgent, ContainerOutput } from "./container-runner.js";
+import type { RegisteredGroup } from "./types.js";
 
 const testGroup: RegisteredGroup = {
-  name: 'Test Group',
-  folder: 'test-group',
-  trigger: '@Andy',
+  name: "Test Group",
+  folder: "test-group",
+  trigger: "@Andy",
   added_at: new Date().toISOString(),
 };
 
 const testInput = {
-  prompt: 'Hello',
-  groupFolder: 'test-group',
-  chatJid: 'test@g.us',
+  prompt: "Hello",
+  groupFolder: "test-group",
+  chatJid: "test@g.us",
   isMain: false,
 };
 
-function emitOutputMarker(
-  proc: ReturnType<typeof createFakeProcess>,
-  output: ContainerOutput,
-) {
+function emitOutputMarker(proc: ReturnType<typeof createFakeProcess>, output: ContainerOutput) {
   const json = JSON.stringify(output);
   proc.stdout.push(`${OUTPUT_START_MARKER}\n${json}\n${OUTPUT_END_MARKER}\n`);
 }
 
-describe('container-runner timeout behavior', () => {
+describe("container-runner timeout behavior", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fakeProc = createFakeProcess();
@@ -120,20 +114,15 @@ describe('container-runner timeout behavior', () => {
     vi.useRealTimers();
   });
 
-  it('timeout after output resolves as success', async () => {
+  it("timeout after output resolves as success", async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, onOutput);
 
     // Emit output with a result
     emitOutputMarker(fakeProc, {
-      status: 'success',
-      result: 'Here is my response',
-      newSessionId: 'session-123',
+      status: "success",
+      result: "Here is my response",
+      newSessionId: "session-123",
     });
 
     // Let output processing settle
@@ -143,67 +132,57 @@ describe('container-runner timeout behavior', () => {
     await vi.advanceTimersByTimeAsync(1830000);
 
     // Emit close event (as if container was stopped by the timeout)
-    fakeProc.emit('close', 137);
+    fakeProc.emit("close", 137);
 
     // Let the promise resolve
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
-    expect(result.status).toBe('success');
-    expect(result.newSessionId).toBe('session-123');
+    expect(result.status).toBe("success");
+    expect(result.newSessionId).toBe("session-123");
     expect(onOutput).toHaveBeenCalledWith(
-      expect.objectContaining({ result: 'Here is my response' }),
+      expect.objectContaining({ result: "Here is my response" }),
     );
   });
 
-  it('timeout with no output resolves as error', async () => {
+  it("timeout with no output resolves as error", async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, onOutput);
 
     // No output emitted — fire the hard timeout
     await vi.advanceTimersByTimeAsync(1830000);
 
     // Emit close event
-    fakeProc.emit('close', 137);
+    fakeProc.emit("close", 137);
 
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
-    expect(result.status).toBe('error');
-    expect(result.error).toContain('timed out');
+    expect(result.status).toBe("error");
+    expect(result.error).toContain("timed out");
     expect(onOutput).not.toHaveBeenCalled();
   });
 
-  it('normal exit after output resolves as success', async () => {
+  it("normal exit after output resolves as success", async () => {
     const onOutput = vi.fn(async () => {});
-    const resultPromise = runContainerAgent(
-      testGroup,
-      testInput,
-      () => {},
-      onOutput,
-    );
+    const resultPromise = runContainerAgent(testGroup, testInput, () => {}, onOutput);
 
     // Emit output
     emitOutputMarker(fakeProc, {
-      status: 'success',
-      result: 'Done',
-      newSessionId: 'session-456',
+      status: "success",
+      result: "Done",
+      newSessionId: "session-456",
     });
 
     await vi.advanceTimersByTimeAsync(10);
 
     // Normal exit (no timeout)
-    fakeProc.emit('close', 0);
+    fakeProc.emit("close", 0);
 
     await vi.advanceTimersByTimeAsync(10);
 
     const result = await resultPromise;
-    expect(result.status).toBe('success');
-    expect(result.newSessionId).toBe('session-456');
+    expect(result.status).toBe("success");
+    expect(result.newSessionId).toBe("session-456");
   });
 });

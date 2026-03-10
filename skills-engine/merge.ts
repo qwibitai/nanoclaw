@@ -1,10 +1,10 @@
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync, execSync } from "child_process";
 
-import { MergeResult } from './types.js';
+import { MergeResult } from "./types.js";
 
 export function isGitRepo(): boolean {
   try {
-    execSync('git rev-parse --git-dir', { stdio: 'pipe' });
+    execSync("git rev-parse --git-dir", { stdio: "pipe" });
     return true;
   } catch {
     return false;
@@ -17,14 +17,10 @@ export function isGitRepo(): boolean {
  * Returns { clean: true, exitCode: 0 } on clean merge,
  * { clean: false, exitCode: N } on conflict (N = number of conflicts).
  */
-export function mergeFile(
-  currentPath: string,
-  basePath: string,
-  skillPath: string,
-): MergeResult {
+export function mergeFile(currentPath: string, basePath: string, skillPath: string): MergeResult {
   try {
-    execFileSync('git', ['merge-file', currentPath, basePath, skillPath], {
-      stdio: 'pipe',
+    execFileSync("git", ["merge-file", currentPath, basePath, skillPath], {
+      stdio: "pipe",
     });
     return { clean: true, exitCode: 0 };
   } catch (err: any) {

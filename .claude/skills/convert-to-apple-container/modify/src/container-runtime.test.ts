@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock logger
-vi.mock('./logger.js', () => ({
+vi.mock("./logger.js", () => ({
   logger: {
     debug: vi.fn(),
     info: vi.fn(),
@@ -12,7 +12,7 @@ vi.mock('./logger.js', () => ({
 
 // Mock child_process — store the mock fn so tests can configure it
 const mockExecSync = vi.fn();
-vi.mock('child_process', () => ({
+vi.mock("child_process", () => ({
   execSync: (...args: unknown[]) => mockExecSync(...args),
 }));
 
@@ -22,8 +22,8 @@ import {
   stopContainer,
   ensureContainerRuntimeRunning,
   cleanupOrphans,
-} from './container-runtime.js';
-import { logger } from './logger.js';
+} from "./container-runtime.js";
+import { logger } from "./logger.js";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -31,19 +31,19 @@ beforeEach(() => {
 
 // --- Pure functions ---
 
-describe('readonlyMountArgs', () => {
-  it('returns --mount flag with type=bind and readonly', () => {
-    const args = readonlyMountArgs('/host/path', '/container/path');
+describe("readonlyMountArgs", () => {
+  it("returns --mount flag with type=bind and readonly", () => {
+    const args = readonlyMountArgs("/host/path", "/container/path");
     expect(args).toEqual([
-      '--mount',
-      'type=bind,source=/host/path,target=/container/path,readonly',
+      "--mount",
+      "type=bind,source=/host/path,target=/container/path,readonly",
     ]);
   });
 });
 
-describe('stopContainer', () => {
-  it('returns stop command using CONTAINER_RUNTIME_BIN', () => {
-    expect(stopContainer('nanoclaw-test-123')).toBe(
+describe("stopContainer", () => {
+  it("returns stop command using CONTAINER_RUNTIME_BIN", () => {
+    expect(stopContainer("nanoclaw-test-123")).toBe(
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-test-123`,
     );
   });
@@ -51,46 +51,44 @@ describe('stopContainer', () => {
 
 // --- ensureContainerRuntimeRunning ---
 
-describe('ensureContainerRuntimeRunning', () => {
-  it('does nothing when runtime is already running', () => {
-    mockExecSync.mockReturnValueOnce('');
+describe("ensureContainerRuntimeRunning", () => {
+  it("does nothing when runtime is already running", () => {
+    mockExecSync.mockReturnValueOnce("");
 
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(1);
-    expect(mockExecSync).toHaveBeenCalledWith(
-      `${CONTAINER_RUNTIME_BIN} system status`,
-      { stdio: 'pipe' },
-    );
-    expect(logger.debug).toHaveBeenCalledWith('Container runtime already running');
+    expect(mockExecSync).toHaveBeenCalledWith(`${CONTAINER_RUNTIME_BIN} system status`, {
+      stdio: "pipe",
+    });
+    expect(logger.debug).toHaveBeenCalledWith("Container runtime already running");
   });
 
-  it('auto-starts when system status fails', () => {
+  it("auto-starts when system status fails", () => {
     // First call (system status) fails
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('not running');
+      throw new Error("not running");
     });
     // Second call (system start) succeeds
-    mockExecSync.mockReturnValueOnce('');
+    mockExecSync.mockReturnValueOnce("");
 
     ensureContainerRuntimeRunning();
 
     expect(mockExecSync).toHaveBeenCalledTimes(2);
-    expect(mockExecSync).toHaveBeenNthCalledWith(
-      2,
-      `${CONTAINER_RUNTIME_BIN} system start`,
-      { stdio: 'pipe', timeout: 30000 },
-    );
-    expect(logger.info).toHaveBeenCalledWith('Container runtime started');
+    expect(mockExecSync).toHaveBeenNthCalledWith(2, `${CONTAINER_RUNTIME_BIN} system start`, {
+      stdio: "pipe",
+      timeout: 30000,
+    });
+    expect(logger.info).toHaveBeenCalledWith("Container runtime started");
   });
 
-  it('throws when both status and start fail', () => {
+  it("throws when both status and start fail", () => {
     mockExecSync.mockImplementation(() => {
-      throw new Error('failed');
+      throw new Error("failed");
     });
 
     expect(() => ensureContainerRuntimeRunning()).toThrow(
-      'Container runtime is required but failed to start',
+      "Container runtime is required but failed to start",
     );
     expect(logger.error).toHaveBeenCalled();
   });
@@ -98,18 +96,18 @@ describe('ensureContainerRuntimeRunning', () => {
 
 // --- cleanupOrphans ---
 
-describe('cleanupOrphans', () => {
-  it('stops orphaned nanoclaw containers from JSON output', () => {
+describe("cleanupOrphans", () => {
+  it("stops orphaned nanoclaw containers from JSON output", () => {
     // Apple Container ls returns JSON
     const lsOutput = JSON.stringify([
-      { status: 'running', configuration: { id: 'nanoclaw-group1-111' } },
-      { status: 'stopped', configuration: { id: 'nanoclaw-group2-222' } },
-      { status: 'running', configuration: { id: 'nanoclaw-group3-333' } },
-      { status: 'running', configuration: { id: 'other-container' } },
+      { status: "running", configuration: { id: "nanoclaw-group1-111" } },
+      { status: "stopped", configuration: { id: "nanoclaw-group2-222" } },
+      { status: "running", configuration: { id: "nanoclaw-group3-333" } },
+      { status: "running", configuration: { id: "other-container" } },
     ]);
     mockExecSync.mockReturnValueOnce(lsOutput);
     // stop calls succeed
-    mockExecSync.mockReturnValue('');
+    mockExecSync.mockReturnValue("");
 
     cleanupOrphans();
 
@@ -118,21 +116,21 @@ describe('cleanupOrphans', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       2,
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group1-111`,
-      { stdio: 'pipe' },
+      { stdio: "pipe" },
     );
     expect(mockExecSync).toHaveBeenNthCalledWith(
       3,
       `${CONTAINER_RUNTIME_BIN} stop nanoclaw-group3-333`,
-      { stdio: 'pipe' },
+      { stdio: "pipe" },
     );
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ['nanoclaw-group1-111', 'nanoclaw-group3-333'] },
-      'Stopped orphaned containers',
+      { count: 2, names: ["nanoclaw-group1-111", "nanoclaw-group3-333"] },
+      "Stopped orphaned containers",
     );
   });
 
-  it('does nothing when no orphans exist', () => {
-    mockExecSync.mockReturnValueOnce('[]');
+  it("does nothing when no orphans exist", () => {
+    mockExecSync.mockReturnValueOnce("[]");
 
     cleanupOrphans();
 
@@ -140,38 +138,38 @@ describe('cleanupOrphans', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
-  it('warns and continues when ls fails', () => {
+  it("warns and continues when ls fails", () => {
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('container not available');
+      throw new Error("container not available");
     });
 
     cleanupOrphans(); // should not throw
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
-      'Failed to clean up orphaned containers',
+      "Failed to clean up orphaned containers",
     );
   });
 
-  it('continues stopping remaining containers when one stop fails', () => {
+  it("continues stopping remaining containers when one stop fails", () => {
     const lsOutput = JSON.stringify([
-      { status: 'running', configuration: { id: 'nanoclaw-a-1' } },
-      { status: 'running', configuration: { id: 'nanoclaw-b-2' } },
+      { status: "running", configuration: { id: "nanoclaw-a-1" } },
+      { status: "running", configuration: { id: "nanoclaw-b-2" } },
     ]);
     mockExecSync.mockReturnValueOnce(lsOutput);
     // First stop fails
     mockExecSync.mockImplementationOnce(() => {
-      throw new Error('already stopped');
+      throw new Error("already stopped");
     });
     // Second stop succeeds
-    mockExecSync.mockReturnValueOnce('');
+    mockExecSync.mockReturnValueOnce("");
 
     cleanupOrphans(); // should not throw
 
     expect(mockExecSync).toHaveBeenCalledTimes(3);
     expect(logger.info).toHaveBeenCalledWith(
-      { count: 2, names: ['nanoclaw-a-1', 'nanoclaw-b-2'] },
-      'Stopped orphaned containers',
+      { count: 2, names: ["nanoclaw-a-1", "nanoclaw-b-2"] },
+      "Stopped orphaned containers",
     );
   });
 });

@@ -1,29 +1,23 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-import { parse } from 'yaml';
+import { parse } from "yaml";
 
-import { SKILLS_SCHEMA_VERSION } from './constants.js';
-import { getAppliedSkills, readState, compareSemver } from './state.js';
-import { SkillManifest } from './types.js';
+import { SKILLS_SCHEMA_VERSION } from "./constants.js";
+import { getAppliedSkills, readState, compareSemver } from "./state.js";
+import { SkillManifest } from "./types.js";
 
 export function readManifest(skillDir: string): SkillManifest {
-  const manifestPath = path.join(skillDir, 'manifest.yaml');
+  const manifestPath = path.join(skillDir, "manifest.yaml");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Manifest not found: ${manifestPath}`);
   }
 
-  const content = fs.readFileSync(manifestPath, 'utf-8');
+  const content = fs.readFileSync(manifestPath, "utf-8");
   const manifest = parse(content) as SkillManifest;
 
   // Validate required fields
-  const required = [
-    'skill',
-    'version',
-    'core_version',
-    'adds',
-    'modifies',
-  ] as const;
+  const required = ["skill", "version", "core_version", "adds", "modifies"] as const;
   for (const field of required) {
     if (manifest[field] === undefined) {
       throw new Error(`Manifest missing required field: ${field}`);
@@ -38,10 +32,8 @@ export function readManifest(skillDir: string): SkillManifest {
   // Validate paths don't escape project root
   const allPaths = [...manifest.adds, ...manifest.modifies];
   for (const p of allPaths) {
-    if (p.includes('..') || path.isAbsolute(p)) {
-      throw new Error(
-        `Invalid path in manifest: ${p} (must be relative without "..")`,
-      );
+    if (p.includes("..") || path.isAbsolute(p)) {
+      throw new Error(`Invalid path in manifest: ${p} (must be relative without "..")`);
     }
   }
 
@@ -80,10 +72,7 @@ export function checkSystemVersion(manifest: SkillManifest): {
   if (!manifest.min_skills_system_version) {
     return { ok: true };
   }
-  const cmp = compareSemver(
-    manifest.min_skills_system_version,
-    SKILLS_SCHEMA_VERSION,
-  );
+  const cmp = compareSemver(manifest.min_skills_system_version, SKILLS_SCHEMA_VERSION);
   if (cmp > 0) {
     return {
       ok: false,

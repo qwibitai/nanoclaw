@@ -8,6 +8,7 @@ description: Add Ollama MCP server so the container agent can call local models 
 This skill adds a stdio-based MCP server that exposes local Ollama models as tools for the container agent. Claude remains the orchestrator but can offload work to local models.
 
 Tools added:
+
 - `ollama_list_models` — lists installed Ollama models
 - `ollama_generate` — sends a prompt to a specified model and returns the response
 
@@ -46,16 +47,17 @@ Run the skills engine to apply this skill's code package.
 If `.nanoclaw/` directory doesn't exist yet:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 ### Apply the skill
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
 ```
 
 This deterministically:
+
 - Adds `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
 - Adds `scripts/ollama-watch.sh` (macOS notification watcher)
 - Three-way merges Ollama MCP config into `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
@@ -63,6 +65,7 @@ This deterministically:
 - Records the application in `.nanoclaw/state.yaml`
 
 If the apply reports merge conflicts, read the intent files:
+
 - `modify/container/agent-runner/src/index.ts.intent.md` — what changed and invariants
 - `modify/src/container-runner.ts.intent.md` — what changed and invariants
 
@@ -80,7 +83,7 @@ done
 ### Validate code changes
 
 ```bash
-npm run build
+pnpm run build
 ./container/build.sh
 ```
 
@@ -128,6 +131,7 @@ tail -f logs/nanoclaw.log | grep -i ollama
 ```
 
 Look for:
+
 - `Agent output: ... Ollama ...` — agent used Ollama successfully
 - `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
 - `[OLLAMA] <<< Done` — generation completed
@@ -137,6 +141,7 @@ Look for:
 ### Agent says "Ollama is not installed"
 
 The agent is trying to run `ollama` CLI inside the container instead of using the MCP tools. This means:
+
 1. The MCP server wasn't registered — check `container/agent-runner/src/index.ts` has the `ollama` entry in `mcpServers`
 2. The per-group source wasn't updated — re-copy files (see Phase 2)
 3. The container wasn't rebuilt — run `./container/build.sh`

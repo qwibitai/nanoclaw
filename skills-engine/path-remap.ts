@@ -1,7 +1,7 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-import { readState, writeState } from './state.js';
+import { readState, writeState } from "./state.js";
 
 function isWithinRoot(rootPath: string, targetPath: string): boolean {
   return targetPath === rootPath || targetPath.startsWith(rootPath + path.sep);
@@ -23,11 +23,8 @@ function nearestExistingPathOrSymlink(candidateAbsPath: string): string {
   }
 }
 
-function toSafeProjectRelativePath(
-  candidatePath: string,
-  projectRoot: string,
-): string {
-  if (typeof candidatePath !== 'string' || candidatePath.trim() === '') {
+function toSafeProjectRelativePath(candidatePath: string, projectRoot: string): string {
+  if (typeof candidatePath !== "string" || candidatePath.trim() === "") {
     throw new Error(`Invalid remap path: "${candidatePath}"`);
   }
 
@@ -55,14 +52,10 @@ function toSafeProjectRelativePath(
   }
 
   const relativeRemainder = path.relative(anchorPath, resolved);
-  const realResolved = relativeRemainder
-    ? path.resolve(realAnchor, relativeRemainder)
-    : realAnchor;
+  const realResolved = relativeRemainder ? path.resolve(realAnchor, relativeRemainder) : realAnchor;
 
   if (!isWithinRoot(realRoot, realResolved)) {
-    throw new Error(
-      `Path remap escapes project root via symlink: "${candidatePath}"`,
-    );
+    throw new Error(`Path remap escapes project root via symlink: "${candidatePath}"`);
   }
 
   return path.relative(realRoot, realResolved);
@@ -70,7 +63,7 @@ function toSafeProjectRelativePath(
 
 function sanitizeRemapEntries(
   remap: Record<string, string>,
-  mode: 'throw' | 'drop',
+  mode: "throw" | "drop",
 ): Record<string, string> {
   const projectRoot = process.cwd();
   const sanitized: Record<string, string> = {};
@@ -81,7 +74,7 @@ function sanitizeRemapEntries(
       const safeTo = toSafeProjectRelativePath(to, projectRoot);
       sanitized[safeFrom] = safeTo;
     } catch (err) {
-      if (mode === 'throw') {
+      if (mode === "throw") {
         throw err;
       }
     }
@@ -90,10 +83,7 @@ function sanitizeRemapEntries(
   return sanitized;
 }
 
-export function resolvePathRemap(
-  relPath: string,
-  remap: Record<string, string>,
-): string {
+export function resolvePathRemap(relPath: string, remap: Record<string, string>): string {
   const projectRoot = process.cwd();
   const safeRelPath = toSafeProjectRelativePath(relPath, projectRoot);
   const remapped = remap[safeRelPath] ?? remap[relPath];
@@ -113,13 +103,13 @@ export function resolvePathRemap(
 export function loadPathRemap(): Record<string, string> {
   const state = readState();
   const remap = state.path_remap ?? {};
-  return sanitizeRemapEntries(remap, 'drop');
+  return sanitizeRemapEntries(remap, "drop");
 }
 
 export function recordPathRemap(remap: Record<string, string>): void {
   const state = readState();
-  const existing = sanitizeRemapEntries(state.path_remap ?? {}, 'drop');
-  const incoming = sanitizeRemapEntries(remap, 'throw');
+  const existing = sanitizeRemapEntries(state.path_remap ?? {}, "drop");
+  const incoming = sanitizeRemapEntries(remap, "throw");
   state.path_remap = { ...existing, ...incoming };
   writeState(state);
 }

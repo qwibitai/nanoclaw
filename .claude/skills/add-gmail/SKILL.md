@@ -29,7 +29,7 @@ AskUserQuestion: Should incoming emails be able to trigger the agent?
 If `.nanoclaw/` directory doesn't exist yet:
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+pnpm exec tsx scripts/apply-skill.ts --init
 ```
 
 ### Path A: Tool-only (user chose "No")
@@ -51,7 +51,7 @@ Add `gmail` to `.nanoclaw/state.yaml` under `applied_skills` with `mode: tool-on
 #### 4. Validate
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Build must be clean before proceeding. Skip to Phase 3.
@@ -61,7 +61,7 @@ Build must be clean before proceeding. Skip to Phase 3.
 Run the full skills engine to apply all code changes:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-gmail
+pnpm exec tsx scripts/apply-skill.ts .claude/skills/add-gmail
 ```
 
 This deterministically:
@@ -93,8 +93,8 @@ When you receive an email notification (messages starting with `[Email from ...`
 #### Validate
 
 ```bash
-npm test
-npm run build
+pnpm test
+pnpm run build
 ```
 
 All tests must pass (including the new gmail tests) and build must be clean before proceeding.
@@ -164,7 +164,7 @@ cd container && ./build.sh
 Then compile and restart:
 
 ```bash
-npm run build
+pnpm run build
 launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
 # Linux: systemctl --user restart nanoclaw
 ```
@@ -228,7 +228,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 2. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
 3. Remove `gmail` from `.nanoclaw/state.yaml`
 4. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-5. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+5. Rebuild: `cd container && ./build.sh && cd .. && pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
 
 ### Channel mode
 
@@ -236,7 +236,7 @@ npx -y @gongrzhe/server-gmail-autoauth-mcp
 2. Remove `import './gmail.js'` from `src/channels/index.ts`
 3. Remove `~/.gmail-mcp` mount from `src/container-runner.ts`
 4. Remove `gmail` MCP server and `mcp__gmail__*` from `container/agent-runner/src/index.ts`
-5. Uninstall: `npm uninstall googleapis`
+5. Uninstall: `pnpm remove googleapis`
 6. Remove `gmail` from `.nanoclaw/state.yaml`
 7. Clear stale agent-runner copies: `rm -r data/sessions/*/agent-runner-src 2>/dev/null || true`
-8. Rebuild: `cd container && ./build.sh && cd .. && npm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)
+8. Rebuild: `cd container && ./build.sh && cd .. && pnpm run build && launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux)

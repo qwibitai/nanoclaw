@@ -138,17 +138,20 @@ cross-communicate without coordinator mediation.
 ### Three tiers
 
 **Tier 1: Global memory** (`groups/global/`)
+
 - Shared identity, communication style, knowledge about users
 - Cross-context status summaries (sanitized)
 - Calendar/schedule awareness
 - Updated by coordinator only
 
 **Tier 2: Domain memory** (each group's folder)
+
 - Task-specific capabilities, instructions, and accumulated knowledge
 - Active state (workflows, current plans, progress)
 - Updated by each group's container during operation
 
 **Tier 3: Ephemeral context** (container session)
+
 - Current conversation, in-progress reasoning
 - Dies with the session, fresh start from Tier 1 + 2
 
@@ -207,12 +210,14 @@ structured pipeline: shape spec -> implement -> audit -> demo -> walk -> PR.
 ### Components
 
 **Coordinator container** (persistent, main group)
+
 - All interactive phases (spec shaping, walkthrough) over messaging
 - Workflow state management across all projects
 - Dispatches autonomous work via IPC to worker manager
 - Calendar-aware timing of notifications and requests
 
 **Worker manager** (host-level service, not a NanoClaw group)
+
 - Watches for dispatch files from coordinator's IPC directory
 - Spawns the correct CLI per phase (different tools for implementation vs. audit)
 - Manages git worktrees for parallel issue work
@@ -221,6 +226,7 @@ structured pipeline: shape spec -> implement -> audit -> demo -> walk -> PR.
 - Enforces per-subscription rate limits and concurrency caps
 
 **Workflow monitor** (NanoClaw scheduled task, 60s cron)
+
 - Checks worker status files for completed phases
 - Advances workflow state machines
 - Dispatches next phases

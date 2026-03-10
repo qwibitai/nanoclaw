@@ -4,22 +4,22 @@
  * Other channels discover group names at runtime — this step auto-skips for them.
  * Replaces 05-sync-groups.sh + 05b-list-groups.sh
  */
-import { execSync } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 
-import Database from 'better-sqlite3';
+import Database from "better-sqlite3";
 
-import { STORE_DIR } from '../src/config.js';
-import { logger } from '../src/logger.js';
-import { emitStatus } from './status.js';
+import { STORE_DIR } from "../src/config.js";
+import { logger } from "../src/logger.js";
+import { emitStatus } from "./status.js";
 
 function parseArgs(args: string[]): { list: boolean; limit: number } {
   let list = false;
   let limit = 30;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--list') list = true;
-    if (args[i] === '--limit' && args[i + 1]) {
+    if (args[i] === "--list") list = true;
+    if (args[i] === "--limit" && args[i + 1]) {
       limit = parseInt(args[i + 1], 10);
       i++;
     }
@@ -40,10 +40,10 @@ export async function run(args: string[]): Promise<void> {
 }
 
 async function listGroups(limit: number): Promise<void> {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
+  const dbPath = path.join(STORE_DIR, "messages.db");
 
   if (!fs.existsSync(dbPath)) {
-    console.error('ERROR: database not found');
+    console.error("ERROR: database not found");
     process.exit(1);
   }
 
@@ -66,48 +66,47 @@ async function listGroups(limit: number): Promise<void> {
 async function syncGroups(projectRoot: string): Promise<void> {
   // Only WhatsApp needs an upfront group sync; other channels resolve names at runtime.
   // Detect WhatsApp by checking for auth credentials on disk.
-  const authDir = path.join(projectRoot, 'store', 'auth');
-  const hasWhatsAppAuth =
-    fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
+  const authDir = path.join(projectRoot, "store", "auth");
+  const hasWhatsAppAuth = fs.existsSync(authDir) && fs.readdirSync(authDir).length > 0;
 
   if (!hasWhatsAppAuth) {
-    logger.info('WhatsApp auth not found — skipping group sync');
-    emitStatus('SYNC_GROUPS', {
-      BUILD: 'skipped',
-      SYNC: 'skipped',
+    logger.info("WhatsApp auth not found — skipping group sync");
+    emitStatus("SYNC_GROUPS", {
+      BUILD: "skipped",
+      SYNC: "skipped",
       GROUPS_IN_DB: 0,
-      REASON: 'whatsapp_not_configured',
-      STATUS: 'success',
-      LOG: 'logs/setup.log',
+      REASON: "whatsapp_not_configured",
+      STATUS: "success",
+      LOG: "logs/setup.log",
     });
     return;
   }
 
   // Build TypeScript first
-  logger.info('Building TypeScript');
+  logger.info("Building TypeScript");
   let buildOk = false;
   try {
-    execSync('npm run build', {
+    execSync("pnpm run build", {
       cwd: projectRoot,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
     });
     buildOk = true;
-    logger.info('Build succeeded');
+    logger.info("Build succeeded");
   } catch {
-    logger.error('Build failed');
-    emitStatus('SYNC_GROUPS', {
-      BUILD: 'failed',
-      SYNC: 'skipped',
+    logger.error("Build failed");
+    emitStatus("SYNC_GROUPS", {
+      BUILD: "failed",
+      SYNC: "skipped",
       GROUPS_IN_DB: 0,
-      STATUS: 'failed',
-      ERROR: 'build_failed',
-      LOG: 'logs/setup.log',
+      STATUS: "failed",
+      ERROR: "build_failed",
+      LOG: "logs/setup.log",
     });
     process.exit(1);
   }
 
   // Run sync script via a temp file to avoid shell escaping issues with node -e
-  logger.info('Fetching group metadata');
+  logger.info("Fetching group metadata");
   let syncOk = false;
   try {
     const syncScript = `
@@ -179,27 +178,31 @@ sock.ev.on('connection.update', async (update) => {
 });
 `;
 
-    const tmpScript = path.join(projectRoot, '.tmp-group-sync.mjs');
-    fs.writeFileSync(tmpScript, syncScript, 'utf-8');
+    const tmpScript = path.join(projectRoot, ".tmp-group-sync.mjs");
+    fs.writeFileSync(tmpScript, syncScript, "utf-8");
     try {
       const output = execSync(`node ${tmpScript}`, {
         cwd: projectRoot,
-        encoding: 'utf-8',
+        encoding: "utf-8",
         timeout: 45000,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      syncOk = output.includes('SYNCED:');
-      logger.info({ output: output.trim() }, 'Sync output');
+      syncOk = output.includes("SYNCED:");
+      logger.info({ output: output.trim() }, "Sync output");
     } finally {
-      try { fs.unlinkSync(tmpScript); } catch { /* ignore cleanup errors */ }
+      try {
+        fs.unlinkSync(tmpScript);
+      } catch {
+        /* ignore cleanup errors */
+      }
     }
   } catch (err) {
-    logger.error({ err }, 'Sync failed');
+    logger.error({ err }, "Sync failed");
   }
 
   // Count groups in DB using better-sqlite3 (no sqlite3 CLI)
   let groupsInDb = 0;
-  const dbPath = path.join(STORE_DIR, 'messages.db');
+  const dbPath = path.join(STORE_DIR, "messages.db");
   if (fs.existsSync(dbPath)) {
     try {
       const db = new Database(dbPath, { readonly: true });
@@ -215,15 +218,15 @@ sock.ev.on('connection.update', async (update) => {
     }
   }
 
-  const status = syncOk ? 'success' : 'failed';
+  const status = syncOk ? "success" : "failed";
 
-  emitStatus('SYNC_GROUPS', {
-    BUILD: buildOk ? 'success' : 'failed',
-    SYNC: syncOk ? 'success' : 'failed',
+  emitStatus("SYNC_GROUPS", {
+    BUILD: buildOk ? "success" : "failed",
+    SYNC: syncOk ? "success" : "failed",
     GROUPS_IN_DB: groupsInDb,
     STATUS: status,
-    LOG: 'logs/setup.log',
+    LOG: "logs/setup.log",
   });
 
-  if (status === 'failed') process.exit(1);
+  if (status === "failed") process.exit(1);
 }

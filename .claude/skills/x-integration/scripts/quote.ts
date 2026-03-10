@@ -4,7 +4,14 @@
  * Usage: echo '{"tweetUrl":"https://x.com/user/status/123","comment":"My thoughts"}' | npx tsx quote.ts
  */
 
-import { getBrowserContext, navigateToTweet, runScript, validateContent, config, ScriptResult } from '../lib/browser.js';
+import {
+  getBrowserContext,
+  navigateToTweet,
+  runScript,
+  validateContent,
+  config,
+  ScriptResult,
+} from "../lib/browser.js";
 
 interface QuoteInput {
   tweetUrl: string;
@@ -15,10 +22,10 @@ async function quoteTweet(input: QuoteInput): Promise<ScriptResult> {
   const { tweetUrl, comment } = input;
 
   if (!tweetUrl) {
-    return { success: false, message: 'Please provide a tweet URL' };
+    return { success: false, message: "Please provide a tweet URL" };
   }
 
-  const validationError = validateContent(comment, 'Comment');
+  const validationError = validateContent(comment, "Comment");
   if (validationError) return validationError;
 
   let context = null;
@@ -27,7 +34,7 @@ async function quoteTweet(input: QuoteInput): Promise<ScriptResult> {
     const { page, success, error } = await navigateToTweet(context, tweetUrl);
 
     if (!success) {
-      return { success: false, message: error || 'Navigation failed' };
+      return { success: false, message: error || "Navigation failed" };
     }
 
     // Click retweet button to open menu
@@ -38,7 +45,7 @@ async function quoteTweet(input: QuoteInput): Promise<ScriptResult> {
     await page.waitForTimeout(config.timeouts.afterClick);
 
     // Click quote option
-    const quoteOption = page.getByRole('menuitem').filter({ hasText: /Quote/i });
+    const quoteOption = page.getByRole("menuitem").filter({ hasText: /Quote/i });
     await quoteOption.waitFor({ timeout: config.timeouts.elementWait });
     await quoteOption.click();
     await page.waitForTimeout(config.timeouts.afterClick * 1.5);
@@ -59,9 +66,12 @@ async function quoteTweet(input: QuoteInput): Promise<ScriptResult> {
     const submitButton = dialog.locator('[data-testid="tweetButton"]');
     await submitButton.waitFor({ timeout: config.timeouts.elementWait });
 
-    const isDisabled = await submitButton.getAttribute('aria-disabled');
-    if (isDisabled === 'true') {
-      return { success: false, message: 'Submit button disabled. Content may be empty or exceed character limit.' };
+    const isDisabled = await submitButton.getAttribute("aria-disabled");
+    if (isDisabled === "true") {
+      return {
+        success: false,
+        message: "Submit button disabled. Content may be empty or exceed character limit.",
+      };
     }
 
     await submitButton.click();
@@ -69,9 +79,8 @@ async function quoteTweet(input: QuoteInput): Promise<ScriptResult> {
 
     return {
       success: true,
-      message: `Quote tweet posted: ${comment.slice(0, 50)}${comment.length > 50 ? '...' : ''}`
+      message: `Quote tweet posted: ${comment.slice(0, 50)}${comment.length > 50 ? "..." : ""}`,
     };
-
   } finally {
     if (context) await context.close();
   }

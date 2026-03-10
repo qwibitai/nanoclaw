@@ -1,6 +1,6 @@
-import { exec } from 'child_process';
-import fs from 'fs';
-import path from 'path';
+import { exec } from "child_process";
+import fs from "fs";
+import path from "path";
 
 import makeWASocket, {
   Browsers,
@@ -9,18 +9,14 @@ import makeWASocket, {
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
-} from '@whiskeysockets/baileys';
+} from "@whiskeysockets/baileys";
 
-import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from '../config.js';
-import {
-  getLastGroupSync,
-  setLastGroupSync,
-  updateChatName,
-} from '../db.js';
-import { logger } from '../logger.js';
-import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
-import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from '../types.js';
-import { registerChannel, ChannelOpts } from './registry.js';
+import { ASSISTANT_HAS_OWN_NUMBER, ASSISTANT_NAME, STORE_DIR } from "../config.js";
+import { getLastGroupSync, setLastGroupSync, updateChatName } from "../db.js";
+import { logger } from "../logger.js";
+import { isVoiceMessage, transcribeAudioMessage } from "../transcription.js";
+import { Channel, OnInboundMessage, OnChatMetadata, RegisteredGroup } from "../types.js";
+import { registerChannel, ChannelOpts } from "./registry.js";
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -31,7 +27,7 @@ export interface WhatsAppChannelOpts {
 }
 
 export class WhatsAppChannel implements Channel {
-  name = 'whatsapp';
+  name = "whatsapp";
 
   private sock!: WASocket;
   private connected = false;
@@ -53,13 +49,13 @@ export class WhatsAppChannel implements Channel {
   }
 
   private async connectInternal(onFirstOpen?: () => void): Promise<void> {
-    const authDir = path.join(STORE_DIR, 'auth');
+    const authDir = path.join(STORE_DIR, "auth");
     fs.mkdirSync(authDir, { recursive: true });
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
     const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
-      logger.warn({ err }, 'Failed to fetch latest WA Web version, using default');
+      logger.warn({ err }, "Failed to fetch latest WA Web version, using default");
       return { version: undefined };
     });
     this.sock = makeWASocket({
@@ -70,15 +66,14 @@ export class WhatsAppChannel implements Channel {
       },
       printQRInTerminal: false,
       logger,
-      browser: Browsers.macOS('Chrome'),
+      browser: Browsers.macOS("Chrome"),
     });
 
-    this.sock.ev.on('connection.update', (update) => {
+    this.sock.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
+        const msg = "WhatsApp authentication required. Run /setup in Claude Code.";
         logger.error(msg);
         exec(
           `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
@@ -86,60 +81,62 @@ export class WhatsAppChannel implements Channel {
         setTimeout(() => process.exit(1), 1000);
       }
 
-      if (connection === 'close') {
+      if (connection === "close") {
         this.connected = false;
-        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output?.statusCode;
+        const reason = (lastDisconnect?.error as { output?: { statusCode?: number } })?.output
+          ?.statusCode;
         const shouldReconnect = reason !== DisconnectReason.loggedOut;
-        logger.info({ reason, shouldReconnect, queuedMessages: this.outgoingQueue.length }, 'Connection closed');
+        logger.info(
+          { reason, shouldReconnect, queuedMessages: this.outgoingQueue.length },
+          "Connection closed",
+        );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
+          logger.info("Reconnecting...");
           this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
+            logger.error({ err }, "Failed to reconnect, retrying in 5s");
             setTimeout(() => {
               this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
+                logger.error({ err: err2 }, "Reconnection retry failed");
               });
             }, 5000);
           });
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
+          logger.info("Logged out. Run /setup to re-authenticate.");
           process.exit(0);
         }
-      } else if (connection === 'open') {
+      } else if (connection === "open") {
         this.connected = true;
-        logger.info('Connected to WhatsApp');
+        logger.info("Connected to WhatsApp");
 
         // Announce availability so WhatsApp relays subsequent presence updates (typing indicators)
-        this.sock.sendPresenceUpdate('available').catch((err) => {
-          logger.warn({ err }, 'Failed to send presence update');
+        this.sock.sendPresenceUpdate("available").catch((err) => {
+          logger.warn({ err }, "Failed to send presence update");
         });
 
         // Build LID to phone mapping from auth state for self-chat translation
         if (this.sock.user) {
-          const phoneUser = this.sock.user.id.split(':')[0];
-          const lidUser = this.sock.user.lid?.split(':')[0];
+          const phoneUser = this.sock.user.id.split(":")[0];
+          const lidUser = this.sock.user.lid?.split(":")[0];
           if (lidUser && phoneUser) {
             this.lidToPhoneMap[lidUser] = `${phoneUser}@s.whatsapp.net`;
-            logger.debug({ lidUser, phoneUser }, 'LID to phone mapping set');
+            logger.debug({ lidUser, phoneUser }, "LID to phone mapping set");
           }
         }
 
         // Flush any messages queued while disconnected
         this.flushOutgoingQueue().catch((err) =>
-          logger.error({ err }, 'Failed to flush outgoing queue'),
+          logger.error({ err }, "Failed to flush outgoing queue"),
         );
 
         // Sync group metadata on startup (respects 24h cache)
-        this.syncGroupMetadata().catch((err) =>
-          logger.error({ err }, 'Initial group sync failed'),
-        );
+        this.syncGroupMetadata().catch((err) => logger.error({ err }, "Initial group sync failed"));
         // Set up daily sync timer (only once)
         if (!this.groupSyncTimerStarted) {
           this.groupSyncTimerStarted = true;
           setInterval(() => {
             this.syncGroupMetadata().catch((err) =>
-              logger.error({ err }, 'Periodic group sync failed'),
+              logger.error({ err }, "Periodic group sync failed"),
             );
           }, GROUP_SYNC_INTERVAL_MS);
         }
@@ -152,24 +149,22 @@ export class WhatsAppChannel implements Channel {
       }
     });
 
-    this.sock.ev.on('creds.update', saveCreds);
+    this.sock.ev.on("creds.update", saveCreds);
 
-    this.sock.ev.on('messages.upsert', async ({ messages }) => {
+    this.sock.ev.on("messages.upsert", async ({ messages }) => {
       for (const msg of messages) {
         if (!msg.message) continue;
         const rawJid = msg.key.remoteJid;
-        if (!rawJid || rawJid === 'status@broadcast') continue;
+        if (!rawJid || rawJid === "status@broadcast") continue;
 
         // Translate LID JID to phone JID if applicable
         const chatJid = await this.translateJid(rawJid);
 
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
+        const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
 
         // Always notify about chat metadata for group discovery
-        const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'whatsapp', isGroup);
+        const isGroup = chatJid.endsWith("@g.us");
+        this.opts.onChatMetadata(chatJid, timestamp, undefined, "whatsapp", isGroup);
 
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
@@ -179,14 +174,14 @@ export class WhatsAppChannel implements Channel {
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
-            '';
+            "";
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           // but allow voice messages through for transcription
           if (!content && !isVoiceMessage(msg)) continue;
 
-          const sender = msg.key.participant || msg.key.remoteJid || '';
-          const senderName = msg.pushName || sender.split('@')[0];
+          const sender = msg.key.participant || msg.key.remoteJid || "";
+          const senderName = msg.pushName || sender.split("@")[0];
 
           const fromMe = msg.key.fromMe || false;
           // Detect bot messages: with own number, fromMe is reliable
@@ -204,18 +199,18 @@ export class WhatsAppChannel implements Channel {
               const transcript = await transcribeAudioMessage(msg, this.sock);
               if (transcript) {
                 finalContent = `[Voice: ${transcript}]`;
-                logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
+                logger.info({ chatJid, length: transcript.length }, "Transcribed voice message");
               } else {
-                finalContent = '[Voice Message - transcription unavailable]';
+                finalContent = "[Voice Message - transcription unavailable]";
               }
             } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              finalContent = '[Voice Message - transcription failed]';
+              logger.error({ err }, "Voice transcription error");
+              finalContent = "[Voice Message - transcription failed]";
             }
           }
 
           this.opts.onMessage(chatJid, {
-            id: msg.key.id || '',
+            id: msg.key.id || "",
             chat_jid: chatJid,
             sender,
             sender_name: senderName,
@@ -234,22 +229,26 @@ export class WhatsAppChannel implements Channel {
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
-    const prefixed = ASSISTANT_HAS_OWN_NUMBER
-      ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+    const prefixed = ASSISTANT_HAS_OWN_NUMBER ? text : `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.info({ jid, length: prefixed.length, queueSize: this.outgoingQueue.length }, 'WA disconnected, message queued');
+      logger.info(
+        { jid, length: prefixed.length, queueSize: this.outgoingQueue.length },
+        "WA disconnected, message queued",
+      );
       return;
     }
     try {
       await this.sock.sendMessage(jid, { text: prefixed });
-      logger.info({ jid, length: prefixed.length }, 'Message sent');
+      logger.info({ jid, length: prefixed.length }, "Message sent");
     } catch (err) {
       // If send fails, queue it for retry on reconnect
       this.outgoingQueue.push({ jid, text: prefixed });
-      logger.warn({ jid, err, queueSize: this.outgoingQueue.length }, 'Failed to send, message queued');
+      logger.warn(
+        { jid, err, queueSize: this.outgoingQueue.length },
+        "Failed to send, message queued",
+      );
     }
   }
 
@@ -258,7 +257,7 @@ export class WhatsAppChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.endsWith('@g.us') || jid.endsWith('@s.whatsapp.net');
+    return jid.endsWith("@g.us") || jid.endsWith("@s.whatsapp.net");
   }
 
   async disconnect(): Promise<void> {
@@ -268,11 +267,11 @@ export class WhatsAppChannel implements Channel {
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     try {
-      const status = isTyping ? 'composing' : 'paused';
-      logger.debug({ jid, status }, 'Sending presence update');
+      const status = isTyping ? "composing" : "paused";
+      logger.debug({ jid, status }, "Sending presence update");
       await this.sock.sendPresenceUpdate(status, jid);
     } catch (err) {
-      logger.debug({ jid, err }, 'Failed to update typing status');
+      logger.debug({ jid, err }, "Failed to update typing status");
     }
   }
 
@@ -287,14 +286,14 @@ export class WhatsAppChannel implements Channel {
       if (lastSync) {
         const lastSyncTime = new Date(lastSync).getTime();
         if (Date.now() - lastSyncTime < GROUP_SYNC_INTERVAL_MS) {
-          logger.debug({ lastSync }, 'Skipping group sync - synced recently');
+          logger.debug({ lastSync }, "Skipping group sync - synced recently");
           return;
         }
       }
     }
 
     try {
-      logger.info('Syncing group metadata from WhatsApp...');
+      logger.info("Syncing group metadata from WhatsApp...");
       const groups = await this.sock.groupFetchAllParticipating();
 
       let count = 0;
@@ -306,20 +305,20 @@ export class WhatsAppChannel implements Channel {
       }
 
       setLastGroupSync();
-      logger.info({ count }, 'Group metadata synced');
+      logger.info({ count }, "Group metadata synced");
     } catch (err) {
-      logger.error({ err }, 'Failed to sync group metadata');
+      logger.error({ err }, "Failed to sync group metadata");
     }
   }
 
   private async translateJid(jid: string): Promise<string> {
-    if (!jid.endsWith('@lid')) return jid;
-    const lidUser = jid.split('@')[0].split(':')[0];
+    if (!jid.endsWith("@lid")) return jid;
+    const lidUser = jid.split("@")[0].split(":")[0];
 
     // Check local cache first
     const cached = this.lidToPhoneMap[lidUser];
     if (cached) {
-      logger.debug({ lidJid: jid, phoneJid: cached }, 'Translated LID to phone JID (cached)');
+      logger.debug({ lidJid: jid, phoneJid: cached }, "Translated LID to phone JID (cached)");
       return cached;
     }
 
@@ -327,13 +326,13 @@ export class WhatsAppChannel implements Channel {
     try {
       const pn = await this.sock.signalRepository?.lidMapping?.getPNForLID(jid);
       if (pn) {
-        const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
+        const phoneJid = `${pn.split("@")[0].split(":")[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
-        logger.info({ lidJid: jid, phoneJid }, 'Translated LID to phone JID (signalRepository)');
+        logger.info({ lidJid: jid, phoneJid }, "Translated LID to phone JID (signalRepository)");
         return phoneJid;
       }
     } catch (err) {
-      logger.debug({ err, jid }, 'Failed to resolve LID via signalRepository');
+      logger.debug({ err, jid }, "Failed to resolve LID via signalRepository");
     }
 
     return jid;
@@ -343,12 +342,12 @@ export class WhatsAppChannel implements Channel {
     if (this.flushing || this.outgoingQueue.length === 0) return;
     this.flushing = true;
     try {
-      logger.info({ count: this.outgoingQueue.length }, 'Flushing outgoing message queue');
+      logger.info({ count: this.outgoingQueue.length }, "Flushing outgoing message queue");
       while (this.outgoingQueue.length > 0) {
         const item = this.outgoingQueue.shift()!;
         // Send directly — queued items are already prefixed by sendMessage
         await this.sock.sendMessage(item.jid, { text: item.text });
-        logger.info({ jid: item.jid, length: item.text.length }, 'Queued message sent');
+        logger.info({ jid: item.jid, length: item.text.length }, "Queued message sent");
       }
     } finally {
       this.flushing = false;
@@ -356,10 +355,10 @@ export class WhatsAppChannel implements Channel {
   }
 }
 
-registerChannel('whatsapp', (opts: ChannelOpts) => {
-  const authDir = path.join(STORE_DIR, 'auth');
-  if (!fs.existsSync(path.join(authDir, 'creds.json'))) {
-    logger.warn('WhatsApp: credentials not found. Run /add-whatsapp to authenticate.');
+registerChannel("whatsapp", (opts: ChannelOpts) => {
+  const authDir = path.join(STORE_DIR, "auth");
+  if (!fs.existsSync(path.join(authDir, "creds.json"))) {
+    logger.warn("WhatsApp: credentials not found. Run /add-whatsapp to authenticate.");
     return null;
   }
   return new WhatsAppChannel(opts);

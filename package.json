@@ -5,39 +5,58 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsgo",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:fix": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsgo --noEmit",
+    "format": "oxfmt --write .",
+    "format:fix": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
     "prepare": "husky",
     "setup": "tsx setup/index.ts",
     "auth": "tsx src/whatsapp-auth.ts",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check": "turbo run format:check lint typecheck test",
+    "knip": "knip",
+    "knip:fix": "knip --fix"
   },
   "dependencies": {
-    "better-sqlite3": "^11.8.1",
+    "better-sqlite3": "^12.6.2",
     "cron-parser": "^5.5.0",
-    "discord.js": "^14.18.0",
-    "pino": "^9.6.0",
+    "discord.js": "^14.25.1",
+    "pino": "^10.3.1",
     "pino-pretty": "^13.0.0",
-    "yaml": "^2.8.2",
-    "zod": "^4.3.6"
+    "yaml": "^2.8.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.10.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.4.0",
+    "@typescript/native-preview": "7.0.0-dev.20260310.1",
     "@vitest/coverage-v8": "^4.0.18",
     "husky": "^9.1.7",
-    "prettier": "^3.8.1",
+    "knip": "^5.86.0",
+    "oxfmt": "^0.37.0",
+    "oxlint": "^1.52.0",
     "tsx": "^4.19.0",
+    "turbo": "^2.8.15",
     "typescript": "^5.7.0",
     "vitest": "^4.0.18"
   },
   "engines": {
     "node": ">=20"
+  },
+  "packageManager": "pnpm@10.17.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ],
+    "overrides": {
+      "rollup": ">=4.59.0",
+      "undici": ">=6.23.0"
+    }
   }
 }

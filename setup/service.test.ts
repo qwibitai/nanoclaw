@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import path from 'path';
+import { describe, it, expect } from "vitest";
+import path from "path";
 
 /**
  * Tests for service configuration generation.
@@ -9,11 +9,7 @@ import path from 'path';
  */
 
 // Helper: generate a plist string the same way service.ts does
-function generatePlist(
-  nodePath: string,
-  projectRoot: string,
-  homeDir: string,
-): string {
+function generatePlist(nodePath: string, projectRoot: string, homeDir: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -68,98 +64,60 @@ StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
 [Install]
-WantedBy=${isSystem ? 'multi-user.target' : 'default.target'}`;
+WantedBy=${isSystem ? "multi-user.target" : "default.target"}`;
 }
 
-describe('plist generation', () => {
-  it('contains the correct label', () => {
-    const plist = generatePlist(
-      '/usr/local/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-    );
-    expect(plist).toContain('<string>com.nanoclaw</string>');
+describe("plist generation", () => {
+  it("contains the correct label", () => {
+    const plist = generatePlist("/usr/local/bin/node", "/home/user/nanoclaw", "/home/user");
+    expect(plist).toContain("<string>com.nanoclaw</string>");
   });
 
-  it('uses the correct node path', () => {
-    const plist = generatePlist(
-      '/opt/node/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-    );
-    expect(plist).toContain('<string>/opt/node/bin/node</string>');
+  it("uses the correct node path", () => {
+    const plist = generatePlist("/opt/node/bin/node", "/home/user/nanoclaw", "/home/user");
+    expect(plist).toContain("<string>/opt/node/bin/node</string>");
   });
 
-  it('points to dist/index.js', () => {
-    const plist = generatePlist(
-      '/usr/local/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-    );
-    expect(plist).toContain('/home/user/nanoclaw/dist/index.js');
+  it("points to dist/index.js", () => {
+    const plist = generatePlist("/usr/local/bin/node", "/home/user/nanoclaw", "/home/user");
+    expect(plist).toContain("/home/user/nanoclaw/dist/index.js");
   });
 
-  it('sets log paths', () => {
-    const plist = generatePlist(
-      '/usr/local/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-    );
-    expect(plist).toContain('nanoclaw.log');
-    expect(plist).toContain('nanoclaw.error.log');
+  it("sets log paths", () => {
+    const plist = generatePlist("/usr/local/bin/node", "/home/user/nanoclaw", "/home/user");
+    expect(plist).toContain("nanoclaw.log");
+    expect(plist).toContain("nanoclaw.error.log");
   });
 });
 
-describe('systemd unit generation', () => {
-  it('user unit uses default.target', () => {
-    const unit = generateSystemdUnit(
-      '/usr/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-      false,
-    );
-    expect(unit).toContain('WantedBy=default.target');
+describe("systemd unit generation", () => {
+  it("user unit uses default.target", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", false);
+    expect(unit).toContain("WantedBy=default.target");
   });
 
-  it('system unit uses multi-user.target', () => {
-    const unit = generateSystemdUnit(
-      '/usr/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-      true,
-    );
-    expect(unit).toContain('WantedBy=multi-user.target');
+  it("system unit uses multi-user.target", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", true);
+    expect(unit).toContain("WantedBy=multi-user.target");
   });
 
-  it('contains restart policy', () => {
-    const unit = generateSystemdUnit(
-      '/usr/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-      false,
-    );
-    expect(unit).toContain('Restart=always');
-    expect(unit).toContain('RestartSec=5');
+  it("contains restart policy", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/home/user/nanoclaw", "/home/user", false);
+    expect(unit).toContain("Restart=always");
+    expect(unit).toContain("RestartSec=5");
   });
 
-  it('sets correct ExecStart', () => {
-    const unit = generateSystemdUnit(
-      '/usr/bin/node',
-      '/srv/nanoclaw',
-      '/home/user',
-      false,
-    );
-    expect(unit).toContain(
-      'ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js',
-    );
+  it("sets correct ExecStart", () => {
+    const unit = generateSystemdUnit("/usr/bin/node", "/srv/nanoclaw", "/home/user", false);
+    expect(unit).toContain("ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js");
   });
 });
 
-describe('WSL nohup fallback', () => {
-  it('generates a valid wrapper script', () => {
-    const projectRoot = '/home/user/nanoclaw';
-    const nodePath = '/usr/bin/node';
-    const pidFile = path.join(projectRoot, 'nanoclaw.pid');
+describe("WSL nohup fallback", () => {
+  it("generates a valid wrapper script", () => {
+    const projectRoot = "/home/user/nanoclaw";
+    const nodePath = "/usr/bin/node";
+    const pidFile = path.join(projectRoot, "nanoclaw.pid");
 
     // Simulate what service.ts generates
     const wrapper = `#!/bin/bash
@@ -168,9 +126,9 @@ cd ${JSON.stringify(projectRoot)}
 nohup ${JSON.stringify(nodePath)} ${JSON.stringify(projectRoot)}/dist/index.js >> ${JSON.stringify(projectRoot)}/logs/nanoclaw.log 2>> ${JSON.stringify(projectRoot)}/logs/nanoclaw.error.log &
 echo $! > ${JSON.stringify(pidFile)}`;
 
-    expect(wrapper).toContain('#!/bin/bash');
-    expect(wrapper).toContain('nohup');
+    expect(wrapper).toContain("#!/bin/bash");
+    expect(wrapper).toContain("nohup");
     expect(wrapper).toContain(nodePath);
-    expect(wrapper).toContain('nanoclaw.pid');
+    expect(wrapper).toContain("nanoclaw.pid");
   });
 });

@@ -1,9 +1,9 @@
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
-import { BACKUP_DIR } from './constants.js';
+import { BACKUP_DIR } from "./constants.js";
 
-const TOMBSTONE_SUFFIX = '.tombstone';
+const TOMBSTONE_SUFFIX = ".tombstone";
 
 function getBackupDir(): string {
   return path.join(process.cwd(), BACKUP_DIR);
@@ -23,7 +23,7 @@ export function createBackup(filePaths: string[]): void {
       fs.copyFileSync(absPath, backupPath);
     } else {
       // File doesn't exist yet — write a tombstone so restore can delete it
-      fs.writeFileSync(backupPath + TOMBSTONE_SUFFIX, '', 'utf-8');
+      fs.writeFileSync(backupPath + TOMBSTONE_SUFFIX, "", "utf-8");
     }
   }
 }

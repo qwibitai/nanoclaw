@@ -133,18 +133,22 @@ Each modified code file has a corresponding `.intent.md` with structured heading
 # Intent: server.ts modifications
 
 ## What this skill adds
+
 Adds WhatsApp webhook route and message handler to the Express server.
 
 ## Key sections
+
 - Route registration at `/webhook/whatsapp` (POST and GET for verification)
 - Message handler middleware between auth and response pipeline
 
 ## Invariants
+
 - Must not interfere with other channel webhook routes
 - Auth middleware must run before the WhatsApp handler
 - Error handling must propagate to the global error handler
 
 ## Must-keep sections
+
 - The webhook verification flow (GET route) is required by WhatsApp Cloud API
 ```
 
@@ -157,7 +161,7 @@ Structured headings (What, Key sections, Invariants, Must-keep) give Claude Code
 skill: whatsapp
 version: 1.2.0
 description: "WhatsApp Business API integration via Cloud API"
-core_version: 0.1.0               # The core version this skill was authored against
+core_version: 0.1.0 # The core version this skill was authored against
 
 # Files this skill adds
 adds:
@@ -183,8 +187,8 @@ structured:
     - WHATSAPP_PHONE_ID
 
 # Skill relationships
-conflicts: []              # Skills that cannot coexist without agent resolution
-depends: []                # Skills that must be applied first
+conflicts: [] # Skills that cannot coexist without agent resolution
+depends: [] # Skills that must be applied first
 
 # Test command — runs after apply to validate the skill works
 test: "npx vitest run src/channels/whatsapp.test.ts"
@@ -501,7 +505,7 @@ The bar: **a user with any common combination of official skills should never en
 `.nanoclaw/state.yaml` records everything about the installation:
 
 ```yaml
-skills_system_version: "0.1.0"     # Schema version — tooling checks this before any operation
+skills_system_version: "0.1.0" # Schema version — tooling checks this before any operation
 core_version: 0.1.0
 
 applied_skills:
@@ -548,6 +552,7 @@ custom_modifications:
 ```
 
 **v0.1 implementation notes:**
+
 - `file_hashes` stores a single SHA-256 hash per file (the final merged result). Three-part hashes (base/skill_modified/merged) are planned for a future version to improve drift diagnosis.
 - Applied skills use `name` as the key field (not `skill`), matching the TypeScript `AppliedSkill` interface.
 - `structured_outcomes` stores the raw manifest values plus the `test` command. Resolved npm versions (actual installed versions vs semver ranges) are not yet tracked.
@@ -917,7 +922,7 @@ for skill in state.applied_skills:
 # 4. Apply all structured operations (batched)
 collect_all_structured_ops(state.applied_skills)
 merge_npm_dependencies → write package.json once
-npm install once
+pnpm install once
 merge_env_additions → write .env.example once
 merge_compose_services → write docker-compose.yml once
 

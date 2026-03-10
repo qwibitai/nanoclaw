@@ -1,15 +1,10 @@
-import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Message, TextChannel } from "discord.js";
 
-import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
-import { readEnvFile } from '../env.js';
-import { logger } from '../logger.js';
-import { registerChannel, ChannelOpts } from './registry.js';
-import {
-  Channel,
-  OnChatMetadata,
-  OnInboundMessage,
-  RegisteredGroup,
-} from '../types.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from "../config.js";
+import { readEnvFile } from "../env.js";
+import { logger } from "../logger.js";
+import { registerChannel, ChannelOpts } from "./registry.js";
+import { Channel, OnChatMetadata, OnInboundMessage, RegisteredGroup } from "../types.js";
 
 export interface DiscordChannelOpts {
   onMessage: OnInboundMessage;
@@ -18,7 +13,7 @@ export interface DiscordChannelOpts {
 }
 
 export class DiscordChannel implements Channel {
-  name = 'discord';
+  name = "discord";
 
   private client: Client | null = null;
   private opts: DiscordChannelOpts;
@@ -48,9 +43,7 @@ export class DiscordChannel implements Channel {
       let content = message.content;
       const timestamp = message.createdAt.toISOString();
       const senderName =
-        message.member?.displayName ||
-        message.author.displayName ||
-        message.author.username;
+        message.member?.displayName || message.author.displayName || message.author.username;
       const sender = message.author.id;
       const msgId = message.id;
 
@@ -76,9 +69,7 @@ export class DiscordChannel implements Channel {
 
         if (isBotMentioned) {
           // Strip the <@botId> mention to avoid visual clutter
-          content = content
-            .replace(new RegExp(`<@!?${botId}>`, 'g'), '')
-            .trim();
+          content = content.replace(new RegExp(`<@!?${botId}>`, "g"), "").trim();
           // Prepend trigger if not already present
           if (!TRIGGER_PATTERN.test(content)) {
             content = `@${ASSISTANT_NAME} ${content}`;
@@ -89,30 +80,28 @@ export class DiscordChannel implements Channel {
       // Handle attachments — store placeholders so the agent knows something was sent
       if (message.attachments.size > 0) {
         const attachmentDescriptions = [...message.attachments.values()].map((att) => {
-          const contentType = att.contentType || '';
-          if (contentType.startsWith('image/')) {
-            return `[Image: ${att.name || 'image'}]`;
-          } else if (contentType.startsWith('video/')) {
-            return `[Video: ${att.name || 'video'}]`;
-          } else if (contentType.startsWith('audio/')) {
-            return `[Audio: ${att.name || 'audio'}]`;
+          const contentType = att.contentType || "";
+          if (contentType.startsWith("image/")) {
+            return `[Image: ${att.name || "image"}]`;
+          } else if (contentType.startsWith("video/")) {
+            return `[Video: ${att.name || "video"}]`;
+          } else if (contentType.startsWith("audio/")) {
+            return `[Audio: ${att.name || "audio"}]`;
           } else {
-            return `[File: ${att.name || 'file'}]`;
+            return `[File: ${att.name || "file"}]`;
           }
         });
         if (content) {
-          content = `${content}\n${attachmentDescriptions.join('\n')}`;
+          content = `${content}\n${attachmentDescriptions.join("\n")}`;
         } else {
-          content = attachmentDescriptions.join('\n');
+          content = attachmentDescriptions.join("\n");
         }
       }
 
       // Handle reply context — include who the user is replying to
       if (message.reference?.messageId) {
         try {
-          const repliedTo = await message.channel.messages.fetch(
-            message.reference.messageId,
-          );
+          const repliedTo = await message.channel.messages.fetch(message.reference.messageId);
           const replyAuthor =
             repliedTo.member?.displayName ||
             repliedTo.author.displayName ||
@@ -125,15 +114,12 @@ export class DiscordChannel implements Channel {
 
       // Store chat metadata for discovery
       const isGroup = message.guild !== null;
-      this.opts.onChatMetadata(chatJid, timestamp, chatName, 'discord', isGroup);
+      this.opts.onChatMetadata(chatJid, timestamp, chatName, "discord", isGroup);
 
       // Only deliver full message for registered groups
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) {
-        logger.debug(
-          { chatJid, chatName },
-          'Message from unregistered Discord channel',
-        );
+        logger.debug({ chatJid, chatName }, "Message from unregistered Discord channel");
         return;
       }
 
@@ -148,27 +134,22 @@ export class DiscordChannel implements Channel {
         is_from_me: false,
       });
 
-      logger.info(
-        { chatJid, chatName, sender: senderName },
-        'Discord message stored',
-      );
+      logger.info({ chatJid, chatName, sender: senderName }, "Discord message stored");
     });
 
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
-      logger.error({ err: err.message }, 'Discord client error');
+      logger.error({ err: err.message }, "Discord client error");
     });
 
     return new Promise<void>((resolve) => {
       this.client!.once(Events.ClientReady, (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
-          'Discord bot connected',
+          "Discord bot connected",
         );
         console.log(`\n  Discord bot: ${readyClient.user.tag}`);
-        console.log(
-          `  Use /chatid command or check channel IDs in Discord settings\n`,
-        );
+        console.log(`  Use /chatid command or check channel IDs in Discord settings\n`);
         resolve();
       });
 
@@ -178,16 +159,16 @@ export class DiscordChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.client) {
-      logger.warn('Discord client not initialized');
+      logger.warn("Discord client not initialized");
       return;
     }
 
     try {
-      const channelId = jid.replace(/^dc:/, '');
+      const channelId = jid.replace(/^dc:/, "");
       const channel = await this.client.channels.fetch(channelId);
 
-      if (!channel || !('send' in channel)) {
-        logger.warn({ jid }, 'Discord channel not found or not text-based');
+      if (!channel || !("send" in channel)) {
+        logger.warn({ jid }, "Discord channel not found or not text-based");
         return;
       }
 
@@ -202,9 +183,9 @@ export class DiscordChannel implements Channel {
           await textChannel.send(text.slice(i, i + MAX_LENGTH));
         }
       }
-      logger.info({ jid, length: text.length }, 'Discord message sent');
+      logger.info({ jid, length: text.length }, "Discord message sent");
     } catch (err) {
-      logger.error({ jid, err }, 'Failed to send Discord message');
+      logger.error({ jid, err }, "Failed to send Discord message");
     }
   }
 
@@ -213,37 +194,36 @@ export class DiscordChannel implements Channel {
   }
 
   ownsJid(jid: string): boolean {
-    return jid.startsWith('dc:');
+    return jid.startsWith("dc:");
   }
 
   async disconnect(): Promise<void> {
     if (this.client) {
       this.client.destroy();
       this.client = null;
-      logger.info('Discord bot stopped');
+      logger.info("Discord bot stopped");
     }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
     if (!this.client || !isTyping) return;
     try {
-      const channelId = jid.replace(/^dc:/, '');
+      const channelId = jid.replace(/^dc:/, "");
       const channel = await this.client.channels.fetch(channelId);
-      if (channel && 'sendTyping' in channel) {
+      if (channel && "sendTyping" in channel) {
         await (channel as TextChannel).sendTyping();
       }
     } catch (err) {
-      logger.debug({ jid, err }, 'Failed to send Discord typing indicator');
+      logger.debug({ jid, err }, "Failed to send Discord typing indicator");
     }
   }
 }
 
-registerChannel('discord', (opts: ChannelOpts) => {
-  const envVars = readEnvFile(['DISCORD_BOT_TOKEN']);
-  const token =
-    process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || '';
+registerChannel("discord", (opts: ChannelOpts) => {
+  const envVars = readEnvFile(["DISCORD_BOT_TOKEN"]);
+  const token = process.env.DISCORD_BOT_TOKEN || envVars.DISCORD_BOT_TOKEN || "";
   if (!token) {
-    logger.warn('Discord: DISCORD_BOT_TOKEN not set');
+    logger.warn("Discord: DISCORD_BOT_TOKEN not set");
     return null;
   }
   return new DiscordChannel(token, opts);
