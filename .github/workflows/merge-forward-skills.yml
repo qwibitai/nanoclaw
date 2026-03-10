@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   merge-forward:
+    if: github.repository == 'qwibitai/nanoclaw'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

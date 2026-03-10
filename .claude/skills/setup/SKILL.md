@@ -124,13 +124,15 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 ## 5. Install Skills Marketplace
 
-Install the official skills marketplace plugin so feature skills (channel integrations, add-ons) are available:
+Register and install the NanoClaw skills marketplace plugin so all feature skills (channel integrations, add-ons) are available:
 
 ```bash
+claude plugin marketplace add qwibitai/nanoclaw-skills
+claude plugin marketplace update nanoclaw-skills
 claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
 ```
 
-This is hot-loaded — no restart needed. All feature skills become immediately available.
+The marketplace update ensures the local cache is fresh before installing. This is hot-loaded — no restart needed. All feature skills become immediately available.
 
 ## 6. Set Up Channels
 
@@ -156,7 +158,13 @@ Each skill will:
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 7.
+**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+
+```bash
+npm install && npm run build
+```
+
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 7.
 
 ## 7. Mount Allowlist
 
