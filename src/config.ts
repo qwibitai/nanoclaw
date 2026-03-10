@@ -67,6 +67,9 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// When true, all groups respond to every message (no @mention required)
+export const DISABLE_TRIGGERS = process.env.DISABLE_TRIGGERS === 'true';
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =
