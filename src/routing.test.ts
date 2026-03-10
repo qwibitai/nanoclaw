@@ -179,8 +179,20 @@ describe('getAvailableGroups', () => {
   });
 
   it('includes Telegram chat JIDs', () => {
-    storeChatMetadata('tg:100200300', '2024-01-01T00:00:01.000Z', 'Telegram Chat', 'telegram', true);
-    storeChatMetadata('user@s.whatsapp.net', '2024-01-01T00:00:02.000Z', 'User DM', 'whatsapp', false);
+    storeChatMetadata(
+      'tg:100200300',
+      '2024-01-01T00:00:01.000Z',
+      'Telegram Chat',
+      'telegram',
+      true,
+    );
+    storeChatMetadata(
+      'user@s.whatsapp.net',
+      '2024-01-01T00:00:02.000Z',
+      'User DM',
+      'whatsapp',
+      false,
+    );
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
@@ -188,7 +200,13 @@ describe('getAvailableGroups', () => {
   });
 
   it('returns Telegram group JIDs with negative IDs', () => {
-    storeChatMetadata('tg:-1001234567890', '2024-01-01T00:00:01.000Z', 'TG Group', 'telegram', true);
+    storeChatMetadata(
+      'tg:-1001234567890',
+      '2024-01-01T00:00:01.000Z',
+      'TG Group',
+      'telegram',
+      true,
+    );
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(1);
@@ -197,8 +215,20 @@ describe('getAvailableGroups', () => {
   });
 
   it('marks registered Telegram chats correctly', () => {
-    storeChatMetadata('tg:100200300', '2024-01-01T00:00:01.000Z', 'TG Registered', 'telegram', true);
-    storeChatMetadata('tg:999999', '2024-01-01T00:00:02.000Z', 'TG Unregistered', 'telegram', true);
+    storeChatMetadata(
+      'tg:100200300',
+      '2024-01-01T00:00:01.000Z',
+      'TG Registered',
+      'telegram',
+      true,
+    );
+    storeChatMetadata(
+      'tg:999999',
+      '2024-01-01T00:00:02.000Z',
+      'TG Unregistered',
+      'telegram',
+      true,
+    );
 
     _setRegisteredGroups({
       'tg:100200300': {
@@ -218,9 +248,27 @@ describe('getAvailableGroups', () => {
   });
 
   it('mixes WhatsApp and Telegram chats ordered by activity', () => {
-    storeChatMetadata('wa@g.us', '2024-01-01T00:00:01.000Z', 'WhatsApp', 'whatsapp', true);
-    storeChatMetadata('tg:100', '2024-01-01T00:00:03.000Z', 'Telegram', 'telegram', true);
-    storeChatMetadata('wa2@g.us', '2024-01-01T00:00:02.000Z', 'WhatsApp 2', 'whatsapp', true);
+    storeChatMetadata(
+      'wa@g.us',
+      '2024-01-01T00:00:01.000Z',
+      'WhatsApp',
+      'whatsapp',
+      true,
+    );
+    storeChatMetadata(
+      'tg:100',
+      '2024-01-01T00:00:03.000Z',
+      'Telegram',
+      'telegram',
+      true,
+    );
+    storeChatMetadata(
+      'wa2@g.us',
+      '2024-01-01T00:00:02.000Z',
+      'WhatsApp 2',
+      'whatsapp',
+      true,
+    );
 
     const groups = getAvailableGroups();
     expect(groups).toHaveLength(3);
