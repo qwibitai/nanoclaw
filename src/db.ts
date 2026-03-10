@@ -622,13 +622,25 @@ export function getThreadMessages(
  */
 export function findMessageById(
   id: string,
-): { chat_jid: string; timestamp: string; sender_name: string; content: string } | undefined {
+):
+  | {
+      chat_jid: string;
+      timestamp: string;
+      sender_name: string;
+      content: string;
+    }
+  | undefined {
   return db
     .prepare(
       `SELECT chat_jid, timestamp, sender_name, content FROM messages WHERE id = ? LIMIT 1`,
     )
     .get(id) as
-    | { chat_jid: string; timestamp: string; sender_name: string; content: string }
+    | {
+        chat_jid: string;
+        timestamp: string;
+        sender_name: string;
+        content: string;
+      }
     | undefined;
 }
 

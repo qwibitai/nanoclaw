@@ -620,7 +620,12 @@ function processQueryIpc(
       }
 
       logger.info(
-        { sourceGroup, chatJid, channelId: data.channelId, count: messages.length },
+        {
+          sourceGroup,
+          chatJid,
+          channelId: data.channelId,
+          count: messages.length,
+        },
         'IPC read_discord query served',
       );
       writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
