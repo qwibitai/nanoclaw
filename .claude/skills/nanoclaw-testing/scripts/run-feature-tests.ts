@@ -33,6 +33,36 @@ interface ParsedArgs {
   jsonOut?: string;
 }
 
+// Module-level constants to avoid repeated allocations
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+  'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with',
+  'add', 'new', 'feature',
+]);
+
+const WORKER_TOKENS = [
+  'worker', 'dispatch', 'container', 'lifecycle', 'timeout',
+  'no-output', 'handoff', 'ipc', 'reliability',
+];
+
+const HAPPINESS_TOKENS = [
+  'andy', 'user', 'progress', 'greeting', 'status', 'chat', 'no-output',
+];
+
+const SCORING_WEIGHTS = {
+  EXACT_ID_MATCH: 100,
+  ID_CONTAINS_QUERY: 40,
+  NAME_CONTAINS_QUERY: 30,
+  SUMMARY_CONTAINS_QUERY: 15,
+  ID_TERM_MATCH: 20,
+  NAME_TERM_MATCH: 15,
+  SUMMARY_TERM_MATCH: 10,
+  KEYWORD_EXACT_MATCH: 20,
+  KEYWORD_TERM_MATCH: 10,
+  TERM_MATCH_BONUS: 12,
+  COVERAGE_BONUS: 6,
+} as const;
+
 function readFlagValue(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   if (idx === -1) return undefined;
@@ -75,87 +105,74 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function scoreFeature(feature: CatalogFeature, query: string): number {
   const q = query.toLowerCase();
-  const stopWords = new Set([
-    'a',
-    'an',
-    'and',
-    'are',
-    'as',
-    'at',
-    'be',
-    'by',
-    'for',
-    'from',
-    'in',
-    'is',
-    'it',
-    'of',
-    'on',
-    'or',
-    'that',
-    'the',
-    'to',
-    'with',
-    'add',
-    'new',
-    'feature',
-  ]);
+  // Pre-compute lowercase values once
+  const idLower = feature.id.toLowerCase();
+  const nameLower = feature.name.toLowerCase();
+  const summaryLower = feature.summary.toLowerCase();
+
   const terms = q
     .split(/\s+/)
     .map((term) => term.trim())
-    .filter((term) => term.length >= 3 && !stopWords.has(term));
+    .filter((term) => term.length >= 3 && !STOP_WORDS.has(term));
+
   const includesAnyTerm = (value: string): boolean =>
     terms.some((term) => value.includes(term));
+
   const matchedTermCount = (value: string): number =>
     terms.filter((term) => value.includes(term)).length;
+
   let score = 0;
   const matchedTerms = new Set<string>();
 
-  if (feature.id.toLowerCase() === q) score += 100;
-  if (feature.id.toLowerCase().includes(q)) score += 40;
-  if (feature.name.toLowerCase().includes(q)) score += 30;
-  if (feature.summary.toLowerCase().includes(q)) score += 15;
-  if (includesAnyTerm(feature.id.toLowerCase())) score += 20;
-  if (includesAnyTerm(feature.name.toLowerCase())) score += 15;
-  if (includesAnyTerm(feature.summary.toLowerCase())) score += 10;
+  if (idLower === q) score += SCORING_WEIGHTS.EXACT_ID_MATCH;
+  else if (idLower.includes(q)) score += SCORING_WEIGHTS.ID_CONTAINS_QUERY;
+
+  if (nameLower.includes(q)) score += SCORING_WEIGHTS.NAME_CONTAINS_QUERY;
+  if (summaryLower.includes(q)) score += SCORING_WEIGHTS.SUMMARY_CONTAINS_QUERY;
+
+  if (includesAnyTerm(idLower)) score += SCORING_WEIGHTS.ID_TERM_MATCH;
+  if (includesAnyTerm(nameLower)) score += SCORING_WEIGHTS.NAME_TERM_MATCH;
+  if (includesAnyTerm(summaryLower)) score += SCORING_WEIGHTS.SUMMARY_TERM_MATCH;
+
   for (const term of terms) {
-    if (
-      feature.id.toLowerCase().includes(term) ||
-      feature.name.toLowerCase().includes(term) ||
-      feature.summary.toLowerCase().includes(term)
-    ) {
+    if (idLower.includes(term) || nameLower.includes(term) || summaryLower.includes(term)) {
       matchedTerms.add(term);
     }
   }
 
   for (const keyword of feature.keywords) {
     const normalized = keyword.toLowerCase();
-    if (normalized.includes(q)) score += 20;
+    if (normalized.includes(q)) score += SCORING_WEIGHTS.KEYWORD_EXACT_MATCH;
     if (includesAnyTerm(normalized)) {
-      score += 10;
+      score += SCORING_WEIGHTS.KEYWORD_TERM_MATCH;
       for (const term of terms) {
         if (normalized.includes(term)) matchedTerms.add(term);
       }
     }
   }
 
-  score += matchedTerms.size * 12;
+  score += matchedTerms.size * SCORING_WEIGHTS.TERM_MATCH_BONUS;
   if (terms.length > 0) {
-    const idCoverage = matchedTermCount(feature.id.toLowerCase());
-    const nameCoverage = matchedTermCount(feature.name.toLowerCase());
-    score += Math.max(idCoverage, nameCoverage) * 6;
+    const idCoverage = matchedTermCount(idLower);
+    const nameCoverage = matchedTermCount(nameLower);
+    score += Math.max(idCoverage, nameCoverage) * SCORING_WEIGHTS.COVERAGE_BONUS;
   }
 
   return score;
 }
 
 function resolveFeature(catalog: Catalog, query: string): CatalogFeature | null {
-  const ranked = catalog.features
-    .map((feature) => ({ feature, score: scoreFeature(feature, query) }))
-    .filter((item) => item.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  return ranked.length > 0 ? ranked[0].feature : null;
+  // Use reduce instead of full sort for O(n) instead of O(n log n)
+  return catalog.features.reduce(
+    (best, feature) => {
+      const score = scoreFeature(feature, query);
+      if (score > best.score) {
+        return { feature, score };
+      }
+      return best;
+    },
+    { feature: null as CatalogFeature | null, score: 0 }
+  ).feature;
 }
 
 function runCommand(name: string, command: string): CmdResult {
@@ -192,32 +209,12 @@ function normalizedFeatureText(feature: CatalogFeature): string {
 
 function shouldRunWorkerConnectivity(feature: CatalogFeature): boolean {
   const text = normalizedFeatureText(feature);
-  const tokens = [
-    'worker',
-    'dispatch',
-    'container',
-    'lifecycle',
-    'timeout',
-    'no-output',
-    'handoff',
-    'ipc',
-    'reliability',
-  ];
-  return tokens.some((token) => text.includes(token));
+  return WORKER_TOKENS.some((token) => text.includes(token));
 }
 
 function shouldRunHappinessGate(feature: CatalogFeature): boolean {
   const text = normalizedFeatureText(feature);
-  const tokens = [
-    'andy',
-    'user',
-    'progress',
-    'greeting',
-    'status',
-    'chat',
-    'no-output',
-  ];
-  if (tokens.some((token) => text.includes(token))) {
+  if (HAPPINESS_TOKENS.some((token) => text.includes(token))) {
     return true;
   }
   return feature.files.some((file) =>

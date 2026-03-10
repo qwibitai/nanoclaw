@@ -31,12 +31,14 @@ function main(): void {
   const repoRoot = process.cwd();
   const seedPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.seed.json');
 
-  if (!fs.existsSync(seedPath)) {
+  // Try to read directly - avoids TOCTOU race condition
+  let seed: SeedCatalog;
+  try {
+    seed = JSON.parse(fs.readFileSync(seedPath, 'utf8')) as SeedCatalog;
+  } catch {
     console.error(`Missing ${seedPath}`);
     process.exit(1);
   }
-
-  const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8')) as SeedCatalog;
   const tracked = new Set(
     seed.features.flatMap((feature) => [...feature.files, ...feature.tests]),
   );

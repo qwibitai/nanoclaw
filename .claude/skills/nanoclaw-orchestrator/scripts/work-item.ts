@@ -5,6 +5,7 @@ import path from 'path';
 
 type WorkStatus = 'planned' | 'implementing' | 'testing' | 'done' | 'blocked';
 
+const SCHEMA_VERSION = 2;
 const ALLOWED_TRANSITIONS: Record<WorkStatus, WorkStatus[]> = {
   planned: ['implementing', 'blocked'],
   implementing: ['testing', 'blocked'],
@@ -39,18 +40,28 @@ function getStorePath(repoRoot: string): string {
   return path.join(repoRoot, '.claude', 'progress', 'feature-work-items.json');
 }
 
+function defaultStore(): WorkStore {
+  return {
+    schema_version: SCHEMA_VERSION,
+    updated_at: nowIso(),
+    items: [],
+  };
+}
+
 function loadStore(repoRoot: string): WorkStore {
   const storePath = getStorePath(repoRoot);
-  if (!fs.existsSync(storePath)) {
-    return {
-      schema_version: 2,
-      updated_at: nowIso(),
-      items: [],
-    };
+  let contents: string;
+  try {
+    contents = fs.readFileSync(storePath, 'utf8');
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') {
+      return defaultStore();
+    }
+    throw error;
   }
 
-  const raw = JSON.parse(fs.readFileSync(storePath, 'utf8')) as WorkStore;
-  raw.schema_version = Math.max(raw.schema_version || 1, 2);
+  const raw = JSON.parse(contents) as WorkStore;
+  raw.schema_version = Math.max(raw.schema_version || 1, SCHEMA_VERSION);
   raw.items = raw.items.map((item) => ({
     ...item,
     evidence: item.evidence || [],
@@ -60,7 +71,7 @@ function loadStore(repoRoot: string): WorkStore {
 
 function saveStore(repoRoot: string, store: WorkStore): void {
   store.updated_at = nowIso();
-  store.schema_version = 2;
+  store.schema_version = SCHEMA_VERSION;
   const storePath = getStorePath(repoRoot);
   fs.mkdirSync(path.dirname(storePath), { recursive: true });
   fs.writeFileSync(storePath, `${JSON.stringify(store, null, 2)}\n`, 'utf8');
@@ -96,12 +107,14 @@ function validateEvidence(repoRoot: string, entries: string[]): void {
   }
 }
 
+const VALID_STATUSES: WorkStatus[] = ['planned', 'implementing', 'testing', 'done', 'blocked'];
+
 function ensureStatus(value: string | undefined): WorkStatus {
   if (!value) {
     console.error('update requires --status');
     process.exit(1);
   }
-  if (!['planned', 'implementing', 'testing', 'done', 'blocked'].includes(value)) {
+  if (!VALID_STATUSES.includes(value as WorkStatus)) {
     console.error(`invalid status: ${value}`);
     process.exit(1);
   }
@@ -169,8 +182,6 @@ function main(): void {
       console.error(`work item not found: ${id}`);
       process.exit(1);
     }
-
-    item.evidence = item.evidence || [];
 
     if (item.status !== status) {
       const allowed = ALLOWED_TRANSITIONS[item.status] || [];
