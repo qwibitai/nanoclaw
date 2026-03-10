@@ -83,8 +83,10 @@ export function resolveWorktreePath(
 
 export function resolveGroupIpcInputPath(
   groupFolder: string,
-  threadId: string,
+  threadKey: string,
 ): string {
   const ipcPath = resolveGroupIpcPath(groupFolder);
-  return path.join(ipcPath, 'input', threadId);
+  const result = path.join(ipcPath, 'input', threadKey);
+  ensureWithinBase(path.join(ipcPath, 'input'), result);
+  return result;
 }

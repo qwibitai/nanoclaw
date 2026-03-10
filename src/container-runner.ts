@@ -229,6 +229,29 @@ function execAsync(cmd: string, options?: { cwd?: string }): Promise<string> {
   });
 }
 
+/** Remove a git worktree with fallback to rm + prune. Best-effort, never throws. */
+async function removeWorktree(repoDir: string, wtPath: string): Promise<void> {
+  try {
+    await execAsync(`git worktree remove --force "${wtPath}"`, {
+      cwd: repoDir,
+    });
+  } catch {
+    try {
+      fs.rmSync(wtPath, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+    try {
+      await execAsync('git worktree prune', { cwd: repoDir });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// Cache repos that have had gc.auto disabled (avoids redundant git config writes)
+const gcDisabledRepos = new Set<string>();
+
 /**
  * Prepare a per-thread worktree workspace for concurrent container access.
  * Creates git worktrees for repos, copies CLAUDE.md/conversations, symlinks others.
@@ -251,20 +274,18 @@ export async function prepareThreadWorkspace(
 
   try {
     const entries = fs.readdirSync(groupDir, { withFileTypes: true });
+    const gitRepos: Array<{ srcPath: string; wtPath: string }> = [];
+
     for (const entry of entries) {
       const srcPath = path.join(groupDir, entry.name);
 
       if (entry.isDirectory()) {
-        // Check if it's a git repo
         const gitDir = path.join(srcPath, '.git');
         if (fs.existsSync(gitDir)) {
-          // Git repo: create worktree
-          const wtPath = path.join(worktreeBase, entry.name);
-          await execAsync('git config gc.auto 0', { cwd: srcPath });
-          await execAsync(`git worktree add --detach "${wtPath}" HEAD`, {
-            cwd: srcPath,
+          gitRepos.push({
+            srcPath,
+            wtPath: path.join(worktreeBase, entry.name),
           });
-          createdWorktrees.push({ repoDir: srcPath, wtPath });
         } else if (entry.name === 'conversations' || entry.name === 'threads') {
           // Copy directories that get written to concurrently
           const dstPath = path.join(worktreeBase, entry.name);
@@ -278,10 +299,8 @@ export async function prepareThreadWorkspace(
         }
       } else if (entry.isFile()) {
         if (entry.name === 'CLAUDE.md') {
-          // Copy CLAUDE.md (written by agent auto-memory)
           fs.copyFileSync(srcPath, path.join(worktreeBase, entry.name));
         } else {
-          // Symlink other files
           const dstPath = path.join(worktreeBase, entry.name);
           if (!fs.existsSync(dstPath)) {
             fs.symlinkSync(srcPath, dstPath);
@@ -289,26 +308,27 @@ export async function prepareThreadWorkspace(
         }
       }
     }
+
+    // Create git worktrees in parallel (independent repos, safe within mutex)
+    await Promise.all(
+      gitRepos.map(async ({ srcPath, wtPath }) => {
+        if (!gcDisabledRepos.has(srcPath)) {
+          await execAsync('git config gc.auto 0', { cwd: srcPath });
+          gcDisabledRepos.add(srcPath);
+        }
+        await execAsync(`git worktree add --detach "${wtPath}" HEAD`, {
+          cwd: srcPath,
+        });
+        createdWorktrees.push({ repoDir: srcPath, wtPath });
+      }),
+    );
   } catch (err) {
     // Rollback: clean up any created worktrees
-    for (const { repoDir, wtPath } of createdWorktrees) {
-      try {
-        await execAsync(`git worktree remove --force "${wtPath}"`, {
-          cwd: repoDir,
-        });
-      } catch {
-        try {
-          fs.rmSync(wtPath, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-        try {
-          await execAsync('git worktree prune', { cwd: repoDir });
-        } catch {
-          /* ignore */
-        }
-      }
-    }
+    await Promise.all(
+      createdWorktrees.map(({ repoDir, wtPath }) =>
+        removeWorktree(repoDir, wtPath),
+      ),
+    );
     try {
       fs.rmSync(worktreeBase, { recursive: true, force: true });
     } catch {
@@ -354,31 +374,16 @@ export async function cleanupThreadWorkspace(
   // Remove git worktrees
   try {
     const entries = fs.readdirSync(worktreeBase, { withFileTypes: true });
+    const removals: Promise<void>[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const wtPath = path.join(worktreeBase, entry.name);
-      // Check if it's a git worktree (has .git file, not directory)
       const gitFile = path.join(wtPath, '.git');
       if (fs.existsSync(gitFile) && fs.statSync(gitFile).isFile()) {
-        const mainRepoDir = path.join(groupDir, entry.name);
-        try {
-          await execAsync(`git worktree remove --force "${wtPath}"`, {
-            cwd: mainRepoDir,
-          });
-        } catch {
-          try {
-            fs.rmSync(wtPath, { recursive: true, force: true });
-          } catch {
-            /* ignore */
-          }
-          try {
-            await execAsync('git worktree prune', { cwd: mainRepoDir });
-          } catch {
-            /* ignore */
-          }
-        }
+        removals.push(removeWorktree(path.join(groupDir, entry.name), wtPath));
       }
     }
+    await Promise.all(removals);
   } catch {
     // ignore readdir errors
   }
@@ -404,23 +409,22 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
       const gfPath = path.join(WORKTREES_DIR, gf);
       if (!fs.statSync(gfPath).isDirectory()) continue;
 
-      // Also prune git's internal worktree metadata for each repo in the group
+      // Prune git's internal worktree metadata for each repo in the group
       const groupDir = path.join(GROUPS_DIR, gf);
       if (fs.existsSync(groupDir)) {
         const entries = fs.readdirSync(groupDir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          const repoGit = path.join(groupDir, entry.name, '.git');
-          if (fs.existsSync(repoGit)) {
-            try {
-              await execAsync('git worktree prune', {
-                cwd: path.join(groupDir, entry.name),
-              });
-            } catch {
-              /* ignore */
-            }
-          }
-        }
+        const pruneOps = entries
+          .filter(
+            (e) =>
+              e.isDirectory() &&
+              fs.existsSync(path.join(groupDir, e.name, '.git')),
+          )
+          .map((e) =>
+            execAsync('git worktree prune', {
+              cwd: path.join(groupDir, e.name),
+            }).catch(() => {}),
+          );
+        await Promise.all(pruneOps);
       }
 
       // Remove stale worktree directories

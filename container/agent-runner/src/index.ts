@@ -326,7 +326,7 @@ function shouldClose(): boolean {
  */
 function drainIpcInput(): string[] {
   try {
-    fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
+    // Dir already created in main() at startup
     const files = fs.readdirSync(IPC_INPUT_DIR)
       .filter(f => f.endsWith('.json'))
       .sort();
