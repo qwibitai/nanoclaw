@@ -5,13 +5,13 @@ description: Add Slack as a channel. Can replace WhatsApp entirely or run alongs
 
 # Add Slack Channel
 
-This skill adds Slack support to NanoClaw using the skills engine for deterministic code changes, then walks through interactive setup.
+This skill adds Slack support to NanoClaw, then walks through interactive setup.
 
 ## Phase 1: Pre-flight
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `slack` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+Check if `src/channels/slack.ts` exists. If it does, skip to Phase 3 (Setup). The code changes are already in place.
 
 ### Ask the user
 
@@ -19,42 +19,43 @@ Read `.nanoclaw/state.yaml`. If `slack` is in `applied_skills`, skip to Phase 3 
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure channel remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `slack` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-slack
+git remote add slack https://github.com/qwibitai/nanoclaw-slack.git
 ```
 
-This deterministically:
-- Adds `src/channels/slack.ts` (SlackChannel class with self-registration via `registerChannel`)
-- Adds `src/channels/slack.test.ts` (46 unit tests)
-- Appends `import './slack.js'` to the channel barrel file `src/channels/index.ts`
-- Installs the `@slack/bolt` npm dependency
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent file:
-- `modify/src/channels/index.ts.intent.md` — what changed and invariants
+```bash
+git fetch slack main
+git merge slack/main
+```
+
+This merges in:
+- `src/channels/slack.ts` (SlackChannel class with self-registration via `registerChannel`)
+- `src/channels/slack.test.ts` (46 unit tests)
+- `import './slack.js'` appended to the channel barrel file `src/channels/index.ts`
+- `@slack/bolt` npm dependency in `package.json`
+- `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install
 npm run build
+npx vitest run src/channels/slack.test.ts
 ```
 
-All tests must pass (including the new slack tests) and build must be clean before proceeding.
+All tests must pass (including the new Slack tests) and build must be clean before proceeding.
 
 ## Phase 3: Setup
 

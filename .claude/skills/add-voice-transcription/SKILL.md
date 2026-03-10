@@ -11,7 +11,7 @@ This skill adds automatic voice message transcription to NanoClaw's WhatsApp cha
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `voice-transcription` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
+Check if `src/transcription.ts` exists. If it does, skip to Phase 3 (Configure). The code changes are already in place.
 
 ### Ask the user
 
@@ -23,42 +23,45 @@ If yes, collect it now. If no, direct them to create one at https://platform.ope
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package.
+**Prerequisite:** WhatsApp must be installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure WhatsApp fork remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-### Apply the skill
+If `whatsapp` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-voice-transcription
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 ```
 
-This deterministically:
-- Adds `src/transcription.ts` (voice transcription module using OpenAI Whisper)
-- Three-way merges voice handling into `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
-- Three-way merges transcription tests into `src/channels/whatsapp.test.ts` (mock + 3 test cases)
-- Installs the `openai` npm dependency
-- Updates `.env.example` with `OPENAI_API_KEY`
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/channels/whatsapp.ts.intent.md` — what changed and invariants for whatsapp.ts
-- `modify/src/channels/whatsapp.test.ts.intent.md` — what changed for whatsapp.test.ts
+```bash
+git fetch whatsapp skill/voice-transcription
+git merge whatsapp/skill/voice-transcription
+```
+
+This merges in:
+- `src/transcription.ts` (voice transcription module using OpenAI Whisper)
+- Voice handling in `src/channels/whatsapp.ts` (isVoiceMessage check, transcribeAudioMessage call)
+- Transcription tests in `src/channels/whatsapp.test.ts`
+- `openai` npm dependency in `package.json`
+- `OPENAI_API_KEY` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 
 ```bash
-npm test
+npm install --legacy-peer-deps
 npm run build
+npx vitest run src/channels/whatsapp.test.ts
 ```
 
-All tests must pass (including the 3 new voice transcription tests) and build must be clean before proceeding.
+All tests must pass and build must be clean before proceeding.
 
 ## Phase 3: Configure
 

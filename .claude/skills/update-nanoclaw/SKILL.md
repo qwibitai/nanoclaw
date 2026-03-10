@@ -204,7 +204,7 @@ Parse the diff output for lines starting with `+[BREAKING]`. Each such line is o
 ```
 
 If no `[BREAKING]` lines are found:
-- Skip this step silently. Proceed to Step 7.
+- Skip this step silently. Proceed to Step 7 (skill updates check).
 
 If one or more `[BREAKING]` lines are found:
 - Display a warning header to the user: "This update includes breaking changes that may require action:"
@@ -215,9 +215,20 @@ If one or more `[BREAKING]` lines are found:
   - "Skip — I'll handle these manually"
 - Set `multiSelect: true` so the user can pick multiple skills if there are several breaking changes.
 - For each skill the user selects, invoke it using the Skill tool.
-- After all selected skills complete (or if user chose Skip), proceed to Step 7.
+- After all selected skills complete (or if user chose Skip), proceed to Step 7 (skill updates check).
 
-# Step 7: Summary + rollback instructions
+# Step 7: Check for skill updates
+After the summary, check if skills are distributed as branches in this repo:
+- `git branch -r --list 'upstream/skill/*'`
+
+If any `upstream/skill/*` branches exist:
+- Use AskUserQuestion to ask: "Upstream has skill branches. Would you like to check for skill updates?"
+  - Option 1: "Yes, check for updates" (description: "Runs /update-skills to check for and apply skill branch updates")
+  - Option 2: "No, skip" (description: "You can run /update-skills later any time")
+- If user selects yes, invoke `/update-skills` using the Skill tool.
+- After the skill completes (or if user selected no), proceed to Step 8.
+
+# Step 8: Summary + rollback instructions
 Show:
 - Backup tag: the tag name created in Step 1
 - New HEAD: `git rev-parse --short HEAD`

@@ -9,31 +9,51 @@ Adds the ability for NanoClaw agents to see and understand images sent via Whats
 
 ## Phase 1: Pre-flight
 
-1. Check `.nanoclaw/state.yaml` for `add-image-vision` — skip if already applied
+1. Check if `src/image.ts` exists — skip to Phase 3 if already applied
 2. Confirm `sharp` is installable (native bindings require build tools)
+
+**Prerequisite:** WhatsApp must be installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
 ## Phase 2: Apply Code Changes
 
-1. Initialize the skills system if not already done:
-   ```bash
-   npx tsx -e "import { initNanoclawDir } from './skills-engine/init.ts'; initNanoclawDir();"
-   ```
+### Ensure WhatsApp fork remote
 
-2. Apply the skill:
-   ```bash
-   npx tsx skills-engine/apply-skill.ts add-image-vision
-   ```
+```bash
+git remote -v
+```
 
-3. Install new dependency:
-   ```bash
-   npm install sharp
-   ```
+If `whatsapp` is missing, add it:
 
-4. Validate:
-   ```bash
-   npm run typecheck
-   npm test
-   ```
+```bash
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+```
+
+### Merge the skill branch
+
+```bash
+git fetch whatsapp skill/image-vision
+git merge whatsapp/skill/image-vision
+```
+
+This merges in:
+- `src/image.ts` (image download, resize via sharp, base64 encoding)
+- `src/image.test.ts` (8 unit tests)
+- Image attachment handling in `src/channels/whatsapp.ts`
+- Image passing to agent in `src/index.ts` and `src/container-runner.ts`
+- Image content block support in `container/agent-runner/src/index.ts`
+- `sharp` npm dependency in `package.json`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
+
+### Validate code changes
+
+```bash
+npm install
+npm run build
+npx vitest run src/image.test.ts
+```
+
+All tests must pass and build must be clean before proceeding.
 
 ## Phase 3: Configure
 
