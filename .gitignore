@@ -13,10 +13,13 @@ logs/
 groups/*
 !groups/main/
 !groups/global/
+!groups/telegram_gentech-agency/
 groups/main/*
 groups/global/*
+groups/telegram_gentech-agency/*
 !groups/main/CLAUDE.md
 !groups/global/CLAUDE.md
+!groups/telegram_gentech-agency/CLAUDE.md
 
 # Secrets
 *.keys.json
