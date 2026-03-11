@@ -513,6 +513,24 @@ const IMAGE_MIME_TYPES = new Set([
 ]);
 
 /**
+ * Detect actual image MIME type from file magic bytes.
+ * Falls back to the provided mimeType if detection fails.
+ */
+function detectImageMimeType(data: Buffer, declaredMime: string): string {
+  if (data.length < 8) return declaredMime;
+  // PNG: 89 50 4E 47
+  if (data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4E && data[3] === 0x47) return 'image/png';
+  // JPEG: FF D8 FF
+  if (data[0] === 0xFF && data[1] === 0xD8 && data[2] === 0xFF) return 'image/jpeg';
+  // GIF: 47 49 46 38
+  if (data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x38) return 'image/gif';
+  // WebP: RIFF....WEBP
+  if (data[0] === 0x52 && data[1] === 0x49 && data[2] === 0x46 && data[3] === 0x46 &&
+      data[8] === 0x57 && data[9] === 0x45 && data[10] === 0x42 && data[11] === 0x50) return 'image/webp';
+  return declaredMime;
+}
+
+/**
  * Build prompt content with interleaved image content blocks.
  * If there are no image attachments, returns the plain text prompt.
  * Otherwise, returns a ContentBlock[] with text and image blocks.
@@ -544,11 +562,15 @@ function buildPromptContent(
           continue;
         }
         const data = fs.readFileSync(att.containerPath);
+        const actualMime = detectImageMimeType(data, att.mimeType);
+        if (actualMime !== att.mimeType) {
+          log(`MIME type mismatch: declared=${att.mimeType}, actual=${actualMime} for ${att.filename}`);
+        }
         blocks.push({
           type: 'image',
           source: {
             type: 'base64',
-            media_type: att.mimeType,
+            media_type: actualMime,
             data: data.toString('base64'),
           },
         });
