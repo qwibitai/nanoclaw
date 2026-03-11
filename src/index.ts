@@ -338,7 +338,11 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
-      if (allowSessionReset && sessionId && shouldResetSessionOnError(output.error)) {
+      if (
+        allowSessionReset &&
+        sessionId &&
+        shouldResetSessionOnError(output.error)
+      ) {
         logger.warn(
           {
             group: group.name,
