@@ -19,7 +19,7 @@ This document owns placement decisions between GitHub and local execution lanes:
 
 This document does not own:
 
-1. the setup shape of the GitHub collaboration stack
+1. the setup shape of the GitHub delivery stack
 2. the daily operating rules for Notion context, Linear issues, and delivery PRs
 3. the detailed governance policy for specific `.github/workflows/*`
 

@@ -49,7 +49,7 @@ bash scripts/workflow/work-sweep.sh --agent codex --fail-on-action-items
 ```
 
 The wrapper resolves the active control plane via `scripts/workflow/work-control-plane.js`.
-Missing Linear configuration is a startup error. There is no GitHub Project fallback.
+Missing Linear configuration is a startup error.
 
 ## What the Sweep Checks
 

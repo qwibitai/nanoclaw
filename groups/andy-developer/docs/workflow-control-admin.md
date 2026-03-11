@@ -28,7 +28,7 @@ Use exactly one authoritative surface per concern:
 - `GitHub`: branches, PRs, reviews, CI, and merge governance
 - repo files: dispatch contracts, catalogs, incidents, diagnostics, and evidence
 
-Do not recreate issue state in GitHub Projects, GitHub Discussions, or repo-local work-item trackers.
+Do not recreate issue state anywhere outside Linear.
 
 ## Standard Sequence
 

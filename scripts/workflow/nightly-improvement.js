@@ -147,15 +147,24 @@ function loadState(statePath = DEFAULT_STATE_PATH) {
     return defaultState();
   }
   const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-  if (parsed.discussion_refs) {
+  const allowedTopLevelKeys = new Set([
+    'schema_version',
+    'last_run_at',
+    'last_upstream_sha',
+    'tool_versions',
+    'context_refs',
+    'evaluated_keys',
+  ]);
+  const unexpectedKeys = Object.keys(parsed).filter((key) => !allowedTopLevelKeys.has(key));
+  if (unexpectedKeys.length > 0) {
     throw new Error(
-      `Legacy nightly state detected in ${statePath}. Migrate discussion_refs to context_refs before continuing.`,
+      `Unsupported nightly state schema in ${statePath}. Remove unexpected keys: ${unexpectedKeys.join(', ')}.`,
     );
   }
   for (const [evaluationKey, evaluation] of Object.entries(parsed.evaluated_keys || {})) {
-    if (evaluation && typeof evaluation === 'object' && 'discussionNumber' in evaluation) {
+    if (evaluation && typeof evaluation === 'object' && !('pageId' in evaluation)) {
       throw new Error(
-        `Legacy nightly evaluation record detected for ${evaluationKey} in ${statePath}. Remove discussionNumber and store pageId instead.`,
+        `Unsupported nightly evaluation record for ${evaluationKey} in ${statePath}. Each record must store pageId.`,
       );
     }
   }

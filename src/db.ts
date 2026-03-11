@@ -132,11 +132,6 @@ function createSchema(database: Database.Database): void {
       worker_group_folder TEXT,
       coordinator_session_id TEXT,
       last_status_text TEXT,
-      github_issue_number INTEGER,
-      github_issue_url TEXT,
-      github_issue_repo TEXT,
-      github_project_board_key TEXT,
-      github_project_item_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       closed_at TEXT
@@ -199,14 +194,6 @@ function createSchema(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_steering_run_id ON worker_steering_events(run_id);
 
-    CREATE TABLE IF NOT EXISTS github_delivery_events (
-      request_id TEXT NOT NULL,
-      event_key TEXT NOT NULL,
-      comment_url TEXT,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (request_id, event_key),
-      FOREIGN KEY (request_id) REFERENCES andy_requests(request_id)
-    );
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -299,20 +286,6 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
-  const andyRequestMigrations = [
-    `ALTER TABLE andy_requests ADD COLUMN github_issue_number INTEGER`,
-    `ALTER TABLE andy_requests ADD COLUMN github_issue_url TEXT`,
-    `ALTER TABLE andy_requests ADD COLUMN github_issue_repo TEXT`,
-    `ALTER TABLE andy_requests ADD COLUMN github_project_board_key TEXT`,
-    `ALTER TABLE andy_requests ADD COLUMN github_project_item_id TEXT`,
-  ];
-  for (const sql of andyRequestMigrations) {
-    try {
-      database.exec(sql);
-    } catch {
-      /* column already exists */
-    }
-  }
   database.exec(`
     UPDATE andy_requests
        SET source_lane_id = CASE
@@ -336,8 +309,6 @@ function createSchema(database: Database.Database): void {
       ON worker_runs(lane_id, started_at);
     CREATE INDEX IF NOT EXISTS idx_andy_requests_source_lane
       ON andy_requests(source_lane_id, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_andy_requests_github_issue
-      ON andy_requests(github_issue_number, updated_at DESC);
   `);
 
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
@@ -1100,11 +1071,6 @@ export interface AndyRequestRecord {
   worker_group_folder: string | null;
   coordinator_session_id: string | null;
   last_status_text: string | null;
-  github_issue_number: number | null;
-  github_issue_url: string | null;
-  github_issue_repo: string | null;
-  github_project_board_key: string | null;
-  github_project_item_id: string | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -1946,7 +1912,7 @@ export function getAndyRequestByMessageId(
 ): AndyRequestRecord | undefined {
   return db
     .prepare(
-      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, github_issue_number, github_issue_url, github_issue_repo, github_project_board_key, github_project_item_id, created_at, updated_at, closed_at
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE user_message_id = ?`,
     )
@@ -1958,7 +1924,7 @@ export function getAndyRequestById(
 ): AndyRequestRecord | undefined {
   return db
     .prepare(
-      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, github_issue_number, github_issue_url, github_issue_repo, github_project_board_key, github_project_item_id, created_at, updated_at, closed_at
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE request_id = ?`,
     )
@@ -1970,7 +1936,7 @@ export function getAndyRequestByWorkerRun(
 ): AndyRequestRecord | undefined {
   return db
     .prepare(
-      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, github_issue_number, github_issue_url, github_issue_repo, github_project_board_key, github_project_item_id, created_at, updated_at, closed_at
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE worker_run_id = ?`,
     )
@@ -1982,7 +1948,7 @@ export function getLatestAndyRequestForChat(
 ): AndyRequestRecord | undefined {
   return db
     .prepare(
-      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, github_issue_number, github_issue_url, github_issue_repo, github_project_board_key, github_project_item_id, created_at, updated_at, closed_at
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE chat_jid = ?
      ORDER BY updated_at DESC
@@ -1998,7 +1964,7 @@ export function listActiveAndyRequests(
   const boundedLimit = Math.max(1, Math.min(limit, 20));
   return db
     .prepare(
-      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, github_issue_number, github_issue_url, github_issue_repo, github_project_board_key, github_project_item_id, created_at, updated_at, closed_at
+      `SELECT request_id, chat_jid, source_group_folder, source_lane_id, user_message_id, user_prompt, intent, state, worker_run_id, worker_group_folder, coordinator_session_id, last_status_text, created_at, updated_at, closed_at
      FROM andy_requests
      WHERE chat_jid = ? AND state NOT IN ('completed', 'failed', 'cancelled')
      ORDER BY updated_at DESC
@@ -2073,81 +2039,6 @@ export function setAndyRequestCoordinatorSession(
          updated_at = ?
      WHERE request_id = ?`,
   ).run(sessionId, new Date().toISOString(), requestId);
-}
-
-export function setAndyRequestGitHubIssueLink(input: {
-  requestId: string;
-  issueNumber: number;
-  issueUrl: string;
-  repoFullName: string;
-}): void {
-  db.prepare(
-    `UPDATE andy_requests
-     SET github_issue_number = ?,
-         github_issue_url = ?,
-         github_issue_repo = ?,
-         updated_at = ?
-     WHERE request_id = ?`,
-  ).run(
-    input.issueNumber,
-    input.issueUrl,
-    input.repoFullName,
-    new Date().toISOString(),
-    input.requestId,
-  );
-}
-
-export function setAndyRequestGitHubProjectLink(input: {
-  requestId: string;
-  boardKey: string;
-  itemId: string | null;
-}): void {
-  db.prepare(
-    `UPDATE andy_requests
-     SET github_project_board_key = ?,
-         github_project_item_id = ?,
-         updated_at = ?
-     WHERE request_id = ?`,
-  ).run(
-    input.boardKey,
-    input.itemId,
-    new Date().toISOString(),
-    input.requestId,
-  );
-}
-
-export function hasGitHubDeliveryEvent(
-  requestId: string,
-  eventKey: string,
-): boolean {
-  const row = db
-    .prepare(
-      `SELECT 1
-       FROM github_delivery_events
-       WHERE request_id = ? AND event_key = ?`,
-    )
-    .get(requestId, eventKey) as { 1: number } | undefined;
-  return Boolean(row);
-}
-
-export function recordGitHubDeliveryEvent(input: {
-  requestId: string;
-  eventKey: string;
-  commentUrl?: string | null;
-}): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO github_delivery_events (
-      request_id,
-      event_key,
-      comment_url,
-      created_at
-    ) VALUES (?, ?, ?, ?)`,
-  ).run(
-    input.requestId,
-    input.eventKey,
-    input.commentUrl ?? null,
-    new Date().toISOString(),
-  );
 }
 
 export function insertDispatchAttempt(input: {

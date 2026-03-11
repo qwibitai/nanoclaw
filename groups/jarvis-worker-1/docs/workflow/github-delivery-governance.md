@@ -57,7 +57,7 @@ Andy-developer chooses the minimum bundle that satisfies reliability and governa
 - Keep product implementation branches on worker branches (`jarvis-*`).
 - Let Andy-developer seed or reseed worker branches when governance changes require it.
 - Do not bypass branch protection except for an explicit emergency procedure.
-- Do not treat GitHub Projects or GitHub Discussions as execution state.
+- Do not store execution state on GitHub.
 
 ## Related Routing
 

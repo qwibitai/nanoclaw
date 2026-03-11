@@ -28,7 +28,7 @@ Usage: scripts/workflow/start-morning-codex-prep.sh [--dry-run]
 Runs the bounded morning Codex prep lane:
   1. headless `codex exec` using the `morning_prep` profile
   2. `session-start.sh --agent codex --no-background-sync`
-  3. GitHub collaboration follow-up only when surfaced by the session-start sweep
+  3. PR and review follow-up only when surfaced by the session-start sweep
   4. structured summary output with no repo-tracked edits
 EOF
 }
