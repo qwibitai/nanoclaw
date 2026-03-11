@@ -514,6 +514,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
+      for (const msg of missedMessages) {
+        attachmentCache.delete(msg.id);
+      }
       saveState();
       return true;
     }
@@ -836,6 +839,10 @@ async function startMessageLoop(): Promise<void> {
             // past messages the container never responded to.
             lastAgentTimestamp[chatJid] =
               messagesToSend[messagesToSend.length - 1].timestamp;
+            // Clean up attachment cache for piped messages
+            for (const msg of messagesToSend) {
+              attachmentCache.delete(msg.id);
+            }
             // Show typing indicator while the container processes the piped message
             channel
               .setTyping?.(chatJid, true)

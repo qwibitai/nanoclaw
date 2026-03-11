@@ -25,16 +25,18 @@ export interface DownloadRequest {
   groupFolder: string;
   filename: string;
   mimeType: string;
+  expectedSize?: number; // Pre-download size check (from platform metadata)
   fetchFn: () => Promise<Buffer>;
 }
 
 /** Sanitize a path segment to prevent path traversal and problematic characters. */
 function sanitizePathSegment(segment: string): string {
-  return segment
+  const sanitized = segment
     .replace(/[/\\:*?"<>|]/g, '_')
     .replace(/\.\./g, '_')
     .replace(/^\.+/, '_') // strip leading dots
     .slice(0, 200);
+  return sanitized || 'unnamed';
 }
 
 function isImageMime(mimeType: string): boolean {
@@ -95,9 +97,23 @@ export async function downloadAttachment(
       ? MAX_IMAGE_SIZE
       : MAX_DOCUMENT_SIZE;
 
+    // Reject oversized files before downloading (prevents OOM from large uploads)
+    if (req.expectedSize && req.expectedSize > maxSize) {
+      logger.warn(
+        {
+          filename: req.filename,
+          expectedSize: req.expectedSize,
+          maxSize,
+          mimeType: req.mimeType,
+        },
+        'Attachment exceeds size limit (pre-download check), skipping',
+      );
+      return null;
+    }
+
     let buffer = await req.fetchFn();
 
-    // Enforce size limits
+    // Post-download size check (catches cases where expectedSize was unavailable)
     if (buffer.length > maxSize) {
       logger.warn(
         {

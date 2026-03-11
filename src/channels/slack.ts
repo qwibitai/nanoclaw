@@ -278,6 +278,7 @@ export class SlackChannel implements Channel {
               groupFolder: group.folder,
               filename,
               mimeType,
+              expectedSize: file.size,
               fetchFn: async () => {
                 const resp = await fetch(file.url_private_download!, {
                   headers: { Authorization: `Bearer ${slackBotToken}` },

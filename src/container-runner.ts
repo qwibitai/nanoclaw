@@ -996,15 +996,16 @@ function buildVolumeMounts(
     }
   }
 
-  // Attachments: mount group-specific attachments directory read-only
+  // Attachments: always mount group-specific attachments directory read-only.
+  // Must be unconditional — piped follow-up messages may deliver attachments
+  // after the container starts, and bind mounts show live filesystem changes.
   const groupAttachmentsDir = path.join(ATTACHMENTS_DIR, group.folder);
-  if (fs.existsSync(groupAttachmentsDir)) {
-    mounts.push({
-      hostPath: groupAttachmentsDir,
-      containerPath: '/workspace/attachments',
-      readonly: true,
-    });
-  }
+  fs.mkdirSync(groupAttachmentsDir, { recursive: true });
+  mounts.push({
+    hostPath: groupAttachmentsDir,
+    containerPath: '/workspace/attachments',
+    readonly: true,
+  });
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC

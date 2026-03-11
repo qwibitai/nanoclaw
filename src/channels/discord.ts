@@ -178,6 +178,7 @@ export class DiscordChannel implements Channel {
                 groupFolder: group.folder,
                 filename: name,
                 mimeType: contentType,
+                expectedSize: att.size,
                 fetchFn: async () => {
                   const resp = await fetch(att.url);
                   if (!resp.ok)

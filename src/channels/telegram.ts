@@ -176,6 +176,7 @@ export class TelegramChannel implements Channel {
       fileId: string,
       filename: string,
       mimeType: string,
+      fileSize?: number,
     ): Promise<Attachment | null> => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
@@ -189,6 +190,7 @@ export class TelegramChannel implements Channel {
         groupFolder: group.folder,
         filename,
         mimeType,
+        expectedSize: fileSize,
         fetchFn: async () => {
           const file = await ctx.api.getFile(fileId);
           const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
@@ -209,6 +211,7 @@ export class TelegramChannel implements Channel {
         largest.file_id,
         'photo.jpg',
         'image/jpeg',
+        largest.file_size,
       );
       storeNonText(ctx, '[Photo]', att ? [att] : undefined);
     });
@@ -223,7 +226,13 @@ export class TelegramChannel implements Channel {
       }
       const name = doc.file_name || 'file';
       const mimeType = doc.mime_type || 'application/octet-stream';
-      const att = await downloadTelegramFile(ctx, doc.file_id, name, mimeType);
+      const att = await downloadTelegramFile(
+        ctx,
+        doc.file_id,
+        name,
+        mimeType,
+        doc.file_size,
+      );
       storeNonText(ctx, `[Document: ${name}]`, att ? [att] : undefined);
     });
     this.bot.on('message:sticker', (ctx) => {
