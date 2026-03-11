@@ -2,7 +2,7 @@
  * Container Runner for NanoClaw
  * Spawns agent execution in containers and handles IPC
  */
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,27 +11,25 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
-  OPENAI_PROXY_PORT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
-  ONECLI_URL,
+  OPENAI_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
-import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
   hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
-import { OneCLI } from '@onecli-sh/sdk';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
-
-const onecli = new OneCLI({ url: ONECLI_URL });
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -45,7 +43,6 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
-  script?: string;
   engine?: 'claude' | 'codex';
   secrets?: Record<string, string>;
 }
@@ -74,7 +71,7 @@ function buildVolumeMounts(
 
   if (isMain) {
     // Main gets the project root read-only. Writable paths the agent needs
-    // (store, group folder, IPC, .claude/) are mounted separately below.
+    // (group folder, IPC, .claude/) are mounted separately below.
     // Read-only prevents the agent from modifying host application code
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
@@ -85,7 +82,7 @@ function buildVolumeMounts(
     });
 
     // Shadow .env so the agent cannot read secrets from the mounted project root.
-    // Credentials are injected by the OneCLI gateway, never exposed to containers.
+    // Credentials are injected by the credential proxy, never exposed to containers.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
       mounts.push({
@@ -95,31 +92,12 @@ function buildVolumeMounts(
       });
     }
 
-    // Main gets writable access to the store (SQLite DB) so it can
-    // query and write to the database directly.
-    const storeDir = path.join(projectRoot, 'store');
-    mounts.push({
-      hostPath: storeDir,
-      containerPath: '/workspace/project/store',
-      readonly: false,
-    });
-
     // Main also gets its group folder as the working directory
     mounts.push({
       hostPath: groupDir,
       containerPath: '/workspace/group',
       readonly: false,
     });
-
-    // Global memory directory — writable for main so it can update shared context
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: false,
-      });
-    }
   } else {
     // Other groups only get their own folder
     mounts.push({
@@ -217,17 +195,8 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
+  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -265,33 +234,43 @@ function buildVolumeMounts(
  * Read Codex-specific secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
-function readCodexSecrets(): Record<string, string> {
-  return readEnvFile(['OPENAI_API_KEY', 'OPENAI_BASE_URL']);
-}
-
-async function buildContainerArgs(
+function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-  agentIdentifier?: string,
-): Promise<string[]> {
+  engine: 'claude' | 'codex' = 'claude',
+): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // OneCLI gateway handles credential injection — containers never see real secrets.
-  // The gateway intercepts HTTPS traffic and injects API keys or OAuth tokens.
-  const onecliApplied = await onecli.applyContainerConfig(args, {
-    addHostMapping: false, // Nanoclaw already handles host gateway
-    agent: agentIdentifier,
-  });
-  if (onecliApplied) {
-    logger.info({ containerName }, 'OneCLI gateway config applied');
-  } else {
-    logger.warn(
-      { containerName },
-      'OneCLI gateway not reachable — container will have no credentials',
+  if (engine === 'codex') {
+    // Codex engine: route OpenAI SDK requests through the OpenAI credential proxy.
+    // The proxy injects the real OPENAI_API_KEY so it never enters the container.
+    // Containers that use ~/.codex session auth (no API key) will ignore these
+    // env vars — the SDK falls back to the mounted auth file automatically.
+    args.push(
+      '-e',
+      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}/v1`,
     );
+    args.push('-e', 'OPENAI_API_KEY=placeholder');
+  } else {
+    // Claude engine: route Anthropic SDK requests through the Claude credential proxy.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -335,15 +314,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  // Main group uses the default OneCLI agent; others use their own agent.
-  const agentIdentifier = input.isMain
-    ? undefined
-    : group.folder.toLowerCase().replace(/_/g, '-');
-  const containerArgs = await buildContainerArgs(
-    mounts,
-    containerName,
-    agentIdentifier,
-  );
+  const containerArgs = buildContainerArgs(mounts, containerName, engine);
 
   logger.debug(
     {
@@ -383,15 +354,11 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass engine and (for Codex) API credentials via stdin — never via env vars or disk
+    // Pass engine via stdin so the agent-runner selects the correct runtime.
+    // Credentials are injected by the host-side proxy — never via stdin or env.
     input.engine = engine;
-    if (engine === 'codex') {
-      input.secrets = readCodexSecrets();
-    }
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
     delete input.engine;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
@@ -486,15 +453,15 @@ export async function runContainerAgent(
         { group: group.name, containerName },
         'Container timeout, stopping gracefully',
       );
-      try {
-        stopContainer(containerName);
-      } catch (err) {
-        logger.warn(
-          { group: group.name, containerName, err },
-          'Graceful stop failed, force killing',
-        );
-        container.kill('SIGKILL');
-      }
+      exec(stopContainer(containerName), { timeout: 15000 }, (err) => {
+        if (err) {
+          logger.warn(
+            { group: group.name, containerName, err },
+            'Graceful stop failed, force killing',
+          );
+          container.kill('SIGKILL');
+        }
+      });
     };
 
     let timeout = setTimeout(killOnTimeout, timeoutMs);
@@ -576,20 +543,10 @@ export async function runContainerAgent(
       const isError = code !== 0;
 
       if (isVerbose || isError) {
-        // On error, log input metadata only — not the full prompt.
-        // Full input is only included at verbose level to avoid
-        // persisting user conversation content on every non-zero exit.
-        if (isVerbose) {
-          logLines.push(`=== Input ===`, JSON.stringify(input, null, 2), ``);
-        } else {
-          logLines.push(
-            `=== Input Summary ===`,
-            `Prompt length: ${input.prompt.length} chars`,
-            `Session ID: ${input.sessionId || 'new'}`,
-            ``,
-          );
-        }
         logLines.push(
+          `=== Input ===`,
+          JSON.stringify(input, null, 2),
+          ``,
           `=== Container Args ===`,
           containerArgs.join(' '),
           ``,
@@ -732,7 +689,6 @@ export function writeTasksSnapshot(
     id: string;
     groupFolder: string;
     prompt: string;
-    script?: string | null;
     schedule_type: string;
     schedule_value: string;
     status: string;
@@ -768,7 +724,7 @@ export function writeGroupsSnapshot(
   groupFolder: string,
   isMain: boolean,
   groups: AvailableGroup[],
-  _registeredJids: Set<string>,
+  registeredJids: Set<string>,
 ): void {
   const groupIpcDir = resolveGroupIpcPath(groupFolder);
   fs.mkdirSync(groupIpcDir, { recursive: true });
