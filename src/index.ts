@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  INSTANCE_NAME,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -466,6 +467,9 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
+  if (INSTANCE_NAME) {
+    logger.info({ instance: INSTANCE_NAME }, 'Starting NanoClaw instance');
+  }
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
