@@ -3,15 +3,15 @@
 ## Project Reference
 
 - **Core value:** Messages never blocked by running containers
-- **Current focus:** Phase 1 — Multi-Container GroupQueue (Plans 01 + 03 complete)
+- **Current focus:** Phase 1 — Multi-Container GroupQueue (Plans 01 + 02 + 03 complete)
 - **Airtable record:** `recFADjzpnBY8NHh4`
 
 ## Current Position
 
 - **Phase:** 1 — Multi-Container GroupQueue
-- **Plan:** 3 of 3
-- **Status:** In Progress
-- **Progress:** ███░░░░░░░ 33%
+- **Plan:** 3 of 3 (all complete)
+- **Status:** Phase Complete
+- **Progress:** █████░░░░░ 50%
 
 ## Performance Metrics
 
@@ -20,13 +20,14 @@
 | Phases total | 2 |
 | Phases complete | 0 |
 | Plans total | 6 |
-| Plans complete | 2 |
-| Tasks total | 3 |
-| Tasks complete | 3 |
+| Plans complete | 3 |
+| Tasks total | 5 |
+| Tasks complete | 5 |
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
 | 01 | 01 | 308s | 2 | 1 |
+| 01 | 02 | 268s | 2 | 3 |
 | 01 | 03 | 128s | 1 | 1 |
 
 ## Accumulated Context
@@ -38,6 +39,9 @@
 - Idle container reuse checked before global cap (no new slot cost)
 - Extract containerId from processMessagesFn mock calls for precise slot targeting in tests
 - Use completion callback arrays for concurrent container control in tests
+- Fresh session per container (sessionId=undefined) for CONC-02 — idle-reuse containers already have session internally
+- Task session logic preserved — context_mode 'group' resumes group session, 'isolated' fresh
+- QueuedTask.fn receives containerId from GroupQueue.runTask for explicit threading
 
 ### Technical Notes
 - GroupQueue now uses `containers: Map<string, ContainerSlot>` per group — multi-slot
@@ -51,6 +55,10 @@
 - `setProcessMessagesFn` callback now includes `containerId` parameter
 - 371/371 tests pass (was 366/367, now all green after test rewrite)
 - Test suite covers: CONC-01, CONC-04, CONC-05, COMPAT-01 + all existing concepts
+- processGroupMessages now receives containerId from GroupQueue, threads to all GroupQueue calls
+- runAgent passes sessionId=undefined (CONC-02) and containerId to registerProcess
+- SchedulerDependencies.onProcess includes containerId parameter
+- QueuedTask.fn signature is (containerId: string) => Promise<void>
 
 ### Blockers
 - (none)
@@ -61,9 +69,10 @@
 ## Session Continuity
 
 ### Last Session
-- 2026-03-11T20:49:00Z
+- 2026-03-11T20:51:27Z
 
 ### Handover Notes
-- Plan 01-01 complete: GroupQueue data model refactored to multi-container
-- Plan 01-03 complete: Test suite rewritten for multi-container semantics (17 tests, all passing)
-- Next: Plan 01-02 (update callers in index.ts and task-scheduler.ts)
+- Phase 01 complete: All 3 plans done (01-01, 01-02, 01-03)
+- Plan 01-02 complete: Callers updated for multi-container containerId flow
+- Fresh sessions per container (CONC-02), per-container idle timeouts (CONC-03)
+- Next: Phase 02 — End-to-End Validation
