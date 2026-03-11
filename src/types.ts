@@ -2,6 +2,7 @@ export interface AdditionalMount {
   hostPath: string; // Absolute path on host (supports ~ for home)
   containerPath?: string; // Optional — defaults to basename of hostPath. Mounted at /workspace/extra/{value}
   readonly?: boolean; // Default: true for safety
+  useWorktree?: boolean; // Create a detached git worktree instead of mounting the repo directly
 }
 
 /**
