@@ -316,6 +316,7 @@ export class DiscordChannel implements Channel {
         if (guild) {
           await this.registerSlashCommands(readyClient.user.id, guild.id);
         }
+        await this.announceDeployComplete(deployChannelId);
         resolve();
       });
 
@@ -649,6 +650,20 @@ export class DiscordChannel implements Channel {
     child.unref();
 
     logger.info({ pid: child.pid }, 'Detached deploy script spawned');
+  }
+
+  private async announceDeployComplete(channelId: string): Promise<void> {
+    try {
+      const logPath = path.resolve(process.cwd(), 'logs/deploy.log');
+      const stat = fs.statSync(logPath);
+      if (Date.now() - stat.mtimeMs > 30_000) return;
+      const channel = await this.client!.channels.fetch(channelId);
+      if (channel && 'send' in channel) {
+        await (channel as TextChannel).send('Deploy complete.');
+      }
+    } catch {
+      // No deploy log or channel not found — skip silently
+    }
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {
