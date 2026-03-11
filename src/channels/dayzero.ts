@@ -30,6 +30,10 @@ interface RunRecord {
   status: 'running' | 'completed' | 'error';
   startedAt: string;
   messages: Array<{ text: string; timestamp: string }>;
+  // Geodesic workflow integration
+  workflowRunId?: string;
+  tenantId?: string;
+  workspaceId?: string;
 }
 
 interface DayZeroChannelOpts {
@@ -191,6 +195,11 @@ export class DayZeroChannel implements Channel {
     );
     const phase = body.phase ? String(body.phase) : undefined;
 
+    // Geodesic workflow integration fields
+    const workflowRunId = body.workflow_run_id ? String(body.workflow_run_id) : undefined;
+    const tenantId = body.tenant_id ? String(body.tenant_id) : undefined;
+    const workspaceId = body.workspace_id ? String(body.workspace_id) : undefined;
+
     if (!company) {
       this.sendJson(res, 400, {
         error: 'Missing required field: company',
@@ -202,7 +211,7 @@ export class DayZeroChannel implements Channel {
     const timestamp = new Date().toISOString();
 
     logger.info(
-      { runId: runId.slice(0, 8), company, engagementMode },
+      { runId: runId.slice(0, 8), company, engagementMode, workflowRunId, tenantId, workspaceId },
       'DayZero run requested',
     );
 
@@ -214,6 +223,9 @@ export class DayZeroChannel implements Channel {
       status: 'running',
       startedAt: timestamp,
       messages: [],
+      workflowRunId,
+      tenantId,
+      workspaceId,
     };
     this.runs.set(runId, run);
 
@@ -228,6 +240,20 @@ export class DayZeroChannel implements Channel {
 
     if (phase) {
       promptLines.push('', `Resume from phase: ${phase}`);
+    }
+
+    // Include Geodesic workflow context if provided
+    if (workflowRunId) {
+      promptLines.push('', '--- Geodesic Workflow Integration ---');
+      promptLines.push(`Workflow Run ID: ${workflowRunId}`);
+      if (tenantId) {
+        promptLines.push(`Tenant ID: ${tenantId}`);
+      }
+      if (workspaceId) {
+        promptLines.push(`Workspace ID: ${workspaceId}`);
+      }
+      promptLines.push('', 'Update workflow progress via GraphQL mutation:');
+      promptLines.push('updateWorkflowRun(workflowRunId, status, progress, currentPhase, currentTask)');
     }
 
     // Report metadata for group discovery
@@ -261,7 +287,7 @@ export class DayZeroChannel implements Channel {
       return;
     }
 
-    this.sendJson(res, 200, {
+    const response: Record<string, unknown> = {
       id: run.id,
       company: run.company,
       engagement_mode: run.engagementMode,
@@ -269,7 +295,20 @@ export class DayZeroChannel implements Channel {
       started_at: run.startedAt,
       message_count: run.messages.length,
       messages: run.messages,
-    });
+    };
+
+    // Include workflow context if available
+    if (run.workflowRunId) {
+      response.workflow_run_id = run.workflowRunId;
+    }
+    if (run.tenantId) {
+      response.tenant_id = run.tenantId;
+    }
+    if (run.workspaceId) {
+      response.workspace_id = run.workspaceId;
+    }
+
+    this.sendJson(res, 200, response);
   }
 
   private handleCompleteRun(runId: string, res: http.ServerResponse): void {
