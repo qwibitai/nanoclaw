@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.34",
-    "@lancedb/lancedb": "^0.17.0",
+    "@lancedb/lancedb": "^0.26.2",
     "apache-arrow": "^18.0.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "cron-parser": "^5.0.0",
