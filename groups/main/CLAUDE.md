@@ -73,6 +73,8 @@ Key paths inside the container:
 - `/workspace/project/store/messages.db` (registered_groups table) - Group config
 - `/workspace/project/groups/` - All group folders
 
+Only `/workspace/group` (your main group folder) and `/workspace/ipc` are writable from inside the container. Treat everything under `/workspace/project` as read-only and request changes via IPC tasks or by informing the operator.
+
 ---
 
 ## Managing Groups
@@ -119,7 +121,7 @@ sqlite3 /workspace/project/store/messages.db "
 
 ### Registered Groups Config
 
-Groups are registered in the SQLite `registered_groups` table:
+Groups are registered in the SQLite `registered_groups` table. The mirror JSON at `/workspace/project/data/registered_groups.json` is **read-only** inside the container; use the `register_group` tool (main group only) or ask a maintainer to make changes.
 
 ```json
 {
@@ -152,8 +154,8 @@ Fields:
 1. Query the database to find the group's JID
 2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
 3. Optionally include `containerConfig` for additional mounts
-4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
-5. Optionally create an initial `CLAUDE.md` for the group
+4. The host automatically creates the group folder on the next run. You cannot write to `/workspace/project/groups/{folder-name}/` from here.
+5. After the group is registered, work from that group's own container (where `/workspace/group` is writable) to add any initial files or memory.
 
 Folder naming convention — channel prefix with underscore separator:
 - WhatsApp "Family Chat" → `whatsapp_family-chat`
@@ -221,10 +223,9 @@ Notes:
 
 ### Removing a Group
 
-1. Read `/workspace/project/data/registered_groups.json`
-2. Remove the entry for that group
-3. Write the updated JSON back
-4. The group folder and its files remain (don't delete them)
+1. Read `/workspace/project/data/registered_groups.json` to confirm the current entry.
+2. Ask the operator or maintainer to remove the entry from the host (containers cannot edit this file directly).
+3. The group folder and its files remain (don't delete them).
 
 ### Listing Groups
 
@@ -234,7 +235,7 @@ Read `/workspace/project/data/registered_groups.json` and format it nicely.
 
 ## Global Memory
 
-You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+Global memory lives at `/workspace/project/groups/global/CLAUDE.md`. This path is **read-only** inside the container. If you need to capture something globally, explain the change to the user and ask them (or a maintainer) to apply it from the host side. Only request updates when explicitly asked to "remember this globally" or similar.
 
 ---
 
