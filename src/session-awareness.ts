@@ -21,7 +21,9 @@ const FILENAME = 'active_sessions.json';
  * Read and parse the active sessions file for a group.
  * Returns an empty structure if the file doesn't exist or is corrupt.
  */
-export function readActiveSessionsFile(groupFolder: string): ActiveSessionsFile {
+export function readActiveSessionsFile(
+  groupFolder: string,
+): ActiveSessionsFile {
   const ipcDir = resolveGroupIpcPath(groupFolder);
   const filePath = path.join(ipcDir, FILENAME);
 

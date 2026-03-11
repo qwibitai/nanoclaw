@@ -9,5 +9,8 @@
 
 // telegram
 
+// google-chat
+import './google-chat.js';
+
 // whatsapp
 import './whatsapp.js';

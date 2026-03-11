@@ -45,7 +45,10 @@ describe('session-awareness', () => {
 
   // 1. Writes session file on first container
   it('writes session file on first container', () => {
-    const session = makeSession({ containerId: 'container-1', type: 'message' });
+    const session = makeSession({
+      containerId: 'container-1',
+      type: 'message',
+    });
 
     writeActiveSessionsFile('test-group', session);
 
@@ -73,7 +76,9 @@ describe('session-awareness', () => {
     expect(ids).toContain('container-1');
     expect(ids).toContain('container-2');
 
-    const taskSession = result.sessions.find((s) => s.containerId === 'container-2');
+    const taskSession = result.sessions.find(
+      (s) => s.containerId === 'container-2',
+    );
     expect(taskSession?.type).toBe('task');
   });
 
@@ -135,7 +140,8 @@ describe('session-awareness', () => {
 
     // Verify renameSync was called with a .tmp source path
     expect(renameSpy).toHaveBeenCalled();
-    const [tmpPath, finalPath] = renameSpy.mock.calls[renameSpy.mock.calls.length - 1];
+    const [tmpPath, finalPath] =
+      renameSpy.mock.calls[renameSpy.mock.calls.length - 1];
     expect(String(tmpPath)).toMatch(/\.tmp$/);
     expect(String(finalPath)).toMatch(/active_sessions\.json$/);
     expect(String(tmpPath)).toBe(`${String(finalPath)}.tmp`);
