@@ -84,7 +84,6 @@ export function extractTemporaryApiKey(payload: unknown): string | null {
 export async function checkCredentials(): Promise<CredentialCheckResult> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
-    'OPENROUTER_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
@@ -97,7 +96,7 @@ export async function checkCredentials(): Promise<CredentialCheckResult> {
 
   const hasCredential =
     authMode === 'api-key'
-      ? Boolean(secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY)
+      ? Boolean(secrets.ANTHROPIC_API_KEY)
       : Boolean(secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN);
 
   if (!hasCredential) {

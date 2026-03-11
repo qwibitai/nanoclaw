@@ -111,4 +111,52 @@ describe('credentials setup step', () => {
 
     exitSpy.mockRestore();
   });
+
+  it('treats ANTHROPIC_AUTH_TOKEN as a supported OAuth credential', async () => {
+    mockReadEnvFile.mockReturnValue({
+      ANTHROPIC_AUTH_TOKEN: 'oauth-token',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+    mockDetectAuthMode.mockReturnValue('oauth');
+
+    vi.mocked(global.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ api_key: 'temp-key' }), { status: 200 }),
+    );
+
+    await run([]);
+
+    expect(mockEmitStatus).toHaveBeenCalledWith(
+      'CHECK_CREDENTIALS',
+      expect.objectContaining({
+        AUTH_PROBE: 'ok',
+        STATUS: 'success',
+      }),
+    );
+  });
+
+  it('reports missing when no supported credentials are configured', async () => {
+    mockReadEnvFile.mockReturnValue({
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+    mockDetectAuthMode.mockReturnValue('oauth');
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as (code?: string | number | null | undefined) => never);
+
+    await expect(run([])).rejects.toThrow('process.exit');
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(mockEmitStatus).toHaveBeenCalledWith(
+      'CHECK_CREDENTIALS',
+      expect.objectContaining({
+        AUTH_PROBE: 'missing',
+        MODEL_PROBE: 'skipped',
+        STATUS: 'failed',
+        ERROR: 'no_configured_credentials',
+      }),
+    );
+
+    exitSpy.mockRestore();
+  });
 });

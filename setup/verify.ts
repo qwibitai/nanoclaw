@@ -103,15 +103,20 @@ export async function run(_args: string[]): Promise<void> {
   let credentialError = '';
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
-      const credentialCheck = await checkCredentials();
+    const credentialCheck = await checkCredentials();
+    credentialError = credentialCheck.error;
+    if (credentialCheck.status === 'success') {
       credentialHealth = credentialCheck.status === 'success' ? 'valid' : 'invalid';
-      credentialError = credentialCheck.error;
-      credentials =
-        credentialCheck.status === 'success'
-          ? 'configured_valid'
-          : 'configured_invalid';
+      credentials = 'configured_valid';
+    } else if (
+      credentialCheck.authProbe === 'missing' ||
+      credentialCheck.error === 'no_configured_credentials'
+    ) {
+      credentialHealth = 'not_checked';
+      credentials = 'missing';
+    } else {
+      credentialHealth = 'invalid';
+      credentials = 'configured_invalid';
     }
   }
 

@@ -54,7 +54,6 @@ describe('verify credentials health', () => {
     vi.spyOn(fs, 'existsSync').mockImplementation((filePath) => {
       return String(filePath).endsWith('.env');
     });
-    vi.spyOn(fs, 'readFileSync').mockReturnValue('ANTHROPIC_API_KEY=sk-test');
     mockCheckCredentials.mockResolvedValue({
       status: 'success',
       error: '',
@@ -89,7 +88,6 @@ describe('verify credentials health', () => {
     vi.spyOn(fs, 'existsSync').mockImplementation((filePath) => {
       return String(filePath).endsWith('.env');
     });
-    vi.spyOn(fs, 'readFileSync').mockReturnValue('CLAUDE_CODE_OAUTH_TOKEN=bad');
     mockCheckCredentials.mockResolvedValue({
       status: 'failed',
       error: 'Invalid OAuth token',
@@ -114,6 +112,74 @@ describe('verify credentials health', () => {
         CREDENTIALS: 'configured_invalid',
         CREDENTIAL_HEALTH: 'invalid',
         CREDENTIAL_ERROR: 'Invalid OAuth token',
+      }),
+    );
+
+    exitSpy.mockRestore();
+  });
+
+  it('treats missing credentials as missing instead of invalid', async () => {
+    vi.spyOn(fs, 'existsSync').mockImplementation((filePath) => {
+      return String(filePath).endsWith('.env');
+    });
+    mockCheckCredentials.mockResolvedValue({
+      status: 'failed',
+      error: 'no_configured_credentials',
+      authMode: 'oauth',
+      upstream: 'https://api.anthropic.com',
+      model: 'none',
+      authProbe: 'missing',
+      authHttpStatus: 0,
+      modelProbe: 'skipped',
+      modelHttpStatus: 0,
+    });
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as (code?: string | number | null | undefined) => never);
+
+    await expect(run([])).rejects.toThrow('process.exit');
+
+    expect(mockEmitStatus).toHaveBeenCalledWith(
+      'VERIFY',
+      expect.objectContaining({
+        CREDENTIALS: 'missing',
+        CREDENTIAL_HEALTH: 'not_checked',
+        CREDENTIAL_ERROR: 'no_configured_credentials',
+      }),
+    );
+
+    exitSpy.mockRestore();
+  });
+
+  it('runs credential verification for ANTHROPIC_AUTH_TOKEN setups', async () => {
+    vi.spyOn(fs, 'existsSync').mockImplementation((filePath) => {
+      return String(filePath).endsWith('.env');
+    });
+    mockCheckCredentials.mockResolvedValue({
+      status: 'success',
+      error: '',
+      authMode: 'oauth',
+      upstream: 'https://api.anthropic.com',
+      model: 'none',
+      authProbe: 'ok',
+      authHttpStatus: 200,
+      modelProbe: 'skipped',
+      modelHttpStatus: 0,
+    });
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit');
+    }) as (code?: string | number | null | undefined) => never);
+
+    await expect(run([])).rejects.toThrow('process.exit');
+
+    expect(mockCheckCredentials).toHaveBeenCalledTimes(1);
+    expect(mockEmitStatus).toHaveBeenCalledWith(
+      'VERIFY',
+      expect.objectContaining({
+        CREDENTIALS: 'configured_valid',
+        CREDENTIAL_HEALTH: 'valid',
       }),
     );
 
