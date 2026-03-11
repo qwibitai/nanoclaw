@@ -3,8 +3,16 @@
 
 FROM node:22-slim
 
-# Install system dependencies for Chromium
-RUN apt-get update && apt-get install -y \
+# Build-time mirror configuration (leave empty for international defaults)
+ARG APT_MIRROR=
+ARG NPM_REGISTRY=
+
+# Configure apt mirror and install system dependencies for Chromium
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|deb.debian.org|${APT_MIRROR}|g; s|security.debian.org|${APT_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
     fonts-noto-cjk \
@@ -29,6 +37,9 @@ RUN apt-get update && apt-get install -y \
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+
+# Configure npm registry if specified
+RUN if [ -n "$NPM_REGISTRY" ]; then npm config set registry "$NPM_REGISTRY"; fi
 
 # Install agent-browser and claude-code globally
 RUN npm install -g agent-browser @anthropic-ai/claude-code
