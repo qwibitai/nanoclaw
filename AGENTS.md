@@ -5,10 +5,10 @@
 - Read and follow `CLAUDE.md` as the single source of truth for repository instructions, including upstream sync policy.
 - At the start of every task, load `CLAUDE.md` first, then follow its `Docs Index` trigger lines for progressive disclosure.
 - `docs/README.md` is the curated docs landing page; `DOCS.md` is the full inventory.
-- At session start, run `bash scripts/workflow/session-start.sh --agent codex` so recall bootstrap, GitHub sweep, and workflow preflight happen in one enforced sequence before task work.
+- At session start, run `bash scripts/workflow/session-start.sh --agent codex` so recall bootstrap, control-plane sweep, and workflow preflight happen in one enforced sequence before task work.
 - At session start or when resuming interrupted work, follow `docs/workflow/runtime/session-recall.md` to reconstruct personal session context before loading project docs.
-- Before changing the sweep protocol or agent-category affinity, follow `docs/workflow/github/github-collab-sweep.md`.
-- When session start is blocked by required GitHub collaboration actions or when handling `Needs My Review` items from the sweep, follow `docs/workflow/github/github-collab-sweep.md`.
+- Before changing the sweep protocol or agent-category affinity, follow `docs/workflow/control-plane/session-work-sweep.md`.
+- When session start is blocked by required Linear review or triage actions from the sweep, follow `docs/workflow/control-plane/session-work-sweep.md`.
 - Use `scripts/qmd-context-recall.sh` for recall-only workflows and `scripts/qmd-session-sync.sh` for session export sync + qmd update + git add/commit.
 - Before ending a session with in-progress work or blockers, follow `docs/workflow/runtime/session-recall.md` handoff flow (`qctx --close`).
 - Before changing session recall/sync/export behavior, follow `docs/workflow/runtime/session-recall.md`.
@@ -28,8 +28,11 @@
 - Before defining subagent fanout for plan/review/verification, follow `docs/operations/subagent-catalog.md` and `docs/operations/subagent-routing.md`.
 - Before adapting behavior between Claude and Codex runtimes, follow `docs/operations/claude-codex-adapter-matrix.md`.
 - Before deciding what to offload to GitHub Actions/rulesets vs keep in local lanes, follow `docs/workflow/github/github-offload-boundary-loop.md`.
-- Before setting up multi-agent GitHub coordination using Issues/Projects/Discussions/rulesets, follow `docs/workflow/github/github-multi-agent-collaboration-loop.md`.
-- Before using GitHub Projects/Discussions for day-to-day agent collaboration or promoting Discussions into Issues, follow `docs/workflow/github/github-agent-collaboration-loop.md`.
+- Before changing the Linear/Notion/GitHub control-plane split, follow `docs/workflow/control-plane/collaboration-surface-contract.md`.
+- Before changing execution-lane routing or Symphony scope, follow `docs/workflow/control-plane/execution-lane-routing-contract.md`.
+- Before changing custom Symphony backend routing or project registry, follow `docs/workflow/control-plane/custom-symphony-orchestration-contract.md`.
+- Before operating Symphony dispatch, daemon, or dashboard workflows, follow `docs/workflow/control-plane/symphony-operations-runbook.md`.
+- Before onboarding a new project into Linear/Notion/Symphony or changing the universal secret model, follow `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md`.
 - Before consulting Claude Code CLI via resumed/forked sessions for parallel reasoning/review, follow `docs/workflow/delivery/claude-cli-resume-consult-lane.md`.
 - If `AGENTS.md` and `CLAUDE.md` ever conflict, `CLAUDE.md` wins.
 
@@ -44,7 +47,7 @@
 - Do not rely on assumptions when facts are retrievable; gather repo facts from code/docs and use DeepWiki for repository documentation when more context is required.
 - When creating or modifying scripts, default to the minimum model-facing output needed for the task; verbose logs, large JSON payloads, and full artifacts must be opt-in or file-backed.
 - Any issue discovered during work must be logged/updated in `.claude/progress/incident.json` via the incident workflow before closure.
-- Any new feature request not already mapped must be feature-tracked and work-item tracked before implementation.
+- Any new feature request not already mapped must be feature-tracked and linked to authoritative execution state before implementation (`Linear` by default; local work-items only for legacy migration support).
 - For GitHub CLI or remote git operations that depend on auth, branch mutation, or networked GitHub state (`gh auth`, `gh pr *`, `gh repo *`, `gh api`, `git fetch`, `git pull`, `git push`, `git merge` against remotes), request escalated execution directly instead of spending a first attempt inside the sandbox.
 - For this repository, treat `origin` (`https://github.com/ingpoc/nanoclaw.git`) as the only push/PR remote. Treat `upstream` (`https://github.com/qwibitai/nanoclaw.git`) as fetch-only and never try to push there.
 
@@ -53,6 +56,6 @@
 - Runtime/auth/container failures route to `/debug`.
 - Incident triage, recurring issue investigation, and incident lifecycle tracking are docs-first via `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md` + `docs/workflow/runtime/nanoclaw-container-debugging.md`.
 - Incident lifecycle state is tracked in `.claude/progress/incident.json` (open/resolved + notes).
-- Feature mapping/touch-set discipline routes to `feature-tracking`; feature execution tracking routes to `nanoclaw-orchestrator` work items.
+- Feature mapping/touch-set discipline routes to `feature-tracking`; feature execution tracking routes to `Linear` by default, with `nanoclaw-orchestrator` work items retained only for legacy migration support.
 - Reliability validation can use `scripts/jarvis-ops.sh verify-worker-connectivity` after `preflight`/`trace`.
 - Andy user-facing reliability sign-off should follow `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md` and run `bash scripts/jarvis-ops.sh happiness-gate --user-confirmation "<manual User POV runbook completed>"`.

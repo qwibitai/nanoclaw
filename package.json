@@ -8,8 +8,13 @@
     "build": "tsc",
     "start": "NANOCLAW_RUNTIME_OWNER_MODE=manual node dist/index.js",
     "dev": "NANOCLAW_RUNTIME_OWNER_MODE=manual tsx src/index.ts",
-    "symphony:setup": "bash scripts/symphony.sh setup",
-    "symphony:run": "bash scripts/symphony.sh run",
+    "symphony:setup": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts validate-registry",
+    "symphony:run": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts show-projects",
+    "symphony:sync-registry": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts sync-registry",
+    "symphony:status": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts status",
+    "symphony:serve": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts serve",
+    "symphony:daemon": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony.ts daemon",
+    "symphony:mcp": "bash scripts/workflow/run-with-env.sh npx tsx scripts/workflow/symphony-mcp.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:fix": "prettier --write \"src/**/*.ts\"",
@@ -21,6 +26,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",

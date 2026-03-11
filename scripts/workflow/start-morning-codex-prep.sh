@@ -18,6 +18,7 @@ OUTPUT_SCHEMA_FILE="$ROOT_DIR/scripts/workflow/morning-codex-prep-output-schema.
 PROFILE_NAME="${NANOCLAW_MORNING_PREP_PROFILE:-morning_prep}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
 LAUNCH_LABEL="${NANOCLAW_MORNING_PREP_LABEL:-com.nanoclaw.morning-codex-prep}"
+PLAN_PATH="${NANOCLAW_AUTONOMY_PLAN_PATH:-$ROOT_DIR/.nanoclaw/autonomy/feature-plan.md}"
 DRY_RUN=0
 
 usage() {
@@ -27,7 +28,7 @@ Usage: scripts/workflow/start-morning-codex-prep.sh [--dry-run]
 Runs the bounded morning Codex prep lane:
   1. headless `codex exec` using the `morning_prep` profile
   2. `session-start.sh --agent codex --no-background-sync`
-  3. GitHub collaboration follow-up only when surfaced by the session-start sweep
+  3. PR and review follow-up only when surfaced by the session-start sweep
   4. structured summary output with no repo-tracked edits
 EOF
 }
@@ -81,18 +82,22 @@ Requirements:
 1. Confirm the active GitHub account with \`gh api user -q .login\`.
 2. If it is not \`$GH_ACCOUNT\`, run \`gh auth switch --user $GH_ACCOUNT\`, re-check, and stop if the account is still wrong.
 3. Run \`bash scripts/workflow/session-start.sh --agent codex --no-background-sync\`.
-4. If session-start exits blocked on GitHub collaboration items, resolve only the surfaced GitHub collaboration work by following:
-   - \`docs/workflow/github/github-collab-sweep.md\`
-   - \`docs/workflow/github/github-agent-collaboration-loop.md\`
+4. If session-start exits blocked on collaboration items, resolve only the surfaced Linear work by following:
+   - \`docs/workflow/control-plane/session-work-sweep.md\`
+   - \`docs/workflow/control-plane/collaboration-surface-contract.md\`
 5. For nightly findings surfaced during that work, follow \`docs/workflow/strategy/nightly-evaluation-loop.md\`.
-6. When evidence is needed, prefer the available MCP servers:
+6. If \`$PLAN_PATH\` exists, read it and treat it as the user roadmap input for promotion and readiness decisions.
+7. When evidence is needed, prefer the available MCP servers:
    - \`DeepWiki\` for repository documentation and architecture questions
    - \`Context7\` for primary library/API docs
    - \`token-efficient\` for verbose logs, JSON, CSV, or command output
-7. Promote only concrete next actions into Issues. Do not broaden scope beyond the surfaced morning queue.
-8. After handling the surfaced GitHub work, rerun \`bash scripts/workflow/session-start.sh --agent codex --no-background-sync\` once.
-9. Do not edit repo-tracked files, docs, or code. This lane may update GitHub state and runtime-local artifacts only.
-10. End with JSON matching the supplied output schema.
+8. For every candidate from the queue or roadmap, decide exactly one of: \`promote\`, \`ready-recommendation\`, \`defer\`, or \`reject\`.
+9. Write rationale for all \`defer\` and \`reject\` decisions on the relevant Notion page or Linear issue.
+10. Codex may normalize issue content and record a \`ready-recommendation\`, but \`andy-developer\` remains the only readiness authority.
+11. Promote only concrete next actions into Issues. Do not broaden scope beyond the surfaced morning queue and roadmap.
+12. After handling the surfaced morning work, rerun \`bash scripts/workflow/session-start.sh --agent codex --no-background-sync\` once.
+13. Do not edit repo-tracked files, docs, or code. This lane may update Linear/Notion/GitHub state and runtime-local artifacts only.
+14. End with JSON matching the supplied output schema.
 EOF
 }
 

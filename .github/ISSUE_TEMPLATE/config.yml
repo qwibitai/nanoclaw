@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Architecture / RFC Discussion
-    url: https://github.com/ingpoc/nanoclaw/discussions
-    about: Use Discussions for workflow ideas, upstream opportunities, Claude/Codex collaboration, and non-immediate execution topics.
+  - name: Shared Context Workspace
+    url: https://www.notion.so/
+    about: Use Notion for workflow ideas, upstream opportunities, Claude/Codex collaboration, and non-immediate execution topics.

@@ -14,6 +14,12 @@ describe('platform-loop helpers', () => {
     ).toBe('claude-platform-42-claude-loop-adoption-for-platform');
   });
 
+  it('builds stable branch names for linear issue identifiers', () => {
+    expect(
+      buildPlatformBranchName('NCL-42', 'Claude /loop adoption for platform'),
+    ).toBe('claude-platform-ncl-42-claude-loop-adoption-for-platform');
+  });
+
   it('builds request and run ids', () => {
     const context = buildPlatformRunContext(
       12,
@@ -25,6 +31,20 @@ describe('platform-loop helpers', () => {
       requestId: 'platform-issue-12-20260308t102030z',
       runId: 'claude-platform-12-20260308t102030z',
       branch: 'claude-platform-12-loop-over-another-command',
+    });
+  });
+
+  it('builds request and run ids for linear issue identifiers', () => {
+    const context = buildPlatformRunContext(
+      'NCL-12',
+      'Loop over another command',
+      new Date('2026-03-08T10:20:30.000Z'),
+    );
+
+    expect(context).toEqual({
+      requestId: 'platform-issue-ncl-12-20260308t102030z',
+      runId: 'claude-platform-ncl-12-20260308t102030z',
+      branch: 'claude-platform-ncl-12-loop-over-another-command',
     });
   });
 

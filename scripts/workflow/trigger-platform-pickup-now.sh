@@ -4,15 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_DIR="$ROOT_DIR/.nanoclaw/platform-loop"
 STATE_FILE="$STATE_DIR/manual-pickup-state.json"
-WORKTREE_PATH="${NANOCLAW_PLATFORM_LOOP_WORKTREE:-$ROOT_DIR/.worktrees/platform-loop}"
-WORKTREE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BRANCH:-claude-platform-loop}"
-BASE_BRANCH="${NANOCLAW_PLATFORM_LOOP_BASE_BRANCH:-main}"
-REMOTE_NAME="${NANOCLAW_PLATFORM_LOOP_REMOTE:-origin}"
-PICKUP_COMMAND="${NANOCLAW_PLATFORM_PICKUP_COMMAND:-/platform-pickup}"
-GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
-CLAUDE_PERMISSION_MODE="${NANOCLAW_PLATFORM_CLAUDE_PERMISSION_MODE:-bypassPermissions}"
-SESSION_RUNNER="$ROOT_DIR/scripts/workflow/run-platform-claude-session.sh"
-SYNC_HELPER="$ROOT_DIR/scripts/workflow/platform-loop-sync.sh"
+START_SCRIPT="$ROOT_DIR/scripts/workflow/start-platform-loop.sh"
 DRY_RUN=0
 
 while (($#)); do
@@ -30,41 +22,6 @@ done
 
 mkdir -p "$STATE_DIR"
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "claude CLI is required but not found in PATH" >&2
-  exit 1
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-  echo "git is required but not found in PATH" >&2
-  exit 1
-fi
-
-if ! command -v osascript >/dev/null 2>&1; then
-  echo "osascript is required to trigger the dedicated Claude session" >&2
-  exit 1
-fi
-
-if command -v gh >/dev/null 2>&1; then
-  gh auth switch --user "$GH_ACCOUNT" >/dev/null 2>&1 || true
-fi
-
-if [[ ! -x "$SYNC_HELPER" ]]; then
-  echo "platform loop sync helper is missing or not executable: $SYNC_HELPER" >&2
-  exit 1
-fi
-
-sync_args=()
-if [[ "$DRY_RUN" == "1" ]]; then
-  sync_args+=(--dry-run)
-fi
-NANOCLAW_PLATFORM_LOOP_SOURCE_ROOT="$ROOT_DIR" \
-NANOCLAW_PLATFORM_LOOP_WORKTREE="$WORKTREE_PATH" \
-NANOCLAW_PLATFORM_LOOP_BRANCH="$WORKTREE_BRANCH" \
-NANOCLAW_PLATFORM_LOOP_BASE_BRANCH="$BASE_BRANCH" \
-NANOCLAW_PLATFORM_LOOP_REMOTE="$REMOTE_NAME" \
-bash "$SYNC_HELPER" "${sync_args[@]}"
-
 SHELL_COMMAND="NANOCLAW_PLATFORM_LOOP_SOURCE_ROOT=\"$ROOT_DIR\" NANOCLAW_PLATFORM_LOOP_WORKTREE=\"$WORKTREE_PATH\" NANOCLAW_PLATFORM_LOOP_BRANCH=\"$WORKTREE_BRANCH\" NANOCLAW_PLATFORM_LOOP_BASE_BRANCH=\"$BASE_BRANCH\" NANOCLAW_PLATFORM_LOOP_REMOTE=\"$REMOTE_NAME\" bash \"$SESSION_RUNNER\" --worktree \"$WORKTREE_PATH\" --gh-account \"$GH_ACCOUNT\" --permission-mode \"$CLAUDE_PERMISSION_MODE\" --prompt \"$PICKUP_COMMAND\""
 
 json_escape() {
@@ -77,29 +34,18 @@ PY
 record_state() {
   cat >"$STATE_FILE" <<EOF
 {
-  "worktree_path": $(json_escape "$WORKTREE_PATH"),
-  "worktree_branch": $(json_escape "$WORKTREE_BRANCH"),
-  "base_branch": $(json_escape "$BASE_BRANCH"),
-  "remote_name": $(json_escape "$REMOTE_NAME"),
-  "source_root": $(json_escape "$ROOT_DIR"),
-  "pickup_command": $(json_escape "$PICKUP_COMMAND"),
-  "github_account": $(json_escape "$GH_ACCOUNT"),
-  "permission_mode": $(json_escape "$CLAUDE_PERMISSION_MODE"),
   "launched_at": $(json_escape "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"),
-  "shell_command": $(json_escape "$SHELL_COMMAND")
+  "source_root": $(json_escape "$ROOT_DIR"),
+  "start_script": $(json_escape "$START_SCRIPT")
 }
 EOF
 }
 
 if [[ "$DRY_RUN" == "1" ]]; then
   record_state
-  echo "$SHELL_COMMAND"
+  bash "$START_SCRIPT" --dry-run
   exit 0
 fi
 
-ESCAPED_COMMAND="${SHELL_COMMAND//\\/\\\\}"
-ESCAPED_COMMAND="${ESCAPED_COMMAND//\"/\\\"}"
-
-osascript -e "tell application \"Terminal\" to do script \"$ESCAPED_COMMAND\"" >/dev/null
 record_state
-echo "Triggered NanoClaw platform pickup once via Terminal"
+bash "$START_SCRIPT"

@@ -12,7 +12,7 @@ Use the available MCP servers when they materially improve evidence quality:
 - `Context7` for primary library/API documentation
 - `token-efficient` for verbose logs, JSON, CSV, or command output
 Do not edit repo-tracked code, docs, or config files.
-If session-start blocks on GitHub collaboration actions, follow the owning GitHub workflow docs, handle only those surfaced items, and rerun session-start once.
-If a nightly finding is accepted, promote only a concrete next action into an Issue and record the decision in the discussion.
+If session-start blocks on GitHub collaboration actions, follow the owning GitHub workflow docs, handle only those surfaced items plus the configured autonomy plan input, and rerun session-start once.
+If a nightly finding or roadmap item is accepted, promote only a concrete next action into an Issue and move it to Ready only when the issue contract is complete.
 Return a concise operational summary with remaining blockers and no implementation work.
 """

@@ -1,10 +1,10 @@
 declare module '../scripts/workflow/platform-loop.js' {
   export function buildPlatformBranchName(
-    issueNumber: number,
+    issueNumber: number | string,
     title: string,
   ): string;
   export function buildPlatformRunContext(
-    issueNumber: number,
+    issueNumber: number | string,
     title: string,
     now?: Date,
   ): {
@@ -17,7 +17,7 @@ declare module '../scripts/workflow/platform-loop.js' {
   ): string[];
   export function selectPlatformCandidate(
     items: Array<{
-      number: number;
+      number: number | string;
       title?: string;
       url?: string;
       state: string;
@@ -32,16 +32,16 @@ declare module '../scripts/workflow/platform-loop.js' {
   ): {
     action: 'noop' | 'pickup';
     reason?: string;
-    blockingIssueNumbers?: number[];
+    blockingIssueNumbers?: Array<number | string>;
     candidatesChecked?: Array<{
-      number: number;
+      number: number | string;
       status: string | null;
       priority: string;
       blocked: boolean;
       missingSections: string[];
     }>;
     issue?: {
-      number: number;
+      number: number | string;
       title: string;
       url: string;
       status: string | null;

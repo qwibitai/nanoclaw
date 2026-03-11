@@ -51,7 +51,7 @@ describe('nightly-improvement helpers', () => {
           claude_agent_sdk: '0.4.0',
           opencode: '0.9.0',
         },
-        discussion_refs: {},
+        context_refs: {},
         evaluated_keys: {},
       },
       {
@@ -83,8 +83,10 @@ describe('nightly-improvement helpers', () => {
         },
       },
       {
-        upstreamDiscussionNumber: '41',
-        toolingDiscussionNumber: '42',
+        upstreamPageId: 'page-upstream',
+        upstreamPageUrl: 'https://notion.so/upstream',
+        toolingPageId: 'page-tooling',
+        toolingPageUrl: 'https://notion.so/tooling',
       },
       '2026-03-10T00:30:00.000Z',
     );
@@ -95,15 +97,25 @@ describe('nightly-improvement helpers', () => {
       claude_agent_sdk: '0.5.0',
       opencode: '0.9.0',
     });
-    expect(nextState.discussion_refs).toEqual({
-      upstream: { number: 41, kind: 'upstream' },
-      tooling: { number: 42, kind: 'tooling' },
+    expect(nextState.context_refs).toEqual({
+      upstream: {
+        kind: 'upstream',
+        pageId: 'page-upstream',
+        updatedAt: '2026-03-10T00:30:00.000Z',
+        url: 'https://notion.so/upstream',
+      },
+      tooling: {
+        kind: 'tooling',
+        pageId: 'page-tooling',
+        updatedAt: '2026-03-10T00:30:00.000Z',
+        url: 'https://notion.so/tooling',
+      },
     });
     expect(nextState.evaluated_keys['upstream:newsha']).toMatchObject({
-      discussionNumber: 41,
+      pageId: 'page-upstream',
     });
     expect(nextState.evaluated_keys['tool:claude_code@1.1.0']).toMatchObject({
-      discussionNumber: 42,
+      pageId: 'page-tooling',
     });
     expect(nextState.evaluated_keys['tool:opencode@1.0.0']).toBeUndefined();
   });

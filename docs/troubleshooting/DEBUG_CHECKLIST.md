@@ -1,10 +1,6 @@
 # NanoClaw Debug Checklist
 Use this file as the active operational checklist for Apple Container runtime debugging.
 
-Historical fixed-issue notes were moved to:
-
-- `docs/archives/debug-known-issues-2026-02.md`
-
 For the full runtime debug workflow, use:
 
 - `docs/workflow/runtime/nanoclaw-container-debugging.md`

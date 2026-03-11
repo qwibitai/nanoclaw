@@ -9,9 +9,10 @@ start_loop() {
   local start_output
   if ! start_output="$(bash "$START_SCRIPT" 2>&1)"; then
     printf '%s\n' "$start_output" >&2
-    echo "platform-loop-health: failed to start the Claude pickup session" >&2
+    echo "platform-loop-health: failed to run the headless pickup lane" >&2
     exit 1
   fi
+
   if [[ -n "$start_output" ]]; then
     printf '%s\n' "$start_output"
   fi

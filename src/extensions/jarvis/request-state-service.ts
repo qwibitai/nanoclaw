@@ -10,10 +10,6 @@ import {
   updateAndyRequestState,
 } from '../../db.js';
 import { type NewMessage } from '../../types.js';
-import {
-  scheduleAndyDeliverySync,
-  scheduleAndyDeliverySyncForRun,
-} from './github-delivery-sync.js';
 import { resolveLaneIdFromGroupFolder } from './lanes.js';
 
 const REVIEW_REQUEST_PATTERN =
@@ -154,7 +150,6 @@ export function createAndyWorkIntakeRequest(input: {
     intent: 'work_intake',
     state: 'queued_for_coordinator',
   });
-  scheduleAndyDeliverySync(created.request_id, 'intake_created');
   return {
     requestId: created.request_id,
     created: created.created,
@@ -200,7 +195,6 @@ export function markAndyRequestsCoordinatorActive(
   for (const request of requests) {
     if (request.kind !== 'coordinator') continue;
     updateAndyRequestState(request.requestId, 'coordinator_active', statusText);
-    scheduleAndyDeliverySync(request.requestId, 'coordinator_active');
   }
 }
 
@@ -211,7 +205,6 @@ export function markAndyRequestsReviewInProgress(
   for (const request of requests) {
     if (request.kind !== 'review') continue;
     updateAndyRequestState(request.requestId, 'review_in_progress', statusText);
-    scheduleAndyDeliverySync(request.requestId, 'review_in_progress');
   }
 }
 
@@ -222,7 +215,6 @@ export function attachAndyRequestToWorkerRun(
   nextState: AndyRequestState = 'worker_queued',
 ): void {
   linkAndyRequestToWorkerRun(requestId, runId, workerGroupFolder, nextState);
-  scheduleAndyDeliverySync(requestId, nextState);
 }
 
 export function syncAndyRequestWithWorkerRun(
@@ -231,7 +223,6 @@ export function syncAndyRequestWithWorkerRun(
   lastStatusText?: string | null,
 ): void {
   updateAndyRequestByWorkerRun(runId, state, lastStatusText);
-  scheduleAndyDeliverySyncForRun(runId, state);
 }
 
 export function applyAndyReviewStateUpdates(
@@ -245,7 +236,6 @@ export function applyAndyReviewStateUpdates(
       update.state,
       update.summary ?? null,
     );
-    scheduleAndyDeliverySync(update.request_id, update.state);
   }
 }
 
@@ -284,7 +274,6 @@ export function markAndyRequestDispatchBlocked(input: {
       'failed',
       `Dispatch blocked before worker queue: ${input.reasonText}`,
     );
-    scheduleAndyDeliverySync(input.requestId, 'dispatch_blocked');
   }
 
   return attemptId;
@@ -332,7 +321,6 @@ export function completeAndyCoordinatorRequest(input: {
       'failed',
       input.errorText || 'Coordinator failed before dispatch',
     );
-    scheduleAndyDeliverySync(input.requestId, 'coordinator_failed');
     return;
   }
 
@@ -341,5 +329,4 @@ export function completeAndyCoordinatorRequest(input: {
     'completed',
     'Coordinator response delivered',
   );
-  scheduleAndyDeliverySync(input.requestId, 'coordinator_completed');
 }

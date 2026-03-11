@@ -111,7 +111,7 @@ Determine which workflow to update:
 |---|---|---|
 | Task execution mistake | `docs/workflow/delivery/nanoclaw-development-loop.md` | Single-lane delivery workflow |
 | Git/push/PR mistake | `docs/workflow/delivery/nanoclaw-development-loop.md` | Phase gates before push |
-| Startup / recall / collaboration sweep friction | `docs/workflow/runtime/session-recall.md` or `docs/workflow/github/github-collab-sweep.md` | Startup path and GitHub collaboration flow |
+| Startup / recall / collaboration sweep friction | `docs/workflow/runtime/session-recall.md` or `docs/workflow/control-plane/session-work-sweep.md` | Startup path and Linear collaboration flow |
 | Documentation confusion | `docs/workflow/docs-discipline/` | How to organize/discover docs |
 | Merge/sync issue | `docs/workflow/delivery/nanoclaw-development-loop.md` | Phase 7 covers merge validation |
 | Governance/compliance | `docs/workflow/strategy/weekly-slop-optimization-loop.md` | Tooling and config checks |
@@ -186,7 +186,7 @@ WHEN merging main into feature branch → read docs/workflow/delivery/nanoclaw-d
 
 ### Example 3: Workflow Followed, But Still Rough
 
-**Friction**: Session-start failed on a GitHub Project query and the workflow did not explain whether to retry, degrade locally, or stop
+**Friction**: Session-start failed on a Linear query and the workflow did not explain whether to retry, verify config, or stop
 **Root cause**: The startup workflow documented the happy path but not the failure mode
 **Fix**: Add explicit recovery/degraded-mode instructions to the session-start and collab-sweep docs
 **Trigger**: Existing session-start trigger remains valid, but the referenced docs now make the path smooth

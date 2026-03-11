@@ -28,7 +28,7 @@ NanoClaw baseline is the default. Jarvis docs apply only when working on the `ja
 - Do not rely on assumptions when facts are retrievable; gather repo facts from code/docs and use DeepWiki for repository documentation when more context is required.
 - When creating or modifying scripts, default to the minimum model-facing output needed for the task; verbose logs, large JSON payloads, and full artifacts must be opt-in or file-backed.
 - Any issue discovered during work must be logged/updated in `.claude/progress/incident.json` via the incident workflow before closure.
-- Any new feature request not already mapped must be feature-tracked and work-item tracked before implementation.
+- Any new feature request not already mapped must be feature-tracked and linked to authoritative execution state before implementation (`Linear` by default; local work-items only for legacy migration support).
 - For GitHub CLI or remote git operations that depend on auth, branch mutation, or networked GitHub state (`gh auth`, `gh pr *`, `gh repo *`, `gh api`, `git fetch`, `git pull`, `git push`, `git merge` against remotes), request escalated execution directly instead of spending a first attempt inside the sandbox.
 - For this repository, treat `origin` (`https://github.com/ingpoc/nanoclaw.git`) as the only push/PR remote. Treat `upstream` (`https://github.com/qwibitai/nanoclaw.git`) as fetch-only and never try to push there.
 
@@ -38,8 +38,8 @@ NanoClaw baseline is the default. Jarvis docs apply only when working on the `ja
 AT SESSION START → run bash scripts/workflow/session-start.sh --agent <claude|codex>
 AT SESSION START, session handoff, or when changing recall/sync/export behavior → read docs/workflow/runtime/session-recall.md
 AT TASK START after routing/preflight → state the selected route briefly (intent + first workflow/skill + MCP if relevant)
-BEFORE using GitHub collab sweep, changing sweep protocol, or updating agent-category affinity → read docs/workflow/github/github-collab-sweep.md
-WHEN session start is blocked by required GitHub collaboration actions or when handling `Needs My Review` items from the sweep → read docs/workflow/github/github-collab-sweep.md
+BEFORE using the collaboration sweep, changing sweep protocol, or updating agent-category affinity → read docs/workflow/control-plane/session-work-sweep.md
+WHEN session start is blocked by required Linear review or triage actions from the sweep → read docs/workflow/control-plane/session-work-sweep.md
 BEFORE editing root CLAUDE.md → read docs/workflow/docs-discipline/nanoclaw-root-claude-compression.md
 BEFORE creating a new docs file or adding a new CLAUDE trigger → read docs/workflow/docs-discipline/doc-creation-contract.md
 BEFORE adding/removing/renaming docs → read docs/workflow/docs-discipline/docs-pruning-loop.md
@@ -62,13 +62,16 @@ BEFORE finalizing Jarvis workflow/contract changes → read docs/workflow/delive
 BEFORE changing worker contract code/docs → read docs/workflow/runtime/jarvis-dispatch-contract-discipline.md
 BEFORE changing worker dispatch validation/contracts → read docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
 BEFORE changing worker container runtime/mounts/model config → read docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md
-BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/github/nanoclaw-github-control-plane.md
+BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/github/github-delivery-governance.md
 BEFORE finalizing Andy user-facing reliability fixes → read docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
 BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
 BEFORE deciding whether to run a skill workflow or docs-first workflow → read docs/operations/skills-vs-docs-map.md
 BEFORE deciding what to offload to GitHub Actions/rulesets vs keep in local lanes → read docs/workflow/github/github-offload-boundary-loop.md
-BEFORE setting up multi-agent GitHub coordination using Issues/Projects/Discussions/rulesets → read docs/workflow/github/github-multi-agent-collaboration-loop.md
-BEFORE using GitHub Projects/Discussions for day-to-day agent collaboration or promoting Discussions into Issues → read docs/workflow/github/github-agent-collaboration-loop.md
+BEFORE changing the Linear/Notion/GitHub control-plane split → read docs/workflow/control-plane/collaboration-surface-contract.md
+BEFORE changing execution-lane routing or Symphony scope → read docs/workflow/control-plane/execution-lane-routing-contract.md
+BEFORE changing custom Symphony backend routing or project registry → read docs/workflow/control-plane/custom-symphony-orchestration-contract.md
+BEFORE operating Symphony dispatch, daemon, or dashboard workflows → read docs/workflow/control-plane/symphony-operations-runbook.md
+BEFORE onboarding a new project into Linear/Notion/Symphony or changing the universal secret model → read docs/workflow/control-plane/project-bootstrap-and-secret-contract.md
 BEFORE consulting Claude Code CLI via resumed/forked sessions for parallel reasoning/review → read docs/workflow/delivery/claude-cli-resume-consult-lane.md
 BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md
 BEFORE finalizing any Andy/Jarvis operating agreement change → read docs/operations/agreement-sync-protocol.md

@@ -13,9 +13,9 @@ Build and maintain a deterministic feature catalog so implementation always star
 
 ## Outputs
 
-- `.claude/progress/feature-catalog.seed.json` (curated source-of-truth)
-- `.claude/progress/feature-catalog.json` (generated runtime map)
-- `.claude/progress/feature-catalog.md` (human-readable view)
+- `.claude/catalog/feature-catalog.seed.json` (curated source-of-truth)
+- `.claude/catalog/feature-catalog.json` (generated runtime map)
+- `.claude/catalog/feature-catalog.md` (human-readable view)
 
 ## Ralph Loop (Practical)
 

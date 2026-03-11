@@ -11,16 +11,16 @@ Use [`DOCS.md`](../DOCS.md) for the full inventory.
 docs/
   architecture/     # system architecture and design rationale
   workflow/
+    control-plane/  # Linear execution sweep, collaboration-surface, lane-routing, project-bootstrap, and Symphony contracts
     delivery/       # delivery loops, gates, and cross-tool execution
     runtime/        # runtime contracts, incident/debug loops, recall
-    github/         # GitHub collaboration, governance, and offload boundaries
+    github/         # GitHub delivery governance and offload boundaries
     docs-discipline/ # docs authoring, pruning, and trigger hygiene
     strategy/       # optimization cadence and slop reduction workflows
   operations/       # role authority and change-management matrix
   tools/            # tool-specific usage maps and best-practice routing
   reference/        # baseline requirements/spec/security documents
   troubleshooting/  # debug playbooks and platform-specific fixes
-  archives/         # historical RCA and archived doc snapshots
   research/         # workflow research intake and weekly optimization evidence
 ```
 
@@ -37,8 +37,10 @@ docs/
 - Default delivery workflow: `docs/workflow/delivery/nanoclaw-development-loop.md`
 - Runtime and incident debugging: `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`
 - Worker contract and runtime: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` + `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
-- GitHub and workflow governance: `docs/workflow/github/nanoclaw-github-control-plane.md` + `docs/workflow/github/github-offload-boundary-loop.md`
-- Day-to-day GitHub agent collaboration: `docs/workflow/github/github-agent-collaboration-loop.md`
+- GitHub delivery and workflow governance: `docs/workflow/github/github-delivery-governance.md` + `docs/workflow/github/github-offload-boundary-loop.md`
+- Control-plane sweep, collaboration split, lane routing, bootstrap/secrets, custom Symphony, and Symphony operator handling: `docs/workflow/control-plane/session-work-sweep.md` + `docs/workflow/control-plane/collaboration-surface-contract.md` + `docs/workflow/control-plane/execution-lane-routing-contract.md` + `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md` + `docs/workflow/control-plane/custom-symphony-orchestration-contract.md` + `docs/workflow/control-plane/symphony-operations-runbook.md`
+- Ownership and update surfaces: `docs/operations/workflow-setup-responsibility-map.md`
+- Shared session recall and Notion publish flow: `docs/workflow/runtime/session-recall.md`
 - Nightly upstream/tooling improvement lane: `docs/workflow/strategy/nightly-evaluation-loop.md`
 - Cross-tool Claude/Codex execution: `docs/workflow/delivery/unified-codex-claude-loop.md`
 - Ownership and update surfaces: `docs/operations/workflow-setup-responsibility-map.md` + `docs/operations/update-requirements-matrix.md`

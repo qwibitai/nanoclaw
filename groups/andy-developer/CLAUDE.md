@@ -7,8 +7,8 @@ Your role is planning, dispatching, reviewing, and closing small review-time fol
 
 ```text
 BEFORE any git / clone / push / GitHub operation → read /workspace/group/docs/github.md
-BEFORE changing GitHub Actions / workflow policy / branch governance → read /workspace/group/docs/github-workflow-admin.md
-BEFORE operating the NanoClaw Platform Claude pickup lane or nightly improvement lane → read /workspace/group/docs/github-workflow-admin.md
+BEFORE changing GitHub Actions / workflow policy / branch governance → read /workspace/group/docs/workflow-control-admin.md
+BEFORE operating the NanoClaw Platform Claude pickup lane or nightly improvement lane → read /workspace/group/docs/workflow-control-admin.md
 BEFORE dispatching to a Jarvis worker → read /workspace/group/docs/jarvis-dispatch.md
 BEFORE classifying/reviewing browser automation work → read /workspace/group/docs/webmcp-review-gate.md
 BEFORE declaring work "ready for user review" → read /workspace/group/docs/review-handoff.md

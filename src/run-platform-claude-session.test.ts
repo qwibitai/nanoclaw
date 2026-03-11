@@ -132,11 +132,11 @@ exit "\${FAKE_CLAUDE_EXIT_CODE:-0}"
     const output = runSession();
 
     expect(output).toContain(
-      `platform-loop-runner: removed clean worktree ${worktreePath}`,
+      `claude-worktree-runner: removed clean worktree ${worktreePath}`,
     );
     expect(fs.existsSync(worktreePath)).toBe(false);
     expect(fs.readFileSync(claudeArgsPath, 'utf8')).toContain(
-      '--permission-mode bypassPermissions /platform-pickup',
+      '-p --permission-mode bypassPermissions --add-dir',
     );
     expect(fs.readFileSync(gitLogPath, 'utf8')).toContain(
       `${path.resolve('')} | worktree | remove ${worktreePath}`,
@@ -150,7 +150,7 @@ exit "\${FAKE_CLAUDE_EXIT_CODE:-0}"
 
     expect(result.status).toBe(0);
     expect(result.stderr).toContain(
-      `platform-loop-runner: preserving dirty worktree at ${worktreePath}`,
+      `claude-worktree-runner: preserving dirty worktree at ${worktreePath}`,
     );
     expect(result.stderr).toContain(' M src/example.ts');
     expect(fs.existsSync(worktreePath)).toBe(true);

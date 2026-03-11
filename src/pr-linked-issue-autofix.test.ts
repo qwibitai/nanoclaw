@@ -19,7 +19,7 @@ describe('pr-linked-issue autofix helpers', () => {
     expect(
       isMaintenanceOnlyChange([
         '.github/workflows/multi-agent-governance.yml',
-        'docs/workflow/github/nanoclaw-github-control-plane.md',
+        'docs/workflow/github/github-delivery-governance.md',
         '.claude/skills/foo/SKILL.md',
       ]),
     ).toBe(true);
@@ -74,7 +74,7 @@ describe('pr-linked-issue autofix helpers', () => {
     const plan = planPrLinkedIssueAutofix({
       title: 'docs: tighten governance docs',
       body: '## Summary\n\nExample',
-      files: ['docs/workflow/github/nanoclaw-github-control-plane.md'],
+      files: ['docs/workflow/github/github-delivery-governance.md'],
     });
 
     expect(plan.shouldFix).toBe(true);

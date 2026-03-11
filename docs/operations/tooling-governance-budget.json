@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "claude_settings": {
-    "max_allow_entries": 60,
-    "max_wildcard_allow_entries": 46,
+    "max_allow_entries": 62,
+    "max_wildcard_allow_entries": 66,
     "required_pretool_hook_paths": [
       ".claude/hooks/risk-tier-pretool-guard.sh"
     ],

@@ -417,6 +417,21 @@ if [[ "$MODE" == "close" ]]; then
   [[ -n "$NEXT_STEP" ]] && echo "  next:    $NEXT_STEP"
   [[ -n "$BLOCKER_TEXT" ]] && echo "  blocker: $BLOCKER_TEXT"
   [[ -n "$FILES_TOUCHED" ]] && echo "  files:   $FILES_TOUCHED"
+
+  if [[ -n "${NOTION_SESSION_SUMMARY_DATABASE_ID:-}" ]]; then
+    echo
+    echo "Publishing shared session summary to Notion..."
+    node scripts/workflow/notion-context.js publish-session-summary \
+      --database "$NOTION_SESSION_SUMMARY_DATABASE_ID" \
+      --title "${ISSUE_ID:-$BRANCH} session summary (${TS})" \
+      --branch "$BRANCH" \
+      --issue "$ISSUE_ID" \
+      --state "$SESSION_STATE" \
+      --done "$DONE_TEXT" \
+      --next "$NEXT_STEP" \
+      --blocker "$BLOCKER_TEXT"
+  fi
+
   echo
   echo "Next session:"
   if [[ -n "$ISSUE_ID" ]]; then

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "projects": [
+    {
+      "projectKey": "nanoclaw",
+      "displayName": "NanoClaw",
+      "linearProject": "nanoclaw",
+      "notionRoot": "https://www.notion.so/your-workspace/nanoclaw-root",
+      "githubRepo": "ingpoc/nanoclaw",
+      "symphonyEnabled": true,
+      "allowedBackends": ["codex", "claude-code"],
+      "defaultBackend": "codex",
+      "workClassesSupported": ["nanoclaw-core"],
+      "secretScope": "nanoclaw",
+      "workspaceRoot": "/Users/your-user/.nanoclaw/symphony/nanoclaw",
+      "readyPolicy": "andy-developer-ready-v1",
+      "nightlyEnabled": false,
+      "morningPrepEnabled": false
+    },
+    {
+      "projectKey": "aadhar-chain",
+      "displayName": "Aadhar Chain",
+      "linearProject": "aadhar-chain",
+      "notionRoot": "https://www.notion.so/your-workspace/aadhar-chain-root",
+      "githubRepo": "your-org/aadhar-chain",
+      "symphonyEnabled": true,
+      "allowedBackends": ["opencode-worker", "codex"],
+      "defaultBackend": "opencode-worker",
+      "workClassesSupported": ["downstream-project"],
+      "secretScope": "aadhar-chain",
+      "workspaceRoot": "/Users/your-user/.nanoclaw/symphony/aadhar-chain",
+      "readyPolicy": "andy-developer-ready-v1",
+      "nightlyEnabled": false,
+      "morningPrepEnabled": false
+    }
+  ]
+}

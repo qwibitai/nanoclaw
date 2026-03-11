@@ -29,7 +29,15 @@ description:
 
 1. Identify current branch and confirm remote state.
    - In Codex/harness sessions, do this with escalated execution rather than attempting sandboxed `gh` or remote git first.
-2. Run local validation (`make -C elixir all`) before pushing.
+2. Run local validation before pushing.
+   - Preferred full gate: `bash scripts/workflow/finalize-pr.sh`
+   - If the full acceptance-gate path is intentionally out of scope for the current change, run the scoped minimum:
+     - `npm run typecheck`
+     - `npm test`
+     - `bash scripts/check-workflow-contracts.sh`
+     - `bash scripts/check-claude-codex-mirror.sh`
+     - `bash scripts/check-tooling-governance.sh`
+     - `git diff --check`
 3. Push branch to `origin` with upstream tracking if needed, using whatever
    remote URL is already configured.
    - Do not retarget the push to `upstream` (`qwibitai/nanoclaw`).
@@ -56,7 +64,10 @@ description:
      scope (all intended work on the branch), not just the newest commits,
      including newly added work, removed work, or changed approach.
    - Do not reuse stale description text from earlier iterations.
-7. Validate PR body with `mix pr_body.check` and fix all reported issues.
+7. Validate PR body manually against `.github/pull_request_template.md`:
+   - fill every section with concrete content
+   - remove all placeholder comments
+   - ensure checked boxes match the actual scope and evidence
 8. Reply with the PR URL from `gh pr view`.
 
 ## Commands
@@ -65,8 +76,17 @@ description:
 # Identify branch
 branch=$(git branch --show-current)
 
-# Minimal validation gate
-make -C elixir all
+# Preferred full validation gate
+bash scripts/workflow/finalize-pr.sh
+
+# If the full gate is intentionally out of scope for the change, run the
+# scoped minimum instead:
+npm run typecheck
+npm test
+bash scripts/check-workflow-contracts.sh
+bash scripts/check-claude-codex-mirror.sh
+bash scripts/check-tooling-governance.sh
+git diff --check
 
 # Initial push: respect the current origin remote.
 git push -u origin HEAD
@@ -102,11 +122,7 @@ fi
 # 1) open the template and draft body content for this PR
 # 2) gh pr edit --body-file /tmp/pr_body.md
 # 3) for branch updates, re-check that title/body still match current diff
-
-tmp_pr_body=$(mktemp)
-gh pr view --json body -q .body > "$tmp_pr_body"
-(cd elixir && mix pr_body.check --file "$tmp_pr_body")
-rm -f "$tmp_pr_body"
+# 4) confirm all template sections are filled and no placeholder comments remain
 
 # Show PR URL for the reply
 gh pr view --json url -q .url

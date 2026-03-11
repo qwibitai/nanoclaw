@@ -17,7 +17,7 @@ declare module '../scripts/workflow/nightly-improvement.js' {
       last_run_at?: string | null;
       last_upstream_sha?: string | null;
       tool_versions?: Record<string, string>;
-      discussion_refs?: Record<string, unknown>;
+      context_refs?: Record<string, unknown>;
       evaluated_keys?: Record<string, unknown>;
     },
     scan: {
@@ -41,8 +41,10 @@ declare module '../scripts/workflow/nightly-improvement.js' {
       };
     },
     refs?: {
-      upstreamDiscussionNumber?: string | null;
-      toolingDiscussionNumber?: string | null;
+      upstreamPageId?: string | null;
+      upstreamPageUrl?: string | null;
+      toolingPageId?: string | null;
+      toolingPageUrl?: string | null;
     },
     recordedAt?: string,
   ): {
@@ -50,7 +52,7 @@ declare module '../scripts/workflow/nightly-improvement.js' {
     last_run_at: string | null;
     last_upstream_sha: string | null;
     tool_versions: Record<string, string>;
-    discussion_refs: Record<string, unknown>;
+    context_refs: Record<string, unknown>;
     evaluated_keys: Record<string, unknown>;
   };
 }

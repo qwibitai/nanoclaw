@@ -92,8 +92,6 @@ function searchOldPath(oldPath) {
         "--glob",
         "!docs/research/**",
         "--glob",
-        "!docs/archives/**",
-        "--glob",
         "!.git/**",
       ],
       { cwd: root, encoding: "utf8" },

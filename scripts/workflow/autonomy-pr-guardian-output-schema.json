@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "pr_review",
+    "notes"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "noop", "blocked", "failed"]
+    },
+    "pr_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pr_number",
+        "action",
+        "ready_for_user_merge"
+      ],
+      "properties": {
+        "pr_number": {
+          "type": ["integer", "null"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["noop", "patched", "ready", "blocked"]
+        },
+        "ready_for_user_merge": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
+

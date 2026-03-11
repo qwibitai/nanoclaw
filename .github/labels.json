@@ -88,5 +88,15 @@
     "name": "status:triage",
     "color": "C5DEF5",
     "description": "Needs initial triage and assignment."
+  },
+  {
+    "name": "ready-for-user-merge",
+    "color": "0E8A16",
+    "description": "Codex guardian marked the PR ready for final user merge."
+  },
+  {
+    "name": "autonomy-blocked",
+    "color": "E4E669",
+    "description": "Autonomous lanes are blocked on a non-repo or policy-level dependency."
   }
 ]

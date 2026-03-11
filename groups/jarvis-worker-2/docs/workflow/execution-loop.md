@@ -146,7 +146,7 @@ Include tool names and key outputs in completion evidence.
 
 ## Control-Plane Boundary
 
-GitHub control-plane tasks are owned by `andy-developer`:
+GitHub delivery-governance tasks are owned by `andy-developer`:
 
 - repository secrets setup (`gh secret set ...`)
 - branch protection/ruleset changes
@@ -154,15 +154,12 @@ GitHub control-plane tasks are owned by `andy-developer`:
 
 Workers stay focused on implementation/test execution and should escalate control-plane requests to Andy-developer.
 
-If GitHub project tracking is used:
+Execution-state ownership is external to workers:
 
-- user-project execution items belong on `Andy/Jarvis Delivery`
-- NanoClaw/runtime/governance blockers belong on `NanoClaw Platform`
-- do not track the same execution item on both boards; cross-link the blocker instead
-- if dispatch includes a GitHub Issue number for delivery tracking:
-  - include the Issue number unchanged in execution output and handoff artifacts
-  - do not manually manage Project workflow state or ownership fields
-  - let the host/runtime sync worker attribution, milestone comments, and board fields
+- Linear owns task state, assignee, and readiness
+- Notion owns shared context and design or research background
+- GitHub Issues may be referenced for delivery history, but workers do not manage project-board state
+- if dispatch includes a Linear issue key or GitHub Issue number, include it unchanged in execution output and handoff artifacts
   - leave completion evidence or PR link on the same issue before handoff only when explicitly instructed by Andy
 
 ---

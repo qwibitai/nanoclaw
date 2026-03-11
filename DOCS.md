@@ -25,6 +25,15 @@ Canonical classification for repository docs.
 
 Workflow docs are physically grouped by operational concern.
 
+### `docs/workflow/control-plane/`
+
+- `docs/workflow/control-plane/collaboration-surface-contract.md`: canonical Linear/Notion/GitHub/repo separation-of-concern contract
+- `docs/workflow/control-plane/custom-symphony-orchestration-contract.md`: custom Symphony registry, backend routing, and project enablement contract
+- `docs/workflow/control-plane/execution-lane-routing-contract.md`: canonical NanoClaw-vs-downstream lane routing and Symphony scope contract
+- `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md`: canonical project onboarding and universal secret-scope contract
+- `docs/workflow/control-plane/session-work-sweep.md`: session-start Linear sweep protocol and morning handoff contract
+- `docs/workflow/control-plane/symphony-operations-runbook.md`: operator runbook for Symphony registry sync, queue inspection, dispatch, daemon, and dashboard handling
+
 ### `docs/workflow/delivery/`
 
 - `docs/workflow/delivery/nanoclaw-development-loop.md`: default feature/bug/reliability delivery loop
@@ -32,6 +41,7 @@ Workflow docs are physically grouped by operational concern.
 - `docs/workflow/delivery/nanoclaw-jarvis-acceptance-checklist.md`: acceptance and smoke validation gates
 - `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md`: user-facing reliability sign-off protocol
 - `docs/workflow/delivery/claude-cli-resume-consult-lane.md`: scoped Claude CLI consult lane guidance
+- `docs/workflow/delivery/platform-claude-pickup-lane.md`: Linear-driven NanoClaw platform pickup automation lane
 
 ### `docs/workflow/runtime/`
 
@@ -44,11 +54,8 @@ Workflow docs are physically grouped by operational concern.
 
 ### `docs/workflow/github/`
 
-- `docs/workflow/github/nanoclaw-github-control-plane.md`: GitHub workflow/review control-plane rules
+- `docs/workflow/github/github-delivery-governance.md`: GitHub-only delivery governance for PRs, reviews, CI, and branch protection
 - `docs/workflow/github/github-offload-boundary-loop.md`: GitHub-vs-local workflow placement policy
-- `docs/workflow/github/github-multi-agent-collaboration-loop.md`: multi-agent GitHub coordination model
-- `docs/workflow/github/github-agent-collaboration-loop.md`: day-to-day agent operating workflow for GitHub Discussions, Issues, and Project usage
-- `docs/workflow/github/github-collab-sweep.md`: session-start GitHub sweep protocol, agent-category affinity, and handoff comment format
 
 ### `docs/workflow/docs-discipline/`
 
@@ -66,7 +73,7 @@ Workflow docs are physically grouped by operational concern.
 
 ## `docs/operations/`
 
-- `docs/operations/roles-classification.md`: role authority and handoff model (`andy-bot`, `andy-developer`, workers)
+- `docs/operations/roles-classification.md`: role authority and handoff model for user shaping, Andy coordination, NanoClaw execution lanes, and downstream workers
 - `docs/operations/update-requirements-matrix.md`: required doc/code update surfaces by change type
 - `docs/operations/agreement-sync-protocol.md`: agreement-driven sync protocol for docs/code
 - `docs/operations/skills-vs-docs-map.md`: decision boundary for skill-first vs docs-first execution
@@ -91,12 +98,6 @@ Workflow docs are physically grouped by operational concern.
 
 - `docs/troubleshooting/DEBUG_CHECKLIST.md`: debug flow for runtime/container/session failures
 - `docs/troubleshooting/APPLE-CONTAINER-NETWORKING.md`: Apple container networking/build diagnostics
-
-## `docs/archives/`
-
-- `docs/archives/CHANGELOG-2026-02-26.md`: historical changelog snapshot prior to current changelog flow
-- `docs/archives/debug-known-issues-2026-02.md`: archived fixed-issue notes removed from the active debug checklist
-- `docs/archives/worker-dispatch-root-cause-2026-02-24.md`: root-cause analysis archive for worker dispatch incident
 
 ## `docs/research/`
 

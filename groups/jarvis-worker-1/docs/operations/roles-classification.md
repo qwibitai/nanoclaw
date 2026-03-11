@@ -8,7 +8,7 @@ Role contract for NanoClaw + Jarvis operation.
 |------|---------|---------------|-------------|
 | `main` | host process control | global orchestration, full group control | n/a |
 | `andy-bot` | `nanoclaw-agent` (Claude Code lane) | observation, summarization, GitHub research on `openclaw-gurusharan`, risk triage | direct worker dispatch/control |
-| `andy-developer` | `nanoclaw-agent` (Claude Code lane) | strict worker dispatch, review/rework loop, GitHub control-plane administration, worker branch seeding | bypass contract or dispatch to non-worker lanes |
+| `andy-developer` | `nanoclaw-agent` (Claude Code lane) | strict worker dispatch, review/rework loop, GitHub delivery-governance administration, worker branch seeding | bypass contract or dispatch to non-worker lanes |
 | `jarvis-worker-*` | `nanoclaw-worker` (OpenCode lane) | bounded implementation/test execution from dispatch contract, produce `<completion>` payload | unbounded orchestration decisions or control-plane governance |
 
 ## Handoff Sequence

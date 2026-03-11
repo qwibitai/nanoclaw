@@ -17,14 +17,13 @@ interface Catalog {
 
 function main(): void {
   const repoRoot = process.cwd();
-  const catalogPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.json');
+  const catalogPath = path.join(repoRoot, '.claude', 'catalog', 'feature-catalog.json');
 
-  // Try to read directly - avoids TOCTOU race condition
   let catalog: Catalog;
   try {
     catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as Catalog;
   } catch {
-    console.error('Missing .claude/progress/feature-catalog.json');
+    console.error('Missing .claude/catalog/feature-catalog.json');
     console.error('Run: npx tsx .claude/skills/feature-tracking/scripts/build-feature-catalog.ts');
     process.exit(1);
   }

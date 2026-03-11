@@ -1,46 +1,78 @@
 # Roles Classification
 
-Role contract for NanoClaw + Jarvis operation.
+Role contract for NanoClaw orchestration, NanoClaw repo execution, and downstream project execution.
 
 ## Role Matrix
 
 | Role | Runtime | Primary Scope | Must Not Do |
 |------|---------|---------------|-------------|
-| `main` | host process control | global orchestration, full group control | n/a |
-| `andy-bot` | `nanoclaw-agent` (Claude Code lane) | observation, summarization, GitHub research on `openclaw-gurusharan`, risk triage | direct worker dispatch/control |
-| `andy-developer` | `nanoclaw-agent` (Claude Code lane) | strict worker dispatch, review/rework loop, GitHub control-plane administration, worker branch seeding | bypass contract or dispatch to non-worker lanes |
-| `jarvis-worker-*` | `nanoclaw-worker` (OpenCode lane) | bounded implementation/test execution from dispatch contract, produce `<completion>` payload | unbounded orchestration decisions or control-plane governance |
+| `you` | human operator | shape intent, priorities, and feature direction | become the hidden system of record outside Linear/Notion |
+| `main` | host process control | global orchestration, group control, lane status | dispatch strict worker contracts directly to `jarvis-worker-*` |
+| `andy-bot` | `nanoclaw-agent` (Claude Code lane) | observation, summarization, research, risk signal | direct worker dispatch/control |
+| `andy-developer` | `nanoclaw-agent` (Claude Code lane) | coordinator, team lead, reviewer, administrator, readiness gatekeeper, task router | become the default implementation lane for scoped product work |
+| `codex` | external execution lane | NanoClaw repo implementation, review/repair, bounded shaping support | self-approve vague work into `Ready` |
+| `claude-code` | external execution lane | NanoClaw repo implementation, scheduled execution loops, reliability/debug execution | self-approve vague work into `Ready` |
+| `jarvis-worker-*` | `nanoclaw-worker` (OpenCode lane) | bounded downstream implementation/test execution from strict dispatch contracts | own planning, governance, or NanoClaw repo implementation by default |
+| `symphony` | external orchestration layer | optional orchestration for selected project-policy-approved `Ready` implementation work | act as a general planner, nightly lane, or morning prep engine |
+
+## Routing Defaults
+
+### NanoClaw repo
+
+For `NanoClaw` repo work:
+
+1. `you` shape the feature or problem
+2. `andy-developer` structures the work and governs the flow
+3. `codex` and `claude-code` are the default execution lanes
+4. approved Symphony queues may orchestrate selected `codex` or `claude-code` work
+5. `jarvis-worker-*` are not the default implementors
+
+### Downstream project repos
+
+For downstream project work requested through WhatsApp:
+
+1. `you` request work
+2. `andy-developer` shapes scope and readiness
+3. `jarvis-worker-*` implement bounded work
+4. `symphony` may orchestrate selected `Ready` issues if explicitly enabled
+
+## Ready Ownership
+
+`Ready` is a coordination decision.
+
+Rules:
+
+1. `andy-developer` is the readiness gatekeeper
+2. `codex` and `claude-code` may propose or normalize issue content
+3. `jarvis-worker-*` and `symphony` consume `Ready` work; they do not define it
 
 ## Handoff Sequence
 
-1. `andy-bot` gathers context and risk signal.
-2. `andy-developer` emits strict JSON dispatch (`run_id`, branch, tests, output contract).
-3. `jarvis-worker-*` executes and returns `<completion>`.
-4. `andy-developer` reviews and resolves to approve/rework.
-5. For user QA requests, `andy-developer` stages (or clones if missing) the approved branch/commit in `NanoClawWorkspace`, runs local preflight (`build` + `server start/health`) on that same branch/commit, verifies no duplicate same-lane running containers, then provides user-run local testing commands.
+### NanoClaw repo work
 
-For UI-impacting changes, browser verification is default:
-- `andy-developer` dispatches WebMCP-required acceptance checks unless fallback is explicitly approved.
-- `jarvis-worker-*` must return WebMCP evidence (`modelContextTesting.listTools()` and task-relevant `executeTool()` output) before approval is eligible.
+1. `you` define the outcome
+2. `andy-developer` converts it into Notion context and/or Linear work
+3. `andy-developer` approves `Ready`
+4. `codex` or `claude-code` executes
+5. `andy-developer` reviews, coordinates, and closes the loop
+
+### Downstream project work
+
+1. `you` request work through WhatsApp
+2. `andy-developer` creates or updates project context and issue scope
+3. `andy-developer` approves `Ready`
+4. `jarvis-worker-*` or approved Symphony queue executes
+5. `andy-developer` reviews and resolves to approve, rework, or escalate
 
 ## Access Policy
 
-- `andy-bot`, `andy-developer`, and `jarvis-worker-*` retain GitHub access via role-scoped env vars:
-  `GITHUB_TOKEN_ANDY_BOT`, `GITHUB_TOKEN_ANDY_DEVELOPER`, `GITHUB_TOKEN_WORKER` (each with fallback to `GITHUB_TOKEN`).
-- Only `andy-developer` has worker delegation authority in IPC lanes.
-- `andy-developer` owns GitHub workflow/review governance changes; workers focus on repository implementation tasks.
-- `andy-developer` may push for control-plane changes and pre-seed `jarvis-*` branches, but does not own product feature/fix implementation commits.
-- `andy-developer` decides whether `@claude` review is required, optional, or disabled per project requirement profile.
-- Local review handoff checks are default behavior for `andy-developer` when declaring "ready for user review" (not reminder-driven).
-
-## Skill Source Of Truth
-
-- `container/skills/testing` is a symlink to `~/.claude/skills/testing`.
-- `container/skills/browser-testing` is a symlink to `~/.claude/skills/browser-testing`.
-- Update WebMCP testing behavior in those global `SKILL.md` targets so Andy and Jarvis lanes receive the same policy.
-- `container/skills/agent-browser/SKILL.md` remains local in-repo and is not part of the global testing/browser-testing sync path.
+- `andy-developer` owns workflow governance, routing, and worker delegation authority
+- `codex` and `claude-code` own NanoClaw repo execution, not workflow governance by default
+- `jarvis-worker-*` focus on downstream repository implementation tasks
+- `symphony` is optional and bounded to approved project issue queues
+- GitHub governance changes remain `andy-developer` owned
 
 ## Related Map
 
-For workflow setup selection and exact update locations, see:
+For exact surface ownership and update locations, see:
 `docs/operations/workflow-setup-responsibility-map.md`.

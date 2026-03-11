@@ -1,7 +1,7 @@
 # Changelog
 
 Tracks only the latest upstream sync outcome.
-Previous entries must be moved to `docs/archives/CHANGELOG-<YYYY-MM-DD>.md`.
+Previous entries are retained in git history only.
 
 ## 2026-03-04
 
@@ -28,7 +28,6 @@ Previous entries must be moved to `docs/archives/CHANGELOG-<YYYY-MM-DD>.md`.
 ### Docs/Infra
 
 - Container rules markdown files from old runtime paths removed in upstream core.
-- Changelog archived to `docs/archives/CHANGELOG-2026-03-04.md` per sync policy.
 
 ### Conflict Notes And Local Compatibility Decisions
 

@@ -15,7 +15,7 @@ Usage: scripts/workflow/session-start.sh --agent claude|codex [options] [query]
 
 Runs the canonical session-start flow:
   1. qmd recall bootstrap
-  2. GitHub collaboration sweep with startup enforcement
+  2. work-control-plane sweep with startup enforcement
   3. workflow preflight checks
 
 Options:
@@ -139,14 +139,18 @@ if [[ "$PENDING_EMBEDDINGS" -gt 0 ]]; then
   echo ""
 fi
 
-if bash scripts/workflow/gh-collab-sweep.sh --agent "$AGENT" --fail-on-action-items; then
+CONTROL_PLANE="$(node scripts/workflow/work-control-plane.js)"
+echo "Work control plane: $CONTROL_PLANE"
+echo ""
+
+if bash scripts/workflow/work-sweep.sh --agent "$AGENT" --fail-on-action-items; then
   :
 else
   status=$?
   if [[ "$status" -eq 3 ]]; then
-    echo "session-start: BLOCKED by required GitHub collaboration actions."
+    echo "session-start: BLOCKED by required work-control-plane actions."
   else
-    echo "session-start: FAILED during GitHub collaboration sweep." >&2
+    echo "session-start: FAILED during work-control-plane sweep." >&2
   fi
   exit "$status"
 fi

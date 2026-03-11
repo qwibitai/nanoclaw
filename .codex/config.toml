@@ -42,6 +42,10 @@ config_file = "agents/monitor.toml"
 description = "Headless morning prep lane for session start, GitHub collaboration triage, and nightly finding promotion without repo-tracked edits."
 config_file = "agents/morning-prep.toml"
 
+[agents.pr_guardian]
+description = "Headless Codex PR guardian lane for autonomous review, CI repair, and merge-readiness labeling."
+config_file = "agents/pr-guardian.toml"
+
 [agents.worker]
 description = "Scoped implementation worker for approved touch-set changes."
 config_file = "agents/worker.toml"
@@ -54,6 +58,25 @@ sandbox_mode = "workspace-write"
 sandbox_workspace_write.network_access = true
 web_search = "disabled"
 
+[profiles.pr_guardian]
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+sandbox_workspace_write.network_access = true
+web_search = "disabled"
+
 [profiles.gpt54_escalation]
 model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
+
+[mcp_servers.symphony]
+command = "bash"
+args = [
+  "scripts/workflow/run-with-env.sh",
+  "npx",
+  "tsx",
+  "scripts/workflow/symphony-mcp.ts"
+]
+startup_timeout_sec = 20.0
+tool_timeout_sec = 120.0

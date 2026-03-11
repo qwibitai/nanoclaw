@@ -1,6 +1,8 @@
 # NanoClaw Jarvis Dispatch Contract
 
-Canonical contract for `jarvis-worker-*` dispatch and completion validation.
+Canonical contract for `jarvis-worker-*` dispatch and completion validation for downstream project work.
+
+This contract does not apply to NanoClaw repo execution by `codex` or `claude-code`.
 
 ## Dispatch Requirements
 
@@ -14,8 +16,8 @@ Screenshot capture/analysis is prohibited in worker dispatch and completion evid
   "task_type": "implement",
   "context_intent": "fresh",
   "ui_impacting": true,
-  "input": "Implement strict worker dispatch validation",
-  "repo": "openclaw-gurusharan/nanoclaw",
+  "input": "Implement downstream feature scope",
+  "repo": "your-org/aadhar-chain",
   "base_branch": "main",
   "branch": "jarvis-dispatch-contract",
   "acceptance_tests": [
@@ -69,6 +71,9 @@ Screenshot capture/analysis is prohibited in worker dispatch and completion evid
   - cross-worker explicit `session_id` reuse is blocked by validator.
 
 ## Branch Seeding Rule
+
+Use this contract only after the work has already been classified as downstream project work.
+If the target repo is `NanoClaw`, route the issue to `codex` or `claude-code` instead of `jarvis-worker-*`.
 
 Before dispatching worker execution:
 

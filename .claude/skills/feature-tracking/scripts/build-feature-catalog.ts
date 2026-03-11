@@ -87,10 +87,10 @@ function toMarkdown(catalog: any): string {
 
 function main(): void {
   const repoRoot = process.cwd();
-  const progressDir = path.join(repoRoot, '.claude', 'progress');
-  const seedPath = path.join(progressDir, 'feature-catalog.seed.json');
-  const outJson = path.join(progressDir, 'feature-catalog.json');
-  const outMd = path.join(progressDir, 'feature-catalog.md');
+  const catalogDir = path.join(repoRoot, '.claude', 'catalog');
+  const seedPath = path.join(catalogDir, 'feature-catalog.seed.json');
+  const outJson = path.join(catalogDir, 'feature-catalog.json');
+  const outMd = path.join(catalogDir, 'feature-catalog.md');
 
   if (!fs.existsSync(seedPath)) {
     console.error(`Missing seed catalog: ${seedPath}`);
@@ -157,7 +157,7 @@ function main(): void {
     features,
   };
 
-  fs.mkdirSync(progressDir, { recursive: true });
+  fs.mkdirSync(catalogDir, { recursive: true });
   fs.writeFileSync(outJson, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
   fs.writeFileSync(outMd, `${toMarkdown(catalog)}\n`, 'utf8');
 

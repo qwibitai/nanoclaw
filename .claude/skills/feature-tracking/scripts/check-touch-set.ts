@@ -19,32 +19,16 @@ interface Catalog {
   features: CatalogFeature[];
 }
 
+interface RankedFeature {
+  feature: CatalogFeature;
+  score: number;
+}
+
 interface Args {
   featureQuery: string;
   stagedOnly: boolean;
   allowPatterns: string[];
 }
-
-// Module-level constants
-const STOP_WORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-  'in', 'is', 'it', 'of', 'on', 'or', 'that', 'the', 'to', 'with',
-  'add', 'new', 'feature',
-]);
-
-const SCORING_WEIGHTS = {
-  EXACT_ID_MATCH: 120,
-  ID_CONTAINS_QUERY: 50,
-  NAME_CONTAINS_QUERY: 40,
-  SUMMARY_CONTAINS_QUERY: 15,
-  ID_TERM_MATCH: 20,
-  NAME_TERM_MATCH: 15,
-  SUMMARY_TERM_MATCH: 10,
-  KEYWORD_EXACT_MATCH: 20,
-  KEYWORD_TERM_MATCH: 10,
-  FILE_EXACT_MATCH: 10,
-  FILE_TERM_MATCH: 5,
-} as const;
 
 function parseArgs(argv: string[]): Args {
   const queryParts: string[] = [];
@@ -86,53 +70,71 @@ function parseArgs(argv: string[]): Args {
 }
 
 function loadCatalog(repoRoot: string): Catalog {
-  const catalogPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.json');
-  // Try to read directly - avoids TOCTOU race condition
+  const catalogPath = path.join(repoRoot, '.claude', 'catalog', 'feature-catalog.json');
   try {
     return JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as Catalog;
   } catch {
-    console.error('Missing .claude/progress/feature-catalog.json. Run build-feature-catalog.ts first.');
+    console.error(
+      'Missing .claude/catalog/feature-catalog.json. Run build-feature-catalog.ts first.',
+    );
     process.exit(1);
   }
 }
 
 function scoreFeature(feature: CatalogFeature, query: string): number {
   const q = query.toLowerCase();
-  // Pre-compute lowercase values once
-  const idLower = feature.id.toLowerCase();
-  const nameLower = feature.name.toLowerCase();
-  const summaryLower = feature.summary.toLowerCase();
-
+  const stopWords = new Set([
+    'a',
+    'an',
+    'and',
+    'are',
+    'as',
+    'at',
+    'be',
+    'by',
+    'for',
+    'from',
+    'in',
+    'is',
+    'it',
+    'of',
+    'on',
+    'or',
+    'that',
+    'the',
+    'to',
+    'with',
+    'add',
+    'new',
+    'feature',
+  ]);
   const terms = q
     .split(/\s+/)
     .map((term) => term.trim())
-    .filter((term) => term.length >= 3 && !STOP_WORDS.has(term));
-
+    .filter((term) => term.length >= 3 && !stopWords.has(term));
   const includesAnyTerm = (value: string): boolean =>
     terms.some((term) => value.includes(term));
 
   let score = 0;
 
-  if (idLower === q) score += SCORING_WEIGHTS.EXACT_ID_MATCH;
-  else if (idLower.includes(q)) score += SCORING_WEIGHTS.ID_CONTAINS_QUERY;
-
-  if (nameLower.includes(q)) score += SCORING_WEIGHTS.NAME_CONTAINS_QUERY;
-  if (summaryLower.includes(q)) score += SCORING_WEIGHTS.SUMMARY_CONTAINS_QUERY;
-
-  if (includesAnyTerm(idLower)) score += SCORING_WEIGHTS.ID_TERM_MATCH;
-  if (includesAnyTerm(nameLower)) score += SCORING_WEIGHTS.NAME_TERM_MATCH;
-  if (includesAnyTerm(summaryLower)) score += SCORING_WEIGHTS.SUMMARY_TERM_MATCH;
+  if (feature.id.toLowerCase() === q) score += 120;
+  if (feature.id.toLowerCase().includes(q)) score += 50;
+  if (feature.name.toLowerCase().includes(q)) score += 40;
+  if (feature.summary.toLowerCase().includes(q)) score += 15;
+  if (includesAnyTerm(feature.id.toLowerCase())) score += 20;
+  if (includesAnyTerm(feature.name.toLowerCase())) score += 15;
+  if (includesAnyTerm(feature.summary.toLowerCase())) score += 10;
 
   for (const keyword of feature.keywords) {
     const normalized = keyword.toLowerCase();
-    if (normalized.includes(q)) score += SCORING_WEIGHTS.KEYWORD_EXACT_MATCH;
-    if (includesAnyTerm(normalized)) score += SCORING_WEIGHTS.KEYWORD_TERM_MATCH;
+    if (normalized.includes(q)) score += 20;
+    if (includesAnyTerm(normalized)) score += 10;
   }
 
   for (const file of feature.files) {
     const normalized = file.toLowerCase();
-    if (normalized.includes(q)) score += SCORING_WEIGHTS.FILE_EXACT_MATCH;
-    if (includesAnyTerm(normalized)) score += SCORING_WEIGHTS.FILE_TERM_MATCH;
+    if (normalized.includes(q)) score += 10;
+    if (includesAnyTerm(normalized)) score += 5;
   }
 
   return score;
@@ -142,17 +144,12 @@ function resolveFeature(catalog: Catalog, query: string): CatalogFeature | null 
   const exact = catalog.features.find((feature) => feature.id === query);
   if (exact) return exact;
 
-  // Use reduce instead of full sort for O(n) instead of O(n log n)
-  return catalog.features.reduce(
-    (best, feature) => {
-      const score = scoreFeature(feature, query);
-      if (score > best.score) {
-        return { feature, score };
-      }
-      return best;
-    },
-    { feature: null as CatalogFeature | null, score: 0 }
-  ).feature;
+  const ranked: RankedFeature[] = catalog.features
+    .map((feature) => ({ feature, score: scoreFeature(feature, query) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  return ranked.length > 0 ? ranked[0].feature : null;
 }
 
 function parseStatusLine(line: string): string | null {
@@ -212,10 +209,10 @@ function main(): void {
     new Set([
       ...selected.files,
       ...(selected.shared_files || []),
-      '.claude/progress/feature-catalog.seed.json',
-      '.claude/progress/feature-catalog.json',
-      '.claude/progress/feature-catalog.md',
-      '.claude/progress/feature-work-items.json',
+      '.claude/catalog/feature-catalog.seed.json',
+      '.claude/catalog/feature-catalog.json',
+      '.claude/catalog/feature-catalog.md',
+      '.claude/archive/legacy-work-items.json',
     ]),
   ).sort((a, b) => a.localeCompare(b));
 

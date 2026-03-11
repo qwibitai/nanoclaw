@@ -1,7 +1,7 @@
 # Changelog
 
 Tracks only the latest upstream sync outcome.
-Previous entries must be moved to `docs/archives/CHANGELOG-YYYY-MM-DD.md`.
+Previous entries are retained in git history only.
 
 ## 2026-02-26
 

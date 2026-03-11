@@ -28,7 +28,7 @@ BEFORE finalizing Jarvis workflow/contract changes → read docs/workflow/delive
 BEFORE changing worker contract code/docs → read .claude/rules/jarvis-dispatch-contract-discipline.md
 BEFORE changing worker dispatch validation/contracts → read docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md
 BEFORE changing worker container runtime/mounts/model config → read docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md
-BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/github/nanoclaw-github-control-plane.md
+BEFORE changing GitHub Actions/review governance for Andy/Jarvis lanes → read docs/workflow/github/github-delivery-governance.md
 BEFORE finalizing Andy user-facing reliability fixes → read docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md
 BEFORE deciding workflow setup, responsibility ownership, or where updates belong → read docs/operations/workflow-setup-responsibility-map.md
 BEFORE deciding whether to run a skill workflow or docs-first workflow → read docs/operations/skills-vs-docs-map.md

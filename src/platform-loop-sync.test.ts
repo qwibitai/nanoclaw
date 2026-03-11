@@ -72,6 +72,10 @@ describe('platform-loop-sync launcher helper', () => {
       path.join(sourceRoot, 'scripts', 'workflow', 'platform-loop-sync.sh'),
       'latest sync helper\n',
     );
+    fs.writeFileSync(
+      path.join(sourceRoot, 'scripts', 'workflow', 'autonomy-lane.sh'),
+      'latest autonomy helper\n',
+    );
 
     writeExecutable(
       path.join(binDir, 'git'),

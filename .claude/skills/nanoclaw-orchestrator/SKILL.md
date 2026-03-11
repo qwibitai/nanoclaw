@@ -7,6 +7,9 @@ description: "Use when coordinating NanoClaw feature delivery end-to-end with ex
 
 Project-level orchestration skill for disciplined feature delivery.
 
+Execution state is now expected to live primarily in Linear.
+The local `.claude/archive/legacy-work-items.json` store is legacy migration support and must not become a co-equal tracker.
+
 ## Pipeline
 
 1. Feature-tracking
@@ -38,7 +41,7 @@ npx tsx .claude/skills/feature-tracking/scripts/validate-feature-catalog.ts
 npx tsx .claude/skills/feature-tracking/scripts/locate-feature.ts "<request>"
 ```
 
-### 3. Create work item
+### 3. Create local legacy work item only when explicitly needed for migration support
 
 ```bash
 npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts create \
@@ -68,14 +71,14 @@ Apply `nanoclaw-testing` workflow.
 For reliability/user-facing features, run:
 
 ```bash
-npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out .claude/progress/test-report.json
+npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out data/diagnostics/tests/test-report.json
 ```
 
 ### 6. Close item
 
 ```bash
 npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts update \
-  --id "<work-id>" --status done --evidence ".claude/progress/test-report.json" --note "typecheck + mapped tests passed"
+  --id "<work-id>" --status done --evidence "data/diagnostics/tests/test-report.json" --note "typecheck + mapped tests passed"
 ```
 
 ## Rules
@@ -83,6 +86,6 @@ npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts update \
 - Never skip the feature map phase.
 - If feature resolution fails, update seed catalog before coding.
 - Use `blocked` status for unresolved dependencies or failed validations.
-- Keep work history in `.claude/progress/feature-work-items.json`.
+- Keep authoritative work history in Linear. Use `.claude/archive/legacy-work-items.json` only for legacy migration support when a local artifact is still required by an older workflow.
 - For runtime incidents, run docs-first incident workflow before implementation and keep incident id in work-item notes.
 - `done` requires explicit evidence (`--evidence`) for testability/auditability.

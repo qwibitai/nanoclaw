@@ -21,7 +21,7 @@ docs/
 - Architecture optimization plan: `docs/architecture/nanoclaw-architecture-optimization-plan.md`
 - Workflow contract: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md`
 - Runtime behavior: `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
-- GitHub control-plane: `docs/workflow/github/nanoclaw-github-control-plane.md`
+- GitHub delivery governance: `docs/workflow/github/github-delivery-governance.md`
 - User review readiness gate: `docs/workflow/delivery/nanoclaw-andy-user-happiness-gate.md` + `docs/troubleshooting/DEBUG_CHECKLIST.md` (runtime recovery)
 - Ops scripts quick entrypoint: `scripts/jarvis-ops.sh` (`preflight`, `reliability`, `status`, `trace`, `verify-worker-connectivity`, `dispatch-lint`, `db-doctor`, `incident`, `probe`, `hotspots`, `incident-bundle`, `recover`, `smoke`, `watch`)
 - Operational ownership: `docs/operations/roles-classification.md`

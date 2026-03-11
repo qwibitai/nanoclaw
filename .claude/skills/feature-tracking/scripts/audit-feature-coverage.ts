@@ -29,7 +29,7 @@ function main(): void {
       : ['src', 'scripts', 'container', 'skills-engine', '.claude/skills'];
 
   const repoRoot = process.cwd();
-  const seedPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.seed.json');
+  const seedPath = path.join(repoRoot, '.claude', 'catalog', 'feature-catalog.seed.json');
 
   // Try to read directly - avoids TOCTOU race condition
   let seed: SeedCatalog;

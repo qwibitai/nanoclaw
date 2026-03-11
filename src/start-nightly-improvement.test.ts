@@ -77,6 +77,10 @@ describe('start-nightly-improvement launcher', () => {
       path.join(sourceRoot, 'scripts', 'workflow', 'platform-loop-sync.sh'),
       'sync helper\n',
     );
+    fs.writeFileSync(
+      path.join(sourceRoot, 'scripts', 'workflow', 'autonomy-lane.sh'),
+      'autonomy helper\n',
+    );
   });
 
   afterEach(() => {
@@ -247,7 +251,7 @@ if (command === 'record') {
   fs.mkdirSync(require('path').dirname(statePath), { recursive: true });
   fs.writeFileSync(statePath, JSON.stringify({
     last_run_at: '2026-03-09T00:30:00Z',
-    discussion_refs: {}
+    context_refs: {}
   }));
   process.stdout.write('{}\\n');
   process.exit(0);

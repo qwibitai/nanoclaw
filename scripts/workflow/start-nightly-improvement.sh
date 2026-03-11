@@ -15,7 +15,7 @@ CLAUDE_AGENT="${NANOCLAW_NIGHTLY_CLAUDE_AGENT:-nightly-improvement-researcher}"
 CLAUDE_MODEL="${NANOCLAW_NIGHTLY_CLAUDE_MODEL:-sonnet}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
 CLAUDE_PERMISSION_MODE="${NANOCLAW_NIGHTLY_CLAUDE_PERMISSION_MODE:-bypassPermissions}"
-CLAUDE_ALLOWED_TOOLS="${NANOCLAW_NIGHTLY_ALLOWED_TOOLS:-Read,Grep,Glob,Bash(node scripts/workflow/nightly-improvement.js:*),Bash(git fetch:*),Bash(git log:*),Bash(git rev-list:*),Bash(git rev-parse:*),Bash(git diff-tree:*),Bash(gh auth:*),Bash(gh api:*),Bash(git status)}"
+CLAUDE_ALLOWED_TOOLS="${NANOCLAW_NIGHTLY_ALLOWED_TOOLS:-Read,Grep,Glob,Bash(node scripts/workflow/nightly-improvement.js:*),Bash(git fetch:*),Bash(git log:*),Bash(git rev-list:*),Bash(git rev-parse:*),Bash(git diff-tree:*),Bash(git status)}"
 SYNC_HELPER="$ROOT_DIR/scripts/workflow/platform-loop-sync.sh"
 DRY_RUN=0
 RUN_ID="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -48,10 +48,6 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required but not found in PATH" >&2
   exit 1
-fi
-
-if command -v gh >/dev/null 2>&1; then
-  gh auth switch --user "$GH_ACCOUNT" >/dev/null 2>&1 || true
 fi
 
 if [[ ! -x "$SYNC_HELPER" ]]; then
@@ -103,8 +99,8 @@ Run the NanoClaw nightly improvement evaluation.
 
 Hard constraints:
 - This is research-only. Never edit repo-tracked files, docs, or code.
-- Never create Issues, move Project state, or open PRs.
-- Update at most one upstream discussion and one tooling discussion.
+- Never create Linear issues, move execution state, or open PRs.
+- Update at most one upstream shared-context page and one tooling shared-context page.
 - Use the worktree-local helper at \`node scripts/workflow/nightly-improvement.js\`.
 - Use explicit state path: \`$CURSOR_STATE_FILE\`.
 - Treat \`$SCAN_FILE\` as the primary source of truth for what changed.
@@ -115,22 +111,22 @@ Execution steps:
    - use the scan output as the default evidence set
    - fetch extra upstream docs only when one commit still looks promising
    - pipe a concise update beginning with \`<!-- nightly-improvement:upstream -->\` into:
-     \`node scripts/workflow/nightly-improvement.js upsert-discussion --state-path "$CURSOR_STATE_FILE" --kind upstream --body-stdin\`
-   - then add one decision comment with:
-     \`node scripts/workflow/nightly-improvement.js comment-decision --discussion-number <number> --decision <pilot|defer|reject> --summary "<one-line summary>"\`
+     \`node scripts/workflow/nightly-improvement.js upsert-context --state-path "$CURSOR_STATE_FILE" --kind upstream --body-stdin\`
+   - then add one decision update with:
+     \`node scripts/workflow/nightly-improvement.js append-decision --state-path "$CURSOR_STATE_FILE" --kind upstream --decision <pilot|defer|reject> --summary "<one-line summary>"\`
 3. If tooling candidates are present:
    - evaluate only the listed changed tools from the scan output
    - fetch extra implementation docs only for candidates that still look relevant
    - pipe a concise update beginning with \`<!-- nightly-improvement:tooling -->\` into:
-     \`node scripts/workflow/nightly-improvement.js upsert-discussion --state-path "$CURSOR_STATE_FILE" --kind tooling --body-stdin\`
-   - then add one decision comment with:
-     \`node scripts/workflow/nightly-improvement.js comment-decision --discussion-number <number> --decision <pilot|defer|reject> --summary "<one-line summary>"\`
-4. After the relevant discussion updates succeed, record state with:
-   - \`node scripts/workflow/nightly-improvement.js record --state-path "$CURSOR_STATE_FILE" --scan-file "$SCAN_FILE" [--upstream-discussion-number <n>] [--tooling-discussion-number <n>]\`
+     \`node scripts/workflow/nightly-improvement.js upsert-context --state-path "$CURSOR_STATE_FILE" --kind tooling --body-stdin\`
+   - then add one decision update with:
+     \`node scripts/workflow/nightly-improvement.js append-decision --state-path "$CURSOR_STATE_FILE" --kind tooling --decision <pilot|defer|reject> --summary "<one-line summary>"\`
+4. After the relevant context updates succeed, record state with:
+   - \`node scripts/workflow/nightly-improvement.js record --state-path "$CURSOR_STATE_FILE" --scan-file "$SCAN_FILE"\`
 5. End with a concise summary of:
    - whether upstream changed
    - which tools changed
-   - which discussions were created or updated
+   - which shared-context pages were created or updated
    - anything intentionally skipped for token efficiency
 
 Do not broaden scope beyond the scan file.
@@ -167,9 +163,9 @@ write_run_log() {
   local ended_at="$3"
   local scan_action="$4"
   local notes="${5:-}"
-  local discussion_refs_json
-  discussion_refs_json="$(json_from_file "$CURSOR_STATE_FILE" "discussion_refs")"
-  [[ "$discussion_refs_json" == "null" ]] && discussion_refs_json="{}"
+  local context_refs_json
+  context_refs_json="$(json_from_file "$CURSOR_STATE_FILE" "context_refs")"
+  [[ "$context_refs_json" == "null" ]] && context_refs_json="{}"
 
   cat >"$RUN_LOG_FILE" <<EOF
 {
@@ -184,7 +180,7 @@ write_run_log() {
   "scan_file": $(json_escape "$SCAN_FILE"),
   "prompt_file": $(json_escape "$PROMPT_FILE"),
   "claude_output_file": $(json_escape "$CLAUDE_OUTPUT_FILE"),
-  "discussion_refs": $discussion_refs_json,
+  "context_refs": $context_refs_json,
   "notes": $(json_escape "$notes")
 }
 EOF

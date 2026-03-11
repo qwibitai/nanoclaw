@@ -44,6 +44,10 @@ qctx --close \
   --next "run verify-worker-connectivity and confirm review_requested" \
   --blocker "needs worker restart permission" \
   --commands "bash scripts/jarvis-ops.sh verify-worker-connectivity"
+
+# Optional shared-context publish to Notion at close
+NOTION_SESSION_SUMMARY_DATABASE_ID=<database-id> \
+  qctx --close --issue INC-123 --next "pick up review lane"
 ```
 
 If `qctx` alias is not installed, use:
@@ -56,7 +60,7 @@ bash scripts/qmd-context-recall.sh --bootstrap
 
 1. Session start: run `bash scripts/workflow/session-start.sh --agent <claude|codex>`.
 2. If `qmd status` warns that embeddings are pending, the main agent may spawn one background `monitor` lane dedicated to `bash scripts/qmd-session-sync.sh`. `scripts/workflow/session-start.sh` now auto-starts this background sync by default immediately after recall (disable with `--no-background-sync` or set `SESSION_SYNC_BACKGROUND=0`).
-3. The main lane continues with GitHub sweep handling and workflow preflight without waiting on session sync.
+3. The main lane continues with control-plane sweep handling and workflow preflight without waiting on session sync.
 4. During work: run `qctx "<topic>"` before major debug/fix loops.
 5. If query precision matters, rerun with `qctx --search-mode hybrid "<topic>"`.
 6. If recall quality is still degraded or stale after background sync completes, rerun recall.
@@ -114,7 +118,7 @@ This keeps session recall useful and avoids turning a context-diagnosis step int
 
 1. `qctx --bootstrap`
 2. `scripts/workflow/platform-loop-worktree-hygiene.sh`
-3. `gh-collab-sweep.sh --agent <runtime> --fail-on-action-items`
+3. `work-sweep.sh --agent <runtime> --fail-on-action-items`
 4. `scripts/workflow/preflight.sh --skip-recall`
 
 If `qmd status` reports pending embeddings, `session-start.sh` prints a recall-quality warning and starts background session sync by default. It also prints the log and status file paths so the main lane can keep moving while sync finishes.
@@ -134,7 +138,7 @@ For interactive Codex/Claude runtime sessions, keep bootstrap recall in the main
 1. Main lane runs `qctx --bootstrap`.
 2. Main lane checks `qmd status`.
 3. If `Pending > 0`, `session-start.sh` starts one background session-sync process by default.
-4. Main lane continues with `gh-collab-sweep.sh` and workflow preflight immediately.
+4. Main lane continues with `work-sweep.sh` and workflow preflight immediately.
 5. Background sync reports success/failure through its log/status files when it finishes.
 
 This keeps session start independent of session sync while still repairing degraded recall in parallel.
@@ -160,6 +164,7 @@ This keeps session start independent of session sync while still repairing degra
   - `timestamp`, `branch`, `issue`, `state`
   - `done`, `next_step`, `blocker`
   - `commands_run`, `files_touched`
+- When `NOTION_SESSION_SUMMARY_DATABASE_ID` is set, also publishes a distilled shared summary via `scripts/workflow/notion-context.js`.
 - Intended `state` values: `active`, `done`, `blocked`, `handoff`.
 
 ## Session Sync Script
