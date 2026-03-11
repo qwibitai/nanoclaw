@@ -303,6 +303,11 @@ export function startSchedulerLoop(deps: SchedulerDependencies): void {
  * Immediately check for due tasks outside the normal poll cycle.
  * Called by the IPC watcher after creating a new task so interactive
  * messages don't wait up to SCHEDULER_POLL_INTERVAL (60s) to be picked up.
+ *
+ * Also schedules a follow-up check after 2 seconds to catch tasks whose
+ * next_run was set slightly in the future (e.g. IPC tasks arriving in
+ * quick succession where the second task isn't due yet at the instant
+ * the first trigger fires).
  */
 export function triggerSchedulerCheck(): void {
   if (!schedulerDeps) return;
@@ -311,6 +316,16 @@ export function triggerSchedulerCheck(): void {
   } catch (err) {
     logger.error({ err }, 'Error in triggered scheduler check');
   }
+
+  // Follow-up check to catch near-future tasks
+  const deps = schedulerDeps;
+  setTimeout(() => {
+    try {
+      checkDueTasks(deps);
+    } catch (err) {
+      logger.error({ err }, 'Error in delayed scheduler check');
+    }
+  }, 2000);
 }
 
 /** @internal - for tests only. */
