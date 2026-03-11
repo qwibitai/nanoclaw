@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'fs';
+import path from 'path';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
+import { spawn } from 'child_process';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -41,6 +44,7 @@ vi.mock('fs', async () => {
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
+      cpSync: vi.fn(),
       copyFileSync: vi.fn(),
     },
   };
@@ -178,6 +182,49 @@ describe('container-runner timeout behavior', () => {
     expect(result.status).toBe('error');
     expect(result.error).toContain('timed out');
     expect(onOutput).not.toHaveBeenCalled();
+  });
+
+
+  it('refreshes agent-runner source even when group copy already exists', async () => {
+    const projectRoot = process.cwd();
+    const agentRunnerSrc = path.join(
+      projectRoot,
+      'container',
+      'agent-runner',
+      'src',
+    );
+    const groupAgentRunnerDir = path.join(
+      '/tmp/nanoclaw-test-data',
+      'sessions',
+      testGroup.folder,
+      'agent-runner-src',
+    );
+
+    vi.mocked(fs.existsSync).mockImplementation((target) => {
+      if (target === agentRunnerSrc) return true;
+      if (target === groupAgentRunnerDir) return true;
+      return false;
+    });
+
+    const resultPromise = runContainerAgent(
+      testGroup,
+      testInput,
+      () => {},
+      vi.fn(async () => {}),
+    );
+
+    expect(fs.cpSync).toHaveBeenCalledWith(agentRunnerSrc, groupAgentRunnerDir, {
+      recursive: true,
+    });
+
+    const spawnArgs = vi.mocked(spawn).mock.calls[0]?.[1] ?? [];
+    expect(spawnArgs).toContain(
+      `-v ${groupAgentRunnerDir}:/app/src`.split(' ')[0],
+    );
+    expect(spawnArgs).toContain(`${groupAgentRunnerDir}:/app/src`);
+
+    fakeProc.emit('close', 0);
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
   });
 
   it('normal exit after output resolves as success', async () => {
