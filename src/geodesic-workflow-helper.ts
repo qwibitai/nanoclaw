@@ -115,7 +115,10 @@ export class GeodesicWorkflowHelper {
         return false;
       }
 
-      const data = await resp.json();
+      const data = (await resp.json()) as {
+        errors?: unknown[];
+        data?: { updateWorkflowRun?: boolean };
+      };
       if (data.errors) {
         logger.error({ errors: data.errors }, 'GraphQL errors in workflow update');
         return false;

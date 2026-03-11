@@ -297,7 +297,7 @@ export class DayZeroChannel implements Channel {
     this.sendJson(res, 200, {
       status: 'started',
       run_id: runId,
-      company,
+      workflow_type: workflowType,
       engagement_mode: engagementMode,
       poll_url: `/v1/runs/${runId}`,
     });
