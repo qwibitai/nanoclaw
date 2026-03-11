@@ -637,6 +637,22 @@ export async function runContainerAgent(
             'Container timed out after output (idle cleanup)',
           );
           outputChain.then(() => {
+            // Log accumulated token usage (critical for daily spend cap accuracy)
+            if (
+              accumulatedUsage.input_tokens > 0 ||
+              accumulatedUsage.output_tokens > 0
+            ) {
+              try {
+                logUsage({
+                  group_folder: input.groupFolder,
+                  model: input.model || null,
+                  ...accumulatedUsage,
+                  timestamp: new Date().toISOString(),
+                });
+              } catch (err) {
+                logger.debug({ err }, 'Failed to log usage on idle cleanup');
+              }
+            }
             resolve({
               status: 'success',
               result: null,
@@ -749,6 +765,7 @@ export async function runContainerAgent(
             try {
               logUsage({
                 group_folder: input.groupFolder,
+                model: input.model || null,
                 ...accumulatedUsage,
                 timestamp: new Date().toISOString(),
               });

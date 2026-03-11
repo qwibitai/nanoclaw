@@ -6,16 +6,20 @@ import { CronExpressionParser } from 'cron-parser';
 
 import {
   DATA_DIR,
+  GROUPS_DIR,
   HEALTH_CHECK_INTERVAL,
   MAIN_GROUP_FOLDER,
+  MAX_DAILY_SPEND_USD,
   STORE_DIR,
   TIMEZONE,
 } from './config.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
 import {
+  getDailySpendUsd,
   getDueTasks,
   getHealthState,
   getLastMessageTimestamp,
+  pruneOldLogs,
   setHealthState,
   updateTask,
 } from './db.js';
@@ -185,6 +189,35 @@ async function runHealthCheck(deps: HealthMonitorDeps): Promise<void> {
     }
   }
 
+  // Check 6: Disk space (Linux only)
+  try {
+    const stats = fs.statfsSync(STORE_DIR);
+    const freeGb = (stats.bfree * stats.bsize) / (1024 ** 3);
+    if (freeGb < 1) {
+      status = 'critical';
+      issues.push(`Disk space critically low: ${freeGb.toFixed(1)} GB free`);
+    } else if (freeGb < 3) {
+      if (status === 'ok') status = 'warning';
+      issues.push(`Disk space low: ${freeGb.toFixed(1)} GB free`);
+    }
+  } catch {
+    // statfsSync may not be available on all platforms
+  }
+
+  // Check 7: Daily spend approaching cap
+  if (MAX_DAILY_SPEND_USD > 0) {
+    try {
+      const spent = getDailySpendUsd();
+      const pct = spent / MAX_DAILY_SPEND_USD;
+      if (pct >= 0.8) {
+        if (status === 'ok') status = 'warning';
+        issues.push(`Daily spend at ${(pct * 100).toFixed(0)}% ($${spent.toFixed(2)} / $${MAX_DAILY_SPEND_USD})`);
+      }
+    } catch {
+      // non-critical
+    }
+  }
+
   // Persist status
   setHealthState('status', status);
   setHealthState('issues', JSON.stringify(issues));
@@ -268,4 +301,59 @@ export function startHealthMonitor(deps: HealthMonitorDeps): void {
       logger.error({ err }, 'Health check error'),
     );
   }, HEALTH_CHECK_INTERVAL);
+
+  // Daily maintenance: prune old logs and clean up container log files
+  const MAINTENANCE_INTERVAL = 24 * 60 * 60 * 1000; // 24h
+  const runMaintenance = () => {
+    try {
+      const pruned = pruneOldLogs();
+      if (pruned.taskRuns > 0 || pruned.usage > 0 || pruned.messages > 0) {
+        logger.info(pruned, 'Daily maintenance: pruned old log entries');
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to prune logs');
+    }
+
+    // Clean up container log files older than 7 days
+    try {
+      const cutoff = Date.now() - 7 * 86400000;
+      const groupsDir = GROUPS_DIR;
+      if (fs.existsSync(groupsDir)) {
+        for (const folder of fs.readdirSync(groupsDir)) {
+          const logsDir = path.join(groupsDir, folder, 'logs');
+          if (!fs.existsSync(logsDir)) continue;
+          for (const file of fs.readdirSync(logsDir)) {
+            const filePath = path.join(logsDir, file);
+            try {
+              const stat = fs.statSync(filePath);
+              if (stat.mtimeMs < cutoff) fs.unlinkSync(filePath);
+            } catch { /* skip */ }
+          }
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to clean container logs');
+    }
+
+    // Clean up IPC error files
+    try {
+      const errDir = path.join(DATA_DIR, 'ipc', 'errors');
+      if (fs.existsSync(errDir)) {
+        const cutoff = Date.now() - 7 * 86400000;
+        for (const file of fs.readdirSync(errDir)) {
+          const filePath = path.join(errDir, file);
+          try {
+            const stat = fs.statSync(filePath);
+            if (stat.mtimeMs < cutoff) fs.unlinkSync(filePath);
+          } catch { /* skip */ }
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Failed to clean IPC error files');
+    }
+  };
+
+  // Run maintenance 5 minutes after startup, then every 24h
+  setTimeout(runMaintenance, 5 * 60 * 1000);
+  setInterval(runMaintenance, MAINTENANCE_INTERVAL);
 }

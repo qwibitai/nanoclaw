@@ -11,7 +11,7 @@ interface QueuedTask {
   fn: () => Promise<void>;
 }
 
-const MAX_RETRIES = 5;
+const MAX_RETRIES = 2;
 const BASE_RETRY_MS = 5000;
 const MIN_SPAWN_COOLDOWN_MS = 10000; // Minimum 10s between container spawns per group
 

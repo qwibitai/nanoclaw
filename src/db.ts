@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, STORE_DIR, TIMEZONE } from './config.js';
 import {
   Campaign,
   Contact,
@@ -271,6 +271,13 @@ function createSchema(database: Database.Database): void {
   database.exec(
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_place_id ON contacts(google_place_id) WHERE google_place_id IS NOT NULL`,
   );
+
+  // Add model column to usage_log for model-specific cost tracking
+  try {
+    database.exec(`ALTER TABLE usage_log ADD COLUMN model TEXT DEFAULT NULL`);
+  } catch {
+    /* column already exists */
+  }
 }
 
 export function initDatabase(): void {
@@ -278,6 +285,7 @@ export function initDatabase(): void {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
   createSchema(db);
 
   // Migrate from JSON files if they exist
@@ -1091,14 +1099,17 @@ export function moveDealStage(
       ? now
       : deal.closed_at;
 
-  db.prepare(
-    `UPDATE deals SET stage = ?, updated_at = ?, closed_at = ? WHERE id = ?`,
-  ).run(toStage, now, closedAt, dealId);
+  const move = db.transaction(() => {
+    db.prepare(
+      `UPDATE deals SET stage = ?, updated_at = ?, closed_at = ? WHERE id = ?`,
+    ).run(toStage, now, closedAt, dealId);
 
-  db.prepare(
-    `INSERT INTO deal_stage_log (deal_id, from_stage, to_stage, changed_at, note)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(dealId, deal.stage, toStage, now, note || null);
+    db.prepare(
+      `INSERT INTO deal_stage_log (deal_id, from_stage, to_stage, changed_at, note)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(dealId, deal.stage, toStage, now, note || null);
+  });
+  move();
 }
 
 export function getDealStageHistory(dealId: string): DealStageLogEntry[] {
@@ -1162,6 +1173,7 @@ export function getLastMessageTimestamp(): string | null {
 
 export interface UsageEntry {
   group_folder: string;
+  model?: string | null;
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
@@ -1170,10 +1182,11 @@ export interface UsageEntry {
 
 export function logUsage(entry: UsageEntry): void {
   db.prepare(
-    `INSERT INTO usage_log (group_folder, input_tokens, output_tokens, cache_read_tokens, timestamp)
-     VALUES (?, ?, ?, ?, ?)`,
+    `INSERT INTO usage_log (group_folder, model, input_tokens, output_tokens, cache_read_tokens, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.group_folder,
+    entry.model || null,
     entry.input_tokens,
     entry.output_tokens,
     entry.cache_read_tokens,
@@ -1181,24 +1194,44 @@ export function logUsage(entry: UsageEntry): void {
   );
 }
 
+// Model pricing per million tokens: [input, output, cache_read]
+const MODEL_PRICING: Record<string, [number, number, number]> = {
+  'claude-sonnet-4-6':    [3.00, 15.00, 0.30],
+  'claude-sonnet-4-5':    [3.00, 15.00, 0.30],
+  'claude-haiku-4-5':     [0.80,  4.00, 0.08],
+  'claude-opus-4-6':      [15.00, 75.00, 1.50],
+};
+const DEFAULT_PRICING: [number, number, number] = [3.00, 15.00, 0.30]; // Sonnet as fallback
+
 /**
  * Get estimated daily spend in USD based on token usage.
- * Uses Claude Sonnet 4.6 pricing: $3/1M input, $15/1M output, $0.30/1M cache read.
+ * Uses model-specific pricing when available, falls back to Sonnet rates.
+ * Calculates "today" using the configured TIMEZONE, not UTC.
  */
 export function getDailySpendUsd(): number {
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const row = db
+  // Calculate midnight in the configured timezone
+  const now = new Date();
+  const tzMidnight = new Date(
+    now.toLocaleString('en-US', { timeZone: TIMEZONE }).replace(',', ''),
+  );
+  tzMidnight.setHours(0, 0, 0, 0);
+  // Convert back to UTC ISO string for the SQL query
+  const offset = now.getTime() - tzMidnight.getTime();
+  const todayStartUtc = new Date(now.getTime() - offset).toISOString();
+
+  const rows = db
     .prepare(
-      `SELECT
-        COALESCE(SUM(input_tokens), 0) as inp,
-        COALESCE(SUM(output_tokens), 0) as out,
-        COALESCE(SUM(cache_read_tokens), 0) as cache,
-        COUNT(*) as runs
+      `SELECT model, input_tokens as inp, output_tokens as out, cache_read_tokens as cache
        FROM usage_log WHERE timestamp >= ?`,
     )
-    .get(today + 'T00:00:00Z') as { inp: number; out: number; cache: number; runs: number };
-  // Pricing per million tokens (Sonnet 4.6)
-  return (row.inp * 3 + row.out * 15 + row.cache * 0.3) / 1_000_000;
+    .all(todayStartUtc) as { model: string | null; inp: number; out: number; cache: number }[];
+
+  let totalUsd = 0;
+  for (const row of rows) {
+    const [inpRate, outRate, cacheRate] = MODEL_PRICING[row.model || ''] || DEFAULT_PRICING;
+    totalUsd += (row.inp * inpRate + row.out * outRate + row.cache * cacheRate) / 1_000_000;
+  }
+  return totalUsd;
 }
 
 export function getUsageStats(
@@ -1245,6 +1278,24 @@ export function getUsageStats(
     total_cache_read: number;
     count: number;
   };
+}
+
+// --- Maintenance / Pruning ---
+
+/**
+ * Prune old log entries to prevent unbounded database growth.
+ * Called periodically from the health monitor.
+ */
+export function pruneOldLogs(): { taskRuns: number; usage: number; messages: number } {
+  const taskRunCutoff = new Date(Date.now() - 30 * 86400000).toISOString(); // 30 days
+  const usageCutoff = new Date(Date.now() - 90 * 86400000).toISOString(); // 90 days
+  const messageCutoff = new Date(Date.now() - 180 * 86400000).toISOString(); // 180 days
+
+  const taskRuns = db.prepare('DELETE FROM task_run_logs WHERE started_at < ?').run(taskRunCutoff).changes;
+  const usage = db.prepare('DELETE FROM usage_log WHERE timestamp < ?').run(usageCutoff).changes;
+  const messages = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(messageCutoff).changes;
+
+  return { taskRuns, usage, messages };
 }
 
 // --- JSON migration ---

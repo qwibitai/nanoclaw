@@ -2,15 +2,22 @@
 Description=NanoClaw AI Assistant
 After=network.target docker.service
 Requires=docker.service
+# Prevent infinite restart loops (max 5 restarts in 5 min, then stop)
+StartLimitBurst=5
+StartLimitIntervalSec=300
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=all
 User=nanoclaw
 Group=nanoclaw
 WorkingDirectory=/home/nanoclaw/nanoclaw
 ExecStart=/usr/bin/node --import tsx/esm src/index.ts
 Restart=always
 RestartSec=10
+
+# Watchdog: kill and restart if no heartbeat in 120s
+WatchdogSec=120
 
 # Environment
 Environment=NODE_ENV=production

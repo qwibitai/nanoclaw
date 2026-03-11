@@ -65,8 +65,10 @@ export class WebChannel implements Channel {
     const widgetDir = path.resolve(process.cwd(), 'widget');
 
     this.server = http.createServer(async (req, res) => {
+      const origin = req.headers.origin || '';
+      const allowedOrigin = WEB_CHANNEL_ORIGINS.includes(origin) ? origin : WEB_CHANNEL_ORIGINS[0] || '*';
       const corsHeaders: Record<string, string> = {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': allowedOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type',
       };
@@ -169,7 +171,7 @@ export class WebChannel implements Channel {
           };
           res.writeHead(200, {
             'Content-Type': mimeTypes[ext] || 'application/octet-stream',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': allowedOrigin,
           });
           fs.createReadStream(fullPath).pipe(res);
           return;
@@ -282,9 +284,27 @@ export class WebChannel implements Channel {
     // Update chat metadata
     this.opts.onChatMetadata(jid, new Date().toISOString(), `Web: ${business}`);
 
+    // Rate limiting: max 10 messages per minute per socket
+    let msgCount = 0;
+    let msgWindowStart = Date.now();
+    const MSG_RATE_LIMIT = 10;
+    const MSG_RATE_WINDOW = 60_000;
+
     socket.on('message', (data: { text?: string; history?: string }) => {
       const text = data?.text?.trim();
       if (!text) return;
+
+      // Enforce rate limit
+      const now = Date.now();
+      if (now - msgWindowStart > MSG_RATE_WINDOW) {
+        msgCount = 0;
+        msgWindowStart = now;
+      }
+      msgCount++;
+      if (msgCount > MSG_RATE_LIMIT) {
+        socket.emit('error', { message: 'Rate limit exceeded. Please wait a moment.' });
+        return;
+      }
 
       // Only deliver to registered groups
       const groups = this.opts.registeredGroups();
