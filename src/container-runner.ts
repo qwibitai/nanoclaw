@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -26,6 +27,7 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -41,6 +43,8 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  engine?: 'claude' | 'codex';
+  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -59,6 +63,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  engine: 'claude' | 'codex' = 'claude',
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -199,6 +204,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Codex engine: mount host's ~/.codex so the SDK can find session credentials.
+  // The SDK reads auth.json and may write refreshed tokens back.
+  if (engine === 'codex') {
+    const hostCodexHome = path.join(os.homedir(), '.codex');
+    if (fs.existsSync(hostCodexHome)) {
+      mounts.push({
+        hostPath: hostCodexHome,
+        containerPath: '/home/node/.codex',
+        readonly: false,
+      });
+    }
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -210,6 +228,14 @@ function buildVolumeMounts(
   }
 
   return mounts;
+}
+
+/**
+ * Read Codex-specific secrets from .env for passing to the container via stdin.
+ * Secrets are never written to disk or mounted as files.
+ */
+function readCodexSecrets(): Record<string, string> {
+  return readEnvFile(['OPENAI_API_KEY', 'OPENAI_BASE_URL']);
 }
 
 function buildContainerArgs(
@@ -275,7 +301,8 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const engine: 'claude' | 'codex' = process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+  const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
   const containerArgs = buildContainerArgs(mounts, containerName);
@@ -318,8 +345,16 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    // Pass engine and (for Codex) API credentials via stdin — never via env vars or disk
+    input.engine = engine;
+    if (engine === 'codex') {
+      input.secrets = readCodexSecrets();
+    }
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    // Remove secrets from input so they don't appear in logs
+    delete input.secrets;
+    delete input.engine;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
