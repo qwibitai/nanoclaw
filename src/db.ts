@@ -542,9 +542,7 @@ export function getBotResponsesSince(
     ORDER BY timestamp
     LIMIT 50
   `;
-  const rows = db
-    .prepare(sql)
-    .all(chatJid, sinceTimestamp) as NewMessage[];
+  const rows = db.prepare(sql).all(chatJid, sinceTimestamp) as NewMessage[];
 
   for (const row of rows) {
     if (row.content.length > BOT_RESPONSE_CONTEXT_LIMIT) {

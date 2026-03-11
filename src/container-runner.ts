@@ -834,8 +834,10 @@ function buildVolumeMounts(
 
   // Gmail credentials — gated by tools config
   if (isToolEnabled(tools, 'gmail')) {
-    const { scopes: gmailAccounts, isScoped: gmailScoped } =
-      extractToolScopes(tools, 'gmail');
+    const { scopes: gmailAccounts, isScoped: gmailScoped } = extractToolScopes(
+      tools,
+      'gmail',
+    );
 
     if (gmailScoped) {
       // Mount only the specified account's credentials as /home/node/.gmail-mcp
@@ -892,9 +894,7 @@ function buildVolumeMounts(
       const tokensPath = path.join(calendarDir, 'tokens.json');
       if (fs.existsSync(tokensPath)) {
         try {
-          const allTokens = JSON.parse(
-            fs.readFileSync(tokensPath, 'utf-8'),
-          );
+          const allTokens = JSON.parse(fs.readFileSync(tokensPath, 'utf-8'));
           const filtered: Record<string, unknown> = {};
           for (const acct of calendarAccounts) {
             if (allTokens[acct]) {
@@ -1145,8 +1145,10 @@ function buildVolumeMounts(
  */
 function readSecrets(tools?: string[]): Record<string, string> {
   // Determine which GitHub token env var to read
-  const { scopes: githubScopes, isScoped: githubScoped } =
-    extractToolScopes(tools, 'github');
+  const { scopes: githubScopes, isScoped: githubScoped } = extractToolScopes(
+    tools,
+    'github',
+  );
   const githubTokenKey = githubScoped
     ? `GITHUB_TOKEN_${githubScopes[0].toUpperCase()}`
     : 'GITHUB_TOKEN';

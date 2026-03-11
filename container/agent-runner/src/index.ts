@@ -412,6 +412,33 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
   return tools.some(t => t === name || t.startsWith(name + ':'));
 }
 
+/** True when tools has scoped entries (e.g. 'gmail:illysium') but no bare entry ('gmail'). */
+function isToolScoped(tools: string[] | undefined, name: string): boolean {
+  if (!tools) return false;
+  return tools.some(t => t.startsWith(name + ':')) && !tools.includes(name);
+}
+
+// Read-only Gmail tools — scoped groups (e.g. gmail:illysium) get these instead of mcp__gmail__*
+const GMAIL_READ_TOOLS = [
+  'mcp__gmail__search_emails',
+  'mcp__gmail__read_email',
+  'mcp__gmail__list_email_labels',
+  'mcp__gmail__list_filters',
+  'mcp__gmail__get_filter',
+  'mcp__gmail__download_attachment',
+];
+
+// Read-only Calendar tools — scoped groups get these instead of mcp__google-calendar__*
+const CALENDAR_READ_TOOLS = [
+  'mcp__google-calendar__list-events',
+  'mcp__google-calendar__get-event',
+  'mcp__google-calendar__search-events',
+  'mcp__google-calendar__list-calendars',
+  'mcp__google-calendar__list-colors',
+  'mcp__google-calendar__get-current-time',
+  'mcp__google-calendar__get-freebusy',
+];
+
 function buildAllowedTools(tools: string[] | undefined): string[] {
   const allowed = [
     'Bash',
@@ -424,12 +451,23 @@ function buildAllowedTools(tools: string[] | undefined): string[] {
     'mcp__nanoclaw__*',
   ];
   if (isToolEnabled(tools, 'gmail')) {
-    allowed.push('mcp__gmail__*');
-    // Also allow additional Gmail account MCP servers (gmail-sunday, gmail-illysium, etc.)
-    allowed.push('mcp__gmail-*__*');
+    if (isToolScoped(tools, 'gmail')) {
+      // Scoped = read-only access (shared group, e.g. Slack with coworkers)
+      allowed.push(...GMAIL_READ_TOOLS);
+    } else {
+      allowed.push('mcp__gmail__*');
+      // Also allow additional Gmail account MCP servers (gmail-sunday, gmail-illysium, etc.)
+      allowed.push('mcp__gmail-*__*');
+    }
   }
   if (isToolEnabled(tools, 'granola')) allowed.push('mcp__granola__*');
-  if (isToolEnabled(tools, 'calendar')) allowed.push('mcp__google-calendar__*');
+  if (isToolEnabled(tools, 'calendar')) {
+    if (isToolScoped(tools, 'calendar')) {
+      allowed.push(...CALENDAR_READ_TOOLS);
+    } else {
+      allowed.push('mcp__google-calendar__*');
+    }
+  }
   return allowed;
 }
 
