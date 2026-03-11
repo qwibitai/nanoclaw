@@ -56,6 +56,11 @@ export async function sendPoolMessage(
     if (_mainBotApi) {
       const numericId = chatId.replace(/^tg:/, '');
       await _mainBotApi.sendMessage(numericId, text);
+    } else {
+      logger.warn(
+        { chatId, sender, groupFolder },
+        'Pool empty and main bot not initialized — message dropped',
+      );
     }
     return;
   }
