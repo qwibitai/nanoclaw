@@ -47,7 +47,6 @@ import {
   getAllSessionsV2,
   getAllTasks,
   getIdleSessions,
-  findPendingThreadJids,
   getMessageById,
   getMessagesSince,
   getRecentMessages,
@@ -906,28 +905,13 @@ function recoverPendingMessages(): void {
       queue.enqueueMessageCheck(chatJid); // parent processes itself
     }
 
-    // Thread messages (Discord and Slack channels only)
-    if (chatJid.startsWith('dc:') || chatJid.startsWith('slack:')) {
-      const threadJids = findPendingThreadJids(
-        chatJid,
-        lastAgentTimestamp,
-        assistantName,
-      );
-      for (const threadJid of threadJids) {
-        const parsedThread = parseThreadJid(threadJid);
-        logger.info(
-          { group: group.name, threadJid },
-          'Recovery: found unprocessed thread messages',
-        );
-        queue.enqueueMessageCheck(chatJid, threadJid, parsedThread?.threadId);
-      }
-
-      // NOTE: Previous "unstick" logic lived here — it nudged cursors back 1ms
-      // when the cursor exactly matched a user message timestamp. This caused
-      // false positives on every restart because the cursor is always set to
-      // the last user message timestamp. The root cause (lost in-memory cursor
-      // on SIGTERM) is now fixed by calling saveState() in the shutdown handler.
-    }
+    // Thread recovery is intentionally skipped. Thread sessions are
+    // user-initiated — if a restart interrupts a response, the user will
+    // re-trigger by sending another message. Attempting to auto-recover
+    // threads causes duplicate responses because:
+    // 1. Discord bot messages aren't stored in DB (can't detect prior response)
+    // 2. Cursor persistence is fragile (saveState writes entire map, can
+    //    overwrite individually-fixed cursors)
   }
 }
 
