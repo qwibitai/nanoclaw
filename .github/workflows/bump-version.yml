@@ -18,10 +18,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v4
 
       - name: Bump patch version
+        env:
+          npm_config_ignore_scripts: "true"
         run: |
           pnpm version patch --no-git-tag-version
           git add package.json pnpm-lock.yaml
@@ -31,4 +34,4 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           git commit -m "chore: bump version to $VERSION"
           git pull --rebase
-          git push
+          git push https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref_name }}
