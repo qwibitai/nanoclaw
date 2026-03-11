@@ -184,7 +184,6 @@ describe('container-runner timeout behavior', () => {
     expect(onOutput).not.toHaveBeenCalled();
   });
 
-
   it('refreshes agent-runner source even when group copy already exists', async () => {
     const projectRoot = process.cwd();
     const agentRunnerSrc = path.join(
@@ -213,15 +212,56 @@ describe('container-runner timeout behavior', () => {
       vi.fn(async () => {}),
     );
 
-    expect(fs.cpSync).toHaveBeenCalledWith(agentRunnerSrc, groupAgentRunnerDir, {
-      recursive: true,
-    });
-
-    const spawnArgs = vi.mocked(spawn).mock.calls[0]?.[1] ?? [];
-    expect(spawnArgs).toContain(
-      `-v ${groupAgentRunnerDir}:/app/src`.split(' ')[0],
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      agentRunnerSrc,
+      groupAgentRunnerDir,
+      {
+        recursive: true,
+      },
     );
-    expect(spawnArgs).toContain(`${groupAgentRunnerDir}:/app/src`);
+
+    fakeProc.emit('close', 0);
+    await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
+  });
+
+  it('mounts /app/src from the per-group agent-runner directory', async () => {
+    const group = {
+      ...testGroup,
+      name: 'Other Group',
+      folder: 'other-group',
+    };
+    const input = {
+      ...testInput,
+      groupFolder: group.folder,
+    };
+    const agentRunnerSrc = path.join(
+      process.cwd(),
+      'container',
+      'agent-runner',
+      'src',
+    );
+    const groupAgentRunnerDir = path.join(
+      '/tmp/nanoclaw-test-data',
+      'sessions',
+      group.folder,
+      'agent-runner-src',
+    );
+
+    vi.mocked(fs.existsSync).mockImplementation(
+      (target) => String(target) === agentRunnerSrc,
+    );
+
+    const resultPromise = runContainerAgent(
+      group,
+      input,
+      () => {},
+      vi.fn(async () => {}),
+    );
+    const spawnArgs = vi.mocked(spawn).mock.calls.at(-1)?.[1] ?? [];
+
+    expect(spawnArgs).toEqual(
+      expect.arrayContaining(['-v', `${groupAgentRunnerDir}:/app/src`]),
+    );
 
     fakeProc.emit('close', 0);
     await expect(resultPromise).resolves.toMatchObject({ status: 'success' });
