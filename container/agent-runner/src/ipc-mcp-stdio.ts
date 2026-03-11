@@ -333,6 +333,100 @@ Use available_groups.json to find the JID for a group. The folder name must be c
   },
 );
 
+// --- Semantic Memory Tools (LanceDB + Gemini embeddings) ---
+
+import { memoryStore, memorySearch, memoryDelete, memoryCount } from './memory.js';
+
+server.tool(
+  'memory_store',
+  `Store a memory for long-term semantic recall. Use this to remember important facts, decisions, preferences, and context that should persist across sessions.
+
+Categories: "preference", "decision", "entity", "event", "general"
+Importance: 0.0-1.0 (higher = more important to remember)`,
+  {
+    text: z.string().describe('The memory text to store (clear, self-contained statement)'),
+    category: z.enum(['preference', 'decision', 'entity', 'event', 'general']).default('general').describe('Memory category'),
+    importance: z.number().min(0).max(1).default(0.7).describe('How important this memory is (0.0-1.0)'),
+  },
+  async (args) => {
+    try {
+      const id = await memoryStore(args.text, args.category, args.importance);
+      return { content: [{ type: 'text' as const, text: `Memory stored (${id}): "${args.text.slice(0, 80)}..."` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to store memory: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_search',
+  'Search memories by semantic similarity. Returns the most relevant memories for a given query.',
+  {
+    query: z.string().describe('What to search for (natural language)'),
+    limit: z.number().min(1).max(20).default(5).describe('Max results to return'),
+    category: z.string().optional().describe('Filter by category (preference, decision, entity, event, general)'),
+  },
+  async (args) => {
+    try {
+      const results = await memorySearch(args.query, args.limit, args.category);
+      if (results.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No memories found.' }] };
+      }
+      const formatted = results
+        .map((r, i) => {
+          const date = new Date(r.timestamp).toISOString().split('T')[0];
+          const meta = JSON.parse(r.metadata || '{}');
+          const extra = meta.l1_overview ? `\n   Detail: ${meta.l1_overview.slice(0, 200)}` : '';
+          return `${i + 1}. [${r.category}] ${r.text}\n   ID: ${r.id} | Importance: ${r.importance} | Date: ${date} | Distance: ${r._distance.toFixed(3)}${extra}`;
+        })
+        .join('\n\n');
+      return { content: [{ type: 'text' as const, text: `Found ${results.length} memories:\n\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Memory search failed: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_delete',
+  'Delete a specific memory by ID.',
+  { id: z.string().describe('The memory ID to delete') },
+  async (args) => {
+    try {
+      await memoryDelete(args.id);
+      return { content: [{ type: 'text' as const, text: `Memory ${args.id} deleted.` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to delete memory: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_count',
+  'Get the total number of stored memories.',
+  {},
+  async () => {
+    try {
+      const count = await memoryCount();
+      return { content: [{ type: 'text' as const, text: `Total memories: ${count}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to count memories: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
