@@ -49,9 +49,17 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
 ); // 10MB default
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+export const TASK_IDLE_TIMEOUT = parseInt(
+  process.env.TASK_IDLE_TIMEOUT || '600000',
+  10,
+); // 10min default — how long to keep a task container warm for reuse
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '10', 10) || 10,
+);
+export const MAX_WARM_PER_GROUP = Math.max(
+  0,
+  parseInt(process.env.MAX_WARM_PER_GROUP || '2', 10) || 2,
 );
 
 function escapeRegex(str: string): string {

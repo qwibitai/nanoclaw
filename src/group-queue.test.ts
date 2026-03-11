@@ -6,6 +6,8 @@ import { GroupQueue } from './group-queue.js';
 vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/nanoclaw-test-data',
   MAX_CONCURRENT_CONTAINERS: 2,
+  MAX_WARM_PER_GROUP: 2,
+  TASK_IDLE_TIMEOUT: 600000, // 10 min
 }));
 
 // Mock fs operations used by sendMessage/closeStdin
@@ -305,9 +307,18 @@ describe('GroupQueue', () => {
     await vi.advanceTimersByTimeAsync(10);
   });
 
-  // 9. Idle container preempted for task (with containerId)
-  it('runs task in own container even when idle container exists', async () => {
+  // 9. Idle container reused for task (warm reuse)
+  it('reuses idle message container for task instead of spawning new', async () => {
     let resolveProcess: () => void;
+    const taskReuseCalls: Array<{
+      groupJid: string;
+      taskId: string;
+      containerId: string;
+    }> = [];
+
+    queue.setOnTaskReuse((groupJid, taskId, containerId) => {
+      taskReuseCalls.push({ groupJid, taskId, containerId });
+    });
 
     const processMessages = vi.fn(
       async (groupJid: string, containerId: string) => {
@@ -335,12 +346,17 @@ describe('GroupQueue', () => {
     );
     queue.notifyIdle('group1@g.us', containerId);
 
-    // Enqueue a task — should run immediately in its own container, not preempt
+    // Enqueue a task — should reuse the idle container via onTaskReuse
     const taskFn = vi.fn(async () => {});
     queue.enqueueTask('group1@g.us', 'task-1', taskFn);
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(taskFn).toHaveBeenCalled();
+    // taskFn NOT called (warm reuse pipes via IPC)
+    expect(taskFn).not.toHaveBeenCalled();
+    // onTaskReuse callback should have been invoked
+    expect(taskReuseCalls).toHaveLength(1);
+    expect(taskReuseCalls[0].taskId).toBe('task-1');
+    expect(taskReuseCalls[0].containerId).toBe(containerId);
 
     resolveProcess!();
     await vi.advanceTimersByTimeAsync(10);
@@ -647,6 +663,253 @@ describe('GroupQueue', () => {
 
     // Clean up
     completionCallbacks.forEach((cb) => cb());
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // =========================================================================
+  // Warm container reuse tests
+  // =========================================================================
+
+  // 18. Task container becomes idle and stays warm for reuse
+  it('keeps task container warm after notifyIdle (WARM-01)', async () => {
+    const fs = await import('fs');
+    let resolveTask: () => void;
+    let capturedContainerId: string;
+
+    const taskFn = vi.fn(async (containerId: string) => {
+      capturedContainerId = containerId;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start a task
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Register the container with a groupFolder so closeStdin works
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+      capturedContainerId!,
+    );
+
+    // Mark idle — should NOT close the container, should keep it warm
+    queue.notifyIdle('group1@g.us', capturedContainerId!);
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Clean up
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // 19. Warm task container is reused for new task (avoids cold start)
+  it('reuses warm task container for new task (WARM-02)', async () => {
+    let resolveTask: () => void;
+    let capturedContainerId: string;
+    const taskReuseCalls: Array<{
+      groupJid: string;
+      taskId: string;
+      containerId: string;
+    }> = [];
+
+    queue.setOnTaskReuse((groupJid, taskId, containerId) => {
+      taskReuseCalls.push({ groupJid, taskId, containerId });
+    });
+
+    const taskFn = vi.fn(async (containerId: string) => {
+      capturedContainerId = containerId;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    // Start first task
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(taskFn).toHaveBeenCalledTimes(1);
+
+    // Register with groupFolder and mark idle (using captured containerId)
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+      capturedContainerId!,
+    );
+    queue.notifyIdle('group1@g.us', capturedContainerId!);
+
+    // Enqueue a second task — should reuse the warm container
+    const taskFn2 = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-2', taskFn2);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // taskFn2 should NOT have been called (warm reuse pipes via IPC, not fn)
+    expect(taskFn2).not.toHaveBeenCalled();
+
+    // onTaskReuse should have been called
+    expect(taskReuseCalls).toHaveLength(1);
+    expect(taskReuseCalls[0].taskId).toBe('task-2');
+
+    // Clean up
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // 20. Warm timeout fires and closes the container
+  it('closes warm container when TASK_IDLE_TIMEOUT expires (WARM-03)', async () => {
+    const fs = await import('fs');
+    let resolveTask: () => void;
+    let capturedContainerId: string;
+
+    const taskFn = vi.fn(async (containerId: string) => {
+      capturedContainerId = containerId;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+      capturedContainerId!,
+    );
+    queue.notifyIdle('group1@g.us', capturedContainerId!);
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Advance past TASK_IDLE_TIMEOUT (600000ms = 10 min)
+    await vi.advanceTimersByTimeAsync(600000);
+
+    // _close sentinel should have been written
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites.length).toBeGreaterThanOrEqual(1);
+
+    // Clean up
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // 21. Warm timer cancelled when container is reused
+  it('cancels warm timer when container is reused (WARM-04)', async () => {
+    const fs = await import('fs');
+    let resolveTask: () => void;
+    let capturedContainerId: string;
+
+    queue.setOnTaskReuse(() => {});
+
+    const taskFn = vi.fn(async (containerId: string) => {
+      capturedContainerId = containerId;
+      await new Promise<void>((resolve) => {
+        resolveTask = resolve;
+      });
+    });
+
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn);
+    await vi.advanceTimersByTimeAsync(10);
+
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+      capturedContainerId!,
+    );
+    queue.notifyIdle('group1@g.us', capturedContainerId!);
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Reuse the container before timeout fires
+    await vi.advanceTimersByTimeAsync(300000); // 5 min (half of timeout)
+    const taskFn2 = vi.fn(async () => {});
+    queue.enqueueTask('group1@g.us', 'task-2', taskFn2);
+    await vi.advanceTimersByTimeAsync(10);
+
+    // Advance past the original timeout — should NOT trigger close
+    // (timer was cancelled on reuse)
+    await vi.advanceTimersByTimeAsync(300000); // another 5 min
+
+    const closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Clean up
+    resolveTask!();
+    await vi.advanceTimersByTimeAsync(10);
+  });
+
+  // 22. MAX_WARM_PER_GROUP enforcement — excess containers closed immediately
+  it('enforces MAX_WARM_PER_GROUP limit (WARM-05)', async () => {
+    const fs = await import('fs');
+    const resolvers: Array<() => void> = [];
+    const containerIds: string[] = [];
+
+    // Start task 1
+    const taskFn1 = vi.fn(async (containerId: string) => {
+      containerIds.push(containerId);
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+    });
+    queue.enqueueTask('group1@g.us', 'task-1', taskFn1);
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-1',
+      'test-group',
+      containerIds[0],
+    );
+
+    // Start task 2
+    const taskFn2 = vi.fn(async (containerId: string) => {
+      containerIds.push(containerId);
+      await new Promise<void>((resolve) => resolvers.push(resolve));
+    });
+    queue.enqueueTask('group1@g.us', 'task-2', taskFn2);
+    await vi.advanceTimersByTimeAsync(10);
+    queue.registerProcess(
+      'group1@g.us',
+      {} as any,
+      'container-2',
+      'test-group',
+      containerIds[1],
+    );
+
+    const writeFileSync = vi.mocked(fs.default.writeFileSync);
+    writeFileSync.mockClear();
+
+    // Mark first idle — should be kept warm (1 <= MAX_WARM_PER_GROUP of 2)
+    queue.notifyIdle('group1@g.us', containerIds[0]);
+    let closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Mark second idle too — still within limit (2 <= MAX_WARM_PER_GROUP of 2)
+    queue.notifyIdle('group1@g.us', containerIds[1]);
+    closeWrites = writeFileSync.mock.calls.filter(
+      (call) => typeof call[0] === 'string' && call[0].endsWith('_close'),
+    );
+    expect(closeWrites).toHaveLength(0);
+
+    // Clean up
+    resolvers.forEach((r) => r());
     await vi.advanceTimersByTimeAsync(10);
   });
 });

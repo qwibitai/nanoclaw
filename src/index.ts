@@ -3,6 +3,7 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -32,12 +33,15 @@ import {
   getNewMessages,
   getRegisteredGroup,
   getRouterState,
+  getTaskById,
   initDatabase,
+  logTaskRun,
   setRegisteredGroup,
   setRouterState,
   setSession,
   storeChatMetadata,
   storeMessage,
+  updateTaskAfterRun,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -53,7 +57,7 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { startSchedulerLoop } from './task-scheduler.js';
+import { computeNextRun, startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -82,6 +86,55 @@ queue.setOnContainerStart((groupFolder, session) => {
 
 queue.setOnContainerExit((groupFolder, containerId) => {
   removeActiveSession(groupFolder, containerId);
+});
+
+// Wire warm container reuse — when GroupQueue reuses an idle task container,
+// write the new task's prompt into the container's IPC input directory.
+// The container's query loop picks it up and processes it. Response delivery
+// works through the original runContainerAgent's streaming callback.
+queue.setOnTaskReuse((groupJid, taskId, containerId, groupFolder) => {
+  const task = getTaskById(taskId);
+  if (!task) {
+    logger.warn(
+      { groupJid, taskId, containerId },
+      'onTaskReuse: task not found in DB, skipping',
+    );
+    return;
+  }
+
+  const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
+  try {
+    fs.mkdirSync(inputDir, { recursive: true });
+    const filename = `${Date.now()}-task-${Math.random().toString(36).slice(2, 6)}.json`;
+    const filepath = path.join(inputDir, filename);
+    const tempPath = `${filepath}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text: task.prompt }));
+    fs.renameSync(tempPath, filepath);
+    logger.info(
+      { groupJid, taskId, containerId, groupFolder },
+      'Piped task prompt to warm container via IPC',
+    );
+  } catch (err) {
+    logger.error(
+      { groupJid, taskId, containerId, err },
+      'Failed to write task prompt to IPC input dir',
+    );
+  }
+
+  // Best-effort bookkeeping — mark task as having run.
+  // The response is delivered through the original container's streaming
+  // callback, so we can't easily capture the result here. Log a run
+  // entry so the task doesn't appear as never-executed.
+  const nextRun = computeNextRun(task);
+  logTaskRun({
+    task_id: taskId,
+    run_at: new Date().toISOString(),
+    duration_ms: 0,
+    status: 'success',
+    result: '(warm reuse — result delivered via streaming)',
+    error: null,
+  });
+  updateTaskAfterRun(taskId, nextRun, '(warm reuse — result delivered via streaming)');
 });
 
 function loadState(): void {

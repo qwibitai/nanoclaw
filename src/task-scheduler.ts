@@ -2,7 +2,12 @@ import { ChildProcess } from 'child_process';
 import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
-import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  ASSISTANT_NAME,
+  SCHEDULER_POLL_INTERVAL,
+  TASK_IDLE_TIMEOUT,
+  TIMEZONE,
+} from './config.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -158,21 +163,26 @@ async function runTask(
   // (CLAUDE.md, mounted repos, etc.) without needing the same session.
   const sessionId = undefined;
 
-  // After the task produces a result, close the container promptly.
-  // Tasks are single-turn — no need to wait IDLE_TIMEOUT (30 min) for the
-  // query loop to time out. A short delay handles any final MCP calls.
-  const TASK_CLOSE_DELAY_MS = 10000;
+  // After the task produces a result, keep the container warm for reuse.
+  // TASK_IDLE_TIMEOUT (default 10 min) gives time for another task to be
+  // piped into the same container, avoiding a cold start. The GroupQueue
+  // manages the warm slot lifecycle — when the timer fires, closeStdin
+  // writes _close, the container exits, and runTask's finally block cleans up.
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const scheduleClose = () => {
+    // Don't schedule if GroupQueue's notifyIdle already manages the warm timeout.
+    // The close sentinel will be written by GroupQueue when the warm timeout fires
+    // or when MAX_WARM_PER_GROUP is exceeded. This function is a fallback for
+    // containers that don't go through the warm reuse path.
     if (closeTimer) return; // already scheduled
     closeTimer = setTimeout(() => {
       logger.debug(
         { taskId: task.id, containerId },
-        'Closing task container after result',
+        'Warm timeout expired in task-scheduler, closing container',
       );
       deps.queue.closeStdin(task.chat_jid, containerId);
-    }, TASK_CLOSE_DELAY_MS);
+    }, TASK_IDLE_TIMEOUT);
   };
 
   try {

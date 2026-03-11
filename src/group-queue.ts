@@ -2,7 +2,12 @@ import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, MAX_CONCURRENT_CONTAINERS } from './config.js';
+import {
+  DATA_DIR,
+  MAX_CONCURRENT_CONTAINERS,
+  MAX_WARM_PER_GROUP,
+  TASK_IDLE_TIMEOUT,
+} from './config.js';
 import { logger } from './logger.js';
 
 interface QueuedTask {
@@ -24,6 +29,7 @@ interface ContainerSlot {
   containerName: string | null;
   groupFolder: string | null;
   runningTaskId: string | null;
+  warmTimer: ReturnType<typeof setTimeout> | null; // idle timeout for warm containers
 }
 
 interface GroupState {
@@ -53,6 +59,14 @@ export class GroupQueue {
   private onContainerExitFn:
     | ((groupFolder: string, containerId: string) => void)
     | null = null;
+  private onTaskReuseFn:
+    | ((
+        groupJid: string,
+        taskId: string,
+        containerId: string,
+        groupFolder: string,
+      ) => void)
+    | null = null;
 
   // Tracks which containerId is being registered during processMessagesFn callback.
   // Safe because Node.js is single-threaded: between runForGroup starting and
@@ -75,12 +89,20 @@ export class GroupQueue {
   }
 
   /**
-   * Find an idle non-task container in the group.
-   * Returns the first idle message-type container, or undefined if none.
+   * Find an idle container in the group.
+   * Prefers message-type containers, falls back to idle task containers
+   * (warm containers waiting for reuse).
    */
   private findIdleContainer(state: GroupState): ContainerSlot | undefined {
+    // Prefer message containers first
     for (const slot of state.containers.values()) {
       if (slot.idleWaiting && slot.type === 'message') {
+        return slot;
+      }
+    }
+    // Fall back to warm task containers
+    for (const slot of state.containers.values()) {
+      if (slot.idleWaiting && slot.type === 'task') {
         return slot;
       }
     }
@@ -106,6 +128,17 @@ export class GroupQueue {
     fn: (groupFolder: string, containerId: string) => void,
   ): void {
     this.onContainerExitFn = fn;
+  }
+
+  setOnTaskReuse(
+    fn: (
+      groupJid: string,
+      taskId: string,
+      containerId: string,
+      groupFolder: string,
+    ) => void,
+  ): void {
+    this.onTaskReuseFn = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -167,6 +200,26 @@ export class GroupQueue {
     }
     if (state.pendingTasks.some((t) => t.id === taskId)) {
       logger.debug({ groupJid, taskId }, 'Task already queued, skipping');
+      return;
+    }
+
+    // Check for a warm idle container we can reuse — avoids cold start.
+    // Reuse doesn't cost a new slot (container already counted in activeCount).
+    const idleSlot = this.findIdleContainer(state);
+    if (idleSlot && idleSlot.groupFolder) {
+      // Cancel the warm timeout — container is being reused
+      if (idleSlot.warmTimer) {
+        clearTimeout(idleSlot.warmTimer);
+        idleSlot.warmTimer = null;
+      }
+      idleSlot.idleWaiting = false;
+      idleSlot.runningTaskId = taskId;
+      logger.info(
+        { groupJid, taskId, containerId: idleSlot.containerId },
+        'Reusing warm container for task',
+      );
+      // Pipe the task prompt via IPC — the warm container's query loop will pick it up
+      this.pipeTaskToContainer(idleSlot, fn, groupJid, taskId);
       return;
     }
 
@@ -262,9 +315,76 @@ export class GroupQueue {
     if (!slot) return;
 
     slot.idleWaiting = true;
+    slot.runningTaskId = null;
 
+    if (slot.type === 'task') {
+      // Enforce MAX_WARM_PER_GROUP — count idle task containers for this group.
+      // If we're already at the limit, close this container immediately
+      // instead of keeping it warm.
+      let idleTaskCount = 0;
+      for (const s of state.containers.values()) {
+        if (s.idleWaiting && s.type === 'task' && s !== slot) {
+          idleTaskCount++;
+        }
+      }
+
+      if (idleTaskCount >= MAX_WARM_PER_GROUP) {
+        logger.debug(
+          {
+            groupJid,
+            containerId: slot.containerId,
+            idleTaskCount,
+            maxWarm: MAX_WARM_PER_GROUP,
+          },
+          'Warm container limit reached, closing excess container',
+        );
+        this.closeStdinForSlot(slot);
+        return;
+      }
+
+      // Schedule warm timeout — close the container if not reused within TASK_IDLE_TIMEOUT
+      slot.warmTimer = setTimeout(() => {
+        logger.debug(
+          { groupJid, containerId: slot!.containerId },
+          'Warm timeout expired, closing idle task container',
+        );
+        slot!.warmTimer = null;
+        this.closeStdinForSlot(slot!);
+      }, TASK_IDLE_TIMEOUT);
+
+      logger.info(
+        {
+          groupJid,
+          containerId: slot.containerId,
+          timeoutMs: TASK_IDLE_TIMEOUT,
+          warmCount: idleTaskCount + 1,
+        },
+        'Task container marked warm for reuse',
+      );
+      return;
+    }
+
+    // Message containers: preempt if tasks are pending
     if (state.pendingTasks.length > 0) {
       this.closeStdinForSlot(slot);
+    }
+  }
+
+  /**
+   * Pipe a task into a warm idle container via the onTaskReuse callback.
+   * The task-scheduler provides the callback, which writes the task prompt
+   * into the container's IPC input directory. The container's query loop
+   * picks it up and processes it. Output flows through the original
+   * streaming callback → user gets the response.
+   */
+  private pipeTaskToContainer(
+    slot: ContainerSlot,
+    _fn: (containerId: string) => Promise<void>,
+    groupJid: string,
+    taskId: string,
+  ): void {
+    if (this.onTaskReuseFn) {
+      this.onTaskReuseFn(groupJid, taskId, slot.containerId, slot.groupFolder!);
     }
   }
 
@@ -361,6 +481,7 @@ export class GroupQueue {
       containerName: null,
       groupFolder: null,
       runningTaskId: null,
+      warmTimer: null,
     };
 
     state.containers.set(containerId, slot);
@@ -428,6 +549,7 @@ export class GroupQueue {
       containerName: null,
       groupFolder: null,
       runningTaskId: task.id,
+      warmTimer: null,
     };
 
     state.containers.set(containerId, slot);
@@ -458,6 +580,12 @@ export class GroupQueue {
       // Notify session awareness — task container is exiting
       if (slot.groupFolder && this.onContainerExitFn) {
         this.onContainerExitFn(slot.groupFolder, containerId);
+      }
+
+      // Clean up warm timer if it's still pending
+      if (slot.warmTimer) {
+        clearTimeout(slot.warmTimer);
+        slot.warmTimer = null;
       }
 
       // EDGE CASE 3: Always clean up in finally — no orphan task slots possible.
