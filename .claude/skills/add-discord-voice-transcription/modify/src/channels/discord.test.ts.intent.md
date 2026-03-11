@@ -29,7 +29,6 @@ import { transcribeAudioBuffer } from '../transcription.js';
 
 ## Invariants (must preserve)
 
-- All image tests (from add-discord-image-vision) unchanged
-- Video and file placeholder tests unchanged
+- Image, video and file placeholder tests unchanged
 - All connection, sendMessage, ownsJid, setTyping tests unchanged
 - @mention and reply context tests unchanged

@@ -16,10 +16,6 @@ export interface ImageAttachment {
   mediaType: string;
 }
 
-export function isImageMessage(msg: any): boolean {
-  return !!msg.message?.imageMessage;
-}
-
 export async function processImage(
   buffer: Buffer,
   groupDir: string,

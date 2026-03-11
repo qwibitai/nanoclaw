@@ -33,7 +33,7 @@ New handler order:
 
 ## Attachment changes
 
-- `image/*` → `fetch(att.url)` → buffer → `processImage(buffer, groupDir, caption)`
+- `image/*` → `fetch(att.url)` → check `response.ok` → buffer → `processImage(buffer, groupDir, caption)`
   - Success: use `result.content` (e.g. `[Image: attachments/img-xxx.jpg]`)
   - Null or error: fallback to `[Image: att.name]`
 - `video/*`, other → unchanged placeholders

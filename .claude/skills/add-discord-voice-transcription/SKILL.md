@@ -5,7 +5,7 @@ description: Add voice message transcription to NanoClaw's Discord channel using
 
 # Add Discord Voice Transcription
 
-This skill adds audio transcription to NanoClaw's Discord channel using the same local whisper.cpp engine already used by WhatsApp. It works by extracting the channel-agnostic `transcribeAudioBuffer(buffer)` function from the transcription module so Discord can call it directly after fetching the audio URL, without any dependency on Baileys or WhatsApp.
+This skill adds audio transcription to NanoClaw's Discord channel using local whisper.cpp. It exposes a channel-agnostic `transcribeAudioBuffer(buffer)` function from the transcription module so Discord can call it directly after fetching the audio URL, without any dependency on Baileys or WhatsApp.
 
 ## Phase 1: Pre-flight
 
@@ -18,10 +18,32 @@ Read `.nanoclaw/state.yaml`. If `discord-voice-transcription` is in `applied_ski
 This skill requires:
 - `discord` skill applied (for the Discord channel)
 - `voice-transcription` skill applied (for the base transcription module)
-- `use-local-whisper` skill applied (to use whisper.cpp instead of OpenAI)
-- whisper-cli and ffmpeg installed on the host machine
+- `whisper-cli` and `ffmpeg` installed on the host machine
+- Whisper model file present at `data/models/ggml-base.bin`
 
-Confirm all are present in `applied_skills`.
+**Note:** This skill modifies `src/transcription.ts` to use local whisper.cpp and expose `transcribeAudioBuffer`. If you previously applied `use-local-whisper`, the changes are compatible. If not, this skill switches the transcription backend from OpenAI to whisper.cpp.
+
+Confirm the skills are present in `applied_skills`, then verify the system dependencies:
+
+```bash
+which whisper-cli   # must print a path
+which ffmpeg        # must print a path
+ls data/models/ggml-base.bin  # must exist
+```
+
+If `whisper-cli` or `ffmpeg` are missing, install them:
+
+```bash
+brew install whisper-cpp ffmpeg
+```
+
+If the model file is missing, download it (≈142 MB):
+
+```bash
+mkdir -p data/models
+curl -L -o data/models/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+```
 
 ## Phase 2: Apply Code Changes
 

@@ -6,7 +6,6 @@ import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { processImage } from '../image.js';
 import { logger } from '../logger.js';
-import { transcribeAudioBuffer } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -120,7 +119,7 @@ export class DiscordChannel implements Channel {
         return;
       }
 
-      // Handle attachments — process images and audio, placeholder for others.
+      // Handle attachments — process images, placeholder for others.
       // Runs after group lookup so group.folder is available for image storage.
       if (message.attachments.size > 0) {
         const attachmentDescriptions: string[] = [];
@@ -131,6 +130,7 @@ export class DiscordChannel implements Channel {
           if (contentType.startsWith('image/')) {
             try {
               const response = await fetch(att.url);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const arrayBuffer = await response.arrayBuffer();
               const buffer = Buffer.from(arrayBuffer);
               const groupDir = path.join(GROUPS_DIR, group.folder);
@@ -148,30 +148,10 @@ export class DiscordChannel implements Channel {
               );
               attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
             }
-          } else if (contentType.startsWith('audio/')) {
-            try {
-              const response = await fetch(att.url);
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              const transcript = await transcribeAudioBuffer(buffer);
-              if (transcript) {
-                attachmentDescriptions.push(`[Voice: ${transcript}]`);
-              } else {
-                attachmentDescriptions.push(
-                  '[Voice Message - transcription unavailable]',
-                );
-              }
-            } catch (err) {
-              logger.warn(
-                { err, name: att.name },
-                'Discord audio transcription failed',
-              );
-              attachmentDescriptions.push(
-                '[Voice Message - transcription failed]',
-              );
-            }
           } else if (contentType.startsWith('video/')) {
             attachmentDescriptions.push(`[Video: ${att.name || 'video'}]`);
+          } else if (contentType.startsWith('audio/')) {
+            attachmentDescriptions.push(`[Audio: ${att.name || 'audio'}]`);
           } else {
             attachmentDescriptions.push(`[File: ${att.name || 'file'}]`);
           }

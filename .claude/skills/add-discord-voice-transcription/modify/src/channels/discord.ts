@@ -1,10 +1,7 @@
-import path from 'path';
-
 import { Client, Events, GatewayIntentBits, Message, TextChannel } from 'discord.js';
 
-import { ASSISTANT_NAME, GROUPS_DIR, TRIGGER_PATTERN } from '../config.js';
+import { ASSISTANT_NAME, TRIGGER_PATTERN } from '../config.js';
 import { readEnvFile } from '../env.js';
-import { processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { transcribeAudioBuffer } from '../transcription.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -120,37 +117,18 @@ export class DiscordChannel implements Channel {
         return;
       }
 
-      // Handle attachments — process images and audio, placeholder for others.
-      // Runs after group lookup so group.folder is available for image storage.
+      // Handle attachments — transcribe audio, placeholder for others.
+      // Runs after group lookup so we only process for registered channels.
       if (message.attachments.size > 0) {
         const attachmentDescriptions: string[] = [];
 
         for (const att of message.attachments.values()) {
           const contentType = att.contentType || '';
 
-          if (contentType.startsWith('image/')) {
+          if (contentType.startsWith('audio/')) {
             try {
               const response = await fetch(att.url);
-              const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
-              const groupDir = path.join(GROUPS_DIR, group.folder);
-              const caption = (att as any).description || '';
-              const result = await processImage(buffer, groupDir, caption);
-              if (result) {
-                attachmentDescriptions.push(result.content);
-              } else {
-                attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
-              }
-            } catch (err) {
-              logger.warn(
-                { err, name: att.name },
-                'Discord image processing failed',
-              );
-              attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
-            }
-          } else if (contentType.startsWith('audio/')) {
-            try {
-              const response = await fetch(att.url);
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const arrayBuffer = await response.arrayBuffer();
               const buffer = Buffer.from(arrayBuffer);
               const transcript = await transcribeAudioBuffer(buffer);
@@ -170,6 +148,8 @@ export class DiscordChannel implements Channel {
                 '[Voice Message - transcription failed]',
               );
             }
+          } else if (contentType.startsWith('image/')) {
+            attachmentDescriptions.push(`[Image: ${att.name || 'image'}]`);
           } else if (contentType.startsWith('video/')) {
             attachmentDescriptions.push(`[Video: ${att.name || 'video'}]`);
           } else {

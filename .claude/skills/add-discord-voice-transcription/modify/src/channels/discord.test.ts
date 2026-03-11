@@ -12,7 +12,6 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
-  GROUPS_DIR: '/mock/groups',
 }));
 
 // Mock logger
@@ -23,14 +22,6 @@ vi.mock('../logger.js', () => ({
     warn: vi.fn(),
     error: vi.fn(),
   },
-}));
-
-// Mock image module
-vi.mock('../image.js', () => ({
-  processImage: vi.fn().mockResolvedValue({
-    content: '[Image: attachments/img-123.jpg]',
-    relativePath: 'attachments/img-123.jpg',
-  }),
 }));
 
 // Mock transcription module
@@ -115,7 +106,6 @@ vi.mock('discord.js', () => {
 });
 
 import { DiscordChannel, DiscordChannelOpts } from './discord.js';
-import { processImage } from '../image.js';
 import { transcribeAudioBuffer } from '../transcription.js';
 
 // --- Test helpers ---
@@ -213,6 +203,7 @@ describe('DiscordChannel', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        ok: true,
         arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(100)),
       }),
     );
@@ -459,8 +450,6 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      // Should NOT prepend @Andy — already starts with trigger
-      // But the <@botId> should still be stripped
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
@@ -512,100 +501,6 @@ describe('DiscordChannel', () => {
   // --- Attachments ---
 
   describe('attachments', () => {
-    it('processes image attachment via processImage', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'photo.png',
-            contentType: 'image/png',
-            url: 'https://cdn.discordapp.com/photo.png',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(processImage).toHaveBeenCalled();
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: '[Image: attachments/img-123.jpg]',
-        }),
-      );
-    });
-
-    it('falls back to placeholder when processImage returns null', async () => {
-      vi.mocked(processImage).mockResolvedValueOnce(null);
-
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'photo.png',
-            contentType: 'image/png',
-            url: 'https://cdn.discordapp.com/photo.png',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({ content: '[Image: photo.png]' }),
-      );
-    });
-
-    it('falls back to placeholder when image fetch fails', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValueOnce(new Error('Network error')),
-      );
-
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'photo.png',
-            contentType: 'image/png',
-            url: 'https://cdn.discordapp.com/photo.png',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({ content: '[Image: photo.png]' }),
-      );
-    });
-
     it('transcribes audio attachment via transcribeAudioBuffer', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
@@ -702,6 +597,36 @@ describe('DiscordChannel', () => {
       );
     });
 
+    it('stores image attachment with placeholder', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const attachments = new Map([
+        [
+          'att1',
+          {
+            name: 'photo.png',
+            contentType: 'image/png',
+            url: 'https://cdn.discordapp.com/photo.png',
+          },
+        ],
+      ]);
+      const msg = createMessage({
+        content: '',
+        attachments,
+        guildName: 'Server',
+      });
+      await triggerMessage(msg);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'dc:1234567890123456',
+        expect.objectContaining({
+          content: '[Image: photo.png]',
+        }),
+      );
+    });
+
     it('stores video attachment with placeholder', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
@@ -762,36 +687,6 @@ describe('DiscordChannel', () => {
       );
     });
 
-    it('includes text content with image attachment', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'photo.jpg',
-            contentType: 'image/jpeg',
-            url: 'https://cdn.discordapp.com/photo.jpg',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: 'Check this out',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: 'Check this out\n[Image: attachments/img-123.jpg]',
-        }),
-      );
-    });
-
     it('handles multiple attachments', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
@@ -825,7 +720,7 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
-          content: '[Image: attachments/img-123.jpg]\n[File: b.txt]',
+          content: '[Image: a.png]\n[File: b.txt]',
         }),
       );
     });
@@ -891,7 +786,6 @@ describe('DiscordChannel', () => {
         new Error('Channel not found'),
       );
 
-      // Should not throw
       await expect(
         channel.sendMessage('dc:1234567890123456', 'Will fail'),
       ).resolves.toBeUndefined();
@@ -901,10 +795,7 @@ describe('DiscordChannel', () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
 
-      // Don't connect — client is null
       await channel.sendMessage('dc:1234567890123456', 'No client');
-
-      // No error, no API call
     });
 
     it('splits messages exceeding 2000 characters', async () => {
@@ -977,7 +868,6 @@ describe('DiscordChannel', () => {
 
       await channel.setTyping('dc:1234567890123456', false);
 
-      // channels.fetch should NOT be called
       expect(currentClient().channels.fetch).not.toHaveBeenCalled();
     });
 
@@ -985,10 +875,7 @@ describe('DiscordChannel', () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
 
-      // Don't connect
       await channel.setTyping('dc:1234567890123456', true);
-
-      // No error
     });
   });
 

@@ -33,11 +33,6 @@ vi.mock('../image.js', () => ({
   }),
 }));
 
-// Mock transcription module
-vi.mock('../transcription.js', () => ({
-  transcribeAudioBuffer: vi.fn().mockResolvedValue('Hello from voice'),
-}));
-
 // --- discord.js mock ---
 
 type Handler = (...args: any[]) => any;
@@ -116,7 +111,6 @@ vi.mock('discord.js', () => {
 
 import { DiscordChannel, DiscordChannelOpts } from './discord.js';
 import { processImage } from '../image.js';
-import { transcribeAudioBuffer } from '../transcription.js';
 
 // --- Test helpers ---
 
@@ -213,6 +207,7 @@ describe('DiscordChannel', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
+        ok: true,
         arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(100)),
       }),
     );
@@ -459,8 +454,6 @@ describe('DiscordChannel', () => {
       });
       await triggerMessage(msg);
 
-      // Should NOT prepend @Andy — already starts with trigger
-      // But the <@botId> should still be stripped
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({
@@ -603,102 +596,6 @@ describe('DiscordChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
         expect.objectContaining({ content: '[Image: photo.png]' }),
-      );
-    });
-
-    it('transcribes audio attachment via transcribeAudioBuffer', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'voice.ogg',
-            contentType: 'audio/ogg',
-            url: 'https://cdn.discordapp.com/voice.ogg',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(transcribeAudioBuffer).toHaveBeenCalled();
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({ content: '[Voice: Hello from voice]' }),
-      );
-    });
-
-    it('falls back when transcription returns null', async () => {
-      vi.mocked(transcribeAudioBuffer).mockResolvedValueOnce(null);
-
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'voice.ogg',
-            contentType: 'audio/ogg',
-            url: 'https://cdn.discordapp.com/voice.ogg',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: '[Voice Message - transcription unavailable]',
-        }),
-      );
-    });
-
-    it('falls back when audio fetch fails', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValueOnce(new Error('Network error')),
-      );
-
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        [
-          'att1',
-          {
-            name: 'voice.ogg',
-            contentType: 'audio/ogg',
-            url: 'https://cdn.discordapp.com/voice.ogg',
-          },
-        ],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: '[Voice Message - transcription failed]',
-        }),
       );
     });
 

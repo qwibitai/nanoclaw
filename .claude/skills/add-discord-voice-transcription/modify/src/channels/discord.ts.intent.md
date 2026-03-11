@@ -20,9 +20,14 @@ import { transcribeAudioBuffer } from '../transcription.js';
   - Null result: `[Voice Message - transcription unavailable]`
   - Fetch or transcription error: `[Voice Message - transcription failed]`
 
+## Structural change: attachment processing moved after group lookup
+
+Attachment processing was moved from BEFORE to AFTER the group lookup guard.
+This is required so we only fetch and transcribe audio for registered channels.
+`onChatMetadata` still fires BEFORE the guard (for channel discovery).
+
 ## Invariants (must preserve)
 
-- Image processing (from add-discord-image-vision) unchanged
-- `video/*` and other file placeholders unchanged
+- `image/*`, `video/*` and other file placeholders unchanged
 - All non-attachment message handling unchanged
 - `sendMessage`, `setTyping`, `connect`, `disconnect`, `ownsJid` — all unchanged
