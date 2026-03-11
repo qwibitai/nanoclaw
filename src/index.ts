@@ -48,6 +48,19 @@ import { startIpcWatcher } from './ipc.js';
 import { parseImageReferences } from './image.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
+  addMapping,
+  anonymize,
+  AnonymizeConfig,
+  deanonymize,
+  loadAnonymizeConfig,
+} from './anonymize.js';
+import {
+  checkForPii,
+  formatPiiAlert,
+  PiiResult,
+  warmupPiiModel,
+} from './pii-check.js';
+import {
   isSenderAllowed,
   isTriggerAllowed,
   loadSenderAllowlist,
@@ -68,6 +81,20 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+// PII-check pending messages: held until user approves/skips
+interface PendingAnon {
+  anonPrompt: string;
+  imageAttachments: Array<{ relativePath: string; mediaType: string }>;
+  group: RegisteredGroup;
+  piiResult: PiiResult;
+  anonConfig: AnonymizeConfig;
+  heldAt: number;
+}
+const pendingAnon = new Map<string, PendingAnon>();
+const PENDING_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+// One-shot flag: bypass PII check after user approves/skips a PII hold
+const piiApproved = new Set<string>();
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -179,6 +206,56 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const prompt = formatMessages(missedMessages, TIMEZONE);
   const imageAttachments = parseImageReferences(missedMessages);
 
+  // Anonymization: load per-group config, apply mappings, optionally run PII check
+  const anonConfig = loadAnonymizeConfig(group.folder);
+  const anonPrompt = anonConfig ? anonymize(prompt, anonConfig) : prompt;
+
+  if (anonConfig) {
+    logger.info(
+      { group: group.name, changed: anonPrompt !== prompt },
+      'anonymize: mappings applied',
+    );
+  }
+
+  if (anonConfig?.piiCheck) {
+    if (piiApproved.has(chatJid)) {
+      piiApproved.delete(chatJid);
+    } else {
+      let piiResult: PiiResult | null;
+      try {
+        piiResult = await checkForPii(anonPrompt, anonConfig);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'PII check failed';
+        logger.error(
+          { err, group: group.name },
+          'PII check failed, message blocked',
+        );
+        await channel.sendMessage(
+          chatJid,
+          `PII check failed: ${msg}\nMessage NOT sent. Ensure Ollama is running, then resend.`,
+        );
+        return true; // Don't retry — user must resend after fixing Ollama
+      }
+      if (piiResult && piiResult.found.length > 0) {
+        // Hold message until user approves mappings
+        pendingAnon.set(chatJid, {
+          anonPrompt,
+          imageAttachments,
+          group,
+          piiResult,
+          anonConfig,
+          heldAt: Date.now(),
+        });
+        await channel.sendMessage(chatJid, formatPiiAlert(piiResult));
+        logger.info(
+          { group: group.name, piiCount: piiResult.found.length },
+          'PII detected, message held for approval',
+        );
+        return true;
+      }
+    }
+  }
+
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
   const previousCursor = lastAgentTimestamp[chatJid] || '';
@@ -211,7 +288,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const output = await runAgent(
     group,
-    prompt,
+    anonPrompt,
     chatJid,
     imageAttachments,
     async (result) => {
@@ -228,7 +305,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           `Agent output: ${raw.slice(0, 200)}`,
         );
         if (text) {
-          await channel.sendMessage(chatJid, text);
+          const outText = anonConfig ? deanonymize(text, anonConfig) : text;
+          await channel.sendMessage(chatJid, outText);
           outputSentToUser = true;
         }
         // Only reset idle timer on actual results, not session-update markers (result: null)
@@ -365,6 +443,19 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
+      // Expire timed-out PII holds
+      for (const [jid, pending] of pendingAnon) {
+        if (Date.now() - pending.heldAt > PENDING_TIMEOUT_MS) {
+          pendingAnon.delete(jid);
+          piiApproved.add(jid);
+          queue.enqueueMessageCheck(jid);
+          logger.warn(
+            { group: pending.group.name },
+            'PII hold timed out, releasing with existing mappings',
+          );
+        }
+      }
+
       const jids = Object.keys(registeredGroups);
       const { messages, newTimestamp } = getNewMessages(
         jids,
@@ -400,6 +491,62 @@ async function startMessageLoop(): Promise<void> {
             continue;
           }
 
+          // Hook F: Handle PII approval responses for held messages
+          if (pendingAnon.has(chatJid)) {
+            const pending = pendingAnon.get(chatJid)!;
+            const latest = groupMessages[groupMessages.length - 1];
+            const cmd = latest.content.trim().toLowerCase();
+
+            if (cmd === 'approve') {
+              for (const item of pending.piiResult.found) {
+                addMapping(group.folder, item.text, item.suggestion);
+              }
+              pendingAnon.delete(chatJid);
+              piiApproved.add(chatJid);
+              queue.enqueueMessageCheck(chatJid);
+              logger.info(
+                { group: group.name },
+                'PII mappings approved, releasing held message',
+              );
+              continue;
+            } else if (cmd === 'skip') {
+              pendingAnon.delete(chatJid);
+              piiApproved.add(chatJid);
+              queue.enqueueMessageCheck(chatJid);
+              logger.info(
+                { group: group.name },
+                'PII check skipped, releasing held message',
+              );
+              continue;
+            } else if (cmd.startsWith('map ')) {
+              const match = cmd.match(/^map\s+(.+?)\s*>\s*(.+)$/i);
+              if (match) {
+                const real = match[1].trim();
+                const pseudonym = match[2].trim();
+                addMapping(group.folder, real, pseudonym);
+                pending.piiResult.found = pending.piiResult.found.filter(
+                  (item) => item.text.toLowerCase() !== real.toLowerCase(),
+                );
+                if (pending.piiResult.found.length === 0) {
+                  pendingAnon.delete(chatJid);
+                  piiApproved.add(chatJid);
+                  queue.enqueueMessageCheck(chatJid);
+                  logger.info(
+                    { group: group.name },
+                    'All PII mapped, releasing held message',
+                  );
+                } else {
+                  await channel.sendMessage(
+                    chatJid,
+                    formatPiiAlert(pending.piiResult),
+                  );
+                }
+                continue;
+              }
+            }
+            // Not a PII command — fall through to normal processing
+          }
+
           const isMainGroup = group.isMain === true;
           const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
@@ -429,9 +576,15 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
           const imageAttachments = parseImageReferences(messagesToSend);
 
+          // Hook C: Anonymize piped messages (container only sees pseudonyms)
+          const pipeAnonConfig = loadAnonymizeConfig(group.folder);
+          const anonFormatted = pipeAnonConfig
+            ? anonymize(formatted, pipeAnonConfig)
+            : formatted;
+
           if (
             queue.sendMessage(chatJid, {
-              text: formatted,
+              text: anonFormatted,
               imageAttachments,
             })
           ) {
@@ -596,6 +749,13 @@ async function main(): Promise<void> {
       writeGroupsSnapshot(gf, im, ag, rj),
   });
   queue.setProcessMessagesFn(processGroupMessages);
+
+  // Pre-load Ollama PII models for groups with piiCheck enabled (fire-and-forget)
+  for (const group of Object.values(registeredGroups)) {
+    const anonCfg = loadAnonymizeConfig(group.folder);
+    if (anonCfg?.piiCheck) warmupPiiModel(anonCfg);
+  }
+
   recoverPendingMessages();
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');

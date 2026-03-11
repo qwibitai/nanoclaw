@@ -33,6 +33,12 @@ export const SENDER_ALLOWLIST_PATH = path.join(
   'nanoclaw',
   'sender-allowlist.json',
 );
+export const ANONYMIZE_CONFIG_DIR = path.join(
+  HOME_DIR,
+  '.config',
+  'nanoclaw',
+  'anonymize',
+);
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');

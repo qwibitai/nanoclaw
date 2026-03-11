@@ -18,6 +18,7 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import { anonymize, deanonymize, loadAnonymizeConfig } from './anonymize.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
@@ -146,6 +147,12 @@ async function runTask(
     })),
   );
 
+  // Hook D: Anonymize task prompt and de-anonymize output
+  const anonConfig = loadAnonymizeConfig(task.group_folder);
+  const taskPrompt = anonConfig
+    ? anonymize(task.prompt, anonConfig)
+    : task.prompt;
+
   let result: string | null = null;
   let error: string | null = null;
 
@@ -172,7 +179,7 @@ async function runTask(
     const output = await runContainerAgent(
       group,
       {
-        prompt: task.prompt,
+        prompt: taskPrompt,
         sessionId,
         groupFolder: task.group_folder,
         chatJid: task.chat_jid,
@@ -185,8 +192,11 @@ async function runTask(
       async (streamedOutput: ContainerOutput) => {
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result to user — de-anonymize pseudonyms back to real names
+          const outText = anonConfig
+            ? deanonymize(streamedOutput.result, anonConfig)
+            : streamedOutput.result;
+          await deps.sendMessage(task.chat_jid, outText);
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {

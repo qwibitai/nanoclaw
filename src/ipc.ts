@@ -3,6 +3,7 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
+import { deanonymize, loadAnonymizeConfig } from './anonymize.js';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
@@ -80,7 +81,12 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
+                  // Hook E: De-anonymize outbound IPC messages (container uses pseudonyms)
+                  const anonConfig = loadAnonymizeConfig(sourceGroup);
+                  const outText = anonConfig
+                    ? deanonymize(data.text, anonConfig)
+                    : data.text;
+                  await deps.sendMessage(data.chatJid, outText);
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
