@@ -286,7 +286,9 @@ export async function runContainerAgent(
     "Spawning container agent",
   );
 
-  const logsDir = path.join(groupDir, "logs");
+  // Store host-side container logs outside the container-writable group directory.
+  // This prevents symlink/hardlink redirection attacks from untrusted group content.
+  const logsDir = path.join(DATA_DIR, "logs", group.folder);
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
