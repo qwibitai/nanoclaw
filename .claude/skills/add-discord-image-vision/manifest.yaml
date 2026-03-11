@@ -1,0 +1,16 @@
+skill: discord-image-vision
+version: 1.0.0
+description: "Image vision for Discord channel via processImage + sharp"
+core_version: 0.1.0
+adds:
+  - src/image.ts
+modifies:
+  - src/channels/discord.ts
+  - src/channels/discord.test.ts
+structured:
+  npm_dependencies:
+    sharp: "^0.33.0"
+conflicts: []
+depends:
+  - discord
+test: "npx vitest run src/channels/discord.test.ts"

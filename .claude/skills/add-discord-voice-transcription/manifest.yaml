@@ -1,0 +1,15 @@
+skill: discord-voice-transcription
+version: 1.0.0
+description: "Voice transcription for Discord audio attachments via transcribeAudioBuffer"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/transcription.ts
+  - src/channels/discord.ts
+  - src/channels/discord.test.ts
+structured: {}
+conflicts: []
+depends:
+  - discord
+  - voice-transcription
+test: "npx vitest run src/channels/discord.test.ts"
