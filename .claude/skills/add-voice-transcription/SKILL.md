@@ -41,7 +41,11 @@ git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 
 ```bash
 git fetch whatsapp skill/voice-transcription
-git merge whatsapp/skill/voice-transcription
+git merge whatsapp/skill/voice-transcription || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:

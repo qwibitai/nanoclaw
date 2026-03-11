@@ -40,7 +40,11 @@ git remote add gmail https://github.com/qwibitai/nanoclaw-gmail.git
 
 ```bash
 git fetch gmail main
-git merge gmail/main
+git merge gmail/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
