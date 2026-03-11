@@ -59,7 +59,8 @@ function buildForwardHeaders(
 
   if (authMode === 'api-key') {
     delete headers['x-api-key'];
-    headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
+    headers['x-api-key'] =
+      secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY;
   } else if (headers['authorization']) {
     const oauthToken =
       secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
@@ -80,8 +81,14 @@ function safeJsonParse(body: Buffer): JsonObject | null {
   }
 }
 
-function isOpenRouterUpstream(upstreamUrl: URL, secrets: Record<string, string>): boolean {
-  return upstreamUrl.hostname.includes('openrouter.ai') || Boolean(secrets.OPENROUTER_API_KEY);
+function isOpenRouterUpstream(
+  upstreamUrl: URL,
+  secrets: Record<string, string>,
+): boolean {
+  return (
+    upstreamUrl.hostname.includes('openrouter.ai') ||
+    Boolean(secrets.OPENROUTER_API_KEY)
+  );
 }
 
 function isMessagesEndpoint(url: string | undefined): boolean {
@@ -553,15 +560,16 @@ export function startCredentialProxy(
 ): Promise<Server> {
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
+    'OPENROUTER_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
-    'OPENROUTER_API_KEY',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+  const authMode: AuthMode =
+    secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY
+      ? 'api-key'
+      : 'oauth';
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
@@ -645,6 +653,8 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']);
+  return secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY
+    ? 'api-key'
+    : 'oauth';
 }
