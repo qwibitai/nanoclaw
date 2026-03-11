@@ -8,22 +8,23 @@ This guide helps you answer two questions quickly:
 ## Recommended Reading Path
 
 1. **Conceptual overview (10-15 min)**
-Read [README.md](../README.md) first, especially:
+   Read [README.md](../README.md) first, especially:
+
 - `About This Fork`
 - `Philosophy`
 - `What It Supports`
 
 2. **Architecture deep dive (20-30 min)**
-Read [SPEC.md](./SPEC.md) for the execution model and data flow, then [ARCHITECTURE.md](./ARCHITECTURE.md) for the multi-arm operating model used in this fork.
+   Read [SPEC.md](./SPEC.md) for the execution model and data flow, then [ARCHITECTURE.md](./ARCHITECTURE.md) for the multi-arm operating model used in this fork.
 
 3. **Security model (15-20 min)**
-Read [SECURITY.md](./SECURITY.md) to understand trust boundaries, mount protections, credential handling, and privilege differences between main vs non-main groups.
+   Read [SECURITY.md](./SECURITY.md) to understand trust boundaries, mount protections, credential handling, and privilege differences between main vs non-main groups.
 
 4. **Remix and fork selectively (10-20 min)**
-Read [FORK_OVERVIEW.md](./FORK_OVERVIEW.md) to understand intentional divergences, then [FORK_SYNC.md](./FORK_SYNC.md) for practical upstream sync workflow.
+   Read [FORK_OVERVIEW.md](./FORK_OVERVIEW.md) to understand intentional divergences, then [FORK_SYNC.md](./FORK_SYNC.md) for practical upstream sync workflow.
 
 5. **Before contributing**
-Read [CONTRIBUTING.md](../CONTRIBUTING.md). Substantive code contributions should usually go to upstream [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
+   Read [CONTRIBUTING.md](../CONTRIBUTING.md). Substantive code contributions should usually go to upstream [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
 
 ## Fast Decision: Fork This Repo or Upstream?
 

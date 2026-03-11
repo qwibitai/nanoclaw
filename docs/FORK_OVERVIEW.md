@@ -11,13 +11,13 @@ This repository (`trevorWieland/nanoclaw`) is a personal public fork of upstream
 
 ## Upstream vs This Fork
 
-| Area | Upstream NanoClaw | This Fork |
-| --- | --- | --- |
-| Core model | Single-process orchestrator + container isolation | Same core model |
-| Target audience | Broad NanoClaw users | Friends/family remixing Trevor's setup |
-| Docs framing | Canonical project framing | Explicit fork overlays and remix guidance |
-| Contribution target for major changes | Upstream repository | Upstream repository |
-| Contribution target for fork context | Not applicable | This fork (docs and small personal adjustments) |
+| Area                                  | Upstream NanoClaw                                 | This Fork                                       |
+| ------------------------------------- | ------------------------------------------------- | ----------------------------------------------- |
+| Core model                            | Single-process orchestrator + container isolation | Same core model                                 |
+| Target audience                       | Broad NanoClaw users                              | Friends/family remixing Trevor's setup          |
+| Docs framing                          | Canonical project framing                         | Explicit fork overlays and remix guidance       |
+| Contribution target for major changes | Upstream repository                               | Upstream repository                             |
+| Contribution target for fork context  | Not applicable                                    | This fork (docs and small personal adjustments) |
 
 ## Intentional Divergences in This Fork
 
@@ -28,10 +28,12 @@ This repository (`trevorWieland/nanoclaw`) is a personal public fork of upstream
 ## Who Should Use This Fork
 
 Use this fork if you:
+
 - Want a practical remix base with clear docs for personal use.
 - Prefer explicit guidance on what to keep local vs what to upstream.
 
 Use upstream if you:
+
 - Want the canonical source of truth without this fork's personal overlays.
 - Plan to contribute substantive platform improvements directly.
 

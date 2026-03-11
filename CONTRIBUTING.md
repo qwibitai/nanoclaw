@@ -5,12 +5,14 @@ This repository is a personal public fork (`trevorWieland/nanoclaw`) of upstream
 ## Where Contributions Should Go
 
 **Contribute upstream (`qwibitai/nanoclaw`) for:**
+
 - New features or capabilities
 - Substantive bug fixes
 - Broad refactors or architecture changes
 - Compatibility/platform expansions
 
 **Contribute to this fork for:**
+
 - Fork-specific documentation (`README`, `docs/START_HERE.md`, `docs/FORK_*.md`)
 - Clarifications that help friends/family remix this fork
 - Small personal adjustments that do not change core project direction
