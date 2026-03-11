@@ -31,6 +31,8 @@ It does not own execution-lane routing or shared-context content design.
 
 - `npx tsx scripts/workflow/symphony.ts print-example`
 - `npx tsx scripts/workflow/symphony.ts validate-registry --file .claude/examples/symphony-project-registry.example.json`
+- `npm run symphony:sync-registry`
+- `npm run symphony:status`
 - `bash scripts/check-workflow-contracts.sh`
 
 ## Related Docs
@@ -92,9 +94,10 @@ Rules:
 
 Recommended local convention:
 
-1. `NANOCLAW_SYMPHONY_SECRET_ROOT` points at the runtime-managed secret directory
-2. each project uses one secret file or secret-manager entry named after `secretScope`
-3. the runtime injects only the subset required by the selected backend and project
+1. `NOTION_PROJECT_REGISTRY_DATABASE_ID` points at the Notion database holding the canonical project registry
+2. `NANOCLAW_SYMPHONY_SECRET_ROOT` points at the runtime-managed secret directory
+3. each project uses one secret file or secret-manager entry named after `secretScope`
+4. the runtime injects only the subset required by the selected backend and project
 
 ## NanoClaw Baseline
 

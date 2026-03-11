@@ -38,7 +38,7 @@ docs/
 - Runtime and incident debugging: `docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md`
 - Worker contract and runtime: `docs/workflow/runtime/nanoclaw-jarvis-dispatch-contract.md` + `docs/workflow/runtime/nanoclaw-jarvis-worker-runtime.md`
 - GitHub delivery and workflow governance: `docs/workflow/github/github-delivery-governance.md` + `docs/workflow/github/github-offload-boundary-loop.md`
-- Control-plane sweep, collaboration split, lane routing, bootstrap/secrets, and custom Symphony: `docs/workflow/control-plane/session-work-sweep.md` + `docs/workflow/control-plane/collaboration-surface-contract.md` + `docs/workflow/control-plane/execution-lane-routing-contract.md` + `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md` + `docs/workflow/control-plane/custom-symphony-orchestration-contract.md`
+- Control-plane sweep, collaboration split, lane routing, bootstrap/secrets, custom Symphony, and Symphony operator handling: `docs/workflow/control-plane/session-work-sweep.md` + `docs/workflow/control-plane/collaboration-surface-contract.md` + `docs/workflow/control-plane/execution-lane-routing-contract.md` + `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md` + `docs/workflow/control-plane/custom-symphony-orchestration-contract.md` + `docs/workflow/control-plane/symphony-operations-runbook.md`
 - Ownership and update surfaces: `docs/operations/workflow-setup-responsibility-map.md`
 - Shared session recall and Notion publish flow: `docs/workflow/runtime/session-recall.md`
 - Nightly upstream/tooling improvement lane: `docs/workflow/strategy/nightly-evaluation-loop.md`

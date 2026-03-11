@@ -30,8 +30,18 @@ It does not own shared-context placement, GitHub governance, or worker runtime i
 ## Verification
 
 - `npm run symphony:setup`
+- `npm run symphony:sync-registry`
+- `npm run symphony:status`
+- `npm run symphony:serve`
+- `npm run symphony:daemon -- --once`
 - `npx tsx scripts/workflow/symphony.ts print-example`
+- `npx tsx scripts/workflow/symphony.ts list-ready --project-key nanoclaw`
+- `npx tsx scripts/workflow/symphony.ts plan-run --issue-file <path>`
+- `npx tsx scripts/workflow/symphony.ts dispatch-once --project-key nanoclaw --dry-run`
 - `npm test -- src/symphony-routing.test.ts`
+- `npm test -- src/symphony-registry.test.ts`
+- `npm test -- src/symphony-state.test.ts`
+- `npm test -- src/symphony-server.test.ts`
 - `bash scripts/check-workflow-contracts.sh`
 
 ## Related Docs
@@ -39,6 +49,7 @@ It does not own shared-context placement, GitHub governance, or worker runtime i
 - `docs/workflow/control-plane/execution-lane-routing-contract.md`
 - `docs/workflow/control-plane/collaboration-surface-contract.md`
 - `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md`
+- `docs/workflow/control-plane/symphony-operations-runbook.md`
 - `docs/operations/workflow-setup-responsibility-map.md`
 
 ## Requirements
@@ -55,6 +66,8 @@ It must provide:
 4. backend selection per issue
 5. backend runner lifecycle
 6. structured observability
+7. persistent local run-state
+8. local dashboard and JSON status surface
 
 ### Supported backends
 
@@ -89,8 +102,9 @@ Runtime expectations:
 
 1. canonical project identity lives in the shared-context project registry
 2. Symphony reads a runtime-local cache materialized from that registry
-3. the local cache path is configured by `NANOCLAW_SYMPHONY_REGISTRY_PATH`
-4. the checked-in example file is schema documentation only, not the live registry
+3. the Notion registry database is configured by `NOTION_PROJECT_REGISTRY_DATABASE_ID`
+4. the local cache path is configured by `NANOCLAW_SYMPHONY_REGISTRY_PATH`
+5. the checked-in example file is schema documentation only, not the live registry
 
 ### Secret scopes
 
@@ -139,6 +153,17 @@ Symphony-routed issues must include:
 
 If `Execution Lane = symphony`, `Target Runtime` is mandatory.
 
+Required issue-body section:
+
+```md
+## Symphony Routing
+- Execution Lane: symphony
+- Target Runtime: codex | claude-code | opencode
+- Work Class: nanoclaw-core | downstream-project
+```
+
+The dispatch path must fail loud when this section is missing or malformed.
+
 ## Validation Gates
 
 Before dispatch, custom Symphony must reject the issue if any are true:
@@ -159,3 +184,5 @@ This contract is operating correctly when all are true:
 2. downstream issues may route through Symphony to allowed backends
 3. backend selection is deterministic per issue
 4. invalid issue/project combinations fail loudly before dispatch
+5. local runtime state is persisted under `.nanoclaw/symphony/`
+6. the local dashboard shows configured projects and recent runs

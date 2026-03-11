@@ -91,6 +91,10 @@ if [ ! -f "docs/workflow/delivery/unified-codex-claude-loop.md" ]; then
   errors+=("Missing unified cross-tool workflow doc: docs/workflow/delivery/unified-codex-claude-loop.md")
 fi
 
+if [ ! -f "docs/workflow/control-plane/symphony-operations-runbook.md" ]; then
+  errors+=("Missing Symphony operations runbook: docs/workflow/control-plane/symphony-operations-runbook.md")
+fi
+
 if [ ! -f "docs/operations/claude-codex-adapter-matrix.md" ]; then
   errors+=("Missing adapter matrix doc: docs/operations/claude-codex-adapter-matrix.md")
 fi
@@ -121,6 +125,10 @@ fi
 
 if [ ! -x "scripts/check-docs-hygiene.sh" ]; then
   errors+=("Missing executable docs hygiene checker: scripts/check-docs-hygiene.sh")
+fi
+
+if [ ! -f ".claude/examples/symphony-linear-issue-template.md" ]; then
+  errors+=("Missing Symphony Linear issue template: .claude/examples/symphony-linear-issue-template.md")
 fi
 
 if ! has_text 'docs/workflow/delivery/nanoclaw-development-loop.md' CLAUDE.md; then
@@ -159,8 +167,50 @@ if ! has_text 'docs/ARCHITECTURE.md' AGENTS.md; then
   errors+=("AGENTS.md is missing architecture boundary reference")
 fi
 
+if ! has_text 'docs/workflow/control-plane/symphony-operations-runbook.md' CLAUDE.md; then
+  errors+=("CLAUDE.md is missing Symphony operations runbook trigger reference")
+fi
+
+if ! has_text 'docs/workflow/control-plane/symphony-operations-runbook.md' AGENTS.md; then
+  errors+=("AGENTS.md is missing Symphony operations runbook reference")
+fi
+
+if ! has_text 'docs/workflow/control-plane/symphony-operations-runbook.md' docs/README.md; then
+  errors+=("docs/README.md is missing Symphony operations runbook reference")
+fi
+
+if ! has_text 'docs/workflow/control-plane/symphony-operations-runbook.md' DOCS.md; then
+  errors+=("DOCS.md is missing Symphony operations runbook reference")
+fi
+
 if has_text 'docs/nanoclaw-jarvis-dispatch-contract.md' docs/workflow/runtime/jarvis-dispatch-contract-discipline.md; then
   errors+=("jarvis-dispatch-contract-discipline.md still references deprecated path docs/nanoclaw-jarvis-dispatch-contract.md")
+fi
+
+for heading in \
+  '^## Problem Statement$' \
+  '^## Scope$' \
+  '^## Acceptance Criteria$' \
+  '^## Required Checks$' \
+  '^## Required Evidence$' \
+  '^## Blocked If$' \
+  '^## Symphony Routing$'
+do
+  if ! has_text "$heading" ".claude/examples/symphony-linear-issue-template.md"; then
+    errors+=("Symphony issue template is missing required heading: ${heading#^}")
+  fi
+done
+
+if ! has_text 'Execution Lane: symphony' ".claude/examples/symphony-linear-issue-template.md"; then
+  errors+=("Symphony issue template is missing Execution Lane routing line")
+fi
+
+if ! has_text 'Target Runtime:' ".claude/examples/symphony-linear-issue-template.md"; then
+  errors+=("Symphony issue template is missing Target Runtime routing line")
+fi
+
+if ! has_text 'Work Class:' ".claude/examples/symphony-linear-issue-template.md"; then
+  errors+=("Symphony issue template is missing Work Class routing line")
 fi
 
 if [ -x "scripts/check-architecture-boundary.sh" ]; then

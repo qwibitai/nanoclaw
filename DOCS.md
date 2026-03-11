@@ -32,6 +32,7 @@ Workflow docs are physically grouped by operational concern.
 - `docs/workflow/control-plane/execution-lane-routing-contract.md`: canonical NanoClaw-vs-downstream lane routing and Symphony scope contract
 - `docs/workflow/control-plane/project-bootstrap-and-secret-contract.md`: canonical project onboarding and universal secret-scope contract
 - `docs/workflow/control-plane/session-work-sweep.md`: session-start Linear sweep protocol and morning handoff contract
+- `docs/workflow/control-plane/symphony-operations-runbook.md`: operator runbook for Symphony registry sync, queue inspection, dispatch, daemon, and dashboard handling
 
 ### `docs/workflow/delivery/`
 
