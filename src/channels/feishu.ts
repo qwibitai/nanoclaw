@@ -6,7 +6,6 @@
  */
 
 import * as lark from '@larksuiteoapi/node-sdk';
-import { ASSISTANT_NAME } from '../config.js';
 import { logger } from '../logger.js';
 import { Channel } from '../types.js';
 import { readEnvFile } from '../env.js';
@@ -16,6 +15,7 @@ export class FeishuChannel implements Channel {
   name = 'feishu';
 
   private client!: lark.Client;
+  private wsClient: lark.WSClient | undefined;
   private connected = false;
   private botOpenId: string | undefined;
   private opts: ChannelOpts;
@@ -56,7 +56,7 @@ export class FeishuChannel implements Channel {
       );
     }
 
-    const wsClient = new lark.WSClient({
+    this.wsClient = new lark.WSClient({
       appId,
       appSecret,
       domain,
@@ -69,7 +69,7 @@ export class FeishuChannel implements Channel {
       },
     });
 
-    wsClient.start({ eventDispatcher });
+    this.wsClient.start({ eventDispatcher });
     this.connected = true;
     logger.info({ domain }, 'Connected to Feishu via WebSocket');
   }
@@ -128,17 +128,16 @@ export class FeishuChannel implements Channel {
 
   async sendMessage(jid: string, text: string): Promise<void> {
     const chatId = jid.replace(/@feishu$/, '');
-    const prefixed = `${ASSISTANT_NAME}: ${text}`;
     try {
       await this.client.im.v1.message.create({
         params: { receive_id_type: 'chat_id' },
         data: {
           receive_id: chatId,
           msg_type: 'text',
-          content: JSON.stringify({ text: prefixed }),
+          content: JSON.stringify({ text }),
         },
       });
-      logger.info({ jid, length: prefixed.length }, 'Feishu message sent');
+      logger.info({ jid, length: text.length }, 'Feishu message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Feishu message');
     }
@@ -153,6 +152,7 @@ export class FeishuChannel implements Channel {
   }
 
   async disconnect(): Promise<void> {
+    this.wsClient?.close?.();
     this.connected = false;
   }
 }
