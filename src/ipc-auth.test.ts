@@ -147,66 +147,79 @@ describe('schedule_task authorization', () => {
 // --- pause_task / resume_task authorization ---
 
 describe.each([
-  { action: 'pause_task' as const, initialStatus: 'active' as const, expectedAfter: 'paused', blockedStatus: 'active' },
-  { action: 'resume_task' as const, initialStatus: 'paused' as const, expectedAfter: 'active', blockedStatus: 'paused' },
-])('$action authorization', ({ action, initialStatus, expectedAfter, blockedStatus }) => {
-  beforeEach(() => {
-    createTask({
-      id: 'task-main',
-      group_folder: 'whatsapp_main',
-      chat_jid: 'main@g.us',
-      prompt: 'main task',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
-      status: initialStatus,
-      created_at: '2024-01-01T00:00:00.000Z',
+  {
+    action: 'pause_task' as const,
+    initialStatus: 'active' as const,
+    expectedAfter: 'paused',
+    blockedStatus: 'active',
+  },
+  {
+    action: 'resume_task' as const,
+    initialStatus: 'paused' as const,
+    expectedAfter: 'active',
+    blockedStatus: 'paused',
+  },
+])(
+  '$action authorization',
+  ({ action, initialStatus, expectedAfter, blockedStatus }) => {
+    beforeEach(() => {
+      createTask({
+        id: 'task-main',
+        group_folder: 'whatsapp_main',
+        chat_jid: 'main@g.us',
+        prompt: 'main task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        context_mode: 'isolated',
+        next_run: '2025-06-01T00:00:00.000Z',
+        status: initialStatus,
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
+      createTask({
+        id: 'task-other',
+        group_folder: 'other-group',
+        chat_jid: 'other@g.us',
+        prompt: 'other task',
+        schedule_type: 'once',
+        schedule_value: '2025-06-01T00:00:00.000Z',
+        context_mode: 'isolated',
+        next_run: '2025-06-01T00:00:00.000Z',
+        status: initialStatus,
+        created_at: '2024-01-01T00:00:00.000Z',
+      });
     });
-    createTask({
-      id: 'task-other',
-      group_folder: 'other-group',
-      chat_jid: 'other@g.us',
-      prompt: 'other task',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
-      status: initialStatus,
-      created_at: '2024-01-01T00:00:00.000Z',
+
+    it('main group can do it to any task', async () => {
+      await processTaskIpc(
+        { type: action, taskId: 'task-other' },
+        'whatsapp_main',
+        true,
+        deps,
+      );
+      expect(getTaskById('task-other')!.status).toBe(expectedAfter);
     });
-  });
 
-  it('main group can do it to any task', async () => {
-    await processTaskIpc(
-      { type: action, taskId: 'task-other' },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-    expect(getTaskById('task-other')!.status).toBe(expectedAfter);
-  });
+    it('non-main group can do it to its own task', async () => {
+      await processTaskIpc(
+        { type: action, taskId: 'task-other' },
+        'other-group',
+        false,
+        deps,
+      );
+      expect(getTaskById('task-other')!.status).toBe(expectedAfter);
+    });
 
-  it('non-main group can do it to its own task', async () => {
-    await processTaskIpc(
-      { type: action, taskId: 'task-other' },
-      'other-group',
-      false,
-      deps,
-    );
-    expect(getTaskById('task-other')!.status).toBe(expectedAfter);
-  });
-
-  it('non-main group cannot do it to another groups task', async () => {
-    await processTaskIpc(
-      { type: action, taskId: 'task-main' },
-      'other-group',
-      false,
-      deps,
-    );
-    expect(getTaskById('task-main')!.status).toBe(blockedStatus);
-  });
-});
+    it('non-main group cannot do it to another groups task', async () => {
+      await processTaskIpc(
+        { type: action, taskId: 'task-main' },
+        'other-group',
+        false,
+        deps,
+      );
+      expect(getTaskById('task-main')!.status).toBe(blockedStatus);
+    });
+  },
+);
 
 // --- cancel_task authorization ---
 

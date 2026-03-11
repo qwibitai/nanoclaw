@@ -182,12 +182,48 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   const withTrigger = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
 
   it.each([
-    { isMain: true, requiresTrigger: undefined, msgs: noTrigger, expected: true, label: 'main always processes' },
-    { isMain: true, requiresTrigger: true, msgs: noTrigger, expected: true, label: 'main ignores requiresTrigger' },
-    { isMain: false, requiresTrigger: undefined, msgs: noTrigger, expected: false, label: 'non-main defaults to requiring trigger' },
-    { isMain: false, requiresTrigger: true, msgs: noTrigger, expected: false, label: 'non-main requires trigger when set' },
-    { isMain: false, requiresTrigger: true, msgs: withTrigger, expected: true, label: 'non-main processes when trigger present' },
-    { isMain: false, requiresTrigger: false, msgs: noTrigger, expected: true, label: 'non-main with requiresTrigger=false always processes' },
+    {
+      isMain: true,
+      requiresTrigger: undefined,
+      msgs: noTrigger,
+      expected: true,
+      label: 'main always processes',
+    },
+    {
+      isMain: true,
+      requiresTrigger: true,
+      msgs: noTrigger,
+      expected: true,
+      label: 'main ignores requiresTrigger',
+    },
+    {
+      isMain: false,
+      requiresTrigger: undefined,
+      msgs: noTrigger,
+      expected: false,
+      label: 'non-main defaults to requiring trigger',
+    },
+    {
+      isMain: false,
+      requiresTrigger: true,
+      msgs: noTrigger,
+      expected: false,
+      label: 'non-main requires trigger when set',
+    },
+    {
+      isMain: false,
+      requiresTrigger: true,
+      msgs: withTrigger,
+      expected: true,
+      label: 'non-main processes when trigger present',
+    },
+    {
+      isMain: false,
+      requiresTrigger: false,
+      msgs: noTrigger,
+      expected: true,
+      label: 'non-main with requiresTrigger=false always processes',
+    },
   ] as const)('$label', ({ isMain, requiresTrigger, msgs, expected }) => {
     expect(shouldProcess(isMain, requiresTrigger, msgs)).toBe(expected);
   });
