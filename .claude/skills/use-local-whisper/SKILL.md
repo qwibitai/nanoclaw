@@ -75,7 +75,11 @@ git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 
 ```bash
 git fetch whatsapp skill/local-whisper
-git merge whatsapp/skill/local-whisper
+git merge whatsapp/skill/local-whisper || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This modifies `src/transcription.ts` to use the `whisper-cli` binary instead of the OpenAI API.
