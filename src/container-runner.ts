@@ -31,7 +31,11 @@ import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
-const toolSecrets = readEnvFile(['GEMINI_API_KEY', 'LANCEDB_URI', 'LANCEDB_API_KEY']);
+const toolSecrets = readEnvFile([
+  'GEMINI_API_KEY',
+  'LANCEDB_URI',
+  'LANCEDB_API_KEY',
+]);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
