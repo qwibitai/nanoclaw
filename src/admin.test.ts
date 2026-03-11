@@ -24,7 +24,12 @@ function makeGroup(overrides: Partial<RegisteredGroup> = {}): RegisteredGroup {
 function makeMainGroup(
   overrides: Partial<RegisteredGroup> = {},
 ): RegisteredGroup {
-  return makeGroup({ name: 'Main', folder: 'main', isMain: true, ...overrides });
+  return makeGroup({
+    name: 'Main',
+    folder: 'main',
+    isMain: true,
+    ...overrides,
+  });
 }
 
 // --- parseAdminCommand ---
@@ -225,7 +230,9 @@ describe('/capabilities output', () => {
       'main@g.us',
       groups['main@g.us'],
       groups,
-      async (text) => { sent.push(text); },
+      async (text) => {
+        sent.push(text);
+      },
     );
 
     // The capabilities output is sent[1] (between activation and deactivation)
@@ -246,7 +253,9 @@ describe('/capabilities output', () => {
       'main@g.us',
       groups['main@g.us'],
       groups,
-      async (text) => { sent.push(text); },
+      async (text) => {
+        sent.push(text);
+      },
     );
 
     const output = sent[1];
@@ -265,7 +274,9 @@ describe('/capabilities output', () => {
       'main@g.us',
       groups['main@g.us'],
       groups,
-      async (text) => { sent.push(text); },
+      async (text) => {
+        sent.push(text);
+      },
     );
 
     const output = sent[1];
@@ -285,7 +296,9 @@ describe('/capabilities output', () => {
       'main@g.us',
       groups['main@g.us'],
       groups,
-      async (text) => { sent.push(text); },
+      async (text) => {
+        sent.push(text);
+      },
     );
 
     const output = sent[1];
@@ -337,7 +350,9 @@ describe('mixed batch filtering (active-container pipe path)', () => {
     ];
 
     const sent: string[] = [];
-    const sendMessage = async (text: string) => { sent.push(text); };
+    const sendMessage = async (text: string) => {
+      sent.push(text);
+    };
     const nonAdminMessages: typeof batch = [];
 
     for (const msg of batch) {
@@ -366,7 +381,8 @@ describe('mixed batch filtering (active-container pipe path)', () => {
     // last non-admin item. This prevents trailing admin commands from
     // remaining behind the cursor and being re-processed on next poll.
     const cursorShouldBe = batch[batch.length - 1].timestamp; // '1003'
-    const cursorWouldBeWrong = nonAdminMessages[nonAdminMessages.length - 1].timestamp; // '1002'
+    const cursorWouldBeWrong =
+      nonAdminMessages[nonAdminMessages.length - 1].timestamp; // '1002'
     expect(cursorShouldBe).toBe('1003');
     expect(cursorWouldBeWrong).toBe('1002');
     expect(cursorShouldBe).not.toBe(cursorWouldBeWrong);
@@ -379,7 +395,9 @@ describe('mixed batch filtering (active-container pipe path)', () => {
     ];
 
     const sent: string[] = [];
-    const sendMessage = async (text: string) => { sent.push(text); };
+    const sendMessage = async (text: string) => {
+      sent.push(text);
+    };
     const nonAdminMessages: typeof batch = [];
 
     for (const msg of batch) {
@@ -422,7 +440,9 @@ describe('mixed batch filtering (active-container pipe path)', () => {
     ];
 
     const sent: string[] = [];
-    const sendMessage = async (text: string) => { sent.push(text); };
+    const sendMessage = async (text: string) => {
+      sent.push(text);
+    };
 
     // Simulate ONE pass (as processGroupMessages would do)
     for (const msg of batch) {
@@ -439,7 +459,9 @@ describe('mixed batch filtering (active-container pipe path)', () => {
 
     // Count activation messages — must be exactly 1
     const activations = sent.filter((s) => s.includes('Admin mode activated'));
-    const deactivations = sent.filter((s) => s.includes('Admin mode deactivated'));
+    const deactivations = sent.filter((s) =>
+      s.includes('Admin mode deactivated'),
+    );
     expect(activations).toHaveLength(1);
     expect(deactivations).toHaveLength(1);
   });

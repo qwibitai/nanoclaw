@@ -8,7 +8,12 @@
 import fs from 'fs';
 import path from 'path';
 
-import { DATA_DIR, GROUPS_DIR, SENDER_ALLOWLIST_PATH, MOUNT_ALLOWLIST_PATH } from './config.js';
+import {
+  DATA_DIR,
+  GROUPS_DIR,
+  SENDER_ALLOWLIST_PATH,
+  MOUNT_ALLOWLIST_PATH,
+} from './config.js';
 import { getRegisteredChannelNames } from './channels/registry.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -242,7 +247,9 @@ async function handleCapabilities(ctx: AdminCommandContext): Promise<void> {
     if (fs.existsSync(SENDER_ALLOWLIST_PATH)) {
       securityLines.push('  • Sender allowlist: configured');
     } else {
-      securityLines.push('  • Sender allowlist: not configured (all senders allowed)');
+      securityLines.push(
+        '  • Sender allowlist: not configured (all senders allowed)',
+      );
     }
   } catch {
     securityLines.push('  • Sender allowlist: unknown');
@@ -253,7 +260,9 @@ async function handleCapabilities(ctx: AdminCommandContext): Promise<void> {
     if (fs.existsSync(MOUNT_ALLOWLIST_PATH)) {
       securityLines.push('  • Mount allowlist: configured');
     } else {
-      securityLines.push('  • Mount allowlist: not configured (additional mounts blocked)');
+      securityLines.push(
+        '  • Mount allowlist: not configured (additional mounts blocked)',
+      );
     }
   } catch {
     securityLines.push('  • Mount allowlist: unknown');
