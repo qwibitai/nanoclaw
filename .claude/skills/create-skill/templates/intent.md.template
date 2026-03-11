@@ -1,0 +1,14 @@
+# Intent: {{FILE_PATH}} modifications
+
+## What changed
+{{CHANGE_SUMMARY}}
+
+## Key sections
+
+{{KEY_SECTIONS}}
+
+## Invariants
+{{INVARIANTS}}
+
+## Must-keep
+{{MUST_KEEP}}

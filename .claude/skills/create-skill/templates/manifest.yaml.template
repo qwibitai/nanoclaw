@@ -1,0 +1,16 @@
+skill: {{SKILL_NAME}}
+version: 1.0.0
+description: "{{SKILL_DESCRIPTION}}"
+core_version: {{CORE_VERSION}}
+adds:
+{{ADDS_LIST}}
+modifies:
+{{MODIFIES_LIST}}
+structured:
+  npm_dependencies:
+{{NPM_DEPS}}
+  env_additions:
+{{ENV_ADDITIONS}}
+conflicts: [{{CONFLICTS}}]
+depends: [{{DEPENDS}}]
+test: "npx vitest run {{TEST_PATH}}"

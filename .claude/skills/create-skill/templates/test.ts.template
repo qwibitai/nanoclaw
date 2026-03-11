@@ -1,0 +1,30 @@
+import { describe, expect, it } from 'vitest';
+import fs from 'fs';
+import path from 'path';
+
+describe('{{SKILL_NAME}} skill package', () => {
+  const skillDir = path.resolve(__dirname, '..');
+
+  it('has a valid manifest', () => {
+    const manifestPath = path.join(skillDir, 'manifest.yaml');
+    expect(fs.existsSync(manifestPath)).toBe(true);
+
+    const content = fs.readFileSync(manifestPath, 'utf-8');
+    expect(content).toContain('skill: {{SKILL_NAME}}');
+    expect(content).toContain('version: 1.0.0');
+  });
+
+  it('has all files declared in adds', () => {
+    // {{ADDS_ASSERTIONS}}
+  });
+
+  it('has all files declared in modifies', () => {
+    // {{MODIFIES_ASSERTIONS}}
+  });
+
+  it('has intent files for modified files', () => {
+    // {{INTENT_ASSERTIONS}}
+  });
+
+  // {{ADDITIONAL_TESTS}}
+});

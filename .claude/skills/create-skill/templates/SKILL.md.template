@@ -1,0 +1,82 @@
+---
+name: {{SKILL_NAME}}
+description: {{SKILL_DESCRIPTION}}
+---
+
+# {{SKILL_TITLE}}
+
+{{SKILL_PITCH}}
+
+## Phase 1: Pre-flight
+
+### Check if already applied
+
+Read `.nanoclaw/state.yaml`. If `{{SKILL_NAME}}` is in `applied_skills`, skip to Phase 3 (Setup). The code changes are already in place.
+
+### Ask the user
+
+{{PREFLIGHT_QUESTIONS}}
+
+## Phase 2: Apply Code Changes
+
+Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
+
+### Initialize skills system (if needed)
+
+If `.nanoclaw/` directory doesn't exist yet:
+
+```bash
+npx tsx scripts/apply-skill.ts --init
+```
+
+### Apply the skill
+
+```bash
+npx tsx scripts/apply-skill.ts .claude/skills/{{SKILL_NAME}}
+```
+
+This deterministically:
+{{APPLY_SUMMARY}}
+
+If the apply reports merge conflicts, read the intent files:
+{{INTENT_FILE_LIST}}
+
+### Validate code changes
+
+```bash
+npm test
+npm run build
+```
+
+All tests must pass and build must be clean before proceeding.
+
+## Phase 3: Setup
+
+{{SETUP_STEPS}}
+
+### Build and restart
+
+```bash
+npm run build
+launchctl kickstart -k gui/$(id -u)/com.nanoclaw
+```
+
+## Phase 4: Registration
+
+{{REGISTRATION_STEPS}}
+
+## Phase 5: Verify
+
+### Test the connection
+
+{{VERIFY_STEPS}}
+
+### Check logs if needed
+
+```bash
+tail -f logs/nanoclaw.log
+```
+
+## Troubleshooting
+
+{{TROUBLESHOOTING}}
