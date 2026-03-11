@@ -211,7 +211,8 @@ export class DayZeroChannel implements Channel {
     body: Record<string, unknown>,
     res: http.ServerResponse,
   ): Promise<void> {
-    const company = String(body.company || '');
+    // Workflow type determines which agent group to route to
+    const workflowType = String(body.workflow_type || body.company || '');
     const engagementMode = String(
       body.engagement_mode || body.engagementMode || 'turnaround_diagnostic',
     );
@@ -222,9 +223,9 @@ export class DayZeroChannel implements Channel {
     const tenantId = body.tenant_id ? String(body.tenant_id) : undefined;
     const workspaceId = body.workspace_id ? String(body.workspace_id) : undefined;
 
-    if (!company) {
+    if (!workflowType) {
       this.sendJson(res, 400, {
-        error: 'Missing required field: company',
+        error: 'Missing required field: workflow_type',
       });
       return;
     }
@@ -233,14 +234,14 @@ export class DayZeroChannel implements Channel {
     const timestamp = new Date().toISOString();
 
     logger.info(
-      { runId: runId.slice(0, 8), company, engagementMode, workflowRunId, tenantId, workspaceId },
-      'DayZero run requested',
+      { runId: runId.slice(0, 8), workflowType, engagementMode, workflowRunId, tenantId, workspaceId },
+      'Workflow run requested',
     );
 
     // Create run record
     const run: RunRecord = {
       id: runId,
-      company,
+      company: workflowType,
       engagementMode,
       status: 'running',
       startedAt: timestamp,
@@ -251,13 +252,13 @@ export class DayZeroChannel implements Channel {
     };
     this.runs.set(runId, run);
 
-    // Build prompt for the agent
+    // Build prompt for the agent based on workflow type
     const promptLines = [
-      `Run a DayZero ${engagementMode} assessment on company: ${company}`,
+      `Run a ${workflowType} workflow (${engagementMode} mode)`,
       '',
       `Run ID: ${runId}`,
-      `Data package: /workspace/extra/dayzero/data/${company}/`,
-      `Output directory: /workspace/extra/dayzero/runs/${company}_${runId.slice(0, 8)}/`,
+      `Data package: /workspace/extra/workflows/data/${workflowType}/`,
+      `Output directory: /workspace/extra/workflows/runs/${workflowType}_${runId.slice(0, 8)}/`,
     ];
 
     if (phase) {
