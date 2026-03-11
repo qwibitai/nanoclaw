@@ -11,7 +11,7 @@ vi.mock('./logger.js', () => ({
   logger: { info: vi.fn(), error: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));
 
-import { startCredentialProxy } from './credential-proxy.js';
+import { detectAuthMode, startCredentialProxy } from './credential-proxy.js';
 
 function makeRequest(
   port: number,
@@ -222,7 +222,7 @@ describe('credential-proxy', () => {
   it('translates non-Anthropic OpenRouter models to chat completions', async () => {
     Object.assign(mockEnv, {
       OPENROUTER_API_KEY: 'sk-or-real-key',
-      ANTHROPIC_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api`,
     });
 
@@ -275,6 +275,7 @@ describe('credential-proxy', () => {
     );
 
     expect(lastUpstreamUrl).toBe('/api/v1/chat/completions');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-or-real-key');
     expect(JSON.parse(lastUpstreamBody)).toMatchObject({
       model: 'arcee-ai/trinity-large-preview:free',
       provider: { only: ['arcee-ai'], allow_fallbacks: false },
@@ -292,12 +293,13 @@ describe('credential-proxy', () => {
   it('synthesizes Anthropic streaming events for translated OpenRouter responses', async () => {
     Object.assign(mockEnv, {
       OPENROUTER_API_KEY: 'sk-or-real-key',
-      ANTHROPIC_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_API_KEY: 'sk-ant-real-key',
       ANTHROPIC_BASE_URL: `http://127.0.0.1:${upstreamPort}/api`,
     });
 
     upstreamServer.close();
     upstreamServer = http.createServer((req, res) => {
+      lastUpstreamHeaders = { ...req.headers };
       const chunks: Buffer[] = [];
       req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
       req.on('end', () => {
@@ -363,5 +365,42 @@ describe('credential-proxy', () => {
     expect(res.body).toContain('input_json_delta');
     expect(res.body).toContain('tool_use');
     expect(res.body).toContain('event: message_stop');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('sk-or-real-key');
+  });
+
+  it('keeps OAuth mode for non-OpenRouter upstream when only OPENROUTER_API_KEY exists', async () => {
+    proxyPort = await startProxy({
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/api/oauth/claude_cli/create_api_key',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer real-oauth-token');
+    expect(lastUpstreamHeaders['x-api-key']).toBeUndefined();
+  });
+
+  it('detectAuthMode uses OPENROUTER_API_KEY only for OpenRouter upstream', () => {
+    Object.assign(mockEnv, {
+      OPENROUTER_API_KEY: 'sk-or-real-key',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+    });
+    expect(detectAuthMode()).toBe('oauth');
+
+    Object.assign(mockEnv, {
+      ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+    });
+    expect(detectAuthMode()).toBe('api-key');
   });
 });

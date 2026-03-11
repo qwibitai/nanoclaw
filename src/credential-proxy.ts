@@ -33,6 +33,43 @@ type JsonValue =
 
 type JsonObject = { [key: string]: JsonValue };
 
+function isOpenRouterHostname(hostname: string): boolean {
+  return /(^|\.)openrouter\.ai$/i.test(hostname);
+}
+
+function isLocalHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isOpenRouterAuthTarget(
+  upstreamUrl: URL,
+): boolean {
+  return isOpenRouterHostname(upstreamUrl.hostname);
+}
+
+function isOpenRouterTranslationTarget(
+  upstreamUrl: URL,
+  secrets: Record<string, string>,
+): boolean {
+  if (isOpenRouterAuthTarget(upstreamUrl)) return true;
+  // Allow local test/proxy setups that emulate OpenRouter while still requiring
+  // explicit OpenRouter credentials to avoid false positives on Anthropic.
+  return isLocalHost(upstreamUrl.hostname) && Boolean(secrets.OPENROUTER_API_KEY);
+}
+
+function resolveAuthMode(
+  upstreamUrl: URL,
+  secrets: Record<string, string>,
+): AuthMode {
+  const hasAnthropicKey = Boolean(secrets.ANTHROPIC_API_KEY);
+  const hasOpenRouterKey = Boolean(secrets.OPENROUTER_API_KEY);
+  if (hasAnthropicKey) return 'api-key';
+  if (hasOpenRouterKey && isOpenRouterAuthTarget(upstreamUrl)) {
+    return 'api-key';
+  }
+  return 'oauth';
+}
+
 function buildUpstreamPath(upstream: URL, incomingPath: string): string {
   const basePath = upstream.pathname?.replace(/\/+$/, '') || '';
   const reqPath = incomingPath.startsWith('/') ? incomingPath : `/${incomingPath}`;
@@ -59,8 +96,12 @@ function buildForwardHeaders(
 
   if (authMode === 'api-key') {
     delete headers['x-api-key'];
-    headers['x-api-key'] =
-      secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY;
+    const apiKey = isOpenRouterTranslationTarget(upstreamUrl, secrets)
+      ? secrets.OPENROUTER_API_KEY || secrets.ANTHROPIC_API_KEY
+      : secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY;
+    if (apiKey) {
+      headers['x-api-key'] = apiKey;
+    }
   } else if (headers['authorization']) {
     const oauthToken =
       secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
@@ -85,10 +126,7 @@ function isOpenRouterUpstream(
   upstreamUrl: URL,
   secrets: Record<string, string>,
 ): boolean {
-  return (
-    upstreamUrl.hostname.includes('openrouter.ai') ||
-    Boolean(secrets.OPENROUTER_API_KEY)
-  );
+  return isOpenRouterTranslationTarget(upstreamUrl, secrets);
 }
 
 function isMessagesEndpoint(url: string | undefined): boolean {
@@ -566,14 +604,10 @@ export function startCredentialProxy(
     'ANTHROPIC_BASE_URL',
   ]);
 
-  const authMode: AuthMode =
-    secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY
-      ? 'api-key'
-      : 'oauth';
-
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
+  const authMode = resolveAuthMode(upstreamUrl, secrets);
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -653,8 +687,13 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY || secrets.OPENROUTER_API_KEY
-    ? 'api-key'
-    : 'oauth';
+  const secrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_BASE_URL',
+  ]);
+  const upstreamUrl = new URL(
+    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+  );
+  return resolveAuthMode(upstreamUrl, secrets);
 }
