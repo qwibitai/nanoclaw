@@ -35,7 +35,11 @@ git remote add slack https://github.com/qwibitai/nanoclaw-slack.git
 
 ```bash
 git fetch slack main
-git merge slack/main
+git merge slack/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
