@@ -1,0 +1,13 @@
+model = "gpt-5.4"
+model_reasoning_effort = "medium"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+sandbox_workspace_write.network_access = true
+developer_instructions = """
+Handle autonomous PR review and repair only.
+Inspect autonomy-managed PRs, review code and CI state, patch only the selected PR branch, and stop when the PR is green or explicitly blocked.
+Do not merge PRs.
+Do not reprioritize issues or mark items Ready.
+Keep the working tree clean unless a concrete blocker requires preserving it for handoff.
+"""
+

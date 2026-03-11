@@ -5,7 +5,7 @@
   "required": [
     "status",
     "session_start",
-    "nightly_triage",
+    "decision_log",
     "notes"
   ],
   "properties": {
@@ -34,31 +34,41 @@
         }
       }
     },
-    "nightly_triage": {
+    "decision_log": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "discussions_reviewed",
-        "issues_created"
+        "plan_path",
+        "decisions",
+        "issues_created",
+        "ready_issue_numbers"
       ],
       "properties": {
-        "discussions_reviewed": {
+        "plan_path": {
+          "type": ["string", "null"]
+        },
+        "decisions": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": [
-              "discussion_number",
+              "source_type",
+              "source_ref",
               "decision",
               "summary"
             ],
             "properties": {
-              "discussion_number": {
-                "type": "integer"
+              "source_type": {
+                "type": "string",
+                "enum": ["discussion", "plan", "issue"]
+              },
+              "source_ref": {
+                "type": "string"
               },
               "decision": {
                 "type": "string",
-                "enum": ["accept", "defer", "reject", "reference only"]
+                "enum": ["promote", "ready", "defer", "reject", "reference only"]
               },
               "issue_number": {
                 "type": ["integer", "null"]
@@ -70,6 +80,12 @@
           }
         },
         "issues_created": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "ready_issue_numbers": {
           "type": "array",
           "items": {
             "type": "integer"

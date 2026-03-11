@@ -10,20 +10,10 @@
         <string>{{PROJECT_ROOT}}/scripts/workflow/check-platform-loop.sh</string>
     </array>
     <key>StartCalendarInterval</key>
-    <array>
-        <dict>
-            <key>Hour</key>
-            <integer>10</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>15</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-        </dict>
-    </array>
+    <dict>
+        <key>Minute</key>
+        <integer>5</integer>
+    </dict>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>

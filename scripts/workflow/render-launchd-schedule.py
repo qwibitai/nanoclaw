@@ -11,6 +11,8 @@ from pathlib import Path
 
 DEFAULT_LABELS = [
     "com.nanoclaw.platform-loop",
+    "com.nanoclaw.pr-guardian",
+    "com.nanoclaw.reliability-loop",
     "com.nanoclaw.nightly-improvement",
     "com.nanoclaw.morning-codex-prep",
 ]

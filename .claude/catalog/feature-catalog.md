@@ -1,6 +1,6 @@
 # NanoClaw Feature Catalog
 
-Generated: 2026-03-09T19:55:27.031Z
+Generated: 2026-03-11T06:34:38.484Z
 Project: nanoclaw
 
 ## Features
@@ -319,13 +319,13 @@ Project: nanoclaw
 - Summary: Administrative cleanup tooling for stale non-terminal Andy requests, including dry-run inspection and explicit archival/closure.
 - Keywords: andy requests, stale request cleanup, archive requests, cancel stale requests, admin command, testing backlog
 - Files (3):
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - scripts/jarvis-ops.sh
   - scripts/jarvis-reconcile-stale-andy-requests.sh
 - Tests (1):
   - src/jarvis-reconcile-stale-andy-requests.test.ts
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - scripts/jarvis-ops.sh
 - Suggested Verify:
   - npm run typecheck
@@ -336,7 +336,7 @@ Project: nanoclaw
 - Summary: Hard boundary contract and deterministic checks that keep upstream NanoClaw core separate from Jarvis extension logic.
 - Keywords: architecture boundary, core vs extension, governance, enforcement, agent guardrails, jarvis customization
 - Files (8):
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
@@ -347,7 +347,7 @@ Project: nanoclaw
 - Tests (0):
   - none
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
@@ -361,8 +361,8 @@ Project: nanoclaw
 - Summary: Physical docs reorganization, canonical ownership cleanup, and reference migration across root docs, group mirrors, and workflow checks.
 - Keywords: docs cleanup, workflow subfolders, reference migration, doc topology, docs governance, mission runtime profiles, archive cleanup
 - Files (52):
+  - .claude/catalog/feature-catalog.seed.json
   - .claude/hooks/posttool-workflow-sync-check.sh
-  - .claude/progress/feature-catalog.seed.json
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
@@ -416,7 +416,7 @@ Project: nanoclaw
 - Tests (0):
   - none
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
@@ -439,7 +439,7 @@ Project: nanoclaw
 - Summary: QMD recall, session export sync, startup bootstrap, and context audit utilities for local session memory hygiene.
 - Keywords: session recall, qmd, session sync, context audit, token audit, session start, stdout waste
 - Files (6):
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - docs/workflow/runtime/session-recall.md
   - scripts/qmd-context-recall.sh
   - scripts/qmd-session-sync.sh
@@ -448,7 +448,7 @@ Project: nanoclaw
 - Tests (0):
   - none
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - docs/workflow/runtime/session-recall.md
 - Suggested Verify:
   - npm run typecheck
@@ -576,12 +576,10 @@ Project: nanoclaw
 - Risk: medium
 - Summary: Primary local skills that drive setup, customization, debugging, updates, and incident workflows.
 - Keywords: skills, setup, customize, debug, update, incident
-- Files (8):
+- Files (6):
   - .claude/skills/convert-to-apple-container/SKILL.md
   - .claude/skills/customize/SKILL.md
   - .claude/skills/debug/SKILL.md
-  - .claude/skills/get-qodo-rules/SKILL.md
-  - .claude/skills/qodo-pr-resolver/SKILL.md
   - .claude/skills/setup/SKILL.md
   - .claude/skills/update/SKILL.md
   - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
@@ -589,9 +587,6 @@ Project: nanoclaw
   - none
 - Shared Files:
   - docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md
-- Validation Warnings:
-  - missing file: .claude/skills/get-qodo-rules/SKILL.md
-  - missing file: .claude/skills/qodo-pr-resolver/SKILL.md
 - Suggested Verify:
   - npm run typecheck
 
@@ -600,7 +595,7 @@ Project: nanoclaw
 - Summary: Feature ownership catalog build/validation/query scripts that prevent duplicate implementation paths.
 - Keywords: feature tracking, ownership, touch set, catalog, duplication, scope
 - Files (7):
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
   - .claude/skills/feature-tracking/scripts/audit-feature-coverage.ts
   - .claude/skills/feature-tracking/scripts/build-feature-catalog.ts
   - .claude/skills/feature-tracking/scripts/check-touch-set.ts
@@ -610,7 +605,7 @@ Project: nanoclaw
 - Tests (0):
   - none
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
 - Suggested Verify:
   - npm run typecheck
 
@@ -641,8 +636,8 @@ Project: nanoclaw
 - Summary: Issue-first Project board automation, discussion scaffolding, and governance docs for Claude/Codex collaboration.
 - Keywords: github project, discussions, control plane, collaboration, workflow, project sync
 - Files (28):
+  - .claude/catalog/feature-catalog.seed.json
   - .claude/commands/platform-pickup.md
-  - .claude/progress/feature-catalog.seed.json
   - .github/DISCUSSION_TEMPLATE/general.yml
   - .github/DISCUSSION_TEMPLATE/ideas.yml
   - .github/DISCUSSION_TEMPLATE/q-a.yml
@@ -674,7 +669,8 @@ Project: nanoclaw
   - src/platform-loop-sync.test.ts
   - src/platform-loop.test.ts
 - Shared Files:
-  - .claude/progress/feature-catalog.seed.json
+  - .claude/catalog/feature-catalog.seed.json
+  - .claude/commands/platform-pickup.md
   - AGENTS.md
   - CLAUDE.md
   - DOCS.md
@@ -683,9 +679,75 @@ Project: nanoclaw
   - docs/workflow/github/github-agent-collaboration-loop.md
   - docs/workflow/github/github-multi-agent-collaboration-loop.md
   - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/github/nanoclaw-platform-loop.md
+  - launchd/com.nanoclaw-platform-loop.plist
+  - scripts/workflow/check-platform-loop.sh
+  - scripts/workflow/platform-loop-sync.sh
+  - scripts/workflow/platform-loop.js
+  - scripts/workflow/run-platform-claude-session.sh
+  - scripts/workflow/start-platform-loop.sh
+  - scripts/workflow/trigger-platform-pickup-now.sh
 - Suggested Verify:
   - npm run typecheck
   - npx vitest run src/github-project-sync.test.ts src/platform-loop-sync.test.ts src/platform-loop.test.ts
+
+### autonomous-lane-control-plane - Autonomous Lane Control Plane
+- Risk: high
+- Summary: Durable Codex and Claude execution lanes for readiness, implementation pickup, PR repair, reliability pause control, and merge handoff.
+- Keywords: autonomy, platform loop, pr guardian, reliability lane, pause sentinel, merge handoff
+- Files (27):
+  - .claude/catalog/feature-catalog.seed.json
+  - .claude/commands/platform-pickup.md
+  - .codex/agents/morning-prep.toml
+  - .codex/agents/pr-guardian.toml
+  - .codex/config.toml
+  - .github/labels.json
+  - docs/operations/workflow-setup-responsibility-map.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/github/nanoclaw-platform-loop.md
+  - docs/workflow/strategy/nightly-evaluation-loop.md
+  - launchd/com.nanoclaw-morning-codex-prep.plist
+  - launchd/com.nanoclaw-platform-loop.plist
+  - launchd/com.nanoclaw-pr-guardian.plist
+  - launchd/com.nanoclaw-reliability-loop.plist
+  - scripts/workflow/autonomy-lane.sh
+  - scripts/workflow/autonomy-pr-guardian-output-schema.json
+  - scripts/workflow/check-platform-loop.sh
+  - scripts/workflow/platform-loop-sync.sh
+  - scripts/workflow/platform-loop.js
+  - scripts/workflow/render-launchd-schedule.py
+  - scripts/workflow/run-platform-claude-session.sh
+  - scripts/workflow/start-autonomy-reliability.sh
+  - scripts/workflow/start-morning-codex-prep.sh
+  - scripts/workflow/start-platform-loop.sh
+  - scripts/workflow/start-pr-guardian.sh
+  - scripts/workflow/trigger-platform-pickup-now.sh
+- Tests (7):
+  - src/platform-loop-sync.test.ts
+  - src/platform-loop.test.ts
+  - src/run-platform-claude-session.test.ts
+  - src/start-autonomy-reliability.test.ts
+  - src/start-nightly-improvement.test.ts
+  - src/start-platform-loop.test.ts
+  - src/start-pr-guardian.test.ts
+- Shared Files:
+  - .claude/catalog/feature-catalog.seed.json
+  - .claude/commands/platform-pickup.md
+  - docs/operations/workflow-setup-responsibility-map.md
+  - docs/workflow/github/github-agent-collaboration-loop.md
+  - docs/workflow/github/nanoclaw-github-control-plane.md
+  - docs/workflow/github/nanoclaw-platform-loop.md
+  - launchd/com.nanoclaw-platform-loop.plist
+  - scripts/workflow/check-platform-loop.sh
+  - scripts/workflow/platform-loop-sync.sh
+  - scripts/workflow/platform-loop.js
+  - scripts/workflow/run-platform-claude-session.sh
+  - scripts/workflow/start-platform-loop.sh
+  - scripts/workflow/trigger-platform-pickup-now.sh
+- Suggested Verify:
+  - npm run typecheck
+  - npx vitest run src/platform-loop-sync.test.ts src/platform-loop.test.ts src/run-platform-claude-session.test.ts src/start-autonomy-reliability.test.ts src/start-nightly-improvement.test.ts src/start-platform-loop.test.ts src/start-pr-guardian.test.ts
 
 ### channel-extension-skills - Channel and Integration Extension Skills
 - Risk: medium

@@ -70,9 +70,9 @@ function parseArgs(argv: string[]): Args {
 }
 
 function loadCatalog(repoRoot: string): Catalog {
-  const catalogPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.json');
+  const catalogPath = path.join(repoRoot, '.claude', 'catalog', 'feature-catalog.json');
   if (!fs.existsSync(catalogPath)) {
-    console.error('Missing .claude/progress/feature-catalog.json. Run build-feature-catalog.ts first.');
+    console.error('Missing .claude/catalog/feature-catalog.json. Run build-feature-catalog.ts first.');
     process.exit(1);
   }
   return JSON.parse(fs.readFileSync(catalogPath, 'utf8')) as Catalog;
@@ -206,10 +206,10 @@ function main(): void {
     new Set([
       ...selected.files,
       ...(selected.shared_files || []),
-      '.claude/progress/feature-catalog.seed.json',
-      '.claude/progress/feature-catalog.json',
-      '.claude/progress/feature-catalog.md',
-      '.claude/progress/feature-work-items.json',
+      '.claude/catalog/feature-catalog.seed.json',
+      '.claude/catalog/feature-catalog.json',
+      '.claude/catalog/feature-catalog.md',
+      '.claude/progress/work-items.json',
     ]),
   ).sort((a, b) => a.localeCompare(b));
 

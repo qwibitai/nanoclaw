@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const PROJECT_OWNER =
   process.env.PROJECT_OWNER ||
@@ -37,6 +39,14 @@ const PLATFORM_REQUIRED_SECTIONS = [
   'Blocked If',
 ];
 const PRIORITY_ORDER = ['p0', 'p1', 'p2'];
+const AUTONOMY_SOURCE_ROOT =
+  process.env.NANOCLAW_AUTONOMY_SOURCE_ROOT || process.cwd();
+const AUTONOMY_PAUSE_FILE = path.join(
+  AUTONOMY_SOURCE_ROOT,
+  '.nanoclaw',
+  'autonomy',
+  'pause.json',
+);
 
 function requireCommand(name) {
   const value = process.argv[2];
@@ -247,6 +257,22 @@ function summarizeNoop(reason, details = {}) {
 }
 
 export function selectPlatformCandidate(items) {
+  if (fs.existsSync(AUTONOMY_PAUSE_FILE)) {
+    try {
+      const pauseState = JSON.parse(
+        fs.readFileSync(AUTONOMY_PAUSE_FILE, 'utf8'),
+      );
+      if (pauseState?.paused) {
+        return summarizeNoop('pause_active', {
+          pauseReason: pauseState.reason || '',
+          pauseSource: pauseState.source || '',
+        });
+      }
+    } catch {
+      return summarizeNoop('pause_state_invalid');
+    }
+  }
+
   const reviewQueueItems = items.filter(
     (item) => item.agent === 'claude' && statusMatches(item.status, 'review'),
   );
@@ -270,6 +296,7 @@ export function selectPlatformCandidate(items) {
     .filter((item) => statusMatches(item.status, 'ready'))
     .filter((item) => !item.agent || item.agent === 'claude')
     .filter((item) => !item.labels.includes('status:blocked'))
+    .filter((item) => !item.labels.includes('autonomy-blocked'))
     .filter((item) => item.missingSections.length === 0)
     .sort((left, right) => {
       const priorityDelta =
@@ -284,7 +311,9 @@ export function selectPlatformCandidate(items) {
         number: item.number,
         status: item.status,
         priority: item.priority,
-        blocked: item.labels.includes('status:blocked'),
+        blocked:
+          item.labels.includes('status:blocked') ||
+          item.labels.includes('autonomy-blocked'),
         missingSections: item.missingSections,
       })),
     });

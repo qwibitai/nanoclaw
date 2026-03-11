@@ -143,7 +143,9 @@ Every execution Issue should include:
 2. the scope boundary
 3. deterministic acceptance criteria
 4. one primary owner
-5. the work source (`user`, `discussion`, `upstream-nanoclaw`, `claude-update`, `codex-observation`, or equivalent current taxonomy)
+5. required checks and required evidence
+6. rollback notes
+7. the work source (`user`, `discussion`, `upstream-nanoclaw`, `claude-update`, `codex-observation`, or equivalent current taxonomy)
 
 Promotion from Discussion to Issue:
 
@@ -184,6 +186,13 @@ Recommended default:
 2. one optional review lane
 3. one linked PR per primary Issue unless the split is explicitly intentional
 
+Autonomous lane split for this repository:
+
+1. Codex owns intake, promotion, and `Ready`
+2. Claude owns implementation pickup for already-`Ready` issues
+3. Codex owns PR review, CI repair, and `ready-for-user-merge`
+4. Claude reliability may open incidents and fix PRs, but may not promote roadmap work or set `Ready`
+
 ## Project Contract
 
 The Project answers only one question: what is the current execution state of committed work?
@@ -200,10 +209,24 @@ Execution status flow:
 Default state transitions:
 
 1. new committed Issue -> `Backlog`
-2. claimed scoped work -> `In Progress`
-3. linked active PR -> `Review`
-4. blocked work -> `Blocked`
-5. merged/closed complete work -> `Done`
+2. Codex-complete execution contract -> `Ready`
+3. claimed scoped work -> `In Progress`
+4. linked active PR -> `Review`
+5. blocked work -> `Blocked`
+6. merged/closed complete work -> `Done`
+
+Authority rules:
+
+1. Only Codex may move an issue to `Ready`
+2. Only Claude pickup may move a claimed feature issue from `Ready` to `In Progress`
+3. Only Codex PR guardian may apply the `ready-for-user-merge` label
+4. Reliability incidents may set a global pickup pause, but they do not move unrelated issues to `Blocked`
+
+Label rules:
+
+1. `ready-for-user-merge` means Codex review is complete and the PR is waiting only on human merge
+2. `autonomy-blocked` means autonomous repair reached a non-repo or policy-level blocker and should not keep retrying
+3. labels do not replace Project `Status`; they add merge and block semantics for autonomous lanes
 
 Do not use the Project to store:
 
@@ -211,6 +234,12 @@ Do not use the Project to store:
 2. incident investigation notes
 3. long-form collaboration history
 4. duplicate PR state outside the linked field
+
+Pause rule:
+
+1. `.nanoclaw/autonomy/pause.json` blocks only new feature pickup
+2. Codex PR guardian continues repairing open PRs while pickup is paused
+3. Claude reliability continues triage and soak testing while pickup is paused
 
 ## CLI, API, and Human-Admin Boundaries
 

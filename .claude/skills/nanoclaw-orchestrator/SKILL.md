@@ -68,14 +68,14 @@ Apply `nanoclaw-testing` workflow.
 For reliability/user-facing features, run:
 
 ```bash
-npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out .claude/progress/test-report.json
+npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out data/diagnostics/tests/test-report.json
 ```
 
 ### 6. Close item
 
 ```bash
 npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts update \
-  --id "<work-id>" --status done --evidence ".claude/progress/test-report.json" --note "typecheck + mapped tests passed"
+  --id "<work-id>" --status done --evidence "data/diagnostics/tests/test-report.json" --note "typecheck + mapped tests passed"
 ```
 
 ## Rules
@@ -83,6 +83,6 @@ npx tsx .claude/skills/nanoclaw-orchestrator/scripts/work-item.ts update \
 - Never skip the feature map phase.
 - If feature resolution fails, update seed catalog before coding.
 - Use `blocked` status for unresolved dependencies or failed validations.
-- Keep work history in `.claude/progress/feature-work-items.json`.
+- Keep work history in `.claude/progress/work-items.json`.
 - For runtime incidents, run docs-first incident workflow before implementation and keep incident id in work-item notes.
 - `done` requires explicit evidence (`--evidence`) for testability/auditability.

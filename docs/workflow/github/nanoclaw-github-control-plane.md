@@ -55,10 +55,11 @@ Use instead:
 1. `main` is PR-only.
 2. Direct pushes to `main` are blocked.
 3. Required checks must pass before merge.
-4. If GitHub still blocks direct merge because of base-branch policy after the required checks are green, the standard path is to enable auto-merge and wait for GitHub to land the PR.
-5. Administrator merge bypass is emergency-only and requires explicit operator intent.
-6. Governance changes must include rollback notes in PR description.
-7. PRs should link an issue; maintenance/docs/governance PRs may use `No issue: maintenance` in the Linked Work Item section.
+4. Autonomy-managed PRs must not auto-merge.
+5. The only merge-ready signal for autonomy-managed PRs is the Codex-applied `ready-for-user-merge` label plus a final review summary.
+6. Administrator merge bypass is emergency-only and requires explicit operator intent.
+7. Governance changes must include rollback notes in PR description.
+8. PRs should link an issue; maintenance/docs/governance PRs may use `No issue: maintenance` in the Linked Work Item section.
 
 ## Claude Review Automation Baseline
 
@@ -120,16 +121,33 @@ Use instead:
 - The morning lane must:
   - run `bash scripts/workflow/session-start.sh --agent codex --no-background-sync`
   - resolve only GitHub collaboration items surfaced by that session-start sweep
-  - promote nightly findings only when the next action is concrete enough for an execution Issue
+  - decide `promote`, `ready`, `defer`, or `reject` for nightly findings and roadmap candidates
+  - move an issue to `Ready` only when the execution contract is complete
   - stop after writing its structured summary
 - The morning lane must not edit repo-tracked files.
+
+## Autonomous PR Guardian Baseline
+
+- The local Codex PR guardian lane runs from `scripts/workflow/start-pr-guardian.sh`.
+- It may patch only autonomy-managed PR branches (`claude-platform-*` and `claude-reliability-*`).
+- It may push bounded repair commits until required checks are green or the PR is explicitly blocked.
+- It must add `ready-for-user-merge` only when the PR is green and review-clean.
+- It must add `autonomy-blocked` when the blocker is non-repo, policy-level, credential-gated, or otherwise unsuitable for continued autonomous retries.
+- It must never merge.
+
+## Autonomous Reliability Baseline
+
+- The local Claude reliability lane runs from `scripts/workflow/start-autonomy-reliability.sh`.
+- It may set `.nanoclaw/autonomy/pause.json` when a fresh regression blocks safe feature pickup.
+- It may open or update fix PRs from its dedicated reliability worktree.
+- It must not move feature issues to `Ready` or merge PRs.
 
 ## CI Failure Feedback Loop
 
 - Keep deterministic `CI` as the required merge gate.
 - On PR-scoped `CI` failure, post a single sticky summary comment with the failing job/step and logs link.
 - On the next successful `CI` run for that PR, remove the stale failure summary automatically.
-- Keep model analysis opt-in from that summary comment; do not auto-trigger Claude or Codex from a failing CI run by default.
+- Keep model analysis opt-in from that summary comment for generic PRs, but allow the local Codex PR guardian lane to react autonomously for autonomy-managed PR branches.
 - `workflow_run` feedback workflows only become active after the workflow file exists on the default branch; do not expect the PR that introduces the workflow to self-summarize its own failures before merge.
 - This repository ships that feedback loop at `.github/workflows/ci-failure-summary.yml`.
 

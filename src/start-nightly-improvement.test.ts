@@ -77,6 +77,10 @@ describe('start-nightly-improvement launcher', () => {
       path.join(sourceRoot, 'scripts', 'workflow', 'platform-loop-sync.sh'),
       'sync helper\n',
     );
+    fs.writeFileSync(
+      path.join(sourceRoot, 'scripts', 'workflow', 'autonomy-lane.sh'),
+      'autonomy helper\n',
+    );
   });
 
   afterEach(() => {

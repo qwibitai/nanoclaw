@@ -50,11 +50,12 @@ This lane does not implement code, create Issues, move Project state, or open PR
 
 ### Daytime lane
 
-The existing platform automation is a sparse execution lane:
+The existing platform automation is a durable autonomous execution stack:
 
-1. one-shot pickup at `10:00` Asia/Kolkata
-2. one-shot pickup at `15:00` Asia/Kolkata
-3. manual trigger remains available for urgent work
+1. Claude implementation pickup runs hourly at minute `05`
+2. Codex PR guardian runs every 15 minutes at `10`, `25`, `40`, and `55`
+3. Claude reliability runs every 30 minutes at `20` and `50`
+4. manual trigger remains available for urgent feature pickup
 
 ### Nightly lane
 
@@ -71,11 +72,12 @@ The morning Codex prep lane runs once at `08:30` Asia/Kolkata and only:
 
 1. runs `bash scripts/workflow/session-start.sh --agent codex --no-background-sync`
 2. handles only GitHub collaboration items surfaced by that session-start sweep
-3. applies the nightly promotion boundary only to pending nightly handoffs
+3. applies the nightly promotion boundary only to pending nightly handoffs and explicit roadmap-plan candidates
 4. reruns `session-start.sh` once after GitHub follow-up
 5. writes a structured summary and stops
 
 The morning lane must not edit repo-tracked files. It may update GitHub state and runtime-local artifacts only.
+It is the only autonomous lane allowed to move an implementation issue to `Ready`.
 
 ## Runtime Surfaces
 
@@ -88,6 +90,9 @@ The morning lane must not edit repo-tracked files. It may update GitHub state an
 - `scripts/workflow/morning-codex-prep-output-schema.json`
 - `launchd/com.nanoclaw-nightly-improvement.plist`
 - `launchd/com.nanoclaw-morning-codex-prep.plist`
+- `launchd/com.nanoclaw-platform-loop.plist`
+- `launchd/com.nanoclaw-pr-guardian.plist`
+- `launchd/com.nanoclaw-reliability-loop.plist`
 - `.nanoclaw/nightly-improvement/state.json` (runtime-local, gitignored)
 - `.nanoclaw/nightly-improvement/runs/` (runtime-local logs)
 - `.nanoclaw/morning-codex-prep/` (runtime-local logs and summaries)
@@ -229,9 +234,11 @@ Codex should:
 
 1. review surfaced nightly discussions during morning session-start triage
 2. make an explicit decision for each surviving candidate before moving on
-3. promote only when the next action is concrete enough for an execution Issue
-4. leave a clear non-promotion reason for anything not promoted
-5. keep the rolling nightly discussion open unless the source family is intentionally retired or replaced
+3. decide one of `promote`, `ready`, `defer`, or `reject`
+4. promote only when the next action is concrete enough for an execution Issue
+5. move an issue to `Ready` only when the execution contract is complete
+6. leave a clear non-promotion reason for anything not promoted
+7. keep the rolling nightly discussion open unless the source family is intentionally retired or replaced
 
 The sweep itself remains read-only.
 
@@ -242,12 +249,14 @@ When `NIGHTLY IMPROVEMENT FINDINGS` is non-empty, Codex should process the surfa
 1. read the latest nightly discussion update
 2. verify whether the candidate already exists locally or is already tracked
 3. decide one of:
-   - `accept -> opened Issue #N`
+   - `promote -> opened Issue #N`
+   - `ready -> Issue #N moved to Ready`
    - `defer -> reason`
    - `reject -> reason`
    - `reference only -> reason`
-4. if accepted, create one execution Issue with concrete next action, set `Source=discussion`, and leave a promotion summary comment
-5. if not accepted, leave the decision comment in the discussion so the morning triage outcome is explicit
+4. if promoted, create one execution Issue with concrete next action, set `Source=discussion`, and leave a promotion summary comment
+5. if moved to `Ready`, ensure the issue includes problem statement, scope, acceptance criteria, required checks, required evidence, blocked-if, and rollback notes
+6. if not promoted or readied, leave the decision comment in the discussion so the morning triage outcome is explicit
 
 When this routine is executed by the scheduled morning Codex prep lane, it should remain bounded to the surfaced morning queue:
 

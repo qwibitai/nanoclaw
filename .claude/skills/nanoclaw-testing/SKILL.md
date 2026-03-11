@@ -57,7 +57,7 @@ npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-i
 Optional JSON artifact output:
 
 ```bash
-npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out .claude/progress/test-report.json
+npx tsx .claude/skills/nanoclaw-testing/scripts/run-feature-tests.ts "<feature-id-or-query>" --live --json-out data/diagnostics/tests/test-report.json
 ```
 
 Use that JSON in commit/PR notes to prove validation scope.

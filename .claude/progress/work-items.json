@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated_at": "2026-03-09T06:03:21.000Z",
+  "updated_at": "2026-03-11T06:36:01.347Z",
   "items": [
     {
       "id": "work-architecture-boundary-governance-1772821500000",
@@ -16,8 +16,8 @@
       "evidence": [
         "docs/ARCHITECTURE.md",
         "scripts/check-architecture-boundary.sh",
-        ".claude/progress/feature-catalog.json",
-        ".claude/progress/feature-catalog.md"
+        ".claude/catalog/feature-catalog.json",
+        ".claude/catalog/feature-catalog.md"
       ],
       "created_at": "2026-03-06T18:25:00.000Z",
       "updated_at": "2026-03-06T18:40:00.000Z"
@@ -37,8 +37,8 @@
         "docs/ARCHITECTURE.md",
         "scripts/check-architecture-boundary.sh",
         "scripts/check-workflow-contracts.sh",
-        ".claude/progress/feature-catalog.json",
-        ".claude/progress/feature-catalog.md"
+        ".claude/catalog/feature-catalog.json",
+        ".claude/catalog/feature-catalog.md"
       ],
       "created_at": "2026-03-06T18:25:47.000Z",
       "updated_at": "2026-03-06T18:27:21.000Z"
@@ -60,8 +60,8 @@
         "2026-03-07T01:39:00.000Z: Implemented main-lane lane-control service, queue status snapshot seam, explicit steer/interrupt handling for andy-developer, and additive main-lane interception that falls back to original NanoClaw behavior for all non-control messages."
       ],
       "evidence": [
-        ".claude/progress/feature-catalog.json",
-        ".claude/progress/feature-catalog.md"
+        ".claude/catalog/feature-catalog.json",
+        ".claude/catalog/feature-catalog.md"
       ],
       "created_at": "2026-03-06T15:30:00.000Z",
       "updated_at": "2026-03-07T01:39:00.000Z"
@@ -211,7 +211,7 @@
         "2026-03-06T07:03:36.165Z: Post-validation note: acceptance-gate test step can still hit sandbox tsx IPC EPERM in this environment; direct npm build/test and all new P0 gate artifacts pass."
       ],
       "evidence": [
-        ".claude/progress/test-report-ops-reliability-tooling-20260306.json",
+        "data/diagnostics/tests/test-report-ops-reliability-tooling-20260306.json",
         "data/diagnostics/workflow/pre-dispatch-gate-negative-20260306.json",
         "data/diagnostics/workflow/pre-dispatch-gate-positive-20260306.json",
         "data/diagnostics/workflow/completion-lint-20260306.json",
@@ -261,7 +261,7 @@
         "2026-03-07T18:59:23.870Z: Added bash scripts/jarvis-ops.sh reconcile-stale-andy-requests with dry-run-by-default stale request targeting, targeted request-id cleanup, DB backups on apply, and terminal close-state control. Verified with npm run build, feature test artifact, and real-DB dry-run via bash scripts/jarvis-ops.sh reconcile-stale-andy-requests --stale-minutes 720 --limit 2."
       ],
       "evidence": [
-        ".claude/progress/test-report-andy-request-admin-cleanup.json"
+        "data/diagnostics/tests/test-report-andy-request-admin-cleanup.json"
       ],
       "created_at": "2026-03-07T18:54:59.391Z",
       "updated_at": "2026-03-07T18:59:23.870Z"
@@ -311,7 +311,7 @@
         "2026-03-07T20:29:16.464Z: Verification passed: bash scripts/check-workflow-contracts.sh, bash scripts/check-claude-codex-mirror.sh, bash scripts/check-tooling-governance.sh, and touch-set check for docs-topology-cleanup with explicit rename/mirror allowances. Feature catalog rebuilt against the new doc layout; strict validator still reports four pre-existing missing references outside this cleanup scope."
       ],
       "evidence": [
-        ".claude/progress/feature-catalog.md"
+        ".claude/catalog/feature-catalog.md"
       ],
       "created_at": "2026-03-07T20:19:41.826Z",
       "updated_at": "2026-03-07T20:29:16.464Z"
@@ -328,10 +328,10 @@
         "2026-03-07T20:36:53.759Z: Verification passed: feature catalog rebuilt with missing_refs=0, strict catalog validation PASS, claude-codex mirror check PASS, and npm run build PASS after restoring the root WhatsApp auth entrypoint and removing stale skill-wrapper references."
       ],
       "evidence": [
-        ".claude/progress/feature-catalog.seed.json",
+        ".claude/catalog/feature-catalog.seed.json",
         "src/whatsapp-auth.ts",
         "groups/jarvis-worker-1/CLAUDE.md",
-        ".claude/progress/feature-catalog.json",
+        ".claude/catalog/feature-catalog.json",
         ".claude/skills/update/SKILL.md",
         "groups/jarvis-worker-1/docs/operations/skills-vs-docs-map.md"
       ],
@@ -355,7 +355,7 @@
         ".claude/hooks/posttool-workflow-sync-check.sh",
         "docs/workflow/docs-discipline/doc-creation-contract.md",
         "docs/workflow/docs-discipline/docs-pruning-loop.md",
-        ".claude/progress/feature-catalog.json"
+        ".claude/catalog/feature-catalog.json"
       ],
       "created_at": "2026-03-07T20:54:49.257Z",
       "updated_at": "2026-03-07T20:57:46.404Z"
@@ -397,10 +397,28 @@
         "launchd/com.nanoclaw-platform-loop.plist",
         "docs/workflow/github/nanoclaw-platform-loop.md",
         "src/platform-loop-sync.test.ts",
-        ".claude/progress/feature-catalog.json"
+        ".claude/catalog/feature-catalog.json"
       ],
       "created_at": "2026-03-09T06:03:21.000Z",
       "updated_at": "2026-03-09T06:03:21.000Z"
+    },
+    {
+      "id": "work-github-collaboration-control-plane-1773208576539",
+      "title": "Autonomous lane control plane and progress-state cleanup",
+      "feature_id": "github-collaboration-control-plane",
+      "status": "done",
+      "request": "Implement the autonomous Codex/Claude lane control plane: Codex intake/readiness, hourly Claude pickup, Codex PR guardian, Claude reliability lane, and .claude/progress consolidation.",
+      "notes": [
+        "2026-03-11T06:35:55.131Z: Control-plane implementation complete; verification in progress",
+        "2026-03-11T06:36:01.346Z: Implemented autonomous pickup/guardian/reliability lanes, progress-state consolidation, and verified with build, focused workflow tests, workflow contracts, mirror check, tooling governance, and docs hygiene"
+      ],
+      "evidence": [
+        ".claude/catalog/feature-catalog.json",
+        ".claude/catalog/feature-catalog.md",
+        "scripts/workflow/autonomy-lane.sh"
+      ],
+      "created_at": "2026-03-11T05:56:16.539Z",
+      "updated_at": "2026-03-11T06:36:01.346Z"
     }
   ]
 }

@@ -228,10 +228,10 @@ function shouldRunHappinessGate(feature: CatalogFeature): boolean {
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
-  const catalogPath = path.join(repoRoot, '.claude', 'progress', 'feature-catalog.json');
+  const catalogPath = path.join(repoRoot, '.claude', 'catalog', 'feature-catalog.json');
 
   if (!fs.existsSync(catalogPath)) {
-    console.error('Missing .claude/progress/feature-catalog.json');
+    console.error('Missing .claude/catalog/feature-catalog.json');
     console.error('Run: npx tsx .claude/skills/feature-tracking/scripts/build-feature-catalog.ts');
     process.exit(1);
   }

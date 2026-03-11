@@ -18,6 +18,7 @@ OUTPUT_SCHEMA_FILE="$ROOT_DIR/scripts/workflow/morning-codex-prep-output-schema.
 PROFILE_NAME="${NANOCLAW_MORNING_PREP_PROFILE:-morning_prep}"
 GH_ACCOUNT="${NANOCLAW_PLATFORM_GH_ACCOUNT:-ingpoc}"
 LAUNCH_LABEL="${NANOCLAW_MORNING_PREP_LABEL:-com.nanoclaw.morning-codex-prep}"
+PLAN_PATH="${NANOCLAW_AUTONOMY_PLAN_PATH:-$ROOT_DIR/.nanoclaw/autonomy/feature-plan.md}"
 DRY_RUN=0
 
 usage() {
@@ -85,14 +86,18 @@ Requirements:
    - \`docs/workflow/github/github-collab-sweep.md\`
    - \`docs/workflow/github/github-agent-collaboration-loop.md\`
 5. For nightly findings surfaced during that work, follow \`docs/workflow/strategy/nightly-evaluation-loop.md\`.
-6. When evidence is needed, prefer the available MCP servers:
+6. If \`$PLAN_PATH\` exists, read it and treat it as the user roadmap input for promotion and readiness decisions.
+7. When evidence is needed, prefer the available MCP servers:
    - \`DeepWiki\` for repository documentation and architecture questions
    - \`Context7\` for primary library/API docs
    - \`token-efficient\` for verbose logs, JSON, CSV, or command output
-7. Promote only concrete next actions into Issues. Do not broaden scope beyond the surfaced morning queue.
-8. After handling the surfaced GitHub work, rerun \`bash scripts/workflow/session-start.sh --agent codex --no-background-sync\` once.
-9. Do not edit repo-tracked files, docs, or code. This lane may update GitHub state and runtime-local artifacts only.
-10. End with JSON matching the supplied output schema.
+8. For every candidate from the queue or roadmap, decide exactly one of: \`promote\`, \`ready\`, \`defer\`, or \`reject\`.
+9. Write rationale for all \`defer\` and \`reject\` decisions on the relevant Discussion or Issue.
+10. Only Codex may move an item to \`Ready\`, and only after the issue contains a concrete execution contract: problem statement, scope, acceptance criteria, required checks, required evidence, and blocked conditions.
+11. Promote only concrete next actions into Issues. Do not broaden scope beyond the surfaced morning queue and roadmap.
+12. After handling the surfaced GitHub work, rerun \`bash scripts/workflow/session-start.sh --agent codex --no-background-sync\` once.
+13. Do not edit repo-tracked files, docs, or code. This lane may update GitHub state and runtime-local artifacts only.
+14. End with JSON matching the supplied output schema.
 EOF
 }
 

@@ -339,7 +339,7 @@
       "files": [
         "scripts/jarvis-ops.sh",
         "scripts/jarvis-reconcile-stale-andy-requests.sh",
-        ".claude/progress/feature-catalog.seed.json"
+        ".claude/catalog/feature-catalog.seed.json"
       ],
       "tests": [
         "src/jarvis-reconcile-stale-andy-requests.test.ts"
@@ -366,7 +366,7 @@
         "docs/README.md",
         "scripts/check-workflow-contracts.sh",
         "scripts/check-architecture-boundary.sh",
-        ".claude/progress/feature-catalog.seed.json"
+        ".claude/catalog/feature-catalog.seed.json"
       ],
       "tests": []
     },
@@ -436,7 +436,7 @@
         ".claude/hooks/posttool-workflow-sync-check.sh",
         "scripts/check-docs-hygiene.sh",
         "scripts/check-workflow-contracts.sh",
-        ".claude/progress/feature-catalog.seed.json"
+        ".claude/catalog/feature-catalog.seed.json"
       ],
       "tests": []
     },
@@ -460,7 +460,7 @@
         "scripts/workflow/session-start.sh",
         "scripts/workflow/session-context-audit.js",
         "docs/workflow/runtime/session-recall.md",
-        ".claude/progress/feature-catalog.seed.json"
+        ".claude/catalog/feature-catalog.seed.json"
       ],
       "tests": []
     },
@@ -634,9 +634,7 @@
         ".claude/skills/debug/SKILL.md",
         ".claude/skills/update/SKILL.md",
         "docs/workflow/runtime/nanoclaw-jarvis-debug-loop.md",
-        ".claude/skills/convert-to-apple-container/SKILL.md",
-        ".claude/skills/get-qodo-rules/SKILL.md",
-        ".claude/skills/qodo-pr-resolver/SKILL.md"
+        ".claude/skills/convert-to-apple-container/SKILL.md"
       ],
       "tests": []
     },
@@ -660,7 +658,7 @@
         ".claude/skills/feature-tracking/scripts/locate-feature.ts",
         ".claude/skills/feature-tracking/scripts/audit-feature-coverage.ts",
         ".claude/skills/feature-tracking/scripts/check-touch-set.ts",
-        ".claude/progress/feature-catalog.seed.json"
+        ".claude/catalog/feature-catalog.seed.json"
       ],
       "tests": []
     },
@@ -710,7 +708,7 @@
         ".claude/commands/platform-pickup.md",
         ".github/workflows/project-intake-sync.yml",
         ".github/workflows/project-status-sync.yml",
-        ".claude/progress/feature-catalog.seed.json",
+        ".claude/catalog/feature-catalog.seed.json",
         "AGENTS.md",
         "CLAUDE.md",
         "DOCS.md",
@@ -736,6 +734,58 @@
         "src/github-project-sync.test.ts",
         "src/platform-loop-sync.test.ts",
         "src/platform-loop.test.ts"
+      ]
+    },
+    {
+      "id": "autonomous-lane-control-plane",
+      "name": "Autonomous Lane Control Plane",
+      "summary": "Durable Codex and Claude execution lanes for readiness, implementation pickup, PR repair, reliability pause control, and merge handoff.",
+      "risk": "high",
+      "keywords": [
+        "autonomy",
+        "platform loop",
+        "pr guardian",
+        "reliability lane",
+        "pause sentinel",
+        "merge handoff"
+      ],
+      "files": [
+        ".claude/commands/platform-pickup.md",
+        ".claude/catalog/feature-catalog.seed.json",
+        ".codex/agents/morning-prep.toml",
+        ".codex/agents/pr-guardian.toml",
+        ".codex/config.toml",
+        ".github/labels.json",
+        "docs/operations/workflow-setup-responsibility-map.md",
+        "docs/workflow/github/github-agent-collaboration-loop.md",
+        "docs/workflow/github/nanoclaw-github-control-plane.md",
+        "docs/workflow/github/nanoclaw-platform-loop.md",
+        "docs/workflow/strategy/nightly-evaluation-loop.md",
+        "launchd/com.nanoclaw-morning-codex-prep.plist",
+        "launchd/com.nanoclaw-platform-loop.plist",
+        "launchd/com.nanoclaw-pr-guardian.plist",
+        "launchd/com.nanoclaw-reliability-loop.plist",
+        "scripts/workflow/autonomy-lane.sh",
+        "scripts/workflow/autonomy-pr-guardian-output-schema.json",
+        "scripts/workflow/check-platform-loop.sh",
+        "scripts/workflow/platform-loop-sync.sh",
+        "scripts/workflow/platform-loop.js",
+        "scripts/workflow/render-launchd-schedule.py",
+        "scripts/workflow/run-platform-claude-session.sh",
+        "scripts/workflow/start-autonomy-reliability.sh",
+        "scripts/workflow/start-morning-codex-prep.sh",
+        "scripts/workflow/start-platform-loop.sh",
+        "scripts/workflow/start-pr-guardian.sh",
+        "scripts/workflow/trigger-platform-pickup-now.sh"
+      ],
+      "tests": [
+        "src/platform-loop-sync.test.ts",
+        "src/platform-loop.test.ts",
+        "src/run-platform-claude-session.test.ts",
+        "src/start-autonomy-reliability.test.ts",
+        "src/start-nightly-improvement.test.ts",
+        "src/start-platform-loop.test.ts",
+        "src/start-pr-guardian.test.ts"
       ]
     },
     {

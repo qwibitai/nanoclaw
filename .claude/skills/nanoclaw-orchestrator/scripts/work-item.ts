@@ -36,7 +36,7 @@ function nowIso(): string {
 }
 
 function getStorePath(repoRoot: string): string {
-  return path.join(repoRoot, '.claude', 'progress', 'feature-work-items.json');
+  return path.join(repoRoot, '.claude', 'progress', 'work-items.json');
 }
 
 function loadStore(repoRoot: string): WorkStore {
