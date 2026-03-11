@@ -122,7 +122,8 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
-  // Ensure debug dir exists and is writable by container's node user (uid 1000)
+  // Ensure .claude/ dir and subdirs are writable by container's node user (uid 1000)
+  fs.chmodSync(groupSessionsDir, 0o777);
   const debugDir = path.join(groupSessionsDir, 'debug');
   fs.mkdirSync(debugDir, { recursive: true });
   fs.chmodSync(debugDir, 0o777);
