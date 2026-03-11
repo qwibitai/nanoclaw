@@ -142,19 +142,28 @@ export async function run(_args: string[]): Promise<void> {
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const hasLocalCredential = /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(
+    const hasLocalCredential =
+      /^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENROUTER_API_KEY)=/m.test(
       envContent,
-    );
+      );
     const hasOneCliUrl = /^ONECLI_URL=/m.test(envContent);
 
     if (hasLocalCredential) {
       const credentialCheck = await checkCredentials();
-      credentialHealth = credentialCheck.status === 'success' ? 'valid' : 'invalid';
       credentialError = credentialCheck.error;
-      credentials =
-        credentialCheck.status === 'success'
-          ? 'configured_valid'
-          : 'configured_invalid';
+      if (credentialCheck.status === 'success') {
+        credentialHealth = 'valid';
+        credentials = 'configured_valid';
+      } else if (
+        credentialCheck.authProbe === 'missing' ||
+        credentialCheck.error === 'no_configured_credentials'
+      ) {
+        credentialHealth = 'not_checked';
+        credentials = 'missing';
+      } else {
+        credentialHealth = 'invalid';
+        credentials = 'configured_invalid';
+      }
     } else if (hasOneCliUrl) {
       credentials = 'configured';
     }

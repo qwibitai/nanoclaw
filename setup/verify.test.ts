@@ -53,7 +53,7 @@ describe('determineVerifyStatus', () => {
     ).toBe('failed');
   });
 
-  it('fails when credentials are configured but invalid', () => {
+  it('fails when credentials are configured_invalid', () => {
     expect(
       determineVerifyStatus({
         ...healthyBase,
