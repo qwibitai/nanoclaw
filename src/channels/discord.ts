@@ -1,8 +1,19 @@
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
+  ChatInputCommandInteraction,
   Client,
   Events,
   GatewayIntentBits,
   Message,
+  REST,
+  Routes,
   TextChannel,
   ThreadChannel,
 } from 'discord.js';
@@ -269,13 +280,30 @@ export class DiscordChannel implements Channel {
       );
     });
 
+    // Handle button clicks and slash commands
+    this.client.on(Events.InteractionCreate, async (interaction) => {
+      if (interaction.isButton()) {
+        if (interaction.customId.startsWith('deploy:')) {
+          await this.handleDeployButton(
+            interaction as ButtonInteraction,
+          );
+        }
+      } else if (interaction.isChatInputCommand()) {
+        if (interaction.commandName === 'deploy') {
+          await this.handleDeployCommand(
+            interaction as ChatInputCommandInteraction,
+          );
+        }
+      }
+    });
+
     // Handle errors gracefully
     this.client.on(Events.Error, (err) => {
       logger.error({ err: err.message }, 'Discord client error');
     });
 
     return new Promise<void>((resolve) => {
-      this.client!.once(Events.ClientReady, (readyClient) => {
+      this.client!.once(Events.ClientReady, async (readyClient) => {
         logger.info(
           { username: readyClient.user.tag, id: readyClient.user.id },
           'Discord bot connected',
@@ -284,6 +312,7 @@ export class DiscordChannel implements Channel {
         console.log(
           `  Use /chatid command or check channel IDs in Discord settings\n`,
         );
+        await this.registerSlashCommands(readyClient.user.id);
         resolve();
       });
 
@@ -404,7 +433,8 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
       text = await this.replaceMentions(text, textChannel);
-      await this.sendChunked(textChannel, text);
+      const components = this.buildDeployButton(text);
+      await this.sendChunked(textChannel, text, components);
       logger.info({ jid, length: text.length }, 'Discord message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Discord message');
@@ -446,7 +476,8 @@ export class DiscordChannel implements Channel {
       });
 
       text = await this.replaceMentions(text, textChannel);
-      await this.sendChunked(thread, text);
+      const components = this.buildDeployButton(text);
+      await this.sendChunked(thread, text, components);
 
       logger.info(
         { parentChannelId, threadId: thread.id, threadName: name },
@@ -465,18 +496,56 @@ export class DiscordChannel implements Channel {
   }
 
   private static MAX_MESSAGE_LENGTH = 2000;
+  private static PR_URL_RE =
+    /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
+
+  /** Build a Deploy button if the text contains a GitHub PR URL. */
+  private buildDeployButton(
+    text: string,
+  ): ActionRowBuilder<ButtonBuilder>[] | undefined {
+    const match = text.match(DiscordChannel.PR_URL_RE);
+    if (!match) return undefined;
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`deploy:${match[0]}`)
+          .setLabel('Deploy')
+          .setStyle(ButtonStyle.Primary),
+      ),
+    ];
+  }
 
   /** Send text in chunks respecting Discord's 2000 char limit. */
   private async sendChunked(
-    target: { send(text: string): Promise<unknown> },
+    target: {
+      send(options: string | Record<string, unknown>): Promise<unknown>;
+    },
     text: string,
+    components?: ActionRowBuilder<ButtonBuilder>[],
   ): Promise<void> {
     const max = DiscordChannel.MAX_MESSAGE_LENGTH;
     if (text.length <= max) {
-      await target.send(text);
+      if (components) {
+        await target.send({ content: text, components });
+      } else {
+        await target.send(text);
+      }
     } else {
+      const chunks: string[] = [];
       for (let i = 0; i < text.length; i += max) {
-        await target.send(text.slice(i, i + max));
+        chunks.push(text.slice(i, i + max));
+      }
+      for (let i = 0; i < chunks.length - 1; i++) {
+        await target.send(chunks[i]);
+      }
+      // Attach button to the last chunk
+      if (components) {
+        await target.send({
+          content: chunks[chunks.length - 1],
+          components,
+        });
+      } else {
+        await target.send(chunks[chunks.length - 1]);
       }
     }
   }
@@ -510,6 +579,74 @@ export class DiscordChannel implements Channel {
       this.client = null;
       logger.info('Discord bot stopped');
     }
+  }
+
+  private async registerSlashCommands(clientId: string): Promise<void> {
+    try {
+      const rest = new REST({ version: '10' }).setToken(this.botToken);
+      await rest.put(Routes.applicationCommands(clientId), {
+        body: [
+          { name: 'deploy', description: 'Deploy latest main branch' },
+        ],
+      });
+      logger.info('Discord slash commands registered');
+    } catch (err) {
+      logger.error({ err }, 'Failed to register Discord slash commands');
+    }
+  }
+
+  private async handleDeployButton(
+    interaction: ButtonInteraction,
+  ): Promise<void> {
+    const prUrl = interaction.customId.replace('deploy:', '');
+
+    await interaction.deferReply();
+
+    try {
+      const { execSync } = await import('child_process');
+      const result = execSync(
+        `gh pr view "${prUrl}" --json state -q .state`,
+        { encoding: 'utf-8', timeout: 15000 },
+      ).trim();
+
+      if (result !== 'MERGED') {
+        await interaction.editReply(
+          `PR hasn't been merged yet (state: ${result})`,
+        );
+        return;
+      }
+
+      await interaction.editReply(
+        'PR is merged. Deploying latest main...',
+      );
+      this.runDetachedDeploy();
+    } catch (err) {
+      logger.error({ err, prUrl }, 'Deploy button handler error');
+      await interaction.editReply('Deploy failed — check logs').catch(() => {});
+    }
+  }
+
+  private async handleDeployCommand(
+    interaction: ChatInputCommandInteraction,
+  ): Promise<void> {
+    await interaction.deferReply();
+    await interaction.editReply('Deploying latest main...');
+    this.runDetachedDeploy();
+  }
+
+  private runDetachedDeploy(): void {
+    const scriptPath = path.resolve(process.cwd(), 'scripts/deploy.sh');
+    const logPath = path.resolve(process.cwd(), 'logs/deploy.log');
+
+    const logFd = fs.openSync(logPath, 'a');
+    const child = spawn('bash', [scriptPath], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd],
+      cwd: process.cwd(),
+    });
+    child.unref();
+
+    logger.info({ pid: child.pid }, 'Detached deploy script spawned');
   }
 
   async setTyping(jid: string, isTyping: boolean): Promise<void> {

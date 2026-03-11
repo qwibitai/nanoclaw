@@ -436,52 +436,74 @@ async function prepareAdditionalMountWorktree(
   sessionId: string,
   containerBasename: string,
 ): Promise<string> {
-  const wtPath = path.join(
+  const clonePath = path.join(
     WORKTREES_DIR,
     MOUNT_WORKTREES_DIR,
     sessionId,
     containerBasename,
   );
-  fs.mkdirSync(wtPath, { recursive: true });
 
-  if (!gcDisabledRepos.has(repoDir)) {
-    await execAsync('git config gc.auto 0', { cwd: repoDir });
-    gcDisabledRepos.add(repoDir);
-  }
-
+  // Fetch latest from the source repo's remote before cloning
   try {
     await execAsync('git fetch origin', { cwd: repoDir });
   } catch {
-    // Offline or no remote
+    // Offline or no remote — clone from whatever the local repo has
   }
 
-  let ref = 'HEAD';
-  try {
-    ref = await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
-      cwd: repoDir,
-    });
-  } catch {
-    // origin/HEAD not set
-  }
-
-  await execAsync(`git worktree add --detach "${wtPath}" "${ref}"`, {
-    cwd: repoDir,
-  });
-
-  return wtPath;
-}
-
-/** Clean up additional-mount worktrees created for a container session. */
-async function cleanupAdditionalMountWorktrees(
-  sessionId: string,
-  mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
-): Promise<void> {
-  await Promise.all(
-    mountWorktrees.map(({ repoDir, wtPath }) =>
-      removeWorktree(repoDir, wtPath),
-    ),
+  // Use git clone (not git worktree add) because worktrees create a .git
+  // file pointing back to the parent repo's .git directory. Only the worktree
+  // is mounted in the container, so that reference is broken. A local clone
+  // is self-contained and works in any mount context.
+  await execAsync(
+    `git clone --local --no-checkout "${repoDir}" "${clonePath}"`,
   );
 
+  // Repoint origin to the real remote (GitHub) so the container can push.
+  // The clone's origin defaults to the local repo path, which isn't useful
+  // inside the container.
+  try {
+    const remoteUrl = await execAsync('git remote get-url origin', {
+      cwd: repoDir,
+    });
+    if (remoteUrl) {
+      await execAsync(`git remote set-url origin "${remoteUrl}"`, {
+        cwd: clonePath,
+      });
+    }
+  } catch {
+    // No remote configured on source repo
+  }
+
+  // Checkout the default branch (origin/main)
+  let ref = 'origin/HEAD';
+  try {
+    await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
+      cwd: clonePath,
+    });
+  } catch {
+    // origin/HEAD not set — try origin/main, then just HEAD
+    try {
+      await execAsync('git rev-parse --verify origin/main', {
+        cwd: clonePath,
+      });
+      ref = 'origin/main';
+    } catch {
+      ref = 'HEAD';
+    }
+  }
+
+  await execAsync(`git checkout "${ref}"`, { cwd: clonePath });
+
+  return clonePath;
+}
+
+/** Clean up additional-mount clones created for a container session. */
+async function cleanupAdditionalMountWorktrees(
+  sessionId: string,
+  _mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
+): Promise<void> {
+  // Clones are self-contained — just remove the session directory.
+  // No git worktree prune needed (unlike real worktrees).
   const sessionDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR, sessionId);
   try {
     fs.rmSync(sessionDir, { recursive: true, force: true });
@@ -545,35 +567,12 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
       }
     }
 
-    // Clean up orphan additional-mount worktrees
+    // Clean up orphan additional-mount clones (self-contained, just rm)
     const mountsDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR);
     if (fs.existsSync(mountsDir)) {
       for (const sessionDir of fs.readdirSync(mountsDir)) {
         const sessionPath = path.join(mountsDir, sessionDir);
         if (!fs.statSync(sessionPath).isDirectory()) continue;
-
-        // Each subdirectory is a worktree — find its parent repo and prune
-        for (const entry of fs.readdirSync(sessionPath)) {
-          const wtPath = path.join(sessionPath, entry);
-          const gitFile = path.join(wtPath, '.git');
-          if (fs.existsSync(gitFile) && fs.statSync(gitFile).isFile()) {
-            try {
-              const gitContent = fs.readFileSync(gitFile, 'utf-8');
-              const match = gitContent.match(/gitdir:\s*(.+)/);
-              if (match) {
-                // gitdir → .git/worktrees/<name> — resolve to repo root
-                const gitWorktreeDir = path.resolve(wtPath, match[1].trim());
-                const repoDir = path.resolve(gitWorktreeDir, '..', '..', '..');
-                await execAsync('git worktree prune', {
-                  cwd: repoDir,
-                }).catch(() => {});
-              }
-            } catch {
-              // ignore
-            }
-          }
-        }
-
         try {
           fs.rmSync(sessionPath, { recursive: true, force: true });
           cleaned++;
