@@ -33,6 +33,7 @@ import { RegisteredGroup } from './types.js';
 // Tool credentials (not Claude API secrets) — passed to containers for MCP tools
 const toolSecrets = readEnvFile([
   'GEMINI_API_KEY',
+  'GITHUB_PERSONAL_ACCESS_TOKEN',
   'LANCEDB_URI',
   'LANCEDB_API_KEY',
 ]);
@@ -131,28 +132,51 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
-  if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(
-      settingsFile,
-      JSON.stringify(
-        {
-          env: {
-            // Enable agent swarms (subagent orchestration)
-            // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
-            CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-            // Load CLAUDE.md from additional mounted directories
-            // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
-            CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-            // Enable Claude's memory feature (persists user preferences between sessions)
-            // https://code.claude.com/docs/en/memory#manage-auto-memory
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-          },
-        },
-        null,
-        2,
-      ) + '\n',
-    );
+
+  // Read existing settings to preserve user customizations, then ensure
+  // NanoClaw-managed fields (env vars, MCP servers) are up to date.
+  let settings: Record<string, unknown> = {};
+  try {
+    settings = JSON.parse(fs.readFileSync(settingsFile, 'utf-8'));
+  } catch {
+    // File doesn't exist or is invalid — start fresh
   }
+
+  // Required env vars for Claude Code features
+  settings.env = {
+    ...(settings.env as Record<string, string> | undefined),
+    // Enable agent swarms (subagent orchestration)
+    // https://code.claude.com/docs/en/agent-teams#orchestrate-teams-of-claude-code-sessions
+    CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+    // Load CLAUDE.md from additional mounted directories
+    // https://code.claude.com/docs/en/memory#load-memory-from-additional-directories
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+    // Enable Claude's memory feature (persists user preferences between sessions)
+    // https://code.claude.com/docs/en/memory#manage-auto-memory
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+  };
+
+  // MCP servers managed by NanoClaw (token-gated: only added when configured)
+  const mcpServers =
+    (settings.mcpServers as Record<string, unknown> | undefined) || {};
+  if (toolSecrets.GITHUB_PERSONAL_ACCESS_TOKEN) {
+    mcpServers.github = {
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: {
+        GITHUB_PERSONAL_ACCESS_TOKEN:
+          toolSecrets.GITHUB_PERSONAL_ACCESS_TOKEN,
+      },
+    };
+  }
+  if (Object.keys(mcpServers).length > 0) {
+    settings.mcpServers = mcpServers;
+  }
+
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify(settings, null, 2) + '\n',
+  );
 
   // Sync skills from container/skills/ into each group's .claude/skills/
   const skillsSrc = path.join(process.cwd(), 'container', 'skills');
