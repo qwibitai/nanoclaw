@@ -24,8 +24,17 @@ interface ClaudeCredentials {
   };
 }
 
-const CREDENTIALS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
+const CREDENTIALS_FILE = path.join(
+  os.homedir(),
+  '.claude',
+  '.credentials.json',
+);
 const BUFFER = 5 * 60 * 1000; // 5 minutes
+
+// In-memory cache — avoids reading the file on every proxy request.
+// Populated after each successful token read or refresh.
+// Cleared when the cached token approaches expiry so the file is re-read.
+let tokenCache: { token: string; expiresAt: number } | null = null;
 
 // All calls chain onto this promise — serializes concurrent refresh operations.
 let refreshLock: Promise<string | null> = Promise.resolve(null);
@@ -56,13 +65,21 @@ async function _doGetToken(): Promise<string | null> {
     return null;
   }
 
-  // Try to read from credentials file
+  // Return cached token if still valid
+  if (tokenCache && tokenCache.expiresAt > Date.now() + BUFFER) {
+    return tokenCache.token;
+  }
+
+  // Cache is stale — read from credentials file
   let credentials: ClaudeCredentials;
   try {
     const content = fs.readFileSync(CREDENTIALS_FILE, 'utf-8');
     credentials = JSON.parse(content);
   } catch (err) {
-    logger.debug({ err }, 'Credentials file not readable, falling back to .env');
+    logger.debug(
+      { err },
+      'Credentials file not readable, falling back to .env',
+    );
     return getEnvToken();
   }
 
@@ -72,8 +89,9 @@ async function _doGetToken(): Promise<string | null> {
     return getEnvToken();
   }
 
-  // Token is still valid
+  // Token is still valid — cache and return
   if (oauth.expiresAt > Date.now() + BUFFER) {
+    tokenCache = { token: oauth.accessToken, expiresAt: oauth.expiresAt };
     return oauth.accessToken;
   }
 
@@ -100,10 +118,14 @@ async function _doGetToken(): Promise<string | null> {
     };
 
     writeCredentialsAtomic(updatedCredentials);
+    tokenCache = { token: newToken.accessToken, expiresAt: newToken.expiresAt };
     logger.info('OAuth token refreshed successfully');
     return newToken.accessToken;
   } catch (err) {
-    logger.error({ err }, 'Failed to refresh OAuth token, falling back to .env');
+    logger.error(
+      { err },
+      'Failed to refresh OAuth token, falling back to .env',
+    );
     return getEnvToken();
   }
 }
@@ -142,10 +164,14 @@ async function refreshOAuthToken(refreshToken: string): Promise<{
       },
       (res) => {
         let data = '';
-        res.on('data', (chunk) => { data += chunk; });
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
         res.on('end', () => {
           if (res.statusCode !== 200) {
-            reject(new Error(`OAuth refresh failed: ${res.statusCode} ${data}`));
+            reject(
+              new Error(`OAuth refresh failed: ${res.statusCode} ${data}`),
+            );
             return;
           }
           try {
@@ -153,7 +179,8 @@ async function refreshOAuthToken(refreshToken: string): Promise<{
             resolve({
               accessToken: response.access_token,
               refreshToken: response.refresh_token,
-              expiresAt: response.expires_at ?? Date.now() + response.expires_in * 1000,
+              expiresAt:
+                response.expires_at ?? Date.now() + response.expires_in * 1000,
             });
           } catch (err) {
             reject(new Error(`Failed to parse OAuth response: ${err}`));
@@ -179,7 +206,9 @@ function writeCredentialsAtomic(credentials: ClaudeCredentials): void {
     fs.writeFileSync(tempFile, content, 'utf-8');
     fs.renameSync(tempFile, CREDENTIALS_FILE);
   } catch (err) {
-    try { fs.unlinkSync(tempFile); } catch {}
+    try {
+      fs.unlinkSync(tempFile);
+    } catch {}
     throw err;
   }
 }
@@ -188,7 +217,8 @@ function writeCredentialsAtomic(credentials: ClaudeCredentials): void {
  * Fallback to .env token if credentials file is unavailable.
  */
 function getEnvToken(): string | null {
-  const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN;
+  const envToken =
+    process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_AUTH_TOKEN;
   if (envToken) {
     logger.debug('Using OAuth token from .env (may be expired)');
     return envToken;
