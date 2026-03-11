@@ -7,12 +7,11 @@
 import fs from 'fs';
 import path from 'path';
 
-import Database from 'better-sqlite3';
-
-import { STORE_DIR } from '../src/config.js';
-import { isValidGroupFolder } from '../src/group-folder.js';
-import { logger } from '../src/logger.js';
-import { emitStatus } from './status.js';
+import { STORE_DIR } from '../src/config.ts';
+import { initDatabase, setRegisteredGroup } from '../src/db.ts';
+import { isValidGroupFolder } from '../src/group-folder.ts';
+import { logger } from '../src/logger.ts';
+import { emitStatus } from './status.ts';
 
 interface RegisterArgs {
   jid: string;
@@ -98,41 +97,18 @@ export async function run(args: string[]): Promise<void> {
   fs.mkdirSync(path.join(projectRoot, 'data'), { recursive: true });
   fs.mkdirSync(STORE_DIR, { recursive: true });
 
-  // Write to SQLite using parameterized queries (no SQL injection)
-  const dbPath = path.join(STORE_DIR, 'messages.db');
-  const timestamp = new Date().toISOString();
-  const requiresTriggerInt = parsed.requiresTrigger ? 1 : 0;
+  // Initialize database (creates schema + runs migrations)
+  initDatabase();
 
-  const db = new Database(dbPath);
-  // Ensure schema exists
-  db.exec(`CREATE TABLE IF NOT EXISTS registered_groups (
-    jid TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    folder TEXT NOT NULL UNIQUE,
-    trigger_pattern TEXT NOT NULL,
-    added_at TEXT NOT NULL,
-    container_config TEXT,
-    requires_trigger INTEGER DEFAULT 1,
-    is_main INTEGER DEFAULT 0
-  )`);
+  setRegisteredGroup(parsed.jid, {
+    name: parsed.name,
+    folder: parsed.folder,
+    trigger: parsed.trigger,
+    added_at: new Date().toISOString(),
+    requiresTrigger: parsed.requiresTrigger,
+    isMain: parsed.isMain,
+  });
 
-  const isMainInt = parsed.isMain ? 1 : 0;
-
-  db.prepare(
-    `INSERT OR REPLACE INTO registered_groups
-     (jid, name, folder, trigger_pattern, added_at, container_config, requires_trigger, is_main)
-     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
-  ).run(
-    parsed.jid,
-    parsed.name,
-    parsed.folder,
-    parsed.trigger,
-    timestamp,
-    requiresTriggerInt,
-    isMainInt,
-  );
-
-  db.close();
   logger.info('Wrote registration to SQLite');
 
   // Create group folders
