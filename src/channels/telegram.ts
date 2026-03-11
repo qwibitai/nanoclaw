@@ -109,7 +109,6 @@ export async function sendPoolMessage(
         { chatId, sender },
         'Cannot send fallback message: main bot API not initialized',
       );
-      throw new Error('Both pool and main bot message sending failed');
     }
   }
 }
