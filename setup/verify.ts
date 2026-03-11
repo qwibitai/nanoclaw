@@ -14,13 +14,6 @@ import Database from 'better-sqlite3';
 import { INSTANCE_NAME, STORE_DIR } from '../src/config.js';
 import { readEnvFile } from '../src/env.js';
 import { logger } from '../src/logger.js';
-
-const SERVICE_LABEL = INSTANCE_NAME
-  ? `com.nanoclaw-${INSTANCE_NAME}`
-  : 'com.nanoclaw';
-const SYSTEMD_SERVICE_NAME = INSTANCE_NAME
-  ? `nanoclaw-${INSTANCE_NAME}`
-  : 'nanoclaw';
 import {
   getPlatform,
   getServiceManager,
@@ -28,6 +21,13 @@ import {
   isRoot,
 } from './platform.js';
 import { emitStatus } from './status.js';
+
+const SERVICE_LABEL = INSTANCE_NAME
+  ? `com.nanoclaw-${INSTANCE_NAME}`
+  : 'com.nanoclaw';
+const SYSTEMD_SERVICE_NAME = INSTANCE_NAME
+  ? `nanoclaw-${INSTANCE_NAME}`
+  : 'nanoclaw';
 
 export async function run(_args: string[]): Promise<void> {
   const projectRoot = process.cwd();
