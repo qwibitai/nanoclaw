@@ -51,6 +51,7 @@ export class DayZeroChannel implements Channel {
   private connected = false;
   private port: number;
   private opts: DayZeroChannelOpts;
+  private apiKey: string | null;
 
   // Track active and completed runs
   private runs = new Map<string, RunRecord>();
@@ -58,11 +59,19 @@ export class DayZeroChannel implements Channel {
   constructor(opts: DayZeroChannelOpts) {
     this.opts = opts;
 
-    const envConfig = readEnvFile(['DAYZERO_PORT']);
+    const envConfig = readEnvFile(['DAYZERO_PORT', 'DAYZERO_API_KEY']);
     this.port = parseInt(
       process.env.DAYZERO_PORT || envConfig.DAYZERO_PORT || String(DEFAULT_PORT),
       10,
     );
+    this.apiKey = process.env.DAYZERO_API_KEY || envConfig.DAYZERO_API_KEY || null;
+
+    if (!this.apiKey) {
+      logger.warn(
+        'DAYZERO_API_KEY not set. DayZero API will accept unauthenticated requests. ' +
+        'Set DAYZERO_API_KEY for production use.',
+      );
+    }
   }
 
   async connect(): Promise<void> {
@@ -136,8 +145,21 @@ export class DayZeroChannel implements Channel {
     const url = req.url || '';
     const method = req.method || '';
 
+    // Health check endpoint (no auth required)
     if (method === 'GET' && url === '/health') {
       this.handleHealth(res);
+      return;
+    }
+
+    // Check authentication for protected endpoints
+    if (this.apiKey && !this.isAuthenticated(req)) {
+      logger.warn(
+        { url, method, ip: req.socket.remoteAddress },
+        'Unauthorized DayZero API request',
+      );
+      this.sendJson(res, 401, {
+        error: 'Unauthorized. Include X-Api-Key header or Authorization: Bearer <token>',
+      });
       return;
     }
 
@@ -337,6 +359,29 @@ export class DayZeroChannel implements Channel {
   }
 
   // --- Helpers ---
+
+  private isAuthenticated(req: http.IncomingMessage): boolean {
+    if (!this.apiKey) {
+      return true; // No auth required if apiKey not set
+    }
+
+    // Check X-Api-Key header
+    const apiKeyHeader = req.headers['x-api-key'];
+    if (apiKeyHeader && apiKeyHeader === this.apiKey) {
+      return true;
+    }
+
+    // Check Authorization: Bearer <token> header
+    const authHeader = req.headers.authorization;
+    if (authHeader) {
+      const match = authHeader.match(/^Bearer\s+(.+)$/i);
+      if (match && match[1] === this.apiKey) {
+        return true;
+      }
+    }
+
+    return false;
+  }
 
   private readBody(
     req: http.IncomingMessage,
