@@ -3,6 +3,10 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
+ * Docs map:
+ * - docs/SECURITY.md#5-credential-isolation-credential-proxy
+ * - docs/SPEC.md#claude-authentication
+ *
  * Two auth modes:
  *   API key:  Proxy injects x-api-key on every request.
  *   OAuth:    Container CLI exchanges its placeholder token for a temp

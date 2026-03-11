@@ -233,6 +233,13 @@ structured pipeline: shape spec -> implement -> audit -> demo -> walk -> PR.
 - Writes results back to coordinator IPC
 - Enforces per-subscription rate limits and concurrency caps
 
+**IPC file contract** (operating convention)
+
+- **Dispatch files**: coordinator -> worker manager (new work)
+- **Result files**: worker manager -> coordinator (final outcome)
+- **Nudge files**: worker manager -> coordinator (result ready signal)
+- **Heartbeat files**: worker manager -> coordinator (liveness/progress)
+
 **Workflow monitor** (NanoClaw scheduled task, 60s cron)
 
 - Checks worker status files for completed phases
@@ -384,7 +391,21 @@ No infrastructure code lands on main without passing a security audit.
 
 ---
 
-## 10. Supporting Features
+## 10. Operational Resilience Overlays
+
+These are fork-level reliability controls for 24/7 operation:
+
+- **Auth circuit breaker**: suppresses retry storms after repeated auth failures, then auto-resets after cooldown.
+- **Task auto-pause on auth errors**: pauses failing scheduled tasks and emits a single operator-facing notification.
+- **Duplicate error suppression**: fingerprint-based dedup prevents repeated high-volume error spam.
+- **Long-lived token preference**: prefers setup-token credentials before short-lived login credentials.
+- **Admin operator commands**: guarded maintenance commands (`!restart`, `!purge`) on supported channels.
+
+Implementation details belong in `docs/SPEC.md`; this section documents the operating intent.
+
+---
+
+## 11. Supporting Features
 
 All implemented as scheduled tasks or coordinator behaviors.
 
@@ -417,7 +438,7 @@ The coordinator adjusts all agent behavior based on calendar state:
 
 ---
 
-## 11. Technology Stack
+## 12. Technology Stack
 
 ```
 Layer              Technology           Purpose

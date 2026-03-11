@@ -3,6 +3,10 @@
  *
  * Shared auth error detection + circuit breaker to prevent retry storms
  * when OAuth tokens expire or become invalid.
+ *
+ * Docs map:
+ * - docs/SECURITY.md#6-auth-resilience-controls
+ * - docs/SPEC.md#scheduled-tasks
  */
 import { logger } from "./logger.js";
 

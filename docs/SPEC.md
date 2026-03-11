@@ -84,6 +84,13 @@ A personal Claude assistant with multi-channel support, persistent memory per co
 | Browser Automation | agent-browser + Chromium                      | Web interaction and screenshots           |
 | Runtime            | Node.js 20+                                   | Host process for routing and scheduling   |
 
+**Operational reliability overlays in this fork:**
+
+- auth circuit breaker + cooldown reset
+- task auto-pause on auth failures
+- fingerprint-based duplicate message suppression
+- long-lived token preference (`claude setup-token`) over short-lived login credentials
+
 ---
 
 ## Architecture: Channel System
@@ -133,6 +140,19 @@ graph LR
     %% Styling for the dynamic channel
     style New stroke-dasharray: 5 5,stroke-width:2px
 ```
+
+### Optional External Worker Orchestration Over IPC
+
+Fork-local operating pattern for coordinator-driven coding orchestration:
+
+- **Dispatch files**: coordinator -> worker manager
+- **Result files**: worker manager -> coordinator
+- **Nudge files**: worker manager -> coordinator (result ready signal)
+- **Heartbeat files**: worker manager -> coordinator (liveness/progress)
+
+The core runtime does not require this pattern; it is an optional layer on top of NanoClaw IPC primitives.
+
+A scheduled workflow monitor task (typically 60-second cadence) is commonly used as a safety net to detect stale or missed orchestration state transitions.
 
 ### Channel Registry
 
@@ -409,7 +429,14 @@ The token can be extracted from `~/.claude/.credentials.json` if you're logged i
 ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-Only the authentication variables (`CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY`) are extracted from `.env` and written to `data/env/env`, then mounted into the container at `/workspace/env-dir/env` and sourced by the entrypoint script. This ensures other environment variables in `.env` are not exposed to the agent. This workaround is needed because some container runtimes lose `-e` environment variables when using `-i` (interactive mode with piped stdin).
+**Current fork behavior:**
+
+1. Containers receive only placeholder auth values.
+2. Containers call host-side credential proxy via `ANTHROPIC_BASE_URL`.
+3. Proxy injects real credentials on the host.
+4. OAuth source priority: `.env` setup-token first, then `~/.claude/.credentials.json` fallback (with refresh handling).
+
+This prevents real provider credentials from being directly exposed inside containers.
 
 ### Changing the Assistant Name
 
@@ -566,6 +593,18 @@ This allows the agent to understand the conversation context even if it wasn't m
 | `@Assistant list groups`         | `@Andy list groups`                 | Show registered groups |
 | `@Assistant remember [fact]`     | `@Andy remember I prefer dark mode` | Add to global memory   |
 
+### Channel-Specific Operator Commands (Discord)
+
+When `DISCORD_ADMIN_USER_ID` is configured, Discord channel handler supports:
+
+| Command                 | Example                 | Effect                                                      |
+| ----------------------- | ----------------------- | ----------------------------------------------------------- |
+| `!restart`              | `!restart`              | Restart NanoClaw service on host (admin-only)               |
+| `!purge`                | `!purge 50`             | Bulk-delete recent messages in current channel (admin-only) |
+| `!purge since midnight` | `!purge since midnight` | Delete messages since local midnight (admin-only)           |
+
+These are host-side maintenance commands and are not available through generic channel command parsing.
+
 ---
 
 ## Scheduled Tasks
@@ -628,6 +667,12 @@ From main channel:
 
 - `@Andy list all tasks` - View tasks from all groups
 - `@Andy schedule task for "Family Chat": [prompt]` - Schedule for another group
+
+### Failure Handling In Long-Running Deployments
+
+- Auth-like task failures trigger automatic pause (`status=paused`) to prevent retry storms.
+- A user-facing notification is sent when auto-pause occurs.
+- Duplicate failure output is suppressed by fingerprinted dedup to reduce repeated alerts.
 
 ---
 
@@ -768,10 +813,14 @@ WhatsApp messages could contain malicious instructions attempting to manipulate 
 
 ### Credential Storage
 
-| Credential       | Storage Location               | Notes                                               |
-| ---------------- | ------------------------------ | --------------------------------------------------- |
-| Claude CLI Auth  | data/sessions/{group}/.claude/ | Per-group isolation, mounted to /home/node/.claude/ |
-| WhatsApp Session | store/auth/                    | Auto-created, persists ~20 days                     |
+| Credential                 | Storage Location                   | Notes                                   |
+| -------------------------- | ---------------------------------- | --------------------------------------- |
+| Long-lived OAuth token     | `.env` (`CLAUDE_CODE_OAUTH_TOKEN`) | Preferred source (`claude setup-token`) |
+| Fallback OAuth credentials | `~/.claude/.credentials.json`      | Host-side fallback with refresh support |
+| API key                    | `.env` (`ANTHROPIC_API_KEY`)       | Injected by host credential proxy       |
+| WhatsApp session           | `store/auth/`                      | Channel auth state; host-side           |
+
+Credentials are injected on host side by credential proxy; containers use placeholder auth values.
 
 ### File Permissions
 

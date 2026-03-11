@@ -23,7 +23,10 @@ This guide helps you answer two questions quickly:
 4. **Remix and fork selectively (10-20 min)**
    Read [FORK_OVERVIEW.md](./FORK_OVERVIEW.md) to understand intentional divergences, then [FORK_SYNC.md](./FORK_SYNC.md) for practical upstream sync workflow.
 
-5. **Before contributing**
+5. **Installation and private config model (10-20 min)**
+   Read [INSTALLATION_MODEL.md](./INSTALLATION_MODEL.md) for code/config separation, group patterns, and long-lived deployment structure.
+
+6. **Before contributing**
    Read [CONTRIBUTING.md](../CONTRIBUTING.md). Substantive code contributions should usually go to upstream [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw).
 
 ## Fast Decision: Fork This Repo or Upstream?
@@ -32,3 +35,5 @@ This guide helps you answer two questions quickly:
 - Choose upstream if you want the canonical project baseline with minimal fork-specific guidance.
 
 If you start here and later want a cleaner baseline, you can switch to upstream using the sync flow in [FORK_SYNC.md](./FORK_SYNC.md).
+
+For roadmap status and planned fork-specific work, see [ROADMAP.md](../ROADMAP.md).

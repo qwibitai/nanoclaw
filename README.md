@@ -36,13 +36,29 @@ This repository is Trevor Wieland's personal public fork of upstream [qwibitai/n
 
 - Friends/family who want a practical starting fork they can safely remix
 - Readers who want to learn NanoClaw fundamentals and then decide whether to continue from this fork or from upstream
+- Developers who want a coordinator-style assistant that can supervise coding workflows through external worker systems
 
 **Recommended reading path:**
 
 - [docs/START_HERE.md](docs/START_HERE.md) - Guided reader journey
 - [docs/FORK_OVERVIEW.md](docs/FORK_OVERVIEW.md) - Fork philosophy and intentional divergences
 - [docs/FORK_SYNC.md](docs/FORK_SYNC.md) - Keeping this fork synced with upstream
+- [docs/INSTALLATION_MODEL.md](docs/INSTALLATION_MODEL.md) - Code/config separation and group layout patterns
+- [docs/HLD_MIGRATION_MAP.md](docs/HLD_MIGRATION_MAP.md) - Mapping of retired HLD content into canonical docs
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Contribution policy (substantive fixes/features go to upstream)
+
+## What This Fork Adds
+
+Compared to a minimal baseline, this fork layers in operational hardening and explicit multi-group operating patterns:
+
+- **Production resilience** - auth circuit breaker, auth-error task auto-pause, and duplicate error suppression to prevent retry storms
+- **Main/non-main boundary enforcement** - stricter controls around IPC operations, task scope, and visibility
+- **Optional external orchestration bridge** - file-based IPC pattern for coordinator-to-worker workflows (documented in `docs/ARCHITECTURE.md`)
+- **Admin controls (Discord)** - guarded `!restart` and `!purge` commands for operator maintenance
+- **Hardened credential flow** - host-side credential proxy so containers do not receive real auth secrets
+- **Modernized developer toolchain** - `pnpm`, `tsgo`, `oxfmt`, `oxlint`, `vitest`, `turbo`, and `knip`
+
+See [docs/SPEC.md](docs/SPEC.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/SECURITY.md](docs/SECURITY.md) for implementation details.
 
 ## Why I Built NanoClaw
 
@@ -71,6 +87,15 @@ claude
 Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
 
 > **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
+
+## Installation Model
+
+For long-lived installs, keep **code and personal config separated**:
+
+- Fork source repo (public): runtime code, docs, shared templates
+- Private config repo: group `CLAUDE.md` files, schedules, sensitive local data conventions
+
+This makes upstream sync safer and keeps personal assistant identity/config private. See [docs/INSTALLATION_MODEL.md](docs/INSTALLATION_MODEL.md) for concrete layouts and examples.
 
 ## Philosophy
 
@@ -133,6 +158,17 @@ NanoClaw doesn't use configuration files. To make changes, just tell Claude Code
 Or run `/customize` for guided changes.
 
 The codebase is small enough that Claude can safely modify it.
+
+## Extending
+
+Common extension paths:
+
+- **Add a group** - create a new group directory + `CLAUDE.md`, map it to a channel
+- **Add a task** - schedule recurring prompts inside the target group context
+- **Add a tool** - attach MCP servers per group according to trust needs
+- **Add a channel** - install/author a skill that registers a new channel adapter
+
+Examples and patterns are in [docs/INSTALLATION_MODEL.md](docs/INSTALLATION_MODEL.md) and [docs/SPEC.md](docs/SPEC.md).
 
 ## Contributing
 
@@ -247,6 +283,10 @@ Questions? Ideas? [Join the Discord](https://discord.gg/VDdww8qS42).
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for breaking changes and migration notes.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for implemented milestones and planned work.
 
 ## License
 
