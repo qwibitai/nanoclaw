@@ -721,6 +721,29 @@ function processQueryIpc(
       break;
     }
 
+    case 'list_groups': {
+      const groups = Object.entries(registeredGroups).map(([jid, g]) => ({
+        jid,
+        name: g.name,
+        folder: g.folder,
+        trigger: g.trigger,
+        isMain: g.isMain || false,
+        requiresTrigger: g.requiresTrigger,
+        // Only expose containerConfig to the group's own entry or main callers
+        containerConfig:
+          isMain || g.folder === sourceGroup ? g.containerConfig : undefined,
+      }));
+      logger.info(
+        { sourceGroup, count: groups.length },
+        'IPC list_groups query served',
+      );
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'ok',
+        groups,
+      });
+      break;
+    }
+
     case 'search_threads': {
       if (!data.query) {
         writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {

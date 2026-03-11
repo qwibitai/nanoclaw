@@ -82,12 +82,14 @@ vi.mock('discord.js', () => {
       return this.on(event, handler);
     }
 
+    guilds = { cache: { first: () => undefined } };
+
     async login(_token: string) {
       this._ready = true;
       // Fire the ready event
       const readyHandlers = this.eventHandlers.get('ready') || [];
       for (const h of readyHandlers) {
-        h({ user: this.user });
+        h({ user: this.user, guilds: this.guilds });
       }
     }
 
@@ -507,72 +509,25 @@ describe('DiscordChannel', () => {
   // --- Attachments ---
 
   describe('attachments', () => {
-    it('stores image attachment with placeholder', async () => {
+    it.each([
+      { name: 'photo.png', contentType: 'image/png', expected: '@Andy [Image: photo.png]' },
+      { name: 'clip.mp4', contentType: 'video/mp4', expected: '@Andy [Video: clip.mp4]' },
+      { name: 'report.pdf', contentType: 'application/pdf', expected: '@Andy [File: report.pdf]' },
+    ])('stores $contentType attachment as placeholder', async ({ name, contentType, expected }) => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      const attachments = new Map([
-        ['att1', { name: 'photo.png', contentType: 'image/png' }],
-      ]);
       const msg = createMessage({
         content: '',
-        attachments,
+        attachments: new Map([['att1', { name, contentType }]]),
         guildName: 'Server',
       });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({
-          content: '@Andy [Image: photo.png]',
-        }),
-      );
-    });
-
-    it('stores video attachment with placeholder', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        ['att1', { name: 'clip.mp4', contentType: 'video/mp4' }],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: '@Andy [Video: clip.mp4]',
-        }),
-      );
-    });
-
-    it('stores file attachment with placeholder', async () => {
-      const opts = createTestOpts();
-      const channel = new DiscordChannel('test-token', opts);
-      await channel.connect();
-
-      const attachments = new Map([
-        ['att1', { name: 'report.pdf', contentType: 'application/pdf' }],
-      ]);
-      const msg = createMessage({
-        content: '',
-        attachments,
-        guildName: 'Server',
-      });
-      await triggerMessage(msg);
-
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'dc:1234567890123456',
-        expect.objectContaining({
-          content: '@Andy [File: report.pdf]',
-        }),
+        expect.objectContaining({ content: expected }),
       );
     });
 
@@ -581,21 +536,16 @@ describe('DiscordChannel', () => {
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      const attachments = new Map([
-        ['att1', { name: 'photo.jpg', contentType: 'image/jpeg' }],
-      ]);
       const msg = createMessage({
         content: 'Check this out',
-        attachments,
+        attachments: new Map([['att1', { name: 'photo.jpg', contentType: 'image/jpeg' }]]),
         guildName: 'Server',
       });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({
-          content: '@Andy Check this out\n[Image: photo.jpg]',
-        }),
+        expect.objectContaining({ content: '@Andy Check this out\n[Image: photo.jpg]' }),
       );
     });
 
@@ -604,22 +554,19 @@ describe('DiscordChannel', () => {
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
 
-      const attachments = new Map([
-        ['att1', { name: 'a.png', contentType: 'image/png' }],
-        ['att2', { name: 'b.txt', contentType: 'text/plain' }],
-      ]);
       const msg = createMessage({
         content: '',
-        attachments,
+        attachments: new Map([
+          ['att1', { name: 'a.png', contentType: 'image/png' }],
+          ['att2', { name: 'b.txt', contentType: 'text/plain' }],
+        ]),
         guildName: 'Server',
       });
       await triggerMessage(msg);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'dc:1234567890123456',
-        expect.objectContaining({
-          content: '@Andy [Image: a.png]\n[File: b.txt]',
-        }),
+        expect.objectContaining({ content: '@Andy [Image: a.png]\n[File: b.txt]' }),
       );
     });
   });
@@ -723,24 +670,15 @@ describe('DiscordChannel', () => {
   // --- ownsJid ---
 
   describe('ownsJid', () => {
-    it('owns dc: JIDs', () => {
+    it.each([
+      ['dc:1234567890123456', true],
+      ['12345@g.us', false],
+      ['tg:123456789', false],
+      ['slack:C0123', false],
+      ['random-string', false],
+    ])('ownsJid(%s) = %s', (jid, expected) => {
       const channel = new DiscordChannel('test-token', createTestOpts());
-      expect(channel.ownsJid('dc:1234567890123456')).toBe(true);
-    });
-
-    it('does not own WhatsApp group JIDs', () => {
-      const channel = new DiscordChannel('test-token', createTestOpts());
-      expect(channel.ownsJid('12345@g.us')).toBe(false);
-    });
-
-    it('does not own Telegram JIDs', () => {
-      const channel = new DiscordChannel('test-token', createTestOpts());
-      expect(channel.ownsJid('tg:123456789')).toBe(false);
-    });
-
-    it('does not own unknown JID formats', () => {
-      const channel = new DiscordChannel('test-token', createTestOpts());
-      expect(channel.ownsJid('random-string')).toBe(false);
+      expect(channel.ownsJid(jid)).toBe(expected);
     });
   });
 

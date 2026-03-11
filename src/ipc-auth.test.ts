@@ -144,9 +144,12 @@ describe('schedule_task authorization', () => {
   });
 });
 
-// --- pause_task authorization ---
+// --- pause_task / resume_task authorization ---
 
-describe('pause_task authorization', () => {
+describe.each([
+  { action: 'pause_task' as const, initialStatus: 'active' as const, expectedAfter: 'paused', blockedStatus: 'active' },
+  { action: 'resume_task' as const, initialStatus: 'paused' as const, expectedAfter: 'active', blockedStatus: 'paused' },
+])('$action authorization', ({ action, initialStatus, expectedAfter, blockedStatus }) => {
   beforeEach(() => {
     createTask({
       id: 'task-main',
@@ -157,7 +160,7 @@ describe('pause_task authorization', () => {
       schedule_value: '2025-06-01T00:00:00.000Z',
       context_mode: 'isolated',
       next_run: '2025-06-01T00:00:00.000Z',
-      status: 'active',
+      status: initialStatus,
       created_at: '2024-01-01T00:00:00.000Z',
     });
     createTask({
@@ -169,88 +172,39 @@ describe('pause_task authorization', () => {
       schedule_value: '2025-06-01T00:00:00.000Z',
       context_mode: 'isolated',
       next_run: '2025-06-01T00:00:00.000Z',
-      status: 'active',
+      status: initialStatus,
       created_at: '2024-01-01T00:00:00.000Z',
     });
   });
 
-  it('main group can pause any task', async () => {
+  it('main group can do it to any task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-other' },
+      { type: action, taskId: 'task-other' },
       'whatsapp_main',
       true,
       deps,
     );
-    expect(getTaskById('task-other')!.status).toBe('paused');
+    expect(getTaskById('task-other')!.status).toBe(expectedAfter);
   });
 
-  it('non-main group can pause its own task', async () => {
+  it('non-main group can do it to its own task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-other' },
+      { type: action, taskId: 'task-other' },
       'other-group',
       false,
       deps,
     );
-    expect(getTaskById('task-other')!.status).toBe('paused');
+    expect(getTaskById('task-other')!.status).toBe(expectedAfter);
   });
 
-  it('non-main group cannot pause another groups task', async () => {
+  it('non-main group cannot do it to another groups task', async () => {
     await processTaskIpc(
-      { type: 'pause_task', taskId: 'task-main' },
+      { type: action, taskId: 'task-main' },
       'other-group',
       false,
       deps,
     );
-    expect(getTaskById('task-main')!.status).toBe('active');
-  });
-});
-
-// --- resume_task authorization ---
-
-describe('resume_task authorization', () => {
-  beforeEach(() => {
-    createTask({
-      id: 'task-paused',
-      group_folder: 'other-group',
-      chat_jid: 'other@g.us',
-      prompt: 'paused task',
-      schedule_type: 'once',
-      schedule_value: '2025-06-01T00:00:00.000Z',
-      context_mode: 'isolated',
-      next_run: '2025-06-01T00:00:00.000Z',
-      status: 'paused',
-      created_at: '2024-01-01T00:00:00.000Z',
-    });
-  });
-
-  it('main group can resume any task', async () => {
-    await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-    expect(getTaskById('task-paused')!.status).toBe('active');
-  });
-
-  it('non-main group can resume its own task', async () => {
-    await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
-      'other-group',
-      false,
-      deps,
-    );
-    expect(getTaskById('task-paused')!.status).toBe('active');
-  });
-
-  it('non-main group cannot resume another groups task', async () => {
-    await processTaskIpc(
-      { type: 'resume_task', taskId: 'task-paused' },
-      'third-group',
-      false,
-      deps,
-    );
-    expect(getTaskById('task-paused')!.status).toBe('paused');
+    expect(getTaskById('task-main')!.status).toBe(blockedStatus);
   });
 });
 
@@ -462,23 +416,6 @@ describe('schedule_task schedule types', () => {
     );
   });
 
-  it('rejects invalid cron expression', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'bad cron',
-        schedule_type: 'cron',
-        schedule_value: 'not a cron',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-  });
-
   it('creates task with interval schedule', async () => {
     const before = Date.now();
 
@@ -498,53 +435,23 @@ describe('schedule_task schedule types', () => {
     const tasks = getAllTasks();
     expect(tasks).toHaveLength(1);
     expect(tasks[0].schedule_type).toBe('interval');
-    // next_run should be ~1 hour from now
     const nextRun = new Date(tasks[0].next_run!).getTime();
     expect(nextRun).toBeGreaterThanOrEqual(before + 3600000 - 1000);
     expect(nextRun).toBeLessThanOrEqual(Date.now() + 3600000 + 1000);
   });
 
-  it('rejects invalid interval (non-numeric)', async () => {
+  it.each([
+    { type: 'cron', value: 'not a cron', label: 'invalid cron' },
+    { type: 'interval', value: 'abc', label: 'non-numeric interval' },
+    { type: 'interval', value: '0', label: 'zero interval' },
+    { type: 'once', value: 'not-a-date', label: 'invalid once timestamp' },
+  ])('rejects $label', async ({ type, value }) => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: 'bad interval',
-        schedule_type: 'interval',
-        schedule_value: 'abc',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-  });
-
-  it('rejects invalid interval (zero)', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'zero interval',
-        schedule_type: 'interval',
-        schedule_value: '0',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    expect(getAllTasks()).toHaveLength(0);
-  });
-
-  it('rejects invalid once timestamp', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'bad once',
-        schedule_type: 'once',
-        schedule_value: 'not-a-date',
+        prompt: 'bad schedule',
+        schedule_type: type,
+        schedule_value: value,
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
@@ -559,14 +466,19 @@ describe('schedule_task schedule types', () => {
 // --- context_mode defaulting ---
 
 describe('schedule_task context_mode', () => {
-  it('accepts context_mode=group', async () => {
+  it.each([
+    { input: 'group', expected: 'group' },
+    { input: 'isolated', expected: 'isolated' },
+    { input: 'bogus', expected: 'isolated' },
+    { input: undefined, expected: 'isolated' },
+  ])('context_mode=$input → $expected', async ({ input, expected }) => {
     await processTaskIpc(
       {
         type: 'schedule_task',
-        prompt: 'group context',
+        prompt: 'test context',
         schedule_type: 'once',
         schedule_value: '2025-06-01T00:00:00.000Z',
-        context_mode: 'group',
+        context_mode: input as any,
         targetJid: 'other@g.us',
       },
       'whatsapp_main',
@@ -575,63 +487,7 @@ describe('schedule_task context_mode', () => {
     );
 
     const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('group');
-  });
-
-  it('accepts context_mode=isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'isolated context',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        context_mode: 'isolated',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('isolated');
-  });
-
-  it('defaults invalid context_mode to isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'bad context',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        context_mode: 'bogus' as any,
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('isolated');
-  });
-
-  it('defaults missing context_mode to isolated', async () => {
-    await processTaskIpc(
-      {
-        type: 'schedule_task',
-        prompt: 'no context mode',
-        schedule_type: 'once',
-        schedule_value: '2025-06-01T00:00:00.000Z',
-        targetJid: 'other@g.us',
-      },
-      'whatsapp_main',
-      true,
-      deps,
-    );
-
-    const tasks = getAllTasks();
-    expect(tasks[0].context_mode).toBe('isolated');
+    expect(tasks[0].context_mode).toBe(expected);
   });
 });
 

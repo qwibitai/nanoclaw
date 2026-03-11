@@ -567,6 +567,74 @@ Workflow: search_threads → get thread_key → read_thread_by_key → full mess
   },
 );
 
+server.tool(
+  'list_groups',
+  `List all registered groups with their JIDs, folder names, triggers, and container configs.
+
+Use this to understand the current NanoClaw deployment:
+• Which channels/groups are registered
+• What folder each group maps to
+• Container configuration (mounts, tools, thread sessions)
+• Trigger patterns and main group identification`,
+  {},
+  async () => {
+    try {
+      const requestId = writeQueryFile({
+        type: 'list_groups',
+      });
+
+      const response = await waitForResponse(requestId) as {
+        status: string;
+        error?: string;
+        groups?: Array<{
+          jid: string;
+          name: string;
+          folder: string;
+          trigger: string;
+          isMain: boolean;
+          requiresTrigger?: boolean;
+          containerConfig?: object;
+        }>;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${response.error || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const groups = response.groups || [];
+      if (groups.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: 'No registered groups found.' }],
+        };
+      }
+
+      const formatted = groups
+        .map((g) => {
+          const flags = [
+            g.isMain ? 'MAIN' : null,
+            g.requiresTrigger === false ? 'no-trigger' : null,
+          ].filter(Boolean).join(', ');
+          const flagStr = flags ? ` [${flags}]` : '';
+          const config = g.containerConfig ? `\n   Config: ${JSON.stringify(g.containerConfig)}` : '';
+          return `- **${g.name}**${flagStr}\n   JID: ${g.jid}\n   Folder: ${g.folder}\n   Trigger: ${g.trigger}${config}`;
+        })
+        .join('\n\n');
+
+      return {
+        content: [{ type: 'text' as const, text: `Registered groups (${groups.length}):\n\n${formatted}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error listing groups: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

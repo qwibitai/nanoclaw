@@ -24,34 +24,16 @@ function makeMsg(overrides: Partial<NewMessage> = {}): NewMessage {
 // --- escapeXml ---
 
 describe('escapeXml', () => {
-  it('escapes ampersands', () => {
-    expect(escapeXml('a & b')).toBe('a &amp; b');
-  });
-
-  it('escapes less-than', () => {
-    expect(escapeXml('a < b')).toBe('a &lt; b');
-  });
-
-  it('escapes greater-than', () => {
-    expect(escapeXml('a > b')).toBe('a &gt; b');
-  });
-
-  it('escapes double quotes', () => {
-    expect(escapeXml('"hello"')).toBe('&quot;hello&quot;');
-  });
-
-  it('handles multiple special characters together', () => {
-    expect(escapeXml('a & b < c > d "e"')).toBe(
-      'a &amp; b &lt; c &gt; d &quot;e&quot;',
-    );
-  });
-
-  it('passes through strings with no special chars', () => {
-    expect(escapeXml('hello world')).toBe('hello world');
-  });
-
-  it('handles empty string', () => {
-    expect(escapeXml('')).toBe('');
+  it.each([
+    ['a & b', 'a &amp; b'],
+    ['a < b', 'a &lt; b'],
+    ['a > b', 'a &gt; b'],
+    ['"hello"', '&quot;hello&quot;'],
+    ['a & b < c > d "e"', 'a &amp; b &lt; c &gt; d &quot;e&quot;'],
+    ['hello world', 'hello world'],
+    ['', ''],
+  ])('escapeXml(%j) = %j', (input, expected) => {
+    expect(escapeXml(input)).toBe(expected);
   });
 });
 
@@ -187,51 +169,26 @@ describe('formatOutbound', () => {
 // --- Trigger gating with requiresTrigger flag ---
 
 describe('trigger gating (requiresTrigger interaction)', () => {
-  // Replicates the exact logic from processGroupMessages and startMessageLoop:
-  //   if (!isMainGroup && group.requiresTrigger !== false) { check trigger }
-  function shouldRequireTrigger(
-    isMainGroup: boolean,
-    requiresTrigger: boolean | undefined,
-  ): boolean {
-    return !isMainGroup && requiresTrigger !== false;
-  }
-
   function shouldProcess(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
     messages: NewMessage[],
   ): boolean {
-    if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
+    if (isMainGroup || requiresTrigger === false) return true;
     return messages.some((m) => TRIGGER_PATTERN.test(m.content.trim()));
   }
 
-  it('main group always processes (no trigger needed)', () => {
-    const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, undefined, msgs)).toBe(true);
-  });
+  const noTrigger = [makeMsg({ content: 'hello no trigger' })];
+  const withTrigger = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
 
-  it('main group processes even with requiresTrigger=true', () => {
-    const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(true, true, msgs)).toBe(true);
-  });
-
-  it('non-main group with requiresTrigger=undefined requires trigger (defaults to true)', () => {
-    const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, undefined, msgs)).toBe(false);
-  });
-
-  it('non-main group with requiresTrigger=true requires trigger', () => {
-    const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, true, msgs)).toBe(false);
-  });
-
-  it('non-main group with requiresTrigger=true processes when trigger present', () => {
-    const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
-    expect(shouldProcess(false, true, msgs)).toBe(true);
-  });
-
-  it('non-main group with requiresTrigger=false always processes (no trigger needed)', () => {
-    const msgs = [makeMsg({ content: 'hello no trigger' })];
-    expect(shouldProcess(false, false, msgs)).toBe(true);
+  it.each([
+    { isMain: true, requiresTrigger: undefined, msgs: noTrigger, expected: true, label: 'main always processes' },
+    { isMain: true, requiresTrigger: true, msgs: noTrigger, expected: true, label: 'main ignores requiresTrigger' },
+    { isMain: false, requiresTrigger: undefined, msgs: noTrigger, expected: false, label: 'non-main defaults to requiring trigger' },
+    { isMain: false, requiresTrigger: true, msgs: noTrigger, expected: false, label: 'non-main requires trigger when set' },
+    { isMain: false, requiresTrigger: true, msgs: withTrigger, expected: true, label: 'non-main processes when trigger present' },
+    { isMain: false, requiresTrigger: false, msgs: noTrigger, expected: true, label: 'non-main with requiresTrigger=false always processes' },
+  ] as const)('$label', ({ isMain, requiresTrigger, msgs, expected }) => {
+    expect(shouldProcess(isMain, requiresTrigger, msgs)).toBe(expected);
   });
 });

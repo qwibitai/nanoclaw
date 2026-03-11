@@ -419,6 +419,9 @@ function isToolScoped(tools: string[] | undefined, name: string): boolean {
 }
 
 // Read-only Gmail tools — scoped groups (e.g. gmail:illysium) get these instead of mcp__gmail__*
+// Excluded write tools: send_email, draft_email, modify_email, delete_email,
+// batch_modify_emails, batch_delete_emails, create_label, update_label, delete_label,
+// get_or_create_label, create_filter, create_filter_from_template, delete_filter
 const GMAIL_READ_TOOLS = [
   'mcp__gmail__search_emails',
   'mcp__gmail__read_email',
@@ -426,9 +429,10 @@ const GMAIL_READ_TOOLS = [
   'mcp__gmail__list_filters',
   'mcp__gmail__get_filter',
   'mcp__gmail__download_attachment',
-];
+] as const;
 
 // Read-only Calendar tools — scoped groups get these instead of mcp__google-calendar__*
+// Excluded write tools: create-event, create-events, delete-event, update-event, respond-to-event
 const CALENDAR_READ_TOOLS = [
   'mcp__google-calendar__list-events',
   'mcp__google-calendar__get-event',
@@ -437,7 +441,7 @@ const CALENDAR_READ_TOOLS = [
   'mcp__google-calendar__list-colors',
   'mcp__google-calendar__get-current-time',
   'mcp__google-calendar__get-freebusy',
-];
+] as const;
 
 function buildAllowedTools(tools: string[] | undefined): string[] {
   const allowed = [
