@@ -482,11 +482,7 @@ async function cleanupAdditionalMountWorktrees(
     ),
   );
 
-  const sessionDir = path.join(
-    WORKTREES_DIR,
-    MOUNT_WORKTREES_DIR,
-    sessionId,
-  );
+  const sessionDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR, sessionId);
   try {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   } catch {
@@ -560,19 +556,13 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
         for (const entry of fs.readdirSync(sessionPath)) {
           const wtPath = path.join(sessionPath, entry);
           const gitFile = path.join(wtPath, '.git');
-          if (
-            fs.existsSync(gitFile) &&
-            fs.statSync(gitFile).isFile()
-          ) {
+          if (fs.existsSync(gitFile) && fs.statSync(gitFile).isFile()) {
             try {
               const gitContent = fs.readFileSync(gitFile, 'utf-8');
               const match = gitContent.match(/gitdir:\s*(.+)/);
               if (match) {
                 // gitdir → .git/worktrees/<name> — resolve to repo root
-                const gitWorktreeDir = path.resolve(
-                  wtPath,
-                  match[1].trim(),
-                );
+                const gitWorktreeDir = path.resolve(wtPath, match[1].trim());
                 const repoDir = path.resolve(gitWorktreeDir, '..', '..', '..');
                 await execAsync('git worktree prune', {
                   cwd: repoDir,
@@ -1461,11 +1451,9 @@ export async function runContainerAgent(
 
       // Clean up additional-mount worktrees (fire-and-forget)
       if (mountWorktrees.length > 0) {
-        cleanupAdditionalMountWorktrees(
-          mountSessionId!,
-          mountWorktrees,
-        ).catch((err) =>
-          logger.warn({ err }, 'Additional mount worktree cleanup error'),
+        cleanupAdditionalMountWorktrees(mountSessionId!, mountWorktrees).catch(
+          (err) =>
+            logger.warn({ err }, 'Additional mount worktree cleanup error'),
         );
       }
 
