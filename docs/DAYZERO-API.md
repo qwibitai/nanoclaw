@@ -1,32 +1,42 @@
 # DayZero API
 
-HTTP API for triggering DayZero assessment runs via NanoClaw.
+HTTP API for triggering workflow runs (DayZero assessments, etc.) via NanoClaw.
 
 ## Overview
 
 The DayZero channel exposes an HTTP server (default port `9002`) that accepts
-requests to run evidence-based company assessments. Each request spawns a
-NanoClaw container agent that executes the DayZero framework against a
-company's data package.
+requests to run agent workflows. Each request spawns a NanoClaw container agent
+that executes the specified workflow type.
 
 ## Configuration
 
 | Environment Variable | Default | Description |
 |---|---|---|
 | `DAYZERO_PORT` | `9002` | HTTP port for the DayZero API |
+| `DAYZERO_API_KEY` | — | API key for authentication (optional but recommended) |
 
 ### Prerequisites
 
 - DayZero repo cloned at `/root/geodesic-explore/DayZero`
 - Mount allowlist (`~/.config/nanoclaw/mount-allowlist.json`) includes `/root/geodesic-explore` as an allowed root
 - Group `internal:dayzero` registered in the NanoClaw database
-- Company data packages present at `DayZero/data/{company}/`
+- Workflow data packages present at the expected path for the workflow type
+
+## Authentication
+
+Set `DAYZERO_API_KEY` in `.env` to enable authentication. When set, all
+endpoints except `/health` require one of:
+
+- `X-Api-Key: <key>` header
+- `Authorization: Bearer <key>` header
+
+If `DAYZERO_API_KEY` is not set, the API accepts unauthenticated requests.
 
 ## Endpoints
 
 ### `GET /health`
 
-Returns API status and active runs.
+Returns API status and active runs. No authentication required.
 
 **Response:**
 ```json
@@ -34,36 +44,42 @@ Returns API status and active runs.
   "status": "ok",
   "active_runs": 1,
   "runs": [
-    { "id": "a1b2c3d4", "company": "point_b" }
+    { "id": "a1b2c3d4", "workflow_type": "dayzero" }
   ]
 }
 ```
 
 ### `POST /v1/run`
 
-Start a new DayZero assessment.
+Start a new workflow run.
 
 **Request body:**
 ```json
 {
-  "company": "point_b",
+  "workflow_type": "dayzero",
   "engagement_mode": "turnaround_diagnostic",
-  "phase": "phase_2"
+  "phase": "phase_2",
+  "workflow_run_id": "uuid",
+  "tenant_id": "uuid",
+  "workspace_id": "uuid"
 }
 ```
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `company` | Yes | — | Company name (must match a directory in `DayZero/data/`) |
-| `engagement_mode` | No | `turnaround_diagnostic` | Either `turnaround_diagnostic` or `carveout_separation` |
-| `phase` | No | — | Resume from a specific phase instead of starting from Phase 0 |
+| `workflow_type` | Yes | — | Workflow type to run (e.g. `dayzero`, `financial-analysis`) |
+| `engagement_mode` | No | `turnaround_diagnostic` | Mode for the workflow |
+| `phase` | No | — | Resume from a specific phase instead of starting from the beginning |
+| `workflow_run_id` | No | — | Geodesic workflow run ID for progress tracking |
+| `tenant_id` | No | — | Geodesic tenant ID |
+| `workspace_id` | No | — | Geodesic workspace ID |
 
 **Response:**
 ```json
 {
   "status": "started",
   "run_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "company": "point_b",
+  "workflow_type": "dayzero",
   "engagement_mode": "turnaround_diagnostic",
   "poll_url": "/v1/runs/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
@@ -79,7 +95,7 @@ List all runs (active and completed).
   "runs": [
     {
       "id": "a1b2c3d4-...",
-      "company": "point_b",
+      "workflow_type": "dayzero",
       "engagement_mode": "turnaround_diagnostic",
       "status": "running",
       "started_at": "2026-03-10T07:30:00.000Z",
@@ -97,7 +113,7 @@ Get status and agent messages for a specific run.
 ```json
 {
   "id": "a1b2c3d4-...",
-  "company": "point_b",
+  "workflow_type": "dayzero",
   "engagement_mode": "turnaround_diagnostic",
   "status": "running",
   "started_at": "2026-03-10T07:30:00.000Z",
@@ -125,12 +141,12 @@ Mark a run as completed.
 
 Assessment artifacts are written by the agent to:
 ```
-/root/geodesic-explore/DayZero/runs/{company}_{run_id_prefix}/
+/workspace/extra/workflows/runs/{workflow_type}_{run_id_prefix}/
 ```
 
-This follows the standard DayZero run structure:
+For DayZero workflows, this follows the standard run structure:
 ```
-runs/{company}_{run_id}/
+runs/{workflow_type}_{run_id}/
   phase_0_orient/
     orientation_package.yaml
   phase_1_quantify/
@@ -151,33 +167,24 @@ runs/{company}_{run_id}/
 ## Example Usage
 
 ```bash
-# Start a turnaround diagnostic
+# Start a DayZero turnaround diagnostic
 curl -X POST http://localhost:9002/v1/run \
   -H "Content-Type: application/json" \
-  -d '{"company": "point_b"}'
+  -H "X-Api-Key: your-api-key" \
+  -d '{"workflow_type": "dayzero"}'
+
+# Start with Geodesic workflow tracking
+curl -X POST http://localhost:9002/v1/run \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: your-api-key" \
+  -d '{"workflow_type": "dayzero", "workflow_run_id": "uuid", "tenant_id": "uuid", "workspace_id": "uuid"}'
 
 # Poll for progress
-curl http://localhost:9002/v1/runs/<run_id>
+curl -H "X-Api-Key: your-api-key" http://localhost:9002/v1/runs/<run_id>
 
 # List all runs
-curl http://localhost:9002/v1/runs
+curl -H "X-Api-Key: your-api-key" http://localhost:9002/v1/runs
 
 # Mark complete
-curl -X POST http://localhost:9002/v1/runs/<run_id>/complete
+curl -X POST -H "X-Api-Key: your-api-key" http://localhost:9002/v1/runs/<run_id>/complete
 ```
-
-## Security
-
-**WARNING: The DayZero API has no authentication.** Any client that can reach
-port 9002 can trigger assessment runs. This is acceptable when:
-
-- The server is behind a firewall or security group restricting access
-- The port is bound to localhost only (`DAYZERO_PORT=127.0.0.1:9002` — not yet supported, would require a code change)
-- Access is mediated by a reverse proxy with authentication (e.g., nginx + OAuth2 Proxy)
-
-The same limitation applies to the Geodesic channel on port 9001.
-
-If the server is internet-facing, consider:
-1. Firewall rules restricting access to known IPs
-2. A reverse proxy (nginx/Caddy) with bearer token or mTLS authentication
-3. Binding to localhost and using an SSH tunnel for remote access

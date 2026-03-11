@@ -1,9 +1,9 @@
 /**
  * DayZero Channel for NanoClaw
  * =============================================================================
- * Exposes an HTTP API to trigger DayZero assessment runs.
- * Accepts POST /v1/run with a company name and engagement mode,
- * routes the prompt to the dayzero agent group, and collects responses.
+ * Exposes an HTTP API to trigger workflow runs (DayZero assessments, etc.).
+ * Accepts POST /v1/run with a workflow_type and engagement mode,
+ * routes the prompt to the appropriate agent group, and collects responses.
  *
  * Responses are accumulated per-run and retrievable via GET /v1/runs/:id.
  */
@@ -25,7 +25,7 @@ const DAYZERO_JID = 'internal:dayzero';
 
 interface RunRecord {
   id: string;
-  company: string;
+  workflowType: string;
   engagementMode: string;
   status: 'running' | 'completed' | 'error';
   startedAt: string;
@@ -198,7 +198,7 @@ export class DayZeroChannel implements Channel {
   private handleHealth(res: http.ServerResponse): void {
     const activeRuns = [...this.runs.values()]
       .filter((r) => r.status === 'running')
-      .map((r) => ({ id: r.id.slice(0, 8), company: r.company }));
+      .map((r) => ({ id: r.id.slice(0, 8), workflow_type: r.workflowType }));
 
     this.sendJson(res, 200, {
       status: 'ok',
@@ -241,7 +241,7 @@ export class DayZeroChannel implements Channel {
     // Create run record
     const run: RunRecord = {
       id: runId,
-      company: workflowType,
+      workflowType,
       engagementMode,
       status: 'running',
       startedAt: timestamp,
@@ -312,7 +312,7 @@ export class DayZeroChannel implements Channel {
 
     const response: Record<string, unknown> = {
       id: run.id,
-      company: run.company,
+      workflow_type: run.workflowType,
       engagement_mode: run.engagementMode,
       status: run.status,
       started_at: run.startedAt,
@@ -349,7 +349,7 @@ export class DayZeroChannel implements Channel {
   private handleListRuns(res: http.ServerResponse): void {
     const runs = [...this.runs.values()].map((r) => ({
       id: r.id,
-      company: r.company,
+      workflow_type: r.workflowType,
       engagement_mode: r.engagementMode,
       status: r.status,
       started_at: r.startedAt,
