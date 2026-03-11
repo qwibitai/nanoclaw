@@ -5,6 +5,7 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
@@ -18,9 +19,10 @@ import {
   STORE_DIR,
   resolveAssistantName,
 } from '../config.js';
+import { downloadAttachment } from '../attachment-downloader.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
-import { Channel } from '../types.js';
+import { Attachment, Channel } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -206,18 +208,85 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
+            let content =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
               '';
 
-            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-            if (!content) continue;
-
+            const msgId = msg.key.id || '';
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
+            const group = groups[chatJid];
+
+            // Download image and document attachments
+            const downloadedAttachments: Attachment[] = [];
+
+            if (normalized.imageMessage) {
+              if (!content) content = '[Image]';
+              try {
+                const att = await downloadAttachment({
+                  messageId: msgId,
+                  groupFolder: group.folder,
+                  filename: 'image.jpg',
+                  mimeType: normalized.imageMessage.mimetype || 'image/jpeg',
+                  expectedSize:
+                    Number(normalized.imageMessage.fileLength || 0) ||
+                    undefined,
+                  fetchFn: async () => {
+                    const buffer = await downloadMediaMessage(
+                      msg,
+                      'buffer',
+                      {},
+                    );
+                    return buffer as Buffer;
+                  },
+                });
+                if (att) downloadedAttachments.push(att);
+              } catch (err) {
+                logger.warn(
+                  { chatJid, err },
+                  'Failed to download WhatsApp image',
+                );
+              }
+            }
+
+            if (normalized.documentMessage) {
+              const docName = normalized.documentMessage.fileName || 'document';
+              const docMime =
+                normalized.documentMessage.mimetype ||
+                'application/octet-stream';
+              if (!content) content = `[Document: ${docName}]`;
+              try {
+                const att = await downloadAttachment({
+                  messageId: msgId,
+                  groupFolder: group.folder,
+                  filename: docName,
+                  mimeType: docMime,
+                  expectedSize:
+                    Number(normalized.documentMessage.fileLength || 0) ||
+                    undefined,
+                  fetchFn: async () => {
+                    const buffer = await downloadMediaMessage(
+                      msg,
+                      'buffer',
+                      {},
+                    );
+                    return buffer as Buffer;
+                  },
+                });
+                if (att) downloadedAttachments.push(att);
+              } catch (err) {
+                logger.warn(
+                  { chatJid, err },
+                  'Failed to download WhatsApp document',
+                );
+              }
+            }
+
+            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            if (!content) continue;
 
             const fromMe = msg.key.fromMe || false;
             // Detect bot messages: with own number, fromMe is reliable
@@ -225,14 +294,14 @@ export class WhatsAppChannel implements Channel {
             // With shared number, bot messages carry the assistant name prefix
             // (even in DMs/self-chat) so we check for that.
             const groupAssistantName = resolveAssistantName(
-              groups[chatJid]?.containerConfig,
+              group?.containerConfig,
             );
             const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
               ? fromMe
               : content.startsWith(`${groupAssistantName}:`);
 
             this.opts.onMessage(chatJid, {
-              id: msg.key.id || '',
+              id: msgId,
               chat_jid: chatJid,
               sender,
               sender_name: senderName,
@@ -240,6 +309,10 @@ export class WhatsAppChannel implements Channel {
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
+              attachments:
+                downloadedAttachments.length > 0
+                  ? downloadedAttachments
+                  : undefined,
             });
           }
         } catch (err) {

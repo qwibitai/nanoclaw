@@ -5,10 +5,11 @@ import {
   buildTriggerPattern,
   resolveAssistantName,
 } from '../config.js';
+import { downloadAttachment } from '../attachment-downloader.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
-import { Channel } from '../types.js';
+import { Attachment, Channel } from '../types.js';
 
 export class TelegramChannel implements Channel {
   name = 'telegram';
@@ -129,8 +130,12 @@ export class TelegramChannel implements Channel {
       );
     });
 
-    // Handle non-text messages with placeholders so the agent knows something was sent
-    const storeNonText = (ctx: any, placeholder: string) => {
+    // Handle non-text messages with placeholders and optional attachment downloads
+    const storeNonText = async (
+      ctx: any,
+      placeholder: string,
+      attachments?: Attachment[],
+    ) => {
       const chatJid = `tg:${ctx.chat.id}`;
       const group = this.opts.registeredGroups()[chatJid];
       if (!group) return;
@@ -160,16 +165,75 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
+        attachments:
+          attachments && attachments.length > 0 ? attachments : undefined,
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    // Helper to download a Telegram file by file_id
+    const downloadTelegramFile = async (
+      ctx: any,
+      fileId: string,
+      filename: string,
+      mimeType: string,
+      fileSize?: number,
+    ): Promise<Attachment | null> => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return null;
+
+      const msgId = ctx.message.message_id.toString();
+      const botToken = this.botToken;
+
+      return downloadAttachment({
+        messageId: msgId,
+        groupFolder: group.folder,
+        filename,
+        mimeType,
+        expectedSize: fileSize,
+        fetchFn: async () => {
+          const file = await ctx.api.getFile(fileId);
+          const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`;
+          const resp = await fetch(url);
+          if (!resp.ok)
+            throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+          return Buffer.from(await resp.arrayBuffer());
+        },
+      });
+    };
+
+    this.bot.on('message:photo', async (ctx) => {
+      const photos = ctx.message.photo;
+      // Use largest photo (last in array)
+      const largest = photos[photos.length - 1];
+      const att = await downloadTelegramFile(
+        ctx,
+        largest.file_id,
+        'photo.jpg',
+        'image/jpeg',
+        largest.file_size,
+      );
+      storeNonText(ctx, '[Photo]', att ? [att] : undefined);
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));
-    this.bot.on('message:document', (ctx) => {
-      const name = ctx.message.document?.file_name || 'file';
-      storeNonText(ctx, `[Document: ${name}]`);
+    this.bot.on('message:document', async (ctx) => {
+      const doc = ctx.message.document;
+      if (!doc?.file_id) {
+        storeNonText(ctx, '[Document]');
+        return;
+      }
+      const name = doc.file_name || 'file';
+      const mimeType = doc.mime_type || 'application/octet-stream';
+      const att = await downloadTelegramFile(
+        ctx,
+        doc.file_id,
+        name,
+        mimeType,
+        doc.file_size,
+      );
+      storeNonText(ctx, `[Document: ${name}]`, att ? [att] : undefined);
     });
     this.bot.on('message:sticker', (ctx) => {
       const emoji = ctx.message.sticker?.emoji || '';

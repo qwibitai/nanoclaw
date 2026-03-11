@@ -3,11 +3,13 @@
  * Spawns agent execution in containers and handles IPC
  */
 import { ChildProcess, exec, spawn } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 import {
+  ATTACHMENTS_DIR,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
@@ -163,6 +165,13 @@ async function getGranolaAccessToken(): Promise<string | null> {
   }
 }
 
+export interface ContainerAttachment {
+  filename: string;
+  mimeType: string;
+  containerPath: string; // e.g. /workspace/attachments/{msgId}/photo.png
+  messageId: string; // links attachment to specific message for correct ordering
+}
+
 export interface ContainerInput {
   prompt: string;
   sessionId?: string;
@@ -175,6 +184,7 @@ export interface ContainerInput {
   model?: string;
   secrets?: Record<string, string>;
   tools?: string[];
+  attachments?: ContainerAttachment[];
 }
 
 export interface ContainerOutput {
@@ -331,7 +341,7 @@ export async function prepareThreadWorkspace(
         } catch {
           // origin/HEAD not set — use local HEAD
         }
-        await execAsync(`git worktree add --detach "${wtPath}" ${ref}`, {
+        await execAsync(`git worktree add --detach "${wtPath}" "${ref}"`, {
           cwd: srcPath,
         });
         createdWorktrees.push({ repoDir: srcPath, wtPath });
@@ -411,6 +421,97 @@ export async function cleanupThreadWorkspace(
   }
 }
 
+/** Namespace for additional-mount worktrees (cannot collide with group folder names) */
+const MOUNT_WORKTREES_DIR = '__mounts__';
+
+/**
+ * Create a detached git worktree for an additionalMount.
+ * Isolates the container's git operations from the host working tree.
+ *
+ * MUST be called inside withGroupMutex() keyed on repoDir to prevent
+ * concurrent git worktree add on the same repo.
+ */
+async function prepareAdditionalMountWorktree(
+  repoDir: string,
+  sessionId: string,
+  containerBasename: string,
+): Promise<string> {
+  const clonePath = path.join(
+    WORKTREES_DIR,
+    MOUNT_WORKTREES_DIR,
+    sessionId,
+    containerBasename,
+  );
+
+  // Fetch latest from the source repo's remote before cloning
+  try {
+    await execAsync('git fetch origin', { cwd: repoDir });
+  } catch {
+    // Offline or no remote — clone from whatever the local repo has
+  }
+
+  // Use git clone (not git worktree add) because worktrees create a .git
+  // file pointing back to the parent repo's .git directory. Only the worktree
+  // is mounted in the container, so that reference is broken. A local clone
+  // is self-contained and works in any mount context.
+  await execAsync(
+    `git clone --local --no-checkout "${repoDir}" "${clonePath}"`,
+  );
+
+  // Repoint origin to the real remote (GitHub) so the container can push.
+  // The clone's origin defaults to the local repo path, which isn't useful
+  // inside the container.
+  try {
+    const remoteUrl = await execAsync('git remote get-url origin', {
+      cwd: repoDir,
+    });
+    if (remoteUrl) {
+      await execAsync(`git remote set-url origin "${remoteUrl}"`, {
+        cwd: clonePath,
+      });
+    }
+  } catch {
+    // No remote configured on source repo
+  }
+
+  // Checkout the default branch (origin/main)
+  let ref = 'origin/HEAD';
+  try {
+    await execAsync('git symbolic-ref refs/remotes/origin/HEAD', {
+      cwd: clonePath,
+    });
+  } catch {
+    // origin/HEAD not set — try origin/main, then just HEAD
+    try {
+      await execAsync('git rev-parse --verify origin/main', {
+        cwd: clonePath,
+      });
+      ref = 'origin/main';
+    } catch {
+      ref = 'HEAD';
+    }
+  }
+
+  await execAsync(`git checkout "${ref}"`, { cwd: clonePath });
+
+  return clonePath;
+}
+
+/** Clean up additional-mount clones created for a container session. */
+async function cleanupAdditionalMountWorktrees(
+  sessionId: string,
+  _mountWorktrees: Array<{ repoDir: string; wtPath: string }>,
+): Promise<void> {
+  // Clones are self-contained — just remove the session directory.
+  // No git worktree prune needed (unlike real worktrees).
+  const sessionDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR, sessionId);
+  try {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  } catch {
+    // best-effort
+  }
+}
+
 /**
  * Startup cleanup: prune orphan worktrees from all groups.
  */
@@ -423,6 +524,9 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
     for (const gf of groupFolders) {
       const gfPath = path.join(WORKTREES_DIR, gf);
       if (!fs.statSync(gfPath).isDirectory()) continue;
+
+      // Additional-mount worktrees are handled separately
+      if (gf === MOUNT_WORKTREES_DIR) continue;
 
       // Prune git's internal worktree metadata for each repo in the group
       const groupDir = path.join(GROUPS_DIR, gf);
@@ -462,6 +566,27 @@ export async function cleanupOrphanWorktrees(): Promise<void> {
         /* not empty or already removed */
       }
     }
+
+    // Clean up orphan additional-mount clones (self-contained, just rm)
+    const mountsDir = path.join(WORKTREES_DIR, MOUNT_WORKTREES_DIR);
+    if (fs.existsSync(mountsDir)) {
+      for (const sessionDir of fs.readdirSync(mountsDir)) {
+        const sessionPath = path.join(mountsDir, sessionDir);
+        if (!fs.statSync(sessionPath).isDirectory()) continue;
+        try {
+          fs.rmSync(sessionPath, { recursive: true, force: true });
+          cleaned++;
+        } catch {
+          /* ignore */
+        }
+      }
+
+      try {
+        fs.rmdirSync(mountsDir);
+      } catch {
+        /* not empty */
+      }
+    }
   } catch (err) {
     logger.warn({ err }, 'Error during orphan worktree cleanup');
   }
@@ -476,6 +601,11 @@ function buildVolumeMounts(
   isMain: boolean,
   threadId?: string,
   worktreePath?: string,
+  preValidatedAdditionalMounts?: Array<{
+    hostPath: string;
+    containerPath: string;
+    readonly: boolean;
+  }>,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -865,6 +995,17 @@ function buildVolumeMounts(
     }
   }
 
+  // Attachments: always mount group-specific attachments directory read-only.
+  // Must be unconditional — piped follow-up messages may deliver attachments
+  // after the container starts, and bind mounts show live filesystem changes.
+  const groupAttachmentsDir = path.join(ATTACHMENTS_DIR, group.folder);
+  fs.mkdirSync(groupAttachmentsDir, { recursive: true });
+  mounts.push({
+    hostPath: groupAttachmentsDir,
+    containerPath: '/workspace/attachments',
+    readonly: true,
+  });
+
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
   const groupIpcDir = resolveGroupIpcPath(group.folder);
@@ -904,15 +1045,17 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Additional mounts validated against external allowlist (tamper-proof from containers)
-  if (group.containerConfig?.additionalMounts) {
-    const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
-      group.name,
-      isMain,
-    );
-    mounts.push(...validatedMounts);
-  }
+  // Additional mounts — use pre-validated if provided, otherwise validate inline
+  const additionalMounts =
+    preValidatedAdditionalMounts ??
+    (group.containerConfig?.additionalMounts
+      ? validateAdditionalMounts(
+          group.containerConfig.additionalMounts,
+          group.name,
+          isMain,
+        )
+      : []);
+  mounts.push(...additionalMounts);
 
   return mounts;
 }
@@ -1025,6 +1168,71 @@ export async function runContainerAgent(
     }
   }
 
+  // Create worktrees for additionalMounts with useWorktree: true.
+  // Isolates the container's git operations from the host working tree.
+  const mountWorktrees: Array<{ repoDir: string; wtPath: string }> = [];
+  let mountSessionId: string | undefined;
+  let validatedAdditionalMounts:
+    | Array<{
+        hostPath: string;
+        containerPath: string;
+        readonly: boolean;
+        useWorktree?: boolean;
+      }>
+    | undefined;
+
+  if (group.containerConfig?.additionalMounts?.some((m) => m.useWorktree)) {
+    const validated = validateAdditionalMounts(
+      group.containerConfig.additionalMounts,
+      group.name,
+      input.isMain,
+    );
+
+    mountSessionId = crypto.randomUUID().slice(0, 8);
+    validatedAdditionalMounts = [];
+
+    for (const vm of validated) {
+      if (
+        vm.useWorktree &&
+        !vm.readonly &&
+        fs.existsSync(path.join(vm.hostPath, '.git'))
+      ) {
+        try {
+          const containerBasename = path.basename(vm.containerPath);
+          const wtPath = await withGroupMutex(vm.hostPath, () =>
+            prepareAdditionalMountWorktree(
+              vm.hostPath,
+              mountSessionId!,
+              containerBasename,
+            ),
+          );
+          mountWorktrees.push({ repoDir: vm.hostPath, wtPath });
+          validatedAdditionalMounts.push({
+            hostPath: wtPath,
+            containerPath: vm.containerPath,
+            readonly: vm.readonly,
+          });
+          logger.info(
+            {
+              hostPath: vm.hostPath,
+              wtPath,
+              sessionId: mountSessionId,
+            },
+            'Additional mount worktree prepared',
+          );
+        } catch (err) {
+          logger.error(
+            { hostPath: vm.hostPath, err },
+            'Failed to create worktree for additional mount, using direct mount',
+          );
+          validatedAdditionalMounts.push(vm);
+        }
+      } else {
+        validatedAdditionalMounts.push(vm);
+      }
+    }
+  }
+
   // Create thread-specific IPC input directory before container launch.
   // chown to 1000 (container user) so the container can delete consumed files.
   const ipcInputDir = resolveGroupIpcInputPath(group.folder, ipcInputSubdir);
@@ -1042,6 +1250,7 @@ export async function runContainerAgent(
     input.isMain,
     input.threadId,
     worktreePath,
+    validatedAdditionalMounts,
   );
 
   // When running as root (UID 0), writable mount directories are owned by root,
@@ -1239,6 +1448,14 @@ export async function runContainerAgent(
     container.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
+
+      // Clean up additional-mount worktrees (fire-and-forget)
+      if (mountWorktrees.length > 0) {
+        cleanupAdditionalMountWorktrees(mountSessionId!, mountWorktrees).catch(
+          (err) =>
+            logger.warn({ err }, 'Additional mount worktree cleanup error'),
+        );
+      }
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');

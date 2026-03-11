@@ -53,6 +53,11 @@ export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
 export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 
+export const ATTACHMENTS_DIR = path.resolve(DATA_DIR, 'attachments');
+export const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB
+export const MAX_DOCUMENT_SIZE = 50 * 1024 * 1024; // 50MB
+export const ATTACHMENT_CLEANUP_HOURS = 72;
+
 export const CONTAINER_IMAGE =
   process.env.CONTAINER_IMAGE || 'nanoclaw-agent:latest';
 export const CONTAINER_TIMEOUT = parseInt(

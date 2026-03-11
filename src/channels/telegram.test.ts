@@ -18,6 +18,11 @@ vi.mock('../config.js', () => ({
     config?.assistantName || 'Andy',
 }));
 
+// Mock attachment downloader (returns null — downloads are tested separately)
+vi.mock('../attachment-downloader.js', () => ({
+  downloadAttachment: vi.fn(() => Promise.resolve(null)),
+}));
+
 // Mock logger
 vi.mock('../logger.js', () => ({
   logger: {
@@ -156,7 +161,11 @@ function createMediaCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       caption: overrides.caption,
+      photo: [{ file_id: 'test-file-id', width: 100, height: 100 }],
       ...(overrides.extra || {}),
+    },
+    api: {
+      getFile: vi.fn(() => Promise.resolve({ file_path: 'photos/test.jpg' })),
     },
     me: { username: 'andy_ai_bot' },
   };
@@ -620,7 +629,13 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createMediaCtx({
-        extra: { document: { file_name: 'report.pdf' } },
+        extra: {
+          document: {
+            file_id: 'test-doc-id',
+            file_name: 'report.pdf',
+            mime_type: 'application/pdf',
+          },
+        },
       });
       await triggerMediaMessage('message:document', ctx);
 
@@ -635,7 +650,9 @@ describe('TelegramChannel', () => {
       const channel = new TelegramChannel('test-token', opts);
       await channel.connect();
 
-      const ctx = createMediaCtx({ extra: { document: {} } });
+      const ctx = createMediaCtx({
+        extra: { document: { file_id: 'test-doc-id' } },
+      });
       await triggerMediaMessage('message:document', ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(

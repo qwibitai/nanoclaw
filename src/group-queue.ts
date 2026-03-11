@@ -7,6 +7,7 @@ import {
   MAX_CONCURRENT_CONTAINERS,
   MAX_THREADS_PER_GROUP,
 } from './config.js';
+import { ContainerAttachment } from './container-runner.js';
 import { resolveGroupIpcInputPath } from './group-folder.js';
 import { logger } from './logger.js';
 
@@ -265,6 +266,7 @@ export class GroupQueue {
     groupJid: string,
     threadId: string | undefined,
     text: string,
+    attachments?: ContainerAttachment[],
   ): boolean {
     const threadKey = this.resolveThreadKey(threadId);
     const state = this.getGroup(groupJid);
@@ -278,7 +280,11 @@ export class GroupQueue {
       const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`;
       const filepath = path.join(inputDir, filename);
       const tempPath = `${filepath}.tmp`;
-      fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
+      const payload: Record<string, unknown> = { type: 'message', text };
+      if (attachments && attachments.length > 0) {
+        payload.attachments = attachments;
+      }
+      fs.writeFileSync(tempPath, JSON.stringify(payload));
       fs.renameSync(tempPath, filepath);
       return true;
     } catch {

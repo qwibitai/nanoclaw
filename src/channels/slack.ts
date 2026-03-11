@@ -8,8 +8,9 @@ import {
   parseThreadJid,
   resolveAssistantName,
 } from '../config.js';
+import { downloadAttachment } from '../attachment-downloader.js';
 import { getRouterState, setRouterState, updateChatName } from '../db.js';
-import { ContainerConfig } from '../types.js';
+import { ContainerConfig, Attachment } from '../types.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
@@ -35,6 +36,7 @@ export class SlackChannel implements Channel {
   name = 'slack';
 
   private app: App;
+  private botToken: string;
   private botUserId: string | undefined;
   private teamId: string | undefined;
   private autoRegisterConfig: Record<string, AutoRegisterTemplate> = {};
@@ -72,6 +74,7 @@ export class SlackChannel implements Channel {
       );
     }
 
+    this.botToken = botToken;
     this.app = new App({
       token: botToken,
       appToken,
@@ -252,6 +255,46 @@ export class SlackChannel implements Channel {
         content = `@${assistantName} ${content}`;
       }
 
+      // Download attached files (images, documents)
+      const downloadedAttachments: Attachment[] = [];
+      const files = (msg as any).files as
+        | Array<{
+            id: string;
+            name?: string;
+            mimetype?: string;
+            url_private_download?: string;
+            size?: number;
+          }>
+        | undefined;
+      if (files && files.length > 0 && !isAnyBot) {
+        const slackBotToken = this.botToken;
+        const downloads = await Promise.all(
+          files.map(async (file) => {
+            if (!file.url_private_download) return null;
+            const mimeType = file.mimetype || 'application/octet-stream';
+            const filename = file.name || 'file';
+            return downloadAttachment({
+              messageId: msg.ts,
+              groupFolder: group.folder,
+              filename,
+              mimeType,
+              expectedSize: file.size,
+              fetchFn: async () => {
+                const resp = await fetch(file.url_private_download!, {
+                  headers: { Authorization: `Bearer ${slackBotToken}` },
+                });
+                if (!resp.ok)
+                  throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+                return Buffer.from(await resp.arrayBuffer());
+              },
+            });
+          }),
+        );
+        for (const dl of downloads) {
+          if (dl) downloadedAttachments.push(dl);
+        }
+      }
+
       // When thread sessions are enabled and the message is inside a thread,
       // emit a thread-scoped JID so the orchestrator creates an isolated session.
       // Top-level messages always use baseJid — the thread is created on reply.
@@ -268,6 +311,8 @@ export class SlackChannel implements Channel {
         timestamp,
         is_from_me: isOurBot,
         is_bot_message: isOurBot,
+        attachments:
+          downloadedAttachments.length > 0 ? downloadedAttachments : undefined,
       });
     });
   }
