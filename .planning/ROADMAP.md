@@ -14,6 +14,13 @@ Transform NanoClaw's GroupQueue from a single-container-per-group model to a mul
 
 **Requirements:** CONC-01, CONC-02, CONC-03, CONC-04, CONC-05, COMPAT-01, COMPAT-02
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Refactor GroupQueue data model from single-container to multi-container
+- [ ] 01-02-PLAN.md — Update index.ts and task-scheduler.ts for multi-container API
+- [ ] 01-03-PLAN.md — Rewrite and extend GroupQueue test suite
+
 **Success Criteria:**
 1. A second message to the same group spawns a new container while the first container is still running
 2. Each concurrent container gets a fresh Claude session (no shared sessionId)
@@ -39,5 +46,5 @@ Transform NanoClaw's GroupQueue from a single-container-per-group model to a mul
 
 | Phase | Status | Plans | Completed |
 |-------|--------|-------|-----------|
-| 1 — Multi-Container GroupQueue | Not Started | 0 | 0 |
+| 1 — Multi-Container GroupQueue | Planning Complete | 3 | 0 |
 | 2 — Session Awareness + Deployment | Not Started | 0 | 0 |
