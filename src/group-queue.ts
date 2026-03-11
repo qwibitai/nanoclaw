@@ -170,19 +170,7 @@ export class GroupQueue {
       return;
     }
 
-    // If group has containers running, queue the task and preempt any idle one
-    if (state.containers.size > 0) {
-      state.pendingTasks.push({ id: taskId, groupJid, fn });
-      const idleContainer = this.findIdleContainer(state);
-      if (idleContainer) {
-        // Preempt idle container so it exits, freeing a slot for the task
-        this.closeStdinForSlot(idleContainer);
-      }
-      logger.debug({ groupJid, taskId }, 'Containers active, task queued');
-      return;
-    }
-
-    // No containers running — check global cap
+    // Check global cap before spawning
     if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
       state.pendingTasks.push({ id: taskId, groupJid, fn });
       if (!this.waitingGroups.includes(groupJid)) {
@@ -195,7 +183,8 @@ export class GroupQueue {
       return;
     }
 
-    // Run immediately
+    // Run immediately — even if other containers are already running for this group.
+    // Tasks (including Google Chat messages routed as tasks) run concurrently.
     this.runTask(groupJid, { id: taskId, groupJid, fn }).catch((err) =>
       logger.error({ groupJid, taskId, err }, 'Unhandled error in runTask'),
     );
