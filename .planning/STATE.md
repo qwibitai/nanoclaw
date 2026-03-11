@@ -3,26 +3,26 @@
 ## Project Reference
 
 - **Core value:** Messages never blocked by running containers
-- **Current focus:** Phase 2 — Session Awareness (Plan 01 complete, Plan 02 next)
+- **Current focus:** Phase 2 — Session Awareness (Complete — both plans done)
 - **Airtable record:** `recFADjzpnBY8NHh4`
 
 ## Current Position
 
 - **Phase:** 2 — Session Awareness
-- **Plan:** 1 of 2 (02-01 complete)
-- **Status:** In Progress
-- **Progress:** ██████░░░░ 67%
+- **Plan:** 2 of 2 (02-02 complete)
+- **Status:** Complete
+- **Progress:** ██████████ 100%
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
 | Phases total | 2 |
-| Phases complete | 0 |
+| Phases complete | 2 |
 | Plans total | 6 |
-| Plans complete | 4 |
-| Tasks total | 7 |
-| Tasks complete | 7 |
+| Plans complete | 5 |
+| Tasks total | 8 |
+| Tasks complete | 8 |
 
 | Phase | Plan | Duration | Tasks | Files |
 |-------|------|----------|-------|-------|
@@ -30,6 +30,7 @@
 | 01 | 02 | 268s | 2 | 3 |
 | 01 | 03 | 128s | 1 | 1 |
 | 02 | 01 | 188s | 2 | 4 |
+| 02 | 02 | 170s | 1 | 4 |
 
 ## Accumulated Context
 
@@ -47,6 +48,9 @@
 - Fresh session per container (sessionId=undefined) for CONC-02 — idle-reuse containers already have session internally
 - Task session logic preserved — context_mode 'group' resumes group session, 'isolated' fresh
 - QueuedTask.fn receives containerId from GroupQueue.runTask for explicit threading
+- containerId added to ContainerInput interface — container needs it to filter self from active sessions
+- Session awareness read once on startup, not per query — point-in-time snapshot is sufficient
+- XML <active-sessions> block prepended to prompt — matches existing Claude context block convention
 
 ### Technical Notes
 - `session-awareness.ts` writes `data/ipc/{group}/active_sessions.json` with atomic temp+rename
@@ -68,6 +72,10 @@
 - runAgent passes sessionId=undefined (CONC-02) and containerId to registerProcess
 - SchedulerDependencies.onProcess includes containerId parameter
 - QueuedTask.fn signature is (containerId: string) => Promise<void>
+- Container reads /workspace/ipc/active_sessions.json via readSessionAwareness() on startup
+- readSessionAwareness filters out own containerId, returns '' on missing/corrupt/empty
+- ContainerInput now includes containerId (host-side and container-side)
+- runAgent() and runTask() both pass containerId in ContainerInput
 
 ### Blockers
 - (none)
@@ -78,10 +86,11 @@
 ## Session Continuity
 
 ### Last Session
-- 2026-03-11T21:03:22Z
+- 2026-03-11T21:08:27Z
 
 ### Handover Notes
 - Phase 01 complete: All 3 plans done (01-01, 01-02, 01-03)
-- Plan 02-01 complete: Session awareness file writer + GroupQueue lifecycle hooks
-- active_sessions.json written on container start, cleaned on exit
-- Next: Plan 02-02 — Container-side session reading + end-to-end validation
+- Phase 02 complete: All 2 plans done (02-01, 02-02)
+- Host writes active_sessions.json on container start/exit (02-01)
+- Container reads it on startup, injects <active-sessions> XML into initial prompt (02-02)
+- All 6 plans across both phases complete — project done
