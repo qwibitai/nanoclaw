@@ -9,7 +9,7 @@ import { logger } from '../logger.js';
 import { Channel } from '../types.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 
-const SA_KEY_PATH = '/opt/nanoclaw/credentials/google-chat-sa.json';
+const SA_KEY_PATH = '/opt/nanoclaw/service-accounts/google-chat-sa.json';
 const SCOPES = ['https://www.googleapis.com/auth/chat.bot'];
 
 // Google Chat message limit is 4096 characters
