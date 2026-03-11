@@ -104,6 +104,9 @@ export async function sendPoolMessage(
     if (_mainBotApi) {
       const numericId = chatId.replace(/^tg:/, '');
       await _mainBotApi.sendMessage(numericId, `[${sender}] ${text}`);
+    } else {
+      logger.error({ chatId, sender }, 'Cannot send fallback message: main bot API not initialized');
+      throw new Error('Both pool and main bot message sending failed');
     }
   }
 }
