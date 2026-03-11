@@ -181,7 +181,7 @@ export class CodexRuntime implements AgentRuntime {
       this.hooks.onLog('Initializing git repo in workspace for Codex');
       execSync('git init && git commit --allow-empty -m "init"', {
         cwd: CONTAINER_GROUP_PATH,
-        env: { ...process.env, GIT_AUTHOR_NAME: 'Lyra', GIT_AUTHOR_EMAIL: 'lyra@nanoclaw', GIT_COMMITTER_NAME: 'Lyra', GIT_COMMITTER_EMAIL: 'lyra@nanoclaw' },
+        env: { ...process.env, GIT_AUTHOR_NAME: 'nanoclaw', GIT_AUTHOR_EMAIL: 'agent@nanoclaw', GIT_COMMITTER_NAME: 'nanoclaw', GIT_COMMITTER_EMAIL: 'agent@nanoclaw' },
         stdio: 'ignore',
       });
     }
