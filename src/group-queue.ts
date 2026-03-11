@@ -44,6 +44,15 @@ export class GroupQueue {
     | ((groupJid: string, containerId: string) => Promise<boolean>)
     | null = null;
   private shuttingDown = false;
+  private onContainerStartFn:
+    | ((
+        groupFolder: string,
+        session: { containerId: string; type: 'message' | 'task' },
+      ) => void)
+    | null = null;
+  private onContainerExitFn:
+    | ((groupFolder: string, containerId: string) => void)
+    | null = null;
 
   // Tracks which containerId is being registered during processMessagesFn callback.
   // Safe because Node.js is single-threaded: between runForGroup starting and
@@ -82,6 +91,21 @@ export class GroupQueue {
     fn: (groupJid: string, containerId: string) => Promise<boolean>,
   ): void {
     this.processMessagesFn = fn;
+  }
+
+  setOnContainerStart(
+    fn: (
+      groupFolder: string,
+      session: { containerId: string; type: 'message' | 'task' },
+    ) => void,
+  ): void {
+    this.onContainerStartFn = fn;
+  }
+
+  setOnContainerExit(
+    fn: (groupFolder: string, containerId: string) => void,
+  ): void {
+    this.onContainerExitFn = fn;
   }
 
   enqueueMessageCheck(groupJid: string): void {
@@ -204,6 +228,14 @@ export class GroupQueue {
       slot.process = proc;
       slot.containerName = containerName;
       if (groupFolder) slot.groupFolder = groupFolder;
+
+      // Notify session awareness — container is now registered and running
+      if (groupFolder && this.onContainerStartFn) {
+        this.onContainerStartFn(groupFolder, {
+          containerId: slot.containerId,
+          type: slot.type,
+        });
+      }
     } else {
       // Fallback: no matching slot found. This shouldn't happen in normal flow
       // but log a warning rather than silently dropping.
@@ -379,6 +411,11 @@ export class GroupQueue {
       );
       this.scheduleRetry(groupJid, state);
     } finally {
+      // Notify session awareness — container is exiting
+      if (slot.groupFolder && this.onContainerExitFn) {
+        this.onContainerExitFn(slot.groupFolder, containerId);
+      }
+
       // EDGE CASE 3: Always clean up this specific slot in finally — even if
       // processMessagesFn throws. No orphan slots possible. Other containers
       // for this group are completely unaffected.
@@ -429,6 +466,11 @@ export class GroupQueue {
         'Error running task',
       );
     } finally {
+      // Notify session awareness — task container is exiting
+      if (slot.groupFolder && this.onContainerExitFn) {
+        this.onContainerExitFn(slot.groupFolder, containerId);
+      }
+
       // EDGE CASE 3: Always clean up in finally — no orphan task slots possible.
       state.containers.delete(containerId);
       this.pendingRegistrations.delete(groupJid);

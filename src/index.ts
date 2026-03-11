@@ -41,6 +41,10 @@ import {
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
+import {
+  removeActiveSession,
+  writeActiveSessionsFile,
+} from './session-awareness.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -64,6 +68,21 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+
+// Wire session awareness — tracks active containers per group in
+// data/ipc/{groupFolder}/active_sessions.json for concurrent container coordination.
+queue.setOnContainerStart((groupFolder, session) => {
+  writeActiveSessionsFile(groupFolder, {
+    containerId: session.containerId,
+    started: new Date().toISOString(),
+    type: session.type,
+    repos: [],
+  });
+});
+
+queue.setOnContainerExit((groupFolder, containerId) => {
+  removeActiveSession(groupFolder, containerId);
+});
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
