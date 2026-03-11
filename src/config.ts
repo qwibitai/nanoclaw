@@ -129,6 +129,12 @@ export const WEB_CHANNEL_ORIGINS = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// --- CLI Runner (host Claude Code via Max subscription) ---
+export const CLI_ENABLED = process.env.CLI_ENABLED !== 'false'; // default on
+export const CLI_TIMEOUT = parseInt(process.env.CLI_TIMEOUT || '600000', 10); // 10 min
+export const CLI_MODEL = process.env.CLI_MODEL || 'claude-sonnet-4-6'; // Sonnet free with Max
+export const CLI_MCP_CONFIG = path.resolve(PROJECT_ROOT, 'cowork-mcp.json');
+
 // --- Groq (voice transcription) ---
 export const GROQ_API_KEY =
   process.env.GROQ_API_KEY || envConfig.GROQ_API_KEY || '';

@@ -112,3 +112,13 @@ UPDATE scheduled_tasks SET model = 'claude-sonnet-4-6', budget_usd = 0.50
 -- (login to Vendera/HahaVending, navigate complex UIs, extract data, reconcile)
 UPDATE scheduled_tasks SET model = 'claude-sonnet-4-6', budget_usd = 0.50
   WHERE id LIKE '%vending%' OR id LIKE '%inventory%';
+
+-- Stage 6: CLI execution mode (Max subscription)
+-- Add columns if they don't exist (safe to re-run — errors are ignored by sqlite3)
+-- Note: sqlite3 CLI doesn't support try/catch, so we use INSERT trick to test.
+-- If the app has already run (which adds columns via ALTER TABLE), these are no-ops.
+ALTER TABLE scheduled_tasks ADD COLUMN execution_mode TEXT DEFAULT 'cli';
+ALTER TABLE scheduled_tasks ADD COLUMN fallback_to_container INTEGER DEFAULT 1;
+
+-- All scheduled tasks default to CLI (free with Max sub), with container fallback
+UPDATE scheduled_tasks SET execution_mode = 'cli', fallback_to_container = 1;

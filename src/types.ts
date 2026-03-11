@@ -72,6 +72,8 @@ export interface ScheduledTask {
   created_at: string;
   model?: string | null;
   budget_usd?: number | null;
+  execution_mode?: 'cli' | 'container' | null;
+  fallback_to_container?: number | null;
 }
 
 export interface TaskRunLog {

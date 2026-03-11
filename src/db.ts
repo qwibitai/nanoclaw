@@ -272,6 +272,22 @@ function createSchema(database: Database.Database): void {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_place_id ON contacts(google_place_id) WHERE google_place_id IS NOT NULL`,
   );
 
+  // Add execution_mode column for CLI vs container routing
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN execution_mode TEXT DEFAULT 'cli'`,
+    );
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE scheduled_tasks ADD COLUMN fallback_to_container INTEGER DEFAULT 1`,
+    );
+  } catch {
+    /* column already exists */
+  }
+
   // Add model column to usage_log for model-specific cost tracking
   try {
     database.exec(`ALTER TABLE usage_log ADD COLUMN model TEXT DEFAULT NULL`);
@@ -541,8 +557,8 @@ export function createTask(
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at, model, budget_usd)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at, model, budget_usd, execution_mode, fallback_to_container)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -557,6 +573,8 @@ export function createTask(
     task.created_at,
     task.model || null,
     task.budget_usd ?? null,
+    task.execution_mode || 'cli',
+    task.fallback_to_container ?? 1,
   );
 }
 
@@ -585,7 +603,7 @@ export function updateTask(
   updates: Partial<
     Pick<
       ScheduledTask,
-      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status' | 'model' | 'budget_usd'
+      'prompt' | 'schedule_type' | 'schedule_value' | 'next_run' | 'status' | 'model' | 'budget_usd' | 'execution_mode' | 'fallback_to_container'
     >
   >,
 ): void {
@@ -619,6 +637,14 @@ export function updateTask(
   if (updates.budget_usd !== undefined) {
     fields.push('budget_usd = ?');
     values.push(updates.budget_usd);
+  }
+  if (updates.execution_mode !== undefined) {
+    fields.push('execution_mode = ?');
+    values.push(updates.execution_mode);
+  }
+  if (updates.fallback_to_container !== undefined) {
+    fields.push('fallback_to_container = ?');
+    values.push(updates.fallback_to_container);
   }
 
   if (fields.length === 0) return;
@@ -1209,15 +1235,20 @@ const DEFAULT_PRICING: [number, number, number] = [3.00, 15.00, 0.30]; // Sonnet
  * Calculates "today" using the configured TIMEZONE, not UTC.
  */
 export function getDailySpendUsd(): number {
-  // Calculate midnight in the configured timezone
+  // Calculate midnight in the configured timezone, then convert to UTC for SQL
   const now = new Date();
-  const tzMidnight = new Date(
-    now.toLocaleString('en-US', { timeZone: TIMEZONE }).replace(',', ''),
-  );
-  tzMidnight.setHours(0, 0, 0, 0);
-  // Convert back to UTC ISO string for the SQL query
-  const offset = now.getTime() - tzMidnight.getTime();
-  const todayStartUtc = new Date(now.getTime() - offset).toISOString();
+  // Get current time in the target timezone as components
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TIMEZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '0';
+  // Hours/minutes/seconds elapsed since midnight in target timezone
+  const elapsedMs = (parseInt(get('hour'), 10) * 3600 + parseInt(get('minute'), 10) * 60 + parseInt(get('second'), 10)) * 1000;
+  // Subtract elapsed time from current UTC time to get midnight UTC equivalent
+  const todayStartUtc = new Date(now.getTime() - elapsedMs).toISOString();
 
   const rows = db
     .prepare(
@@ -1291,7 +1322,7 @@ export function pruneOldLogs(): { taskRuns: number; usage: number; messages: num
   const usageCutoff = new Date(Date.now() - 90 * 86400000).toISOString(); // 90 days
   const messageCutoff = new Date(Date.now() - 180 * 86400000).toISOString(); // 180 days
 
-  const taskRuns = db.prepare('DELETE FROM task_run_logs WHERE started_at < ?').run(taskRunCutoff).changes;
+  const taskRuns = db.prepare('DELETE FROM task_run_logs WHERE run_at < ?').run(taskRunCutoff).changes;
   const usage = db.prepare('DELETE FROM usage_log WHERE timestamp < ?').run(usageCutoff).changes;
   const messages = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(messageCutoff).changes;
 
