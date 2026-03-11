@@ -504,6 +504,8 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter bot messages using both the is_bot_message flag AND the content
   // prefix as a backstop for messages written before the migration ran.
+  // Bot messages are excluded here to prevent re-trigger loops;
+  // use getBotResponsesSince() to fetch them separately for prompt context.
   const sql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
     FROM messages
@@ -515,6 +517,43 @@ export function getMessagesSince(
   return db
     .prepare(sql)
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
+}
+
+/** Max characters to include for bot responses in prompt context.
+ *  Long bot responses are truncated to save tokens while preserving awareness. */
+const BOT_RESPONSE_CONTEXT_LIMIT = 500;
+
+/**
+ * Fetch bot responses in a time range, truncated for prompt context.
+ * Used to interleave the agent's prior responses into the conversation
+ * so it knows what it said. Separate from getMessagesSince to avoid
+ * re-trigger loops (bot messages should not trigger processing).
+ */
+export function getBotResponsesSince(
+  chatJid: string,
+  sinceTimestamp: string,
+): NewMessage[] {
+  const sql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 1
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp
+    LIMIT 50
+  `;
+  const rows = db
+    .prepare(sql)
+    .all(chatJid, sinceTimestamp) as NewMessage[];
+
+  for (const row of rows) {
+    if (row.content.length > BOT_RESPONSE_CONTEXT_LIMIT) {
+      row.content =
+        row.content.slice(0, BOT_RESPONSE_CONTEXT_LIMIT) + '\n... [truncated]';
+    }
+  }
+
+  return rows;
 }
 
 /**

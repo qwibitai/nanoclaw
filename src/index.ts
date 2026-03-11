@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -46,6 +47,7 @@ import {
   getAllRegisteredGroups,
   getAllSessionsV2,
   getAllTasks,
+  getBotResponsesSince,
   getIdleSessions,
   getMessageById,
   getMessagesSince,
@@ -393,6 +395,27 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
+  // Interleave bot responses so the agent has context of what it said.
+  // Bot responses are stored separately (not in getMessagesSince) to avoid
+  // re-trigger loops. Both arrays are already sorted by timestamp (ORDER BY
+  // in SQL), so merge them in O(n) rather than concat+sort.
+  const botResponses = getBotResponsesSince(chatJid, sinceTimestamp);
+  if (botResponses.length > 0) {
+    const merged: typeof missedMessages = [];
+    let i = 0;
+    let j = 0;
+    while (i < missedMessages.length && j < botResponses.length) {
+      if (missedMessages[i].timestamp <= botResponses[j].timestamp) {
+        merged.push(missedMessages[i++]);
+      } else {
+        merged.push(botResponses[j++]);
+      }
+    }
+    while (i < missedMessages.length) merged.push(missedMessages[i++]);
+    while (j < botResponses.length) merged.push(botResponses[j++]);
+    missedMessages = merged;
+  }
+
   const modelOverride = extractModelOverride(missedMessages);
   const model = resolveModel(group, modelOverride);
   const prompt = formatMessages(missedMessages);
@@ -476,6 +499,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         );
         if (text) {
           await channel.sendMessage(chatJid, text);
+          // Persist bot response so the agent has context of what it said
+          storeMessage({
+            id: `bot-${crypto.randomUUID()}`,
+            chat_jid: chatJid,
+            sender: 'bot',
+            sender_name: groupAssistantName,
+            content: text,
+            timestamp: new Date().toISOString(),
+            is_from_me: true,
+            is_bot_message: true,
+          });
           await channel.setTyping?.(chatJid, false);
           outputSentToUser = true;
         }

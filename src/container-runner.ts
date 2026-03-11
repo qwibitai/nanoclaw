@@ -211,6 +211,24 @@ function isToolEnabled(tools: string[] | undefined, name: string): boolean {
   return tools.some((t) => t === name || t.startsWith(name + ':'));
 }
 
+/**
+ * Extract scoped access entries from tools array (e.g. 'gmail:illysium' → ['illysium']).
+ * Returns scopes and whether the tool is scope-restricted (no bare entry like 'gmail').
+ */
+function extractToolScopes(
+  tools: string[] | undefined,
+  toolName: string,
+): { scopes: string[]; isScoped: boolean } {
+  const scopes =
+    tools
+      ?.filter((t) => t.startsWith(`${toolName}:`))
+      .map((t) => t.split(':')[1]) ?? [];
+  return {
+    scopes,
+    isScoped: scopes.length > 0 && !tools?.includes(toolName),
+  };
+}
+
 // Per-group mutex for serializing worktree creation (git locks .git/worktrees/)
 const worktreeMutex = new Map<string, Promise<void>>();
 
@@ -635,13 +653,17 @@ function buildVolumeMounts(
       readonly: false,
     });
 
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
-      });
+    // Mount global context directory unless explicitly disabled (shared/multi-tenant groups).
+    // When globalContext is false, the container has zero visibility into other projects.
+    if (group.containerConfig?.globalContext !== false) {
+      const globalDir = path.join(GROUPS_DIR, 'global');
+      if (fs.existsSync(globalDir)) {
+        mounts.push({
+          hostPath: globalDir,
+          containerPath: '/workspace/global',
+          readonly: true,
+        });
+      }
     }
   }
 
@@ -812,14 +834,10 @@ function buildVolumeMounts(
 
   // Gmail credentials — gated by tools config
   if (isToolEnabled(tools, 'gmail')) {
-    // Check for account-specific restriction (e.g. 'gmail:illysium')
-    const gmailAccounts = tools
-      ?.filter((t) => t.startsWith('gmail:'))
-      .map((t) => t.split(':')[1]);
-    const accountSpecific =
-      gmailAccounts && gmailAccounts.length > 0 && !tools!.includes('gmail');
+    const { scopes: gmailAccounts, isScoped: gmailScoped } =
+      extractToolScopes(tools, 'gmail');
 
-    if (accountSpecific) {
+    if (gmailScoped) {
       // Mount only the specified account's credentials as /home/node/.gmail-mcp
       // so the Gmail MCP server finds it at its default location
       const accountDir = path.join(homeDir, `.gmail-mcp-${gmailAccounts[0]}`);
@@ -858,16 +876,77 @@ function buildVolumeMounts(
   }
 
   // Google Calendar MCP credentials — gated by tools config.
+  // Supports scoped access: 'calendar' = all accounts,
+  // 'calendar:illysium' = only that account's token.
   // Calendar uses the same GCP OAuth app as Gmail, so mount the primary
   // Gmail OAuth keys even when gmail tool is not enabled for this group.
   if (isToolEnabled(tools, 'calendar')) {
     const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
     fs.mkdirSync(calendarDir, { recursive: true });
-    mounts.push({
-      hostPath: calendarDir,
-      containerPath: '/home/node/.config/google-calendar-mcp',
-      readonly: false,
-    });
+
+    const { scopes: calendarAccounts, isScoped: calendarScoped } =
+      extractToolScopes(tools, 'calendar');
+
+    if (calendarScoped) {
+      // Stage a filtered tokens.json with only allowed accounts
+      const tokensPath = path.join(calendarDir, 'tokens.json');
+      if (fs.existsSync(tokensPath)) {
+        try {
+          const allTokens = JSON.parse(
+            fs.readFileSync(tokensPath, 'utf-8'),
+          );
+          const filtered: Record<string, unknown> = {};
+          for (const acct of calendarAccounts) {
+            if (allTokens[acct]) {
+              filtered[acct] = allTokens[acct];
+            }
+          }
+          const stagingDir = path.join(
+            DATA_DIR,
+            'sessions',
+            group.folder,
+            threadId ? `threads/${threadId}` : 'main',
+            'google-calendar-mcp',
+          );
+          fs.mkdirSync(stagingDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(stagingDir, 'tokens.json'),
+            JSON.stringify(filtered, null, 2),
+          );
+          // Copy non-token files (e.g. settings) as-is
+          for (const entry of fs.readdirSync(calendarDir)) {
+            if (entry === 'tokens.json') continue;
+            const src = path.join(calendarDir, entry);
+            if (fs.statSync(src).isFile()) {
+              fs.copyFileSync(src, path.join(stagingDir, entry));
+            }
+          }
+          mounts.push({
+            hostPath: stagingDir,
+            containerPath: '/home/node/.config/google-calendar-mcp',
+            readonly: false,
+          });
+        } catch (err) {
+          // Fail closed — do NOT fall back to full dir, that defeats scoping
+          logger.warn(
+            { err, group: group.folder },
+            'Failed to filter calendar tokens — skipping calendar mount',
+          );
+        }
+      } else {
+        logger.warn(
+          { group: group.folder },
+          'Calendar tokens.json not found — calendar MCP will have no pre-existing tokens',
+        );
+      }
+    } else {
+      mounts.push({
+        hostPath: calendarDir,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,
+      });
+    }
+
     // Ensure OAuth keys are available for calendar even without gmail tool.
     // Mount only the keys file — not the full dir (which has Gmail tokens).
     if (!isToolEnabled(tools, 'gmail')) {
@@ -891,13 +970,8 @@ function buildVolumeMounts(
       const origToml = path.join(snowflakeDir, 'connections.toml');
       if (fs.existsSync(origToml)) {
         // Determine which connections this group may access
-        const allowedConns = tools
-          ?.filter((t) => t.startsWith('snowflake:'))
-          .map((t) => t.split(':')[1]);
-        const filterConnections =
-          allowedConns &&
-          allowedConns.length > 0 &&
-          !tools!.includes('snowflake');
+        const { scopes: allowedConns, isScoped: filterConnections } =
+          extractToolScopes(tools, 'snowflake');
 
         // Stage everything into a single directory: connections.toml (with
         // rewritten paths), config.toml (with rewritten log path), and key
@@ -927,7 +1001,7 @@ function buildVolumeMounts(
             .filter((section) => {
               const match = section.match(/^\[([^\]]+)\]/);
               if (!match) return !section.trim(); // keep blank preamble
-              return allowedConns!.includes(match[1]);
+              return allowedConns.includes(match[1]);
             })
             .join('');
         }
@@ -1063,13 +1137,48 @@ function buildVolumeMounts(
 /**
  * Read allowed secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
+ *
+ * When tools includes 'github:<scope>' (e.g. 'github:illysium'), reads
+ * GITHUB_TOKEN_<SCOPE> from .env instead of the global GITHUB_TOKEN.
+ * This ensures shared/multi-tenant groups get a fine-grained PAT scoped
+ * to their org, making cross-org repo access impossible by construction.
  */
-function readSecrets(): Record<string, string> {
-  return readEnvFile([
+function readSecrets(tools?: string[]): Record<string, string> {
+  // Determine which GitHub token env var to read
+  const { scopes: githubScopes, isScoped: githubScoped } =
+    extractToolScopes(tools, 'github');
+  const githubTokenKey = githubScoped
+    ? `GITHUB_TOKEN_${githubScopes[0].toUpperCase()}`
+    : 'GITHUB_TOKEN';
+
+  if (githubScopes.length > 1) {
+    logger.warn(
+      'Multiple github: scopes specified — only the first (%s) is used',
+      githubScopes[0],
+    );
+  }
+
+  const secrets = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
-    'GITHUB_TOKEN',
+    githubTokenKey,
   ]);
+
+  // Warn if scoped token is missing (fail-closed: no GITHUB_TOKEN at all)
+  if (githubTokenKey !== 'GITHUB_TOKEN' && !secrets[githubTokenKey]) {
+    logger.warn(
+      { key: githubTokenKey },
+      'Scoped GitHub token not found in .env — container will have no GitHub access',
+    );
+  }
+
+  // Normalize scoped token key to GITHUB_TOKEN so the container entrypoint finds it
+  if (githubTokenKey !== 'GITHUB_TOKEN' && secrets[githubTokenKey]) {
+    secrets.GITHUB_TOKEN = secrets[githubTokenKey];
+    delete secrets[githubTokenKey];
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(
@@ -1323,7 +1432,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    input.secrets = readSecrets(tools);
     if (granolaAccessToken) {
       input.secrets.GRANOLA_ACCESS_TOKEN = granolaAccessToken;
     }

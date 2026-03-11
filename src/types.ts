@@ -35,11 +35,16 @@ export interface ContainerConfig {
   model?: string; // Default model for this group (e.g. "claude-sonnet-4-6")
   // Integrations available inside this group's container.
   // Undefined = all tools (backwards compatible).
-  // Supported: 'gmail', 'gmail:<account>' (e.g. 'gmail:illysium'), 'calendar', 'granola',
-  //            'snowflake', 'snowflake:<connection>' (e.g. 'snowflake:sunday', 'snowflake:apollo')
+  // Supported: 'gmail', 'gmail:<account>' (e.g. 'gmail:illysium'), 'calendar',
+  //            'calendar:<account>' (e.g. 'calendar:illysium'), 'granola',
+  //            'snowflake', 'snowflake:<connection>' (e.g. 'snowflake:sunday', 'snowflake:apollo'),
+  //            'github', 'github:<scope>' (e.g. 'github:illysium' → reads GITHUB_TOKEN_ILLYSIUM from .env)
   // Account-specific gmail mounts only that account's credentials as the default.
+  // Account-specific calendar stages a filtered tokens.json with only allowed accounts.
   // Connection-specific snowflake filters connections.toml to only allowed sections + keys.
+  // Scope-specific github reads GITHUB_TOKEN_<SCOPE> from .env instead of global GITHUB_TOKEN.
   tools?: string[];
+  globalContext?: boolean; // Mount groups/global/ into container (default true; set false for shared groups)
   enableThreadSessions?: boolean; // Default true for Discord/Slack; set false to disable
   sessionIdleResetHours?: number; // Override global idle reset (0 = never auto-reset)
   threadSessionIdleHours?: number; // Override idle reset for thread sessions
