@@ -75,7 +75,12 @@ export const DISABLE_TRIGGERS = process.env.DISABLE_TRIGGERS === 'true';
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+const poolEnv = readEnvFile(['TELEGRAM_BOT_POOL']);
+export const TELEGRAM_BOT_POOL = (
+  process.env.TELEGRAM_BOT_POOL ||
+  poolEnv.TELEGRAM_BOT_POOL ||
+  ''
+)
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);
