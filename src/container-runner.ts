@@ -249,9 +249,13 @@ function buildContainerArgs(
     // The proxy injects the real OPENAI_API_KEY so it never enters the container.
     // Containers that use ~/.codex session auth (no API key) will ignore these
     // env vars — the SDK falls back to the mounted auth file automatically.
+    //
+    // No /v1 suffix here: the OpenAI SDK appends /v1 to OPENAI_BASE_URL itself.
+    // Adding /v1 here would produce double-prefix (/v1/v1/...) when users set
+    // OPENAI_BASE_URL to a custom endpoint that already includes /v1.
     args.push(
       '-e',
-      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}/v1`,
+      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}`,
     );
     args.push('-e', 'OPENAI_API_KEY=placeholder');
   } else {

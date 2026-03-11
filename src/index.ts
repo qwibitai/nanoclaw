@@ -11,6 +11,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy, startOpenAIProxy } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -481,6 +482,13 @@ async function main(): Promise<void> {
   // Start OpenAI credential proxy for Codex engine (only when AGENT_ENGINE=codex)
   let openAIProxyServer: Awaited<ReturnType<typeof startOpenAIProxy>> | null = null;
   if (process.env.AGENT_ENGINE === 'codex') {
+    const openaiSecrets = readEnvFile(['OPENAI_API_KEY']);
+    if (!openaiSecrets.OPENAI_API_KEY) {
+      logger.warn(
+        'AGENT_ENGINE=codex but OPENAI_API_KEY is not set in .env. ' +
+        'API requests will fail unless ~/.codex session auth is configured.',
+      );
+    }
     openAIProxyServer = await startOpenAIProxy(OPENAI_PROXY_PORT, PROXY_BIND_HOST);
   }
 
