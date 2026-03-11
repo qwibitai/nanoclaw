@@ -190,8 +190,20 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  if (fs.existsSync(agentRunnerSrc)) {
+    if (!fs.existsSync(groupAgentRunnerDir)) {
+      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+    } else {
+      // Sync source files so skill-branch updates propagate to existing sessions
+      // while preserving any agent-created files in the group directory.
+      for (const entry of fs.readdirSync(agentRunnerSrc)) {
+        fs.cpSync(
+          path.join(agentRunnerSrc, entry),
+          path.join(groupAgentRunnerDir, entry),
+          { recursive: true },
+        );
+      }
+    }
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
