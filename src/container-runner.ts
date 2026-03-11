@@ -111,8 +111,8 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
     }
   }
 
-  // Persistent uv cache across container restarts (shared across all groups)
-  const uvCacheDir = path.join(DATA_DIR, "cache", "uv");
+  // Persistent uv cache across container restarts (isolated per group)
+  const uvCacheDir = path.join(DATA_DIR, "cache", "uv", group.folder);
   fs.mkdirSync(uvCacheDir, { recursive: true });
   mounts.push({
     hostPath: uvCacheDir,
