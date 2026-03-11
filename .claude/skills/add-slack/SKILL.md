@@ -35,7 +35,11 @@ git remote add slack https://github.com/qwibitai/nanoclaw-slack.git
 
 ```bash
 git fetch slack main
-git merge slack/main
+git merge slack/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
@@ -114,31 +118,18 @@ Wait for the user to provide the channel ID.
 
 ### Register the channel
 
-Use the IPC register flow or register directly. The channel ID, name, and folder name are needed.
+The channel ID, name, and folder name are needed. Use `npx tsx setup/index.ts --step register` with the appropriate flags.
 
 For a main channel (responds to all messages):
 
-```typescript
-registerGroup("slack:<channel-id>", {
-  name: "<channel-name>",
-  folder: "slack_main",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: false,
-  isMain: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "slack:<channel-id>" --name "<channel-name>" --folder "slack_main" --trigger "@${ASSISTANT_NAME}" --channel slack --no-trigger-required --is-main
 ```
 
 For additional channels (trigger-only):
 
-```typescript
-registerGroup("slack:<channel-id>", {
-  name: "<channel-name>",
-  folder: "slack_<channel-name>",
-  trigger: `@${ASSISTANT_NAME}`,
-  added_at: new Date().toISOString(),
-  requiresTrigger: true,
-});
+```bash
+npx tsx setup/index.ts --step register -- --jid "slack:<channel-id>" --name "<channel-name>" --folder "slack_<channel-name>" --trigger "@${ASSISTANT_NAME}" --channel slack
 ```
 
 ## Phase 5: Verify
