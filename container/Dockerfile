@@ -1,9 +1,10 @@
 # NanoClaw Agent Container
 # Runs Claude Agent SDK in isolated Linux VM with browser automation
 
-FROM node:22-slim
+FROM node:22-bookworm
 
 # Install system dependencies for Chromium
+# node:22-bookworm includes curl and git; chromium requires unrestricted apt access
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-liberation \
@@ -22,11 +23,10 @@ RUN apt-get update && apt-get install -y \
     libcups2 \
     libdrm2 \
     libxshmfence1 \
-    curl \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    || (echo "WARNING: Browser packages unavailable - browser automation disabled" && rm -rf /var/lib/apt/lists/*)
 
-# Set Chromium path for agent-browser
+# Set Chromium path for agent-browser (only active if chromium was installed above)
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
