@@ -15,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OPENAI_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -27,7 +28,6 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
-import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -234,34 +234,43 @@ function buildVolumeMounts(
  * Read Codex-specific secrets from .env for passing to the container via stdin.
  * Secrets are never written to disk or mounted as files.
  */
-function readCodexSecrets(): Record<string, string> {
-  return readEnvFile(['OPENAI_API_KEY', 'OPENAI_BASE_URL']);
-}
-
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  engine: 'claude' | 'codex' = 'claude',
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  if (engine === 'codex') {
+    // Codex engine: route OpenAI SDK requests through the OpenAI credential proxy.
+    // The proxy injects the real OPENAI_API_KEY so it never enters the container.
+    // Containers that use ~/.codex session auth (no API key) will ignore these
+    // env vars — the SDK falls back to the mounted auth file automatically.
+    args.push(
+      '-e',
+      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}/v1`,
+    );
+    args.push('-e', 'OPENAI_API_KEY=placeholder');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // Claude engine: route Anthropic SDK requests through the Claude credential proxy.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -305,7 +314,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, engine);
 
   logger.debug(
     {
@@ -345,15 +354,11 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    // Pass engine and (for Codex) API credentials via stdin — never via env vars or disk
+    // Pass engine via stdin so the agent-runner selects the correct runtime.
+    // Credentials are injected by the host-side proxy — never via stdin or env.
     input.engine = engine;
-    if (engine === 'codex') {
-      input.secrets = readCodexSecrets();
-    }
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
     delete input.engine;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
