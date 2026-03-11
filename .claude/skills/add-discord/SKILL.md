@@ -39,7 +39,11 @@ git remote add discord https://github.com/qwibitai/nanoclaw-discord.git
 
 ```bash
 git fetch discord main
-git merge discord/main
+git merge discord/main || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
 ```
 
 This merges in:
