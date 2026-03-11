@@ -58,7 +58,7 @@ Run `bash setup.sh` and parse the status block.
   - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
   - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
   - After installing Node, re-run `bash setup.sh`
-- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules` and `package-lock.json`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
+- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
 - If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
 - Record PLATFORM and IS_WSL for later steps.
 
@@ -122,19 +122,7 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
-## 5. Install Skills Marketplace
-
-Register and install the NanoClaw skills marketplace plugin so all feature skills (channel integrations, add-ons) are available:
-
-```bash
-claude plugin marketplace add qwibitai/nanoclaw-skills
-claude plugin marketplace update nanoclaw-skills
-claude plugin install nanoclaw-skills@nanoclaw-skills --scope project
-```
-
-The marketplace update ensures the local cache is fresh before installing. This is hot-loaded — no restart needed. All feature skills become immediately available.
-
-## 6. Set Up Channels
+## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - WhatsApp (authenticates via QR code or pairing code)
@@ -164,16 +152,16 @@ Each skill will:
 npm install && npm run build
 ```
 
-If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 7.
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
 
-## 7. Mount Allowlist
+## 6. Mount Allowlist
 
 AskUserQuestion: Agent access to external directories?
 
 **No:** `npx tsx setup/index.ts --step mounts -- --empty`
 **Yes:** Collect paths/permissions. `npx tsx setup/index.ts --step mounts -- --json '{"allowedRoots":[...],"blockedPatterns":[],"nonMainReadOnly":true}'`
 
-## 8. Start Service
+## 7. Start Service
 
 If service already running: unload first.
 - macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
@@ -203,23 +191,23 @@ Replace `USERNAME` with the actual username (from `whoami`). Run the two `sudo` 
 - Linux: check `systemctl --user status nanoclaw`.
 - Re-run the service step after fixing.
 
-## 9. Verify
+## 8. Verify
 
 Run `npx tsx setup/index.ts --step verify` and parse the status block.
 
 **If STATUS=failed, fix each:**
 - SERVICE=stopped → `npm run build`, then restart: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw` (macOS) or `systemctl --user restart nanoclaw` (Linux) or `bash start-nanoclaw.sh` (WSL nohup)
-- SERVICE=not_found → re-run step 8
+- SERVICE=not_found → re-run step 7
 - CREDENTIALS=missing → re-run step 4
 - CHANNEL_AUTH shows `not_found` for any channel → re-invoke that channel's skill (e.g. `/add-telegram`)
-- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 6
+- REGISTERED_GROUPS=0 → re-invoke the channel skills from step 5
 - MOUNT_ALLOWLIST=missing → `npx tsx setup/index.ts --step mounts -- --empty`
 
 Tell user to test: send a message in their registered chat. Show: `tail -f logs/nanoclaw.log`
 
 ## Troubleshooting
 
-**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 8), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
+**Service not starting:** Check `logs/nanoclaw.error.log`. Common: wrong Node path (re-run step 7), missing `.env` (step 4), missing channel credentials (re-invoke channel skill).
 
 **Container agent fails ("Claude Code process exited with code 1"):** Ensure the container runtime is running — `open -a Docker` (macOS Docker), `container system start` (Apple Container), or `sudo systemctl start docker` (Linux). Check container logs in `groups/main/logs/container-*.log`.
 
