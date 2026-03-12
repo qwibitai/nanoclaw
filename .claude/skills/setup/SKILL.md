@@ -11,6 +11,45 @@ Run setup steps automatically. Only pause when user action is required (channel 
 
 **UX Note:** Use `AskUserQuestion` for all user-facing questions.
 
+## 0. Git & Fork Setup
+
+Check the git remote configuration to ensure the user has a fork and upstream is configured.
+
+Run:
+- `git remote -v`
+
+**Case A — `origin` points to `qwibitai/nanoclaw` (user cloned directly):**
+
+The user cloned instead of forking. AskUserQuestion: "You cloned NanoClaw directly. We recommend forking so you can push your customizations. Would you like to set up a fork?"
+- Fork now (recommended) — walk them through it
+- Continue without fork — they'll only have local changes
+
+If fork: instruct the user to fork `qwibitai/nanoclaw` on GitHub (they need to do this in their browser), then ask them for their GitHub username. Run:
+```bash
+git remote rename origin upstream
+git remote add origin https://github.com/<their-username>/nanoclaw.git
+git push --force origin main
+```
+Verify with `git remote -v`.
+
+If continue without fork: add upstream so they can still pull updates:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case B — `origin` points to user's fork, no `upstream` remote:**
+
+Add upstream:
+```bash
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
+```
+
+**Case C — both `origin` (user's fork) and `upstream` (qwibitai) exist:**
+
+Already configured. Continue.
+
+**Verify:** `git remote -v` should show `origin` → user's repo, `upstream` → `qwibitai/nanoclaw.git`.
+
 ## 1. Bootstrap (Node.js + Dependencies)
 
 Run `bash setup.sh` and parse the status block.
@@ -19,7 +58,7 @@ Run `bash setup.sh` and parse the status block.
   - macOS: `brew install node@22` (if brew available) or install nvm then `nvm install 22`
   - Linux: `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`, or nvm
   - After installing Node, re-run `bash setup.sh`
-- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules` and `package-lock.json`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
+- If DEPS_OK=false → Read `logs/setup.log`. Try: delete `node_modules`, re-run `bash setup.sh`. If native module build fails, install build tools (`xcode-select --install` on macOS, `build-essential` on Linux), then retry.
 - If NATIVE_OK=false → better-sqlite3 failed to load. Install build tools and re-run.
 - Record PLATFORM and IS_WSL for later steps.
 
@@ -38,7 +77,7 @@ Run `npx tsx setup/index.ts --step environment` and parse the status block.
 Check the preflight results for `APPLE_CONTAINER` and `DOCKER`, and the PLATFORM from step 1.
 
 - PLATFORM=linux → Docker (only option)
-- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 4c.
+- PLATFORM=macos + APPLE_CONTAINER=installed → Use `AskUserQuestion: Docker (cross-platform) or Apple Container (native macOS)?` If Apple Container, run `/convert-to-apple-container` now, then skip to 3c.
 - PLATFORM=macos + APPLE_CONTAINER=not_found → Docker
 
 ### 3a-docker. Install Docker
@@ -59,9 +98,9 @@ grep -q "CONTAINER_RUNTIME_BIN = 'container'" src/container-runtime.ts && echo "
 
 **If NEEDS_CONVERSION**, the source code still uses Docker as the runtime. You MUST run the `/convert-to-apple-container` skill NOW, before proceeding to the build step.
 
-**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 4c.
+**If ALREADY_CONVERTED**, the code already uses Apple Container. Continue to 3c.
 
-**If the chosen runtime is Docker**, no conversion is needed. Continue to 4c.
+**If the chosen runtime is Docker**, no conversion is needed. Continue to 3c.
 
 ### 3c. Build and test
 
@@ -101,13 +140,19 @@ For each selected channel, invoke its skill:
 - **Discord:** Invoke `/add-discord`
 
 Each skill will:
-1. Install the channel code (via `apply-skill`)
+1. Install the channel code (via `git merge` of the skill branch)
 2. Collect credentials/tokens and write to `.env`
 3. Authenticate (WhatsApp QR/pairing, or verify token-based connection)
 4. Register the chat with the correct JID format
 5. Build and verify
 
-**After all channel skills complete**, continue to step 6.
+**After all channel skills complete**, install dependencies and rebuild — channel merges may introduce new packages:
+
+```bash
+npm install && npm run build
+```
+
+If the build fails, read the error output and fix it (usually a missing dependency). Then continue to step 6.
 
 ## 6. Mount Allowlist
 

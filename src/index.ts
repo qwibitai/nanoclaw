@@ -16,6 +16,7 @@ import {
   SESSION_SWEEP_INTERVAL,
   THREAD_DEBOUNCE_MS,
   THREAD_SESSION_IDLE_HOURS,
+  TIMEZONE,
   buildTriggerPattern,
   getParentJid,
   parseThreadJid,
@@ -54,6 +55,7 @@ import {
   getMessagesSince,
   getRecentMessages,
   getNewMessages,
+  getRegisteredGroup,
   getRouterState,
   getSessionModel,
   initDatabase,
@@ -493,7 +495,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     model = resolveModel(group, undefined, sessionModel);
   }
 
-  const prompt = formatMessages(missedMessages);
+  const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Collect attachments from messages and remap paths for container mount
   const containerAttachments: ContainerAttachment[] = [];
@@ -914,7 +916,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
-          const formatted = formatMessages(messagesToSend);
+          const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           // Collect attachments for piped messages
           const pipeAttachments: ContainerAttachment[] = [];

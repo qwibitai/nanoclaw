@@ -358,7 +358,7 @@ export const TRIGGER_PATTERN = new RegExp(`^@${ASSISTANT_NAME}\\b`, 'i');
 Groups can have additional directories mounted via `containerConfig` in the SQLite `registered_groups` table (stored as JSON in the `container_config` column). Example registration:
 
 ```typescript
-registerGroup("1234567890@g.us", {
+setRegisteredGroup("1234567890@g.us", {
   name: "Dev Team",
   folder: "whatsapp_dev-team",
   trigger: "@Andy",

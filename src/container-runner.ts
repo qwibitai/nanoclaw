@@ -13,6 +13,7 @@ import {
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
+  CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   GROUP_THREAD_KEY,
   GROUPS_DIR,
@@ -33,10 +34,13 @@ import {
 } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  CONTAINER_HOST_GATEWAY,
   CONTAINER_RUNTIME_BIN,
+  hostGatewayArgs,
   readonlyMountArgs,
   stopContainer,
 } from './container-runtime.js';
+import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -641,6 +645,17 @@ function buildVolumeMounts(
       readonly: true,
     });
 
+    // Shadow .env so the agent cannot read secrets from the mounted project root.
+    // Credentials are passed via stdin pipe, never exposed to containers.
+    const envFile = path.join(projectRoot, '.env');
+    if (fs.existsSync(envFile)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
     mounts.push({
       hostPath: effectiveGroupDir,
       containerPath: '/workspace/group',
@@ -1213,6 +1228,9 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_PLUGIN_ROOT=/workspace/plugin');
   }
 
+  // Runtime-specific args for host gateway resolution
+  args.push(...hostGatewayArgs());
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).
@@ -1442,8 +1460,6 @@ export async function runContainerAgent(
     input.tools = group.containerConfig?.tools;
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
-    // Remove secrets from input so they don't appear in logs
-    delete input.secrets;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';
