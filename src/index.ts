@@ -646,21 +646,21 @@ async function main(): Promise<void> {
         groupFolder,
         containerId,
       ),
-    sendMessage: async (jid, rawText) => {
+    sendMessage: async (jid, rawText, threadId) => {
       const channel = findChannel(channels, jid);
       if (!channel) {
         logger.warn({ jid }, 'No channel owns JID, cannot send message');
         return;
       }
       const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+      if (text) await channel.sendMessage(jid, text, threadId);
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text) => {
+    sendMessage: (jid, text, threadId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      return channel.sendMessage(jid, text);
+      return channel.sendMessage(jid, text, threadId);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

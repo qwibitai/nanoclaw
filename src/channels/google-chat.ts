@@ -50,7 +50,11 @@ export class GoogleChatChannel implements Channel {
     logger.info('Google Chat channel connected (stateless HTTP API)');
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    threadId?: string,
+  ): Promise<void> {
     if (!this.connected) {
       logger.warn(
         { jid },
@@ -79,8 +83,9 @@ export class GoogleChatChannel implements Channel {
       return;
     }
 
-    // Resolve thread name for in-thread replies (best-effort — falls back to new message)
-    const threadName = this.resolveThread(jid);
+    // Use the explicit threadId if provided (from task metadata),
+    // otherwise fall back to the thread map file (last-seen thread for JID).
+    const threadName = threadId || this.resolveThread(jid);
 
     // Split long messages
     const chunks = this.splitMessage(text);

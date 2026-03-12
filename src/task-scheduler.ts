@@ -98,7 +98,7 @@ export interface SchedulerDependencies {
     groupFolder: string,
     containerId: string,
   ) => void;
-  sendMessage: (jid: string, text: string) => Promise<void>;
+  sendMessage: (jid: string, text: string, threadId?: string) => Promise<void>;
 }
 
 async function runTask(
@@ -240,7 +240,12 @@ async function runTask(
         if (streamedOutput.result) {
           result = streamedOutput.result;
           // Forward result to user (sendMessage handles formatting).
-          await deps.sendMessage(activeTask.chat_jid, streamedOutput.result);
+          // Pass thread_id so Google Chat replies go to the correct thread.
+          await deps.sendMessage(
+            activeTask.chat_jid,
+            streamedOutput.result,
+            activeTask.thread_id ?? undefined,
+          );
 
           // Store Holly's response in messages DB for conversation history.
           // This ensures Google Chat (and other channels) have a record of
@@ -339,6 +344,17 @@ function checkDueTasks(deps: SchedulerDependencies): void {
     const currentTask = getTaskById(task.id);
     if (!currentTask || currentTask.status !== 'active') {
       continue;
+    }
+
+    // For one-shot tasks (gchat messages, etc.), null out next_run immediately
+    // so the task won't be picked up again by a subsequent scheduler check
+    // while the container is still running. Without this, rapid scheduler
+    // checks (e.g. triggerSchedulerCheck from a second inbound message) can
+    // re-dispatch the same once task after the first container finishes and
+    // goes warm, because the dedup check in enqueueTask no longer sees it
+    // as "running".
+    if (currentTask.schedule_type === 'once') {
+      updateTask(currentTask.id, { next_run: null });
     }
 
     deps.queue.enqueueTask(
