@@ -201,6 +201,24 @@ describe('formatOutbound', () => {
       formatOutbound('<internal>thinking</internal>The answer is 42'),
     ).toBe('The answer is 42');
   });
+
+  it('suppresses [SILENT]-prefixed messages', () => {
+    expect(formatOutbound('[SILENT] Creating goal in Airtable')).toBe('');
+  });
+
+  it('suppresses [SILENT] even after internal tag stripping', () => {
+    expect(
+      formatOutbound('<internal>reasoning</internal>[SILENT] logging action'),
+    ).toBe('');
+  });
+
+  it('does not suppress [SILENT] in the middle of text', () => {
+    expect(formatOutbound('Hello [SILENT] world')).toBe('Hello [SILENT] world');
+  });
+
+  it('suppresses [SILENT] with no trailing text', () => {
+    expect(formatOutbound('[SILENT]')).toBe('');
+  });
 });
 
 // --- Trigger gating with requiresTrigger flag ---

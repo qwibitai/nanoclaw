@@ -325,8 +325,8 @@ async function processGroupMessages(
           typeof result.result === 'string'
             ? result.result
             : JSON.stringify(result.result);
-        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+        // Strip <internal> blocks and suppress [SILENT] messages
+        const text = formatOutbound(raw);
         logger.info(
           { group: group.name },
           `Agent output: ${raw.slice(0, 200)}`,
@@ -672,9 +672,11 @@ async function main(): Promise<void> {
     },
   });
   startIpcWatcher({
-    sendMessage: (jid, text, threadId) => {
+    sendMessage: (jid, rawText, threadId) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      const text = formatOutbound(rawText);
+      if (!text) return Promise.resolve();
       return channel.sendMessage(jid, text, threadId);
     },
     registeredGroups: () => registeredGroups,

@@ -31,6 +31,8 @@ export function stripInternalTags(text: string): string {
 export function formatOutbound(rawText: string): string {
   const text = stripInternalTags(rawText);
   if (!text) return '';
+  // Suppress [SILENT]-prefixed messages — agent uses these for internal actions
+  if (text.startsWith('[SILENT]')) return '';
   return text;
 }
 
