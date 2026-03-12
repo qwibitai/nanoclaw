@@ -16,6 +16,7 @@ import {
   IDLE_TIMEOUT,
   TIMEZONE,
 } from './config.js';
+import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -222,10 +223,19 @@ function buildContainerArgs(
   args.push('-e', `TZ=${TIMEZONE}`);
 
   // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
+  const proxyBaseUrl = `http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`;
+  args.push('-e', `ANTHROPIC_BASE_URL=${proxyBaseUrl}`);
+
+  // Route Groq and OpenAI through the credential proxy (if keys are configured)
+  const proxyServices = readEnvFile(['GROQ_API_KEY', 'OPENAI_API_KEY']);
+  if (proxyServices.GROQ_API_KEY) {
+    // Point Groq requests to the proxy (Host header will route to api.groq.com)
+    args.push('-e', `GROQ_BASE_URL=${proxyBaseUrl}`);
+  }
+  if (proxyServices.OPENAI_API_KEY) {
+    // Point OpenAI requests to the proxy (Host header will route to api.openai.com)
+    args.push('-e', `OPENAI_BASE_URL=${proxyBaseUrl}`);
+  }
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.

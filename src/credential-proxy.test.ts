@@ -88,6 +88,7 @@ describe('credential-proxy', () => {
         path: '/v1/messages',
         headers: {
           'content-type': 'application/json',
+          'host': 'api.anthropic.com',
           'x-api-key': 'placeholder',
         },
       },
@@ -109,6 +110,7 @@ describe('credential-proxy', () => {
         path: '/api/oauth/claude_cli/create_api_key',
         headers: {
           'content-type': 'application/json',
+          'host': 'api.anthropic.com',
           authorization: 'Bearer placeholder',
         },
       },
@@ -133,6 +135,7 @@ describe('credential-proxy', () => {
         path: '/v1/messages',
         headers: {
           'content-type': 'application/json',
+          'host': 'api.anthropic.com',
           'x-api-key': 'temp-key-from-exchange',
         },
       },
@@ -153,6 +156,7 @@ describe('credential-proxy', () => {
         path: '/v1/messages',
         headers: {
           'content-type': 'application/json',
+          'host': 'api.anthropic.com',
           connection: 'keep-alive',
           'keep-alive': 'timeout=5',
           'transfer-encoding': 'chunked',
@@ -181,7 +185,7 @@ describe('credential-proxy', () => {
       {
         method: 'POST',
         path: '/v1/messages',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'host': 'api.anthropic.com' },
       },
       '{}',
     );
