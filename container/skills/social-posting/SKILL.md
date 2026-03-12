@@ -1,7 +1,7 @@
 ---
 name: social-posting
 description: Post content to X (Twitter), Facebook, and LinkedIn. Manage LinkedIn warm outreach and connection requests. Use when asked to post on social media, share content, manage social presence, or do LinkedIn outreach.
-allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *)
+allowed-tools: Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/linkedin-connect.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *)
 ---
 
 # Social Media Posting
@@ -174,6 +174,16 @@ When engaging with prospects' LinkedIn posts:
 - 1,300 characters is the sweet spot
 - Use line breaks for readability
 - Post industry insights and thought leadership
+
+## Read Facebook Post Insights
+
+```bash
+npx tsx /workspace/project/tools/social/read-facebook-insights.ts \
+  --post-ids "POST_ID_1,POST_ID_2"
+```
+
+Returns engagement metrics per post: reactions, comments, shares, reach, impressions, clicks.
+Falls back gracefully if `read_insights` permission is unavailable (still returns reactions/comments/shares).
 
 ## Cross-Platform Posting
 

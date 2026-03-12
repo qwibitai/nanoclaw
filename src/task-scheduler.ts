@@ -122,6 +122,7 @@ async function runTask(
           isMain,
           model: task.model || undefined,
           extraSecretScopes: group.containerConfig?.extraSecretScopes,
+          secretOverrides: group.containerConfig?.secretOverrides,
         },
         (proc) =>
           deps.onProcess(task.chat_jid, proc, `cli-${task.id}`, task.group_folder),

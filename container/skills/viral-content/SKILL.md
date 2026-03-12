@@ -1,7 +1,7 @@
 ---
 name: viral-content
 description: Monitor trending content, learn viral patterns, and create high-engagement posts for SNAK Group. Use when asked to create viral content, analyze trends, or remix popular formats.
-allowed-tools: Bash(npx tsx /workspace/project/tools/social/trend-scraper.ts *), Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *)
+allowed-tools: Bash(npx tsx /workspace/project/tools/social/trend-scraper.ts *), Bash(npx tsx /workspace/project/tools/social/post-tweet.ts *), Bash(npx tsx /workspace/project/tools/social/post-facebook.ts *), Bash(npx tsx /workspace/project/tools/social/post-linkedin.ts *), Bash(npx tsx /workspace/project/tools/social/read-facebook-insights.ts *)
 ---
 
 # Viral Content Engine
@@ -116,7 +116,17 @@ After each viral attempt:
 4. **Double down** on formats that work
 5. **Retire** formats that consistently underperform
 
-### Analysis Command
+### Fetch Your Own Post Performance
+
+```bash
+npx tsx /workspace/project/tools/social/read-facebook-insights.ts \
+  --post-ids "POST_ID_1,POST_ID_2"
+```
+
+Returns reactions, comments, shares, reach, impressions, clicks per post.
+Use this to measure YOUR posts' engagement and compare hook types.
+
+### Trend Analysis Command
 
 ```bash
 npx tsx /workspace/project/tools/social/trend-scraper.ts analyze

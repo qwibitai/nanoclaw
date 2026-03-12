@@ -39,6 +39,7 @@ Single Node.js process that connects to WhatsApp, routes messages to Claude Agen
 | `tools/email/templates/` | HTML email templates (coffee-intro, vending-intro, ice-machine-intro, case-study, follow-up) |
 | `tools/social/post-tweet.ts` | X/Twitter API poster |
 | `tools/social/post-facebook.ts` | Facebook Graph API poster |
+| `tools/social/read-facebook-insights.ts` | Facebook post engagement metrics reader |
 | `tools/social/post-linkedin.ts` | LinkedIn API poster |
 | `tools/social/linkedin-connect.ts` | LinkedIn connection requests and messaging |
 | `tools/social/trend-scraper.ts` | Trend monitoring and viral pattern analysis |

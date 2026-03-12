@@ -35,6 +35,10 @@ export interface ContainerConfig {
   /** Additional secret scopes beyond the standard set (core + google + email).
    *  Main always gets all secrets regardless. Options: 'social', 'iddi', 'leads' */
   extraSecretScopes?: SecretScope[];
+  /** Map standard env var names to group-specific env var names from .env.
+   *  E.g. { "FB_PAGE_ID": "FB_PAGE_ID_SNAK" } reads FB_PAGE_ID_SNAK from .env
+   *  and injects it as FB_PAGE_ID into the container/CLI environment. */
+  secretOverrides?: Record<string, string>;
 }
 
 export interface RegisteredGroup {

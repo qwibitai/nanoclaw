@@ -304,7 +304,11 @@ const SCOPE_MAP: Record<string, readonly string[]> = {
  * Non-main groups receive a restricted set to limit blast radius.
  * Extra scopes can be granted via containerConfig.extraSecretScopes.
  */
-function readSecrets(isMain: boolean, extraScopes?: string[]): Record<string, string> {
+function readSecrets(
+  isMain: boolean,
+  extraScopes?: string[],
+  secretOverrides?: Record<string, string>,
+): Record<string, string> {
   if (isMain) return readEnvFile([...ALL_SECRET_KEYS]);
 
   const keys: string[] = [...STANDARD_SECRET_KEYS];
@@ -314,7 +318,20 @@ function readSecrets(isMain: boolean, extraScopes?: string[]): Record<string, st
       if (scopeKeys) keys.push(...scopeKeys);
     }
   }
-  return readEnvFile(keys);
+  const secrets = readEnvFile(keys);
+
+  // Apply per-group secret overrides: read group-specific env var, inject as standard name
+  if (secretOverrides) {
+    const overrideKeys = Object.values(secretOverrides);
+    const overrideValues = readEnvFile(overrideKeys);
+    for (const [standardKey, groupKey] of Object.entries(secretOverrides)) {
+      if (overrideValues[groupKey]) {
+        secrets[standardKey] = overrideValues[groupKey];
+      }
+    }
+  }
+
+  return secrets;
 }
 
 function buildContainerArgs(
@@ -476,7 +493,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets(input.isMain, group.containerConfig?.extraSecretScopes);
+    input.secrets = readSecrets(input.isMain, group.containerConfig?.extraSecretScopes, group.containerConfig?.secretOverrides);
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
     // Remove secrets from input so they don't appear in logs

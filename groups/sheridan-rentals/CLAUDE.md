@@ -260,3 +260,43 @@ When content posting or SEO tasks fire:
 - Check `content-calendar.md` before posting to avoid topic repetition
 - Update `content-calendar.md` after every post
 - Read `seo-assets.md` for website SEO targets and GBP settings
+
+## Facebook Page Posting — Weekly Approval Workflow
+
+The goal is to build page credibility, followers, and engagement organically — this unlocks Facebook Marketplace access.
+
+### Weekly Post Generation (Sunday 6 PM CT)
+A scheduled task (`sheridan-fb-posts-weekly`) generates next week's 5 Facebook posts (Mon-Fri) and sends them to the group chat for owner approval.
+
+When the task fires:
+1. Read `brand-voice.md`, `content-calendar.md` (check log to avoid topic repeats within 2 weeks), and `viral-patterns.md`
+2. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
+3. Write all posts to `pending-posts.md` with status "awaiting-approval"
+4. Send WhatsApp preview of all 5 posts for owner review
+
+### Handling Approval Messages
+When the owner replies with approval (e.g., "approved", "looks good", "approve all"):
+- Update `pending-posts.md` top-level Status to "approved"
+- Update each day's Status from "pending" to "approved"
+- Confirm: "All 5 posts approved and queued for this week."
+
+When the owner requests changes (e.g., "change Wednesday to..." or "I don't like Tuesday's"):
+- Update the specific day's content in `pending-posts.md`
+- Reply with the updated post for confirmation
+- Do NOT approve other days unless the owner says so
+
+### Daily Posting (Weekdays 9 AM CT)
+A scheduled task (`sheridan-fb-post-daily`) reads `pending-posts.md` and posts today's approved content:
+1. Find today's entry by date
+2. If approved → post via `post-facebook.ts`, record the post_id in `pending-posts.md` and `content-calendar.md` log
+3. If not approved → skip and notify: "Skipping today's post — not yet approved"
+4. If already posted → skip silently
+
+### Weekly Performance Review (Saturday 10 AM CT)
+A scheduled task (`sheridan-fb-review-weekly`) measures engagement on this week's posts:
+1. Collect post_ids from `pending-posts.md` and `content-calendar.md`
+2. Fetch insights via `read-facebook-insights.ts`
+3. Compare hook types, themes, and engagement across the week
+4. Update `content-learnings.md` with the week's best/worst performers and key insight
+5. Update `viral-patterns.md` if new patterns emerge
+6. Send WhatsApp performance summary

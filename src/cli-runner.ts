@@ -83,6 +83,7 @@ const SCOPE_MAP: Record<string, readonly string[]> = {
 function readSecrets(
   isMain: boolean,
   extraScopes?: string[],
+  secretOverrides?: Record<string, string>,
 ): Record<string, string> {
   if (isMain) return readEnvFile([...ALL_SECRET_KEYS]);
   const keys: string[] = [...STANDARD_SECRET_KEYS];
@@ -92,7 +93,20 @@ function readSecrets(
       if (scopeKeys) keys.push(...scopeKeys);
     }
   }
-  return readEnvFile(keys);
+  const secrets = readEnvFile(keys);
+
+  // Apply per-group secret overrides: read group-specific env var, inject as standard name
+  if (secretOverrides) {
+    const overrideKeys = Object.values(secretOverrides);
+    const overrideValues = readEnvFile(overrideKeys);
+    for (const [standardKey, groupKey] of Object.entries(secretOverrides)) {
+      if (overrideValues[groupKey]) {
+        secrets[standardKey] = overrideValues[groupKey];
+      }
+    }
+  }
+
+  return secrets;
 }
 
 export interface CliInput {
@@ -101,6 +115,7 @@ export interface CliInput {
   isMain: boolean;
   model?: string;
   extraSecretScopes?: string[];
+  secretOverrides?: Record<string, string>;
 }
 
 export interface CliOutput {
@@ -288,7 +303,7 @@ export async function runCliAgent(
   }
 
   // Read secrets scoped to the group
-  const secrets = readSecrets(input.isMain, input.extraSecretScopes);
+  const secrets = readSecrets(input.isMain, input.extraSecretScopes, input.secretOverrides);
 
   // Build system prompt explaining host environment
   const systemPrompt = buildSystemPrompt(input.groupFolder);
