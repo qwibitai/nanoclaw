@@ -204,11 +204,31 @@ export class WhatsAppChannel implements Channel {
             msg.message?.videoMessage?.caption ||
             '';
 
-          const replyToId =
-            msg.message?.extendedTextMessage?.contextInfo?.stanzaId ||
-            msg.message?.imageMessage?.contextInfo?.stanzaId ||
-            msg.message?.videoMessage?.contextInfo?.stanzaId ||
+          const contextInfo =
+            msg.message?.extendedTextMessage?.contextInfo ||
+            msg.message?.imageMessage?.contextInfo ||
+            msg.message?.videoMessage?.contextInfo ||
             undefined;
+
+          const replyToId = contextInfo?.stanzaId || undefined;
+
+          // Extract the text of the quoted message directly from the payload.
+          // contextInfo.quotedMessage is the full WA proto Message object.
+          const quotedMsg = contextInfo?.quotedMessage;
+          const quotedText = quotedMsg
+            ? quotedMsg.conversation ||
+              quotedMsg.extendedTextMessage?.text ||
+              quotedMsg.imageMessage?.caption ||
+              quotedMsg.videoMessage?.caption ||
+              (quotedMsg.audioMessage ? '[Voice Message]' : undefined) ||
+              undefined
+            : undefined;
+
+          // participant is the JID of the quoted message sender
+          const quotedParticipant = contextInfo?.participant || undefined;
+          const quotedSender = quotedParticipant
+            ? quotedParticipant.split('@')[0]
+            : undefined;
 
           // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
           // but allow voice messages through for transcription
@@ -256,6 +276,8 @@ export class WhatsAppChannel implements Channel {
             is_from_me: fromMe,
             is_bot_message: isBotMessage,
             reply_to_id: replyToId,
+            quoted_text: quotedText,
+            quoted_sender: quotedSender,
           });
         }
       }

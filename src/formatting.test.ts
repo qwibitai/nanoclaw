@@ -111,6 +111,25 @@ describe('formatMessages', () => {
     expect(result).toContain('<messages>\n\n</messages>');
   });
 
+  it('includes reply_to block when quoted_text is present', () => {
+    const result = formatMessages(
+      [makeMsg({ quoted_text: 'original message', quoted_sender: 'Bob' })],
+      TZ,
+    );
+    expect(result).toContain('<reply_to sender="Bob">original message</reply_to>');
+    expect(result).toContain('hello</message>');
+  });
+
+  it('omits reply_to block when no quoted_text', () => {
+    const result = formatMessages([makeMsg()], TZ);
+    expect(result).not.toContain('reply_to');
+  });
+
+  it('uses "someone" as sender when quoted_sender is absent', () => {
+    const result = formatMessages([makeMsg({ quoted_text: 'hi there' })], TZ);
+    expect(result).toContain('<reply_to sender="someone">hi there</reply_to>');
+  });
+
   it('converts timestamps to local time for given timezone', () => {
     // 2024-01-01T18:30:00Z in America/New_York (EST) = 1:30 PM
     const result = formatMessages(
