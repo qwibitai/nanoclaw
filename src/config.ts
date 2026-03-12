@@ -57,9 +57,12 @@ export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '10', 10) || 10,
 );
+// Capped at 1 until per-container IPC input directories are implemented.
+// With a shared IPC input dir, multiple warm containers race to read each
+// other's messages — causing cross-thread reply pollution.
 export const MAX_WARM_PER_GROUP = Math.max(
   0,
-  parseInt(process.env.MAX_WARM_PER_GROUP || '2', 10) || 2,
+  parseInt(process.env.MAX_WARM_PER_GROUP || '1', 10) || 1,
 );
 
 function escapeRegex(str: string): string {
