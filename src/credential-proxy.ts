@@ -44,7 +44,10 @@ export function startCredentialProxy(
     secrets.ANTHROPIC_API_KEY;
 
   let authMode: AuthMode;
-  if ((secrets.OPENROUTER_API_KEY || (isOpenRouter && openRouterKey)) && openRouterKey) {
+  if (
+    (secrets.OPENROUTER_API_KEY || (isOpenRouter && openRouterKey)) &&
+    openRouterKey
+  ) {
     authMode = 'openrouter';
   } else if (secrets.ANTHROPIC_API_KEY) {
     authMode = 'api-key';
