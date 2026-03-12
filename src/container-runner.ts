@@ -56,6 +56,31 @@ interface VolumeMount {
   readonly: boolean;
 }
 
+/**
+ * Sync agent-runner source files into a per-group directory.
+ * On first run (dest doesn't exist), copies the entire directory.
+ * On subsequent runs, copies each entry individually to pick up changes.
+ * No-op if the source directory doesn't exist.
+ */
+export function syncAgentRunnerSource(
+  srcDir: string,
+  destDir: string,
+): void {
+  if (!fs.existsSync(srcDir)) return;
+
+  if (!fs.existsSync(destDir)) {
+    fs.cpSync(srcDir, destDir, { recursive: true });
+  } else {
+    for (const entry of fs.readdirSync(srcDir)) {
+      fs.cpSync(
+        path.join(srcDir, entry),
+        path.join(destDir, entry),
+        { recursive: true },
+      );
+    }
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -190,21 +215,7 @@ function buildVolumeMounts(
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    if (!fs.existsSync(groupAgentRunnerDir)) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    } else {
-      // Sync source files so skill-branch updates propagate to existing sessions
-      // while preserving any agent-created files in the group directory.
-      for (const entry of fs.readdirSync(agentRunnerSrc)) {
-        fs.cpSync(
-          path.join(agentRunnerSrc, entry),
-          path.join(groupAgentRunnerDir, entry),
-          { recursive: true },
-        );
-      }
-    }
-  }
+  syncAgentRunnerSource(agentRunnerSrc, groupAgentRunnerDir);
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',
