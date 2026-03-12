@@ -99,7 +99,7 @@ export class GoogleChatChannel implements Channel {
           requestBody,
         });
         logger.info(
-          { space: spaceName, length: chunk.length },
+          { space: spaceName, length: chunk.length, threaded: !!threadName },
           'Google Chat message sent',
         );
       } catch (err) {
