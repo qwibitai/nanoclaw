@@ -25,6 +25,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  persistent: boolean;
 }
 
 export class GroupQueue {
@@ -49,6 +50,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        persistent: false,
       };
       this.groups.set(groupJid, state);
     }
@@ -227,7 +229,13 @@ export class GroupQueue {
       state.containerName = null;
       state.groupFolder = null;
       this.activeCount--;
-      this.drainGroup(groupJid);
+
+      if (state.persistent && !this.shuttingDown) {
+        // Persistent containers auto-restart with backoff
+        this.schedulePersistentRestart(groupJid, state);
+      } else {
+        this.drainGroup(groupJid);
+      }
     }
   }
 
@@ -258,6 +266,64 @@ export class GroupQueue {
       this.activeCount--;
       this.drainGroup(groupJid);
     }
+  }
+
+  /**
+   * Start persistent (always-on) containers for all given groups.
+   * Respects MAX_CONCURRENT_CONTAINERS — excess groups wait in queue.
+   */
+  startPersistentContainers(groupJids: string[]): void {
+    for (const jid of groupJids) {
+      const state = this.getGroup(jid);
+      state.persistent = true;
+
+      if (state.active) continue;
+
+      if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+        state.pendingMessages = true;
+        if (!this.waitingGroups.includes(jid)) {
+          this.waitingGroups.push(jid);
+        }
+        logger.info(
+          { groupJid: jid, activeCount: this.activeCount },
+          'Persistent container queued (at concurrency limit)',
+        );
+        continue;
+      }
+
+      logger.info({ groupJid: jid }, 'Starting persistent container');
+      this.runForGroup(jid, 'messages').catch((err) =>
+        logger.error({ groupJid: jid, err }, 'Error starting persistent container'),
+      );
+    }
+  }
+
+  private schedulePersistentRestart(groupJid: string, state: GroupState): void {
+    const MAX_PERSISTENT_BACKOFF_MS = 300_000; // 5 minutes
+    state.retryCount++;
+    const delayMs = Math.min(
+      BASE_RETRY_MS * Math.pow(2, state.retryCount - 1),
+      MAX_PERSISTENT_BACKOFF_MS,
+    );
+    logger.info(
+      { groupJid, retryCount: state.retryCount, delayMs },
+      'Scheduling persistent container restart',
+    );
+    setTimeout(() => {
+      if (this.shuttingDown || !state.persistent) return;
+
+      if (this.activeCount >= MAX_CONCURRENT_CONTAINERS) {
+        state.pendingMessages = true;
+        if (!this.waitingGroups.includes(groupJid)) {
+          this.waitingGroups.push(groupJid);
+        }
+        return;
+      }
+
+      this.runForGroup(groupJid, 'messages').catch((err) =>
+        logger.error({ groupJid, err }, 'Error restarting persistent container'),
+      );
+    }, delayMs);
   }
 
   private scheduleRetry(groupJid: string, state: GroupState): void {
@@ -347,11 +413,17 @@ export class GroupQueue {
   async shutdown(_gracePeriodMs: number): Promise<void> {
     this.shuttingDown = true;
 
-    // Count active containers but don't kill them — they'll finish on their own
-    // via idle timeout or container timeout. The --rm flag cleans them up on exit.
-    // This prevents WhatsApp reconnection restarts from killing working agents.
+    // Disable persistent mode on all groups to prevent restart loops
+    for (const [, state] of this.groups) {
+      state.persistent = false;
+    }
+
+    // Signal all active containers to wind down gracefully
     const activeContainers: string[] = [];
     for (const [jid, state] of this.groups) {
+      if (state.active && state.groupFolder) {
+        this.closeStdin(jid);
+      }
       if (state.process && !state.process.killed && state.containerName) {
         activeContainers.push(state.containerName);
       }
@@ -359,7 +431,7 @@ export class GroupQueue {
 
     logger.info(
       { activeCount: this.activeCount, detachedContainers: activeContainers },
-      'GroupQueue shutting down (containers detached, not killed)',
+      'GroupQueue shutting down (close sentinels sent to active containers)',
     );
   }
 }
