@@ -730,7 +730,9 @@ describe('getRecentMessagesByThread', () => {
     const threadBMsgs = getRecentMessagesByThread(CHAT_JID, THREAD_B, 20);
     expect(threadBMsgs).toHaveLength(2);
     expect(threadBMsgs[0].content).toBe('Lets discuss task management');
-    expect(threadBMsgs[1].content).toBe('Here is the autonomous execution plan...');
+    expect(threadBMsgs[1].content).toBe(
+      'Here is the autonomous execution plan...',
+    );
   });
 
   it('falls back to getRecentMessages when threadId is null', () => {

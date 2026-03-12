@@ -27,6 +27,25 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup, ScheduledTask } from './types.js';
 
+// ── Warm-reuse task tracking ─────────────────────────────────────────
+// When a warm container is reused for a new task, the streaming callback
+// from the original runTask still runs. This map lets the callback look
+// up the CURRENT task for a container, so outbound messages get the
+// correct thread_id (and other metadata) from the new task — not the
+// original one that spawned the container.
+const containerCurrentTask = new Map<string, ScheduledTask>();
+
+/**
+ * Update the current task for a container. Called by the warm-reuse
+ * callback in index.ts when a new task is piped into an idle container.
+ */
+export function setContainerCurrentTask(
+  containerId: string,
+  task: ScheduledTask,
+): void {
+  containerCurrentTask.set(containerId, task);
+}
+
 /**
  * Compute the next run time for a recurring task, anchored to the
  * task's scheduled time rather than Date.now() to prevent cumulative
@@ -157,6 +176,12 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
+  // Register this task as the current one for this container.
+  // When warm-reuse pipes a new task, setContainerCurrentTask updates
+  // the map entry. The streaming callback reads from the map so
+  // outbound messages get the correct thread_id for the CURRENT task.
+  containerCurrentTask.set(containerId, task);
+
   // CONC-02: Fresh session per container. Even 'group' context mode tasks
   // get a fresh session — sharing a sessionId between concurrent containers
   // causes the second to block on the Claude API session lock, defeating
@@ -208,32 +233,36 @@ async function runTask(
           containerId,
         ),
       async (streamedOutput: ContainerOutput) => {
+        // Read the CURRENT task for this container — may have been updated
+        // by warm-reuse (setContainerCurrentTask) since this callback was created.
+        const activeTask = containerCurrentTask.get(containerId) || task;
+
         if (streamedOutput.result) {
           result = streamedOutput.result;
-          // Forward result to user (sendMessage handles formatting)
-          await deps.sendMessage(task.chat_jid, streamedOutput.result);
+          // Forward result to user (sendMessage handles formatting).
+          await deps.sendMessage(activeTask.chat_jid, streamedOutput.result);
 
           // Store Holly's response in messages DB for conversation history.
           // This ensures Google Chat (and other channels) have a record of
           // what Holly said, so subsequent messages include full context.
-          // Thread ID is propagated so outbound messages are scoped to the
-          // same thread as the inbound message that triggered them.
-          if (task.id.startsWith('gchat-msg-')) {
+          // Thread ID is read from activeTask so warm-reused containers get
+          // the CURRENT task's thread_id, not the original spawning task's.
+          if (activeTask.id.startsWith('gchat-msg-')) {
             try {
               storeMessage({
                 id: `gchat-out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                chat_jid: task.chat_jid,
+                chat_jid: activeTask.chat_jid,
                 sender: ASSISTANT_NAME,
                 sender_name: ASSISTANT_NAME,
                 content: streamedOutput.result,
                 timestamp: new Date().toISOString(),
                 is_from_me: true,
                 is_bot_message: true,
-                thread_id: task.thread_id ?? undefined,
+                thread_id: activeTask.thread_id ?? undefined,
               });
             } catch (err) {
               logger.warn(
-                { taskId: task.id, err },
+                { taskId: activeTask.id, err },
                 'Failed to store outbound message for conversation history',
               );
             }
@@ -242,7 +271,7 @@ async function runTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
-          deps.queue.notifyIdle(task.chat_jid, containerId);
+          deps.queue.notifyIdle(activeTask.chat_jid, containerId);
         }
         if (streamedOutput.status === 'error') {
           error = streamedOutput.error || 'Unknown error';
@@ -268,6 +297,9 @@ async function runTask(
     error = err instanceof Error ? err.message : String(err);
     logger.error({ taskId: task.id, error }, 'Task failed');
   }
+
+  // Clean up container→task tracking (no longer needed after exit)
+  containerCurrentTask.delete(containerId);
 
   const durationMs = Date.now() - startTime;
 

@@ -57,7 +57,11 @@ import {
   loadSenderAllowlist,
   shouldDropMessage,
 } from './sender-allowlist.js';
-import { computeNextRun, startSchedulerLoop } from './task-scheduler.js';
+import {
+  computeNextRun,
+  setContainerCurrentTask,
+  startSchedulerLoop,
+} from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -101,6 +105,14 @@ queue.setOnTaskReuse((groupJid, taskId, containerId, groupFolder) => {
     );
     return;
   }
+
+  // Update the container→task mapping so the streaming callback (which
+  // belongs to the original runTask that spawned this container) uses
+  // the NEW task's metadata (thread_id, chat_jid, etc.) for outbound
+  // message storage. Without this, warm-reused containers tag outbound
+  // messages with the original task's thread_id — causing cross-thread
+  // context pollution in Google Chat.
+  setContainerCurrentTask(containerId, task);
 
   const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
   try {
