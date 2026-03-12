@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.marvinclaw.bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/mgandal/.pyenv/versions/anaconda3-2024.02-1/bin/python3</string>
+        <string>/Users/mgandal/Agents/nanoclaw/tools/bridge/bridge.py</string>
+        <string>--port</string>
+        <string>19876</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/mgandal/Agents/nanoclaw/logs/bridge.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mgandal/Agents/nanoclaw/logs/bridge.error.log</string>
+</dict>
+</plist>
