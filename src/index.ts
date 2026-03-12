@@ -646,6 +646,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       throttledTouchActivity(sessionKey);
 
       if (result.status === 'success') {
+        // Clear typing as soon as the agent signals idle — don't wait for
+        // the container to exit, which can take much longer and leaves a
+        // stale "typing…" indicator visible to the user.
+        await channel.setTyping?.(chatJid, false);
         queue.notifyIdle(parentJid, effectiveThreadId);
       }
 
