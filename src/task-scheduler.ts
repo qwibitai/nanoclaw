@@ -216,6 +216,8 @@ async function runTask(
           // Store Holly's response in messages DB for conversation history.
           // This ensures Google Chat (and other channels) have a record of
           // what Holly said, so subsequent messages include full context.
+          // Thread ID is propagated so outbound messages are scoped to the
+          // same thread as the inbound message that triggered them.
           if (task.id.startsWith('gchat-msg-')) {
             try {
               storeMessage({
@@ -227,6 +229,7 @@ async function runTask(
                 timestamp: new Date().toISOString(),
                 is_from_me: true,
                 is_bot_message: true,
+                thread_id: task.thread_id ?? undefined,
               });
             } catch (err) {
               logger.warn(

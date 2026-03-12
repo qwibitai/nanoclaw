@@ -51,6 +51,9 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  /** Google Chat thread name (e.g. "spaces/xxx/threads/yyy"). Used to scope
+   *  conversation history per-thread, preventing topic pollution. */
+  thread_id?: string;
 }
 
 export interface ScheduledTask {
@@ -66,6 +69,9 @@ export interface ScheduledTask {
   last_result: string | null;
   status: 'active' | 'paused' | 'completed';
   created_at: string;
+  /** Google Chat thread name. Stored on gchat-msg-* tasks so outbound
+   *  messages can be tagged with the same thread for scoped history. */
+  thread_id?: string | null;
 }
 
 export interface TaskRunLog {
