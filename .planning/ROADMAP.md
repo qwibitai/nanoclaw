@@ -82,11 +82,13 @@ Plans:
 
 ## Deployment
 
-- **Deployed:** 2026-03-12T08:46:00Z
+- **Deployed:** 2026-03-12T15:30:00Z
 - Google Chat channel adapter added to git repo and deployed
 - OAuth token (Claude Max 20x) active — API key removed
 - Concurrent sessions live — up to 10 containers globally
 - Passwordless deploy configured via sudoers
 - Google Chat threaded replies — Holly replies in-thread
 - Google Chat conversation history — inbound/outbound messages stored, last 20 prepended to prompt
-- 416 tests passing
+- **Google Chat thread isolation** — replies routed to correct thread, no cross-thread context pollution (PRs #3–#7)
+- MAX_WARM_PER_GROUP=1 (shared IPC dir race prevention). Per-container IPC dirs needed for parallel warm reuse.
+- 428 tests passing

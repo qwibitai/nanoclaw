@@ -3,7 +3,7 @@
 ## Project Reference
 
 - **Core value:** Messages never blocked by running containers
-- **Current focus:** Google Chat context loss fix shipped 2026-03-12
+- **Current focus:** Google Chat thread isolation complete 2026-03-12
 - **Airtable record:** `recFADjzpnBY8NHh4`
 
 ## Current Position
@@ -86,7 +86,7 @@
 ## Session Continuity
 
 ### Last Session
-- 2026-03-12T09:10:00Z
+- 2026-03-12T15:30:00Z
 
 ### Handover Notes
 - Phase 01 complete: All 3 plans done (01-01, 01-02, 01-03)
@@ -102,5 +102,13 @@
   - 12 new tests (416 total), deployed and verified working
 - Google Chat threaded replies also shipped (separate earlier commit)
 - OAuth auto-refresh live — token refreshes automatically when near expiry
-- 416 tests passing (404 + 12 context history tests)
 - Passwordless deploy configured via sudoers (craig → nanoclaw)
+- **Google Chat thread isolation FIXED (2026-03-12)** — 5 PRs merged (#3–#7):
+  - PR #3: Warm container reuse bug — outbound messages tagged with wrong thread_id
+  - PR #4: Reply routing — threadId threaded through Channel.sendMessage so replies go to correct thread (not just last-seen thread from file map). Also prevents one-shot task re-execution.
+  - PR #5: MAX_WARM_PER_GROUP capped to 1 — shared IPC input directory caused race condition where multiple warm containers picked up each other's messages
+  - PR #6: Task queue replaces single-entry containerCurrentTask Map — FIFO queue ensures streaming callback reads the correct task when multiple tasks are piped sequentially
+  - PR #7: Thread isolation directive — warm containers retain Claude session memory; new-thread-message framing tells Claude to ignore prior session context from other threads
+  - Root causes: (1) sendMessage had no threadId param, (2) shared IPC dir race, (3) containerCurrentTask overwrite race, (4) Claude session memory bleed across threads
+  - 428 tests passing
+  - Known limitation: MAX_WARM_PER_GROUP=1 means sequential processing. Per-container IPC directories needed to restore parallelism (backlog item).
