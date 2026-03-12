@@ -27,6 +27,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  deleteSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -300,6 +301,14 @@ async function runAgent(
         if (output.newSessionId) {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
+        }
+        if (output.compacted) {
+          // 清除 session，让下条消息从 compact seed 轻装启动
+          delete sessions[group.folder];
+          deleteSession(group.folder);
+          // 向用户发送通知
+          const channel = findChannel(channels, chatJid);
+          channel?.sendMessage(chatJid, '📦 对话历史已自动整理，下条消息将轻装开始新对话～');
         }
         await onOutput(output);
       }

@@ -48,6 +48,7 @@ export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
+  compacted?: boolean;   // 本轮已生成 compact summary，宿主应清除 session
   error?: string;
 }
 
@@ -195,7 +196,10 @@ function buildVolumeMounts(
   // Per-group copy allows agents to customize their own runner without affecting others.
   if (fs.existsSync(agentRunnerSrc)) {
     fs.mkdirSync(groupAgentRunnerDir, { recursive: true });
-    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true, force: true });
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, {
+      recursive: true,
+      force: true,
+    });
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
