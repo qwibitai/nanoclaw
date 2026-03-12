@@ -26,8 +26,12 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+// Tool credentials (not Claude API secrets) — passed to containers for MCP tools
+const toolSecrets = readEnvFile(['GEMINI_API_KEY', 'LANCEDB_URI', 'LANCEDB_API_KEY']);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -236,6 +240,17 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Tool API keys (non-Claude credentials for MCP tools like semantic memory)
+  if (toolSecrets.GEMINI_API_KEY) {
+    args.push('-e', `GEMINI_API_KEY=${toolSecrets.GEMINI_API_KEY}`);
+  }
+  if (toolSecrets.LANCEDB_URI) {
+    args.push('-e', `LANCEDB_URI=${toolSecrets.LANCEDB_URI}`);
+  }
+  if (toolSecrets.LANCEDB_API_KEY) {
+    args.push('-e', `LANCEDB_API_KEY=${toolSecrets.LANCEDB_API_KEY}`);
   }
 
   // Runtime-specific args for host gateway resolution
