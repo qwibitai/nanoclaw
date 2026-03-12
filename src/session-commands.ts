@@ -30,6 +30,7 @@ export function isSessionCommandAllowed(
 export interface AgentResult {
   status: 'success' | 'error';
   result?: string | object | null;
+  idle?: boolean;
 }
 
 /** Dependencies injected by the orchestrator. */
@@ -116,9 +117,9 @@ export async function handleSessionCommand(opts: {
         await deps.sendMessage(text);
         preOutputSent = true;
       }
-      // Close stdin on session-update marker — emitted after query completes,
-      // so all results (including multi-result runs) are already written.
-      if (result.status === 'success' && result.result === null) {
+      // Close stdin on idle marker — emitted when the agent is between queries,
+      // so all results (including multi-turn piped messages) are already written.
+      if (result.status === 'success' && result.idle) {
         deps.closeStdin();
       }
     });

@@ -47,6 +47,7 @@ interface ContainerOutput {
   newSessionId?: string;
   error?: string;
   errorType?: 'prompt_too_long' | 'general';
+  idle?: boolean;
 }
 
 interface SessionEntry {
@@ -1022,8 +1023,12 @@ async function main(): Promise<void> {
         break;
       }
 
-      // Emit session update so host can track it
-      writeOutput({ status: 'success', result: null, newSessionId: sessionId });
+      // Emit session update so host can track it.
+      // idle: true tells the host the agent is waiting for new input and can
+      // be safely preempted.  Intermediate results (text or null) within a
+      // query do NOT carry this flag, preventing premature closeStdin while
+      // piped messages are still being processed.
+      writeOutput({ status: 'success', result: null, newSessionId: sessionId, idle: true });
 
       log('Query ended, waiting for next IPC message...');
 

@@ -111,7 +111,7 @@ Always specify `--profile <name>` to pick the right database. If unsure, check `
 When asked to make code changes or open PRs:
 1. Clone the repo if not already cloned in your workspace
 2. **Read the repo's CLAUDE.md** (if it exists) before writing any code — it contains project-specific conventions, guardrails, and skills you must follow
-3. Create a feature branch
+3. **Before writing any code**, report the current branch: run `git branch --show-current` and tell Dave which branch you're on and which branch you intend to work on. If you're on main/develop and the work touches more than a trivial fix, create a feature branch first. Never silently start editing on main.
 4. Make the changes
 5. Commit, push, and open a PR using `gh pr create`
 6. Share the PR link

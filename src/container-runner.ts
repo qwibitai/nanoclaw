@@ -107,7 +107,9 @@ async function getGranolaAccessToken(): Promise<string | null> {
 
   // Token expired — try to refresh
   if (!refreshToken || !clientId) {
-    logger.error('Granola OAuth token expired and no refresh token available. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp');
+    logger.error(
+      'Granola OAuth token expired and no refresh token available. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp',
+    );
     return null;
   }
 
@@ -169,7 +171,9 @@ async function getGranolaAccessToken(): Promise<string | null> {
     logger.info('Granola OAuth token refreshed successfully');
     return newAccessToken;
   } catch (err) {
-    logger.error(`Granola token refresh error: ${err}. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp`);
+    logger.error(
+      `Granola token refresh error: ${err}. Re-authenticate: claude mcp add granola --transport http https://mcp.granola.ai/mcp`,
+    );
     return null;
   }
 }
@@ -192,7 +196,9 @@ export function startGranolaTokenRefresh(): void {
   doRefresh();
   granolaRefreshTimer = setInterval(doRefresh, GRANOLA_PROACTIVE_REFRESH_MS);
   granolaRefreshTimer.unref(); // don't keep the process alive just for this
-  logger.info(`Granola proactive token refresh started (every ${GRANOLA_PROACTIVE_REFRESH_MS / 1000 / 60 / 60}h)`);
+  logger.info(
+    `Granola proactive token refresh started (every ${GRANOLA_PROACTIVE_REFRESH_MS / 1000 / 60 / 60}h)`,
+  );
 }
 
 export function stopGranolaTokenRefresh(): void {
@@ -416,7 +422,9 @@ export async function prepareThreadWorkspace(
             // Clean up leftover directory if it exists
             try {
               fs.rmSync(wtPath, { recursive: true, force: true });
-            } catch { /* ignore */ }
+            } catch {
+              /* ignore */
+            }
             await execAsync(`git worktree add --detach "${wtPath}" "${ref}"`, {
               cwd: srcPath,
             });
@@ -1393,7 +1401,10 @@ export async function runContainerAgent(
   if (isToolEnabled(tools, 'granola')) {
     granolaAccessToken = (await getGranolaAccessToken()) || undefined;
     if (!granolaAccessToken) {
-      logger.warn({ group: group.name }, 'Granola enabled but no valid token — Granola tools will be unavailable');
+      logger.warn(
+        { group: group.name },
+        'Granola enabled but no valid token — Granola tools will be unavailable',
+      );
     }
   }
 
