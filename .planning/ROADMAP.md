@@ -59,8 +59,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — OAuth module + container-runner integration + tests
-- [ ] 03-02-PLAN.md — VPS deployment, seed credentials, verify refresh cycle
+- [x] 03-01-PLAN.md — OAuth module + container-runner integration + tests
+- [x] 03-02-PLAN.md — VPS deployment, seed credentials, verify refresh cycle
 
 **Success Criteria:**
 1. NanoClaw reads OAuth credentials from `oauth-credentials.json` (not `.env`)
@@ -78,7 +78,7 @@ Plans:
 |-------|--------|-------|-----------|
 | 1 — Multi-Container GroupQueue | Complete | 3 | 3 |
 | 2 — Session Awareness + Deployment | Complete | 2 | 2 |
-| 3 — OAuth Auto-Refresh | In Progress | 2 | 0 |
+| 3 — OAuth Auto-Refresh | Complete | 2 | 2 |
 
 ## Deployment
 
