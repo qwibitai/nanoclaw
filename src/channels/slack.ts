@@ -37,6 +37,7 @@ export class SlackChannel implements Channel {
   private outgoingQueue: Array<{ jid: string; text: string }> = [];
   private flushing = false;
   private userNameCache = new Map<string, string>();
+  private thinkingMessages = new Map<string, string>();
 
   private opts: SlackChannelOpts;
 
@@ -94,8 +95,7 @@ export class SlackChannel implements Channel {
       const groups = this.opts.registeredGroups();
       if (!groups[jid]) return;
 
-      const isBotMessage =
-        !!msg.bot_id || msg.user === this.botUserId;
+      const isBotMessage = !!msg.bot_id || msg.user === this.botUserId;
 
       let senderName: string;
       if (isBotMessage) {
@@ -113,7 +113,10 @@ export class SlackChannel implements Channel {
       let content = msg.text;
       if (this.botUserId && !isBotMessage) {
         const mentionPattern = `<@${this.botUserId}>`;
-        if (content.includes(mentionPattern) && !TRIGGER_PATTERN.test(content)) {
+        if (
+          content.includes(mentionPattern) &&
+          !TRIGGER_PATTERN.test(content)
+        ) {
           content = `@${ASSISTANT_NAME} ${content}`;
         }
       }
@@ -142,10 +145,7 @@ export class SlackChannel implements Channel {
       this.botUserId = auth.user_id as string;
       logger.info({ botUserId: this.botUserId }, 'Connected to Slack');
     } catch (err) {
-      logger.warn(
-        { err },
-        'Connected to Slack but failed to get bot user ID',
-      );
+      logger.warn({ err }, 'Connected to Slack but failed to get bot user ID');
     }
 
     this.connected = true;
@@ -204,11 +204,30 @@ export class SlackChannel implements Channel {
     await this.app.stop();
   }
 
-  // Slack does not expose a typing indicator API for bots.
-  // This no-op satisfies the Channel interface so the orchestrator
-  // doesn't need channel-specific branching.
-  async setTyping(_jid: string, _isTyping: boolean): Promise<void> {
-    // no-op: Slack Bot API has no typing indicator endpoint
+  async setTyping(jid: string, isTyping: boolean): Promise<void> {
+    const channelId = jid.replace(/^slack:/, '');
+    if (!this.connected) return;
+
+    try {
+      if (isTyping) {
+        const result = await this.app.client.chat.postMessage({
+          channel: channelId,
+          text: ':brain: Thinking...',
+        });
+        if (result.ts) {
+          this.thinkingMessages.set(jid, result.ts);
+        }
+      } else {
+        const ts = this.thinkingMessages.get(jid);
+        if (ts) {
+          await this.app.client.chat.delete({ channel: channelId, ts });
+          this.thinkingMessages.delete(jid);
+        }
+      }
+    } catch (err) {
+      logger.debug({ jid, isTyping, err }, 'Failed to manage thinking indicator');
+      this.thinkingMessages.delete(jid);
+    }
   }
 
   /**
@@ -245,9 +264,7 @@ export class SlackChannel implements Channel {
     }
   }
 
-  private async resolveUserName(
-    userId: string,
-  ): Promise<string | undefined> {
+  private async resolveUserName(userId: string): Promise<string | undefined> {
     if (!userId) return undefined;
 
     const cached = this.userNameCache.get(userId);
