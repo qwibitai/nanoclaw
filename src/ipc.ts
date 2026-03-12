@@ -3,7 +3,12 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TELEGRAM_BOT_POOL, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
+  TIMEZONE,
+} from './config.js';
 import { sendPoolMessage } from './channels/telegram.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
@@ -81,7 +86,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  if (data.sender && data.chatJid.startsWith('tg:') && TELEGRAM_BOT_POOL.length > 0) {
+                  if (
+                    data.sender &&
+                    data.chatJid.startsWith('tg:') &&
+                    TELEGRAM_BOT_POOL.length > 0
+                  ) {
                     await sendPoolMessage(
                       data.chatJid,
                       data.text,

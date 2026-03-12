@@ -13,7 +13,9 @@ export const CONTAINER_RUNTIME_BIN = 'container';
 
 /** Hostname containers use to reach the host machine. */
 export const CONTAINER_HOST_GATEWAY =
-  CONTAINER_RUNTIME_BIN === 'container' ? '192.168.64.1' : 'host.docker.internal';
+  CONTAINER_RUNTIME_BIN === 'container'
+    ? '192.168.64.1'
+    : 'host.docker.internal';
 
 /**
  * Address the credential proxy binds to.
@@ -28,7 +30,8 @@ function detectProxyBindHost(): string {
   // Apple Container VMs cannot reach 127.0.0.1 — bind to 0.0.0.0 so the
   // gateway IP (192.168.64.1) routes through. Docker Desktop on macOS
   // handles host.docker.internal via its own VM routing.
-  if (os.platform() === 'darwin' && CONTAINER_RUNTIME_BIN === 'container') return '0.0.0.0';
+  if (os.platform() === 'darwin' && CONTAINER_RUNTIME_BIN === 'container')
+    return '0.0.0.0';
   if (os.platform() === 'darwin') return '127.0.0.1';
 
   // WSL uses Docker Desktop (same VM routing as macOS) — loopback is correct.

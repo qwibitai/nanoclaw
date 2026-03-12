@@ -6,7 +6,11 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'TELEGRAM_BOT_POOL']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'TELEGRAM_BOT_POOL',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -72,7 +76,11 @@ export const TRIGGER_PATTERN = new RegExp(
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || envConfig.TELEGRAM_BOT_POOL || '')
+export const TELEGRAM_BOT_POOL = (
+  process.env.TELEGRAM_BOT_POOL ||
+  envConfig.TELEGRAM_BOT_POOL ||
+  ''
+)
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);
