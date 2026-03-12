@@ -29,21 +29,54 @@ import { RegisteredGroup, ScheduledTask } from './types.js';
 
 // ── Warm-reuse task tracking ─────────────────────────────────────────
 // When a warm container is reused for a new task, the streaming callback
-// from the original runTask still runs. This map lets the callback look
-// up the CURRENT task for a container, so outbound messages get the
-// correct thread_id (and other metadata) from the new task — not the
-// original one that spawned the container.
-const containerCurrentTask = new Map<string, ScheduledTask>();
+// from the original runTask still runs. This queue lets the callback look
+// up which task is CURRENTLY producing output — not which task was most
+// recently piped in.
+//
+// Tasks are pushed onto the queue when piped (setContainerCurrentTask)
+// and shifted off when their output is fully consumed (status: 'success'
+// in the streaming callback). This prevents a newly piped task from
+// stealing the thread_id of a still-in-progress task.
+const containerTaskQueue = new Map<string, ScheduledTask[]>();
 
 /**
- * Update the current task for a container. Called by the warm-reuse
+ * Push a new task onto the container's task queue. Called by the warm-reuse
  * callback in index.ts when a new task is piped into an idle container.
  */
 export function setContainerCurrentTask(
   containerId: string,
   task: ScheduledTask,
 ): void {
-  containerCurrentTask.set(containerId, task);
+  const queue = containerTaskQueue.get(containerId);
+  if (queue) {
+    queue.push(task);
+  } else {
+    containerTaskQueue.set(containerId, [task]);
+  }
+}
+
+/**
+ * Get the task currently producing output for a container (head of queue).
+ */
+function getContainerCurrentTask(
+  containerId: string,
+): ScheduledTask | undefined {
+  const queue = containerTaskQueue.get(containerId);
+  return queue?.[0];
+}
+
+/**
+ * Advance the task queue: remove the completed head task so the next
+ * queued task becomes current.
+ */
+function advanceContainerTaskQueue(containerId: string): void {
+  const queue = containerTaskQueue.get(containerId);
+  if (queue) {
+    queue.shift();
+    if (queue.length === 0) {
+      containerTaskQueue.delete(containerId);
+    }
+  }
 }
 
 /**
@@ -177,10 +210,11 @@ async function runTask(
   let error: string | null = null;
 
   // Register this task as the current one for this container.
-  // When warm-reuse pipes a new task, setContainerCurrentTask updates
-  // the map entry. The streaming callback reads from the map so
-  // outbound messages get the correct thread_id for the CURRENT task.
-  containerCurrentTask.set(containerId, task);
+  // When warm-reuse pipes a new task, setContainerCurrentTask pushes
+  // onto the queue. The streaming callback reads the HEAD of the queue
+  // so outbound messages get the correct thread_id for the task that
+  // is actually producing output right now.
+  containerTaskQueue.set(containerId, [task]);
 
   // CONC-02: Fresh session per container. Even 'group' context mode tasks
   // get a fresh session — sharing a sessionId between concurrent containers
@@ -233,9 +267,11 @@ async function runTask(
           containerId,
         ),
       async (streamedOutput: ContainerOutput) => {
-        // Read the CURRENT task for this container — may have been updated
-        // by warm-reuse (setContainerCurrentTask) since this callback was created.
-        const activeTask = containerCurrentTask.get(containerId) || task;
+        // Read the task at the HEAD of the queue — this is the task whose
+        // output is currently being streamed. New tasks piped via warm-reuse
+        // are appended to the queue and won't become "current" until this
+        // one completes (status: 'success').
+        const activeTask = getContainerCurrentTask(containerId) || task;
 
         if (streamedOutput.result) {
           result = streamedOutput.result;
@@ -276,6 +312,9 @@ async function runTask(
           scheduleClose();
         }
         if (streamedOutput.status === 'success') {
+          // This task is done — advance the queue so the next piped task
+          // becomes the current one for subsequent output.
+          advanceContainerTaskQueue(containerId);
           deps.queue.notifyIdle(activeTask.chat_jid, containerId);
         }
         if (streamedOutput.status === 'error') {
@@ -304,7 +343,7 @@ async function runTask(
   }
 
   // Clean up container→task tracking (no longer needed after exit)
-  containerCurrentTask.delete(containerId);
+  containerTaskQueue.delete(containerId);
 
   const durationMs = Date.now() - startTime;
 
