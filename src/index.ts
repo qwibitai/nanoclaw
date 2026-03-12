@@ -163,7 +163,6 @@ interface ModelOverrideResult {
  * Checks (in priority order):
  *   1. One-shot flag: "-m1 opus" — this invocation only, doesn't persist
  *   2. Sticky flag: "-m opus" — persists for rest of session; "-m default" clears
- *   3. Legacy NLP: "use opus" — treated as sticky
  */
 function extractModelOverride(
   messages: NewMessage[],
@@ -209,7 +208,7 @@ function resolveModel(
   sessionModel?: string,
 ): string {
   if (messageOverride) return messageOverride; // already resolved from alias
-  if (sessionModel) return sessionModel; // sticky from a previous "use opus"
+  if (sessionModel) return sessionModel; // sticky from a previous "-m opus"
   const groupModel = group.containerConfig?.model;
   if (groupModel) return resolveAlias(groupModel);
   return DEFAULT_MODEL;
@@ -304,6 +303,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   }
 
   const isMainGroup = group.isMain === true;
+  const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
   const groupAssistantName = resolveAssistantName(group.containerConfig);
   const triggerPattern = buildTriggerPattern(groupAssistantName);
 
@@ -318,7 +318,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
+  if (needsTrigger) {
     const allowlistCfg = loadSenderAllowlist();
     const hasTrigger = missedMessages.some(
       (m) =>
@@ -393,7 +393,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // from different people asking unrelated questions). Anchor on the first
     // trigger and truncate the batch before the next trigger so each gets its
     // own thread/container. Remaining triggers are picked up on the next cycle.
-    const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
     const firstIdx = needsTrigger
       ? missedMessages.findIndex((m) => triggerPattern.test(m.content.trim()))
       : 0;

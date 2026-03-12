@@ -100,9 +100,7 @@ function createSchema(database: Database.Database): void {
 
   // Add model column to sessions_v2 (sticky model override per session)
   try {
-    database.exec(
-      `ALTER TABLE sessions_v2 ADD COLUMN model TEXT DEFAULT NULL`,
-    );
+    database.exec(`ALTER TABLE sessions_v2 ADD COLUMN model TEXT DEFAULT NULL`);
   } catch {
     // Column already exists — ignore
   }

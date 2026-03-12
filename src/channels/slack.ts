@@ -248,6 +248,11 @@ export class SlackChannel implements Channel {
         }
       }
 
+      // Resolve Slack <@USERID> mentions to readable names so the agent
+      // knows who is being referenced (e.g. "<@U0AJE0VK802>" → "@Hive").
+      // Done AFTER hasBotMention check which needs the raw <@BOTID> format.
+      content = await this.resolveUserMentions(content);
+
       // Translate Slack <@UBOTID> mentions into TRIGGER_PATTERN format.
       // Prepend @AssistantName so the trigger pattern matches.
       // Uses the pre-wrapping bot mention check to avoid false positives
@@ -567,7 +572,8 @@ export class SlackChannel implements Channel {
         : msg.user
           ? (await this.resolveUserName(msg.user)) || msg.user
           : 'unknown';
-      const content = msg.text || this.extractFallbackText(msg);
+      const rawContent = msg.text || this.extractFallbackText(msg);
+      const content = await this.resolveUserMentions(rawContent);
 
       return {
         id: msg.ts!,
@@ -619,7 +625,8 @@ export class SlackChannel implements Channel {
             : m.user
               ? (await this.resolveUserName(m.user)) || m.user
               : 'unknown';
-          const text = m.text || this.extractFallbackText(m);
+          const raw = m.text || this.extractFallbackText(m);
+          const text = await this.resolveUserMentions(raw);
           return `${name}: ${text}`;
         }),
       );
@@ -693,6 +700,31 @@ export class SlackChannel implements Channel {
       logger.debug({ userId, err }, 'Failed to resolve Slack user name');
       return undefined;
     }
+  }
+
+  /**
+   * Replace all <@USERID> mentions in text with @DisplayName.
+   * Falls back to the raw ID if the user can't be resolved.
+   */
+  private async resolveUserMentions(text: string): Promise<string> {
+    const mentionRe = /<@([A-Z0-9]+)>/g;
+    const matches = [...text.matchAll(mentionRe)];
+    if (matches.length === 0) return text;
+
+    // Resolve unique IDs concurrently, then do a single-pass replace.
+    const uniqueIds = [...new Set(matches.map((m) => m[1]))];
+    const nameMap = new Map<string, string>();
+    await Promise.all(
+      uniqueIds.map(async (id) => {
+        const name = await this.resolveUserName(id);
+        if (name) nameMap.set(id, name);
+      }),
+    );
+
+    return text.replace(mentionRe, (full, userId) => {
+      const name = nameMap.get(userId);
+      return name ? `@${name}` : full;
+    });
   }
 
   /**

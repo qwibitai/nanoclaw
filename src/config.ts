@@ -86,7 +86,7 @@ export function escapeRegex(str: string): string {
 }
 
 // Default model for the agent container. Per-group overrides live in
-// ContainerConfig.model; per-message overrides via "use opus/sonnet/haiku".
+// ContainerConfig.model; per-message overrides via "-m opus" (sticky) or "-m1 opus" (one-shot).
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
 
 // Map short aliases to full model IDs
@@ -98,7 +98,8 @@ export const MODEL_ALIASES: Record<string, string> = {
 
 // Patterns to detect model override in a message.
 // Sticky flag: "-m opus" — sets model for rest of session; "-m default" clears
-export const MODEL_FLAG_PATTERN = /(?:^|\s)-m\s+(opus|sonnet|haiku|default|reset)\b/i;
+export const MODEL_FLAG_PATTERN =
+  /(?:^|\s)-m\s+(opus|sonnet|haiku|default|reset)\b/i;
 // One-shot flag: "-m1 opus" — just this invocation, doesn't stick
 export const MODEL_ONESHOT_PATTERN = /(?:^|\s)-m1\s+(opus|sonnet|haiku)\b/i;
 
