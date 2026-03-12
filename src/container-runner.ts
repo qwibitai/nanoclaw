@@ -123,7 +123,10 @@ function buildVolumeMounts(
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
   // Claude Agent SDK writes debug files here on a timer; must exist before mounting
-  fs.mkdirSync(path.join(groupSessionsDir, 'debug'), { recursive: true });
+  // and be world-writable since the container runs as non-root node user
+  const debugDir = path.join(groupSessionsDir, 'debug');
+  fs.mkdirSync(debugDir, { recursive: true });
+  fs.chmodSync(debugDir, 0o777);
   const settingsFile = path.join(groupSessionsDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
     fs.writeFileSync(
