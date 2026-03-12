@@ -61,11 +61,12 @@ function detectProxyBindHost(): string {
   return '0.0.0.0';
 }
 
-/**
- * CLI args needed for the container to resolve the host gateway.
- * Apple Container uses a direct IP (CONTAINER_HOST_GATEWAY) — no extra args needed.
- */
+/** CLI args needed for the container to resolve the host gateway. */
 export function hostGatewayArgs(): string[] {
+  // On Linux, host.docker.internal isn't built-in — add it explicitly
+  if (os.platform() === 'linux') {
+    return ['--add-host=host.docker.internal:host-gateway'];
+  }
   return [];
 }
 
