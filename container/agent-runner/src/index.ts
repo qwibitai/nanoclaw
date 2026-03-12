@@ -85,6 +85,48 @@ const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
 /**
+ * Returns channel-type-specific message formatting instructions based on the JID prefix.
+ *
+ * This is injected into the system prompt on every invocation so that even groups with
+ * globalContext:false (no /workspace/global mount) get correct formatting guidance.
+ *
+ * Note: for WhatsApp and Telegram, MAIN groups access the global CLAUDE.md via the
+ * /workspace/project SDK auto-load (entire groups/ dir is mounted there). Non-MAIN
+ * WhatsApp/Telegram groups with globalContext:true also get it via the /workspace/global
+ * mount. This function covers Slack and Discord explicitly; a future non-MAIN
+ * WhatsApp/Telegram group with globalContext:false would need entries added here.
+ *
+ * Returns undefined for unrecognised JID prefixes — no formatting injection.
+ */
+function getChannelFormattingInstructions(chatJid: string): string | undefined {
+  if (chatJid.startsWith('slack:')) {
+    return `## Message Formatting
+
+You are responding in a Slack channel. Use Slack markdown only:
+- *single asterisks* for bold
+- _underscores_ for italic
+- \`backticks\` for inline code
+- \`\`\`triple backticks\`\`\` for code blocks
+- • or - for bullet points
+
+Do NOT use: **double asterisks**, ## headings, --- horizontal rules, or [text](url) link syntax. These do not render in Slack.`;
+  }
+  if (chatJid.startsWith('dc:')) {
+    return `## Message Formatting
+
+You are responding in a Discord channel. Use Discord markdown:
+- **double asterisks** for bold
+- *single asterisks* for italic
+- \`backticks\` for inline code
+- \`\`\`triple backticks\`\`\` for code blocks
+- - or * for bullet points
+- > for blockquotes`;
+  }
+  // WhatsApp/Telegram JIDs reach here intentionally — they use global CLAUDE.md for formatting.
+  return undefined;
+}
+
+/**
  * Push-based async iterable for streaming user messages to the SDK.
  * Keeps the iterable alive until end() is called, preventing isSingleUserTurn.
  */
@@ -653,6 +695,7 @@ async function runQuery(
   mcpServerPath: string,
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
+  systemPromptOption: { type: 'preset'; preset: 'claude_code'; append: string } | undefined,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
@@ -685,13 +728,6 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
-  // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
-  let globalClaudeMd: string | undefined;
-  if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
-    globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
-  }
-
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -723,9 +759,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
-        : undefined,
+      systemPrompt: systemPromptOption,
       allowedTools: buildAllowedTools(containerInput.tools),
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -807,6 +841,20 @@ async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, 'ipc-mcp-stdio.js');
 
+  // Build systemPrompt once — chatJid and global CLAUDE.md are invariant for the container lifetime.
+  // channelFormatting is placed AFTER globalClaudeMd so it overrides the WA/Telegram formatting
+  // rule in global CLAUDE.md for Slack/Discord groups. This also ensures globalContext:false groups
+  // (no /workspace/global mount) still receive channel-appropriate formatting guidance.
+  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMd = !containerInput.isMain && fs.existsSync(globalClaudeMdPath)
+    ? fs.readFileSync(globalClaudeMdPath, 'utf-8')
+    : undefined;
+  const channelFormatting = getChannelFormattingInstructions(containerInput.chatJid);
+  const systemPromptParts = [globalClaudeMd, channelFormatting].filter(Boolean);
+  const systemPromptOption = systemPromptParts.length > 0
+    ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptParts.join('\n\n') }
+    : undefined;
+
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
 
@@ -841,7 +889,7 @@ async function main(): Promise<void> {
     while (true) {
       log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
 
-      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
+      const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, systemPromptOption, resumeAt);
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
       }
