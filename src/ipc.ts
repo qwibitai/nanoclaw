@@ -14,6 +14,7 @@ import {
   createTask,
   deleteTask,
   getRecentMessages,
+  getRecentMessagesByThread,
   getTaskById,
   storeChatMetadata,
   storeMessage,
@@ -183,6 +184,7 @@ export async function processTaskIpc(
     senderName?: string;
     senderEmail?: string;
     messageText?: string;
+    threadId?: string;
     // For register_group
     jid?: string;
     name?: string;
@@ -279,15 +281,20 @@ export async function processTaskIpc(
         // the inbound message in the messages DB and prepend recent
         // conversation history to the prompt. This ensures Holly has
         // context even when spawned in a fresh container.
+        //
+        // Thread-scoped: when a threadId is present, only messages from
+        // the same thread are included in history. This prevents topic
+        // pollution when multiple Chat threads are active simultaneously.
         let enrichedPrompt = data.prompt;
         if (taskId.startsWith('gchat-msg-') && data.senderName) {
           const now = new Date().toISOString();
           const msgId = `gchat-in-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          const threadId = data.threadId || null;
 
           // Ensure chat metadata exists (foreign key constraint)
           storeChatMetadata(targetJid, now, undefined, 'google-chat');
 
-          // Store the inbound message
+          // Store the inbound message with thread context
           storeMessage({
             id: msgId,
             chat_jid: targetJid,
@@ -297,10 +304,17 @@ export async function processTaskIpc(
             timestamp: now,
             is_from_me: false,
             is_bot_message: false,
+            thread_id: threadId ?? undefined,
           });
 
-          // Fetch recent conversation history and prepend to prompt
-          const recentMessages = getRecentMessages(targetJid, 20);
+          // Fetch recent conversation history scoped to this thread.
+          // When threadId is present, only messages from the same thread
+          // are returned — preventing cross-thread context pollution.
+          const recentMessages = getRecentMessagesByThread(
+            targetJid,
+            threadId,
+            20,
+          );
           if (recentMessages.length > 1) {
             // More than just this message — there's history to include
             // Exclude the message we just stored (it's already in the prompt)
@@ -319,8 +333,9 @@ export async function processTaskIpc(
               chatJid: targetJid,
               historyCount: recentMessages.length - 1,
               sender: data.senderName,
+              threadId: threadId || 'none',
             },
-            'Google Chat message stored with conversation history',
+            'Google Chat message stored with thread-scoped conversation history',
           );
         }
 
@@ -335,6 +350,7 @@ export async function processTaskIpc(
           next_run: nextRun,
           status: 'active',
           created_at: new Date().toISOString(),
+          thread_id: data.threadId || null,
         });
         logger.info(
           { taskId, sourceGroup, targetFolder, contextMode },

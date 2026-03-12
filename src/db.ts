@@ -93,6 +93,14 @@ function createSchema(database: Database.Database): void {
     /* column already exists */
   }
 
+  // Add thread_id column to scheduled_tasks if it doesn't exist.
+  // Used to propagate Google Chat thread context to outbound messages.
+  try {
+    database.exec(`ALTER TABLE scheduled_tasks ADD COLUMN thread_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
   // Add is_bot_message column if it doesn't exist (migration for existing DBs)
   try {
     database.exec(
@@ -104,6 +112,22 @@ function createSchema(database: Database.Database): void {
       .run(`${ASSISTANT_NAME}:%`);
   } catch {
     /* column already exists */
+  }
+
+  // Add thread_id column if it doesn't exist (migration for existing DBs).
+  // Used to scope Google Chat conversation history per-thread, preventing
+  // topic pollution when multiple threads are active simultaneously.
+  try {
+    database.exec(`ALTER TABLE messages ADD COLUMN thread_id TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `CREATE INDEX IF NOT EXISTS idx_thread_id ON messages(thread_id)`,
+    );
+  } catch {
+    /* index already exists */
   }
 
   // Add is_main column if it doesn't exist (migration for existing DBs)
@@ -262,7 +286,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -272,6 +296,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.thread_id ?? null,
   );
 }
 
@@ -287,9 +312,10 @@ export function storeMessageDirect(msg: {
   timestamp: string;
   is_from_me: boolean;
   is_bot_message?: boolean;
+  thread_id?: string;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -299,6 +325,7 @@ export function storeMessageDirect(msg: {
     msg.timestamp,
     msg.is_from_me ? 1 : 0,
     msg.is_bot_message ? 1 : 0,
+    msg.thread_id ?? null,
   );
 }
 
@@ -387,13 +414,42 @@ export function getRecentMessages(
   return db.prepare(sql).all(chatJid, limit) as NewMessage[];
 }
 
+/**
+ * Get the N most recent messages for a chat within a specific thread.
+ * Used for Google Chat thread-scoped conversation history — prevents
+ * topic pollution when multiple threads are active simultaneously.
+ * Falls back to getRecentMessages if threadId is null/undefined.
+ */
+export function getRecentMessagesByThread(
+  chatJid: string,
+  threadId: string | null | undefined,
+  limit: number = 20,
+): NewMessage[] {
+  if (!threadId) {
+    return getRecentMessages(chatJid, limit);
+  }
+
+  const sql = `
+    SELECT * FROM (
+      SELECT id, chat_jid, sender, sender_name, content, timestamp,
+             is_from_me, is_bot_message, thread_id
+      FROM messages
+      WHERE chat_jid = ? AND thread_id = ?
+        AND content != '' AND content IS NOT NULL
+      ORDER BY timestamp DESC
+      LIMIT ?
+    ) ORDER BY timestamp
+  `;
+  return db.prepare(sql).all(chatJid, threadId, limit) as NewMessage[];
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {
   db.prepare(
     `
-    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scheduled_tasks (id, group_folder, chat_jid, prompt, schedule_type, schedule_value, context_mode, next_run, status, created_at, thread_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `,
   ).run(
     task.id,
@@ -406,6 +462,7 @@ export function createTask(
     task.next_run,
     task.status,
     task.created_at,
+    task.thread_id ?? null,
   );
 }
 

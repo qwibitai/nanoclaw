@@ -9,6 +9,7 @@ import {
   getMessagesSince,
   getNewMessages,
   getRecentMessages,
+  getRecentMessagesByThread,
   getTaskById,
   setRegisteredGroup,
   storeChatMetadata,
@@ -643,5 +644,241 @@ describe('getRecentMessages', () => {
   it('returns empty array when no messages exist', () => {
     const messages = getRecentMessages('gchat:nonexistent', 20);
     expect(messages).toHaveLength(0);
+  });
+});
+
+// --- getRecentMessagesByThread ---
+
+describe('getRecentMessagesByThread', () => {
+  const CHAT_JID = 'gchat:pm-agent';
+  const THREAD_A = 'spaces/xxx/threads/thread-a';
+  const THREAD_B = 'spaces/xxx/threads/thread-b';
+
+  beforeEach(() => {
+    storeChatMetadata(CHAT_JID, '2024-01-01T00:00:00.000Z');
+
+    // Thread A: M365 migration discussion
+    storeMessage({
+      id: 'ta-1',
+      chat_jid: CHAT_JID,
+      sender: 'craig@gorillahub.co.uk',
+      sender_name: 'Craig',
+      content: 'Lets talk about M365 migration',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      thread_id: THREAD_A,
+    });
+
+    storeMessage({
+      id: 'ta-2',
+      chat_jid: CHAT_JID,
+      sender: 'Holly',
+      sender_name: 'Holly',
+      content: 'Sure, here is the migration plan...',
+      timestamp: '2024-01-01T00:00:02.000Z',
+      is_from_me: true,
+      is_bot_message: true,
+      thread_id: THREAD_A,
+    });
+
+    // Thread B: Task management discussion
+    storeMessage({
+      id: 'tb-1',
+      chat_jid: CHAT_JID,
+      sender: 'craig@gorillahub.co.uk',
+      sender_name: 'Craig',
+      content: 'Lets discuss task management',
+      timestamp: '2024-01-01T00:00:03.000Z',
+      is_from_me: false,
+      thread_id: THREAD_B,
+    });
+
+    storeMessage({
+      id: 'tb-2',
+      chat_jid: CHAT_JID,
+      sender: 'Holly',
+      sender_name: 'Holly',
+      content: 'Here is the autonomous execution plan...',
+      timestamp: '2024-01-01T00:00:04.000Z',
+      is_from_me: true,
+      is_bot_message: true,
+      thread_id: THREAD_B,
+    });
+
+    // Thread A: more messages
+    storeMessage({
+      id: 'ta-3',
+      chat_jid: CHAT_JID,
+      sender: 'craig@gorillahub.co.uk',
+      sender_name: 'Craig',
+      content: 'What about the mailboxes?',
+      timestamp: '2024-01-01T00:00:05.000Z',
+      is_from_me: false,
+      thread_id: THREAD_A,
+    });
+  });
+
+  it('returns only messages from the specified thread', () => {
+    const threadAMsgs = getRecentMessagesByThread(CHAT_JID, THREAD_A, 20);
+    expect(threadAMsgs).toHaveLength(3);
+    expect(threadAMsgs[0].content).toBe('Lets talk about M365 migration');
+    expect(threadAMsgs[1].content).toBe('Sure, here is the migration plan...');
+    expect(threadAMsgs[2].content).toBe('What about the mailboxes?');
+  });
+
+  it('isolates thread B from thread A messages', () => {
+    const threadBMsgs = getRecentMessagesByThread(CHAT_JID, THREAD_B, 20);
+    expect(threadBMsgs).toHaveLength(2);
+    expect(threadBMsgs[0].content).toBe('Lets discuss task management');
+    expect(threadBMsgs[1].content).toBe('Here is the autonomous execution plan...');
+  });
+
+  it('falls back to getRecentMessages when threadId is null', () => {
+    const allMsgs = getRecentMessagesByThread(CHAT_JID, null, 20);
+    // Should return ALL messages across all threads (5 total)
+    expect(allMsgs).toHaveLength(5);
+  });
+
+  it('falls back to getRecentMessages when threadId is undefined', () => {
+    const allMsgs = getRecentMessagesByThread(CHAT_JID, undefined, 20);
+    expect(allMsgs).toHaveLength(5);
+  });
+
+  it('respects the limit parameter', () => {
+    const msgs = getRecentMessagesByThread(CHAT_JID, THREAD_A, 2);
+    expect(msgs).toHaveLength(2);
+    // Should return the 2 most recent in chronological order
+    expect(msgs[0].content).toBe('Sure, here is the migration plan...');
+    expect(msgs[1].content).toBe('What about the mailboxes?');
+  });
+
+  it('returns empty array for unknown thread', () => {
+    const msgs = getRecentMessagesByThread(
+      CHAT_JID,
+      'spaces/xxx/threads/nonexistent',
+      20,
+    );
+    expect(msgs).toHaveLength(0);
+  });
+
+  it('excludes empty content messages', () => {
+    storeMessage({
+      id: 'ta-empty',
+      chat_jid: CHAT_JID,
+      sender: 'Craig',
+      sender_name: 'Craig',
+      content: '',
+      timestamp: '2024-01-01T00:00:06.000Z',
+      is_from_me: false,
+      thread_id: THREAD_A,
+    });
+
+    const msgs = getRecentMessagesByThread(CHAT_JID, THREAD_A, 20);
+    // Still 3 — empty message excluded
+    expect(msgs).toHaveLength(3);
+  });
+
+  it('includes bot messages in thread history', () => {
+    const msgs = getRecentMessagesByThread(CHAT_JID, THREAD_A, 20);
+    const botMsgs = msgs.filter(
+      (m) => m.content === 'Sure, here is the migration plan...',
+    );
+    expect(botMsgs).toHaveLength(1);
+  });
+});
+
+// --- storeMessage with thread_id ---
+
+describe('storeMessage with thread_id', () => {
+  it('stores and retrieves thread_id', () => {
+    storeChatMetadata('gchat:pm-agent', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-thread',
+      chat_jid: 'gchat:pm-agent',
+      sender: 'Craig',
+      sender_name: 'Craig',
+      content: 'threaded message',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+      thread_id: 'spaces/xxx/threads/abc',
+    });
+
+    const msgs = getRecentMessagesByThread(
+      'gchat:pm-agent',
+      'spaces/xxx/threads/abc',
+      20,
+    );
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].thread_id).toBe('spaces/xxx/threads/abc');
+  });
+
+  it('stores null thread_id when not provided', () => {
+    storeChatMetadata('gchat:pm-agent', '2024-01-01T00:00:00.000Z');
+
+    storeMessage({
+      id: 'msg-no-thread',
+      chat_jid: 'gchat:pm-agent',
+      sender: 'Craig',
+      sender_name: 'Craig',
+      content: 'unthreaded message',
+      timestamp: '2024-01-01T00:00:01.000Z',
+      is_from_me: false,
+    });
+
+    // Should appear in the fallback (all messages) query
+    const msgs = getRecentMessages('gchat:pm-agent', 20);
+    expect(msgs).toHaveLength(1);
+
+    // Should NOT appear in a thread-specific query
+    const threadMsgs = getRecentMessagesByThread(
+      'gchat:pm-agent',
+      'spaces/xxx/threads/specific',
+      20,
+    );
+    expect(threadMsgs).toHaveLength(0);
+  });
+});
+
+// --- createTask with thread_id ---
+
+describe('createTask with thread_id', () => {
+  it('stores thread_id on a task', () => {
+    createTask({
+      id: 'gchat-msg-123',
+      group_folder: 'google-chat_pm-agent',
+      chat_jid: 'gchat:pm-agent',
+      prompt: 'test prompt',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: '2024-06-01T00:00:00.000Z',
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+      thread_id: 'spaces/xxx/threads/task-thread',
+    });
+
+    const task = getTaskById('gchat-msg-123');
+    expect(task).toBeDefined();
+    expect(task!.thread_id).toBe('spaces/xxx/threads/task-thread');
+  });
+
+  it('stores null thread_id when not provided', () => {
+    createTask({
+      id: 'task-no-thread',
+      group_folder: 'main',
+      chat_jid: 'group@g.us',
+      prompt: 'test',
+      schedule_type: 'once',
+      schedule_value: '2024-06-01T00:00:00.000Z',
+      context_mode: 'isolated',
+      next_run: null,
+      status: 'active',
+      created_at: '2024-01-01T00:00:00.000Z',
+    });
+
+    const task = getTaskById('task-no-thread');
+    expect(task).toBeDefined();
+    expect(task!.thread_id).toBeNull();
   });
 });
