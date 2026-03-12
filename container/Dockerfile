@@ -5,7 +5,6 @@ FROM node:22-slim
 
 # Install system dependencies for Chromium
 RUN apt-get update && apt-get install -y \
-    chromium \
     fonts-liberation \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
@@ -31,6 +30,8 @@ ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Install agent-browser and claude-code globally
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD prevents playwright from downloading chromium at install time
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm install -g agent-browser @anthropic-ai/claude-code
 
 # Create app directory
