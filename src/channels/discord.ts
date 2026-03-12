@@ -519,6 +519,28 @@ export class DiscordChannel implements Channel {
     ];
   }
 
+  /** Split text at a clean boundary at or before maxLen. */
+  private static splitAtBoundary(text: string, maxLen: number): number {
+    if (text.length <= maxLen) return text.length;
+    const slice = text.slice(0, maxLen);
+    // Prefer paragraph break
+    let idx = slice.lastIndexOf('\n\n');
+    if (idx > 0) return idx + 2;
+    // Line break
+    idx = slice.lastIndexOf('\n');
+    if (idx > 0) return idx + 1;
+    // Sentence ending
+    for (const sep of ['. ', '! ', '? ']) {
+      idx = slice.lastIndexOf(sep);
+      if (idx > 0) return idx + sep.length;
+    }
+    // Word boundary
+    idx = slice.lastIndexOf(' ');
+    if (idx > 0) return idx + 1;
+    // Hard cut fallback
+    return maxLen;
+  }
+
   /** Send text in chunks respecting Discord's 2000 char limit. */
   private async sendChunked(
     target: {
@@ -536,9 +558,13 @@ export class DiscordChannel implements Channel {
       }
     } else {
       const chunks: string[] = [];
-      for (let i = 0; i < text.length; i += max) {
-        chunks.push(text.slice(i, i + max));
+      let remaining = text;
+      while (remaining.length > max) {
+        const split = DiscordChannel.splitAtBoundary(remaining, max);
+        chunks.push(remaining.slice(0, split).trimEnd());
+        remaining = remaining.slice(split).trimStart();
       }
+      if (remaining.length > 0) chunks.push(remaining);
       for (let i = 0; i < chunks.length - 1; i++) {
         await target.send(chunks[i]);
       }

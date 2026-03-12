@@ -668,7 +668,7 @@ describe('DiscordChannel', () => {
       // No error, no API call
     });
 
-    it('splits messages exceeding 2000 characters', async () => {
+    it('splits messages exceeding 2000 characters (hard cut fallback)', async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel('test-token', opts);
       await channel.connect();
@@ -685,6 +685,50 @@ describe('DiscordChannel', () => {
       expect(mockChannel.send).toHaveBeenCalledTimes(2);
       expect(mockChannel.send).toHaveBeenNthCalledWith(1, 'x'.repeat(2000));
       expect(mockChannel.send).toHaveBeenNthCalledWith(2, 'x'.repeat(1000));
+    });
+
+    it('splits long messages at paragraph boundary', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      // First paragraph just under 2000 chars, second paragraph pushes total over
+      const para1 = 'a'.repeat(1990);
+      const para2 = 'b'.repeat(100);
+      const longText = `${para1}\n\n${para2}`;
+      await channel.sendMessage('dc:1234567890123456', longText);
+
+      expect(mockChannel.send).toHaveBeenCalledTimes(2);
+      expect(mockChannel.send).toHaveBeenNthCalledWith(1, para1);
+      expect(mockChannel.send).toHaveBeenNthCalledWith(2, para2);
+    });
+
+    it('splits long messages at sentence boundary', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      const mockChannel = {
+        send: vi.fn().mockResolvedValue(undefined),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      // Sentence ending just before 2000, rest pushes over
+      const sentence1 = 'a'.repeat(1990) + '. ';
+      const sentence2 = 'b'.repeat(100);
+      const longText = sentence1 + sentence2;
+      await channel.sendMessage('dc:1234567890123456', longText);
+
+      expect(mockChannel.send).toHaveBeenCalledTimes(2);
+      expect(mockChannel.send).toHaveBeenNthCalledWith(1, sentence1.trimEnd());
+      expect(mockChannel.send).toHaveBeenNthCalledWith(2, sentence2);
     });
   });
 
