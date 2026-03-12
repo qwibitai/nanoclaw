@@ -363,6 +363,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -440,6 +441,17 @@ async function runQuery(
 
     if (message.type === 'assistant' && 'uuid' in message) {
       lastAssistantUuid = (message as { uuid: string }).uuid;
+      // Track last assistant text so we can use it as a fallback if the SDK's
+      // result.result is empty (happens when the turn ends with a tool call
+      // rather than text — e.g. agent replies then silently updates memory).
+      const assistantContent = (message as { message?: { content?: unknown[] } }).message?.content;
+      if (Array.isArray(assistantContent)) {
+        const text = assistantContent
+          .filter((b): b is { type: 'text'; text: string } => (b as { type?: string }).type === 'text')
+          .map((b) => b.text)
+          .join('');
+        if (text) lastAssistantText = text;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -455,12 +467,18 @@ async function runQuery(
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      // Fall back to the last captured assistant text when result.result is empty.
+      // This covers the case where the agent's turn ends with a tool call (e.g.
+      // writing memory) rather than a text response, causing result.result to be
+      // empty even though the agent did produce visible text earlier in the turn.
+      const effectiveResult = textResult || lastAssistantText || null;
+      log(`Result #${resultCount}: subtype=${message.subtype}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}${!textResult && effectiveResult ? ' (from lastAssistantText fallback)' : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId
       });
+      lastAssistantText = undefined;
     }
   }
 
