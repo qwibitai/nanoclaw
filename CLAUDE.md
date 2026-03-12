@@ -4,33 +4,34 @@ Personal Claude assistant. See [README.md](README.md) for philosophy and setup. 
 
 ## Quick Context
 
-Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
+Single Node.js process with skill-based channel system. Channels (WhatsApp, Telegram, Slack, Discord, Gmail, Google Chat) are skills that self-register at startup. Messages route to Claude Agent SDK running in containers (Linux VMs). Each group has isolated filesystem and memory.
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `src/index.ts` | Orchestrator: state, message loop, agent invocation |
-| `src/channels/registry.ts` | Channel registry (self-registration at startup) |
-| `src/ipc.ts` | IPC watcher and task processing |
-| `src/router.ts` | Message formatting and outbound routing |
-| `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
-| `src/task-scheduler.ts` | Runs scheduled tasks |
-| `src/db.ts` | SQLite operations |
-| `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
-| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| File                                | Purpose                                                                |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| `src/index.ts`                      | Orchestrator: state, message loop, agent invocation                    |
+| `src/channels/registry.ts`          | Channel registry (self-registration at startup)                        |
+| `src/ipc.ts`                        | IPC watcher and task processing                                        |
+| `src/router.ts`                     | Message formatting and outbound routing                                |
+| `src/config.ts`                     | Trigger pattern, paths, intervals                                      |
+| `src/container-runner.ts`           | Spawns agent containers with mounts                                    |
+| `src/task-scheduler.ts`             | Runs scheduled tasks                                                   |
+| `src/db.ts`                         | SQLite operations                                                      |
+| `src/channels/google-chat.ts`       | Google Chat adapter (sidecar files written by external trigger-writer) |
+| `groups/{name}/CLAUDE.md`           | Per-group memory (isolated)                                            |
+| `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash)             |
 
 ## Skills
 
-| Skill | When to Use |
-|-------|-------------|
-| `/setup` | First-time installation, authentication, service configuration |
-| `/customize` | Adding channels, integrations, changing behavior |
-| `/debug` | Container issues, logs, troubleshooting |
-| `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |
-| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch |
-| `/get-qodo-rules` | Load org- and repo-level coding rules from Qodo before code tasks |
+| Skill               | When to Use                                                       |
+| ------------------- | ----------------------------------------------------------------- |
+| `/setup`            | First-time installation, authentication, service configuration    |
+| `/customize`        | Adding channels, integrations, changing behavior                  |
+| `/debug`            | Container issues, logs, troubleshooting                           |
+| `/update-nanoclaw`  | Bring upstream NanoClaw updates into a customized install         |
+| `/qodo-pr-resolver` | Fetch and fix Qodo PR review issues interactively or in batch     |
+| `/get-qodo-rules`   | Load org- and repo-level coding rules from Qodo before code tasks |
 
 ## Development
 
@@ -43,6 +44,7 @@ npm run build        # Compile TypeScript
 ```
 
 Service management:
+
 ```bash
 # macOS (launchd)
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
