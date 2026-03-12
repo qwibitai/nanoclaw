@@ -53,6 +53,11 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
 );
 export const IPC_POLL_INTERVAL = 1000;
 export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+export const SESSION_MAX_SIZE_BYTES = parseInt(
+  process.env.SESSION_MAX_SIZE_BYTES || '10485760',
+  10,
+); // 10MB default — rotate session when JSONL exceeds this
+export const FLUSH_TIMEOUT = parseInt(process.env.FLUSH_TIMEOUT || '20000', 10); // 20s — time window for pre-death memory flush
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
   parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '5', 10) || 5,

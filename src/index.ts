@@ -4,8 +4,11 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
+  FLUSH_TIMEOUT,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  SESSION_MAX_SIZE_BYTES,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
@@ -27,6 +30,7 @@ import {
   PROXY_BIND_HOST,
 } from './container-runtime.js';
 import {
+  clearSession,
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -58,6 +62,23 @@ import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+function getDirectorySize(dirPath: string): number {
+  let total = 0;
+  try {
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+      const fullPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        total += getDirectorySize(fullPath);
+      } else {
+        total += fs.statSync(fullPath).size;
+      }
+    }
+  } catch {
+    /* directory doesn't exist */
+  }
+  return total;
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -191,15 +212,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushing = false;
+
+  const FLUSH_INSTRUCTION =
+    '[SESSION ENDING — MEMORY FLUSH]\n' +
+    "Your session is about to end. You have ~15 seconds. Quickly persist anything important you haven't already saved:\n" +
+    '1. New facts, corrections, or decisions → update the relevant memory files\n' +
+    '2. In-progress work status → write a note so you can resume next session\n' +
+    "3. Anything the user asked you to remember → ensure it's in your memory files\n" +
+    'If everything important is already saved, respond with just "<internal>Nothing to flush.</internal>".';
 
   const resetIdleTimer = () => {
+    if (flushing) return; // Don't reset during flush
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
-      logger.debug(
-        { group: group.name },
-        'Idle timeout, closing container stdin',
-      );
-      queue.closeStdin(chatJid);
+      flushing = true;
+      const sent = queue.sendMessage(chatJid, FLUSH_INSTRUCTION);
+      if (sent) {
+        logger.debug(
+          { group: group.name },
+          'Idle timeout, sending memory flush before close',
+        );
+        setTimeout(() => {
+          logger.debug(
+            { group: group.name },
+            'Flush window expired, closing container',
+          );
+          queue.closeStdin(chatJid);
+        }, FLUSH_TIMEOUT);
+      } else {
+        logger.debug(
+          { group: group.name },
+          'Idle timeout, closing container stdin',
+        );
+        queue.closeStdin(chatJid);
+      }
     }, IDLE_TIMEOUT);
   };
 
@@ -267,7 +314,34 @@ async function runAgent(
   onOutput?: (output: ContainerOutput) => Promise<void>,
 ): Promise<'success' | 'error'> {
   const isMain = group.isMain === true;
-  const sessionId = sessions[group.folder];
+  let sessionId: string | undefined = sessions[group.folder];
+
+  // Check session size — rotate if over threshold
+  if (sessionId) {
+    const sessionDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+    const size = getDirectorySize(sessionDir);
+    if (size > SESSION_MAX_SIZE_BYTES) {
+      const sizeMB = (size / 1024 / 1024).toFixed(1);
+      logger.info(
+        { group: group.name, sessionId, sizeMB },
+        'Session exceeds size limit, rotating to fresh session',
+      );
+      // Archive old session directory
+      const archiveName = `${group.folder}-${Date.now()}`;
+      const archiveDir = path.join(DATA_DIR, 'sessions', archiveName);
+      try {
+        fs.renameSync(
+          path.join(DATA_DIR, 'sessions', group.folder),
+          archiveDir,
+        );
+      } catch {
+        /* best-effort archive */
+      }
+      clearSession(group.folder);
+      delete sessions[group.folder];
+      sessionId = undefined;
+    }
+  }
 
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();

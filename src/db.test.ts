@@ -2,14 +2,18 @@ import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   _initTestDatabase,
+  clearSession,
   createTask,
   deleteTask,
   getAllChats,
   getAllRegisteredGroups,
+  getAllSessions,
   getMessagesSince,
   getNewMessages,
+  getSession,
   getTaskById,
   setRegisteredGroup,
+  setSession,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -480,5 +484,45 @@ describe('registered group isMain', () => {
     const group = groups['group@g.us'];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- Session CRUD ---
+
+describe('session management', () => {
+  it('stores and retrieves a session', () => {
+    setSession('telegram_main', 'session-abc-123');
+    expect(getSession('telegram_main')).toBe('session-abc-123');
+  });
+
+  it('returns undefined for unknown group', () => {
+    expect(getSession('nonexistent')).toBeUndefined();
+  });
+
+  it('overwrites session on repeated set', () => {
+    setSession('telegram_main', 'session-1');
+    setSession('telegram_main', 'session-2');
+    expect(getSession('telegram_main')).toBe('session-2');
+  });
+
+  it('getAllSessions returns all stored sessions', () => {
+    setSession('group_a', 'sess-a');
+    setSession('group_b', 'sess-b');
+    const all = getAllSessions();
+    expect(all).toEqual({ group_a: 'sess-a', group_b: 'sess-b' });
+  });
+
+  it('clearSession removes only the target group', () => {
+    setSession('group_a', 'sess-a');
+    setSession('group_b', 'sess-b');
+    clearSession('group_a');
+    expect(getSession('group_a')).toBeUndefined();
+    expect(getSession('group_b')).toBe('sess-b');
+  });
+
+  it('clearSession is a no-op for unknown group', () => {
+    setSession('group_a', 'sess-a');
+    clearSession('nonexistent');
+    expect(getSession('group_a')).toBe('sess-a');
   });
 });
