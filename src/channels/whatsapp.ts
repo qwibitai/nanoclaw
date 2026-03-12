@@ -5,18 +5,22 @@ import path from 'path';
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   WASocket,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
+  normalizeMessageContent,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
 import {
   ASSISTANT_HAS_OWN_NUMBER,
   ASSISTANT_NAME,
+  GROUPS_DIR,
   STORE_DIR,
 } from '../config.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
+import { isImageMessage, processImage } from '../image.js';
 import { logger } from '../logger.js';
 import { isVoiceMessage, transcribeAudioMessage } from '../transcription.js';
 import {
@@ -110,15 +114,7 @@ export class WhatsAppChannel implements Channel {
         );
 
         if (shouldReconnect) {
-          logger.info('Reconnecting...');
-          this.connectInternal().catch((err) => {
-            logger.error({ err }, 'Failed to reconnect, retrying in 5s');
-            setTimeout(() => {
-              this.connectInternal().catch((err2) => {
-                logger.error({ err: err2 }, 'Reconnection retry failed');
-              });
-            }, 5000);
-          });
+          this.scheduleReconnect(1);
         } else {
           logger.info('Logged out. Run /setup to re-authenticate.');
           process.exit(0);
@@ -173,112 +169,141 @@ export class WhatsAppChannel implements Channel {
 
     this.sock.ev.on('messages.upsert', async ({ messages }) => {
       for (const msg of messages) {
-        if (!msg.message) continue;
-        const rawJid = msg.key.remoteJid;
-        if (!rawJid || rawJid === 'status@broadcast') continue;
+        try {
+          if (!msg.message) continue;
+          // Unwrap container types (viewOnceMessageV2, ephemeralMessage,
+          // editedMessage, etc.) so that conversation, extendedTextMessage,
+          // imageMessage, etc. are accessible at the top level.
+          const normalized = normalizeMessageContent(msg.message);
+          if (!normalized) continue;
+          const rawJid = msg.key.remoteJid;
+          if (!rawJid || rawJid === 'status@broadcast') continue;
 
-        // Translate LID JID to phone JID if applicable
-        const chatJid = await this.translateJid(rawJid);
+          // Translate LID JID to phone JID if applicable
+          const chatJid = await this.translateJid(rawJid);
 
-        const timestamp = new Date(
-          Number(msg.messageTimestamp) * 1000,
-        ).toISOString();
+          const timestamp = new Date(
+            Number(msg.messageTimestamp) * 1000,
+          ).toISOString();
 
-        // Always notify about chat metadata for group discovery
-        const isGroup = chatJid.endsWith('@g.us');
-        this.opts.onChatMetadata(
-          chatJid,
-          timestamp,
-          undefined,
-          'whatsapp',
-          isGroup,
-        );
-
-        // Only deliver full message for registered groups
-        const groups = this.opts.registeredGroups();
-        if (groups[chatJid]) {
-          const content =
-            msg.message?.conversation ||
-            msg.message?.extendedTextMessage?.text ||
-            msg.message?.imageMessage?.caption ||
-            msg.message?.videoMessage?.caption ||
-            '';
-
-          const contextInfo =
-            msg.message?.extendedTextMessage?.contextInfo ||
-            msg.message?.imageMessage?.contextInfo ||
-            msg.message?.videoMessage?.contextInfo ||
-            undefined;
-
-          const replyToId = contextInfo?.stanzaId || undefined;
-
-          // Extract the text of the quoted message directly from the payload.
-          // contextInfo.quotedMessage is the full WA proto Message object.
-          const quotedMsg = contextInfo?.quotedMessage;
-          const quotedText = quotedMsg
-            ? quotedMsg.conversation ||
-              quotedMsg.extendedTextMessage?.text ||
-              quotedMsg.imageMessage?.caption ||
-              quotedMsg.videoMessage?.caption ||
-              (quotedMsg.audioMessage ? '[Voice Message]' : undefined) ||
-              undefined
-            : undefined;
-
-          // participant is the JID of the quoted message sender
-          const quotedParticipant = contextInfo?.participant || undefined;
-          const quotedSender = quotedParticipant
-            ? quotedParticipant.split('@')[0]
-            : undefined;
-
-          // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-          // but allow voice messages through for transcription
-          if (!content && !isVoiceMessage(msg)) continue;
-
-          const sender = msg.key.participant || msg.key.remoteJid || '';
-          const senderName = msg.pushName || sender.split('@')[0];
-
-          const fromMe = msg.key.fromMe || false;
-          // Detect bot messages: with own number, fromMe is reliable
-          // since only the bot sends from that number.
-          // With shared number, bot messages carry the assistant name prefix
-          // (even in DMs/self-chat) so we check for that.
-          const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
-            ? fromMe
-            : content.startsWith(`${ASSISTANT_NAME}:`);
-
-          // Transcribe voice messages before storing
-          let finalContent = content;
-          if (isVoiceMessage(msg)) {
-            try {
-              const transcript = await transcribeAudioMessage(msg, this.sock);
-              if (transcript) {
-                finalContent = `[Voice: ${transcript}]`;
-                logger.info(
-                  { chatJid, length: transcript.length },
-                  'Transcribed voice message',
-                );
-              } else {
-                finalContent = '[Voice Message - transcription unavailable]';
-              }
-            } catch (err) {
-              logger.error({ err }, 'Voice transcription error');
-              finalContent = '[Voice Message - transcription failed]';
-            }
-          }
-
-          this.opts.onMessage(chatJid, {
-            id: msg.key.id || '',
-            chat_jid: chatJid,
-            sender,
-            sender_name: senderName,
-            content: finalContent,
+          // Always notify about chat metadata for group discovery
+          const isGroup = chatJid.endsWith('@g.us');
+          this.opts.onChatMetadata(
+            chatJid,
             timestamp,
-            is_from_me: fromMe,
-            is_bot_message: isBotMessage,
-            reply_to_id: replyToId,
-            quoted_text: quotedText,
-            quoted_sender: quotedSender,
-          });
+            undefined,
+            'whatsapp',
+            isGroup,
+          );
+
+          // Only deliver full message for registered groups
+          const groups = this.opts.registeredGroups();
+          if (groups[chatJid]) {
+            let content =
+              normalized.conversation ||
+              normalized.extendedTextMessage?.text ||
+              normalized.imageMessage?.caption ||
+              normalized.videoMessage?.caption ||
+              '';
+
+            const contextInfo =
+              normalized.extendedTextMessage?.contextInfo ||
+              normalized.imageMessage?.contextInfo ||
+              normalized.videoMessage?.contextInfo ||
+              undefined;
+
+            const replyToId = contextInfo?.stanzaId || undefined;
+
+            // Extract the text of the quoted message directly from the payload.
+            const quotedMsg = contextInfo?.quotedMessage;
+            const quotedText = quotedMsg
+              ? quotedMsg.conversation ||
+                quotedMsg.extendedTextMessage?.text ||
+                quotedMsg.imageMessage?.caption ||
+                quotedMsg.videoMessage?.caption ||
+                (quotedMsg.audioMessage ? '[Voice Message]' : undefined) ||
+                undefined
+              : undefined;
+
+            const quotedParticipant = contextInfo?.participant || undefined;
+            const quotedSender = quotedParticipant
+              ? quotedParticipant.split('@')[0]
+              : undefined;
+
+            // Image attachment handling
+            if (isImageMessage(msg)) {
+              try {
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                const groupDir = path.join(GROUPS_DIR, groups[chatJid].folder);
+                const caption = normalized?.imageMessage?.caption ?? '';
+                const result = await processImage(
+                  buffer as Buffer,
+                  groupDir,
+                  caption,
+                );
+                if (result) {
+                  content = result.content;
+                }
+              } catch (err) {
+                logger.warn({ err, jid: chatJid }, 'Image - download failed');
+              }
+            }
+
+            // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
+            // but allow voice messages through for transcription
+            if (!content && !isVoiceMessage(msg)) continue;
+
+            const sender = msg.key.participant || msg.key.remoteJid || '';
+            const senderName = msg.pushName || sender.split('@')[0];
+
+            const fromMe = msg.key.fromMe || false;
+            // Detect bot messages: with own number, fromMe is reliable
+            // since only the bot sends from that number.
+            // With shared number, bot messages carry the assistant name prefix
+            // (even in DMs/self-chat) so we check for that.
+            const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
+              ? fromMe
+              : content.startsWith(`${ASSISTANT_NAME}:`);
+
+            // Transcribe voice messages before storing
+            let finalContent = content;
+            if (isVoiceMessage(msg)) {
+              try {
+                const transcript = await transcribeAudioMessage(msg, this.sock);
+                if (transcript) {
+                  finalContent = `[Voice: ${transcript}]`;
+                  logger.info(
+                    { chatJid, length: transcript.length },
+                    'Transcribed voice message',
+                  );
+                } else {
+                  finalContent = '[Voice Message - transcription unavailable]';
+                }
+              } catch (err) {
+                logger.error({ err }, 'Voice transcription error');
+                finalContent = '[Voice Message - transcription failed]';
+              }
+            }
+
+            this.opts.onMessage(chatJid, {
+              id: msg.key.id || '',
+              chat_jid: chatJid,
+              sender,
+              sender_name: senderName,
+              content: finalContent,
+              timestamp,
+              is_from_me: fromMe,
+              is_bot_message: isBotMessage,
+              reply_to_id: replyToId,
+              quoted_text: quotedText,
+              quoted_sender: quotedSender,
+            });
+          }
+        } catch (err) {
+          logger.error(
+            { err, remoteJid: msg.key?.remoteJid },
+            'Error processing incoming message',
+          );
         }
       }
     });
@@ -337,6 +362,10 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
+  async syncGroups(force: boolean): Promise<void> {
+    return this.syncGroupMetadata(force);
+  }
+
   /**
    * Sync group metadata from WhatsApp.
    * Fetches all participating groups and stores their names in the database.
@@ -371,6 +400,17 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.error({ err }, 'Failed to sync group metadata');
     }
+  }
+
+  private scheduleReconnect(attempt: number): void {
+    const delayMs = Math.min(5000 * Math.pow(2, attempt - 1), 300000);
+    logger.info({ attempt, delayMs }, 'Reconnecting...');
+    setTimeout(() => {
+      this.connectInternal().catch((err) => {
+        logger.error({ err, attempt }, 'Reconnection attempt failed');
+        this.scheduleReconnect(attempt + 1);
+      });
+    }, delayMs);
   }
 
   private async translateJid(jid: string): Promise<string> {
