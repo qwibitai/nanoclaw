@@ -34,10 +34,11 @@ if ! npm run build >> "$LOG" 2>&1; then
 fi
 
 echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Build complete, restarting..." >> "$LOG"
-write_status "running" "restart" ""
+
+# Write success status BEFORE restart — systemctl restart kills this script's
+# process group, so lines after it never execute. The new process reads this
+# file on startup to announce the result to Discord.
+write_status "ok" "done" ""
+echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Deploy complete" >> "$LOG"
 
 sudo systemctl restart nanoclaw >> "$LOG" 2>&1
-
-# If we get here, restart was issued. The new process writes "ok" on startup.
-echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Deploy complete" >> "$LOG"
-write_status "ok" "done" ""
