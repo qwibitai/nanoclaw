@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { ANONYMIZE_CONFIG_DIR } from './config.js';
+import { ANONYMIZE_CONFIG_DIR, escapeRegex } from './config.js';
 import { logger } from './logger.js';
 
 export interface AnonymizeConfig {
@@ -16,9 +16,13 @@ interface CompiledMapping {
   replacement: string;
 }
 
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+interface CachedEntry {
+  config: AnonymizeConfig;
+  forward: CompiledMapping[];
+  inverse: CompiledMapping[];
 }
+
+const configCache = new Map<string, CachedEntry | null>();
 
 /**
  * Compile mappings into sorted regex patterns (longest key first).
@@ -29,9 +33,17 @@ function compileMappings(mappings: Record<string, string>): CompiledMapping[] {
   return Object.entries(mappings)
     .sort(([a], [b]) => b.length - a.length)
     .map(([key, value]) => ({
-      pattern: new RegExp(`\\b${escapeRegExp(key)}\\b`, 'gi'),
+      pattern: new RegExp(`\\b${escapeRegex(key)}\\b`, 'gi'),
       replacement: value,
     }));
+}
+
+function applyMappings(text: string, compiled: CompiledMapping[]): string {
+  let result = text;
+  for (const { pattern, replacement } of compiled) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
 }
 
 function configPath(groupFolder: string): string {
@@ -39,6 +51,30 @@ function configPath(groupFolder: string): string {
 }
 
 export function loadAnonymizeConfig(
+  groupFolder: string,
+  pathOverride?: string,
+): AnonymizeConfig | null {
+  const cacheKey = pathOverride ?? groupFolder;
+  const cached = configCache.get(cacheKey);
+  if (cached !== undefined) return cached?.config ?? null;
+
+  const result = loadAnonymizeConfigUncached(groupFolder, pathOverride);
+  if (result) {
+    const inverted = Object.fromEntries(
+      Object.entries(result.mappings).map(([k, v]) => [v, k]),
+    );
+    configCache.set(cacheKey, {
+      config: result,
+      forward: compileMappings(result.mappings),
+      inverse: compileMappings(inverted),
+    });
+  } else {
+    configCache.set(cacheKey, null);
+  }
+  return result;
+}
+
+function loadAnonymizeConfigUncached(
   groupFolder: string,
   pathOverride?: string,
 ): AnonymizeConfig | null {
@@ -97,31 +133,33 @@ export function loadAnonymizeConfig(
 
 /** Replace real values with pseudonyms. */
 export function anonymize(text: string, config: AnonymizeConfig): string {
-  const compiled = compileMappings(config.mappings);
-  let result = text;
-  for (const { pattern, replacement } of compiled) {
-    result = result.replace(pattern, replacement);
-  }
-  return result;
+  const cacheKey = findCacheKey(config);
+  if (cacheKey) return applyMappings(text, configCache.get(cacheKey)!.forward);
+  return applyMappings(text, compileMappings(config.mappings));
 }
 
 /** Replace pseudonyms with real values (inverted mappings). */
 export function deanonymize(text: string, config: AnonymizeConfig): string {
-  const inverted: Record<string, string> = {};
-  for (const [real, pseudonym] of Object.entries(config.mappings)) {
-    inverted[pseudonym] = real;
+  const cacheKey = findCacheKey(config);
+  if (cacheKey) return applyMappings(text, configCache.get(cacheKey)!.inverse);
+  const inverted = Object.fromEntries(
+    Object.entries(config.mappings).map(([k, v]) => [v, k]),
+  );
+  return applyMappings(text, compileMappings(inverted));
+}
+
+/** Find cache key for a config object (by reference equality). */
+function findCacheKey(config: AnonymizeConfig): string | undefined {
+  for (const [key, entry] of configCache) {
+    if (entry?.config === config) return key;
   }
-  const compiled = compileMappings(inverted);
-  let result = text;
-  for (const { pattern, replacement } of compiled) {
-    result = result.replace(pattern, replacement);
-  }
-  return result;
+  return undefined;
 }
 
 /**
  * Add a new mapping entry to the config file on disk.
  * Reads the current file, adds the entry, writes it back.
+ * Invalidates the cache for the affected group.
  */
 export function addMapping(
   groupFolder: string,
@@ -147,5 +185,6 @@ export function addMapping(
   obj.mappings = mappings;
 
   fs.writeFileSync(filePath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
+  configCache.delete(pathOverride ?? groupFolder);
   logger.info({ real, pseudonym, groupFolder }, 'anonymize: added mapping');
 }

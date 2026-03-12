@@ -5,6 +5,10 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const DEFAULT_MODEL = 'qwen2.5:7b';
 const TIMEOUT_MS = 30_000;
 
+export const PII_CMD_APPROVE = 'approve';
+export const PII_CMD_SKIP = 'skip';
+export const PII_CMD_MAP_PREFIX = 'map ';
+
 export interface PiiItem {
   text: string;
   type: string;
@@ -130,8 +134,8 @@ export function formatPiiAlert(result: PiiResult): string {
     items,
     '',
     'Reply:',
-    '  "approve" — add suggested mappings and send',
-    '  "skip" — send without new mappings',
-    '  "map X > Y" — use custom pseudonym (e.g. "map Livvy > Lulu")',
+    `  "${PII_CMD_APPROVE}" — add suggested mappings and send`,
+    `  "${PII_CMD_SKIP}" — send without new mappings`,
+    `  "${PII_CMD_MAP_PREFIX}X > Y" — use custom pseudonym (e.g. "map Livvy > Lulu")`,
   ].join('\n');
 }

@@ -57,6 +57,9 @@ import {
 import {
   checkForPii,
   formatPiiAlert,
+  PII_CMD_APPROVE,
+  PII_CMD_MAP_PREFIX,
+  PII_CMD_SKIP,
   PiiResult,
   warmupPiiModel,
 } from './pii-check.js';
@@ -86,7 +89,6 @@ const queue = new GroupQueue();
 interface PendingAnon {
   anonPrompt: string;
   imageAttachments: Array<{ relativePath: string; mediaType: string }>;
-  group: RegisteredGroup;
   piiResult: PiiResult;
   anonConfig: AnonymizeConfig;
   heldAt: number;
@@ -211,7 +213,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const anonPrompt = anonConfig ? anonymize(prompt, anonConfig) : prompt;
 
   if (anonConfig) {
-    logger.info(
+    logger.debug(
       { group: group.name, changed: anonPrompt !== prompt },
       'anonymize: mappings applied',
     );
@@ -241,7 +243,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         pendingAnon.set(chatJid, {
           anonPrompt,
           imageAttachments,
-          group,
           piiResult,
           anonConfig,
           heldAt: Date.now(),
@@ -450,7 +451,7 @@ async function startMessageLoop(): Promise<void> {
           piiApproved.add(jid);
           queue.enqueueMessageCheck(jid);
           logger.warn(
-            { group: pending.group.name },
+            { chatJid: jid },
             'PII hold timed out, releasing with existing mappings',
           );
         }
@@ -497,7 +498,7 @@ async function startMessageLoop(): Promise<void> {
             const latest = groupMessages[groupMessages.length - 1];
             const cmd = latest.content.trim().toLowerCase();
 
-            if (cmd === 'approve') {
+            if (cmd === PII_CMD_APPROVE) {
               for (const item of pending.piiResult.found) {
                 addMapping(group.folder, item.text, item.suggestion);
               }
@@ -509,7 +510,7 @@ async function startMessageLoop(): Promise<void> {
                 'PII mappings approved, releasing held message',
               );
               continue;
-            } else if (cmd === 'skip') {
+            } else if (cmd === PII_CMD_SKIP) {
               pendingAnon.delete(chatJid);
               piiApproved.add(chatJid);
               queue.enqueueMessageCheck(chatJid);
@@ -518,7 +519,7 @@ async function startMessageLoop(): Promise<void> {
                 'PII check skipped, releasing held message',
               );
               continue;
-            } else if (cmd.startsWith('map ')) {
+            } else if (cmd.startsWith(PII_CMD_MAP_PREFIX)) {
               const match = cmd.match(/^map\s+(.+?)\s*>\s*(.+)$/i);
               if (match) {
                 const real = match[1].trim();
