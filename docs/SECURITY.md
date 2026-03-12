@@ -94,6 +94,17 @@ Real API credentials **never enter containers**. Instead, the host runs an HTTP 
 - Any credentials matching blocked patterns
 - `.env` is shadowed with `/dev/null` in the project root mount
 
+### 6. Auth Resilience Controls
+
+The auth path is hardened for long-running operation:
+
+- **Token source priority**: prefer `.env` `CLAUDE_CODE_OAUTH_TOKEN` (setup-token flow), then fallback to `~/.claude/.credentials.json`
+- **Circuit breaker**: repeated auth failures open a cooldown window to stop repeated failing requests
+- **Task fail-safe**: scheduled tasks auto-pause on auth failures instead of retrying indefinitely
+- **Duplicate suppression**: repeated auth-like failure messages are fingerprinted and suppressed after threshold
+
+These controls reduce noise and rate-limit churn when credentials expire or are temporarily invalid.
+
 ## Privilege Comparison
 
 | Capability          | Main Group                | Non-Main Group           |

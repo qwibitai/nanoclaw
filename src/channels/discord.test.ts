@@ -24,6 +24,34 @@ vi.mock("../logger.js", () => ({
   },
 }));
 
+const restartPlanRef = vi.hoisted(() => ({
+  current: {
+    manager: "systemd-user" as const,
+    command: {
+      bin: "systemctl",
+      args: ["--user", "restart", "nanoclaw"],
+      display: "systemctl --user restart nanoclaw",
+    },
+  },
+}));
+
+const restartResultRef = vi.hoisted(() => ({
+  current: {
+    manager: "systemd-user" as const,
+    command: {
+      bin: "systemctl",
+      args: ["--user", "restart", "nanoclaw"],
+      display: "systemctl --user restart nanoclaw",
+    },
+    ok: true,
+  },
+}));
+
+vi.mock("../service-control.js", () => ({
+  getRestartPlan: vi.fn(() => restartPlanRef.current),
+  restartNanoClawService: vi.fn(async () => restartResultRef.current),
+}));
+
 // --- discord.js mock ---
 
 type Handler = (...args: any[]) => any;
@@ -101,6 +129,7 @@ vi.mock("discord.js", () => {
 });
 
 import { DiscordChannel, DiscordChannelOpts } from "./discord.js";
+import { getRestartPlan, restartNanoClawService } from "../service-control.js";
 
 // --- Test helpers ---
 
@@ -135,6 +164,8 @@ function createMessage(overrides: {
   attachments?: Map<string, any>;
   reference?: { messageId?: string };
   mentionsBotId?: boolean;
+  send?: ReturnType<typeof vi.fn>;
+  reply?: ReturnType<typeof vi.fn>;
 }) {
   const channelId = overrides.channelId ?? "1234567890123456";
   const authorId = overrides.authorId ?? "55512345";
@@ -160,6 +191,7 @@ function createMessage(overrides: {
     guild: overrides.guildName ? { name: overrides.guildName } : null,
     channel: {
       name: overrides.channelName ?? "general",
+      send: overrides.send ?? vi.fn().mockResolvedValue(undefined),
       messages: {
         fetch: vi.fn().mockResolvedValue({
           author: { username: "Bob", displayName: "Bob" },
@@ -167,6 +199,7 @@ function createMessage(overrides: {
         }),
       },
     },
+    reply: overrides.reply ?? vi.fn().mockResolvedValue(undefined),
     mentions: {
       users: mentionsMap,
     },
@@ -748,6 +781,119 @@ describe("DiscordChannel", () => {
       await channel.setTyping("dc:1234567890123456", true);
 
       // No error
+    });
+  });
+
+  describe("admin commands", () => {
+    it("attempts restart via detected manager for admin user", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts, "admin-user");
+      await channel.connect();
+
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const msg = createMessage({
+        authorId: "admin-user",
+        content: "!restart",
+        guildName: "Server",
+        send: sendSpy,
+      });
+      await triggerMessage(msg);
+
+      expect(getRestartPlan).toHaveBeenCalled();
+      expect(restartNanoClawService).toHaveBeenCalled();
+      expect(sendSpy).toHaveBeenCalledWith("Attempting restart via systemd-user...");
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it("reports restart unavailable when no service manager is supported", async () => {
+      vi.mocked(getRestartPlan).mockReturnValueOnce({
+        manager: "none",
+        command: null,
+        reason: "systemd not detected on this host",
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts, "admin-user");
+      await channel.connect();
+
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const msg = createMessage({
+        authorId: "admin-user",
+        content: "!restart",
+        guildName: "Server",
+        send: sendSpy,
+      });
+      await triggerMessage(msg);
+
+      expect(sendSpy).toHaveBeenCalledWith(
+        "Restart unavailable: systemd not detected on this host",
+      );
+      expect(restartNanoClawService).not.toHaveBeenCalled();
+      expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it("reports restart command failure to the admin", async () => {
+      vi.mocked(restartNanoClawService).mockResolvedValueOnce({
+        manager: "systemd-user",
+        command: {
+          bin: "systemctl",
+          args: ["--user", "restart", "nanoclaw"],
+          display: "systemctl --user restart nanoclaw",
+        },
+        ok: false,
+        error: "permission denied",
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts, "admin-user");
+      await channel.connect();
+
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const msg = createMessage({
+        authorId: "admin-user",
+        content: "!restart",
+        guildName: "Server",
+        send: sendSpy,
+      });
+      await triggerMessage(msg);
+
+      expect(sendSpy).toHaveBeenNthCalledWith(1, "Attempting restart via systemd-user...");
+      expect(sendSpy).toHaveBeenNthCalledWith(
+        2,
+        "Restart failed via systemd-user: permission denied",
+      );
+    });
+
+    it("reports restart timeout failure to the admin", async () => {
+      vi.mocked(restartNanoClawService).mockResolvedValueOnce({
+        manager: "systemd-user",
+        command: {
+          bin: "systemctl",
+          args: ["--user", "restart", "nanoclaw"],
+          display: "systemctl --user restart nanoclaw",
+        },
+        ok: false,
+        error: "Restart command timed out after 30000ms: systemctl --user restart nanoclaw",
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts, "admin-user");
+      await channel.connect();
+
+      const sendSpy = vi.fn().mockResolvedValue(undefined);
+      const msg = createMessage({
+        authorId: "admin-user",
+        content: "!restart",
+        guildName: "Server",
+        send: sendSpy,
+      });
+      await triggerMessage(msg);
+
+      expect(sendSpy).toHaveBeenNthCalledWith(1, "Attempting restart via systemd-user...");
+      expect(sendSpy).toHaveBeenNthCalledWith(
+        2,
+        "Restart failed via systemd-user: Restart command timed out after 30000ms: systemctl --user restart nanoclaw",
+      );
     });
   });
 

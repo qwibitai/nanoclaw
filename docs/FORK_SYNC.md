@@ -48,6 +48,7 @@ When merge conflicts happen:
 1. Keep upstream behavior for runtime logic unless you intentionally diverged.
 2. Preserve this fork's identity docs (`README.md`, `docs/FORK_*`, `docs/START_HERE.md`) where appropriate.
 3. Re-check `docs/ARCHITECTURE.md`, `docs/SPEC.md`, and `docs/SECURITY.md` callouts so they still match the code.
+4. Re-check `docs/INSTALLATION_MODEL.md` and `ROADMAP.md` for drift when operational behavior changes.
 
 If conflict resolution changes behavior significantly, prefer opening a PR/issue upstream first, then syncing again.
 
@@ -61,3 +62,4 @@ If conflict resolution changes behavior significantly, prefer opening a PR/issue
 
 - Re-read [START_HERE.md](./START_HERE.md) and [FORK_OVERVIEW.md](./FORK_OVERVIEW.md) for drift.
 - Confirm [CONTRIBUTING.md](../CONTRIBUTING.md) still reflects upstream-routing policy.
+- If major docs are merged/replaced, update [HLD_MIGRATION_MAP.md](./HLD_MIGRATION_MAP.md) (or equivalent mapping doc).

@@ -9,6 +9,7 @@ import os from "os";
 import path from "path";
 
 import { readEnvFile } from "./env.js";
+import { CONFIG_ROOT, PROJECT_ROOT } from "./runtime-paths.js";
 
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
@@ -21,8 +22,8 @@ export const ASSISTANT_HAS_OWN_NUMBER =
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
 
-// Absolute paths needed for container mounts
-const PROJECT_ROOT = process.cwd();
+// Absolute paths needed for container mounts.
+// GROUPS_DIR can be relocated via NANOCLAW_CONFIG_ROOT.
 const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers
@@ -39,7 +40,7 @@ export const SENDER_ALLOWLIST_PATH = path.join(
   "sender-allowlist.json",
 );
 export const STORE_DIR = path.resolve(PROJECT_ROOT, "store");
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, "groups");
+export const GROUPS_DIR = path.resolve(CONFIG_ROOT, "groups");
 export const DATA_DIR = path.resolve(PROJECT_ROOT, "data");
 
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || "nanoclaw-agent:latest";

@@ -3,6 +3,10 @@
  *
  * Prevents spam from identical error messages that differ only in
  * request IDs, timestamps, or other variable parts.
+ *
+ * Docs map:
+ * - docs/SPEC.md#scheduled-tasks
+ * - docs/ARCHITECTURE.md#10-operational-resilience-overlays
  */
 import { createHash } from "crypto";
 

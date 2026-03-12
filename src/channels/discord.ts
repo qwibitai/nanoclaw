@@ -1,4 +1,3 @@
-import { exec } from "child_process";
 import {
   Client,
   Collection,
@@ -12,6 +11,7 @@ import {
 import { ASSISTANT_NAME, TRIGGER_PATTERN } from "../config.js";
 import { readEnvFile } from "../env.js";
 import { logger } from "../logger.js";
+import { getRestartPlan, restartNanoClawService } from "../service-control.js";
 import { registerChannel, ChannelOpts } from "./registry.js";
 import {
   Channel,
@@ -297,13 +297,22 @@ export class DiscordChannel implements Channel {
   private async handleRestart(message: Message): Promise<void> {
     try {
       const channel = message.channel as TextChannel;
-      await channel.send("Restarting NanoClaw stack...");
+      const plan = getRestartPlan();
+      if (!plan.command) {
+        logger.warn({ reason: plan.reason }, "Restart command unavailable on this host");
+        await channel.send(`Restart unavailable: ${plan.reason || "unsupported service manager"}`);
+        return;
+      }
+
+      await channel.send(`Attempting restart via ${plan.manager}...`);
       logger.info({ admin: message.author.id }, "Admin restart requested");
-      exec("systemctl --user restart nanoclaw", (err) => {
-        if (err) {
-          logger.error({ err }, "systemctl restart failed");
-        }
-      });
+      const result = await restartNanoClawService(plan);
+      if (!result.ok) {
+        logger.error({ manager: result.manager, err: result.error }, "Restart command failed");
+        await channel.send(
+          `Restart failed via ${result.manager}: ${result.error || "unknown error"}`,
+        );
+      }
     } catch (err) {
       logger.error({ err }, "Failed to handle restart command");
     }

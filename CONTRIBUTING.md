@@ -41,6 +41,29 @@ Your skill should contain the **instructions** Claude follows to add the feature
 - Test your skill or doc workflow on a fresh clone before submitting.
 - For fork-specific docs changes, verify links and cross-doc consistency.
 
+## Documentation Source of Truth
+
+Keep docs aligned to this split:
+
+- `README.md`: concise overview and navigation
+- `docs/SPEC.md`: implementation behavior and interfaces
+- `docs/SECURITY.md`: trust boundaries and security controls
+- `docs/ARCHITECTURE.md`: operating model and orchestration patterns
+- `docs/INSTALLATION_MODEL.md`: code/config separation and group setup patterns
+- `ROADMAP.md`: planned or exploratory future work
+
+If you touch behavior and docs in the same PR, update the canonical doc first, then any summary docs.
+
+## Documentation Change Checklist
+
+For behavior changes or major doc refactors:
+
+1. Update canonical docs listed above.
+2. Update `README.md` links/summaries to match.
+3. Confirm wording in `docs/FORK_OVERVIEW.md` and `docs/FORK_SYNC.md` is still accurate.
+4. If migrating or retiring docs, update `docs/HLD_MIGRATION_MAP.md` (or equivalent mapping) before deletion.
+5. Run formatting/check commands and validate markdown links.
+
 ## Docs Terminology Consistency
 
 - Use `friends/family` (plural) when describing this fork's remix audience.

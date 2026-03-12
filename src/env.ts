@@ -1,6 +1,6 @@
 import fs from "fs";
-import path from "path";
 import { logger } from "./logger.js";
+import { ENV_FILE_PATH } from "./runtime-paths.js";
 
 /**
  * Parse the .env file and return values for the requested keys.
@@ -9,12 +9,11 @@ import { logger } from "./logger.js";
  * so they don't leak to child processes.
  */
 export function readEnvFile(keys: string[]): Record<string, string> {
-  const envFile = path.join(process.cwd(), ".env");
   let content: string;
   try {
-    content = fs.readFileSync(envFile, "utf-8");
+    content = fs.readFileSync(ENV_FILE_PATH, "utf-8");
   } catch (err) {
-    logger.debug({ err }, ".env file not found, using defaults");
+    logger.debug({ err, envFile: ENV_FILE_PATH }, ".env file not found, using defaults");
     return {};
   }
 
