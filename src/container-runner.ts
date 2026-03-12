@@ -1188,7 +1188,7 @@ function buildVolumeMounts(
  * This ensures shared/multi-tenant groups get a fine-grained PAT scoped
  * to their org, making cross-org repo access impossible by construction.
  */
-function readSecrets(tools?: string[]): Record<string, string> {
+function readSecrets(groupFolder: string, tools?: string[]): Record<string, string> {
   // Determine which GitHub token env var to read
   const { scopes: githubScopes, isScoped: githubScoped } = extractToolScopes(
     tools,
@@ -1205,16 +1205,25 @@ function readSecrets(tools?: string[]): Record<string, string> {
     );
   }
 
+  // Derive the scope suffix for this group (e.g. "sunday" → "SUNDAY")
+  const scope = groupFolder.toUpperCase();
+
+  // Build dbt keys: scoped variants take priority; fall back to unscoped globals
+  const dbtScopedEmail = `DBT_CLOUD_EMAIL_${scope}`;
+  const dbtScopedPassword = `DBT_CLOUD_PASSWORD_${scope}`;
+  const dbtScopedApiKey = `DBT_CLOUD_API_KEY_${scope}`;
+  const dbtScopedApiUrl = `DBT_CLOUD_API_URL_${scope}`;
+
   const secrets = readEnvFile([
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_API_KEY',
     githubTokenKey,
     'DBT_CLOUD_EMAIL',
     'DBT_CLOUD_PASSWORD',
-    'DBT_CLOUD_EMAIL_ILLYSIUM',
-    'DBT_CLOUD_PASSWORD_ILLYSIUM',
-    'DBT_CLOUD_EMAIL_SUNDAY',
-    'DBT_CLOUD_PASSWORD_SUNDAY',
+    dbtScopedEmail,
+    dbtScopedPassword,
+    dbtScopedApiKey,
+    dbtScopedApiUrl,
   ]);
 
   // Warn if scoped token is missing (fail-closed: no GITHUB_TOKEN at all)
@@ -1229,6 +1238,21 @@ function readSecrets(tools?: string[]): Record<string, string> {
   if (githubTokenKey !== 'GITHUB_TOKEN' && secrets[githubTokenKey]) {
     secrets.GITHUB_TOKEN = secrets[githubTokenKey];
     delete secrets[githubTokenKey];
+  }
+
+  // Normalize scoped dbt keys to their generic names, then remove the scoped originals.
+  // Scoped values override unscoped globals — unscoped globals remain as fallback if
+  // no scoped key exists for this group.
+  for (const [scoped, generic] of [
+    [dbtScopedEmail, 'DBT_CLOUD_EMAIL'],
+    [dbtScopedPassword, 'DBT_CLOUD_PASSWORD'],
+    [dbtScopedApiKey, 'DBT_CLOUD_API_KEY'],
+    [dbtScopedApiUrl, 'DBT_CLOUD_API_URL'],
+  ] as const) {
+    if (secrets[scoped]) {
+      secrets[generic] = secrets[scoped];
+      delete secrets[scoped];
+    }
   }
 
   return secrets;
@@ -1488,7 +1512,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets(tools);
+    input.secrets = readSecrets(group.folder, tools);
     if (granolaAccessToken) {
       input.secrets.GRANOLA_ACCESS_TOKEN = granolaAccessToken;
     }
