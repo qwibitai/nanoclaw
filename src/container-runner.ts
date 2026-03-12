@@ -17,6 +17,7 @@ import {
 } from './config.js';
 import { readEnvFile } from './env.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
+import { getValidToken } from './oauth.js';
 import { logger } from './logger.js';
 import {
   CONTAINER_RUNTIME_BIN,
@@ -212,12 +213,12 @@ function buildVolumeMounts(
 }
 
 /**
- * Read allowed secrets from .env for passing to the container via stdin.
- * Secrets are never written to disk or mounted as files.
+ * Read allowed secrets for passing to the container via stdin.
+ * OAuth token is read from oauth-credentials.json with auto-refresh;
+ * other secrets come from .env.  Secrets are never mounted as files.
  */
-function readSecrets(): Record<string, string> {
-  return readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
+async function readSecrets(): Promise<Record<string, string>> {
+  const envSecrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'ANTHROPIC_BASE_URL',
     'ANTHROPIC_AUTH_TOKEN',
@@ -226,6 +227,14 @@ function readSecrets(): Record<string, string> {
     'AIRTABLE_BASE_ID',
     'GITHUB_TOKEN',
   ]);
+
+  // OAuth token from credentials file (auto-refreshing) or .env fallback
+  const oauthToken = await getValidToken();
+  if (oauthToken) {
+    envSecrets.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
+  }
+
+  return envSecrets;
 }
 
 function buildContainerArgs(
@@ -302,6 +311,9 @@ export async function runContainerAgent(
   const logsDir = path.join(groupDir, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
+  // Read secrets before entering the Promise constructor (can't await inside it)
+  const secrets = await readSecrets();
+
   return new Promise((resolve) => {
     const container = spawn(CONTAINER_RUNTIME_BIN, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -315,7 +327,7 @@ export async function runContainerAgent(
     let stderrTruncated = false;
 
     // Pass secrets via stdin (never written to disk or mounted as files)
-    input.secrets = readSecrets();
+    input.secrets = secrets;
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
     // Remove secrets from input so they don't appear in logs

@@ -1,8 +1,8 @@
-# Roadmap — NanoClaw Concurrent Sessions
+# Roadmap — NanoClaw
 
 ## Overview
 
-Transform NanoClaw's GroupQueue from a single-container-per-group model to a multi-container model. Phase 1 delivers the core concurrency change with full test coverage. Phase 2 adds session awareness so concurrent containers can coordinate behaviourally.
+NanoClaw is the container runtime for GorillaHubOS agents. Phases 1–2 delivered concurrent multi-container support. Phase 3 fixes the critical OAuth token expiry problem that causes Holly to go down every ~15 hours.
 
 ## Phases
 
@@ -48,17 +48,42 @@ Plans:
 3. Each new container reads the session awareness file on startup and has the information available for prompt context
 4. 2 GSD executions in different repos + 2 ad-hoc sessions run concurrently without git conflicts
 
+### Phase 3: OAuth Auto-Refresh
+
+**Goal:** Claude Max OAuth access token refreshes automatically so Holly never goes down due to token expiry.
+
+**Dependencies:** None (independent of Phases 1–2)
+
+**Requirements:** OAUTH-01, OAUTH-02, OAUTH-03
+
+**Plans:** 2 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — OAuth module + container-runner integration + tests
+- [ ] 03-02-PLAN.md — VPS deployment, seed credentials, verify refresh cycle
+
+**Success Criteria:**
+1. NanoClaw reads OAuth credentials from `oauth-credentials.json` (not `.env`)
+2. When access token is within 5 minutes of expiry, NanoClaw automatically refreshes it before spawning a container
+3. Refreshed credentials (including potentially rotated refresh token) are persisted atomically
+4. Concurrent container spawns deduplicate refresh requests (single in-flight refresh)
+5. Holly stays alive for 48+ hours without manual token intervention
+6. If refresh fails, a CRITICAL log entry is written and the stale token is used as fallback
+
+---
+
 ## Progress
 
 | Phase | Status | Plans | Completed |
 |-------|--------|-------|-----------|
 | 1 — Multi-Container GroupQueue | Complete | 3 | 3 |
 | 2 — Session Awareness + Deployment | Complete | 2 | 2 |
+| 3 — OAuth Auto-Refresh | In Progress | 2 | 0 |
 
 ## Deployment
 
 - **Deployed:** 2026-03-11T22:12:10Z
 - Google Chat channel adapter added to git repo and deployed
 - OAuth token (Claude Max 20x) active — API key removed
-- Concurrent sessions live — up to 5 containers globally
+- Concurrent sessions live — up to 10 containers globally
 - Passwordless deploy configured via sudoers

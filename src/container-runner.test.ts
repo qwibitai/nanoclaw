@@ -50,6 +50,11 @@ vi.mock('./mount-security.js', () => ({
   validateAdditionalMounts: vi.fn(() => []),
 }));
 
+// Mock oauth — getValidToken returns a static token in tests
+vi.mock('./oauth.js', () => ({
+  getValidToken: vi.fn(async () => 'test-oauth-token'),
+}));
+
 // Create a controllable fake ChildProcess
 function createFakeProcess() {
   const proc = new EventEmitter() as EventEmitter & {
