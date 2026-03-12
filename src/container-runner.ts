@@ -1179,6 +1179,10 @@ function readSecrets(tools?: string[]): Record<string, string> {
     githubTokenKey,
     'DBT_CLOUD_EMAIL',
     'DBT_CLOUD_PASSWORD',
+    'DBT_CLOUD_EMAIL_ILLYSIUM',
+    'DBT_CLOUD_PASSWORD_ILLYSIUM',
+    'DBT_CLOUD_EMAIL_SUNDAY',
+    'DBT_CLOUD_PASSWORD_SUNDAY',
   ]);
 
   // Warn if scoped token is missing (fail-closed: no GITHUB_TOKEN at all)
