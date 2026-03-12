@@ -35,7 +35,7 @@ export interface ProxyConfig {
  * On macOS, falls back to reading directly from the Keychain when
  * the .env token is missing or has been invalidated by a 401.
  */
-const TOKEN_CACHE_TTL_MS = 30_000; // 30 seconds
+const TOKEN_CACHE_TTL_MS = 5_000; // 5 seconds — Keychain read is fast
 let cachedOAuthToken: string | undefined;
 let tokenCacheTime = 0;
 let lastTokenInvalid = false;
@@ -75,9 +75,10 @@ function syncTokenToEnvFile(token: string): void {
           `CLAUDE_CODE_OAUTH_TOKEN=${token}`,
         );
         fs.writeFileSync(envPath, content);
+        logger.info({ envPath }, 'Synced refreshed OAuth token to env file');
       }
-    } catch {
-      // File may not exist — that's fine
+    } catch (err) {
+      logger.warn({ err, envPath }, 'Failed to sync OAuth token to env file');
     }
   }
 }
@@ -92,22 +93,26 @@ function getFreshOAuthToken(): string | undefined {
     return cachedOAuthToken;
   }
 
-  // First try .env file
-  const fresh = readEnvFile([
-    'CLAUDE_CODE_OAUTH_TOKEN',
-    'ANTHROPIC_AUTH_TOKEN',
-  ]);
-  let token: string | undefined =
-    fresh.CLAUDE_CODE_OAUTH_TOKEN || fresh.ANTHROPIC_AUTH_TOKEN || undefined;
-
-  // If .env token was previously invalid (401) or missing, try Keychain
-  if (!token || lastTokenInvalid) {
-    const keychainToken = readTokenFromKeychain();
-    if (keychainToken && keychainToken !== token) {
+  // On macOS, always prefer Keychain as the source of truth —
+  // Claude Code continuously refreshes it, so .env goes stale quickly.
+  let token: string | undefined;
+  const keychainToken = readTokenFromKeychain();
+  if (keychainToken) {
+    token = keychainToken;
+    if (lastTokenInvalid) {
       logger.info('OAuth token refreshed from Keychain');
-      token = keychainToken;
       syncTokenToEnvFile(token);
     }
+  }
+
+  // Fallback to .env file (non-macOS or Keychain unavailable)
+  if (!token) {
+    const fresh = readEnvFile([
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_AUTH_TOKEN',
+    ]);
+    token =
+      fresh.CLAUDE_CODE_OAUTH_TOKEN || fresh.ANTHROPIC_AUTH_TOKEN || undefined;
   }
 
   cachedOAuthToken = token;
