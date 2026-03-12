@@ -131,6 +131,20 @@ export class SlackChannel implements Channel {
         is_from_me: isBotMessage,
         is_bot_message: isBotMessage,
       });
+
+      // Show thinking indicator immediately on inbound messages that will
+      // trigger the agent, rather than waiting for the poll loop + container spawn.
+      // The orchestrator's setTyping(false) cleans it up when the response arrives.
+      if (!isBotMessage && !this.thinkingMessages.has(jid)) {
+        const group = groups[jid];
+        const willTrigger =
+          !group.requiresTrigger || group.isMain || TRIGGER_PATTERN.test(content.trim());
+        if (willTrigger) {
+          this.setTyping(jid, true).catch((err) =>
+            logger.debug({ jid, err }, 'Failed to show early thinking indicator'),
+          );
+        }
+      }
     });
   }
 
@@ -210,6 +224,7 @@ export class SlackChannel implements Channel {
 
     try {
       if (isTyping) {
+        if (this.thinkingMessages.has(jid)) return;
         const result = await this.app.client.chat.postMessage({
           channel: channelId,
           text: ':brain: Thinking...',
