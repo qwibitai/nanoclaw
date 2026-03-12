@@ -84,7 +84,6 @@ class PDFGenerator:
         section_class = "world" if "world" in category else \
                        "tech" if "tech" in category else \
                        "finance" if "finance" in category or "economy" in category else \
-                       "culture" if "culture" in category else \
                        "custom"
 
         html = f"""

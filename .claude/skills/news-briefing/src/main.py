@@ -39,6 +39,12 @@ class NewsBriefingSystem:
         print()
 
         try:
+            # Step 0: Cleanup old result files
+            print("STEP 0: Cleanup Old Result Files")
+            print("-" * 70)
+            self._cleanup_old_results()
+            print()
+
             # Step 1: Orchestration
             print("STEP 1: Orchestration & Task Generation")
             print("-" * 70)
@@ -134,16 +140,12 @@ class NewsBriefingSystem:
 
             caption = self._generate_caption(briefing)
 
-            # chatJid and groupFolder are set during skill installation (see SKILL.md)
-            chat_jid = os.environ.get("NANOCLAW_CHAT_JID", "YOUR_CHAT_JID_HERE")
-            group_folder = os.environ.get("NANOCLAW_GROUP_FOLDER", "main")
-
             ipc_message = {
                 "type": "file",
-                "chatJid": chat_jid,
+                "chatJid": os.environ.get("NANOCLAW_CHAT_JID", ""),
                 "file_path": str(pdf_file),
                 "caption": caption,
-                "groupFolder": group_folder,
+                "groupFolder": os.environ.get("NANOCLAW_GROUP_FOLDER", ""),
                 "timestamp": datetime.now().isoformat()
             }
 
@@ -174,6 +176,31 @@ class NewsBriefingSystem:
             import traceback
             traceback.print_exc()
             return "error"
+
+    def _cleanup_old_results(self):
+        """Remove result files that are not from today"""
+        results_dir = self.base_dir / "agents" / "results"
+        today = datetime.now().strftime("%Y%m%d")
+
+        if not results_dir.exists():
+            print("⚠️  No results directory found")
+            return
+
+        removed_count = 0
+        kept_count = 0
+
+        for file in results_dir.glob("result_*.json"):
+            parts = file.stem.split('_')
+            if len(parts) >= 4:
+                file_date = parts[-1]
+
+                if file_date != today:
+                    file.unlink()
+                    removed_count += 1
+                else:
+                    kept_count += 1
+
+        print(f"✓ Removed {removed_count} old files, kept {kept_count} current files")
 
     def _generate_caption(self, briefing: Dict[str, Any]) -> str:
         """Generate WhatsApp caption for briefing"""

@@ -1,6 +1,7 @@
 {
+  "user_id": "arjun_singh",
   "delivery_time": "07:00",
-  "timezone": "America/New_York",
+  "timezone": "America/Los_Angeles",
   "enabled": true,
   "categories": {
     "world_highlights": {
@@ -36,10 +37,10 @@
       "enabled": true,
       "priority": 4,
       "topics": [
-        "new music releases and album reviews",
-        "box office hits and movie reviews",
-        "art exhibitions and cultural events",
-        "streaming shows and entertainment news"
+        "entertainment news and celebrity updates",
+        "film and television releases",
+        "music industry developments",
+        "arts and cultural events"
       ]
     },
     "custom_tracking": {
@@ -47,7 +48,8 @@
       "priority": 5,
       "topics": [
         "Claude AI and Anthropic developments",
-        "WhatsApp Business API updates"
+        "WhatsApp Business API updates",
+        "North Dakota state banking system"
       ]
     }
   },

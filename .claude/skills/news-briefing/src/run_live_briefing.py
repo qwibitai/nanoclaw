@@ -16,7 +16,7 @@ from typing import List, Dict, Any
 
 def load_preferences() -> Dict[str, Any]:
     """Load user preferences"""
-    prefs_file = Path("/workspace/group/news-briefing-poc/config/user_preferences.json")
+    prefs_file = Path("/workspace/group/nanoclaw-skills/news-briefing/config/user_preferences.json")
     with open(prefs_file) as f:
         return json.load(f)
 

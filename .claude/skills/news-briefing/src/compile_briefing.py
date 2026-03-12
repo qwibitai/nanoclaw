@@ -124,15 +124,13 @@ class BriefingCompiler:
 
         briefing["summary"]["sources"] = sorted(list(all_sources))
 
-        # Sort sections by priority from user config (so any category order works)
-        try:
-            prefs = self.orchestrator.load_user_preferences()
-            priority_order = {
-                cat: data.get("priority", 99)
-                for cat, data in prefs.get("categories", {}).items()
-            }
-        except Exception:
-            priority_order = {}
+        # Sort sections by priority (world → tech → finance → custom)
+        priority_order = {
+            "world_highlights": 1,
+            "technology": 2,
+            "economy_finance": 3,
+            "custom_tracking": 4
+        }
 
         briefing["sections"].sort(key=lambda x: priority_order.get(x["category"], 99))
 
@@ -144,7 +142,6 @@ class BriefingCompiler:
             "world_highlights": "🌍 World Highlights",
             "technology": "💻 Technology",
             "economy_finance": "💰 Economy & Finance",
-            "culture": "🎭 Culture",
             "custom_tracking": "🔍 Custom Tracking"
         }
         return titles.get(category, category.replace("_", " ").title())

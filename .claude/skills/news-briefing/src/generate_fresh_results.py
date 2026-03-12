@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-base_dir = Path("/workspace/group/news-briefing-poc")
+base_dir = Path("/workspace/group/nanoclaw-skills/news-briefing")
 results_dir = base_dir / "agents" / "results"
 results_dir.mkdir(parents=True, exist_ok=True)
 

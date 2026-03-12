@@ -44,7 +44,7 @@ def setup_daily_briefing(delivery_time: str = "07:00"):
     prompt = """Generate and deliver the daily news briefing.
 
 Execute the following steps:
-1. Run the news briefing system: python3 /workspace/group/news-briefing-poc/main.py
+1. Run the news briefing system: python3 /workspace/group/nanoclaw-skills/news-briefing/main.py
 2. If successful, the briefing will be automatically delivered via WhatsApp
 3. If there are any errors, send an error notification via send_message
 

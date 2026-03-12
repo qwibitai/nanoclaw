@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 class LiveResearchAgent:
     """Performs actual web research for news briefings"""
 
-    def __init__(self, base_dir: str = "/workspace/group/news-briefing-poc"):
+    def __init__(self, base_dir: str = "/workspace/group/nanoclaw-skills/news-briefing"):
         self.base_dir = Path(base_dir)
         self.results_dir = self.base_dir / "agents" / "results"
         self.results_dir.mkdir(parents=True, exist_ok=True)
