@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  nanoclaw:
+    build: .
+    container_name: nanoclaw
+    restart: unless-stopped
+    environment:
+      - HOST_PROJECT_PATH=${PWD}
+      # Pass through common env vars if they exist
+      - ASSISTANT_NAME
+      - ASSISTANT_HAS_OWN_NUMBER
+      - ANTHROPIC_API_KEY
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - TZ
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./store:/app/store
+      - ./groups:/app/groups
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Mount .env so the orchestrator can read it
+      - ./.env:/app/.env:ro
+    ports:
+      - "3001:3001"
