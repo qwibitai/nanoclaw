@@ -3,15 +3,16 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { DATA_DIR, GROUPS_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import { isValidGroupFolder } from './group-folder.js';
+import { resolveGroupFolderPath, isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendFile: (jid: string, text: string, filePaths: string[]) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -22,6 +23,106 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+}
+
+/**
+ * Resolve workspace-relative file paths from IPC to host-absolute paths.
+ * Security: rejects traversal, absolute paths, and non-existent files.
+ */
+export function resolveIpcFilePaths(
+  workspaceRelativePaths: string[],
+  sourceGroup: string,
+  registeredGroups: Record<string, RegisteredGroup>,
+): string[] {
+  const resolved: string[] = [];
+
+  for (const relPath of workspaceRelativePaths) {
+    // Reject absolute paths
+    if (path.isAbsolute(relPath)) {
+      logger.warn({ relPath }, 'IPC file: rejecting absolute path');
+      continue;
+    }
+    // Reject traversal
+    if (relPath.includes('..')) {
+      logger.warn({ relPath }, 'IPC file: rejecting path with traversal');
+      continue;
+    }
+
+    let hostPath: string | null = null;
+
+    if (relPath.startsWith('group/')) {
+      // group/attachments/img.png → {GROUPS_DIR}/{folder}/attachments/img.png
+      const rest = relPath.slice('group/'.length);
+      try {
+        const groupDir = resolveGroupFolderPath(sourceGroup);
+        hostPath = path.resolve(groupDir, rest);
+        // Ensure resolved path stays within group dir
+        const realBase = fs.realpathSync(groupDir);
+        if (!fs.existsSync(hostPath)) {
+          logger.warn({ relPath, hostPath }, 'IPC file: file not found on host');
+          continue;
+        }
+        const realPath = fs.realpathSync(hostPath);
+        if (!realPath.startsWith(realBase + path.sep) && realPath !== realBase) {
+          logger.warn({ relPath, hostPath }, 'IPC file: path escapes group directory');
+          continue;
+        }
+        hostPath = realPath;
+      } catch (err) {
+        logger.warn({ relPath, err }, 'IPC file: failed to resolve group path');
+        continue;
+      }
+    } else if (relPath.startsWith('extra/')) {
+      // extra/{mountName}/file.txt → resolve via additionalMounts
+      const rest = relPath.slice('extra/'.length);
+      const slashIndex = rest.indexOf('/');
+      if (slashIndex === -1) {
+        logger.warn({ relPath }, 'IPC file: extra path missing file component');
+        continue;
+      }
+      const mountName = rest.slice(0, slashIndex);
+      const filePart = rest.slice(slashIndex + 1);
+
+      // Find the group's additionalMounts
+      const group = Object.values(registeredGroups).find(
+        (g) => g.folder === sourceGroup,
+      );
+      const mount = group?.containerConfig?.additionalMounts?.find((m) => {
+        const cPath = m.containerPath || path.basename(m.hostPath);
+        return cPath === mountName;
+      });
+      if (!mount) {
+        logger.warn({ relPath, mountName }, 'IPC file: no matching mount for extra path');
+        continue;
+      }
+
+      const expandedHost = mount.hostPath.replace(/^~/, process.env.HOME || '');
+      hostPath = path.resolve(expandedHost, filePart);
+      if (!fs.existsSync(hostPath)) {
+        logger.warn({ relPath, hostPath }, 'IPC file: extra file not found on host');
+        continue;
+      }
+      try {
+        const realHost = fs.realpathSync(hostPath);
+        const realBase = fs.realpathSync(expandedHost);
+        if (!realHost.startsWith(realBase + path.sep) && realHost !== realBase) {
+          logger.warn({ relPath, hostPath }, 'IPC file: extra path escapes mount directory');
+          continue;
+        }
+        hostPath = realHost;
+      } catch {
+        logger.warn({ relPath, hostPath }, 'IPC file: failed to resolve extra path');
+        continue;
+      }
+    } else {
+      logger.warn({ relPath }, 'IPC file: path must start with group/ or extra/');
+      continue;
+    }
+
+    resolved.push(hostPath);
+  }
+
+  return resolved;
 }
 
 let ipcWatcherRunning = false;
@@ -73,18 +174,39 @@ export function startIpcWatcher(deps: IpcDeps): void {
             const filePath = path.join(messagesDir, file);
             try {
               const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-              if (data.type === 'message' && data.chatJid && data.text) {
+              if (data.type === 'message' && data.chatJid && (data.text || data.files)) {
                 // Authorization: verify this group can send to this chatJid
                 const targetGroup = registeredGroups[data.chatJid];
                 if (
                   isMain ||
                   (targetGroup && targetGroup.folder === sourceGroup)
                 ) {
-                  await deps.sendMessage(data.chatJid, data.text);
-                  logger.info(
-                    { chatJid: data.chatJid, sourceGroup },
-                    'IPC message sent',
-                  );
+                  const text = data.text || '';
+                  const files = Array.isArray(data.files) ? data.files as string[] : undefined;
+
+                  if (files && files.length > 0) {
+                    const hostPaths = resolveIpcFilePaths(files, sourceGroup, registeredGroups);
+                    if (hostPaths.length > 0) {
+                      await deps.sendFile(data.chatJid, text, hostPaths);
+                      logger.info(
+                        { chatJid: data.chatJid, sourceGroup, fileCount: hostPaths.length },
+                        'IPC file message sent',
+                      );
+                    } else if (text) {
+                      // All files failed resolution — fall back to text-only
+                      await deps.sendMessage(data.chatJid, text);
+                      logger.warn(
+                        { chatJid: data.chatJid, sourceGroup },
+                        'All IPC files failed resolution, sent text-only',
+                      );
+                    }
+                  } else {
+                    await deps.sendMessage(data.chatJid, text);
+                    logger.info(
+                      { chatJid: data.chatJid, sourceGroup },
+                      'IPC message sent',
+                    );
+                  }
                 } else {
                   logger.warn(
                     { chatJid: data.chatJid, sourceGroup },

@@ -41,24 +41,63 @@ const server = new McpServer({
 
 server.tool(
   'send_message',
-  "Send a message to the user or group immediately while you're still running. Use this for progress updates or to send multiple messages. You can call this multiple times.",
+  "Send a message to the user or group immediately while you're still running. Use this for progress updates, to send multiple messages, or to send file attachments (screenshots, generated files, etc.). You can call this multiple times.",
   {
-    text: z.string().describe('The message text to send'),
+    text: z.string().optional().describe('The message text to send (optional when sending files)'),
     sender: z.string().optional().describe('Your role/identity name (e.g. "Researcher"). When set, messages appear from a dedicated bot in Telegram.'),
+    files: z.array(z.string()).optional().describe('File paths to send as attachments (e.g. ["/workspace/group/attachments/screenshot.png"]). Paths must be under /workspace/group/ or /workspace/extra/.'),
   },
   async (args) => {
-    const data: Record<string, string | undefined> = {
+    if (!args.text && (!args.files || args.files.length === 0)) {
+      return {
+        content: [{ type: 'text' as const, text: 'Error: must provide text or files (or both).' }],
+        isError: true,
+      };
+    }
+
+    // Validate and convert file paths to workspace-relative
+    let validFiles: string[] | undefined;
+    if (args.files && args.files.length > 0) {
+      const errors: string[] = [];
+      validFiles = [];
+      for (const filePath of args.files) {
+        if (!filePath.startsWith('/workspace/group/') && !filePath.startsWith('/workspace/extra/')) {
+          errors.push(`${filePath}: must be under /workspace/group/ or /workspace/extra/`);
+          continue;
+        }
+        if (!fs.existsSync(filePath)) {
+          errors.push(`${filePath}: file not found`);
+          continue;
+        }
+        // Convert to workspace-relative: strip /workspace/ prefix
+        validFiles.push(filePath.slice('/workspace/'.length));
+      }
+      if (errors.length > 0 && validFiles.length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: `File errors:\n${errors.join('\n')}` }],
+          isError: true,
+        };
+      }
+    }
+
+    const data: Record<string, unknown> = {
       type: 'message',
       chatJid,
-      text: args.text,
+      text: args.text || undefined,
       sender: args.sender || undefined,
       groupFolder,
       timestamp: new Date().toISOString(),
     };
+    if (validFiles && validFiles.length > 0) {
+      data.files = validFiles;
+    }
 
     writeIpcFile(MESSAGES_DIR, data);
 
-    return { content: [{ type: 'text' as const, text: 'Message sent.' }] };
+    const parts: string[] = [];
+    if (args.text) parts.push('Message sent.');
+    if (validFiles && validFiles.length > 0) parts.push(`${validFiles.length} file(s) attached.`);
+    return { content: [{ type: 'text' as const, text: parts.join(' ') }] };
   },
 );
 
