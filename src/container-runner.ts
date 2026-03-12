@@ -122,6 +122,9 @@ function buildVolumeMounts(
     '.claude',
   );
   fs.mkdirSync(groupSessionsDir, { recursive: true });
+  // Allow container's non-root node user (uid 1000) to write session transcripts.
+  // Without this, Claude Code cannot persist sessions and every resume fails with code 1.
+  fs.chmodSync(groupSessionsDir, 0o777);
   // Claude Agent SDK writes debug files here on a timer; must exist before mounting
   // and be world-writable since the container runs as non-root node user
   const debugDir = path.join(groupSessionsDir, 'debug');

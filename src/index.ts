@@ -30,6 +30,7 @@ import {
 } from './container-runtime.js';
 import {
   getAllChats,
+  deleteSession,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -323,6 +324,10 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Clear stale session so the next attempt starts fresh rather than
+      // retrying a resume that will fail if the transcript wasn't written.
+      delete sessions[group.folder];
+      deleteSession(group.folder);
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
