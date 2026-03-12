@@ -9,7 +9,8 @@ import {
   GROUP_THREAD_KEY,
   IDLE_TIMEOUT,
   MODEL_ALIASES,
-  MODEL_OVERRIDE_PATTERN,
+  MODEL_FLAG_PATTERN,
+  MODEL_ONESHOT_PATTERN,
   POLL_INTERVAL,
   SESSION_IDLE_RESET_HOURS,
   SESSION_SWEEP_INTERVAL,
@@ -54,11 +55,13 @@ import {
   getRecentMessages,
   getNewMessages,
   getRouterState,
+  getSessionModel,
   initDatabase,
   pruneThreadOrigins,
   setRegisteredGroup,
   setRouterState,
   setSession,
+  setSessionModel,
   setSessionV2,
   storeChatMetadata,
   storeMessage,
@@ -149,17 +152,40 @@ function isThreadSessionEnabled(jid: string, group: RegisteredGroup): boolean {
   return jid.startsWith('dc:') || jid.startsWith('slack:');
 }
 
+interface ModelOverrideResult {
+  model: string; // full model ID
+  sticky: boolean; // persist for rest of session?
+  reset?: boolean; // clear sticky override (-m default/-m reset)
+}
+
 /**
  * Extract a per-message model override from raw message content.
- * Looks for "use opus", "use sonnet", "use haiku" in any message.
- * Returns the full model ID or undefined.
+ * Checks (in priority order):
+ *   1. One-shot flag: "-m1 opus" — this invocation only, doesn't persist
+ *   2. Sticky flag: "-m opus" — persists for rest of session; "-m default" clears
+ *   3. Legacy NLP: "use opus" — treated as sticky
  */
-function extractModelOverride(messages: NewMessage[]): string | undefined {
+function extractModelOverride(
+  messages: NewMessage[],
+): ModelOverrideResult | undefined {
   for (const msg of messages) {
-    const match = MODEL_OVERRIDE_PATTERN.exec(msg.content);
-    if (match) {
-      const alias = match[1].toLowerCase();
-      return MODEL_ALIASES[alias];
+    // One-shot flag: highest priority
+    const oneshotMatch = MODEL_ONESHOT_PATTERN.exec(msg.content);
+    if (oneshotMatch) {
+      return {
+        model: MODEL_ALIASES[oneshotMatch[1].toLowerCase()],
+        sticky: false,
+      };
+    }
+
+    // Sticky flag
+    const flagMatch = MODEL_FLAG_PATTERN.exec(msg.content);
+    if (flagMatch) {
+      const alias = flagMatch[1].toLowerCase();
+      if (alias === 'default' || alias === 'reset') {
+        return { model: '', sticky: true, reset: true };
+      }
+      return { model: MODEL_ALIASES[alias], sticky: true };
     }
   }
   return undefined;
@@ -175,13 +201,15 @@ function resolveAlias(model: string): string {
 
 /**
  * Resolve the model for a container run.
- * Priority: per-message override > per-group config > global default.
+ * Priority: per-message override > session sticky > per-group config > global default.
  */
 function resolveModel(
   group: RegisteredGroup,
   messageOverride?: string,
+  sessionModel?: string,
 ): string {
   if (messageOverride) return messageOverride; // already resolved from alias
+  if (sessionModel) return sessionModel; // sticky from a previous "use opus"
   const groupModel = group.containerConfig?.model;
   if (groupModel) return resolveAlias(groupModel);
   return DEFAULT_MODEL;
@@ -361,8 +389,25 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let effectiveThreadId = threadId;
   const isThreadEnabled = isThreadSessionEnabled(chatJid, group);
   if (isThreadEnabled && !effectiveThreadId && missedMessages.length > 0) {
-    const triggerMsg = missedMessages[missedMessages.length - 1];
-    effectiveThreadId = triggerMsg.id;
+    // Each @trigger on the base channel is a separate conversation (possibly
+    // from different people asking unrelated questions). Anchor on the first
+    // trigger and truncate the batch before the next trigger so each gets its
+    // own thread/container. Remaining triggers are picked up on the next cycle.
+    const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
+    const firstIdx = needsTrigger
+      ? missedMessages.findIndex((m) => triggerPattern.test(m.content.trim()))
+      : 0;
+    const anchorIdx = firstIdx >= 0 ? firstIdx : 0;
+    effectiveThreadId = missedMessages[anchorIdx].id;
+
+    if (needsTrigger) {
+      const nextTriggerIdx = missedMessages.findIndex(
+        (m, i) => i > anchorIdx && triggerPattern.test(m.content.trim()),
+      );
+      if (nextTriggerIdx >= 0) {
+        missedMessages = missedMessages.slice(0, nextTriggerIdx);
+      }
+    }
   }
 
   // For thread sessions on first invocation (no existing session),
@@ -416,8 +461,39 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     missedMessages = merged;
   }
 
-  const modelOverride = extractModelOverride(missedMessages);
-  const model = resolveModel(group, modelOverride);
+  const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
+
+  // Model resolution: per-message flag > session sticky > per-group > default
+  const overrideResult = extractModelOverride(missedMessages);
+  const sessionModel = getSessionModel(sessionKey);
+
+  let model: string;
+  if (overrideResult?.reset) {
+    // "-m default" / "-m reset" — clear sticky, revert to group/global default
+    setSessionModel(sessionKey, null);
+    model = resolveModel(group);
+    logger.info(
+      { group: group.name, model, sessionKey },
+      'Model override cleared, reverted to default',
+    );
+  } else if (overrideResult) {
+    model = overrideResult.model;
+    if (overrideResult.sticky) {
+      setSessionModel(sessionKey, overrideResult.model);
+      logger.info(
+        { group: group.name, model: overrideResult.model, sessionKey },
+        'Model override persisted for session',
+      );
+    } else {
+      logger.info(
+        { group: group.name, model: overrideResult.model, sessionKey },
+        'One-shot model override (not persisted)',
+      );
+    }
+  } else {
+    model = resolveModel(group, undefined, sessionModel);
+  }
+
   const prompt = formatMessages(missedMessages);
 
   // Collect attachments from messages and remap paths for container mount
@@ -447,8 +523,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const previousCursor = lastAgentTimestamp[chatJid] || '';
   lastAgentTimestamp[chatJid] =
     missedMessages[missedMessages.length - 1].timestamp;
-
-  const sessionKey = buildSessionKey(group.folder, effectiveThreadId);
   logger.info(
     {
       group: group.name,
@@ -860,8 +934,12 @@ async function startMessageLoop(): Promise<void> {
           }
 
           // Pipe into active container only if same thread has an active slot.
-          // For non-threaded channels, this checks the GROUP_THREAD_KEY slot.
-          const canPipe = queue.isThreadActive(parentJid, incomingThreadId);
+          // For thread-enabled channels, only pipe actual thread replies —
+          // top-level triggers each deserve their own thread (different people
+          // asking unrelated questions on the same channel).
+          const canPipe =
+            queue.isThreadActive(parentJid, incomingThreadId) &&
+            (!isThreadEnabled || !!incomingThreadId);
 
           if (
             canPipe &&

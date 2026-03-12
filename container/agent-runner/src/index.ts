@@ -692,6 +692,11 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Inject model identity into system prompt so the agent can report it accurately
+  const modelNote = containerInput.model
+    ? `\n\nYou are running on model: ${containerInput.model}. If the user asks what model you are using, report this accurately.`
+    : '';
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -723,8 +728,8 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      systemPrompt: (globalClaudeMd || modelNote)
+        ? { type: 'preset' as const, preset: 'claude_code' as const, append: (globalClaudeMd || '') + modelNote }
         : undefined,
       allowedTools: buildAllowedTools(containerInput.tools),
       env: sdkEnv,
@@ -798,7 +803,7 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // Set model for this container run (per-message override > per-group > global default)
+  // Set model for this container run (per-message flag > session sticky > per-group > global default)
   if (containerInput.model) {
     sdkEnv['CLAUDE_CODE_USE_MODEL'] = containerInput.model;
     log(`Using model: ${containerInput.model}`);
