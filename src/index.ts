@@ -114,6 +114,21 @@ queue.setOnTaskReuse((groupJid, taskId, containerId, groupFolder) => {
   // context pollution in Google Chat.
   setContainerCurrentTask(containerId, task);
 
+  // For Google Chat tasks piped to a warm container, wrap the prompt
+  // with an isolation directive. The warm container's Claude session
+  // retains memory from previous tasks — without this framing, Claude
+  // may merge answers from different threads into a single response.
+  let promptText = task.prompt;
+  if (task.id.startsWith('gchat-msg-')) {
+    promptText =
+      `<new-thread-message>\n` +
+      `This is a NEW, INDEPENDENT message from a DIFFERENT Google Chat thread. ` +
+      `Ignore all previous messages in this session — they belong to other threads. ` +
+      `Answer ONLY the question below. Do NOT reference or repeat answers from earlier in this session.\n` +
+      `</new-thread-message>\n\n` +
+      task.prompt;
+  }
+
   const inputDir = path.join(DATA_DIR, 'ipc', groupFolder, 'input');
   try {
     fs.mkdirSync(inputDir, { recursive: true });
@@ -122,7 +137,7 @@ queue.setOnTaskReuse((groupJid, taskId, containerId, groupFolder) => {
     const tempPath = `${filepath}.tmp`;
     fs.writeFileSync(
       tempPath,
-      JSON.stringify({ type: 'message', text: task.prompt }),
+      JSON.stringify({ type: 'message', text: promptText }),
     );
     fs.renameSync(tempPath, filepath);
     logger.info(
