@@ -30,6 +30,7 @@ import {
 } from './container-runtime.js';
 import {
   getAllChats,
+  deleteSession,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -171,19 +172,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
-  if (!isMainGroup && group.requiresTrigger !== false) {
-    const allowlistCfg = loadSenderAllowlist();
-    const groupTrigger = buildGroupTriggerPattern(group);
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        (TRIGGER_PATTERN.test(m.content.trim()) ||
-          groupTrigger.test(m.content.trim())) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-    );
-    if (!hasTrigger) return true;
-  }
-
   const prompt = formatMessages(missedMessages, TIMEZONE);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -306,7 +294,7 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && output.status !== 'error') {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -336,6 +324,10 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Clear stale session so the next attempt starts fresh rather than
+      // retrying a resume that will fail if the transcript wasn't written.
+      delete sessions[group.folder];
+      deleteSession(group.folder);
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -397,24 +389,6 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
-
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const allowlistCfg = loadSenderAllowlist();
-            const groupTrigger = buildGroupTriggerPattern(group);
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                (TRIGGER_PATTERN.test(m.content.trim()) ||
-                  groupTrigger.test(m.content.trim())) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
-            );
-            if (!hasTrigger) continue;
-          }
-
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const allPending = getMessagesSince(
