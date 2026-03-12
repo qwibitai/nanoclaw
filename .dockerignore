@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.env
+store
+data
+logs
+groups/*
+!groups/main
+!groups/global
+groups/main/*
+groups/main/CLAUDE.md
+groups/global/*
+groups/global/CLAUDE.md
+*.md
+.nanoclaw
+agents-sdk-docs

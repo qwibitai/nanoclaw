@@ -3,12 +3,11 @@
  * Containers connect here instead of directly to the Anthropic API.
  * The proxy injects real credentials so containers never see them.
  *
- * Two auth modes:
- *   API key:  Proxy injects x-api-key on every request.
- *   OAuth:    Container CLI exchanges its placeholder token for a temp
- *             API key via /api/oauth/claude_cli/create_api_key.
- *             Proxy injects real OAuth token on that exchange request;
- *             subsequent requests carry the temp key which is valid as-is.
+ * Auth modes:
+ *   api-key:    Proxy injects x-api-key (Anthropic direct).
+ *   openrouter: Proxy injects Authorization: Bearer (OpenRouter gateway).
+ *   oauth:      Container CLI exchanges placeholder for temp key; proxy
+ *               injects real OAuth token on exchange requests.
  */
 import { createServer, Server } from 'http';
 import { request as httpsRequest } from 'https';
@@ -17,7 +16,7 @@ import { request as httpRequest, RequestOptions } from 'http';
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+export type AuthMode = 'api-key' | 'oauth' | 'openrouter';
 
 export interface ProxyConfig {
   authMode: AuthMode;
@@ -32,15 +31,30 @@ export function startCredentialProxy(
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
+    'OPENROUTER_API_KEY',
   ]);
-
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
-  const oauthToken =
-    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
   const upstreamUrl = new URL(
     secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
   );
+  const isOpenRouter = upstreamUrl.hostname.includes('openrouter.ai');
+  const openRouterKey =
+    secrets.OPENROUTER_API_KEY ||
+    secrets.ANTHROPIC_AUTH_TOKEN ||
+    secrets.ANTHROPIC_API_KEY;
+
+  let authMode: AuthMode;
+  if ((secrets.OPENROUTER_API_KEY || (isOpenRouter && openRouterKey)) && openRouterKey) {
+    authMode = 'openrouter';
+  } else if (secrets.ANTHROPIC_API_KEY) {
+    authMode = 'api-key';
+  } else {
+    authMode = 'oauth';
+  }
+
+  const oauthToken =
+    secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
+
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
@@ -62,7 +76,11 @@ export function startCredentialProxy(
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
 
-        if (authMode === 'api-key') {
+        if (authMode === 'openrouter') {
+          // OpenRouter uses Authorization: Bearer, not x-api-key
+          delete headers['x-api-key'];
+          headers['authorization'] = `Bearer ${openRouterKey}`;
+        } else if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
@@ -120,6 +138,25 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
+  const secrets = readEnvFile([
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_BASE_URL',
+    'OPENROUTER_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+  ]);
+  const upstreamUrl = new URL(
+    secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+  );
+  const isOpenRouter = upstreamUrl.hostname.includes('openrouter.ai');
+  const openRouterKey =
+    secrets.OPENROUTER_API_KEY ||
+    secrets.ANTHROPIC_AUTH_TOKEN ||
+    secrets.ANTHROPIC_API_KEY;
+  if (
+    (secrets.OPENROUTER_API_KEY || (isOpenRouter && openRouterKey)) &&
+    openRouterKey
+  ) {
+    return 'openrouter';
+  }
   return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
 }

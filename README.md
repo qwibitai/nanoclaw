@@ -178,6 +178,13 @@ ANTHROPIC_AUTH_TOKEN=your-token-here
 ```
 
 This allows you to use:
+- **[OpenRouter](https://openrouter.ai)** — one key for 300+ models (Claude, GPT, Llama, etc.), no Anthropic subscription needed:
+  ```bash
+  ANTHROPIC_BASE_URL=https://openrouter.ai/api
+  OPENROUTER_API_KEY=sk-or-v1-...
+  # Optional: pick model (e.g. anthropic/claude-sonnet-4, openai/gpt-4o)
+  # ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4
+  ```
 - Local models via [Ollama](https://ollama.ai) with an API proxy
 - Open-source models hosted on [Together AI](https://together.ai), [Fireworks](https://fireworks.ai), etc.
 - Custom model deployments with Anthropic-compatible APIs

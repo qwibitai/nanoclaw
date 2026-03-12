@@ -168,6 +168,28 @@ describe('credential-proxy', () => {
     expect(lastUpstreamHeaders['transfer-encoding']).toBeUndefined();
   });
 
+  it('OpenRouter mode injects Authorization Bearer instead of x-api-key', async () => {
+    proxyPort = await startProxy({
+      OPENROUTER_API_KEY: 'sk-or-v1-abc123',
+    });
+
+    await makeRequest(
+      proxyPort,
+      {
+        method: 'POST',
+        path: '/v1/messages',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': 'placeholder',
+        },
+      },
+      '{}',
+    );
+
+    expect(lastUpstreamHeaders['authorization']).toBe('Bearer sk-or-v1-abc123');
+    expect(lastUpstreamHeaders['x-api-key']).toBeUndefined();
+  });
+
   it('returns 502 when upstream is unreachable', async () => {
     Object.assign(mockEnv, {
       ANTHROPIC_API_KEY: 'sk-ant-real-key',
