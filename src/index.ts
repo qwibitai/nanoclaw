@@ -133,7 +133,8 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 function autoRegisterGroupFolders(): void {
   let entries: string[];
   try {
-    entries = fs.readdirSync(GROUPS_DIR, { withFileTypes: true })
+    entries = fs
+      .readdirSync(GROUPS_DIR, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name);
   } catch {

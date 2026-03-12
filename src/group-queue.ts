@@ -293,7 +293,10 @@ export class GroupQueue {
 
       logger.info({ groupJid: jid }, 'Starting persistent container');
       this.runForGroup(jid, 'messages').catch((err) =>
-        logger.error({ groupJid: jid, err }, 'Error starting persistent container'),
+        logger.error(
+          { groupJid: jid, err },
+          'Error starting persistent container',
+        ),
       );
     }
   }
@@ -321,7 +324,10 @@ export class GroupQueue {
       }
 
       this.runForGroup(groupJid, 'messages').catch((err) =>
-        logger.error({ groupJid, err }, 'Error restarting persistent container'),
+        logger.error(
+          { groupJid, err },
+          'Error restarting persistent container',
+        ),
       );
     }, delayMs);
   }
