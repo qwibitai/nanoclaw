@@ -216,3 +216,53 @@ export function updateRunRecord(
   writeRunRecord(next);
   return next;
 }
+
+export function archiveRunRecords(options: {
+  olderThanDays?: number;
+  statuses?: SymphonyRunRecord['status'][];
+}): { archived: number; kept: number } {
+  const olderThanDays = options.olderThanDays ?? 7;
+  const statuses: SymphonyRunRecord['status'][] = options.statuses ?? ['done', 'failed', 'canceled'];
+  const runsRoot = symphonyRunsRoot();
+  const archiveDir = path.join(runsRoot, 'archive');
+
+  if (!fs.existsSync(runsRoot)) {
+    return { archived: 0, kept: 0 };
+  }
+
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000);
+  fs.mkdirSync(archiveDir, { recursive: true });
+
+  const entries = fs
+    .readdirSync(runsRoot)
+    .filter((entry) => entry.endsWith('.json'));
+
+  let archived = 0;
+  let kept = 0;
+
+  for (const entry of entries) {
+    const filePath = path.join(runsRoot, entry);
+    let record: SymphonyRunRecord;
+    try {
+      record = JSON.parse(fs.readFileSync(filePath, 'utf8')) as SymphonyRunRecord;
+    } catch {
+      kept++;
+      continue;
+    }
+
+    const startedAt = new Date(record.startedAt);
+    const shouldArchive =
+      statuses.includes(record.status) &&
+      !Number.isNaN(startedAt.getTime()) &&
+      startedAt < cutoff;
+
+    if (shouldArchive) {
+      fs.renameSync(filePath, path.join(archiveDir, entry));
+      archived++;
+    } else {
+      kept++;
+    }
+  }
+
+  return { archived, kept };
+}

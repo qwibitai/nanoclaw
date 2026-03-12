@@ -68,63 +68,49 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
+function renderPlistTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => vars[key] ?? _match);
+}
+
 function setupLaunchd(
   projectRoot: string,
   nodePath: string,
   homeDir: string,
 ): void {
-  const plistPath = path.join(
-    homeDir,
-    'Library',
-    'LaunchAgents',
-    'com.nanoclaw.plist',
-  );
-  fs.mkdirSync(path.dirname(plistPath), { recursive: true });
+  const launchAgentsDir = path.join(homeDir, 'Library', 'LaunchAgents');
+  fs.mkdirSync(launchAgentsDir, { recursive: true });
 
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.nanoclaw</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${nodePath}</string>
-        <string>${projectRoot}/dist/index.js</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>${projectRoot}</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>${path.dirname(nodePath)}:/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
-        <key>HOME</key>
-        <string>${homeDir}</string>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
-    <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
-</dict>
-</plist>`;
+  const templateVars: Record<string, string> = {
+    PROJECT_ROOT: projectRoot,
+    HOME: homeDir,
+    NODE_PATH: nodePath,
+  };
 
-  fs.writeFileSync(plistPath, plist);
-  logger.info({ plistPath }, 'Wrote launchd plist');
+  // Install all launchd templates from the launchd/ directory
+  const templateDir = path.join(projectRoot, 'launchd');
+  const templates = fs.readdirSync(templateDir).filter((f) => f.endsWith('.plist'));
+  const installedPaths: string[] = [];
 
-  try {
-    execSync(`launchctl load ${JSON.stringify(plistPath)}`, {
-      stdio: 'ignore',
-    });
-    logger.info('launchctl load succeeded');
-  } catch {
-    logger.warn('launchctl load failed (may already be loaded)');
+  for (const templateFile of templates) {
+    const raw = fs.readFileSync(path.join(templateDir, templateFile), 'utf8');
+    const rendered = renderPlistTemplate(raw, templateVars);
+    const destPath = path.join(launchAgentsDir, templateFile);
+    fs.writeFileSync(destPath, rendered);
+    logger.info({ destPath }, `Wrote launchd plist: ${templateFile}`);
+
+    try {
+      execSync(`launchctl unload ${JSON.stringify(destPath)} 2>/dev/null; launchctl load ${JSON.stringify(destPath)}`, {
+        stdio: 'ignore',
+        shell: '/bin/bash',
+      });
+      logger.info(`launchctl load succeeded: ${templateFile}`);
+    } catch {
+      logger.warn(`launchctl load failed (may already be loaded): ${templateFile}`);
+    }
+    installedPaths.push(destPath);
   }
 
-  // Verify
+  // Verify main service is loaded
   let serviceLoaded = false;
   try {
     const output = execSync('launchctl list', { encoding: 'utf-8' });
@@ -137,7 +123,8 @@ function setupLaunchd(
     SERVICE_TYPE: 'launchd',
     NODE_PATH: nodePath,
     PROJECT_PATH: projectRoot,
-    PLIST_PATH: plistPath,
+    PLIST_PATHS: installedPaths.join(','),
+    PLIST_COUNT: String(installedPaths.length),
     SERVICE_LOADED: serviceLoaded,
     STATUS: 'success',
     LOG: 'logs/setup.log',

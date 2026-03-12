@@ -4,6 +4,19 @@ const LINEAR_API_URL = process.env.LINEAR_API_URL || 'https://api.linear.app/gra
 const TEAM_KEY =
   process.env.NANOCLAW_LINEAR_TEAM_KEY || process.env.LINEAR_TEAM_KEY || '';
 
+export type LinearTeamRecord = {
+  id: string;
+  key: string;
+  name: string;
+};
+
+export type LinearProjectRecord = {
+  id: string;
+  name: string;
+  url: string;
+  state?: string;
+};
+
 export type SymphonyLinearIssueSummary = {
   id: string;
   identifier: string;
@@ -23,6 +36,7 @@ export type SymphonyLinearIssueDetail = SymphonyLinearIssueSummary & {
     key: string;
     states: Array<{ id: string; name: string; type: string }>;
   };
+  recurringIssueTemplate: { id: string; name: string } | null;
 };
 
 function requireLinearToken(): string {
@@ -33,7 +47,14 @@ function requireLinearToken(): string {
   return token;
 }
 
-async function linearGraphql<T>(
+function requireLinearTeamKey(): string {
+  if (!TEAM_KEY) {
+    throw new Error('Missing NANOCLAW_LINEAR_TEAM_KEY or LINEAR_TEAM_KEY.');
+  }
+  return TEAM_KEY;
+}
+
+export async function linearGraphql<T>(
   query: string,
   variables: Record<string, unknown>,
 ): Promise<T> {
@@ -161,6 +182,7 @@ export async function getIssueByIdentifier(
       state?: { name?: string | null } | null;
       project?: { name?: string | null } | null;
       labels?: { nodes?: Array<{ name: string }> } | null;
+      recurringIssueTemplate?: { id: string; name: string } | null;
       team?: {
         id: string;
         key: string;
@@ -181,6 +203,7 @@ export async function getIssueByIdentifier(
           state { name }
           project { name }
           labels { nodes { name } }
+          recurringIssueTemplate { id name }
           team {
             id
             key
@@ -212,6 +235,7 @@ export async function getIssueByIdentifier(
       key: data.issue.team.key,
       states: data.issue.team.states.nodes,
     },
+    recurringIssueTemplate: data.issue.recurringIssueTemplate ?? null,
   };
 }
 
@@ -259,4 +283,144 @@ export async function addIssueComment(issueId: string, body: string): Promise<vo
     `,
     { issueId, body },
   );
+}
+
+export async function findLinearTeamByKey(teamKey = requireLinearTeamKey()): Promise<LinearTeamRecord> {
+  const data = await linearGraphql<{
+    teams: {
+      nodes: Array<{ id: string; key: string; name: string }>;
+    };
+  }>(
+    `
+      query SymphonyTeams {
+        teams {
+          nodes {
+            id
+            key
+            name
+          }
+        }
+      }
+    `,
+    {},
+  );
+
+  const team = data.teams.nodes.find((candidate) => candidate.key === teamKey);
+  if (!team) {
+    throw new Error(`Linear team not found for key "${teamKey}".`);
+  }
+
+  return team;
+}
+
+export async function findLinearProjectByName(
+  name: string,
+): Promise<LinearProjectRecord | null> {
+  const data = await linearGraphql<{
+    projects: {
+      nodes: Array<{
+        id: string;
+        name: string;
+        url: string;
+        state?: string | null;
+      }>;
+    };
+  }>(
+    `
+      query SymphonyProjectsByName($name: String!) {
+        projects(filter: { name: { eq: $name } }) {
+          nodes {
+            id
+            name
+            url
+            state
+          }
+        }
+      }
+    `,
+    { name },
+  );
+
+  const project = data.projects.nodes[0];
+  if (!project) {
+    return null;
+  }
+
+  return {
+    id: project.id,
+    name: project.name,
+    url: project.url,
+    state: project.state || undefined,
+  };
+}
+
+export async function createLinearProject(input: {
+  name: string;
+  teamId: string;
+}): Promise<LinearProjectRecord> {
+  const data = await linearGraphql<{
+    projectCreate: {
+      success: boolean;
+      project: {
+        id: string;
+        name: string;
+        url: string;
+        state?: string | null;
+      } | null;
+    };
+  }>(
+    `
+      mutation SymphonyProjectCreate($input: ProjectCreateInput!) {
+        projectCreate(input: $input) {
+          success
+          project {
+            id
+            name
+            url
+            state
+          }
+        }
+      }
+    `,
+    {
+      input: {
+        name: input.name,
+        teamIds: [input.teamId],
+      },
+    },
+  );
+
+  if (!data.projectCreate.success || !data.projectCreate.project) {
+    throw new Error(`Linear projectCreate did not return a project for "${input.name}".`);
+  }
+
+  return {
+    id: data.projectCreate.project.id,
+    name: data.projectCreate.project.name,
+    url: data.projectCreate.project.url,
+    state: data.projectCreate.project.state || undefined,
+  };
+}
+
+export async function ensureLinearProject(
+  name: string,
+): Promise<{ action: 'linked' | 'created'; project: LinearProjectRecord }> {
+  const existing = await findLinearProjectByName(name);
+  if (existing) {
+    return {
+      action: 'linked',
+      project: existing,
+    };
+  }
+
+  const team = await findLinearTeamByKey();
+  const created = await createLinearProject({
+    name,
+    teamId: team.id,
+  });
+
+  return {
+    action: 'created',
+    project: created,
+  };
 }

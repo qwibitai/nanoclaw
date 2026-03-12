@@ -80,3 +80,16 @@ args = [
 ]
 startup_timeout_sec = 20.0
 tool_timeout_sec = 120.0
+env_vars = ["NOTION_TOKEN", "NOTION_SESSION_SUMMARY_DATABASE_ID", "NOTION_NIGHTLY_DATABASE_ID", "NOTION_PROJECT_REGISTRY_DATABASE_ID", "LINEAR_API_KEY", "NANOCLAW_LINEAR_TEAM_KEY"]
+
+[mcp_servers.notion]
+command = "bash"
+args = [
+  "scripts/workflow/run-with-env.sh",
+  "bash",
+  "-c",
+  "NOTION_API_KEY=$NOTION_TOKEN npx -y @notionhq/notion-mcp-server"
+]
+startup_timeout_sec = 20.0
+tool_timeout_sec = 60.0
+env_vars = ["NOTION_TOKEN", "NOTION_SESSION_SUMMARY_DATABASE_ID", "NOTION_NIGHTLY_DATABASE_ID"]

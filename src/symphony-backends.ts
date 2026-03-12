@@ -1,18 +1,29 @@
+import os from 'node:os';
 import path from 'node:path';
 
 import type { SymphonyBackend, SymphonyBackendResolution } from './symphony-routing.js';
+
+function expandHome(value: string): string {
+  if (!value.startsWith('~')) {
+    return value;
+  }
+  return path.join(os.homedir(), value.slice(1));
+}
 
 export type SymphonyLaunchPlan = {
   backend: SymphonyBackend;
   bin: string;
   argv: string[];
   workspacePath: string;
+  useWorktree: boolean;
+  githubRepo: string;
   env: Record<string, string>;
 };
 
 export type SymphonyLaunchInput = SymphonyBackendResolution & {
   issueId: string;
   issueIdentifier: string;
+  githubRepo: string;
 };
 
 function sanitizePathSegment(value: string): string {
@@ -33,8 +44,10 @@ export function backendBinary(backend: SymphonyBackend): string {
 export function buildSymphonyLaunchPlan(
   input: SymphonyLaunchInput,
 ): SymphonyLaunchPlan {
+  const useWorktree = process.env.NANOCLAW_SYMPHONY_USE_WORKTREE === 'true';
+  const expandedWorkspaceRoot = expandHome(input.workspaceRoot);
   const workspacePath = path.join(
-    input.workspaceRoot,
+    expandedWorkspaceRoot,
     sanitizePathSegment(input.issueIdentifier),
   );
 
@@ -43,6 +56,8 @@ export function buildSymphonyLaunchPlan(
     bin: backendBinary(input.backend),
     argv: [],
     workspacePath,
+    useWorktree,
+    githubRepo: input.githubRepo,
     env: {
       NANOCLAW_SYMPHONY_PROJECT_KEY: input.projectKey,
       NANOCLAW_SYMPHONY_SECRET_SCOPE: input.secretScope,

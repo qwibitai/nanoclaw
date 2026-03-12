@@ -10,7 +10,7 @@ import {
 import { buildSymphonyLaunchPlan } from '../../src/symphony-backends.js';
 import { runSymphonyDaemon, runSymphonyTick } from '../../src/symphony-daemon.js';
 import { dispatchOnceForProject } from '../../src/symphony-dispatch.js';
-import { listReadyIssuesForProject } from '../../src/symphony-linear.js';
+import { linearGraphql, listReadyIssuesForProject } from '../../src/symphony-linear.js';
 import {
   fetchProjectRegistryFromNotion,
   loadProjectRegistryFromFile,
@@ -57,6 +57,7 @@ function usage(): never {
   npx tsx scripts/workflow/symphony.ts serve [--port <port>] [--file <path>]
   npx tsx scripts/workflow/symphony.ts daemon [--once] [--auto-dispatch] [--interval-ms <n>] [--file <path>]
   npx tsx scripts/workflow/symphony.ts print-example
+  npx tsx scripts/workflow/symphony.ts validate-linear-states --project-key <key> [--file <path>]
 `);
   process.exit(1);
 }
@@ -270,6 +271,66 @@ async function main() {
     }
     case 'print-example': {
       console.log(fs.readFileSync(EXAMPLE_REGISTRY_PATH, 'utf8'));
+      return;
+    }
+    case 'validate-linear-states': {
+      const projectKey = optionValue(rest, '--project-key');
+      if (!projectKey) usage();
+      const registry = loadRegistry(filePath);
+      const project = registry.projects.find((entry) => entry.projectKey === projectKey);
+      if (!project) {
+        throw new Error(`Unknown Symphony projectKey: ${projectKey}`);
+      }
+      const teamKey =
+        process.env.NANOCLAW_LINEAR_TEAM_KEY ||
+        process.env.LINEAR_TEAM_KEY ||
+        optionValue(rest, '--team-key') ||
+        '';
+      if (!teamKey) {
+        throw new Error(
+          'validate-linear-states requires NANOCLAW_LINEAR_TEAM_KEY, LINEAR_TEAM_KEY, or --team-key <key>.',
+        );
+      }
+      const data = await linearGraphql<{
+        teams: {
+          nodes: Array<{
+            id: string;
+            key: string;
+            states: { nodes: Array<{ id: string; name: string; type: string }> };
+          }>;
+        };
+      }>(
+        `
+          query TeamStates($key: String!) {
+            teams(filter: { key: { eq: $key } }) {
+              nodes { id key states { nodes { id name type } } }
+            }
+          }
+        `,
+        { key: teamKey },
+      );
+      const team = data.teams.nodes[0];
+      if (!team) {
+        throw new Error(`Linear team not found for key "${teamKey}".`);
+      }
+      const REQUIRED_STATES = ['Ready', 'In Progress', 'In Review', 'Blocked', 'Done'];
+      const foundStates = team.states.nodes.map((state) => state.name);
+      const missingStates = REQUIRED_STATES.filter(
+        (required) => !foundStates.includes(required),
+      );
+      console.log(
+        JSON.stringify(
+          {
+            status: missingStates.length === 0 ? 'ok' : 'missing_states',
+            projectKey,
+            teamKey,
+            missingStates,
+            foundStates,
+          },
+          null,
+          2,
+        ),
+      );
       return;
     }
     default:

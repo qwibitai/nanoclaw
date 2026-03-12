@@ -233,8 +233,6 @@ function createSanitizeBashHook(): HookCallback {
     };
   };
 }
-
-
 function sanitizeFilename(summary: string): string {
   return summary
     .toLowerCase()

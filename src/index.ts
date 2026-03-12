@@ -24,6 +24,7 @@ import {
   TRIGGER_PATTERN,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import './channels/index.js';
 import {
   type WhatsAppChannelOpts,
   type WhatsAppCloseContext,

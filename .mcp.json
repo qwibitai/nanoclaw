@@ -8,6 +8,15 @@
         "tsx",
         "scripts/workflow/symphony-mcp.ts"
       ]
+    },
+    "notion": {
+      "command": "bash",
+      "args": [
+        "scripts/workflow/run-with-env.sh",
+        "bash",
+        "-c",
+        "NOTION_API_KEY=$NOTION_TOKEN npx -y @notionhq/notion-mcp-server"
+      ]
     }
   }
 }

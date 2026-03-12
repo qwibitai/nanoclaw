@@ -14,10 +14,12 @@ import {
 } from '../../src/symphony-registry.js';
 import { findProjectRegistryEntry, type ProjectRegistry } from '../../src/symphony-routing.js';
 import {
+  archiveRunRecords,
   buildRuntimeState,
   listRunRecords,
   readRunRecord,
   readRuntimeState,
+  updateRunRecord,
 } from '../../src/symphony-state.js';
 
 const DEFAULT_REGISTRY_PATH =
@@ -226,6 +228,73 @@ server.tool(
       daemonPid: process.pid,
     });
     return resultWithJson(`Stop request completed for run ${args.run_id}.`, result);
+  },
+);
+
+server.tool(
+  'symphony_get_run_log',
+  'Read the tail of a run\'s log file. Useful for debugging agent output without needing shell access to the workspace.',
+  {
+    run_id: z.string().describe('The Symphony run ID.'),
+    lines: z.number().int().min(1).max(500).optional().describe('Number of lines from the end to return. Defaults to 50.'),
+  },
+  async (args) => {
+    const run = readRunRecord(args.run_id);
+    const lines = args.lines ?? 50;
+    let content = '';
+    try {
+      const { readFileSync } = await import('node:fs');
+      const raw = readFileSync(run.logFile, 'utf8');
+      const allLines = raw.split('\n');
+      content = allLines.slice(-lines).join('\n');
+    } catch {
+      content = '(log file not found or unreadable)';
+    }
+    return resultWithJson(`Last ${lines} lines of log for run ${run.runId}.`, {
+      runId: run.runId,
+      logFile: run.logFile,
+      status: run.status,
+      content,
+    });
+  },
+);
+
+server.tool(
+  'symphony_mark_run_status',
+  'Manually override the local status of a Symphony run record. Use to recover stuck runs when automatic reconciliation fails (e.g. missing Linear state).',
+  {
+    run_id: z.string().describe('The Symphony run ID to update.'),
+    status: z.enum(['planned', 'dispatching', 'running', 'review', 'blocked', 'failed', 'done', 'canceled']).describe('New status to set on the run record.'),
+    reason: z.string().optional().describe('Optional note to record as resultSummary.'),
+  },
+  async (args) => {
+    const updated = updateRunRecord(args.run_id, {
+      status: args.status,
+      ...(args.reason ? { resultSummary: args.reason } : {}),
+    });
+    return resultWithJson(`Run ${args.run_id} status updated to ${args.status}.`, updated);
+  },
+);
+
+server.tool(
+  'symphony_archive_runs',
+  'Move old completed Symphony run records to an archive subdirectory. Use to keep the active runs directory manageable without permanently deleting history.',
+  {
+    older_than_days: z.number().int().min(1).max(365).optional().describe('Archive runs whose startedAt is older than this many days. Defaults to 7.'),
+    statuses: z
+      .array(z.enum(['planned', 'dispatching', 'running', 'review', 'blocked', 'failed', 'done', 'canceled']))
+      .optional()
+      .describe('Status values eligible for archiving. Defaults to ["done", "failed", "canceled"].'),
+  },
+  async (args) => {
+    const result = archiveRunRecords({
+      olderThanDays: args.older_than_days,
+      statuses: args.statuses as Array<'planned' | 'dispatching' | 'running' | 'review' | 'blocked' | 'failed' | 'done' | 'canceled'> | undefined,
+    });
+    return resultWithJson(
+      `Archived ${result.archived} run record(s); ${result.kept} record(s) kept in the active runs directory.`,
+      result,
+    );
   },
 );
 

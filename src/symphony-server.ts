@@ -138,7 +138,7 @@ function pageLayout(input: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="refresh" content="5" />
+  <meta http-equiv="refresh" content="30" />
   <title>${htmlEscape(input.title)}</title>
   <style>
     :root {
@@ -252,7 +252,7 @@ function pageLayout(input: {
     .nav-pill {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
+      gap: 5px;
       padding: 8px 12px;
       border-radius: var(--radius-pill);
       background: rgba(255, 255, 255, 0.88);
@@ -263,6 +263,11 @@ function pageLayout(input: {
     .nav-pill strong {
       color: var(--ink);
       font-weight: 600;
+    }
+    .nav-pill .nav-sep {
+      color: var(--line);
+      font-weight: 300;
+      font-size: 0.9em;
     }
     .hero-grid,
     .card-grid,
@@ -371,12 +376,31 @@ function pageLayout(input: {
       font-size: 0.85rem;
     }
     .badge-row,
-    .link-row,
     .meta-grid {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
       align-items: center;
+    }
+    .link-row {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      align-items: center;
+      font-size: 0.83rem;
+      color: var(--ink-soft);
+    }
+    .link-row a {
+      color: var(--ink-soft);
+    }
+    .link-row a:hover {
+      color: var(--accent);
+    }
+    .link-row > *:not(:last-child)::after {
+      content: "·";
+      margin-left: 4px;
+      color: rgba(58, 48, 37, 0.35);
+      pointer-events: none;
     }
     .badge {
       display: inline-flex;
@@ -473,6 +497,11 @@ function pageLayout(input: {
       letter-spacing: 0.08em;
       color: var(--ink-soft);
     }
+    .meta-item span.mono {
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      font-size: 0.78rem;
+    }
     .detail-grid {
       grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
       align-items: start;
@@ -535,10 +564,10 @@ function pageLayout(input: {
           <p>${htmlEscape(input.subheading)}</p>
         </div>
         <nav class="hero-nav" aria-label="Symphony Navigation">
-          <a class="nav-pill" href="/"><strong>Overview</strong> Portfolio</a>
-          <a class="nav-pill" href="/projects"><strong>Projects</strong> Registry</a>
-          <a class="nav-pill" href="/runs"><strong>Runs</strong> Activity</a>
-          <a class="nav-pill" href="/api/v1/state"><strong>API</strong> JSON state</a>
+          <a class="nav-pill" href="/"><strong>Overview</strong><span class="nav-sep">/</span>Portfolio</a>
+          <a class="nav-pill" href="/projects"><strong>Projects</strong><span class="nav-sep">/</span>Registry</a>
+          <a class="nav-pill" href="/runs"><strong>Runs</strong><span class="nav-sep">/</span>Activity</a>
+          <a class="nav-pill" href="/api/v1/state"><strong>API</strong><span class="nav-sep">/</span>JSON state</a>
         </nav>
       </div>
       ${input.body}
@@ -646,7 +675,7 @@ function renderRunCard(run: SymphonyRunRecord): string {
     <div class="link-row">
       ${renderLink(run.linearIssueUrl, 'Linear issue')}
       ${renderLink(`https://github.com/${run.githubRepo}`, run.githubRepo)}
-      <span class="mono">${htmlEscape(run.runId)}</span>
+      <span class="mono" style="font-size:0.72rem;color:var(--ink-soft);word-break:break-all">${htmlEscape(run.runId)}</span>
     </div>
   </article>`;
 }
@@ -694,7 +723,7 @@ function renderHome(snapshot: Awaited<ReturnType<typeof loadDashboardSnapshot>>)
           ${runs || '<div class="empty-state">No run records yet. Dispatch one Ready issue to populate the runtime ledger.</div>'}
         </div>
       </section>
-      <p class="footer-note">Auto-refresh every 5 seconds. Linear remains the execution source of truth; this dashboard is the orchestration surface.</p>
+      <p class="footer-note">Auto-refresh every 30 seconds. Linear remains the execution source of truth; this dashboard is the orchestration surface.</p>
     `,
   });
 }

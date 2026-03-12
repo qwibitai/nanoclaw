@@ -71,6 +71,7 @@ BEFORE changing the Linear/Notion/GitHub control-plane split → read docs/workf
 BEFORE changing execution-lane routing or Symphony scope → read docs/workflow/control-plane/execution-lane-routing-contract.md
 BEFORE changing custom Symphony backend routing or project registry → read docs/workflow/control-plane/custom-symphony-orchestration-contract.md
 BEFORE operating Symphony dispatch, daemon, or dashboard workflows → read docs/workflow/control-plane/symphony-operations-runbook.md
+BEFORE debugging Symphony nightly improvement dispatch or agent execution issues → read docs/troubleshooting/SYMPHONY-NIGHTLY-FLOW.md
 BEFORE onboarding a new project into Linear/Notion/Symphony or changing the universal secret model → read docs/workflow/control-plane/project-bootstrap-and-secret-contract.md
 BEFORE consulting Claude Code CLI via resumed/forked sessions for parallel reasoning/review → read docs/workflow/delivery/claude-cli-resume-consult-lane.md
 BEFORE pulling/fetching upstream main or resolving upstream sync conflicts → read docs/operations/upstream-sync-policy.md

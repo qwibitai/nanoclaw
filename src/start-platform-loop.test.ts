@@ -95,6 +95,7 @@ describe('start-platform-loop launcher', () => {
   it('prints a headless runner invocation in dry-run mode', () => {
     const output = execFileSync('bash', [SCRIPT_PATH, '--dry-run'], {
       encoding: 'utf8',
+      timeout: 30000,
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH}`,

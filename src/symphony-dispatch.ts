@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 
 import { buildSymphonyLaunchPlan } from './symphony-backends.js';
 import {
@@ -80,13 +80,96 @@ function sortCandidates(issues: Awaited<ReturnType<typeof listReadyIssuesForProj
   });
 }
 
+function runGitCommand(args: string[], cwd: string): string {
+  return execSync(`git ${args.join(' ')}`, { cwd, encoding: 'utf8' });
+}
+
+function createGitWorktree(workspacePath: string, githubRepo: string, branchName: string): void {
+  // Determine the source repo - use current nanoclaw repo, otherwise use remote
+  let sourceRepo: string | undefined;
+
+  // Use current nanoclaw repo as source if it exists
+  const currentDir = process.cwd();
+  if (fs.existsSync(path.join(currentDir, '.git'))) {
+    sourceRepo = currentDir;
+  }
+
+  if (!sourceRepo) {
+    // Use remote URL
+    sourceRepo = `https://github.com/${githubRepo}.git`;
+  }
+
+  console.log(`Creating git worktree at ${workspacePath} from ${sourceRepo} branch ${branchName}`);
+
+  // Create the worktree
+  try {
+    runGitCommand(['worktree', 'add', '-B', branchName, workspacePath, 'origin/main'], sourceRepo);
+  } catch (err) {
+    // If worktree already exists, try to prune and recreate
+    try {
+      runGitCommand(['worktree', 'remove', '--force', workspacePath], sourceRepo);
+      runGitCommand(['worktree', 'add', '-B', branchName, workspacePath, 'origin/main'], sourceRepo);
+    } catch (retryErr) {
+      console.error('Failed to create worktree:', retryErr);
+      throw retryErr;
+    }
+  }
+}
+
+function injectMcpConfig(workspacePath: string): void {
+  const symphonyMcpConfig = {
+    mcpServers: {
+      symphony: {
+        command: 'bash',
+        args: [
+          'scripts/workflow/run-with-env.sh',
+          'npx',
+          'tsx',
+          'scripts/workflow/symphony-mcp.ts',
+        ],
+      },
+    },
+  };
+
+  const symphonyCodexConfig = `[mcp_servers.symphony]
+command = "bash"
+args = [
+  "scripts/workflow/run-with-env.sh",
+  "npx",
+  "tsx",
+  "scripts/workflow/symphony-mcp.ts"
+]
+startup_timeout_sec = 20.0
+tool_timeout_sec = 120.0
+env_vars = ["NOTION_TOKEN", "NOTION_SESSION_SUMMARY_DATABASE_ID", "NOTION_NIGHTLY_DATABASE_ID", "NOTION_PROJECT_REGISTRY_DATABASE_ID", "LINEAR_API_KEY", "NANOCLAW_LINEAR_TEAM_KEY"]
+`;
+
+  fs.writeFileSync(
+    path.join(workspacePath, '.mcp.json'),
+    JSON.stringify(symphonyMcpConfig, null, 2) + '\n',
+    'utf8',
+  );
+  fs.mkdirSync(path.join(workspacePath, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(workspacePath, '.codex', 'config.toml'), symphonyCodexConfig, 'utf8');
+}
+
 function prepareWorkspace(
   issue: SymphonyLinearIssueDetail,
   plan: ReturnType<typeof buildSymphonyLaunchPlan>,
   prompt: string,
   runId: string,
 ): { promptFile: string; manifestFile: string; logFile: string; exitFile: string } {
-  fs.mkdirSync(plan.workspacePath, { recursive: true });
+  // Create worktree if enabled
+  if (plan.useWorktree) {
+    const branchName = `symphony-${issue.identifier.toLowerCase()}`;
+    createGitWorktree(plan.workspacePath, plan.githubRepo, branchName);
+  } else {
+    fs.mkdirSync(plan.workspacePath, { recursive: true });
+  }
+
+  // Inject MCP config for agents running in this workspace
+  injectMcpConfig(plan.workspacePath);
+
   const promptFile = path.join(plan.workspacePath, 'PROMPT.md');
   const manifestFile = path.join(plan.workspacePath, 'RUN.json');
   const logFile = path.join(plan.workspacePath, 'run.log');
@@ -143,14 +226,12 @@ with open(path, "w", encoding="utf-8") as handle:
 PY
 exit $code`;
 
+  const { CLAUDECODE: _omit, ...envWithoutClaudeCode } = { ...process.env, ...env };
   const child = spawn('/bin/sh', ['-lc', wrapped], {
     cwd,
     detached: true,
     stdio: ['ignore', out, out],
-    env: {
-      ...process.env,
-      ...env,
-    },
+    env: envWithoutClaudeCode,
   });
   child.unref();
   return child.pid ?? 0;
@@ -211,6 +292,7 @@ export async function dispatchOnceForProject(
     ...resolved,
     issueId: issue.id,
     issueIdentifier: issue.identifier,
+    githubRepo: project.githubRepo,
   });
   const prompt = buildSymphonyPrompt(issue);
   const runId = buildRunId(issue.identifier);

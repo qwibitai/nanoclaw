@@ -1,4 +1,24 @@
-# Managing Groups
+# Groups & Container Mounts
+
+## Container Mounts
+
+| Container Path | Host Path | Access |
+|----------------|-----------|--------|
+| `/workspace/project` | Project root | read-only |
+| `/workspace/group` | `groups/main/` | read-write |
+| `/workspace/extra/repos` | NanoClawWorkspace | read-write |
+
+When configured via `additionalMounts`, shared mounts appear under `/workspace/extra/<containerPath>`.
+
+Key paths:
+
+- `/workspace/project/store/messages.db` — SQLite database
+- `/workspace/project/data/registered_groups.json` — Group config
+- `/workspace/project/groups/` — All group folders
+
+---
+
+## Managing Groups
 
 ## Finding Available Groups
 

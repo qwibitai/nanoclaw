@@ -65,9 +65,45 @@ This runbook owns only day-to-day operator handling.
    - `npm run symphony:mcp`
 
 Expected runtime files:
+
 - `.nanoclaw/symphony/project-registry.cache.json`
 - `.nanoclaw/symphony/state.json`
 - `.nanoclaw/symphony/runs/*.json`
+
+## Environment Setup
+
+Required environment variables in `.env`:
+
+```bash
+# Backend commands (at least one required)
+NANOCLAW_SYMPHONY_CODEX_COMMAND='codex exec {workspace}'
+NANOCLAW_SYMPHONY_CLAUDE_CODE_COMMAND='claude-code --workdir {workspace}'
+
+# Workspace configuration
+# Use absolute path (not ~) - tilde expansion is automatic in code
+NANOCLAW_SYMPHONY_WORKSPACE_BASE=/path/to/workspaces
+
+# Optional: Enable git worktree creation for isolated execution
+NANOCLAW_SYMPHONY_USE_WORKTREE=true
+
+# Optional: Auto-dispatch runs when issues become Ready
+NANOCLAW_SYMPHONY_AUTO_DISPATCH=true
+```
+
+### Workspace Path
+
+- Use **absolute paths** (e.g., `/Users/gurusharan/Documents/remote-claude/SymphonyWorkspace`)
+- Do NOT use `~` in registry - code expands it automatically
+- Workspace structure: `{workspaceBase}/{projectKey}/{issueIdentifier}/`
+
+### Git Worktree Mode
+
+When `NANOCLAW_SYMPHONY_USE_WORKTREE=true`:
+
+- Creates git worktree at workspace path
+- Branch name: `symphony-{issue-identifier}`
+- Uses current nanoclaw repo as source (or clones from remote)
+- Provides proper git isolation for agent execution
 - `.nanoclaw/symphony/runs/*.log`
 
 ## Issue Categories
@@ -75,11 +111,13 @@ Expected runtime files:
 ### Registry Problems
 
 Symptoms:
+
 - `show-projects` is empty
 - expected project missing from dashboard
 - registry sync fails loudly
 
 Checks:
+
 - confirm `NOTION_PROJECT_REGISTRY_DATABASE_ID`
 - run `npm run symphony:sync-registry`
 - inspect `.nanoclaw/symphony/project-registry.cache.json`
@@ -88,10 +126,12 @@ Checks:
 ### Ready Queue Problems
 
 Symptoms:
+
 - dashboard shows zero ready issues when Linear has work
 - `dispatch-once` returns `no_ready_issue`
 
 Checks:
+
 - confirm issue state is `Ready`
 - confirm the issue belongs to the correct Linear project
 - confirm the issue body follows `.claude/examples/symphony-linear-issue-template.md`
@@ -103,10 +143,12 @@ Checks:
 ### Dispatch Problems
 
 Symptoms:
+
 - `dispatch-once` fails before launch
 - run record stays `failed` or `blocked`
 
 Checks:
+
 - confirm the selected project allows the target backend
 - confirm repo URL, base branch, acceptance criteria, required checks, and evidence sections exist
 - confirm the backend command env var is set:
@@ -117,11 +159,13 @@ Checks:
 ### Dashboard or Daemon Problems
 
 Symptoms:
+
 - `http://127.0.0.1:4318/` does not load
 - state stays stale
 - recent runs do not reconcile
 
 Checks:
+
 - run `npm run symphony:serve`
 - run `npm run symphony:daemon -- --once`
 - inspect `.nanoclaw/symphony/state.json`
@@ -130,10 +174,12 @@ Checks:
 ### MCP Tooling Problems
 
 Symptoms:
+
 - client reports no Symphony tools
 - MCP-connected agents cannot inspect queues or dispatch work
 
 Checks:
+
 - confirm `.mcp.json` contains the `symphony` server entry
 - run `npm run symphony:mcp`
 - confirm the client is pointed at the repo-local MCP config
