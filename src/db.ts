@@ -98,6 +98,13 @@ function createSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_v2_activity ON sessions_v2(last_activity);
   `);
 
+  // Add model column to sessions_v2 (sticky model override per session)
+  try {
+    database.exec(`ALTER TABLE sessions_v2 ADD COLUMN model TEXT DEFAULT NULL`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Index for thread LIKE queries in getNewMessages (e.g. chat_jid LIKE 'slack:C123:thread:%')
   database.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp)`,
@@ -987,6 +994,22 @@ export function touchSessionActivity(key: string): void {
 
 export function deleteSessionV2(key: string): void {
   db.prepare('DELETE FROM sessions_v2 WHERE session_key = ?').run(key);
+}
+
+/** Get the sticky model override for a session, if any. */
+export function getSessionModel(key: string): string | undefined {
+  const row = db
+    .prepare('SELECT model FROM sessions_v2 WHERE session_key = ?')
+    .get(key) as { model: string | null } | undefined;
+  return row?.model ?? undefined;
+}
+
+/** Set or clear the sticky model override for a session. */
+export function setSessionModel(key: string, model: string | null): void {
+  db.prepare('UPDATE sessions_v2 SET model = ? WHERE session_key = ?').run(
+    model,
+    key,
+  );
 }
 
 export function getIdleSessions(cutoffISO: string): SessionV2Row[] {

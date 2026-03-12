@@ -832,7 +832,7 @@ async function main(): Promise<void> {
     sdkEnv[key] = value;
   }
 
-  // Set model for this container run (per-message override > per-group > global default)
+  // Set model for this container run (per-message flag > session sticky > per-group > global default)
   if (containerInput.model) {
     sdkEnv['CLAUDE_CODE_USE_MODEL'] = containerInput.model;
     log(`Using model: ${containerInput.model}`);
@@ -850,7 +850,11 @@ async function main(): Promise<void> {
     ? fs.readFileSync(globalClaudeMdPath, 'utf-8')
     : undefined;
   const channelFormatting = getChannelFormattingInstructions(containerInput.chatJid);
-  const systemPromptParts = [globalClaudeMd, channelFormatting].filter(Boolean);
+  // Inject model identity so the agent can report it accurately
+  const modelNote = containerInput.model
+    ? `You are running on model: ${containerInput.model}. If the user asks what model you are using, report this accurately.`
+    : undefined;
+  const systemPromptParts = [globalClaudeMd, channelFormatting, modelNote].filter(Boolean);
   const systemPromptOption = systemPromptParts.length > 0
     ? { type: 'preset' as const, preset: 'claude_code' as const, append: systemPromptParts.join('\n\n') }
     : undefined;
