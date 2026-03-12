@@ -3,7 +3,7 @@
 ## Project Reference
 
 - **Core value:** Messages never blocked by running containers
-- **Current focus:** Project complete — deployed to VPS 2026-03-11
+- **Current focus:** Google Chat context loss fix shipped 2026-03-12
 - **Airtable record:** `recFADjzpnBY8NHh4`
 
 ## Current Position
@@ -86,19 +86,21 @@
 ## Session Continuity
 
 ### Last Session
-- 2026-03-12T08:24:00Z
+- 2026-03-12T09:10:00Z
 
 ### Handover Notes
 - Phase 01 complete: All 3 plans done (01-01, 01-02, 01-03)
 - Phase 02 complete: All 2 plans done (02-01, 02-02)
 - Phase 03 complete: All 2 plans done (03-01, 03-02) — OAuth auto-refresh
-- Host writes active_sessions.json on container start/exit (02-01)
-- Container reads it on startup, injects <active-sessions> XML into initial prompt (02-02)
-- Google Chat channel adapter added to git repo (was VPS-only)
-- Bug fixes: concurrent task spawning + message loop piping
-- Deployed to VPS 2026-03-12T08:21:00Z — service active
+- **Google Chat context loss bug FIXED** — Holly now remembers conversation history
+  - Root cause: every Google Chat message spawned a fresh container with zero history
+  - Fix: store inbound/outbound messages in DB, prepend last 20 as <conversation-history> XML
+  - trigger-writer passes senderName/senderEmail/messageText in task JSON
+  - ipc.ts stores inbound, calls storeChatMetadata for FK constraint, fetches history
+  - task-scheduler.ts stores Holly's outbound responses after sendMessage
+  - db.ts: new getRecentMessages() — includes bot messages (unlike getMessagesSince)
+  - 12 new tests (416 total), deployed and verified working
+- Google Chat threaded replies also shipped (separate earlier commit)
 - OAuth auto-refresh live — token refreshes automatically when near expiry
-- `.env` CLAUDE_CODE_OAUTH_TOKEN commented out — credentials file is sole source
-- Refresh token rotation handled — server rotated on first refresh, new token persisted
-- 404 tests passing (387 + 17 OAuth tests)
+- 416 tests passing (404 + 12 context history tests)
 - Passwordless deploy configured via sudoers (craig → nanoclaw)

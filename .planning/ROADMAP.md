@@ -82,8 +82,11 @@ Plans:
 
 ## Deployment
 
-- **Deployed:** 2026-03-11T22:12:10Z
+- **Deployed:** 2026-03-12T08:46:00Z
 - Google Chat channel adapter added to git repo and deployed
 - OAuth token (Claude Max 20x) active — API key removed
 - Concurrent sessions live — up to 10 containers globally
 - Passwordless deploy configured via sudoers
+- Google Chat threaded replies — Holly replies in-thread
+- Google Chat conversation history — inbound/outbound messages stored, last 20 prepended to prompt
+- 416 tests passing
