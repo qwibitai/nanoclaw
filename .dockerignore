@@ -1,0 +1,7 @@
+node_modules
+dist
+logs
+store
+data
+.env
+.git

@@ -18,6 +18,11 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
+// Host paths for Docker-out-of-Docker mounts
+export const HOST_PROJECT_PATH = process.env.HOST_PROJECT_PATH || PROJECT_ROOT;
+export const HOST_GROUPS_DIR = path.resolve(HOST_PROJECT_PATH, "groups");
+export const HOST_DATA_DIR = path.resolve(HOST_PROJECT_PATH, "data");
+export const HOST_STORE_DIR = path.resolve(HOST_PROJECT_PATH, "store");
 const HOME_DIR = process.env.HOME || os.homedir();
 
 // Mount security: allowlist stored OUTSIDE project root, never mounted into containers

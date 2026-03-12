@@ -15,6 +15,9 @@ import {
   GROUPS_DIR,
   IDLE_TIMEOUT,
   TIMEZONE,
+  HOST_DATA_DIR,
+  HOST_GROUPS_DIR,
+  HOST_PROJECT_PATH,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
 import { logger } from './logger.js';
@@ -71,7 +74,7 @@ function buildVolumeMounts(
     // (src/, dist/, package.json, etc.) which would bypass the sandbox
     // entirely on next restart.
     mounts.push({
-      hostPath: projectRoot,
+      hostPath: HOST_PROJECT_PATH,
       containerPath: '/workspace/project',
       readonly: true,
     });
@@ -89,14 +92,14 @@ function buildVolumeMounts(
 
     // Main also gets its group folder as the working directory
     mounts.push({
-      hostPath: groupDir,
+      hostPath: path.join(HOST_GROUPS_DIR, group.folder),
       containerPath: '/workspace/group',
       readonly: false,
     });
   } else {
     // Other groups only get their own folder
     mounts.push({
-      hostPath: groupDir,
+      hostPath: path.join(HOST_GROUPS_DIR, group.folder),
       containerPath: '/workspace/group',
       readonly: false,
     });
@@ -106,7 +109,7 @@ function buildVolumeMounts(
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
-        hostPath: globalDir,
+        hostPath: path.join(HOST_GROUPS_DIR, 'global'),
         containerPath: '/workspace/global',
         readonly: true,
       });
@@ -158,7 +161,7 @@ function buildVolumeMounts(
     }
   }
   mounts.push({
-    hostPath: groupSessionsDir,
+    hostPath: path.join(HOST_DATA_DIR, 'sessions', group.folder, '.claude'),
     containerPath: '/home/node/.claude',
     readonly: false,
   });
@@ -170,7 +173,7 @@ function buildVolumeMounts(
   fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(groupIpcDir, 'input'), { recursive: true });
   mounts.push({
-    hostPath: groupIpcDir,
+    hostPath: path.join(HOST_DATA_DIR, 'ipc', group.folder),
     containerPath: '/workspace/ipc',
     readonly: false,
   });
@@ -194,7 +197,7 @@ function buildVolumeMounts(
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   }
   mounts.push({
-    hostPath: groupAgentRunnerDir,
+    hostPath: path.join(HOST_DATA_DIR, 'sessions', group.folder, 'agent-runner-src'),
     containerPath: '/app/src',
     readonly: false,
   });
@@ -325,6 +328,7 @@ export async function runContainerAgent(
     let parseBuffer = '';
     let newSessionId: string | undefined;
     let outputChain = Promise.resolve();
+    let hadStreamingOutput = false;
 
     container.stdout.on('data', (data) => {
       const chunk = data.toString();
@@ -401,7 +405,6 @@ export async function runContainerAgent(
     });
 
     let timedOut = false;
-    let hadStreamingOutput = false;
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
