@@ -15,6 +15,7 @@ import {
   deleteTask,
   getRecentMessages,
   getTaskById,
+  storeChatMetadata,
   storeMessage,
   updateTask,
 } from './db.js';
@@ -282,6 +283,9 @@ export async function processTaskIpc(
         if (taskId.startsWith('gchat-msg-') && data.senderName) {
           const now = new Date().toISOString();
           const msgId = `gchat-in-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+          // Ensure chat metadata exists (foreign key constraint)
+          storeChatMetadata(targetJid, now, undefined, 'google-chat');
 
           // Store the inbound message
           storeMessage({
