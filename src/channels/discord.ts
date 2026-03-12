@@ -1,4 +1,5 @@
-import { spawn } from 'child_process';
+import { exec, spawn } from 'child_process';
+import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 
@@ -280,13 +281,16 @@ export class DiscordChannel implements Channel {
       );
     });
 
-    // Handle button clicks and slash commands (deploy restricted to #nanoclaw-dev)
+    // Handle button clicks and slash commands (restricted to #nanoclaw-dev)
     const deployChannelId = '1480411210183610418';
     this.client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.channelId !== deployChannelId) return;
       if (interaction.isButton()) {
-        if (interaction.customId.startsWith('deploy:')) {
-          await this.handleDeployButton(interaction as ButtonInteraction);
+        const btn = interaction as ButtonInteraction;
+        if (btn.customId.startsWith('review-merge:')) {
+          await this.handleReviewMergeButton(btn);
+        } else if (btn.customId.startsWith('merge:')) {
+          await this.handleMergeButton(btn);
         }
       } else if (interaction.isChatInputCommand()) {
         if (interaction.commandName === 'deploy') {
@@ -437,7 +441,7 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
       text = await this.replaceMentions(text, textChannel);
-      const components = this.buildDeployButton(text);
+      const components = this.buildPrButtons(text);
       await this.sendChunked(textChannel, text, components);
       logger.info({ jid, length: text.length }, 'Discord message sent');
     } catch (err) {
@@ -480,7 +484,7 @@ export class DiscordChannel implements Channel {
       });
 
       text = await this.replaceMentions(text, textChannel);
-      const components = this.buildDeployButton(text);
+      const components = this.buildPrButtons(text);
       await this.sendChunked(thread, text, components);
 
       logger.info(
@@ -503,18 +507,24 @@ export class DiscordChannel implements Channel {
   private static PR_URL_RE =
     /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
 
-  /** Build a Deploy button if the text contains a GitHub PR URL. */
-  private buildDeployButton(
+  /** Build Review & Merge / Merge buttons if the text contains a GitHub PR URL. */
+  private buildPrButtons(
     text: string,
   ): ActionRowBuilder<ButtonBuilder>[] | undefined {
     const match = text.match(DiscordChannel.PR_URL_RE);
     if (!match) return undefined;
+    // Discord customId max is 100 chars; "review-merge:" prefix is 13 chars
+    if (match[0].length > 87) return undefined;
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId(`deploy:${match[0]}`)
-          .setLabel('Deploy')
+          .setCustomId(`review-merge:${match[0]}`)
+          .setLabel('Review & Merge')
           .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`merge:${match[0]}`)
+          .setLabel('Merge')
+          .setStyle(ButtonStyle.Secondary),
       ),
     ];
   }
@@ -618,7 +628,12 @@ export class DiscordChannel implements Channel {
     try {
       const rest = new REST({ version: '10' }).setToken(this.botToken);
       await rest.put(Routes.applicationGuildCommands(clientId, guildId), {
-        body: [{ name: 'deploy', description: 'Deploy latest main branch' }],
+        body: [
+          {
+            name: 'deploy',
+            description: 'Pull, build, and restart NanoClaw from latest main',
+          },
+        ],
       });
       logger.info('Discord slash commands registered (guild-only)');
     } catch (err) {
@@ -626,33 +641,63 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  private async handleDeployButton(
+  /** Review & Merge: inject a message that triggers /review-swarm + /simplify + merge. */
+  private async handleReviewMergeButton(
     interaction: ButtonInteraction,
   ): Promise<void> {
-    const prUrl = interaction.customId.replace('deploy:', '');
+    const prUrl = interaction.customId.replace('review-merge:', '');
+    await interaction.deferReply();
 
+    const prompt =
+      `Review and merge ${prUrl}:\n` +
+      `1. Run /review-swarm on the PR diff — fix any critical findings\n` +
+      `2. Run /simplify on changed files — fix any code quality issues\n` +
+      `3. If both pass clean, merge with \`gh pr merge ${prUrl} --squash --delete-branch\``;
+
+    this.injectMessage(interaction, prompt);
+    await interaction.editReply('Starting review pipeline...');
+  }
+
+  /** Merge: merge the PR directly via gh CLI. */
+  private async handleMergeButton(
+    interaction: ButtonInteraction,
+  ): Promise<void> {
+    const prUrl = interaction.customId.replace('merge:', '');
     await interaction.deferReply();
 
     try {
-      const { execSync } = await import('child_process');
-      const result = execSync(`gh pr view "${prUrl}" --json state -q .state`, {
-        encoding: 'utf-8',
-        timeout: 15000,
-      }).trim();
+      const execAsync = promisify(exec);
+      const { stdout } = await execAsync(
+        `gh pr merge "${prUrl}" --squash --delete-branch`,
+        { encoding: 'utf-8', timeout: 30000 },
+      );
 
-      if (result !== 'MERGED') {
-        await interaction.editReply(
-          `PR hasn't been merged yet (state: ${result})`,
-        );
-        return;
-      }
-
-      await interaction.editReply('PR is merged. Deploying latest main...');
-      this.runDetachedDeploy();
+      await interaction.editReply(stdout.trim() || 'PR merged.');
     } catch (err) {
-      logger.error({ err, prUrl }, 'Deploy button handler error');
-      await interaction.editReply('Deploy failed — check logs').catch(() => {});
+      logger.error({ err, prUrl }, 'Merge button handler error');
+      const msg =
+        err instanceof Error ? err.message.split('\n')[0] : 'Unknown error';
+      await interaction.editReply(`Merge failed: ${msg}`).catch(() => {});
     }
+  }
+
+  /** Inject a synthetic message into the inbound pipeline for the agent to process. */
+  private injectMessage(interaction: ButtonInteraction, prompt: string): void {
+    const channelId = interaction.channelId;
+    const jid = `dc:${channelId}`;
+    const msgId = interaction.id;
+    const sender = interaction.user.id;
+    const senderName = interaction.user.username;
+
+    this.opts.onMessage(jid, {
+      id: msgId,
+      chat_jid: jid,
+      sender,
+      sender_name: senderName,
+      content: prompt,
+      timestamp: new Date().toISOString(),
+      is_from_me: false,
+    });
   }
 
   private async handleDeployCommand(
