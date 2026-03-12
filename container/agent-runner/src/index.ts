@@ -821,9 +821,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Credentials are injected via stdin JSON pipe (secrets field).
-  // The entrypoint sets them as env vars; they never touch disk.
+  // Build SDK env: merge secrets into process.env for the SDK only.
+  // Secrets never touch process.env itself, so Bash subprocesses can't see them.
   const sdkEnv: Record<string, string | undefined> = { ...process.env };
+  for (const [key, value] of Object.entries(containerInput.secrets || {})) {
+    sdkEnv[key] = value;
+  }
 
   // Set model for this container run (per-message flag > session sticky > per-group > global default)
   if (containerInput.model) {
