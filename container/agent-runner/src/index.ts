@@ -363,6 +363,7 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastAssistantText: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -434,7 +435,12 @@ async function runQuery(
     log(`[msg #${messageCount}] type=${msgType}`);
 
     if (message.type === 'assistant' && 'uuid' in message) {
-      lastAssistantUuid = (message as { uuid: string }).uuid;
+      lastAssistantUuid = (message as any).uuid;
+      const content = (message as any).message?.content;
+      if (Array.isArray(content)) {
+        const text = content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('');
+        if (text) lastAssistantText = text;
+      }
     }
 
     if (message.type === 'system' && message.subtype === 'init') {
@@ -449,13 +455,15 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
-      log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      const textResult = (message as any).result ?? null;
+      const effectiveResult = textResult || lastAssistantText || null;
+      log(`Result #${resultCount}: subtype=${message.subtype}${effectiveResult ? ` text=${effectiveResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
-        result: textResult || null,
+        result: effectiveResult,
         newSessionId
       });
+      lastAssistantText = undefined;
     }
   }
 
