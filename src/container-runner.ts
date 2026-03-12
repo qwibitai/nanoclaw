@@ -41,6 +41,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  compactSeed?: string; // 机制一：上次压缩摘要，用于新 session 启动时注入初始 context
 }
 
 export interface ContainerOutput {
