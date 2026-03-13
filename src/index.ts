@@ -530,7 +530,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // "-m default" / "-m reset" — clear sticky, revert to group/global default
     setSessionModel(sessionKey, null);
     model = resolveModel(group);
-    modelSwitchNotice = `[Model reverted to default: ${model}] `;
+    modelSwitchNotice = `\n\n[SYSTEM: Model has been reverted to default (${model}). Briefly confirm the model change at the start of your response before addressing the user's request.]`;
     logger.info(
       { group: group.name, model, sessionKey },
       'Model override cleared, reverted to default',
@@ -538,14 +538,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   } else if (overrideResult) {
     model = overrideResult.model;
     if (overrideResult.sticky) {
-      setSessionModel(sessionKey, overrideResult.model, group.folder, effectiveThreadId);
-      modelSwitchNotice = `[Model switched to ${model} for this session] `;
+      setSessionModel(
+        sessionKey,
+        overrideResult.model,
+        group.folder,
+        effectiveThreadId,
+      );
+      modelSwitchNotice = `\n\n[SYSTEM: Model switched to ${model} for this session. Briefly confirm the model change at the start of your response before addressing the user's request.]`;
       logger.info(
         { group: group.name, model: overrideResult.model, sessionKey },
         'Model override persisted for session',
       );
     } else {
-      modelSwitchNotice = `[Model switched to ${model} for this message only] `;
+      modelSwitchNotice = `\n\n[SYSTEM: Model switched to ${model} for this message only. Briefly confirm the model change at the start of your response before addressing the user's request.]`;
       logger.info(
         { group: group.name, model: overrideResult.model, sessionKey },
         'One-shot model override (not persisted)',
@@ -555,7 +560,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     model = resolveModel(group, undefined, sessionModel);
   }
 
-  const prompt = modelSwitchNotice + formatMessages(missedMessages, TIMEZONE);
+  const prompt = formatMessages(missedMessages, TIMEZONE) + modelSwitchNotice;
 
   // Collect attachments from messages and remap paths for container mount
   const containerAttachments: ContainerAttachment[] = [];
