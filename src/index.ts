@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { gitSyncAfterRun } from './git-sync.js';
+
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
@@ -331,12 +333,15 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      gitSyncAfterRun();
       return 'error';
     }
 
+    gitSyncAfterRun();
     return 'success';
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    gitSyncAfterRun();
     return 'error';
   }
 }

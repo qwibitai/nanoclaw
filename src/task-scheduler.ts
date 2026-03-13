@@ -3,6 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import fs from 'fs';
 
 import { ASSISTANT_NAME, SCHEDULER_POLL_INTERVAL, TIMEZONE } from './config.js';
+import { gitSyncAfterRun } from './git-sync.js';
 import {
   ContainerOutput,
   runContainerAgent,
@@ -236,6 +237,8 @@ async function runTask(
       ? result.slice(0, 200)
       : 'Completed';
   updateTaskAfterRun(task.id, nextRun, resultSummary);
+
+  gitSyncAfterRun();
 }
 
 let schedulerRunning = false;

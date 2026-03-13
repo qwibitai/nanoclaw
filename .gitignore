@@ -9,14 +9,8 @@ store/
 data/
 logs/
 
-# Groups - only track base structure and specific CLAUDE.md files
-groups/*
-!groups/main/
-!groups/global/
-groups/main/*
-groups/global/*
-!groups/main/CLAUDE.md
-!groups/global/CLAUDE.md
+# Groups - track all agent workspace files
+# (auth credentials and secrets are in store/, not here)
 
 # Secrets
 *.keys.json

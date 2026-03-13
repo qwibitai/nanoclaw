@@ -337,8 +337,16 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  // Detect "ultrathink" keyword to switch to Opus 4.6
+  const ultrathinkPattern = /\bultrathink\b/i;
+  const useOpus = ultrathinkPattern.test(prompt);
+  const cleanedPrompt = useOpus ? prompt.replace(ultrathinkPattern, '').trim() : prompt;
+  if (useOpus) {
+    log('Ultrathink detected — using claude-opus-4-6');
+  }
+
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(cleanedPrompt);
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -392,6 +400,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
+      model: useOpus ? 'claude-opus-4-6' : undefined,
       cwd: '/workspace/group',
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
