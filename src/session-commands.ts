@@ -18,13 +18,15 @@ export function extractSessionCommand(
 
 /**
  * Check if a session command sender is authorized.
- * Allowed: main group (any sender), or trusted/admin sender (is_from_me) in any group.
+ * Allowed: main group (any sender), trusted/admin sender (is_from_me), or
+ * an allowlisted sender (isTrustedSender — covers Discord/Slack where is_from_me is always false).
  */
 export function isSessionCommandAllowed(
   isMainGroup: boolean,
   isFromMe: boolean,
+  isTrustedSender: boolean = false,
 ): boolean {
-  return isMainGroup || isFromMe;
+  return isMainGroup || isFromMe || isTrustedSender;
 }
 
 /** Minimal agent result interface — matches the subset of ContainerOutput used here. */
@@ -87,7 +89,7 @@ export async function handleSessionCommand(opts: {
 
   if (!command || !cmdMsg) return { handled: false };
 
-  if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true)) {
+  if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true, deps.canSenderInteract(cmdMsg))) {
     // DENIED: send denial if the sender would normally be allowed to interact,
     // then silently consume the command by advancing the cursor past it.
     // Trade-off: other messages in the same batch are also consumed (cursor is

@@ -69,6 +69,10 @@ describe('isSessionCommandAllowed', () => {
   it('allows trusted sender in main group', () => {
     expect(isSessionCommandAllowed(true, true)).toBe(true);
   });
+
+  it('allows allowlisted sender (isTrustedSender=true) in non-main group', () => {
+    expect(isSessionCommandAllowed(false, false, true)).toBe(true);
+  });
 });
 
 function makeMsg(
@@ -135,8 +139,9 @@ describe('handleSessionCommand', () => {
     expect(deps.advanceCursor).toHaveBeenCalledWith('100');
   });
 
-  it('sends denial to interactable sender in non-main group', async () => {
-    const deps = makeDeps();
+  it('allows allowlisted (canSenderInteract=true) sender in non-main group', async () => {
+    // canSenderInteract=true covers Discord/Slack allowlisted senders where is_from_me is always false
+    const deps = makeDeps({ canSenderInteract: vi.fn().mockReturnValue(true) });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/compact', { is_from_me: false })],
       isMainGroup: false,
@@ -146,9 +151,20 @@ describe('handleSessionCommand', () => {
       deps,
     });
     expect(result).toEqual({ handled: true, success: true });
-    expect(deps.sendMessage).toHaveBeenCalledWith(
-      'Session commands require admin access.',
-    );
+    expect(deps.runAgent).toHaveBeenCalledWith('/compact', expect.any(Function));
+  });
+
+  it('sends denial to non-allowlisted sender in non-main group', async () => {
+    const deps = makeDeps({ canSenderInteract: vi.fn().mockReturnValue(false) });
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/compact', { is_from_me: false })],
+      isMainGroup: false,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
     expect(deps.runAgent).not.toHaveBeenCalled();
     expect(deps.advanceCursor).toHaveBeenCalledWith('100');
   });
