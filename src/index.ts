@@ -296,6 +296,8 @@ async function runAgent(
   );
 
   // Wrap onOutput to track session ID from streamed results
+  let pendingCompactNotify = false;
+  let pendingCompactStats: { transcriptBytes: number; seedBytes: number } | undefined;
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
         if (output.newSessionId) {
@@ -306,9 +308,8 @@ async function runAgent(
           // 清除 session，让下条消息从 compact seed 轻装启动
           delete sessions[group.folder];
           deleteSession(group.folder);
-          // 向用户发送通知
-          const channel = findChannel(channels, chatJid);
-          channel?.sendMessage(chatJid, '📦 对话历史已自动整理，下条消息将轻装开始新对话～');
+          pendingCompactNotify = true;
+          pendingCompactStats = output.compactStats;
         }
         await onOutput(output);
       }
@@ -354,6 +355,19 @@ async function runAgent(
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
+    }
+
+    if (pendingCompactNotify) {
+      const channel = findChannel(channels, chatJid);
+      let compactMsg = '📦 对话历史已自动整理，下条消息将轻装开始新对话～';
+      if (pendingCompactStats) {
+        const { transcriptBytes, seedBytes } = pendingCompactStats;
+        const fromKB = Math.round(transcriptBytes / 1024);
+        const toKB = (seedBytes / 1024).toFixed(1);
+        const savedPct = Math.round((1 - seedBytes / transcriptBytes) * 100);
+        compactMsg = `📦 对话历史已自动压缩整理 ✨\n🗜️ ${fromKB}KB → ${toKB}KB，节省 ${savedPct}%\n🚀 下条消息轻装出发～`;
+      }
+      await channel?.sendMessage(chatJid, compactMsg);
     }
 
     if (output.status === 'error') {

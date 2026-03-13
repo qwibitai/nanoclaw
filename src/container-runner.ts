@@ -48,7 +48,8 @@ export interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
-  compacted?: boolean;   // 本轮已生成 compact summary，宿主应清除 session
+  compacted?: boolean; // 本轮已生成 compact summary，宿主应清除 session
+  compactStats?: { transcriptBytes: number; seedBytes: number };
   error?: string;
 }
 
@@ -199,6 +200,7 @@ function buildVolumeMounts(
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, {
       recursive: true,
       force: true,
+      filter: (src) => !src.endsWith('.test.ts'),
     });
   }
   mounts.push({
