@@ -122,6 +122,19 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 
+### Validate token immediately
+
+After writing the token to `.env`, run:
+
+```bash
+npx tsx setup/index.ts --step validate-credentials
+```
+
+Parse the status block:
+- `VALID: true` → continue to step 5
+- `VALID: false, ERROR: invalid_or_expired_token` → tell the user their token was rejected (401) and ask them to re-run `claude setup-token` and paste a fresh token, then re-write `.env` and validate again
+- `VALID: false, ERROR: network_error` → warn that the API couldn't be reached (check internet connection), but allow the user to choose to continue anyway
+
 ## 5. Set Up Channels
 
 AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
