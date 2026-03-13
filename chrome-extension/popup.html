@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=400">
+  <title>NanoClaw Browser Agent</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>NanoClaw</h1>
+      <p class="subtitle">Browser Agent</p>
+    </header>
+
+    <section class="status-section">
+      <div class="status-indicator">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Disconnected</span>
+      </div>
+    </section>
+
+    <section class="settings-section">
+      <label for="bridgeUrl">Bridge Server URL</label>
+      <input type="text" id="bridgeUrl" placeholder="ws://localhost:3002" />
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="autoConnect" />
+        <label for="autoConnect">Auto-connect on startup</label>
+      </div>
+    </section>
+
+    <section class="actions-section">
+      <button id="connectBtn" class="btn btn-primary">Connect</button>
+      <button id="disconnectBtn" class="btn btn-secondary" disabled>Disconnect</button>
+    </section>
+
+    <section class="test-section">
+      <h3>Quick Test</h3>
+      <div class="test-buttons">
+        <button class="btn btn-small" data-test="snapshot">Snapshot</button>
+        <button class="btn btn-small" data-test="page_info">Page Info</button>
+        <button class="btn btn-small" data-test="screenshot">Screenshot</button>
+        <button class="btn btn-small" data-test="list_tabs">Tabs</button>
+      </div>
+      <pre id="testOutput" class="test-output"></pre>
+    </section>
+
+    <section class="info-section">
+      <p class="info-text">
+        This extension allows NanoClaw agents to control your browser.
+        Start the bridge server with <code>npm run bridge</code> in your NanoClaw directory.
+      </p>
+    </section>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

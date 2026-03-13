@@ -1,0 +1,454 @@
+#!/usr/bin/env node
+
+/**
+ * chrome-browser - CLI tool for NanoClaw agents to control the user's real Chrome browser.
+ *
+ * Sends commands to the extension bridge server via HTTP POST.
+ * The bridge forwards them over WebSocket to the Chrome extension.
+ *
+ * Usage: chrome-browser <command> [options]
+ */
+
+const http = require('http');
+
+const BRIDGE_HOST = process.env.CHROME_BRIDGE_HOST || 'host.docker.internal';
+const BRIDGE_PORT = process.env.CHROME_BRIDGE_PORT || '3002';
+const BRIDGE_URL = `http://${BRIDGE_HOST}:${BRIDGE_PORT}`;
+
+// --- Argument Parser ---
+
+function parseArgs(argv) {
+  const args = argv.slice(2);
+  if (args.length === 0) {
+    printUsage();
+    process.exit(1);
+  }
+
+  const command = args[0];
+  const opts = {};
+  const positional = [];
+
+  for (let i = 1; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+      const key = args[i].slice(2);
+      // Boolean flags that don't take a value
+      if (['ctrl', 'shift', 'alt', 'meta', 'all', 'outer', 'interactive'].includes(key)) {
+        opts[key] = true;
+      } else if (i + 1 < args.length && !args[i + 1].startsWith('--')) {
+        opts[key] = args[i + 1];
+        i++;
+      } else {
+        opts[key] = true;
+      }
+    } else {
+      positional.push(args[i]);
+    }
+  }
+
+  return { command, opts, positional };
+}
+
+// --- Build selector params from CLI options ---
+
+function buildSelector(opts) {
+  const sel = {};
+  if (opts.ref) sel.ref = opts.ref;
+  if (opts.selector) sel.selector = opts.selector;
+  if (opts.xpath) sel.xpath = opts.xpath;
+  if (opts.text) sel.text = opts.text;
+  if (opts.x !== undefined) sel.x = parseInt(opts.x);
+  if (opts.y !== undefined) sel.y = parseInt(opts.y);
+  return sel;
+}
+
+// --- Command to bridge action mapping ---
+
+function buildRequest(command, opts, positional) {
+  const sel = buildSelector(opts);
+
+  switch (command) {
+    // Navigation
+    case 'navigate':
+    case 'open':
+    case 'goto':
+      return { action: 'navigate', params: { url: positional[0] || opts.url } };
+    case 'back':
+      return { action: 'back', params: {} };
+    case 'forward':
+      return { action: 'forward', params: {} };
+    case 'reload':
+      return { action: 'reload', params: {} };
+    case 'new-tab':
+      return { action: 'new_tab', params: { url: positional[0] || opts.url } };
+    case 'close-tab':
+      return { action: 'close_tab', params: { tabId: opts.tabId ? parseInt(opts.tabId) : undefined } };
+    case 'switch-tab':
+      return { action: 'switch_tab', params: { index: parseInt(positional[0] || opts.index || '0') } };
+    case 'list-tabs':
+      return { action: 'list_tabs', params: {} };
+    case 'get-url':
+      return { action: 'get_url', params: {} };
+    case 'get-title':
+      return { action: 'get_title', params: {} };
+
+    // Snapshot
+    case 'snapshot':
+      return { action: 'snapshot', params: { interactive: !opts.all } };
+    case 'page-info':
+      return { action: 'get_page_info', params: {} };
+
+    // Interactions
+    case 'click':
+      return { action: 'click', params: sel };
+    case 'double-click':
+    case 'dblclick':
+      return { action: 'double_click', params: sel };
+    case 'right-click':
+      return { action: 'right_click', params: sel };
+    case 'type':
+      return { action: 'type', params: { ...sel, text: opts.text || positional[0] } };
+    case 'fill':
+      return { action: 'fill', params: { ...sel, text: opts.text || positional[0] } };
+    case 'clear':
+      return { action: 'clear', params: sel };
+    case 'select':
+      return { action: 'select', params: { ...sel, value: opts.value || positional[0] } };
+    case 'check':
+      return { action: 'check', params: sel };
+    case 'uncheck':
+      return { action: 'uncheck', params: sel };
+    case 'hover':
+      return { action: 'hover', params: sel };
+    case 'focus':
+      return { action: 'focus', params: sel };
+    case 'blur':
+      return { action: 'blur', params: sel };
+    case 'press-key':
+    case 'press':
+      return {
+        action: 'press_key',
+        params: {
+          ...sel,
+          key: opts.key || positional[0],
+          ctrl: opts.ctrl || false,
+          shift: opts.shift || false,
+          alt: opts.alt || false,
+          meta: opts.meta || false,
+        },
+      };
+    case 'scroll':
+      return {
+        action: 'scroll',
+        params: {
+          ...sel,
+          x: opts.x ? parseInt(opts.x) : 0,
+          y: opts.y ? parseInt(opts.y) : parseInt(positional[0] || '0'),
+        },
+      };
+    case 'scroll-to':
+      return { action: 'scroll_to_element', params: { ...sel, block: opts.block } };
+    case 'drag':
+      return {
+        action: 'drag_and_drop',
+        params: { source: opts.source, target: opts.target },
+      };
+    case 'upload':
+      return { action: 'upload_file', params: sel };
+
+    // Data extraction
+    case 'get-text':
+      return { action: 'get_text', params: sel };
+    case 'get-html':
+      return { action: 'get_html', params: { ...sel, outer: opts.outer || false } };
+    case 'get-attribute':
+    case 'get-attr':
+      return { action: 'get_attribute', params: { ...sel, attribute: opts.attr || positional[0] } };
+    case 'get-value':
+      return { action: 'get_value', params: sel };
+    case 'get-styles':
+      return { action: 'get_styles', params: { ...sel, properties: opts.properties?.split(',') } };
+    case 'get-bounds':
+      return { action: 'get_bounding_box', params: sel };
+    case 'query':
+      return { action: 'query_selector', params: { selector: opts.selector || positional[0] } };
+    case 'query-all':
+      return {
+        action: 'query_selector_all',
+        params: { selector: opts.selector || positional[0], limit: opts.limit ? parseInt(opts.limit) : 100 },
+      };
+    case 'get-table':
+      return { action: 'get_table_data', params: sel };
+    case 'get-links':
+      return { action: 'get_links', params: { limit: opts.limit ? parseInt(opts.limit) : 200 } };
+    case 'get-forms':
+      return { action: 'get_forms', params: {} };
+
+    // Screenshot
+    case 'screenshot':
+      return { action: 'screenshot', params: { format: opts.format || 'png', quality: parseInt(opts.quality || '90') } };
+
+    // Wait
+    case 'wait':
+      return { action: 'wait', params: { ms: parseInt(positional[0] || opts.ms || '1000') } };
+    case 'wait-for':
+      return {
+        action: 'wait_for_element',
+        params: { selector: opts.selector || positional[0], timeout: parseInt(opts.timeout || '10000') },
+      };
+    case 'wait-for-text':
+      return {
+        action: 'wait_for_text',
+        params: { text: opts.text || positional[0], timeout: parseInt(opts.timeout || '10000') },
+      };
+    case 'wait-for-nav':
+      return { action: 'wait_for_navigation', params: { timeout: parseInt(opts.timeout || '30000') } };
+
+    // JavaScript
+    case 'eval':
+    case 'js':
+      return { action: 'eval', params: { code: positional.join(' ') || opts.code } };
+
+    // Cookies & Storage
+    case 'get-cookies':
+      return { action: 'get_cookies', params: { url: opts.url } };
+    case 'set-cookie':
+      return { action: 'set_cookie', params: { url: opts.url, name: opts.name, value: opts.value } };
+    case 'delete-cookie':
+      return { action: 'delete_cookie', params: { url: opts.url, name: opts.name } };
+    case 'get-storage':
+      return { action: 'get_local_storage', params: { key: opts.key } };
+    case 'set-storage':
+      return { action: 'set_local_storage', params: { key: opts.key, value: opts.value } };
+
+    // Clipboard
+    case 'copy':
+      return { action: 'copy_to_clipboard', params: { text: opts.text || positional[0] } };
+    case 'paste':
+      return { action: 'read_clipboard', params: {} };
+
+    // Downloads
+    case 'download':
+      return { action: 'download', params: { url: opts.url || positional[0], filename: opts.filename } };
+
+    // Status
+    case 'status':
+      return { action: '__status__', params: {} };
+
+    default:
+      console.error(`Unknown command: ${command}`);
+      printUsage();
+      process.exit(1);
+  }
+}
+
+// --- HTTP POST to bridge ---
+
+function postCommand(body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const options = {
+      hostname: BRIDGE_HOST,
+      port: parseInt(BRIDGE_PORT),
+      path: '/command',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+      },
+      timeout: 65000,
+    };
+
+    const req = http.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error(`Invalid response: ${body}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      if (err.code === 'ECONNREFUSED') {
+        reject(new Error(`Bridge server not running. Start NanoClaw with extension bridge enabled.`));
+      } else {
+        reject(err);
+      }
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+
+    req.write(data);
+    req.end();
+  });
+}
+
+function getStatus() {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: BRIDGE_HOST,
+      port: parseInt(BRIDGE_PORT),
+      path: '/status',
+      method: 'GET',
+      timeout: 5000,
+    };
+
+    const req = http.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => (body += chunk));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error(`Invalid response: ${body}`));
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+    req.end();
+  });
+}
+
+// --- Output formatting ---
+
+function formatOutput(result) {
+  if (!result) return 'No response';
+
+  if (!result.success) {
+    return `Error: ${result.error || 'Unknown error'}`;
+  }
+
+  const data = result.data;
+  if (data === null || data === undefined) return 'OK';
+
+  // Snapshot: format nicely
+  if (data.elements && data.totalElements !== undefined) {
+    let out = `Page: ${data.title}\nURL: ${data.url}\n`;
+    out += `Viewport: ${data.viewport?.width}x${data.viewport?.height}\n`;
+    out += `Scroll: (${data.scrollPosition?.x}, ${data.scrollPosition?.y})\n`;
+    out += `Interactive elements: ${data.totalElements}\n\n`;
+
+    for (const el of data.elements) {
+      let line = `${el.ref} <${el.tag}>`;
+      if (el.role) line += ` [role=${el.role}]`;
+      if (el.type) line += ` [type=${el.type}]`;
+      if (el.name) line += ` [name=${el.name}]`;
+      if (el.id) line += ` [id=${el.id}]`;
+      if (el.ariaLabel) line += ` "${el.ariaLabel}"`;
+      else if (el.text) line += ` "${el.text.substring(0, 80)}"`;
+      if (el.placeholder) line += ` (placeholder: "${el.placeholder}")`;
+      if (el.href) line += ` -> ${el.href}`;
+      if (el.value !== undefined) line += ` [value="${el.value}"]`;
+      if (el.checked !== undefined) line += ` [${el.checked ? 'checked' : 'unchecked'}]`;
+      out += line + '\n';
+    }
+    return out;
+  }
+
+  // Tabs list
+  if (Array.isArray(data) && data[0]?.tabId !== undefined) {
+    return data.map((t) => `[${t.index}] ${t.active ? '* ' : '  '}${t.title} (${t.url})`).join('\n');
+  }
+
+  // Table data
+  if (data.rows) {
+    return data.rows.map((row) => row.join('\t')).join('\n');
+  }
+
+  // Links
+  if (data.links) {
+    return data.links.map((l) => `${l.text} -> ${l.href}`).join('\n');
+  }
+
+  // Forms
+  if (data.forms) {
+    return data.forms
+      .map((f) => {
+        let out = `Form: ${f.action} (${f.method})\n`;
+        out += f.fields
+          .map((field) => `  ${field.tag}[${field.type}] name="${field.name}" ${field.placeholder ? `placeholder="${field.placeholder}"` : ''}`)
+          .join('\n');
+        return out;
+      })
+      .join('\n\n');
+  }
+
+  // Screenshot: show summary instead of base64
+  if (data.dataUrl) {
+    return `Screenshot captured (${data.format}), ${data.dataUrl.length} bytes base64`;
+  }
+
+  // Simple text/value
+  if (data.text !== undefined) return data.text;
+  if (data.value !== undefined) return String(data.value);
+  if (data.url !== undefined && Object.keys(data).length <= 2) return data.url;
+  if (data.title !== undefined && Object.keys(data).length <= 2) return data.title;
+
+  // Generic object
+  return JSON.stringify(data, null, 2);
+}
+
+function printUsage() {
+  console.log(`chrome-browser - Control the user's real Chrome browser
+
+Usage: chrome-browser <command> [options]
+
+Navigation:   navigate, back, forward, reload, new-tab, close-tab, switch-tab, list-tabs
+Snapshot:     snapshot, page-info
+Interaction:  click, double-click, right-click, type, fill, clear, select, check, uncheck
+              hover, focus, blur, press-key, scroll, scroll-to, drag, upload
+Extraction:   get-text, get-html, get-attribute, get-value, get-styles, get-bounds
+              query, query-all, get-table, get-links, get-forms
+Screenshot:   screenshot
+Wait:         wait, wait-for, wait-for-text, wait-for-nav
+JavaScript:   eval
+Cookies:      get-cookies, set-cookie, delete-cookie
+Storage:      get-storage, set-storage
+Clipboard:    copy, paste
+Other:        download, status
+
+Element selectors: --ref @e1, --selector "css", --xpath "//...", --text "visible text", --x/--y coords
+
+Run 'chrome-browser status' to check if the extension is connected.`);
+}
+
+// --- Main ---
+
+async function main() {
+  const { command, opts, positional } = parseArgs(process.argv);
+
+  // Status check
+  if (command === 'status') {
+    try {
+      const status = await getStatus();
+      console.log(status.connected ? 'Chrome extension: Connected' : 'Chrome extension: Disconnected');
+    } catch (err) {
+      console.error(`Bridge server not reachable: ${err.message}`);
+    }
+    return;
+  }
+
+  const req = buildRequest(command, opts, positional);
+
+  try {
+    const result = await postCommand(req);
+    const output = formatOutput(result);
+    console.log(output);
+    if (!result.success) process.exit(1);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+}
+
+main();

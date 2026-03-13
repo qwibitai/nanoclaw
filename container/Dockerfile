@@ -48,6 +48,10 @@ COPY agent-runner/ ./
 # Build TypeScript
 RUN npm run build
 
+# Install chrome-browser CLI (Chrome extension bridge client)
+COPY skills/chrome-browser/chrome-browser /usr/local/bin/chrome-browser
+RUN chmod +x /usr/local/bin/chrome-browser
+
 # Create workspace directories
 RUN mkdir -p /workspace/group /workspace/global /workspace/extra /workspace/ipc/messages /workspace/ipc/tasks /workspace/ipc/input
 

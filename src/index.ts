@@ -53,6 +53,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { startExtensionBridge } from './extension-bridge.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -476,6 +477,11 @@ async function main(): Promise<void> {
     CREDENTIAL_PROXY_PORT,
     PROXY_BIND_HOST,
   );
+
+  // Start Chrome extension bridge server (if enabled)
+  if (process.env.EXTENSION_BRIDGE !== '0') {
+    startExtensionBridge();
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {

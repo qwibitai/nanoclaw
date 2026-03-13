@@ -238,6 +238,15 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
+  // Chrome extension bridge: let containers reach the bridge server
+  const bridgePort = process.env.EXTENSION_BRIDGE_PORT || '3002';
+  args.push(
+    '-e',
+    `CHROME_BRIDGE_HOST=${CONTAINER_HOST_GATEWAY}`,
+    '-e',
+    `CHROME_BRIDGE_PORT=${bridgePort}`,
+  );
+
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
