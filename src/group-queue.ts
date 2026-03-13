@@ -34,6 +34,15 @@ export class GroupQueue {
   private processMessagesFn: ((groupJid: string) => Promise<boolean>) | null =
     null;
   private shuttingDown = false;
+  private idleTimerResetters = new Map<string, () => void>();
+
+  registerIdleTimerResetter(groupJid: string, resetter: () => void): void {
+    this.idleTimerResetters.set(groupJid, resetter);
+  }
+
+  unregisterIdleTimerResetter(groupJid: string): void {
+    this.idleTimerResetters.delete(groupJid);
+  }
 
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
@@ -171,6 +180,7 @@ export class GroupQueue {
       const tempPath = `${filepath}.tmp`;
       fs.writeFileSync(tempPath, JSON.stringify({ type: 'message', text }));
       fs.renameSync(tempPath, filepath);
+      this.idleTimerResetters.get(groupJid)?.();
       return true;
     } catch {
       return false;
