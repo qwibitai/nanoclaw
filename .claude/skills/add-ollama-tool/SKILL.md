@@ -15,7 +15,7 @@ Tools added:
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `ollama` is in `applied_skills`, skip to Phase 3 (Configure). The code changes are already in place.
+Check if `container/agent-runner/src/ollama-mcp-stdio.ts` exists. If it does, skip to Phase 3 (Configure).
 
 ### Check prerequisites
 
@@ -39,32 +39,33 @@ If no models are installed, suggest pulling one:
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure upstream remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-### Apply the skill
+If `upstream` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-ollama-tool
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
-This deterministically:
-- Adds `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
-- Adds `scripts/ollama-watch.sh` (macOS notification watcher)
-- Three-way merges Ollama MCP config into `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
-- Three-way merges `[OLLAMA]` log surfacing into `src/container-runner.ts`
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/container/agent-runner/src/index.ts.intent.md` — what changed and invariants
-- `modify/src/container-runner.ts.intent.md` — what changed and invariants
+```bash
+git fetch upstream skill/ollama-tool
+git merge upstream/skill/ollama-tool
+```
+
+This merges in:
+- `container/agent-runner/src/ollama-mcp-stdio.ts` (Ollama MCP server)
+- `scripts/ollama-watch.sh` (macOS notification watcher)
+- Ollama MCP config in `container/agent-runner/src/index.ts` (allowedTools + mcpServers)
+- `[OLLAMA]` log surfacing in `src/container-runner.ts`
+- `OLLAMA_HOST` in `.env.example`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Copy to per-group agent-runner
 

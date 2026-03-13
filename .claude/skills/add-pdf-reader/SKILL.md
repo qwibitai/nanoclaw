@@ -9,44 +9,48 @@ Adds PDF reading capability to all container agents using poppler-utils (pdftote
 
 ## Phase 1: Pre-flight
 
-### Check if already applied
-
-Read `.nanoclaw/state.yaml`. If `add-pdf-reader` is in `applied_skills`, skip to Phase 3 (Verify).
+1. Check if `container/skills/pdf-reader/pdf-reader` exists — skip to Phase 3 if already applied
+2. Confirm WhatsApp is installed first (`skill/whatsapp` merged). This skill modifies WhatsApp channel files.
 
 ## Phase 2: Apply Code Changes
 
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist:
+### Ensure WhatsApp fork remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-### Apply the skill
+If `whatsapp` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-pdf-reader
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
 ```
 
-This deterministically:
-- Adds `container/skills/pdf-reader/SKILL.md` (agent-facing documentation)
-- Adds `container/skills/pdf-reader/pdf-reader` (CLI script)
-- Three-way merges `poppler-utils` + COPY into `container/Dockerfile`
-- Three-way merges PDF attachment download into `src/channels/whatsapp.ts`
-- Three-way merges PDF tests into `src/channels/whatsapp.test.ts`
-- Records application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If merge conflicts occur, read the intent files:
-- `modify/container/Dockerfile.intent.md`
-- `modify/src/channels/whatsapp.ts.intent.md`
-- `modify/src/channels/whatsapp.test.ts.intent.md`
+```bash
+git fetch whatsapp skill/pdf-reader
+git merge whatsapp/skill/pdf-reader || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This merges in:
+- `container/skills/pdf-reader/SKILL.md` (agent-facing documentation)
+- `container/skills/pdf-reader/pdf-reader` (CLI script)
+- `poppler-utils` in `container/Dockerfile`
+- PDF attachment download in `src/channels/whatsapp.ts`
+- PDF tests in `src/channels/whatsapp.test.ts`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate
 
 ```bash
-npm test
 npm run build
+npx vitest run src/channels/whatsapp.test.ts
 ```
 
 ### Rebuild container

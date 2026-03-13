@@ -12,9 +12,27 @@
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
 </p>
-Using Claude Code, NanoClaw can dynamically rewrite its code to customize its feature set for your needs.
 
-**New:** First AI assistant to support [Agent Swarms](https://code.claude.com/docs/en/agent-teams). Spin up teams of agents that collaborate in your chat.
+---
+
+<h2 align="center">🐳 Now Runs in Docker Sandboxes</h2>
+<p align="center">Every agent gets its own isolated container inside a micro VM.<br>Hypervisor-level isolation. Millisecond startup. No complex setup.</p>
+
+**macOS (Apple Silicon)**
+```bash
+curl -fsSL https://nanoclaw.dev/install-docker-sandboxes.sh | bash
+```
+
+**Windows (WSL)**
+```bash
+curl -fsSL https://nanoclaw.dev/install-docker-sandboxes-windows.sh | bash
+```
+
+> Currently supported on macOS (Apple Silicon) and Windows (x86). Linux support coming soon.
+
+<p align="center"><a href="https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes">Read the announcement →</a>&nbsp; · &nbsp;<a href="docs/docker-sandboxes.md">Manual setup guide →</a></p>
+
+---
 
 ## Why I Built NanoClaw
 
@@ -25,14 +43,24 @@ NanoClaw provides that same core functionality, but in a codebase small enough t
 ## Quick Start
 
 ```bash
-git clone https://github.com/qwibitai/nanoclaw.git
+gh repo fork qwibitai/nanoclaw --clone
 cd nanoclaw
 claude
 ```
 
+<details>
+<summary>Without GitHub CLI</summary>
+
+1. Fork [qwibitai/nanoclaw](https://github.com/qwibitai/nanoclaw) on GitHub (click the Fork button)
+2. `git clone https://github.com/<your-username>/nanoclaw.git`
+3. `cd nanoclaw`
+4. `claude`
+
+</details>
+
 Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup and service configuration.
 
-> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal.
+> **Note:** Commands prefixed with `/` (like `/setup`, `/add-whatsapp`) are [Claude Code skills](https://code.claude.com/docs/en/skills). Type them inside the `claude` CLI prompt, not in your regular terminal. If you don't have Claude Code installed, get it at [claude.com/product/claude-code](https://claude.com/product/claude-code).
 
 ## Philosophy
 
@@ -60,8 +88,8 @@ Then run `/setup`. Claude Code handles everything: dependencies, authentication,
 - **Main channel** - Your private channel (self-chat) for admin control; every group is completely isolated
 - **Scheduled tasks** - Recurring jobs that run Claude and can message you back
 - **Web access** - Search and fetch content from the Web
-- **Container isolation** - Agents are sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
-- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks. NanoClaw is the first personal AI assistant to support agent swarms.
+- **Container isolation** - Agents are sandboxed in [Docker Sandboxes](https://nanoclaw.dev/blog/nanoclaw-docker-sandboxes) (micro VM isolation), Apple Container (macOS), or Docker (macOS/Linux)
+- **Agent Swarms** - Spin up teams of specialized agents that collaborate on complex tasks
 - **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
 
 ## Usage
@@ -98,7 +126,7 @@ The codebase is small enough that Claude can safely modify it.
 
 **Don't add features. Add skills.**
 
-If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NanoClaw installation to use Telegram.
+If you want to add Telegram support, don't create a PR that adds Telegram to the core codebase. Instead, fork NanoClaw, make the code changes on a branch, and open a PR. We'll create a `skill/telegram` branch from your PR that other users can merge into their fork.
 
 Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
