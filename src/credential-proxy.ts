@@ -79,11 +79,20 @@ export function startCredentialProxy(
           }
         }
 
+        // Concatenate upstream URL pathname with request path
+        // e.g., https://host/api/anthropic + /v1/messages
+        //      -> https://host/api/anthropic/v1/messages
+        const upstreamPathname = upstreamUrl.pathname.endsWith('/')
+          ? upstreamUrl.pathname.slice(0, -1)
+          : upstreamUrl.pathname;
+        const requestPath = req.url.startsWith('/') ? req.url : `/${req.url}`;
+        const fullPath = upstreamPathname + requestPath;
+
         const upstream = makeRequest(
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: fullPath,
             method: req.method,
             headers,
           } as RequestOptions,
