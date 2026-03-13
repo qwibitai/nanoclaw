@@ -5,6 +5,7 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  NOSTR_DM_ALLOWLIST,
   POLL_INTERVAL,
   SIGNAL_PHONE_NUMBER,
   TIMEZONE,
@@ -13,6 +14,7 @@ import {
   messageHasTrigger,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { NostrDMChannel } from './channels/nostr-dm.js';
 import { SignalChannel } from './channels/signal.js';
 import { WhiteNoiseChannel } from './channels/whitenoise.js';
 import {
@@ -401,13 +403,17 @@ async function checkNewContactDMs(): Promise<void> {
 
   const allChats = getAllChats();
   for (const chat of allChats) {
-    // Only notify for Signal individual contacts — not WhatsApp history,
+    // Only notify for Signal/Nostr individual contacts — not WhatsApp history,
     // not groups (is_group may be 0/null for old data), not our own number
+    const isSignalContact =
+      chat.channel === 'signal' &&
+      chat.jid.startsWith('signal:') &&
+      !chat.jid.includes('group.') &&
+      chat.jid !== `signal:${SIGNAL_PHONE_NUMBER}`;
+    const isNostrContact =
+      chat.channel === 'nostr' && chat.jid.startsWith('nostr:');
     if (
-      chat.channel !== 'signal' ||
-      !chat.jid.startsWith('signal:') ||
-      chat.jid.includes('group.') ||
-      chat.jid === `signal:${SIGNAL_PHONE_NUMBER}` ||
+      (!isSignalContact && !isNostrContact) ||
       registeredJids.has(chat.jid) ||
       notifiedContacts.has(chat.jid)
     )
@@ -628,6 +634,20 @@ async function main(): Promise<void> {
       logger.warn(
         { err },
         'White Noise channel failed to connect (continuing without it)',
+      );
+    }
+  }
+
+  // Nostr DM channel (optional — only when NOSTR_DM_ALLOWLIST has entries)
+  if (NOSTR_DM_ALLOWLIST.length > 0) {
+    try {
+      const nostrDm = new NostrDMChannel(channelOpts);
+      channels.push(nostrDm);
+      await nostrDm.connect();
+    } catch (err) {
+      logger.warn(
+        { err },
+        'Nostr DM channel failed to connect (continuing without it)',
       );
     }
   }

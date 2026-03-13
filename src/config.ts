@@ -12,6 +12,9 @@ const envConfig = readEnvFile([
   'SIGNAL_PHONE_NUMBER',
   'TRIGGER_WORD',
   'WN_ACCOUNT_PUBKEY',
+  'NOSTR_DM_ALLOWLIST',
+  'NOSTR_DM_RELAYS',
+  'NOSTR_SIGNER_SOCKET',
 ]);
 
 export const ASSISTANT_NAME =
@@ -89,7 +92,16 @@ export function messageHasTrigger(content: string): boolean {
   // Treat a leading U+FFFC as "@TriggerWord" for backwards compatibility.
   const trimmed = content.replace(/^\uFFFC\s*/, `@${TRIGGER_WORD} `).trim();
   if (trimmed.startsWith('[Voice:')) return VOICE_MENTION_PATTERN.test(trimmed);
-  return TRIGGER_PATTERN.test(trimmed);
+  if (TRIGGER_PATTERN.test(trimmed)) return true;
+  // Signal users may @mention the assistant by phone number instead of name
+  // (e.g., "@+15102143647" rather than "@Jorgenclaw"). Match both forms.
+  if (SIGNAL_PHONE_NUMBER && /^@\+?\d/.test(trimmed)) {
+    const digits = SIGNAL_PHONE_NUMBER.replace(/^\+/, '');
+    if (trimmed.startsWith(`@+${digits}`) || trimmed.startsWith(`@${digits}`)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Timezone for scheduled tasks (cron expressions, etc.)
@@ -122,6 +134,26 @@ export const WN_SOCKET_PATH =
   );
 export const WN_ACCOUNT_PUBKEY =
   process.env.WN_ACCOUNT_PUBKEY || envConfig.WN_ACCOUNT_PUBKEY || '';
+
+// Nostr DM channel (NIP-17 private direct messages)
+export const NOSTR_SIGNER_SOCKET =
+  process.env.NOSTR_SIGNER_SOCKET ||
+  envConfig.NOSTR_SIGNER_SOCKET ||
+  `${process.env.XDG_RUNTIME_DIR || '/run/user/1000'}/nostr-signer.sock`;
+export const NOSTR_DM_RELAYS = (
+  process.env.NOSTR_DM_RELAYS ||
+  envConfig.NOSTR_DM_RELAYS ||
+  'wss://relay.damus.io,wss://nos.lol,wss://relay.snort.social'
+)
+  .split(',')
+  .filter(Boolean);
+export const NOSTR_DM_ALLOWLIST = (
+  process.env.NOSTR_DM_ALLOWLIST ||
+  envConfig.NOSTR_DM_ALLOWLIST ||
+  ''
+)
+  .split(',')
+  .filter(Boolean);
 
 // Local Whisper transcription (whisper-cli from whisper.cpp)
 // Set WHISPER_BIN to empty string to disable and fall back to OpenAI only.

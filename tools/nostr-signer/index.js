@@ -14,6 +14,7 @@ import { createServer } from 'net';
 import { existsSync, unlinkSync } from 'fs';
 import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import { decode as decodeNsec } from 'nostr-tools/nip19';
+import { unwrapEvent as nip17Unwrap, wrapManyEvents as nip17WrapMany } from 'nostr-tools/nip17';
 
 // --- Load key from kernel keyring ---
 let secretKeyHex;
@@ -63,6 +64,30 @@ function handleRequest(data) {
 
       const signedEvent = finalizeEvent(eventTemplate, secretKeyHex);
       return JSON.stringify({ event: signedEvent });
+    }
+
+    if (req.method === 'unwrap_gift_wrap') {
+      const p = req.params || {};
+      if (!p.event) return JSON.stringify({ error: 'Missing required field: event' });
+      try {
+        const rumor = nip17Unwrap(p.event, secretKeyHex);
+        return JSON.stringify({ rumor });
+      } catch (err) {
+        return JSON.stringify({ error: `Unwrap failed: ${err.message}` });
+      }
+    }
+
+    if (req.method === 'wrap_dm') {
+      const p = req.params || {};
+      if (!p.recipientPubkey) return JSON.stringify({ error: 'Missing required field: recipientPubkey' });
+      if (p.message === undefined) return JSON.stringify({ error: 'Missing required field: message' });
+      try {
+        const recipients = [{ publicKey: p.recipientPubkey }];
+        const events = nip17WrapMany(secretKeyHex, recipients, p.message, p.conversationTitle, p.replyTo);
+        return JSON.stringify({ events });
+      } catch (err) {
+        return JSON.stringify({ error: `Wrap failed: ${err.message}` });
+      }
     }
 
     return JSON.stringify({ error: `Unknown method: ${req.method}` });
