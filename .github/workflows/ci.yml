@@ -23,3 +23,14 @@ jobs:
 
       - name: Tests
         run: npx vitest run
+
+      - name: Build Docker image
+        run: docker build -t nanoclaw:latest -f container/Dockerfile .
+      
+      - name: Run Trivy vulnerability
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'nanoclaw:latest'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
