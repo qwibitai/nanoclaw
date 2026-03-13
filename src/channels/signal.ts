@@ -152,14 +152,20 @@ export class SignalChannel implements Channel {
 
     if (syncMsg) {
       // syncMessage.sentMessage = message synced from another device (phone).
-      // For "Note to Self", the user types on their phone and it arrives here
-      // as a sync. Only treat it as a bot message if it has the assistant prefix.
+      // signal-cli receives syncs for ALL conversations (groups, DMs, Note to Self).
+      // We only care about Note to Self (destination = own number) and bot echoes.
+      // Skip syncs for other conversations to avoid triggering the agent.
       const sent = syncMsg.sentMessage as Record<string, unknown> | undefined;
       if (!sent) return;
 
       chatPhone = (sent.destinationNumber ??
         sent.destination ??
         source) as string;
+
+      // Only process messages destined for our own number (Note to Self / bot echo)
+      // Skip syncs for group chats and other DMs
+      if (chatPhone !== this.phoneNumber) return;
+
       text = sent.message as string | undefined;
       attachments = (sent.attachments as unknown[]) ?? [];
       isBotMessage =

@@ -22,40 +22,42 @@ function openFile(filePath: string): void {
   }
 }
 
-export async function run(_args: string[]): Promise<void> {
-  console.log('=== NANOCLAW SETUP: SIGNAL_AUTH ===');
-
-  const phoneNumber = process.env.SIGNAL_PHONE_NUMBER || '';
-  if (!phoneNumber) {
-    console.log('SIGNAL_AUTH_OK=false');
-    console.log('STATUS=error');
-    console.log('ERROR=SIGNAL_PHONE_NUMBER not set');
-    console.log('=== END ===');
-    return;
-  }
-
-  // Find signal-cli binary
-  const { SignalCli } = await import('signal-sdk');
-  // We need to access signal-cli directly for the link command.
-  // The SDK's deviceLink spawns signal-cli internally, but pipes stdout
-  // so QR codes don't display in non-TTY terminals.
-  // Instead, we spawn signal-cli ourselves and capture the URI.
-
-  const signalCliBin = path.join(
+function getSignalCliBin(): string {
+  return path.join(
     process.cwd(),
     'node_modules',
     'signal-sdk',
     'bin',
     'signal-cli',
   );
+}
 
-  if (!fs.existsSync(signalCliBin)) {
-    console.log('SIGNAL_AUTH_OK=false');
-    console.log('STATUS=error');
-    console.log('ERROR=signal-cli binary not found');
-    console.log('=== END ===');
-    return;
+function getJavaEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  // Ensure Homebrew Java is available (signal-cli needs Java 25+)
+  const homebrewJava = '/opt/homebrew/opt/openjdk/bin/java';
+  if (fs.existsSync(homebrewJava)) {
+    try {
+      const output = execSync(
+        `${homebrewJava} -XshowSettings:properties -version 2>&1`,
+        { encoding: 'utf-8', timeout: 5000 },
+      );
+      const match = output.match(/java\.home\s*=\s*(.+)/);
+      if (match) {
+        env.JAVA_HOME = match[1].trim();
+        env.PATH = `/opt/homebrew/opt/openjdk/bin:${env.PATH || ''}`;
+      }
+    } catch { /* use system Java */ }
   }
+  return env;
+}
+
+// ---------------------------------------------------------------------------
+// Mode: linked — Link as secondary device via QR code scan
+// ---------------------------------------------------------------------------
+
+async function runLinked(phoneNumber: string): Promise<{ success: boolean; error?: string }> {
+  const signalCliBin = getSignalCliBin();
 
   console.log('Linking as secondary device...');
   console.log('A QR code image will open — scan it with Signal:');
@@ -64,6 +66,7 @@ export async function run(_args: string[]): Promise<void> {
 
   const linkProcess = spawn(signalCliBin, ['link', '--name', 'NanoClaw'], {
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: getJavaEnv(),
   });
 
   let resolved = false;
@@ -81,7 +84,6 @@ export async function run(_args: string[]): Promise<void> {
       linkProcess.stdout.on('data', async (data: Buffer) => {
         const output = data.toString('utf8');
 
-        // Look for the signal linking URI
         const uriMatch = output.match(/sgnl:\/\/[^\s]+/);
         if (uriMatch) {
           const uri = uriMatch[0];
@@ -98,7 +100,6 @@ export async function run(_args: string[]): Promise<void> {
           }
         }
 
-        // Check for successful linking
         if (output.includes('Associated with')) {
           if (!resolved) {
             resolved = true;
@@ -111,7 +112,6 @@ export async function run(_args: string[]): Promise<void> {
       linkProcess.stderr.on('data', (data: Buffer) => {
         const output = data.toString('utf8').trim();
         if (output) {
-          // Log but don't fail on stderr — signal-cli is noisy
           console.error(`[signal-cli] ${output}`);
         }
       });
@@ -133,15 +133,180 @@ export async function run(_args: string[]): Promise<void> {
   // Cleanup QR code file
   try {
     fs.unlinkSync(QR_CODE_PATH);
-  } catch {
-    /* best effort */
+  } catch { /* best effort */ }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Mode: primary — Register as primary device via SMS verification
+// ---------------------------------------------------------------------------
+
+async function runPrimary(phoneNumber: string): Promise<{ success: boolean; error?: string }> {
+  const signalCliBin = getSignalCliBin();
+  const env = getJavaEnv();
+
+  console.log(`Registering ${phoneNumber} as primary device...`);
+  console.log('An SMS verification code will be sent to this number.');
+  console.log('');
+
+  // Step 1: Send registration SMS
+  try {
+    const registerArgs = ['-u', phoneNumber, 'register'];
+    console.log('Sending verification SMS...');
+    execSync(`${JSON.stringify(signalCliBin)} ${registerArgs.join(' ')}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      timeout: 30_000,
+    });
+    console.log('Verification SMS sent.');
+  } catch (err: unknown) {
+    const stderr = (err as { stderr?: Buffer })?.stderr?.toString('utf8') || '';
+
+    // Check if captcha is required
+    if (stderr.includes('captcha') || stderr.includes('CAPTCHA')) {
+      console.log('');
+      console.log('Signal requires a captcha challenge before registration.');
+      console.log('1. Open https://signalcaptchas.org/registration/generate.html in a browser');
+      console.log('2. Complete the captcha');
+      console.log('3. Copy the signalcaptcha:// URI from the page');
+      console.log('');
+      console.log('SIGNAL_AUTH_OK=false');
+      console.log('STATUS=captcha_required');
+      console.log('CAPTCHA_URL=https://signalcaptchas.org/registration/generate.html');
+      return { success: false, error: 'captcha_required' };
+    }
+
+    console.error(`Registration failed: ${stderr}`);
+    return { success: false, error: `register failed: ${stderr.slice(0, 200)}` };
+  }
+
+  // Step 2: Wait for user to provide verification code
+  // The calling skill (add-signal) will prompt the user for the code
+  // and call signal-auth again with --verify <code>
+  console.log('');
+  console.log('SIGNAL_AUTH_OK=pending');
+  console.log('STATUS=awaiting_verification');
+  console.log('NEXT_STEP=Run signal-auth again with --verify <code>');
+  return { success: true };
+}
+
+async function runVerify(
+  phoneNumber: string,
+  code: string,
+  captcha?: string,
+): Promise<{ success: boolean; error?: string }> {
+  const signalCliBin = getSignalCliBin();
+  const env = getJavaEnv();
+
+  // If captcha provided, re-register with captcha first
+  if (captcha) {
+    console.log('Re-registering with captcha token...');
+    try {
+      const registerArgs = ['-u', phoneNumber, 'register', '--captcha', captcha];
+      execSync(`${JSON.stringify(signalCliBin)} ${registerArgs.join(' ')}`, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env,
+        timeout: 30_000,
+      });
+      console.log('Verification SMS sent (with captcha). Enter the code.');
+      console.log('');
+      console.log('SIGNAL_AUTH_OK=pending');
+      console.log('STATUS=awaiting_verification');
+      return { success: true };
+    } catch (err: unknown) {
+      const stderr = (err as { stderr?: Buffer })?.stderr?.toString('utf8') || '';
+      return { success: false, error: `register with captcha failed: ${stderr.slice(0, 200)}` };
+    }
+  }
+
+  // Verify the SMS code
+  console.log(`Verifying code: ${code}...`);
+  try {
+    const verifyArgs = ['-u', phoneNumber, 'verify', code];
+    execSync(`${JSON.stringify(signalCliBin)} ${verifyArgs.join(' ')}`, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+      timeout: 30_000,
+    });
+    console.log('Verification successful — registered as primary device.');
+
+    // Set a profile name so the bot shows up nicely in groups
+    try {
+      const profileName = process.env.ASSISTANT_NAME || 'Andy';
+      execSync(
+        `${JSON.stringify(signalCliBin)} -u ${phoneNumber} updateProfile --given-name ${JSON.stringify(profileName)}`,
+        { stdio: ['ignore', 'pipe', 'pipe'], env, timeout: 15_000 },
+      );
+      console.log(`Profile name set to "${profileName}".`);
+    } catch {
+      console.log('Could not set profile name (non-critical, can be set later).');
+    }
+
+    return { success: true };
+  } catch (err: unknown) {
+    const stderr = (err as { stderr?: Buffer })?.stderr?.toString('utf8') || '';
+    return { success: false, error: `verify failed: ${stderr.slice(0, 200)}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+export async function run(args: string[]): Promise<void> {
+  console.log('=== NANOCLAW SETUP: SIGNAL_AUTH ===');
+
+  const phoneNumber = process.env.SIGNAL_PHONE_NUMBER || '';
+  if (!phoneNumber) {
+    console.log('SIGNAL_AUTH_OK=false');
+    console.log('STATUS=error');
+    console.log('ERROR=SIGNAL_PHONE_NUMBER not set');
+    console.log('=== END ===');
+    return;
+  }
+
+  const signalCliBin = getSignalCliBin();
+  if (!fs.existsSync(signalCliBin)) {
+    console.log('SIGNAL_AUTH_OK=false');
+    console.log('STATUS=error');
+    console.log('ERROR=signal-cli binary not found');
+    console.log('=== END ===');
+    return;
+  }
+
+  // Parse mode from args: --mode linked|primary, --verify <code>, --captcha <token>
+  const modeIdx = args.indexOf('--mode');
+  const mode = modeIdx !== -1 && args[modeIdx + 1] ? args[modeIdx + 1] : 'linked';
+
+  const verifyIdx = args.indexOf('--verify');
+  const verifyCode = verifyIdx !== -1 ? args[verifyIdx + 1] : undefined;
+
+  const captchaIdx = args.indexOf('--captcha');
+  const captchaToken = captchaIdx !== -1 ? args[captchaIdx + 1] : undefined;
+
+  let result: { success: boolean; error?: string };
+
+  if (verifyCode || captchaToken) {
+    // Verify step (for primary registration)
+    result = await runVerify(phoneNumber, verifyCode || '', captchaToken);
+  } else if (mode === 'primary') {
+    result = await runPrimary(phoneNumber);
+  } else {
+    result = await runLinked(phoneNumber);
   }
 
   if (result.success) {
-    console.log('');
-    console.log('SIGNAL_AUTH_OK=true');
-    console.log('STATUS=success');
-  } else {
+    // Don't print success for pending verification
+    if (!verifyCode && mode === 'primary' && !captchaToken) {
+      // Pending — status already printed by runPrimary
+    } else {
+      console.log('');
+      console.log('SIGNAL_AUTH_OK=true');
+      console.log('STATUS=success');
+      console.log(`MODE=${mode}`);
+    }
+  } else if (result.error !== 'captcha_required') {
     console.log('');
     console.log('SIGNAL_AUTH_OK=false');
     console.log('STATUS=error');
