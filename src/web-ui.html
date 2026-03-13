@@ -100,7 +100,7 @@ body {
   align-items: center;
   flex-shrink: 0;
 }
-.filter-search {
+.filter-sel {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -108,11 +108,17 @@ body {
   color: var(--text);
   font-size: 12px;
   font-family: inherit;
-  width: 130px;
-  transition: border-color 0.2s, width 0.2s;
+  max-width: 170px;
+  min-width: 0;
+  transition: border-color 0.2s;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0l5 6 5-6' fill='%235a5650'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 24px;
 }
-.filter-search:focus { border-color: var(--accent); outline: none; width: 160px; }
-.filter-search::placeholder { color: var(--text-3); }
+.filter-sel:focus { border-color: var(--accent); outline: none; }
 .pill {
   padding: 4px 10px;
   border-radius: 20px;
@@ -156,6 +162,7 @@ body {
 }
 .s-item:hover { background: var(--bg-raised); }
 .s-item:active { background: var(--bg-surface); }
+.s-item.active { background: var(--bg-raised); border-left-color: var(--accent); }
 .s-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; animation: pulse 2.5s ease-in-out infinite; }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 .s-info { min-width: 0; }
@@ -309,8 +316,7 @@ body {
   .side { display: none; }
   .hdr { padding: 10px 12px; }
   .filters { padding: 6px 10px; gap: 4px; }
-  .filter-search { width: 100px; font-size: 11px; padding: 4px 10px; }
-  .filter-search:focus { width: 120px; }
+  .filter-sel { max-width: 130px; font-size: 11px; padding: 4px 10px; padding-right: 22px; }
   .pill { font-size: 10px; padding: 3px 8px; }
   .ev-inner { padding: 4px 8px; gap: 4px; }
   .ev-ts { min-width: 42px; font-size: 9px; }
@@ -340,7 +346,7 @@ body {
   <div id="status-dot" class="hdr-dot off"></div>
 </div>
 <div class="filters">
-  <input type="text" class="filter-search" id="filter" placeholder="Group...">
+  <select class="filter-sel" id="filter"><option value="">All sessions</option></select>
   <span class="pill on" data-t="text" onclick="togglePill(this)">text</span>
   <span class="pill on" data-t="tool_use" onclick="togglePill(this)">tools</span>
   <span class="pill on" data-t="thinking" onclick="togglePill(this)">think</span>
@@ -392,13 +398,13 @@ const sessSumEl = $('sess-sum');
 let sessions = {};
 let count = 0;
 let autoScroll = true;
-let filterStr = '';
+let filterKey = ''; // sessionKey to filter by, '' = all
 const MAX = 1500;
 const vis = { text: true, tool_use: true, thinking: true, system: true };
 const params = new URLSearchParams(location.search);
 const token = params.get('token') || '';
 
-filterEl.addEventListener('input', () => { filterStr = filterEl.value.toLowerCase(); applyVis(); });
+filterEl.addEventListener('change', () => { filterKey = filterEl.value; applyVis(); highlightSidebar(); });
 selEl.addEventListener('change', () => { const on = selEl.value !== ''; msgEl.disabled = !on; sendBtn.disabled = !on; });
 msgEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !sendBtn.disabled) doSend(); });
 eventsEl.addEventListener('scroll', () => {
@@ -430,38 +436,64 @@ function chLabel(jid) {
   return '';
 }
 
+function sessionLabel(s) {
+  const ch = chLabel(s.groupJid);
+  return s.group + (ch ? ' \u00b7 ' + ch : '') + (s.threadId ? ' \u00b7 thread' : '');
+}
+
 function renderSessions() {
   const keys = Object.keys(sessions);
   sessSumEl.textContent = keys.length ? keys.length + ' session' + (keys.length > 1 ? 's' : '') : '';
   if (!keys.length) {
     sessionsEl.innerHTML = '<div class="s-empty">Waiting for activity\u2026</div>';
     selEl.innerHTML = '<option value="">No sessions</option>';
+    filterEl.innerHTML = '<option value="">All sessions</option>';
     msgEl.disabled = true; sendBtn.disabled = true;
+    if (filterKey) { filterKey = ''; applyVis(); }
     return;
   }
+  // Sidebar
   sessionsEl.innerHTML = keys.map(k => {
     const s = sessions[k];
     const ch = chLabel(s.groupJid);
     const meta = [ch, s.threadId ? 'thread' : ''].filter(Boolean).join(' \u00b7 ');
-    return `<div class="s-item" onclick="setFilter(${esc(JSON.stringify(s.group))})"><span class="s-dot"></span><div class="s-info"><div class="s-group">${esc(s.group)}</div>${meta ? `<div class="s-meta">${esc(meta)}</div>` : ''}</div></div>`;
+    const active = filterKey === k ? ' active' : '';
+    return `<div class="s-item${active}" data-sk="${esc(k)}" onclick="toggleFilter('${esc(k)}')"><span class="s-dot"></span><div class="s-info"><div class="s-group">${esc(s.group)}</div>${meta ? `<div class="s-meta">${esc(meta)}</div>` : ''}</div></div>`;
   }).join('');
+  // Filter select (top bar)
+  const prevFilter = filterKey;
+  filterEl.innerHTML = '<option value="">All sessions</option>' + keys.map(k => {
+    const s = sessions[k];
+    return `<option value="${esc(k)}">${esc(sessionLabel(s))}</option>`;
+  }).join('');
+  if (prevFilter && filterEl.querySelector(`option[value="${prevFilter}"]`)) filterEl.value = prevFilter;
+  // Intervene select (bottom bar)
   const prev = selEl.value;
   selEl.innerHTML = '<option value="">Session\u2026</option>' + keys.map(k => {
     const s = sessions[k];
-    const ch = chLabel(s.groupJid);
-    const lbl = s.group + (ch ? ' \u00b7 ' + ch : '') + (s.threadId ? ' \u00b7 thread' : '');
-    return `<option value="${esc(k)}" data-jid="${esc(s.groupJid)}" data-tid="${esc(s.threadId||'')}">${esc(lbl)}</option>`;
+    return `<option value="${esc(k)}" data-jid="${esc(s.groupJid)}" data-tid="${esc(s.threadId||'')}">${esc(sessionLabel(s))}</option>`;
   }).join('');
   if (prev && selEl.querySelector(`option[value="${prev}"]`)) selEl.value = prev;
 }
 
-function setFilter(g) { filterEl.value = g; filterStr = g.toLowerCase(); applyVis(); }
+function toggleFilter(sk) {
+  filterKey = filterKey === sk ? '' : sk;
+  filterEl.value = filterKey;
+  applyVis();
+  highlightSidebar();
+}
+
+function highlightSidebar() {
+  sessionsEl.querySelectorAll('.s-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sk === filterKey);
+  });
+}
 
 function applyVis() {
   eventsEl.querySelectorAll('.ev').forEach(el => {
-    const g = (el.dataset.g || '').toLowerCase();
+    const sk = el.dataset.sk || '';
     const t = el.dataset.t || '';
-    el.style.display = (!filterStr || g.includes(filterStr)) && vis[t] ? '' : 'none';
+    el.style.display = (!filterKey || sk === filterKey) && vis[t] ? '' : 'none';
   });
 }
 
@@ -471,6 +503,7 @@ function addEvent(msg) {
   const el = document.createElement('div');
   el.className = 'ev';
   el.dataset.g = msg.group;
+  el.dataset.sk = msg.sessionKey;
   el.dataset.t = ev.eventType;
 
   let body = '';
@@ -493,8 +526,7 @@ function addEvent(msg) {
       (long ? `<span class="ev-x" onclick="this.previousElementSibling.classList.toggle('open');this.textContent=this.textContent==='+'?'\u2212':'+'">+</span>` : '') +
     `</div>`;
 
-  const g = (msg.group || '').toLowerCase();
-  if ((filterStr && !g.includes(filterStr)) || !vis[ev.eventType]) el.style.display = 'none';
+  if ((filterKey && msg.sessionKey !== filterKey) || !vis[ev.eventType]) el.style.display = 'none';
 
   eventsEl.appendChild(el);
   count++;
