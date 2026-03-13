@@ -28,7 +28,7 @@ jobs:
         run: docker build -t nanoclaw:latest -f container/Dockerfile .
       
       - name: Run Trivy vulnerability
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@v0.69.3
         with:
           image-ref: 'nanoclaw:latest'
           format: 'table'
