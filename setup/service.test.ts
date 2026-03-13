@@ -13,7 +13,7 @@ import path from 'path';
 
 /**
  * Generates a plist string the same way service.ts does:
- * - Uses bash wrapper (cd + exec) instead of WorkingDirectory
+ * - Uses named wrapper script (~/.local/bin/nanoclaw) instead of /bin/bash
  * - Logs to local filesystem (~/.local/share/nanoclaw/logs/) not project dir
  * - Supports extra env vars (JAVA_HOME, etc.)
  * - KeepAlive=false, ThrottleInterval=5
@@ -48,6 +48,7 @@ function generatePlist(
     .join('\n');
 
   const logDir = path.join(homeDir, '.local', 'share', 'nanoclaw', 'logs');
+  const wrapperPath = path.join(homeDir, '.local', 'bin', 'nanoclaw');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -57,9 +58,7 @@ function generatePlist(
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>cd ${projectRoot} &amp;&amp; exec ${nodePath} dist/index.js</string>
+        <string>${wrapperPath}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -132,14 +131,14 @@ describe('plist generation', () => {
     expect(plist).toContain('<string>com.nanoclaw</string>');
   });
 
-  it('uses bash wrapper instead of WorkingDirectory', () => {
+  it('uses named wrapper script instead of /bin/bash', () => {
     const plist = generatePlist(
       '/opt/homebrew/bin/node',
       '/Volumes/external/nanoclaw',
       '/Users/user',
     );
-    expect(plist).toContain('<string>/bin/bash</string>');
-    expect(plist).toContain('cd /Volumes/external/nanoclaw &amp;&amp; exec /opt/homebrew/bin/node dist/index.js');
+    expect(plist).toContain('/Users/user/.local/bin/nanoclaw');
+    expect(plist).not.toContain('<string>/bin/bash</string>');
     expect(plist).not.toContain('<key>WorkingDirectory</key>');
   });
 

@@ -173,15 +173,29 @@ function setupLaunchd(
     .filter(Boolean)
     .join('\n');
 
-  // Use bash wrapper to avoid launchd issues on external/network volumes:
+  // Use a named wrapper script to avoid launchd issues on external/network volumes:
   //   1. WorkingDirectory fails silently with EX_CONFIG (exit 78)
   //   2. StandardOutPath/StandardErrorPath fail — launchd opens them before
   //      the process starts and can't access external volumes at that point
   //   3. Shell redirects (>>) from within the bash command also fail for the
   //      same volume-access reason
   // Solution: log to a local tmpdir, then symlink project logs/ to it.
+  // Bonus: a named script at ~/.local/bin/nanoclaw shows "nanoclaw" in
+  //        System Settings > Login Items instead of "bash".
   const logDir = path.join(homeDir, '.local', 'share', 'nanoclaw', 'logs');
   fs.mkdirSync(logDir, { recursive: true });
+
+  // Create named wrapper script so macOS shows "nanoclaw" in System Settings
+  const wrapperDir = path.join(homeDir, '.local', 'bin');
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  const wrapperPath = path.join(wrapperDir, 'nanoclaw');
+  const wrapperScript = [
+    '#!/bin/bash',
+    `cd ${JSON.stringify(projectRoot)} && exec ${JSON.stringify(nodePath)} dist/index.js`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(wrapperPath, wrapperScript, { mode: 0o755 });
+  logger.info({ wrapperPath }, 'Wrote nanoclaw launcher script');
 
   // Symlink project logs/ → local log dir so `tail -f logs/nanoclaw.log` works
   const projectLogDir = path.join(projectRoot, 'logs');
@@ -221,9 +235,7 @@ function setupLaunchd(
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>-c</string>
-        <string>cd ${projectRoot} &amp;&amp; exec ${nodePath} dist/index.js</string>
+        <string>${wrapperPath}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
