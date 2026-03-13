@@ -110,6 +110,15 @@ Always specify `--profile <name>` to pick the right database. If unsure, check `
 
 You have access to Google Drive, Sheets, Slides, and Docs via MCP tools prefixed with `mcp__google-workspace__`.
 
+All tools that accept `user_google_email` must use one of these exact addresses:
+- `david.kim6@gmail.com` (primary personal)
+- `dave.kim917@gmail.com` (personal 2)
+- `david.kim@getsunday.com` (Sunday)
+- `dave@illysium.ai` (Illysium)
+- `dave@numberdrinks.com` (Number Drinks)
+
+Pick the account that matches your group. If unsure, check which credential files exist at `~/.google_workspace_mcp/credentials/`.
+
 Common operations:
 - *Drive*: Search files, list contents, download, upload, share
 - *Sheets*: Read/write cell ranges, create spreadsheets, append rows
