@@ -3,6 +3,8 @@ import path from 'path';
 
 import { SignalCli } from 'signal-sdk';
 
+import os from 'os';
+
 import { ASSISTANT_NAME, STORE_DIR } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
@@ -199,8 +201,19 @@ export class SignalChannel implements Channel {
 
     // Handle voice/audio transcription
     if (audioAttachment) {
-      const localPath = audioAttachment.localPath as string | undefined;
+      // signal-cli stores downloaded attachments at ~/.local/share/signal-cli/attachments/<id>
+      // The SDK event provides id/filename but not the full local path, so we resolve it.
+      const attId = audioAttachment.id as string | undefined;
+      const signalAttachDir = path.join(os.homedir(), '.local', 'share', 'signal-cli', 'attachments');
+      const localPath = attId && fs.existsSync(path.join(signalAttachDir, attId))
+        ? path.join(signalAttachDir, attId)
+        : (audioAttachment.localPath as string | undefined);
+
       if (!localPath) {
+        logger.warn(
+          { attId, keys: Object.keys(audioAttachment) },
+          'Signal: audio attachment has no resolvable local path',
+        );
         finalContent = '[Voice Message - transcription unavailable]';
       } else {
         try {

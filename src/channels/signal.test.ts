@@ -493,7 +493,46 @@ describe('SignalChannel', () => {
       return channel;
     }
 
-    it('transcribes audio attachment using localPath', async () => {
+    it('transcribes audio attachment by resolving id to signal-cli attachments dir', async () => {
+      const opts = createTestOpts();
+      await connectChannel(opts);
+
+      emitMessage({
+        envelope: {
+          source: '+447700900001',
+          sourceNumber: '+447700900001',
+          sourceName: 'Alice',
+          timestamp: Date.now(),
+          dataMessage: {
+            attachments: [
+              {
+                id: 'abc123.m4a',
+                filename: 'voice.m4a',
+                contentType: 'audio/aac',
+              },
+            ],
+          },
+        },
+      });
+      await flushAsync();
+
+      // fs.existsSync is mocked to true, so id-based path resolves
+      expect(transcribeAudioFile).toHaveBeenCalledWith(
+        expect.stringContaining('signal-cli/attachments/abc123.m4a'),
+      );
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'signal:+447700900001',
+        expect.objectContaining({
+          content: '[Voice: Hello from voice]',
+        }),
+      );
+    });
+
+    it('falls back to localPath when id-based path does not exist', async () => {
+      // Override existsSync to return false for attachment dir lookup
+      const fsMod = await import('fs');
+      const existsSpy = vi.spyOn(fsMod.default, 'existsSync').mockReturnValue(false);
+
       const opts = createTestOpts();
       await connectChannel(opts);
 
@@ -510,7 +549,6 @@ describe('SignalChannel', () => {
                 filename: 'voice.ogg',
                 contentType: 'audio/ogg; codecs=opus',
                 localPath: '/tmp/signal-attachments/voice.ogg',
-                voiceNote: true,
               },
             ],
           },
@@ -521,12 +559,8 @@ describe('SignalChannel', () => {
       expect(transcribeAudioFile).toHaveBeenCalledWith(
         '/tmp/signal-attachments/voice.ogg',
       );
-      expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
-        expect.objectContaining({
-          content: '[Voice: Hello from voice]',
-        }),
-      );
+
+      existsSpy.mockRestore();
     });
 
     it('falls back gracefully when audio localPath is missing', async () => {
@@ -542,10 +576,9 @@ describe('SignalChannel', () => {
           dataMessage: {
             attachments: [
               {
-                id: 'att-2',
                 filename: 'voice.ogg',
                 contentType: 'audio/ogg',
-                // no localPath
+                // no id and no localPath — cannot resolve file
               },
             ],
           },

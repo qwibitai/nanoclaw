@@ -7,7 +7,7 @@ dist/
 # Local data & auth
 store/
 data/
-logs/
+logs
 .env
 
 
