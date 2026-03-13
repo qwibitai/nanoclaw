@@ -278,6 +278,20 @@ export function getMessagesSince(
   return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+export function countMessagesSince(
+  chatJid: string,
+  sinceTimestamp: string,
+  botPrefix: string,
+): number {
+  const sql = `
+    SELECT COUNT(*) as cnt FROM messages
+    WHERE chat_jid = ? AND timestamp > ?
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+  `;
+  return (db.prepare(sql).get(chatJid, sinceTimestamp, `${botPrefix}:%`) as { cnt: number }).cnt;
+}
+
 export function getAllMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
@@ -307,25 +321,23 @@ export function getAllMessagesSince(
     ORDER BY timestamp, id
     LIMIT ?
   `;
+  const initialStmt = db.prepare(initialSql);
+  const pageStmt = db.prepare(pageSql);
   const all: NewMessage[] = [];
   let cursorTs = sinceTimestamp;
   let cursorId: string | null = null;
   while (true) {
     const batch: NewMessage[] =
       cursorId === null
-        ? (db
-            .prepare(initialSql)
-            .all(chatJid, cursorTs, `${botPrefix}:%`, batchSize) as NewMessage[])
-        : (db
-            .prepare(pageSql)
-            .all(
-              chatJid,
-              cursorTs,
-              cursorTs,
-              cursorId,
-              `${botPrefix}:%`,
-              batchSize,
-            ) as NewMessage[]);
+        ? (initialStmt.all(chatJid, cursorTs, `${botPrefix}:%`, batchSize) as NewMessage[])
+        : (pageStmt.all(
+            chatJid,
+            cursorTs,
+            cursorTs,
+            cursorId,
+            `${botPrefix}:%`,
+            batchSize,
+          ) as NewMessage[]);
     if (batch.length === 0) break;
     all.push(...batch);
     const last = batch[batch.length - 1];

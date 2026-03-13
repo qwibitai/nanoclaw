@@ -31,12 +31,14 @@ export function formatMessagesWithCap(
   messages: NewMessage[],
   timezone: string,
   maxMessages: number = 200,
+  totalCount?: number,
 ): string {
-  if (messages.length <= maxMessages) {
-    return formatMessages(messages, timezone);
+  const kept = messages.length > maxMessages ? messages.slice(-maxMessages) : messages;
+  const effectiveTotal = totalCount ?? messages.length;
+  const omitted = effectiveTotal - kept.length;
+  if (omitted <= 0) {
+    return formatMessages(kept, timezone);
   }
-  const omitted = messages.length - maxMessages;
-  const kept = messages.slice(-maxMessages);
   return `<note>${omitted} older messages omitted for context window</note>\n${formatMessages(kept, timezone)}`;
 }
 

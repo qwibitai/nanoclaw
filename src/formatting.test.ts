@@ -288,4 +288,27 @@ describe("formatMessagesWithCap", () => {
     const result = formatMessagesWithCap(msgs, TZ, 10);
     expect(result).not.toContain("<note>");
   });
+
+  it("adds omission note when totalCount > messages.length (pre-capped)", () => {
+    const msgs = makeMsgs(5);
+    // 5 messages passed but totalCount says 15 existed — 10 were omitted before reaching us
+    const result = formatMessagesWithCap(msgs, TZ, 200, 15);
+    expect(result).toContain("<note>10 older messages omitted for context window</note>");
+    // All 5 passed messages should be included (they're already under maxMessages)
+    expect(result).toContain("msg 0");
+    expect(result).toContain("msg 4");
+  });
+
+  it("no note when totalCount equals messages.length", () => {
+    const msgs = makeMsgs(5);
+    const result = formatMessagesWithCap(msgs, TZ, 10, 5);
+    expect(result).not.toContain("<note>");
+  });
+
+  it("backward-compatible: existing behavior unchanged without totalCount", () => {
+    const msgs = makeMsgs(5);
+    const withoutParam = formatMessagesWithCap(msgs, TZ, 10);
+    const withUndefined = formatMessagesWithCap(msgs, TZ, 10, undefined);
+    expect(withoutParam).toBe(withUndefined);
+  });
 });

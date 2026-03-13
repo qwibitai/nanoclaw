@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 
 import {
   _initTestDatabase,
+  countMessagesSince,
   createTask,
   deleteTask,
   getAllChats,
@@ -510,6 +511,89 @@ describe("getAllMessagesSince", () => {
     for (const r of rows) {
       expect(ids).toContain(r.id);
     }
+  });
+});
+
+// --- countMessagesSince ---
+
+describe("countMessagesSince", () => {
+  beforeEach(() => {
+    storeChatMetadata("group@g.us", "2024-01-01T00:00:00.000Z");
+
+    store({
+      id: "c1",
+      chat_jid: "group@g.us",
+      sender: "Alice@s.whatsapp.net",
+      sender_name: "Alice",
+      content: "first",
+      timestamp: "2024-01-01T00:00:01.000Z",
+    });
+    store({
+      id: "c2",
+      chat_jid: "group@g.us",
+      sender: "Bob@s.whatsapp.net",
+      sender_name: "Bob",
+      content: "second",
+      timestamp: "2024-01-01T00:00:02.000Z",
+    });
+    storeMessage({
+      id: "c3",
+      chat_jid: "group@g.us",
+      sender: "Bot@s.whatsapp.net",
+      sender_name: "Bot",
+      content: "bot reply",
+      timestamp: "2024-01-01T00:00:03.000Z",
+      is_bot_message: true,
+    });
+    store({
+      id: "c4",
+      chat_jid: "group@g.us",
+      sender: "Carol@s.whatsapp.net",
+      sender_name: "Carol",
+      content: "third",
+      timestamp: "2024-01-01T00:00:04.000Z",
+    });
+  });
+
+  it("counts non-bot messages since timestamp", () => {
+    const count = countMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy");
+    // 3 user messages (bot message excluded)
+    expect(count).toBe(3);
+  });
+
+  it("returns 0 for no messages after timestamp", () => {
+    const count = countMessagesSince("group@g.us", "2024-01-01T01:00:00.000Z", "Andy");
+    expect(count).toBe(0);
+  });
+
+  it("excludes bot-prefix messages and empty content", () => {
+    // Add a pre-migration bot message (has prefix but is_bot_message = 0)
+    store({
+      id: "c5",
+      chat_jid: "group@g.us",
+      sender: "Bot@s.whatsapp.net",
+      sender_name: "Bot",
+      content: "Andy: old bot reply",
+      timestamp: "2024-01-01T00:00:05.000Z",
+    });
+    // Add an empty content message
+    store({
+      id: "c6",
+      chat_jid: "group@g.us",
+      sender: "Eve@s.whatsapp.net",
+      sender_name: "Eve",
+      content: "",
+      timestamp: "2024-01-01T00:00:06.000Z",
+    });
+    const count = countMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy");
+    // Still 3 — bot-prefix and empty messages excluded
+    expect(count).toBe(3);
+  });
+
+  it("matches getMessagesSince filter behavior", () => {
+    const count = countMessagesSince("group@g.us", "2024-01-01T00:00:01.000Z", "Andy");
+    const msgs = getMessagesSince("group@g.us", "2024-01-01T00:00:01.000Z", "Andy");
+    expect(count).toBe(msgs.length);
   });
 });
 
