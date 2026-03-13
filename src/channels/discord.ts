@@ -28,10 +28,49 @@ import {
 } from '../config.js';
 import { downloadAttachment } from '../attachment-downloader.js';
 import { getThreadOrigin, setThreadOrigin } from '../db.js';
-import { readEnvFile } from '../env.js';
+import { getAnthropicApiKey, readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Attachment, Channel } from '../types.js';
+
+/**
+ * Ask Haiku to generate a short, descriptive thread title from the user's message.
+ * Returns a trimmed string of ≤100 chars (Discord's thread name limit), or 'Thread'
+ * on any failure.
+ */
+async function generateThreadName(userMessage: string): Promise<string> {
+  const apiKey = getAnthropicApiKey();
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 20,
+        messages: [
+          {
+            role: 'user',
+            content: `Generate a concise 2–5 word title that captures the topic of this message. Reply with only the title — no quotes, no punctuation, no explanation.\n\nMessage: ${userMessage.slice(0, 500)}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = (await resp.json()) as {
+      content: Array<{ type: string; text?: string }>;
+    };
+    const name = data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
+    return name.slice(0, 100) || 'Thread';
+  } catch (err) {
+    logger.debug({ err }, 'Failed to generate thread name');
+    return 'Thread';
+  }
+}
 
 export class DiscordChannel implements Channel {
   name = 'discord';
@@ -514,14 +553,11 @@ export class DiscordChannel implements Channel {
       const originalMessage =
         await textChannel.messages.fetch(originalMessageId);
 
-      // Generate thread name from the user's message (first ~40 chars)
-      const name =
-        threadName ||
-        originalMessage.content
-          .replace(/@\w+\s*/g, '')
-          .trim()
-          .slice(0, 40) ||
-        'Thread';
+      // Strip mentions once; reuse for both the initial thread name and AI rename
+      const strippedContent = threadName
+        ? ''
+        : originalMessage.content.replace(/@\w+\s*/g, '').trim();
+      const name = threadName || strippedContent.slice(0, 40) || 'Thread';
 
       const thread = await originalMessage.startThread({
         name,
@@ -531,6 +567,17 @@ export class DiscordChannel implements Channel {
       text = await this.replaceMentions(text, textChannel);
       const components = this.buildPrButtons(text);
       await this.sendChunked(thread, text, components);
+
+      // Fire-and-forget: rename with an AI-generated topic title
+      if (strippedContent) {
+        void generateThreadName(strippedContent).then((aiName) => {
+          if (aiName && aiName !== 'Thread') {
+            thread.setName(aiName).catch((err) => {
+              logger.warn({ err }, 'Failed to rename Discord thread');
+            });
+          }
+        });
+      }
 
       logger.info(
         { parentChannelId, threadId: thread.id, threadName: name },
