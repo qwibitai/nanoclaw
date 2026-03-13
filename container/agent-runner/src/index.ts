@@ -510,21 +510,38 @@ const CALENDAR_READ_TOOLS = [
 ] as const;
 
 // Read-only Google Workspace tools — scoped groups get these instead of mcp__google-workspace__*
-// Excluded write tools: create/update/delete for drive files, spreadsheets, documents, presentations
+// Excluded write tools: batch_update_doc, batch_update_presentation, copy_drive_file,
+// create_*, delete_*, export_doc_to_pdf, find_and_replace_doc, format_sheet_range,
+// import_to_google_doc, insert_*, manage_*, modify_*, set_drive_file_permissions,
+// update_*, manage_drive_access, manage_*_comment, create_table_with_data
 const GOOGLE_WORKSPACE_READ_TOOLS = [
+  // Drive
   'mcp__google-workspace__search_drive_files',
-  'mcp__google-workspace__get_drive_file_info',
-  'mcp__google-workspace__list_drive_files',
-  'mcp__google-workspace__download_drive_file',
+  'mcp__google-workspace__list_drive_items',
+  'mcp__google-workspace__get_drive_file_content',
+  'mcp__google-workspace__get_drive_file_download_url',
+  'mcp__google-workspace__get_drive_file_permissions',
+  'mcp__google-workspace__get_drive_shareable_link',
+  'mcp__google-workspace__check_drive_file_public_access',
+  // Sheets
   'mcp__google-workspace__get_spreadsheet_info',
-  'mcp__google-workspace__read_spreadsheet_range',
+  'mcp__google-workspace__read_sheet_values',
   'mcp__google-workspace__list_spreadsheets',
-  'mcp__google-workspace__get_document',
-  'mcp__google-workspace__list_documents',
-  'mcp__google-workspace__read_document_content',
+  'mcp__google-workspace__list_spreadsheet_comments',
+  // Docs
+  'mcp__google-workspace__get_doc_content',
+  'mcp__google-workspace__get_doc_as_markdown',
+  'mcp__google-workspace__inspect_doc_structure',
+  'mcp__google-workspace__list_docs_in_folder',
+  'mcp__google-workspace__list_document_comments',
+  'mcp__google-workspace__search_docs',
+  // Slides
   'mcp__google-workspace__get_presentation',
-  'mcp__google-workspace__list_presentations',
-  'mcp__google-workspace__get_slide_content',
+  'mcp__google-workspace__get_page',
+  'mcp__google-workspace__get_page_thumbnail',
+  'mcp__google-workspace__list_presentation_comments',
+  // Auth (always needed)
+  'mcp__google-workspace__start_google_auth',
 ] as const;
 
 function buildAllowedTools(tools: string[] | undefined): string[] {
