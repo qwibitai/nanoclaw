@@ -84,7 +84,7 @@ function createTestOpts(overrides?: Partial<ChannelOpts>): ChannelOpts {
     onMessage: vi.fn(),
     onChatMetadata: vi.fn(),
     registeredGroups: vi.fn(() => ({
-      'signal:+447700900001': {
+      'signal:+447700900000': {
         name: 'Test Chat',
         folder: 'test-chat',
         trigger: '@Andy',
@@ -107,14 +107,16 @@ async function flushAsync() {
 
 describe('SignalChannel', () => {
   beforeEach(() => {
-    process.env.SIGNAL_PHONE_NUMBER = '+447700900000';
+    process.env.SIGNAL_BOT_PHONE = '+447700900000';
+    process.env.SIGNAL_USER_PHONE = '+447700900001';
     fakeSignalCli = createFakeSignalCli();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
-    delete process.env.SIGNAL_PHONE_NUMBER;
+    delete process.env.SIGNAL_BOT_PHONE;
+    delete process.env.SIGNAL_USER_PHONE;
   });
 
   // --- Channel properties ---
@@ -204,7 +206,10 @@ describe('SignalChannel', () => {
       return channel;
     }
 
-    it('processes a dataMessage and calls onMessage with correct fields', async () => {
+    it('processes a dataMessage and calls onMessage with bot JID as chatJid', async () => {
+      // In primary device mode, DMs set chatPhone = this.phoneNumber (the bot's number).
+      // The registered group JID is signal:+447700900000 (bot's number).
+      // The sender field still reflects who sent the message (+447700900001).
       const opts = createTestOpts();
       await connectChannel(opts);
 
@@ -224,9 +229,9 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
-          chat_jid: 'signal:+447700900001',
+          chat_jid: 'signal:+447700900000',
           sender: 'signal:+447700900001',
           sender_name: 'Alice',
           content: 'Hello Andy',
@@ -237,6 +242,8 @@ describe('SignalChannel', () => {
     });
 
     it('calls onChatMetadata for all messages including unregistered chats', async () => {
+      // Even for unregistered senders, onChatMetadata is called with the bot JID
+      // (chatPhone = this.phoneNumber in primary device mode).
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({})),
       });
@@ -258,7 +265,7 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onChatMetadata).toHaveBeenCalledWith(
-        'signal:+447700999999',
+        'signal:+447700900000',
         expect.any(String),
         'Unknown',
         'signal',
@@ -303,7 +310,8 @@ describe('SignalChannel', () => {
       });
       await connectChannel(opts);
 
-      // Bot reply synced back — destination is own number (Note to Self)
+      // Bot reply synced back — destination is own number (Note to Self).
+      // chatPhone = destinationNumber = +447700900000 = this.phoneNumber → passes filter.
       emitMessage({
         envelope: {
           source: '+447700900000',
@@ -377,7 +385,7 @@ describe('SignalChannel', () => {
       const opts = createTestOpts();
       await connectChannel(opts);
 
-      // User sends a message in a DM with someone else — should be ignored
+      // User sends a message to someone else — destination != phoneNumber, filtered out.
       emitMessage({
         envelope: {
           source: '+447700900000',
@@ -487,6 +495,7 @@ describe('SignalChannel', () => {
     });
 
     it('falls back to sourceNumber for sender_name when sourceName is absent', async () => {
+      // dataMessage → chatJid = signal:+447700900000 (bot JID, primary device mode)
       const opts = createTestOpts();
       await connectChannel(opts);
 
@@ -504,14 +513,15 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           sender_name: '+447700900001',
         }),
       );
     });
 
-    it('detects bot message by ASSISTANT_NAME prefix in dataMessage from own number', async () => {
+    it('detects bot message by ASSISTANT_NAME prefix in dataMessage', async () => {
+      // dataMessage → chatJid = signal:+447700900000 (bot JID, primary device mode)
       const opts = createTestOpts();
       await connectChannel(opts);
 
@@ -530,7 +540,7 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           is_bot_message: true,
         }),
@@ -548,6 +558,7 @@ describe('SignalChannel', () => {
     }
 
     it('transcribes audio attachment by resolving id to signal-cli attachments dir', async () => {
+      // dataMessage → chatJid = signal:+447700900000 (bot JID, primary device mode)
       const opts = createTestOpts();
       await connectChannel(opts);
 
@@ -575,7 +586,7 @@ describe('SignalChannel', () => {
         expect.stringContaining('signal-cli/attachments/abc123.m4a'),
       );
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           content: '[Voice: Hello from voice]',
         }),
@@ -585,7 +596,9 @@ describe('SignalChannel', () => {
     it('falls back to localPath when id-based path does not exist', async () => {
       // Override existsSync to return false for attachment dir lookup
       const fsMod = await import('fs');
-      const existsSpy = vi.spyOn(fsMod.default, 'existsSync').mockReturnValue(false);
+      const existsSpy = vi
+        .spyOn(fsMod.default, 'existsSync')
+        .mockReturnValue(false);
 
       const opts = createTestOpts();
       await connectChannel(opts);
@@ -642,7 +655,7 @@ describe('SignalChannel', () => {
 
       expect(transcribeAudioFile).not.toHaveBeenCalled();
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           content: '[Voice Message - transcription unavailable]',
         }),
@@ -676,7 +689,7 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           content: '[Voice Message - transcription unavailable]',
         }),
@@ -712,7 +725,7 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           content: '[Voice Message - transcription failed]',
         }),
@@ -723,6 +736,36 @@ describe('SignalChannel', () => {
   // --- sendMessage ---
 
   describe('sendMessage', () => {
+    it('redirects to ownerPhone when sending to the bot JID (signal:+447700900000)', async () => {
+      // The registered group JID is signal:+447700900000 (bot's own number).
+      // sendMessage() detects rawPhone === this.phoneNumber and routes to ownerPhone instead.
+      const opts = createTestOpts();
+      const channel = new SignalChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('signal:+447700900000', 'Hello world');
+
+      expect(fakeSignalCli.sendMessage).toHaveBeenCalledWith(
+        '+447700900001',
+        'Andy: Hello world',
+      );
+    });
+
+    it('sends directly to phone when JID does not match bot number', async () => {
+      // Sending to signal:+447700900001 — rawPhone (+447700900001) != phoneNumber (+447700900000),
+      // so no owner-phone redirect; sends directly.
+      const opts = createTestOpts();
+      const channel = new SignalChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('signal:+447700900001', 'Direct message');
+
+      expect(fakeSignalCli.sendMessage).toHaveBeenCalledWith(
+        '+447700900001',
+        'Andy: Direct message',
+      );
+    });
+
     it('strips signal: prefix and prepends assistant name before sending', async () => {
       const opts = createTestOpts();
       const channel = new SignalChannel(opts);
@@ -756,13 +799,15 @@ describe('SignalChannel', () => {
       expect(fakeSignalCli.sendMessage).not.toHaveBeenCalled();
     });
 
-    it('flushes queued messages on connect', async () => {
+    it('flushes queued messages on connect, redirecting bot-JID sends to ownerPhone', async () => {
+      // Messages queued for signal:+447700900000 (bot JID) are redirected to +447700900001
+      // (ownerPhone) when flushed after connect.
       const opts = createTestOpts();
       const channel = new SignalChannel(opts);
 
-      // Queue messages while disconnected
-      await channel.sendMessage('signal:+447700900001', 'First');
-      await channel.sendMessage('signal:+447700900001', 'Second');
+      // Queue messages while disconnected — using bot JID triggers owner-phone redirect
+      await channel.sendMessage('signal:+447700900000', 'First');
+      await channel.sendMessage('signal:+447700900000', 'Second');
 
       expect(fakeSignalCli.sendMessage).not.toHaveBeenCalled();
 
@@ -784,11 +829,12 @@ describe('SignalChannel', () => {
     });
 
     it('handles jid without signal: prefix gracefully', async () => {
+      // Raw phone number without prefix — jidToPhone returns it unchanged.
+      // +447700900001 != phoneNumber (+447700900000), so sends directly.
       const opts = createTestOpts();
       const channel = new SignalChannel(opts);
       await channel.connect();
 
-      // Should not throw, strips nothing and sends as-is recipient
       await channel.sendMessage('+447700900001', 'No prefix');
 
       expect(fakeSignalCli.sendMessage).toHaveBeenCalledWith(

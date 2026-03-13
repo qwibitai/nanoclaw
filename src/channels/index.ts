@@ -12,4 +12,8 @@ import './signal.js';
 
 // telegram
 
+// signal
+import './signal.js';
+
 // whatsapp
+import './whatsapp.js';

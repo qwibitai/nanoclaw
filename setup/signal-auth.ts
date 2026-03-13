@@ -257,11 +257,12 @@ async function runVerify(
 export async function run(args: string[]): Promise<void> {
   console.log('=== NANOCLAW SETUP: SIGNAL_AUTH ===');
 
-  const phoneNumber = process.env.SIGNAL_PHONE_NUMBER || '';
+  const phoneNumber =
+    process.env.SIGNAL_BOT_PHONE || process.env.SIGNAL_PHONE_NUMBER || '';
   if (!phoneNumber) {
     console.log('SIGNAL_AUTH_OK=false');
     console.log('STATUS=error');
-    console.log('ERROR=SIGNAL_PHONE_NUMBER not set');
+    console.log('ERROR=SIGNAL_BOT_PHONE not set');
     console.log('=== END ===');
     return;
   }
