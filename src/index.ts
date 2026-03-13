@@ -60,6 +60,7 @@ import {
 import { startSchedulerLoop } from "./task-scheduler.js";
 import { isAuthError } from "./auth-circuit-breaker.js";
 import { shouldSend, recordSent } from "./message-dedup.js";
+import { createTanrenClient, readTanrenConfig } from "./tanren/index.js";
 import { Channel, NewMessage, RegisteredGroup } from "./types.js";
 import { logger } from "./logger.js";
 
@@ -299,6 +300,8 @@ async function runAgent(
       }
     : undefined;
 
+  const tanrenConfig = isMain ? readTanrenConfig() : undefined;
+
   try {
     const output = await runContainerAgent(
       group,
@@ -309,6 +312,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        tanren: tanrenConfig ?? undefined,
       },
       (proc, containerName) => queue.registerProcess(chatJid, proc, containerName, group.folder),
       wrappedOnOutput,
@@ -451,6 +455,26 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info("Database initialized");
   loadState();
+
+  const tanrenClient = createTanrenClient();
+  if (tanrenClient) {
+    tanrenClient
+      .health()
+      .then((health) => {
+        logger.info(
+          { version: health.version, uptime: health.uptime_seconds },
+          "Tanren API connected",
+        );
+      })
+      .catch((err) => {
+        logger.warn(
+          { err },
+          "Tanren API health check failed — tanren integration continues (API may recover)",
+        );
+      });
+  } else {
+    logger.debug("Tanren API not configured (TANREN_API_URL / TANREN_API_KEY missing)");
+  }
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);

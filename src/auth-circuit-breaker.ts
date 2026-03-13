@@ -77,9 +77,3 @@ export function checkCircuit(): { allowed: boolean; reason?: string } {
     reason: `Auth circuit breaker open: ${consecutiveFailures} consecutive failures. Resets in ${Math.ceil((RESET_TIMEOUT_MS - elapsed) / 60000)} minutes.`,
   };
 }
-
-export function resetCircuit(): void {
-  consecutiveFailures = 0;
-  circuitOpenSince = null;
-  logger.info("Auth circuit breaker manually reset");
-}

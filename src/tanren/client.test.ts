@@ -9,11 +9,14 @@ vi.mock("../config.js", () => ({
 }));
 
 vi.mock("../env.js", () => ({
-  readEnvFile: vi.fn(() => ({ TANREN_API_KEY: "test-api-key" })),
+  readEnvFile: vi.fn(() => ({
+    TANREN_API_KEY: "test-api-key",
+    TANREN_API_URL: "http://tanren.test:8000",
+  })),
 }));
 
 import { readEnvFile } from "../env.js";
-import { TanrenClient, createTanrenClient } from "./client.js";
+import { TanrenClient, createTanrenClient, readTanrenConfig } from "./client.js";
 import {
   TanrenAPIError,
   TanrenAuthError,
@@ -478,9 +481,67 @@ describe("TanrenClient — URL encoding", () => {
   });
 });
 
+describe("readTanrenConfig", () => {
+  beforeEach(() => {
+    vi.mocked(readEnvFile).mockReturnValue({
+      TANREN_API_KEY: "test-api-key",
+      TANREN_API_URL: "http://tanren.test:8000",
+    });
+  });
+
+  it("returns config when both URL and key are set", () => {
+    const result = readTanrenConfig();
+    expect(result).toEqual({ apiUrl: "http://tanren.test:8000", apiKey: "test-api-key" });
+  });
+
+  it("returns null when key is missing from env file and process.env", () => {
+    vi.mocked(readEnvFile).mockReturnValue({});
+    const saved = process.env.TANREN_API_KEY;
+    delete process.env.TANREN_API_KEY;
+    try {
+      const result = readTanrenConfig();
+      expect(result).toBeNull();
+    } finally {
+      if (saved) process.env.TANREN_API_KEY = saved;
+    }
+  });
+
+  it("falls back to process.env.TANREN_API_KEY", () => {
+    vi.mocked(readEnvFile).mockReturnValue({ TANREN_API_URL: "http://tanren.test:8000" });
+    const saved = process.env.TANREN_API_KEY;
+    process.env.TANREN_API_KEY = "env-key";
+    try {
+      const result = readTanrenConfig();
+      expect(result).toEqual({ apiUrl: "http://tanren.test:8000", apiKey: "env-key" });
+    } finally {
+      if (saved) {
+        process.env.TANREN_API_KEY = saved;
+      } else {
+        delete process.env.TANREN_API_KEY;
+      }
+    }
+  });
+
+  it("reads TANREN_API_URL from .env when config constant is empty", async () => {
+    // Re-import with empty config constant
+    vi.doMock("../config.js", () => ({ TANREN_API_URL: "" }));
+    vi.mocked(readEnvFile).mockReturnValue({
+      TANREN_API_URL: "http://from-env-file:8000",
+      TANREN_API_KEY: "env-file-key",
+    });
+    const { readTanrenConfig: readConfig } = await import("./client.js");
+    const result = readConfig();
+    expect(result).toEqual({ apiUrl: "http://from-env-file:8000", apiKey: "env-file-key" });
+    vi.doUnmock("../config.js");
+  });
+});
+
 describe("createTanrenClient — factory", () => {
   beforeEach(() => {
-    vi.mocked(readEnvFile).mockReturnValue({ TANREN_API_KEY: "test-api-key" });
+    vi.mocked(readEnvFile).mockReturnValue({
+      TANREN_API_KEY: "test-api-key",
+      TANREN_API_URL: "http://tanren.test:8000",
+    });
   });
 
   it("creates client from config and env", () => {

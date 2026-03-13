@@ -1,4 +1,4 @@
-export { TanrenClient, createTanrenClient } from "./client.js";
+export { TanrenClient, createTanrenClient, readTanrenConfig } from "./client.js";
 export type { TanrenClientOptions } from "./client.js";
 
 export {

@@ -7,6 +7,7 @@
     "typecheck": {},
     "lint": {},
     "format:check": {},
-    "test": {}
+    "test": {},
+    "knip": {}
   }
 }

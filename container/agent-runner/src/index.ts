@@ -27,6 +27,7 @@ interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  tanren?: { apiUrl: string; apiKey: string };
 }
 
 interface ContainerOutput {
@@ -354,6 +355,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
+  tanrenMcpPath?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
   stream.push(prompt);
@@ -417,42 +419,64 @@ async function runQuery(
       systemPrompt: globalClaudeMd
         ? { type: "preset" as const, preset: "claude_code" as const, append: globalClaudeMd }
         : undefined,
-      allowedTools: [
-        "Bash",
-        "Read",
-        "Write",
-        "Edit",
-        "Glob",
-        "Grep",
-        "WebSearch",
-        "WebFetch",
-        "Task",
-        "TaskOutput",
-        "TaskStop",
-        "TeamCreate",
-        "TeamDelete",
-        "SendMessage",
-        "TodoWrite",
-        "ToolSearch",
-        "Skill",
-        "NotebookEdit",
-        "mcp__nanoclaw__*",
-      ],
+      allowedTools: (() => {
+        const tools = [
+          "Bash",
+          "Read",
+          "Write",
+          "Edit",
+          "Glob",
+          "Grep",
+          "WebSearch",
+          "WebFetch",
+          "Task",
+          "TaskOutput",
+          "TaskStop",
+          "TeamCreate",
+          "TeamDelete",
+          "SendMessage",
+          "TodoWrite",
+          "ToolSearch",
+          "Skill",
+          "NotebookEdit",
+          "mcp__nanoclaw__*",
+        ];
+        if (containerInput.isMain && containerInput.tanren) {
+          tools.push("mcp__tanren__*");
+        }
+        return tools;
+      })(),
       env: sdkEnv,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
       settingSources: ["project", "user"],
-      mcpServers: {
-        nanoclaw: {
-          command: "node",
-          args: [mcpServerPath],
-          env: {
-            NANOCLAW_CHAT_JID: containerInput.chatJid,
-            NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-            NANOCLAW_IS_MAIN: containerInput.isMain ? "1" : "0",
+      mcpServers: (() => {
+        const servers: Record<
+          string,
+          { command: string; args: string[]; env: Record<string, string> }
+        > = {
+          nanoclaw: {
+            command: "node",
+            args: [mcpServerPath],
+            env: {
+              NANOCLAW_CHAT_JID: containerInput.chatJid,
+              NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+              NANOCLAW_IS_MAIN: containerInput.isMain ? "1" : "0",
+            },
           },
-        },
-      },
+        };
+        if (containerInput.isMain && containerInput.tanren && tanrenMcpPath) {
+          servers.tanren = {
+            command: "node",
+            args: [tanrenMcpPath],
+            env: {
+              TANREN_API_URL: containerInput.tanren.apiUrl,
+              TANREN_API_KEY: containerInput.tanren.apiKey,
+            },
+          };
+        }
+        return servers;
+      })(),
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
@@ -530,6 +554,11 @@ async function main(): Promise<void> {
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const mcpServerPath = path.join(__dirname, "ipc-mcp-stdio.js");
+  const tanrenMcpCandidate = path.join(__dirname, "tanren-mcp-stdio.js");
+  const tanrenMcpPath = fs.existsSync(tanrenMcpCandidate) ? tanrenMcpCandidate : undefined;
+  if (containerInput.isMain && containerInput.tanren && !tanrenMcpPath) {
+    log("tanren-mcp-stdio.js not found — skipping tanren MCP server");
+  }
 
   let sessionId = containerInput.sessionId;
   fs.mkdirSync(IPC_INPUT_DIR, { recursive: true });
@@ -565,6 +594,7 @@ async function main(): Promise<void> {
         containerInput,
         sdkEnv,
         resumeAt,
+        tanrenMcpPath,
       );
       if (queryResult.newSessionId) {
         sessionId = queryResult.newSessionId;
