@@ -4,12 +4,19 @@ import path from 'path';
 import { SignalCli } from 'signal-sdk';
 
 import { ASSISTANT_NAME, STORE_DIR } from '../config.js';
+import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { transcribeAudioFile } from '../transcription.js';
 import { Channel, NewMessage } from '../types.js';
 import { ChannelOpts, registerChannel } from './registry.js';
 
 const SIGNAL_PREFIX = 'signal:';
+
+function getSignalPhoneNumber(): string {
+  if (process.env.SIGNAL_PHONE_NUMBER) return process.env.SIGNAL_PHONE_NUMBER;
+  const env = readEnvFile(['SIGNAL_PHONE_NUMBER']);
+  return env.SIGNAL_PHONE_NUMBER || '';
+}
 
 /**
  * Strips the `signal:` prefix from a JID to get the raw phone number.
@@ -38,18 +45,21 @@ export class SignalChannel implements Channel {
 
   constructor(opts: ChannelOpts) {
     this.opts = opts;
-    this.phoneNumber = process.env.SIGNAL_PHONE_NUMBER ?? '';
+    this.phoneNumber = getSignalPhoneNumber();
   }
 
   async connect(): Promise<void> {
-    const dataDir = path.join(STORE_DIR, 'signal');
-    fs.mkdirSync(dataDir, { recursive: true });
-    this.signal = new SignalCli(dataDir, this.phoneNumber);
+    this.signal = new SignalCli(this.phoneNumber);
 
     this.signal.on('message', (params: unknown) => {
+      logger.debug({ params: JSON.stringify(params).slice(0, 200) }, 'Signal: raw event received');
       this.handleMessage(params).catch((err) =>
         logger.error({ err }, 'Signal: unhandled error in message handler'),
       );
+    });
+
+    this.signal.on('error', (err: Error) => {
+      logger.error({ err: err.message }, 'Signal: SDK error');
     });
 
     await this.signal.connect();
@@ -139,7 +149,9 @@ export class SignalChannel implements Channel {
     let isBotMessage = false;
 
     if (syncMsg) {
-      // syncMessage.sentMessage = message the bot sent (outbound sync from another device)
+      // syncMessage.sentMessage = message synced from another device (phone).
+      // For "Note to Self", the user types on their phone and it arrives here
+      // as a sync. Only treat it as a bot message if it has the assistant prefix.
       const sent = syncMsg.sentMessage as Record<string, unknown> | undefined;
       if (!sent) return;
 
@@ -148,8 +160,9 @@ export class SignalChannel implements Channel {
         source) as string;
       text = sent.message as string | undefined;
       attachments = (sent.attachments as unknown[]) ?? [];
-      isFromMe = true;
-      isBotMessage = true;
+      isBotMessage =
+        typeof text === 'string' && text.startsWith(`${ASSISTANT_NAME}:`);
+      isFromMe = !isBotMessage;
     } else if (dataMsg) {
       chatPhone = source;
       text = dataMsg.message as string | undefined;
@@ -247,8 +260,7 @@ export class SignalChannel implements Channel {
 // ---------------------------------------------------------------------------
 
 registerChannel('signal', (opts: ChannelOpts) => {
-  const configDir = path.join(STORE_DIR, 'signal');
-  if (!fs.existsSync(configDir) || !process.env.SIGNAL_PHONE_NUMBER) {
+  if (!getSignalPhoneNumber()) {
     logger.warn('Signal: not configured. Run /add-signal to set up.');
     return null;
   }

@@ -25,6 +25,10 @@ vi.mock('../transcription.js', () => ({
   transcribeAudioFile: vi.fn().mockResolvedValue('Hello from voice'),
 }));
 
+vi.mock('../env.js', () => ({
+  readEnvFile: vi.fn(() => ({})),
+}));
+
 vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
@@ -160,10 +164,7 @@ describe('SignalChannel', () => {
 
       await channel.connect();
 
-      expect(SignalCliSpy).toHaveBeenCalledWith(
-        '/tmp/nanoclaw-test-store/signal',
-        '+447700900000',
-      );
+      expect(SignalCliSpy).toHaveBeenCalledWith('+447700900000');
       expect(fakeSignalCli.connect).toHaveBeenCalled();
       expect(channel.isConnected()).toBe(true);
     });
@@ -289,7 +290,7 @@ describe('SignalChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('detects syncMessage.sentMessage as bot message (Note to Self)', async () => {
+    it('detects syncMessage with assistant prefix as bot message', async () => {
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({
           'signal:+447700900001': {
@@ -323,9 +324,50 @@ describe('SignalChannel', () => {
       expect(opts.onMessage).toHaveBeenCalledWith(
         'signal:+447700900001',
         expect.objectContaining({
-          is_from_me: true,
+          is_from_me: false,
           is_bot_message: true,
           content: 'Andy: Hello from bot',
+        }),
+      );
+    });
+
+    it('treats syncMessage without assistant prefix as user message (Note to Self)', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'signal:+447700900000': {
+            name: 'Test',
+            folder: 'test',
+            trigger: '@Andy',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      await connectChannel(opts);
+
+      emitMessage({
+        envelope: {
+          source: '+447700900000',
+          sourceNumber: '+447700900000',
+          sourceName: 'Greg',
+          timestamp: Date.now(),
+          syncMessage: {
+            sentMessage: {
+              destination: '+447700900000',
+              destinationNumber: '+447700900000',
+              message: 'Hello from my phone',
+              attachments: [],
+            },
+          },
+        },
+      });
+      await flushAsync();
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'signal:+447700900000',
+        expect.objectContaining({
+          is_from_me: true,
+          is_bot_message: false,
+          content: 'Hello from my phone',
         }),
       );
     });

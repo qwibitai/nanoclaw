@@ -68,6 +68,71 @@ export async function run(_args: string[]): Promise<void> {
   }
 }
 
+/**
+ * Detect extra PATH directories and environment variables needed by channels.
+ * Channels write their requirements to store/service-env.json during setup.
+ * This function also auto-detects common requirements (Homebrew, Java).
+ */
+function detectServiceEnv(projectRoot: string): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  // Auto-detect Homebrew (macOS) — many channel dependencies install here
+  // /opt/homebrew/bin = Apple Silicon, /usr/local/bin = Intel (already in basePath)
+  if (fs.existsSync('/opt/homebrew/bin')) {
+    env.__EXTRA_PATH_DIRS = '/opt/homebrew/bin';
+  }
+
+  // Auto-detect Java (needed by signal-cli, possibly others)
+  // Prefer Homebrew Java over system Java — Homebrew is typically newer
+  const javaCandidates = [
+    '/opt/homebrew/opt/openjdk/bin/java',   // macOS Apple Silicon Homebrew
+    '/usr/local/opt/openjdk/bin/java',      // macOS Intel Homebrew
+    'java',                                  // System PATH fallback
+  ];
+  for (const javaCmd of javaCandidates) {
+    try {
+      if (javaCmd !== 'java' && !fs.existsSync(javaCmd)) continue;
+      const javaOutput = execSync(
+        `${javaCmd} -XshowSettings:properties -version 2>&1`,
+        { encoding: 'utf-8', timeout: 5000 },
+      );
+      const match = javaOutput.match(/java\.home\s*=\s*(.+)/);
+      if (match) {
+        env.JAVA_HOME = match[1].trim();
+        const javaBin = path.dirname(javaCmd === 'java' ? path.join(env.JAVA_HOME, 'bin', 'java') : javaCmd);
+        env.__EXTRA_PATH_DIRS = env.__EXTRA_PATH_DIRS
+          ? `${env.__EXTRA_PATH_DIRS}:${javaBin}`
+          : javaBin;
+        logger.info({ JAVA_HOME: env.JAVA_HOME, javaBin }, 'Detected Java');
+        break;
+      }
+    } catch {
+      // Try next candidate
+    }
+  }
+
+  // Read channel-declared env vars (channels write these during their setup)
+  const envFile = path.join(projectRoot, 'store', 'service-env.json');
+  if (fs.existsSync(envFile)) {
+    try {
+      const channelEnv = JSON.parse(
+        fs.readFileSync(envFile, 'utf-8'),
+      ) as Record<string, string>;
+      for (const [k, v] of Object.entries(channelEnv)) {
+        if (typeof v === 'string') env[k] = v;
+      }
+      logger.info(
+        { keys: Object.keys(channelEnv) },
+        'Loaded channel service env vars',
+      );
+    } catch (err) {
+      logger.warn({ err }, 'Failed to parse store/service-env.json');
+    }
+  }
+
+  return env;
+}
+
 function setupLaunchd(
   projectRoot: string,
   nodePath: string,
@@ -81,6 +146,73 @@ function setupLaunchd(
   );
   fs.mkdirSync(path.dirname(plistPath), { recursive: true });
 
+  const serviceEnv = detectServiceEnv(projectRoot);
+
+  // Build PATH: detected extras + standard dirs
+  const extraPaths = serviceEnv.__EXTRA_PATH_DIRS || '';
+  delete serviceEnv.__EXTRA_PATH_DIRS;
+  const basePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`;
+  const fullPath = extraPaths ? `${extraPaths}:${basePath}` : basePath;
+
+  // Build extra env var XML entries
+  const extraEnvXml = Object.entries(serviceEnv)
+    .filter(([k]) => k !== 'PATH' && k !== 'HOME')
+    .map(
+      ([k, v]) =>
+        `        <key>${k}</key>\n        <string>${v}</string>`,
+    )
+    .join('\n');
+
+  const envBlock = [
+    `        <key>PATH</key>`,
+    `        <string>${fullPath}</string>`,
+    extraEnvXml,
+    `        <key>HOME</key>`,
+    `        <string>${homeDir}</string>`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  // Use bash wrapper to avoid launchd issues on external/network volumes:
+  //   1. WorkingDirectory fails silently with EX_CONFIG (exit 78)
+  //   2. StandardOutPath/StandardErrorPath fail — launchd opens them before
+  //      the process starts and can't access external volumes at that point
+  //   3. Shell redirects (>>) from within the bash command also fail for the
+  //      same volume-access reason
+  // Solution: log to a local tmpdir, then symlink project logs/ to it.
+  const logDir = path.join(homeDir, '.local', 'share', 'nanoclaw', 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+
+  // Symlink project logs/ → local log dir so `tail -f logs/nanoclaw.log` works
+  const projectLogDir = path.join(projectRoot, 'logs');
+  try {
+    const existing = fs.lstatSync(projectLogDir);
+    if (existing.isSymbolicLink()) {
+      // Already a symlink — update if target changed
+      if (fs.readlinkSync(projectLogDir) !== logDir) {
+        fs.unlinkSync(projectLogDir);
+        fs.symlinkSync(logDir, projectLogDir);
+      }
+    } else if (existing.isDirectory()) {
+      // Move existing log files to new location, replace dir with symlink
+      const files = fs.readdirSync(projectLogDir);
+      for (const f of files) {
+        const src = path.join(projectLogDir, f);
+        const dst = path.join(logDir, f);
+        try {
+          if (!fs.existsSync(dst)) fs.renameSync(src, dst);
+          else fs.unlinkSync(src);
+        } catch { /* best effort */ }
+      }
+      fs.rmSync(projectLogDir, { recursive: true, force: true });
+      fs.symlinkSync(logDir, projectLogDir);
+    }
+  } catch {
+    // logs/ doesn't exist yet — create symlink
+    fs.symlinkSync(logDir, projectLogDir);
+  }
+  logger.info({ logDir, symlink: projectLogDir }, 'Log directory configured');
+
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -89,26 +221,24 @@ function setupLaunchd(
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
-        <string>${projectRoot}/dist/index.js</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd ${projectRoot} &amp;&amp; exec ${nodePath} dist/index.js</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>${projectRoot}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
-        <key>HOME</key>
-        <string>${homeDir}</string>
+${envBlock}
     </dict>
     <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
+    <string>${logDir}/nanoclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
+    <string>${logDir}/nanoclaw.error.log</string>
 </dict>
 </plist>`;
 
@@ -233,6 +363,19 @@ function setupSystemd(
     systemctlPrefix = 'systemctl --user';
   }
 
+  const serviceEnv = detectServiceEnv(projectRoot);
+  const extraPaths = serviceEnv.__EXTRA_PATH_DIRS || '';
+  delete serviceEnv.__EXTRA_PATH_DIRS;
+  const basePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`;
+  const fullPath = extraPaths ? `${extraPaths}:${basePath}` : basePath;
+
+  const envLines = [`Environment=HOME=${homeDir}`, `Environment=PATH=${fullPath}`];
+  for (const [k, v] of Object.entries(serviceEnv)) {
+    if (k !== 'PATH' && k !== 'HOME') {
+      envLines.push(`Environment=${k}=${v}`);
+    }
+  }
+
   const unit = `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
@@ -243,8 +386,7 @@ ExecStart=${nodePath} ${projectRoot}/dist/index.js
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
-Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+${envLines.join('\n')}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
