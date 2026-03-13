@@ -290,12 +290,12 @@ describe('SignalChannel', () => {
       expect(opts.onMessage).not.toHaveBeenCalled();
     });
 
-    it('detects syncMessage with assistant prefix as bot message', async () => {
+    it('detects syncMessage with assistant prefix as bot message (Note to Self echo)', async () => {
       const opts = createTestOpts({
         registeredGroups: vi.fn(() => ({
-          'signal:+447700900001': {
-            name: 'Test',
-            folder: 'test',
+          'signal:+447700900000': {
+            name: 'Note to Self',
+            folder: 'signal_main',
             trigger: '@Andy',
             added_at: '2024-01-01T00:00:00.000Z',
           },
@@ -303,6 +303,7 @@ describe('SignalChannel', () => {
       });
       await connectChannel(opts);
 
+      // Bot reply synced back — destination is own number (Note to Self)
       emitMessage({
         envelope: {
           source: '+447700900000',
@@ -311,8 +312,8 @@ describe('SignalChannel', () => {
           timestamp: Date.now(),
           syncMessage: {
             sentMessage: {
-              destination: '+447700900001',
-              destinationNumber: '+447700900001',
+              destination: '+447700900000',
+              destinationNumber: '+447700900000',
               message: 'Andy: Hello from bot',
               attachments: [],
             },
@@ -322,7 +323,7 @@ describe('SignalChannel', () => {
       await flushAsync();
 
       expect(opts.onMessage).toHaveBeenCalledWith(
-        'signal:+447700900001',
+        'signal:+447700900000',
         expect.objectContaining({
           is_from_me: false,
           is_bot_message: true,
@@ -370,6 +371,59 @@ describe('SignalChannel', () => {
           content: 'Hello from my phone',
         }),
       );
+    });
+
+    it('ignores syncMessages for other conversations (not Note to Self)', async () => {
+      const opts = createTestOpts();
+      await connectChannel(opts);
+
+      // User sends a message in a DM with someone else — should be ignored
+      emitMessage({
+        envelope: {
+          source: '+447700900000',
+          sourceNumber: '+447700900000',
+          sourceName: 'Me',
+          timestamp: Date.now(),
+          syncMessage: {
+            sentMessage: {
+              destinationNumber: '+447700900999',
+              destination: '+447700900999',
+              message: 'Hey friend!',
+              attachments: [],
+            },
+          },
+        },
+      });
+      await flushAsync();
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onChatMetadata).not.toHaveBeenCalled();
+    });
+
+    it('ignores syncMessages for group conversations', async () => {
+      const opts = createTestOpts();
+      await connectChannel(opts);
+
+      // User sends a message in a Signal group — should be ignored
+      emitMessage({
+        envelope: {
+          source: '+447700900000',
+          sourceNumber: '+447700900000',
+          sourceName: 'Me',
+          timestamp: Date.now(),
+          syncMessage: {
+            sentMessage: {
+              destination: 'mK9qL+pQrStUv/w==',
+              message: 'Hello group!',
+              attachments: [],
+            },
+          },
+        },
+      });
+      await flushAsync();
+
+      expect(opts.onMessage).not.toHaveBeenCalled();
+      expect(opts.onChatMetadata).not.toHaveBeenCalled();
     });
 
     it('ignores messages with no text and no audio attachments', async () => {
