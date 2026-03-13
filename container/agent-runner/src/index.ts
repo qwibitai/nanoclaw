@@ -446,7 +446,8 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__supabase__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -462,6 +463,12 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.SUPABASE_ACCESS_TOKEN ? {
+          supabase: {
+            command: 'mcp-server-supabase',
+            args: ['--read-only', '--access-token', process.env.SUPABASE_ACCESS_TOKEN],
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
