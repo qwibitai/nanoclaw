@@ -42,7 +42,9 @@ export class SignalChannel implements Channel {
   }
 
   async connect(): Promise<void> {
-    this.signal = new SignalCli(this.phoneNumber);
+    const dataDir = path.join(STORE_DIR, 'signal');
+    fs.mkdirSync(dataDir, { recursive: true });
+    this.signal = new SignalCli(dataDir, this.phoneNumber);
 
     this.signal.on('message', (params: unknown) => {
       this.handleMessage(params).catch((err) =>
@@ -210,7 +212,7 @@ export class SignalChannel implements Channel {
     const message: NewMessage = {
       id,
       chat_jid: chatJid,
-      sender: chatPhone,
+      sender: phoneToJid(source),
       sender_name: sourceName,
       content: finalContent,
       timestamp,

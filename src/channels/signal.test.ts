@@ -160,7 +160,10 @@ describe('SignalChannel', () => {
 
       await channel.connect();
 
-      expect(SignalCliSpy).toHaveBeenCalledWith('+447700900000');
+      expect(SignalCliSpy).toHaveBeenCalledWith(
+        '/tmp/nanoclaw-test-store/signal',
+        '+447700900000',
+      );
       expect(fakeSignalCli.connect).toHaveBeenCalled();
       expect(channel.isConnected()).toBe(true);
     });
@@ -223,7 +226,7 @@ describe('SignalChannel', () => {
         'signal:+447700900001',
         expect.objectContaining({
           chat_jid: 'signal:+447700900001',
-          sender: '+447700900001',
+          sender: 'signal:+447700900001',
           sender_name: 'Alice',
           content: 'Hello Andy',
           is_from_me: false,
