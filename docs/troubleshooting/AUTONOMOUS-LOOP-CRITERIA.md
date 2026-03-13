@@ -81,6 +81,8 @@ For each autonomous handler, document:
 
 ## Usage
 
+### Trigger 1: CI Failure
+
 When CI fails or workflow requires intervention:
 
 1. **Diagnose** the failure type
@@ -89,3 +91,36 @@ When CI fails or workflow requires intervention:
 4. **Implement** → Add handler to relevant skill
 5. **Test** → Verify it works
 6. **Document** → Add to scorecard
+
+### Trigger 2: Session Recall (Proactive)
+
+During session introspection (end of session), evaluate workflow friction:
+
+1. **Identify** friction points from the session
+2. **Score** each friction using the matrix
+3. **Flag** any with score ≥15 as automation candidates
+4. **Log** to `docs/troubleshooting/AUTONOMOUS-LOOP-CANDIDATES.md` for tracking
+5. **Review** candidates in next session or weekly review
+
+**Why session recall?**
+- Fresh context - session friction is still in memory
+- Quantifiable - count frequency from session alone
+- Cumulative - multiple sessions with same issue = higher frequency score
+- Creates continuous improvement loop
+
+## Candidate Log
+
+Store automation candidates discovered during session recall:
+
+```markdown
+### [Friction Description]
+
+**Session**: [date/session-ref]
+**Trigger**: Session recall
+**Score**: [total]
+**Proposed Handler**: [what the autonomous fix would do]
+
+- [ ] Reviewed
+- [ ] Implemented
+- [ ] Rejected (reason: )
+```

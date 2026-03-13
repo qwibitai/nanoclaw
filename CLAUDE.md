@@ -37,6 +37,7 @@ NanoClaw baseline is the default. Jarvis docs apply only when working on the `ja
 ```text
 AT SESSION START → run bash scripts/workflow/session-start.sh --agent <claude|codex>
 AT SESSION START, session handoff, or when changing recall/sync/export behavior → read docs/workflow/runtime/session-recall.md
+DURING SESSION RECALL at end of session → evaluate friction points against docs/troubleshooting/AUTONOMOUS-LOOP-CRITERIA.md and log candidates scoring ≥15
 AT TASK START after routing/preflight → state the selected route briefly (intent + first workflow/skill + MCP if relevant)
 BEFORE using the collaboration sweep, changing sweep protocol, or updating agent-category affinity → read docs/workflow/control-plane/session-work-sweep.md
 WHEN session start is blocked by required Linear review or triage actions from the sweep → read docs/workflow/control-plane/session-work-sweep.md
