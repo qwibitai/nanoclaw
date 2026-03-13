@@ -43,14 +43,17 @@ export class DiscordChannel implements Channel {
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
   // ── Discord thread state maps ──────────────────────────────────
   //
-  // lastUserMessageId: TRANSIENT. Tracks the user message to create a
-  //   thread from on first reply. Lives seconds between message receipt
-  //   and first response. Lost on restart = harmless (no thread created,
-  //   response goes to channel instead).
+  // pendingTopLevelMsgIds: TRANSIENT. FIFO queue of top-level message IDs
+  //   per parent channel JID, awaiting thread creation on first reply.
+  //   Using a queue (not last-in-wins) prevents a fast second message from
+  //   overwriting the first — each response pops the correct trigger ID.
+  //   Lost on restart = harmless (no thread created, response goes to channel).
   //
-  // createdThreadJid: TRANSIENT. Redirects subsequent sends for a parent
-  //   JID to the thread during a single container run. Not needed after
-  //   restart — thread replies arrive with thread JIDs directly.
+  // createdThreadJid: TRANSIENT. Redirects subsequent sends for a
+  //   conversation to the thread. Keyed by "parentJid:triggerMsgId" so
+  //   concurrent conversations on the same channel each get their own thread.
+  //   Falls back to plain "parentJid" key when no triggerMessageId is provided
+  //   (e.g. session command responses).
   //
   // threadOriginMessage: PERSISTED (SQLite-backed with in-memory cache).
   //   Maps threadChannelId → originalMsgId so thread replies resolve to
@@ -58,7 +61,7 @@ export class DiscordChannel implements Channel {
   //   continuity across restarts — without it, Discord thread replies
   //   after restart create orphaned sessions.
   // ─────────────────────────────────────────────────────────────────
-  private lastUserMessageId = new Map<string, string>();
+  private pendingTopLevelMsgIds = new Map<string, string[]>();
   private createdThreadJid = new Map<string, string>();
   private threadOriginMessage = new Map<string, string>();
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -260,11 +263,13 @@ export class DiscordChannel implements Channel {
         return;
       }
 
-      // Track user message ID for thread creation (top-level messages only)
+      // Queue message ID for thread creation (top-level messages only).
+      // Using a FIFO queue prevents a rapid second message from overwriting
+      // the first: each response will pop the correct trigger message ID.
       if (!isInThread) {
-        this.lastUserMessageId.set(parentJid, msgId);
-        // Clear any stale thread redirect from a previous conversation
-        this.createdThreadJid.delete(parentJid);
+        const queue = this.pendingTopLevelMsgIds.get(parentJid) ?? [];
+        queue.push(msgId);
+        this.pendingTopLevelMsgIds.set(parentJid, queue);
       }
 
       // Store messages with the most specific JID:
@@ -398,17 +403,25 @@ export class DiscordChannel implements Channel {
     }
   }
 
-  async sendMessage(jid: string, text: string): Promise<void> {
+  async sendMessage(
+    jid: string,
+    text: string,
+    triggerMessageId?: string,
+  ): Promise<void> {
     if (!this.client) {
       logger.warn('Discord client not initialized');
       return;
     }
 
     try {
-      // If we already created a thread for this parent JID, redirect there
-      const redirectJid = this.createdThreadJid.get(jid);
+      // Conversation key: per-conversation when triggerMessageId is known,
+      // per-channel fallback for session commands that don't supply it.
+      const convKey = triggerMessageId ? `${jid}:${triggerMessageId}` : jid;
+
+      // If we already created a thread for this conversation, redirect there.
+      const redirectJid = this.createdThreadJid.get(convKey);
       if (redirectJid) {
-        return this.sendMessage(redirectJid, text);
+        return this.sendMessage(redirectJid, text, triggerMessageId);
       }
 
       // Parse JID: dc:{channelId} or dc:{parentId}:thread:{threadId}
@@ -421,18 +434,30 @@ export class DiscordChannel implements Channel {
       // Thread creation: for top-level JIDs, create a thread from the
       // user's triggering message on first response.
       if (!isThreadJid) {
-        const originalMsgId = this.lastUserMessageId.get(jid);
+        // Prefer the explicit triggerMessageId supplied by the caller (index.ts
+        // passes effectiveThreadId so each conversation threads correctly even
+        // when two messages arrive before the first response is sent).
+        // Fall back to the FIFO queue for session commands that don't supply one.
+        let originalMsgId: string | undefined = triggerMessageId;
+        if (!originalMsgId) {
+          const queue = this.pendingTopLevelMsgIds.get(jid);
+          if (queue && queue.length > 0) {
+            originalMsgId = queue.shift();
+            if (queue.length === 0) {
+              this.pendingTopLevelMsgIds.delete(jid);
+            }
+          }
+        }
         if (originalMsgId) {
-          this.lastUserMessageId.delete(jid);
           const threadId = await this.createThreadAndSend(
             channelId,
             originalMsgId,
             text,
           );
           if (threadId) {
-            // Redirect future sends for this parent JID to the thread
+            // Redirect future sends for this conversation to the thread.
             const threadJid = `dc:${channelId}:thread:${threadId}`;
-            this.createdThreadJid.set(jid, threadJid);
+            this.createdThreadJid.set(convKey, threadJid);
             // Map threadChannelId → originalMsgId so thread replies
             // resolve to the same session as the top-level message.
             // Write-through: persist to SQLite for restart survival.
@@ -624,13 +649,17 @@ export class DiscordChannel implements Channel {
 
   clearThreadState(parentJid: string, threadId?: string): void {
     if (threadId) {
-      // Per-thread cleanup: only clear state for this specific thread
-      const threadJid = `${parentJid}:thread:${threadId}`;
-      this.lastUserMessageId.delete(threadJid);
+      // Per-conversation cleanup: clear the keyed redirect for this trigger message.
+      const convKey = `${parentJid}:${threadId}`;
+      this.createdThreadJid.delete(convKey);
     } else {
-      // No thread specified: clear parent-level state and all thread entries
-      this.createdThreadJid.delete(parentJid);
-      this.lastUserMessageId.delete(parentJid);
+      // Full cleanup: remove all redirects whose key starts with this parent JID.
+      for (const key of this.createdThreadJid.keys()) {
+        if (key === parentJid || key.startsWith(`${parentJid}:`)) {
+          this.createdThreadJid.delete(key);
+        }
+      }
+      this.pendingTopLevelMsgIds.delete(parentJid);
     }
   }
 

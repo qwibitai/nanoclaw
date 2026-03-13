@@ -730,6 +730,74 @@ describe('DiscordChannel', () => {
       expect(mockChannel.send).toHaveBeenNthCalledWith(1, sentence1.trimEnd());
       expect(mockChannel.send).toHaveBeenNthCalledWith(2, sentence2);
     });
+
+    // Regression: two unrelated messages arrive before any response — each
+    // should create its own thread (from its own message), not both pile into
+    // the thread of whichever message arrived last.
+    it('creates separate threads for two concurrent top-level messages when triggerMessageId is provided', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Two messages arrive before any response
+      await triggerMessage(
+        createMessage({ messageId: 'msgA', content: '@Andy Question A' }),
+      );
+      await triggerMessage(
+        createMessage({ messageId: 'msgB', content: '@Andy Question B' }),
+      );
+
+      // Spy on createThreadAndSend to verify which message IDs are used
+      const createThreadSpy = vi
+        .spyOn(channel, 'createThreadAndSend')
+        .mockResolvedValueOnce('thread_for_A')
+        .mockResolvedValueOnce('thread_for_B');
+
+      // Response to A (index.ts passes effectiveThreadId = 'msgA')
+      await channel.sendMessage('dc:1234567890123456', 'Answer A', 'msgA');
+      // Response to B (index.ts passes effectiveThreadId = 'msgB')
+      await channel.sendMessage('dc:1234567890123456', 'Answer B', 'msgB');
+
+      expect(createThreadSpy).toHaveBeenCalledTimes(2);
+      // A's response must thread from msgA (not msgB)
+      expect(createThreadSpy).toHaveBeenNthCalledWith(
+        1,
+        '1234567890123456',
+        'msgA',
+        'Answer A',
+      );
+      // B's response must thread from msgB
+      expect(createThreadSpy).toHaveBeenNthCalledWith(
+        2,
+        '1234567890123456',
+        'msgB',
+        'Answer B',
+      );
+    });
+
+    it('uses FIFO queue when no triggerMessageId provided (session command fallback)', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      await triggerMessage(
+        createMessage({ messageId: 'msgA', content: '-m gpt4' }),
+      );
+
+      const createThreadSpy = vi
+        .spyOn(channel, 'createThreadAndSend')
+        .mockResolvedValueOnce('thread_for_A');
+
+      // Session command response: no triggerMessageId supplied
+      await channel.sendMessage('dc:1234567890123456', 'Switched to GPT-4!');
+
+      // Should pop msgA from the FIFO queue
+      expect(createThreadSpy).toHaveBeenCalledWith(
+        '1234567890123456',
+        'msgA',
+        'Switched to GPT-4!',
+      );
+    });
   });
 
   // --- ownsJid ---

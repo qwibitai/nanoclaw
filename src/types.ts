@@ -134,7 +134,11 @@ export interface BacklogItem {
 export interface Channel {
   name: string;
   connect(): Promise<void>;
-  sendMessage(jid: string, text: string): Promise<void>;
+  sendMessage(
+    jid: string,
+    text: string,
+    triggerMessageId?: string,
+  ): Promise<void>;
   isConnected(): boolean;
   ownsJid(jid: string): boolean;
   disconnect(): Promise<void>;

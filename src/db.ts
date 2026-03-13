@@ -1236,7 +1236,12 @@ export function searchMessagesRaw(
   groupFolder: string,
   words: string[],
   limit: number = 5,
-): Array<{ thread_id: string; chat_jid: string; snippet: string; last_activity: string }> {
+): Array<{
+  thread_id: string;
+  chat_jid: string;
+  snippet: string;
+  last_activity: string;
+}> {
   if (words.length === 0) return [];
 
   const likeClauses = words.map(() => 'm.content LIKE ?').join(' OR ');

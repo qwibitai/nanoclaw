@@ -99,7 +99,11 @@ import {
   isSessionCommandAllowed,
 } from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { indexSingleThread, indexThreadFromMessages, indexThreadSummaries } from './thread-search.js';
+import {
+  indexSingleThread,
+  indexThreadFromMessages,
+  indexThreadSummaries,
+} from './thread-search.js';
 import { checkUserOverride, shouldResetSession } from './topic-classifier.js';
 import { Attachment, Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -652,7 +656,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           `Agent output: ${raw.slice(0, 200)}`,
         );
         if (text) {
-          await channel.sendMessage(chatJid, text);
+          await channel.sendMessage(chatJid, text, effectiveThreadId);
           // Persist bot response so the agent has context of what it said
           storeMessage({
             id: `bot-${crypto.randomUUID()}`,
@@ -688,6 +692,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
           await channel.sendMessage(
             chatJid,
             'I finished processing but wasn\u2019t able to produce a response. Please try again.',
+            effectiveThreadId,
           );
           outputSentToUser = true;
         }

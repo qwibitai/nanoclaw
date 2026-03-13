@@ -356,13 +356,19 @@ export function indexThreadFromMessages(
     fs.mkdirSync(threadDir, { recursive: true });
     fs.writeFileSync(path.join(threadDir, 'summary.txt'), summary, 'utf-8');
   } catch (err) {
-    logger.warn({ err, groupFolder, threadId }, 'Failed to write auto summary.txt');
+    logger.warn(
+      { err, groupFolder, threadId },
+      'Failed to write auto summary.txt',
+    );
     return false;
   }
 
   const indexed = indexSingleThread(groupFolder, threadId);
   if (indexed) {
-    logger.info({ groupFolder, threadId }, 'Auto-indexed short thread from messages');
+    logger.info(
+      { groupFolder, threadId },
+      'Auto-indexed short thread from messages',
+    );
   }
   return indexed;
 }
