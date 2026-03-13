@@ -8,6 +8,8 @@ dist/
 store/
 data/
 logs/
+.env
+
 
 # Groups - only track base structure and specific CLAUDE.md files
 groups/*

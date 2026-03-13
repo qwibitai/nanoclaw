@@ -5,15 +5,51 @@ import path from 'path';
  * Tests for service configuration generation.
  *
  * These tests verify the generated content of plist/systemd/nohup configs
- * without actually loading services.
+ * without actually loading services. The helpers mirror the actual logic in
+ * service.ts so we can assert on the output shape.
  */
 
-// Helper: generate a plist string the same way service.ts does
+// --- Plist generation (macOS launchd) ---
+
+/**
+ * Generates a plist string the same way service.ts does:
+ * - Uses named wrapper script (~/.local/bin/nanoclaw) instead of /bin/bash
+ * - Logs to local filesystem (~/.local/share/nanoclaw/logs/) not project dir
+ * - Supports extra env vars (JAVA_HOME, etc.)
+ * - KeepAlive=false, ThrottleInterval=5
+ */
 function generatePlist(
   nodePath: string,
   projectRoot: string,
   homeDir: string,
+  extraEnv?: Record<string, string>,
 ): string {
+  const basePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`;
+  const fullPath = extraEnv?.__EXTRA_PATH_DIRS
+    ? `${extraEnv.__EXTRA_PATH_DIRS}:${basePath}`
+    : basePath;
+
+  const envEntries = Object.entries(extraEnv ?? {})
+    .filter(([k]) => k !== '__EXTRA_PATH_DIRS' && k !== 'PATH' && k !== 'HOME')
+    .map(
+      ([k, v]) =>
+        `        <key>${k}</key>\n        <string>${v}</string>`,
+    )
+    .join('\n');
+
+  const envBlock = [
+    `        <key>PATH</key>`,
+    `        <string>${fullPath}</string>`,
+    envEntries,
+    `        <key>HOME</key>`,
+    `        <string>${homeDir}</string>`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const logDir = path.join(homeDir, '.local', 'share', 'nanoclaw', 'logs');
+  const wrapperPath = path.join(homeDir, '.local', 'bin', 'nanoclaw');
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -22,36 +58,49 @@ function generatePlist(
     <string>com.nanoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
-        <string>${projectRoot}/dist/index.js</string>
+        <string>${wrapperPath}</string>
     </array>
-    <key>WorkingDirectory</key>
-    <string>${projectRoot}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin</string>
-        <key>HOME</key>
-        <string>${homeDir}</string>
+${envBlock}
     </dict>
     <key>StandardOutPath</key>
-    <string>${projectRoot}/logs/nanoclaw.log</string>
+    <string>${logDir}/nanoclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>${projectRoot}/logs/nanoclaw.error.log</string>
+    <string>${logDir}/nanoclaw.error.log</string>
 </dict>
 </plist>`;
 }
+
+// --- Systemd unit generation (Linux) ---
 
 function generateSystemdUnit(
   nodePath: string,
   projectRoot: string,
   homeDir: string,
   isSystem: boolean,
+  extraEnv?: Record<string, string>,
 ): string {
+  const basePath = `/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin`;
+  const extraPaths = extraEnv?.__EXTRA_PATH_DIRS || '';
+  const fullPath = extraPaths ? `${extraPaths}:${basePath}` : basePath;
+
+  const envLines = [
+    `Environment=HOME=${homeDir}`,
+    `Environment=PATH=${fullPath}`,
+  ];
+  for (const [k, v] of Object.entries(extraEnv ?? {})) {
+    if (k !== '__EXTRA_PATH_DIRS' && k !== 'PATH' && k !== 'HOME') {
+      envLines.push(`Environment=${k}=${v}`);
+    }
+  }
+
   return `[Unit]
 Description=NanoClaw Personal Assistant
 After=network.target
@@ -62,8 +111,7 @@ ExecStart=${nodePath} ${projectRoot}/dist/index.js
 WorkingDirectory=${projectRoot}
 Restart=always
 RestartSec=5
-Environment=HOME=${homeDir}
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${homeDir}/.local/bin
+${envLines.join('\n')}
 StandardOutput=append:${projectRoot}/logs/nanoclaw.log
 StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 
@@ -71,42 +119,74 @@ StandardError=append:${projectRoot}/logs/nanoclaw.error.log
 WantedBy=${isSystem ? 'multi-user.target' : 'default.target'}`;
 }
 
+// --- Tests ---
+
 describe('plist generation', () => {
   it('contains the correct label', () => {
     const plist = generatePlist(
-      '/usr/local/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
+      '/opt/homebrew/bin/node',
+      '/Volumes/external/nanoclaw',
+      '/Users/user',
     );
     expect(plist).toContain('<string>com.nanoclaw</string>');
   });
 
-  it('uses the correct node path', () => {
+  it('uses named wrapper script instead of /bin/bash', () => {
     const plist = generatePlist(
-      '/opt/node/bin/node',
+      '/opt/homebrew/bin/node',
+      '/Volumes/external/nanoclaw',
+      '/Users/user',
+    );
+    expect(plist).toContain('/Users/user/.local/bin/nanoclaw');
+    expect(plist).not.toContain('<string>/bin/bash</string>');
+    expect(plist).not.toContain('<key>WorkingDirectory</key>');
+  });
+
+  it('stores logs on local filesystem, not project directory', () => {
+    const plist = generatePlist(
+      '/opt/homebrew/bin/node',
+      '/Volumes/external/nanoclaw',
+      '/Users/user',
+    );
+    expect(plist).toContain('/Users/user/.local/share/nanoclaw/logs/nanoclaw.log');
+    expect(plist).toContain('/Users/user/.local/share/nanoclaw/logs/nanoclaw.error.log');
+    expect(plist).not.toContain('/Volumes/external/nanoclaw/logs/');
+  });
+
+  it('uses KeepAlive false and ThrottleInterval 5', () => {
+    const plist = generatePlist(
+      '/opt/homebrew/bin/node',
       '/home/user/nanoclaw',
       '/home/user',
     );
-    expect(plist).toContain('<string>/opt/node/bin/node</string>');
+    expect(plist).toContain('<key>KeepAlive</key>\n    <false/>');
+    expect(plist).toContain('<integer>5</integer>');
   });
 
-  it('points to dist/index.js', () => {
+  it('includes extra env vars like JAVA_HOME', () => {
+    const plist = generatePlist(
+      '/opt/homebrew/bin/node',
+      '/home/user/nanoclaw',
+      '/home/user',
+      {
+        __EXTRA_PATH_DIRS: '/opt/homebrew/bin:/opt/homebrew/opt/openjdk/bin',
+        JAVA_HOME: '/opt/homebrew/Cellar/openjdk/25/libexec/openjdk.jdk/Contents/Home',
+      },
+    );
+    expect(plist).toContain('<key>JAVA_HOME</key>');
+    expect(plist).toContain('openjdk');
+    expect(plist).toContain('/opt/homebrew/bin:/opt/homebrew/opt/openjdk/bin:');
+  });
+
+  it('works without extra env vars', () => {
     const plist = generatePlist(
       '/usr/local/bin/node',
       '/home/user/nanoclaw',
       '/home/user',
     );
-    expect(plist).toContain('/home/user/nanoclaw/dist/index.js');
-  });
-
-  it('sets log paths', () => {
-    const plist = generatePlist(
-      '/usr/local/bin/node',
-      '/home/user/nanoclaw',
-      '/home/user',
-    );
-    expect(plist).toContain('nanoclaw.log');
-    expect(plist).toContain('nanoclaw.error.log');
+    expect(plist).toContain('<key>PATH</key>');
+    expect(plist).toContain('/usr/local/bin:/usr/bin:/bin:/home/user/.local/bin');
+    expect(plist).not.toContain('JAVA_HOME');
   });
 });
 
@@ -152,6 +232,21 @@ describe('systemd unit generation', () => {
     expect(unit).toContain(
       'ExecStart=/usr/bin/node /srv/nanoclaw/dist/index.js',
     );
+  });
+
+  it('includes extra env vars when provided', () => {
+    const unit = generateSystemdUnit(
+      '/usr/bin/node',
+      '/home/user/nanoclaw',
+      '/home/user',
+      false,
+      {
+        __EXTRA_PATH_DIRS: '/opt/homebrew/bin',
+        JAVA_HOME: '/usr/lib/jvm/java-25',
+      },
+    );
+    expect(unit).toContain('Environment=JAVA_HOME=/usr/lib/jvm/java-25');
+    expect(unit).toContain('/opt/homebrew/bin:');
   });
 });
 

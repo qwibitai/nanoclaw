@@ -108,6 +108,7 @@ export async function run(_args: string[]): Promise<void> {
 
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
+    'SIGNAL_PHONE_NUMBER',
     'TELEGRAM_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
     'SLACK_APP_TOKEN',
@@ -115,6 +116,18 @@ export async function run(_args: string[]): Promise<void> {
   ]);
 
   const channelAuth: Record<string, string> = {};
+
+  // Signal: check for phone number in .env and linked device credentials
+  const signalPhone =
+    process.env.SIGNAL_PHONE_NUMBER || envVars.SIGNAL_PHONE_NUMBER;
+  if (signalPhone) {
+    // Check if signal-cli has linked device credentials
+    const signalDataDir = path.join(homeDir, '.local', 'share', 'signal-cli', 'data');
+    const hasCredentials =
+      fs.existsSync(signalDataDir) &&
+      fs.readdirSync(signalDataDir).some((f) => !f.endsWith('.json'));
+    channelAuth.signal = hasCredentials ? 'authenticated' : 'configured';
+  }
 
   // WhatsApp: check for auth credentials on disk
   const authDir = path.join(projectRoot, 'store', 'auth');

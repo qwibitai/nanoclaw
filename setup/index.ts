@@ -14,6 +14,7 @@ const STEPS: Record<
   groups: () => import('./groups.js'),
   register: () => import('./register.js'),
   mounts: () => import('./mounts.js'),
+  'signal-auth': () => import('./signal-auth.js'),
   service: () => import('./service.js'),
   verify: () => import('./verify.js'),
 };
