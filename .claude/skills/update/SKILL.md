@@ -123,10 +123,10 @@ If duplicate declarations appear: open the file, find the duplicated block, and 
 Then clear the backup:
 
 ```bash
-rm -rf .nanoclaw/backup && echo "backup cleared"
+npx tsx -e "import('./skills-engine/backup.ts').then(m => m.clearBackup()).then(() => console.log('backup cleared'))"
 ```
 
-Note: `npx tsx -e "import { clearBackup } from './skills-engine/backup.js'..."` will fail with MODULE_NOT_FOUND — use the `rm -rf` command above instead.
+Note: static `import` syntax in `-e` fails (MODULE_NOT_FOUND). Always use dynamic `import()` with `.ts` extension when invoking skills-engine modules from the command line.
 
 **If you cannot confidently resolve a conflict:** Show the user the conflicting sections and ask them to choose or provide guidance.
 
