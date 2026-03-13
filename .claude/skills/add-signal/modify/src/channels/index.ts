@@ -5,6 +5,9 @@
 
 // gmail
 
+// marmot
+import './marmot.js';
+
 // signal
 import './signal.js';
 

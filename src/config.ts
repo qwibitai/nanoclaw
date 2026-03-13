@@ -6,7 +6,12 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets are NOT read here — they stay on disk and are loaded only
 // where needed (container-runner.ts) to avoid leaking to child processes.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile([
+  'ASSISTANT_NAME',
+  'ASSISTANT_HAS_OWN_NUMBER',
+  'SIGNAL_PHONE_NUMBER',
+  'SIGNAL_SOCKET_PATH',
+]);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -62,6 +67,15 @@ export const TRIGGER_PATTERN = new RegExp(
   `^@${escapeRegex(ASSISTANT_NAME)}\\b`,
   'i',
 );
+
+// Signal channel configuration
+export const SIGNAL_PHONE_NUMBER =
+  process.env.SIGNAL_PHONE_NUMBER || envConfig.SIGNAL_PHONE_NUMBER || '';
+
+export const SIGNAL_SOCKET_PATH =
+  process.env.SIGNAL_SOCKET_PATH ||
+  envConfig.SIGNAL_SOCKET_PATH ||
+  '/run/signal-cli/socket';
 
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
