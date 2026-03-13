@@ -39,8 +39,8 @@ import { Attachment, Channel } from '../types.js';
  * on any failure.
  */
 async function generateThreadName(userMessage: string): Promise<string> {
-  const apiKey = getAnthropicApiKey();
   try {
+    const apiKey = getAnthropicApiKey();
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -570,13 +570,17 @@ export class DiscordChannel implements Channel {
 
       // Fire-and-forget: rename with an AI-generated topic title
       if (strippedContent) {
-        void generateThreadName(strippedContent).then((aiName) => {
-          if (aiName && aiName !== 'Thread') {
-            thread.setName(aiName).catch((err) => {
-              logger.warn({ err }, 'Failed to rename Discord thread');
-            });
-          }
-        });
+        void generateThreadName(strippedContent)
+          .then((aiName) => {
+            if (aiName && aiName !== 'Thread') {
+              thread.setName(aiName).catch((err) => {
+                logger.warn({ err }, 'Failed to rename Discord thread');
+              });
+            }
+          })
+          .catch((err) => {
+            logger.warn({ err }, 'Failed to generate thread name');
+          });
       }
 
       logger.info(
