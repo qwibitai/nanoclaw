@@ -74,14 +74,14 @@ export const CREDENTIAL_PROXY_PORT = parseInt(
   10,
 );
 export const IPC_POLL_INTERVAL = 1000;
-export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '1800000', 10); // 30min default — how long to keep container alive after last result
+export const IDLE_TIMEOUT = parseInt(process.env.IDLE_TIMEOUT || '600000', 10); // 10min default — how long to keep container alive after last result
 export const MAX_CONCURRENT_CONTAINERS = Math.max(
   1,
-  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '8', 10) || 8,
+  parseInt(process.env.MAX_CONCURRENT_CONTAINERS || '18', 10) || 18,
 );
 export const MAX_THREADS_PER_GROUP = Math.max(
   1,
-  parseInt(process.env.MAX_THREADS_PER_GROUP || '3', 10) || 3,
+  parseInt(process.env.MAX_THREADS_PER_GROUP || '6', 10) || 6,
 );
 export const WORKTREES_DIR = path.resolve(DATA_DIR, 'worktrees');
 export const GROUP_THREAD_KEY = '__group__';

@@ -99,7 +99,7 @@ import {
   isSessionCommandAllowed,
 } from './session-commands.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { indexSingleThread, indexThreadSummaries } from './thread-search.js';
+import { indexSingleThread, indexThreadFromMessages, indexThreadSummaries } from './thread-search.js';
 import { checkUserOverride, shouldResetSession } from './topic-classifier.js';
 import { Attachment, Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
@@ -848,10 +848,14 @@ async function runAgent(
       );
 
       // Index this thread's summary (if PreCompact wrote one).
-      // Only indexes the single thread that just completed — not a full scan.
+      // If no summary.txt exists (short session, compaction never fired), generate
+      // a minimal summary from recent messages so the thread is searchable.
       setImmediate(() => {
         try {
-          indexSingleThread(group.folder, threadId);
+          const indexed = indexSingleThread(group.folder, threadId);
+          if (!indexed) {
+            indexThreadFromMessages(group.folder, threadId, chatJid);
+          }
         } catch (err) {
           logger.warn({ err }, 'Post-run thread indexing failed (non-fatal)');
         }

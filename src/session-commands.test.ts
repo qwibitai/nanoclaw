@@ -39,6 +39,18 @@ describe('extractSessionCommand', () => {
   it('is case-sensitive for the command', () => {
     expect(extractSessionCommand('/Compact', trigger)).toBeNull();
   });
+
+  it('detects bare /close', () => {
+    expect(extractSessionCommand('/close', trigger)).toBe('/close');
+  });
+
+  it('detects /close with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /close', trigger)).toBe('/close');
+  });
+
+  it('rejects /close with extra text', () => {
+    expect(extractSessionCommand('/close now', trigger)).toBeNull();
+  });
 });
 
 describe('isSessionCommandAllowed', () => {
@@ -223,6 +235,23 @@ describe('handleSessionCommand', () => {
     expect(deps.sendMessage).toHaveBeenCalledWith(
       expect.stringContaining('failed'),
     );
+  });
+
+  it('handles /close by closing stdin immediately without running agent', async () => {
+    const deps = makeDeps();
+    const result = await handleSessionCommand({
+      missedMessages: [makeMsg('/close')],
+      isMainGroup: true,
+      groupName: 'test',
+      triggerPattern: trigger,
+      timezone: 'UTC',
+      deps,
+    });
+    expect(result).toEqual({ handled: true, success: true });
+    expect(deps.closeStdin).toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith('Container closed.');
+    expect(deps.runAgent).not.toHaveBeenCalled();
+    expect(deps.advanceCursor).toHaveBeenCalledWith('100');
   });
 
   it('returns success:false on pre-compact failure with no output', async () => {

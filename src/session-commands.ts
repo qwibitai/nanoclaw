@@ -12,6 +12,7 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
+  if (text === '/close') return '/close';
   return null;
 }
 
@@ -98,8 +99,18 @@ export async function handleSessionCommand(opts: {
     return { handled: true, success: true };
   }
 
-  // AUTHORIZED: process pre-compact messages first, then run the command
+  // AUTHORIZED: handle command
   logger.info({ group: groupName, command }, 'Session command');
+
+  // /close: immediately kill the container without running the agent.
+  // Intentionally skips pre-command message processing (unlike /compact) — this is a
+  // hard stop. Any messages before /close in the same batch are silently dropped.
+  if (command === '/close') {
+    deps.closeStdin();
+    deps.advanceCursor(cmdMsg.timestamp);
+    await deps.sendMessage('Container closed.');
+    return { handled: true, success: true };
+  }
 
   const cmdIndex = missedMessages.indexOf(cmdMsg);
   const preCompactMsgs = missedMessages.slice(0, cmdIndex);

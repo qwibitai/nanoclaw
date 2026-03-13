@@ -12,6 +12,9 @@ import path from 'path';
 import { GROUPS_DIR } from './config.js';
 import {
   ThreadMetadataRow,
+  buildSessionKey,
+  getRecentMessages,
+  searchMessagesRaw,
   searchThreadsFTS,
   upsertThreadIndex,
 } from './db.js';
@@ -49,7 +52,13 @@ export async function searchThreads(
     return [];
   }
 
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) {
+    logger.info(
+      { query: sanitized, groupFolder, reason: 'no_fts_index_entries' },
+      'FTS search returned 0 results — trying raw message fallback',
+    );
+    return searchRawMessageFallback(groupFolder, query, limit);
+  }
 
   const results = candidates
     .filter((c) => c.topic_summary)
@@ -77,6 +86,54 @@ export async function searchThreads(
 }
 
 /**
+ * Fallback search used when FTS5 returns 0 results (thread was never summarized/indexed).
+ * Searches raw message content in the DB for threads matching any query keyword.
+ * Returns synthetic ThreadSearchResults with a content snippet as the summary.
+ */
+function searchRawMessageFallback(
+  groupFolder: string,
+  query: string,
+  limit: number,
+): ThreadSearchResult[] {
+  const words = extractWords(query);
+  const hits = searchMessagesRaw(groupFolder, words, limit);
+
+  if (hits.length === 0) {
+    logger.info(
+      { query, groupFolder, reason: 'no_raw_message_matches' },
+      'Fallback message search also returned 0 results — no indexed or raw matches found',
+    );
+    return [];
+  }
+
+  logger.info(
+    { query, groupFolder, hits: hits.length },
+    'FTS fallback: found matches in raw messages',
+  );
+
+  return hits.map(({ thread_id, snippet, last_activity }) => ({
+    thread_key: buildSessionKey(groupFolder, thread_id),
+    group_folder: groupFolder,
+    thread_id,
+    platform: detectPlatform(thread_id),
+    topic_summary: `(unindexed thread) ${snippet}`,
+    last_activity,
+  }));
+}
+
+/**
+ * Extract normalized words from a search query for LIKE-based matching.
+ * Strips non-letter/non-number characters (Unicode-aware), then splits on whitespace.
+ * Shared by sanitizeFtsQuery (FTS formatting) and the raw message fallback (LIKE params).
+ */
+function extractWords(query: string): string[] {
+  return query
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // strip non-letter/non-number chars (Unicode-aware)
+    .split(/\s+/)
+    .filter((w) => w.length > 0);
+}
+
+/**
  * Sanitize a user query for FTS5 MATCH syntax.
  * Wraps each word in quotes to prevent syntax errors from special chars.
  * Hyphens are replaced with spaces since FTS5's unicode61 tokenizer
@@ -84,10 +141,7 @@ export async function searchThreads(
  * Uses Unicode-aware regex to preserve accented/non-Latin characters.
  */
 function sanitizeFtsQuery(query: string): string {
-  const words = query
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ') // strip non-letter/non-number chars (Unicode-aware)
-    .split(/\s+/)
-    .filter((w) => w.length > 0);
+  const words = extractWords(query);
   if (words.length === 0) return '';
   // Use OR to match any keyword (broad search, Haiku will narrow down)
   return words.map((w) => `"${w}"`).join(' OR ');
@@ -199,7 +253,7 @@ export function indexSingleThread(
 
   try {
     const platform = detectPlatform(threadId);
-    const threadKey = `${groupFolder}:thread:${threadId}`;
+    const threadKey = buildSessionKey(groupFolder, threadId);
     return upsertThreadIndex(
       threadKey,
       groupFolder,
@@ -265,5 +319,50 @@ export function indexThreadSummaries(): number {
     logger.info({ indexed }, 'Indexed thread summaries');
   }
 
+  return indexed;
+}
+
+/**
+ * Generate a minimal summary from recent messages and index the thread.
+ * Called after a container run when no summary.txt exists (session was too short
+ * to trigger SDK compaction). Writes summary.txt then delegates to indexSingleThread
+ * to avoid duplicating the upsert logic. If the write fails, does not index —
+ * the FTS index should always reflect what is on disk.
+ */
+export function indexThreadFromMessages(
+  groupFolder: string,
+  threadId: string,
+  chatJid: string,
+): boolean {
+  // Grab the last 10 user messages for a quick topic snippet
+  const messages = getRecentMessages(chatJid, 10);
+  if (messages.length === 0) return false;
+
+  // Build a compact summary in chronological order (getRecentMessages returns DESC)
+  const userMessages = messages
+    .filter((m) => !m.is_from_me && m.content.trim())
+    .reverse();
+  if (userMessages.length === 0) return false;
+
+  const snippet = userMessages
+    .map((m) => m.content.trim().slice(0, 150))
+    .join(' | ')
+    .slice(0, 500);
+  const summary = `[auto-indexed] ${snippet}`;
+
+  // Write summary.txt then delegate to indexSingleThread (avoids duplicating upsert logic)
+  const threadDir = path.join(GROUPS_DIR, groupFolder, 'threads', threadId);
+  try {
+    fs.mkdirSync(threadDir, { recursive: true });
+    fs.writeFileSync(path.join(threadDir, 'summary.txt'), summary, 'utf-8');
+  } catch (err) {
+    logger.warn({ err, groupFolder, threadId }, 'Failed to write auto summary.txt');
+    return false;
+  }
+
+  const indexed = indexSingleThread(groupFolder, threadId);
+  if (indexed) {
+    logger.info({ groupFolder, threadId }, 'Auto-indexed short thread from messages');
+  }
   return indexed;
 }
