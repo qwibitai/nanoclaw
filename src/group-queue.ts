@@ -27,6 +27,8 @@ export interface ThreadSlot {
   idleWaiting: boolean;
   isTaskContainer: boolean;
   runningTaskId: string | null;
+  /** Callback to reset the idle timer when a message is piped to this slot. */
+  onActivity?: () => void;
 }
 
 interface GroupState {
@@ -208,7 +210,9 @@ export class GroupQueue {
 
   /**
    * Mark a thread's container as idle-waiting.
-   * Preempt if tasks are pending or messages for other threads are queued.
+   * Preempt if tasks are pending, messages for other threads, or new
+   * conversations queued under the same threadKey (e.g. successive
+   * top-level Discord messages that each become separate threads).
    */
   notifyIdle(groupJid: string, threadId?: string): void {
     const threadKey = this.resolveThreadKey(threadId);
@@ -219,6 +223,17 @@ export class GroupQueue {
 
     // Preempt if tasks pending
     if (state.pendingTasks.length > 0) {
+      this.closeStdin(groupJid, threadId);
+      return;
+    }
+
+    // Preempt if messages queued for the same threadKey — these are new
+    // conversations waiting (e.g. top-level Discord messages debounced
+    // under GROUP_THREAD_KEY), not follow-ups to the current one.
+    const hasPendingSameThread = state.pendingProcessJids.some(
+      (p) => p.threadKey === threadKey,
+    );
+    if (hasPendingSameThread) {
       this.closeStdin(groupJid, threadId);
       return;
     }
@@ -248,6 +263,18 @@ export class GroupQueue {
     return state?.activeThreads.has(threadKey) === true;
   }
 
+  /** Register an activity callback on a slot (resets idle timer on piped messages). */
+  setOnActivity(
+    groupJid: string,
+    threadId: string | undefined,
+    fn: () => void,
+  ): void {
+    const threadKey = this.resolveThreadKey(threadId);
+    const state = this.groups.get(groupJid);
+    const slot = state?.activeThreads.get(threadKey);
+    if (slot) slot.onActivity = fn;
+  }
+
   /** Get the thread slot for a specific thread (if active). */
   getThreadSlot(
     groupJid: string,
@@ -273,6 +300,7 @@ export class GroupQueue {
     const slot = state.activeThreads.get(threadKey);
     if (!slot || !slot.groupFolder || slot.isTaskContainer) return false;
     slot.idleWaiting = false;
+    slot.onActivity?.(); // Reset idle timer on piped messages
 
     const inputDir = resolveGroupIpcInputPath(slot.groupFolder, threadKey);
     try {

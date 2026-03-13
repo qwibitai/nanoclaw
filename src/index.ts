@@ -614,6 +614,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Register idle timer reset on the queue slot so piped messages (from
+  // the message loop) also reset the timer, preventing premature kills.
+  // Use the original threadId from resolveGroup for lookup — synthesized
+  // effectiveThreadId won't match the GROUP_THREAD_KEY slot.
+  const slotLookupKey = threadId || undefined;
+  queue.setOnActivity(parentJid, slotLookupKey, resetIdleTimer);
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
