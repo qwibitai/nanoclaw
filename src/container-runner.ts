@@ -41,6 +41,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  persistent?: boolean;
 }
 
 export interface ContainerOutput {
@@ -415,7 +416,10 @@ export async function runContainerAgent(
     const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
     // Grace period: hard timeout must be at least IDLE_TIMEOUT + 30s so the
     // graceful _close sentinel has time to trigger before the hard kill fires.
-    const timeoutMs = Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
+    // Persistent (always-on) containers disable the hard timeout entirely.
+    const timeoutMs = input.persistent
+      ? Number.MAX_SAFE_INTEGER
+      : Math.max(configTimeout, IDLE_TIMEOUT + 30_000);
 
     const killOnTimeout = () => {
       timedOut = true;

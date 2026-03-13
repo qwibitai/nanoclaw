@@ -22,10 +22,14 @@ groups/gentech_agency/*
 groups/gentech_labs/*
 groups/gentech_strategies/*
 !groups/main/CLAUDE.md
+!groups/main/group.json
 !groups/global/CLAUDE.md
 !groups/gentech_agency/CLAUDE.md
+!groups/gentech_agency/group.json
 !groups/gentech_labs/CLAUDE.md
+!groups/gentech_labs/group.json
 !groups/gentech_strategies/CLAUDE.md
+!groups/gentech_strategies/group.json
 
 # Secrets
 *.keys.json

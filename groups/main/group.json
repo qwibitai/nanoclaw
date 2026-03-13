@@ -1,0 +1,5 @@
+{
+  "jid": "tg:REPLACE_WITH_MAIN_CHAT_ID",
+  "requiresTrigger": false,
+  "isMain": true
+}
