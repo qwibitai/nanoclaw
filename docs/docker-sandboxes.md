@@ -1,6 +1,6 @@
 # Running NanoClaw in Docker Sandboxes (Manual Setup)
 
-This guide walks through setting up NanoClaw inside a [Docker Sandbox](https://docs.docker.com/security/sandbox/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
+This guide walks through setting up NanoClaw inside a [Docker Sandbox](https://docs.docker.com/ai/sandboxes/) from scratch — no install script, no pre-built fork. You'll clone the upstream repo, apply the necessary patches, and have agents running in full hypervisor-level isolation.
 
 ## Architecture
 
