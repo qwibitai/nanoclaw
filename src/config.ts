@@ -112,8 +112,9 @@ export const BUDGET_INTERACTIVE = parseFloat(
 
 // Daily spend cap — total estimated API cost across all containers per day.
 // 0 = no cap. Read from .env MAX_DAILY_SPEND_USD.
+// Default $2: scheduled tasks should run free via CLI, only interactive comms use API credits.
 export const MAX_DAILY_SPEND_USD = parseFloat(
-  process.env.MAX_DAILY_SPEND_USD || '5',
+  process.env.MAX_DAILY_SPEND_USD || '2',
 );
 
 // --- Web Channel (Socket.IO chat widget) ---
@@ -131,6 +132,7 @@ export const WEB_CHANNEL_ORIGINS = (
 
 // --- CLI Runner (host Claude Code via Max subscription) ---
 export const CLI_ENABLED = process.env.CLI_ENABLED !== 'false'; // default on
+export const CLI_FALLBACK_ENABLED = process.env.CLI_FALLBACK_ENABLED === 'true'; // default OFF — prevents silent credit burn
 export const CLI_TIMEOUT = parseInt(process.env.CLI_TIMEOUT || '600000', 10); // 10 min
 export const CLI_MODEL = process.env.CLI_MODEL || 'claude-sonnet-4-6'; // Sonnet free with Max
 export const CLI_MCP_CONFIG = path.resolve(PROJECT_ROOT, 'cowork-mcp.json');

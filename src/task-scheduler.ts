@@ -6,6 +6,7 @@ import path from 'path';
 import {
   BUDGET_SCHEDULED,
   CLI_ENABLED,
+  CLI_FALLBACK_ENABLED,
   GROUPS_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
@@ -105,7 +106,6 @@ async function runTask(
   // Determine execution mode: CLI (Max subscription) or container (API credits)
   const useCliMode =
     CLI_ENABLED && task.execution_mode !== 'container';
-  const fallbackEnabled = task.fallback_to_container !== 0;
 
   if (useCliMode) {
     // --- CLI path: run via host Claude Code (Max subscription, no API cost) ---
@@ -135,17 +135,22 @@ async function runTask(
           'CLI agent failed',
         );
 
-        // Fallback to container if enabled
-        if (fallbackEnabled) {
-          logger.info(
-            { taskId: task.id },
-            'Falling back to container (API credits)',
+        // Only fall back to container if explicitly enabled (default: OFF to prevent silent credit burn)
+        if (CLI_FALLBACK_ENABLED) {
+          logger.warn(
+            { taskId: task.id, event: 'cli_fallback_triggered', reason: error },
+            'CLI failed — falling back to container (API credits will be consumed)',
           );
-          error = null; // Reset error for fallback attempt
+          error = null;
           await runTaskViaContainer(task, group, isMain, deps, startTime, (r, e) => {
             result = r;
             error = e;
           });
+        } else {
+          logger.error(
+            { taskId: task.id, event: 'cli_fallback_blocked', reason: error },
+            'CLI failed and CLI_FALLBACK_ENABLED=false — task SKIPPED to prevent credit burn. Fix CLI setup or set CLI_FALLBACK_ENABLED=true.',
+          );
         }
       } else if (cliOutput.result) {
         result = cliOutput.result;
@@ -163,11 +168,11 @@ async function runTask(
       error = err instanceof Error ? err.message : String(err);
       logger.error({ taskId: task.id, error, mode: 'cli' }, 'CLI task failed');
 
-      // Fallback to container on exception
-      if (fallbackEnabled) {
-        logger.info(
-          { taskId: task.id },
-          'Falling back to container after CLI exception',
+      // Only fall back to container if explicitly enabled
+      if (CLI_FALLBACK_ENABLED) {
+        logger.warn(
+          { taskId: task.id, event: 'cli_fallback_triggered', reason: error },
+          'CLI exception — falling back to container (API credits will be consumed)',
         );
         error = null;
         try {
@@ -179,6 +184,11 @@ async function runTask(
           error = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
           logger.error({ taskId: task.id, error }, 'Container fallback also failed');
         }
+      } else {
+        logger.error(
+          { taskId: task.id, event: 'cli_fallback_blocked', reason: error },
+          'CLI exception and CLI_FALLBACK_ENABLED=false — task SKIPPED to prevent credit burn.',
+        );
       }
     }
   } else {

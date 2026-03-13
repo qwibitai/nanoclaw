@@ -7,14 +7,16 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   BUDGET_INTERACTIVE,
+  CLI_ENABLED,
+  CLI_FALLBACK_ENABLED,
   DATA_DIR,
   IDLE_TIMEOUT,
   MAIN_GROUP_FOLDER,
+  MAX_DAILY_SPEND_USD,
   MODEL_INTERACTIVE,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
-  MAX_DAILY_SPEND_USD
 } from './config.js';
 import { startHealthMonitor } from './health.js';
 import { WhatsAppChannel } from './channels/whatsapp.js';
@@ -24,6 +26,7 @@ import {
   writeGroupsSnapshot,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { readEnvFile } from './env.js';
 import {
   createTask,
   getAllChats,
@@ -793,6 +796,23 @@ async function main(): Promise<void> {
   logger.info('Database initialized');
   loadState();
   seedHealthTasks();
+
+  // --- CLI mode health check ---
+  if (CLI_ENABLED) {
+    const envSecrets = readEnvFile(['CLAUDE_CODE_OAUTH_TOKEN']);
+    const hasOAuthToken = !!(process.env.CLAUDE_CODE_OAUTH_TOKEN || envSecrets.CLAUDE_CODE_OAUTH_TOKEN);
+    if (!hasOAuthToken) {
+      const fallbackWarning = CLI_FALLBACK_ENABLED
+        ? 'CLI_FALLBACK_ENABLED=true — tasks WILL fall back to container and BURN API CREDITS'
+        : 'CLI_FALLBACK_ENABLED=false (default) — tasks will be SKIPPED when CLI fails';
+      logger.warn(
+        { cliEnabled: true, oauthToken: false, fallbackEnabled: CLI_FALLBACK_ENABLED },
+        `CLAUDE_CODE_OAUTH_TOKEN is not set. Scheduled tasks cannot use the free CLI path. ${fallbackWarning}. Set CLAUDE_CODE_OAUTH_TOKEN in .env to enable free execution via Max subscription.`,
+      );
+    } else {
+      logger.info('CLI mode ready: CLAUDE_CODE_OAUTH_TOKEN is set');
+    }
+  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {

@@ -9,15 +9,7 @@
 
   // ── Configuration ──────────────────────────────────────────────
   var SCRIPT = document.currentScript;
-  var SERVER_URL = (function () {
-    if (SCRIPT && SCRIPT.src) {
-      try {
-        var u = new URL(SCRIPT.src);
-        return u.origin;
-      } catch (e) {}
-    }
-    return 'https://chat.sheridantrailerrentals.us';
-  })();
+  var SERVER_URL = (SCRIPT && SCRIPT.getAttribute('data-server')) || 'https://chat.sheridantrailerrentals.us';
 
   var TITLE = 'Chat with Snak Group';
   var GREETING =
@@ -181,11 +173,11 @@
       loadSocketIO(function () {
         var connectOpts = {
           transports: ['websocket', 'polling'],
-          auth: {},
+          query: { business: 'snak-group' },
         };
 
         if (VISITOR_ID) {
-          connectOpts.auth.visitorId = VISITOR_ID;
+          connectOpts.query.sessionId = VISITOR_ID;
         }
 
         socket = window.io(SERVER_URL, connectOpts);
@@ -196,10 +188,10 @@
         });
 
         socket.on('session', function (data) {
-          if (data && data.visitorId) {
-            VISITOR_ID = data.visitorId;
+          if (data && data.sessionId) {
+            VISITOR_ID = data.sessionId;
             try {
-              sessionStorage.setItem('snak_visitor_id', data.visitorId);
+              sessionStorage.setItem('snak_visitor_id', data.sessionId);
             } catch (e) {}
           }
         });
@@ -212,10 +204,11 @@
             typingTimeout = null;
           }
 
-          addMessage('bot', data.content);
+          addMessage('bot', data.text || data.content);
         });
 
-        socket.on('typing', function (isTyping) {
+        socket.on('typing', function (data) {
+          var isTyping = data && data.isTyping;
           typingEl.classList.toggle('snak-visible', isTyping);
           if (isTyping) {
             scrollToBottom();
