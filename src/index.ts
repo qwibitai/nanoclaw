@@ -49,10 +49,12 @@ import {
 } from './container-runtime.js';
 import {
   buildSessionKey,
+  clearAllProcessingFlags,
+  clearSessionProcessing,
   deleteSessionV2,
+  findAllInFlightThreads,
   getAllChats,
   getAllRegisteredGroups,
-  findPendingThreadJids,
   getAllSessionsV2,
   getAllTasks,
   getBotResponsesSince,
@@ -70,6 +72,7 @@ import {
   setRouterState,
   setSession,
   setSessionModel,
+  setSessionProcessing,
   setSessionV2,
   storeChatMetadata,
   storeMessage,
@@ -801,6 +804,7 @@ async function runAgent(
       }
     : undefined;
 
+  setSessionProcessing(sessionKey, group.folder, chatJid, threadId);
   try {
     const parentJid = getParentJid(chatJid);
     const output = await runContainerAgent(
@@ -932,6 +936,7 @@ async function runAgent(
     logger.error({ group: group.name, err }, 'Agent error');
     return 'error';
   } finally {
+    clearSessionProcessing(sessionKey);
     webUI?.notifySessionEnd(sessionKey);
   }
 }
@@ -1163,34 +1168,34 @@ function recoverPendingMessages(): void {
       queue.enqueueMessageCheck(chatJid); // parent processes itself
     }
 
-    // Thread auto-recovery is skipped (causes duplicate responses — see below).
-    // Instead, notify the user in each pending thread so they know to resend.
-    const pendingThreadJids = findPendingThreadJids(
-      chatJid,
-      lastAgentTimestamp,
-      assistantName,
-    );
-    for (const threadJid of pendingThreadJids) {
-      const channel = findChannel(channels, chatJid);
-      if (channel?.isConnected()) {
-        channel
-          .sendMessage(
-            threadJid,
-            `_Service restarted — your last message wasn't processed. Please resend to continue._`,
-          )
-          .catch((err: unknown) =>
-            logger.warn(
-              { group: group.name, threadJid, err },
-              'Failed to send thread recovery notice',
-            ),
-          );
-        logger.info(
-          { group: group.name, threadJid },
-          'Sent thread recovery notice (auto-recovery skipped)',
+  }
+
+  // Notify threads that were mid-processing when the service stopped.
+  // Single query returns all in-flight threads with their correct chat_jid.
+  const inFlightThreads = findAllInFlightThreads();
+  for (const { thread_id, chat_jid: parentJid, group_folder } of inFlightThreads) {
+    const threadJid = `${parentJid}:thread:${thread_id}`;
+    const channel = findChannel(channels, parentJid);
+    if (channel?.isConnected()) {
+      channel
+        .sendMessage(
+          threadJid,
+          `_Service restarted — your last message wasn't processed. Please resend to continue._`,
+        )
+        .catch((err: unknown) =>
+          logger.warn(
+            { group_folder, threadJid, err },
+            'Failed to send thread recovery notice',
+          ),
         );
-      }
+      logger.info(
+        { group_folder, threadJid },
+        'Sent thread recovery notice (in-flight thread detected)',
+      );
     }
   }
+  // Clear all in-flight flags after recovery notices are sent
+  clearAllProcessingFlags();
 }
 
 /**
@@ -1506,6 +1511,30 @@ async function main(): Promise<void> {
     {
       sendMessage: (groupJid, threadId, text) =>
         queue.sendMessage(groupJid, threadId, text),
+      getRegisteredGroups: () =>
+        Object.entries(registeredGroups).map(([jid, g]) => ({
+          jid,
+          name: g.name,
+          folder: g.folder,
+        })),
+      startSession: (groupJid, text) => {
+        const group = registeredGroups[groupJid];
+        if (!group) return false;
+        const assistantName = resolveAssistantName(group.containerConfig);
+        const trigger =
+          group.requiresTrigger !== false ? `@${assistantName} ` : '';
+        storeMessage({
+          id: `web-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+          chat_jid: groupJid,
+          sender: 'web-ui',
+          sender_name: 'Dave',
+          content: trigger + text,
+          timestamp: new Date().toISOString(),
+          is_from_me: false,
+        });
+        queue.enqueueMessageCheck(groupJid);
+        return true;
+      },
     },
     WEB_UI_TOKEN,
   );

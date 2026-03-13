@@ -105,6 +105,22 @@ function createSchema(database: Database.Database): void {
     // Column already exists — ignore
   }
 
+  // Add processing flag to sessions_v2 (tracks in-flight agent runs)
+  try {
+    database.exec(
+      `ALTER TABLE sessions_v2 ADD COLUMN processing INTEGER DEFAULT 0`,
+    );
+  } catch {
+    // Column already exists — ignore
+  }
+
+  // Add chat_jid column to sessions_v2 (identifies the channel for recovery notices)
+  try {
+    database.exec(`ALTER TABLE sessions_v2 ADD COLUMN chat_jid TEXT`);
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Index for thread LIKE queries in getNewMessages (e.g. chat_jid LIKE 'slack:C123:thread:%')
   database.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_chat_ts ON messages(chat_jid, timestamp)`,
@@ -586,45 +602,68 @@ export function getMessageById(
     .get(id, chatJid) as NewMessage | undefined;
 }
 
-/**
- * Find all pending thread JIDs for a parent channel.
- * Returns thread JIDs with unprocessed messages, ordered by oldest first.
- * Used only during startup recovery — normal flow passes exact processJid via the queue.
- */
-export function findPendingThreadJids(
-  parentJid: string,
-  sinceTimestamps: Record<string, string>,
-  botPrefix: string,
-): string[] {
-  // Find distinct thread JIDs with pending messages
-  const sql = `
-    SELECT DISTINCT chat_jid
-    FROM messages
-    WHERE chat_jid LIKE ? AND is_bot_message = 0
-      AND content NOT LIKE ? AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp
-  `;
-  const rows = db
-    .prepare(sql)
-    .all(`${parentJid}:thread:%`, `${botPrefix}:%`) as Array<{
-    chat_jid: string;
-  }>;
+/** Ensure a sessions_v2 row exists (creates a stub if needed). */
+function ensureSessionRow(
+  sessionKey: string,
+  groupFolder: string,
+  threadId?: string,
+): void {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT OR IGNORE INTO sessions_v2 (session_key, group_folder, thread_id, session_id, last_activity, created_at)
+     VALUES (?, ?, ?, '', ?, ?)`,
+  ).run(sessionKey, groupFolder, threadId || null, now, now);
+}
 
-  const result: string[] = [];
-  for (const row of rows) {
-    const since =
-      sinceTimestamps[row.chat_jid] || sinceTimestamps[parentJid] || '';
-    // Check if this thread has messages newer than what we've processed
-    const pending = db
-      .prepare(
-        `SELECT 1 FROM messages WHERE chat_jid = ? AND timestamp > ?
-         AND is_bot_message = 0 AND content NOT LIKE ?
-         AND content != '' AND content IS NOT NULL LIMIT 1`,
-      )
-      .get(row.chat_jid, since, `${botPrefix}:%`);
-    if (pending) result.push(row.chat_jid);
-  }
-  return result;
+/** Mark a session as in-flight (processing started).
+ *  Creates a stub row if needed (new threads don't have a sessions_v2 row yet).
+ *  Stores chat_jid so recovery can send notices to the correct channel. */
+export function setSessionProcessing(
+  sessionKey: string,
+  groupFolder: string,
+  chatJid: string,
+  threadId?: string,
+): void {
+  ensureSessionRow(sessionKey, groupFolder, threadId);
+  db.prepare(
+    'UPDATE sessions_v2 SET processing = 1, chat_jid = ? WHERE session_key = ?',
+  ).run(chatJid, sessionKey);
+}
+
+/** Clear in-flight flag (processing completed or errored). */
+export function clearSessionProcessing(sessionKey: string): void {
+  db.prepare('UPDATE sessions_v2 SET processing = 0 WHERE session_key = ?').run(
+    sessionKey,
+  );
+}
+
+/**
+ * Find all threads that were mid-processing when the service stopped.
+ * Returns thread_id + chat_jid so recovery can send notices to the correct channel.
+ */
+export function findAllInFlightThreads(): Array<{
+  thread_id: string;
+  chat_jid: string;
+  group_folder: string;
+}> {
+  return db
+    .prepare(
+      `SELECT thread_id, chat_jid, group_folder FROM sessions_v2
+       WHERE thread_id IS NOT NULL AND processing = 1
+         AND chat_jid IS NOT NULL`,
+    )
+    .all() as Array<{
+    thread_id: string;
+    chat_jid: string;
+    group_folder: string;
+  }>;
+}
+
+/** Clear all processing flags (safety reset on startup). */
+export function clearAllProcessingFlags(): void {
+  db.prepare(
+    'UPDATE sessions_v2 SET processing = 0 WHERE processing = 1',
+  ).run();
 }
 
 // --- Thread origin accessors (Discord thread → session mapping) ---
@@ -1024,13 +1063,7 @@ export function setSessionModel(
   threadId?: string,
 ): void {
   if (groupFolder && model !== null) {
-    // Ensure the row exists — create a stub with empty session_id if needed.
-    // setSessionV2() will fill in the real session_id when the container returns.
-    const now = new Date().toISOString();
-    db.prepare(
-      `INSERT OR IGNORE INTO sessions_v2 (session_key, group_folder, thread_id, session_id, last_activity, created_at)
-       VALUES (?, ?, ?, '', ?, ?)`,
-    ).run(key, groupFolder, threadId || null, now, now);
+    ensureSessionRow(key, groupFolder, threadId);
   }
   db.prepare('UPDATE sessions_v2 SET model = ? WHERE session_key = ?').run(
     model,
