@@ -85,13 +85,9 @@ export class WhatsAppChannel implements Channel {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        const msg =
-          'WhatsApp authentication required. Run /setup in Claude Code.';
-        logger.error(msg);
-        exec(
-          `osascript -e 'display notification "${msg}" with title "NanoClaw" sound name "Basso"'`,
-        );
-        setTimeout(() => process.exit(1), 1000);
+        logger.info('WhatsApp QR code ready — scan with your phone to authenticate');
+        // Log QR to terminal so it can be scanned in SSH/headless environments
+        logger.info({ qr }, 'QR data (base64)');
       }
 
       if (connection === 'close') {
@@ -120,8 +116,19 @@ export class WhatsAppChannel implements Channel {
             }, 5000);
           });
         } else {
-          logger.info('Logged out. Run /setup to re-authenticate.');
-          process.exit(0);
+          // Logged out — clear stale credentials and re-enter QR mode
+          // instead of exiting the process and requiring a manual restart.
+          logger.warn('WhatsApp logged out — clearing auth store and re-entering QR mode');
+          const authDir = path.join(STORE_DIR, 'auth');
+          try {
+            fs.rmSync(authDir, { recursive: true, force: true });
+            fs.mkdirSync(authDir, { recursive: true });
+          } catch (e) {
+            logger.warn({ err: e }, 'Failed to clear auth store');
+          }
+          this.connectInternal().catch((err) => {
+            logger.error({ err }, 'Failed to re-enter QR mode after logout');
+          });
         }
       } else if (connection === 'open') {
         this.connected = true;
