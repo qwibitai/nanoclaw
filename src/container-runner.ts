@@ -78,11 +78,18 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // .env shadowing: mount /dev/null over .env so the agent cannot read host secrets
+    // .env shadowing: mount an empty file over .env so the agent cannot read host secrets.
+    // Using /dev/null fails when Docker tries to bind-mount it over a file inside
+    // an already-mounted directory. Instead, use a persistent empty file.
     const envFile = path.join(projectRoot, '.env');
     if (fs.existsSync(envFile)) {
+      const emptyEnv = path.join(projectRoot, 'data', '.env-shadow');
+      if (!fs.existsSync(emptyEnv)) {
+        fs.mkdirSync(path.dirname(emptyEnv), { recursive: true });
+        fs.writeFileSync(emptyEnv, '');
+      }
       mounts.push({
-        hostPath: '/dev/null',
+        hostPath: emptyEnv,
         containerPath: '/workspace/project/.env',
         readonly: true,
       });

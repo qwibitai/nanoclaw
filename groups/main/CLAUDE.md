@@ -238,6 +238,35 @@ You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts
 
 ---
 
+## Agent Teams (Swarm)
+
+When you create a team of sub-agents, each one can appear as a separate bot in the Telegram group. Use the `sender` parameter in `send_message` to route messages through pool bots.
+
+### How it works
+
+- Each unique `sender` name gets assigned its own pool bot automatically
+- The pool bot is renamed to match the sender name
+- Use consistent sender names across a conversation (e.g. always "Researcher", not sometimes "Research Agent")
+- Keep sub-agent messages short (2-4 sentences per message)
+
+### Example
+
+When creating a team, instruct sub-agents to use `send_message` with their role name:
+
+```
+send_message(chatJid: "tg:-100...", text: "Found 3 relevant papers...", sender: "Researcher")
+send_message(chatJid: "tg:-100...", text: "Here's the implementation...", sender: "Coder")
+```
+
+### Guidelines
+
+- As lead agent, coordinate the team — don't let sub-agents talk over each other
+- Use `<internal>` tags for coordination messages between agents that shouldn't go to the user
+- If no pool bots are configured, messages fall back to the main bot
+- Pool bots are shared across all groups — the same sender name in different groups may get different bots
+
+---
+
 ## Scheduling for Other Groups
 
 When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID from `registered_groups.json`:

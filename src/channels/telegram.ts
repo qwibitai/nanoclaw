@@ -209,28 +209,40 @@ export class TelegramChannel implements Channel {
         const url = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
 
         const buffer = await new Promise<Buffer>((resolve, reject) => {
-          https.get(url, (res) => {
-            const chunks: Buffer[] = [];
-            res.on('data', (chunk: Buffer) => chunks.push(chunk));
-            res.on('end', () => resolve(Buffer.concat(chunks)));
-            res.on('error', reject);
-          }).on('error', reject);
+          https
+            .get(url, (res) => {
+              const chunks: Buffer[] = [];
+              res.on('data', (chunk: Buffer) => chunks.push(chunk));
+              res.on('end', () => resolve(Buffer.concat(chunks)));
+              res.on('error', reject);
+            })
+            .on('error', reject);
         });
 
         const groupDir = path.join(GROUPS_DIR, group.folder);
         const result = await processImage(buffer, groupDir, caption);
 
         const timestamp = new Date(ctx.message.date * 1000).toISOString();
-        const senderName = ctx.from?.first_name || ctx.from?.username || 'Unknown';
-        const isGroup = ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+        const senderName =
+          ctx.from?.first_name || ctx.from?.username || 'Unknown';
+        const isGroup =
+          ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
 
-        this.opts.onChatMetadata(chatJid, timestamp, undefined, 'telegram', isGroup);
+        this.opts.onChatMetadata(
+          chatJid,
+          timestamp,
+          undefined,
+          'telegram',
+          isGroup,
+        );
         this.opts.onMessage(chatJid, {
           id: ctx.message.message_id.toString(),
           chat_jid: chatJid,
           sender: ctx.from?.id?.toString() || '',
           sender_name: senderName,
-          content: result ? result.content : `[Photo]${caption ? ` ${caption}` : ''}`,
+          content: result
+            ? result.content
+            : `[Photo]${caption ? ` ${caption}` : ''}`,
           timestamp,
           is_from_me: false,
         });
@@ -331,6 +343,97 @@ export class TelegramChannel implements Channel {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
     }
   }
+}
+
+// --- Bot Pool for Agent Swarm (Teams) ---
+// Shared module-level state: pool bots are send-only Api instances
+let poolApis: Api[] = [];
+const senderBotMap = new Map<string, number>(); // "{groupFolder}:{sender}" → pool index
+let nextPoolIndex = 0;
+
+/**
+ * Initialize the bot pool with send-only Api instances.
+ * Call once at startup if TELEGRAM_BOT_POOL tokens are configured.
+ */
+export async function initBotPool(tokens: string[]): Promise<void> {
+  for (const token of tokens) {
+    try {
+      const api = new Api(token);
+      const me = await api.getMe();
+      poolApis.push(api);
+      logger.info(
+        { username: me.username, index: poolApis.length - 1 },
+        'Pool bot initialized',
+      );
+    } catch (err) {
+      logger.error({ err }, 'Failed to initialize pool bot');
+    }
+  }
+  if (poolApis.length > 0) {
+    logger.info(
+      { count: poolApis.length },
+      'Telegram bot pool ready',
+    );
+  } else {
+    logger.warn('No pool bots initialized — swarm will use main bot');
+  }
+}
+
+/**
+ * Send a message through a pool bot (for agent swarm/teams).
+ * Assigns a pool bot per sender+group on first use (round-robin).
+ * Falls back to the provided main-bot send function if no pool available.
+ */
+export async function sendPoolMessage(
+  chatId: string | number,
+  text: string,
+  sender: string,
+  groupFolder: string,
+  fallbackSend: (jid: string, text: string) => Promise<void>,
+  jid: string,
+): Promise<void> {
+  if (poolApis.length === 0) {
+    await fallbackSend(jid, text);
+    return;
+  }
+
+  const key = `${groupFolder}:${sender}`;
+  let poolIdx = senderBotMap.get(key);
+
+  if (poolIdx === undefined) {
+    poolIdx = nextPoolIndex % poolApis.length;
+    nextPoolIndex++;
+    senderBotMap.set(key, poolIdx);
+
+    // Rename the pool bot to the sender name (best-effort, with delay)
+    const api = poolApis[poolIdx];
+    setTimeout(async () => {
+      try {
+        await api.setMyName(sender);
+        logger.info({ sender, poolIdx }, 'Pool bot renamed');
+      } catch (err) {
+        logger.debug({ err, sender, poolIdx }, 'Failed to rename pool bot');
+      }
+    }, 2000);
+  }
+
+  const api = poolApis[poolIdx];
+  const numericId = typeof chatId === 'string' ? chatId.replace(/^tg:/, '') : chatId;
+
+  const MAX_LENGTH = 4096;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += MAX_LENGTH) {
+    chunks.push(text.slice(i, i + MAX_LENGTH));
+  }
+
+  for (const chunk of chunks) {
+    await sendTelegramMessage(api, numericId, chunk);
+  }
+
+  logger.info(
+    { sender, poolIdx, chatId: numericId, length: text.length },
+    'Pool bot message sent',
+  );
 }
 
 registerChannel('telegram', (opts: ChannelOpts) => {
