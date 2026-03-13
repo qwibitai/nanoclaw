@@ -596,7 +596,9 @@ describe('SignalChannel', () => {
     it('falls back to localPath when id-based path does not exist', async () => {
       // Override existsSync to return false for attachment dir lookup
       const fsMod = await import('fs');
-      const existsSpy = vi.spyOn(fsMod.default, 'existsSync').mockReturnValue(false);
+      const existsSpy = vi
+        .spyOn(fsMod.default, 'existsSync')
+        .mockReturnValue(false);
 
       const opts = createTestOpts();
       await connectChannel(opts);

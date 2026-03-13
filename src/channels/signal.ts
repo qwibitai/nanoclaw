@@ -28,8 +28,7 @@ function getSignalEnv(): { botPhone: string; userPhone: string } {
       process.env.SIGNAL_PHONE_NUMBER ||
       env.SIGNAL_PHONE_NUMBER ||
       '',
-    userPhone:
-      process.env.SIGNAL_USER_PHONE || env.SIGNAL_USER_PHONE || '',
+    userPhone: process.env.SIGNAL_USER_PHONE || env.SIGNAL_USER_PHONE || '',
   };
 }
 
@@ -111,9 +110,7 @@ export class SignalChannel implements Channel {
     // In primary device mode, the registered JID is the bot's own number.
     // Route DM replies to the owner's phone number instead.
     const phone =
-      rawPhone === this.botPhone && this.userPhone
-        ? this.userPhone
-        : rawPhone;
+      rawPhone === this.botPhone && this.userPhone ? this.userPhone : rawPhone;
     const prefixed = `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
@@ -127,7 +124,10 @@ export class SignalChannel implements Channel {
 
     try {
       await this.signal.sendMessage(phone, prefixed);
-      logger.info({ jid, phone, length: prefixed.length }, 'Signal: message sent');
+      logger.info(
+        { jid, phone, length: prefixed.length },
+        'Signal: message sent',
+      );
     } catch (err) {
       this.outgoingQueue.push({ phone, text: prefixed });
       logger.warn(
@@ -169,12 +169,8 @@ export class SignalChannel implements Channel {
       Number(envelope.timestamp) || Date.now(),
     ).toISOString();
 
-    const dataMsg = envelope.dataMessage as
-      | Record<string, unknown>
-      | undefined;
-    const syncMsg = envelope.syncMessage as
-      | Record<string, unknown>
-      | undefined;
+    const dataMsg = envelope.dataMessage as Record<string, unknown> | undefined;
+    const syncMsg = envelope.syncMessage as Record<string, unknown> | undefined;
 
     // Only process data messages and sync messages (Note to Self outbound)
     if (!dataMsg && !syncMsg) return;
@@ -190,9 +186,7 @@ export class SignalChannel implements Channel {
       // signal-cli receives syncs for ALL conversations (groups, DMs, Note to Self).
       // We only care about Note to Self (destination = own number) and bot echoes.
       // Skip syncs for other conversations to avoid triggering the agent.
-      const sent = syncMsg.sentMessage as
-        | Record<string, unknown>
-        | undefined;
+      const sent = syncMsg.sentMessage as Record<string, unknown> | undefined;
       if (!sent) return;
 
       chatPhone = (sent.destinationNumber ??
