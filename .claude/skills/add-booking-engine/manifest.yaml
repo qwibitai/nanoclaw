@@ -1,0 +1,14 @@
+skill: add-booking-engine
+version: 1.0.0
+description: "Adds multi-tenant booking engine: DB schema, CRUD functions, booking tools, tenant config, and seed script for a WhatsApp appointment booking bot (barbershops, nail salons, PT gyms)"
+core_version: 1.2.6
+adds:
+  - src/booking-db.ts
+  - src/booking-types.ts
+  - scripts/seed-tenant.ts
+  - container/skills/booking/booking-tools.md
+modifies:
+  - src/db.ts
+conflicts: []
+depends: []
+test: "npx vitest run src/booking-db.test.ts"
