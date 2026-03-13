@@ -108,6 +108,7 @@ export async function run(_args: string[]): Promise<void> {
 
   // 4. Check channel auth (detect configured channels by credentials)
   const envVars = readEnvFile([
+    'SIGNAL_BOT_PHONE',
     'SIGNAL_PHONE_NUMBER',
     'TELEGRAM_BOT_TOKEN',
     'SLACK_BOT_TOKEN',
@@ -119,6 +120,7 @@ export async function run(_args: string[]): Promise<void> {
 
   // Signal: check for phone number in .env and linked device credentials
   const signalPhone =
+    process.env.SIGNAL_BOT_PHONE || envVars.SIGNAL_BOT_PHONE ||
     process.env.SIGNAL_PHONE_NUMBER || envVars.SIGNAL_PHONE_NUMBER;
   if (signalPhone) {
     // Check if signal-cli has linked device credentials
