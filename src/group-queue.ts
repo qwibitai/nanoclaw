@@ -153,6 +153,19 @@ export class GroupQueue {
     }
   }
 
+  /** Check if a group has an active container running. */
+  isActive(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    if (!state || !state.active) return false;
+    // Match sendMessage's liveness check: process may have exited before finally-block cleanup
+    if (
+      state.process &&
+      (state.process.killed || state.process.exitCode != null)
+    )
+      return false;
+    return true;
+  }
+
   /**
    * Send a follow-up message to the active container via IPC file.
    * Returns true if the message was written, false if no active container.
@@ -160,6 +173,13 @@ export class GroupQueue {
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder || state.isTaskContainer)
+      return false;
+    // Don't pipe to a dead container — let messages fall through to enqueueMessageCheck
+    if (
+      !state.process ||
+      state.process.killed ||
+      state.process.exitCode != null
+    )
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 

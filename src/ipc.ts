@@ -12,10 +12,16 @@ import { RegisteredGroup } from './types.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
+  sendReaction?: (
+    jid: string,
+    emoji: string,
+    messageId?: string,
+  ) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
   getAvailableGroups: () => AvailableGroup[];
+  statusHeartbeat?: () => void;
   writeGroupsSnapshot: (
     groupFolder: string,
     isMain: boolean,
@@ -91,6 +97,44 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     'Unauthorized IPC message attempt blocked',
                   );
                 }
+              } else if (
+                data.type === 'reaction' &&
+                data.chatJid &&
+                data.emoji &&
+                deps.sendReaction
+              ) {
+                const targetGroup = registeredGroups[data.chatJid];
+                if (
+                  isMain ||
+                  (targetGroup && targetGroup.folder === sourceGroup)
+                ) {
+                  try {
+                    await deps.sendReaction(
+                      data.chatJid,
+                      data.emoji,
+                      data.messageId,
+                    );
+                    logger.info(
+                      { chatJid: data.chatJid, emoji: data.emoji, sourceGroup },
+                      'IPC reaction sent',
+                    );
+                  } catch (err) {
+                    logger.error(
+                      {
+                        chatJid: data.chatJid,
+                        emoji: data.emoji,
+                        sourceGroup,
+                        err,
+                      },
+                      'IPC reaction failed',
+                    );
+                  }
+                } else {
+                  logger.warn(
+                    { chatJid: data.chatJid, sourceGroup },
+                    'Unauthorized IPC reaction attempt blocked',
+                  );
+                }
               }
               fs.unlinkSync(filePath);
             } catch (err) {
@@ -145,6 +189,9 @@ export function startIpcWatcher(deps: IpcDeps): void {
         logger.error({ err, sourceGroup }, 'Error reading IPC tasks directory');
       }
     }
+
+    // Status emoji heartbeat — detect dead containers with stale emoji state
+    deps.statusHeartbeat?.();
 
     setTimeout(processIpcFiles, IPC_POLL_INTERVAL);
   };

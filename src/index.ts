@@ -33,7 +33,7 @@ import {
   getAllTasks,
   getMessagesSince,
   getNewMessages,
-  getRegisteredGroup,
+  getMessageById,
   getRouterState,
   initDatabase,
   setRegisteredGroup,
@@ -53,6 +53,7 @@ import {
   shouldDropMessage,
 } from './sender-allowlist.js';
 import { startSchedulerLoop } from './task-scheduler.js';
+import { StatusTracker } from './status-tracker.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
 
@@ -67,6 +68,7 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let statusTracker: StatusTracker | null = null;
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -189,6 +191,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
+  // Track received messages for emoji status reactions
+  for (const msg of missedMessages) {
+    const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+    statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
+  }
+
+  // Advance user messages to THINKING (👀 → 💭)
+  const userMessages = missedMessages.filter(
+    (m) => !m.is_bot_message && (isMainGroup || !m.is_from_me),
+  );
+  for (const msg of userMessages) {
+    statusTracker?.markThinking(msg.id);
+  }
+
   // Track idle timer for closing stdin when agent is idle
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -206,10 +222,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let firstOutputSeen = false;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
+      // Advance all tracked messages to WORKING on first output (💭 → 🔄)
+      // Uses markAllWorking so piped messages are included, not just the initial batch
+      if (!firstOutputSeen) {
+        firstOutputSeen = true;
+        statusTracker?.markAllWorking(chatJid);
+      }
       const raw =
         typeof result.result === 'string'
           ? result.result
@@ -227,6 +250,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
     if (result.status === 'success') {
       queue.notifyIdle(chatJid);
+      statusTracker?.markAllDone(chatJid);
     }
 
     if (result.status === 'error') {
@@ -241,12 +265,14 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // If we already sent output to the user, don't roll back the cursor —
     // the user got their response and re-processing would send duplicates.
     if (outputSentToUser) {
+      statusTracker?.markAllDone(chatJid);
       logger.warn(
         { group: group.name },
         'Agent error after output was sent, skipping cursor rollback to prevent duplicates',
       );
       return true;
     }
+    statusTracker?.markAllFailed(chatJid, 'Agent error — retrying.');
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
@@ -257,6 +283,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     return false;
   }
 
+  statusTracker?.markAllDone(chatJid);
   return true;
 }
 
@@ -416,6 +443,10 @@ async function startMessageLoop(): Promise<void> {
           const formatted = formatMessages(messagesToSend, TIMEZONE);
 
           if (queue.sendMessage(chatJid, formatted)) {
+            // Agent is about to see these — advance to THINKING (👀 → 💭)
+            for (const msg of groupMessages) {
+              statusTracker?.markThinking(msg.id);
+            }
             logger.debug(
               { chatJid, count: messagesToSend.length },
               'Piped messages to active container',
@@ -481,6 +512,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    await statusTracker?.shutdown();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -508,6 +540,10 @@ async function main(): Promise<void> {
         }
       }
       storeMessage(msg);
+
+      // Fire 👀 immediately on real-time message event, not on next poll cycle
+      const fromMe = msg.is_from_me === true || (msg.is_from_me as unknown) === 1;
+      statusTracker?.markReceived(msg.id, chatJid, fromMe, msg.is_bot_message === true);
     },
     onChatMetadata: (
       chatJid: string,
@@ -518,6 +554,23 @@ async function main(): Promise<void> {
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
   };
+
+  // Initialize status tracker BEFORE channels connect, so onMessage can fire 👀 immediately
+  statusTracker = new StatusTracker({
+    sendReaction: async (chatJid, messageKey, emoji) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel?.sendReaction) return;
+      await channel.sendReaction(chatJid, messageKey, emoji);
+    },
+    sendMessage: async (chatJid, text) => {
+      const channel = findChannel(channels, chatJid);
+      if (!channel) return;
+      await channel.sendMessage(chatJid, text);
+    },
+    isMainGroup: (chatJid) => registeredGroups[chatJid]?.isMain === true,
+    isContainerAlive: (chatJid) => queue.isActive(chatJid),
+  });
+  await statusTracker.recover();
 
   // Create and connect all registered channels.
   // Each channel self-registers via the barrel import above.
@@ -572,7 +625,24 @@ async function main(): Promise<void> {
           .map((ch) => ch.syncGroups!(force)),
       );
     },
+    sendReaction: async (jid, emoji, messageId) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) return;
+      if (messageId && channel.sendReaction) {
+        const msg = getMessageById(messageId, jid);
+        const key = {
+          id: messageId,
+          remoteJid: jid,
+          fromMe: msg?.is_from_me === true || (msg?.is_from_me as unknown) === 1,
+          participant: msg?.sender,
+        };
+        await channel.sendReaction(jid, key, emoji);
+      } else if (channel.reactToLatestMessage) {
+        await channel.reactToLatestMessage(jid, emoji);
+      }
+    },
     getAvailableGroups,
+    statusHeartbeat: () => statusTracker?.heartbeatCheck(),
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });

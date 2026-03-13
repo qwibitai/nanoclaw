@@ -1,0 +1,6 @@
+{
+  "name": "reactions",
+  "description": "Emoji status reactions for message lifecycle",
+  "tier": 0,
+  "dependencies": []
+}
