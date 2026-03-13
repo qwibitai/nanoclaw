@@ -124,16 +124,38 @@ AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
 
 ### Validate token immediately
 
-After writing the token to `.env`, run:
+After writing the token to `.env`, make a live API call to confirm it works before proceeding:
 
 ```bash
-npx tsx setup/index.ts --step validate-credentials
+node -e "
+const https = require('https');
+const fs = require('fs');
+const content = fs.readFileSync('.env', 'utf-8');
+let token = '', isApiKey = false;
+for (const line of content.split('\n')) {
+  let m = line.match(/^ANTHROPIC_API_KEY=[\"']?(.+?)[\"']?\s*$/);
+  if (m) { token = m[1]; isApiKey = true; break; }
+  m = line.match(/^(?:CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_AUTH_TOKEN)=[\"']?(.+?)[\"']?\s*$/);
+  if (m) { token = m[1]; break; }
+}
+if (!token) { console.log('CREDENTIAL_CHECK: no_token'); process.exit(1); }
+const headers = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' };
+if (isApiKey) headers['x-api-key'] = token; else headers['authorization'] = 'Bearer ' + token;
+const body = JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] });
+const req = https.request({ hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(body) } }, (res) => {
+  console.log('CREDENTIAL_CHECK: ' + (res.statusCode === 401 ? 'invalid_token' : 'ok') + ' HTTP=' + res.statusCode);
+  process.exit(res.statusCode === 401 ? 1 : 0);
+});
+req.on('error', (e) => { console.log('CREDENTIAL_CHECK: network_error ' + e.message); process.exit(2); });
+req.write(body); req.end();
+"
 ```
 
-Parse the status block:
-- `VALID: true` → continue to step 5
-- `VALID: false, ERROR: invalid_or_expired_token` → tell the user their token was rejected (401) and ask them to re-run `claude setup-token` and paste a fresh token, then re-write `.env` and validate again
-- `VALID: false, ERROR: network_error` → warn that the API couldn't be reached (check internet connection), but allow the user to choose to continue anyway
+Parse the output:
+- `CREDENTIAL_CHECK: ok` → continue to step 5
+- `CREDENTIAL_CHECK: invalid_token` → token was rejected (401). Tell the user and ask them to re-run `claude setup-token`, paste a fresh token, re-write `.env`, and validate again
+- `CREDENTIAL_CHECK: network_error` → API unreachable. Warn the user and ask if they want to continue anyway
+- `CREDENTIAL_CHECK: no_token` → `.env` has no recognised credential key — re-run step 4
 
 ## 5. Set Up Channels
 
