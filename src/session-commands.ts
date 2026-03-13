@@ -12,7 +12,7 @@ export function extractSessionCommand(
   let text = content.trim();
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
-  if (text === '/close') return '/close';
+  if (text === '/closethread') return '/closethread';
   return null;
 }
 
@@ -104,10 +104,10 @@ export async function handleSessionCommand(opts: {
   // AUTHORIZED: handle command
   logger.info({ group: groupName, command }, 'Session command');
 
-  // /close: immediately kill the container without running the agent.
+  // /closethread: immediately kill the container without running the agent.
   // Intentionally skips pre-command message processing (unlike /compact) — this is a
-  // hard stop. Any messages before /close in the same batch are silently dropped.
-  if (command === '/close') {
+  // hard stop. Any messages before /closethread in the same batch are silently dropped.
+  if (command === '/closethread') {
     deps.closeStdin();
     deps.advanceCursor(cmdMsg.timestamp);
     await deps.sendMessage('Container closed.');

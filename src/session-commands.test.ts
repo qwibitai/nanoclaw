@@ -40,16 +40,16 @@ describe('extractSessionCommand', () => {
     expect(extractSessionCommand('/Compact', trigger)).toBeNull();
   });
 
-  it('detects bare /close', () => {
-    expect(extractSessionCommand('/close', trigger)).toBe('/close');
+  it('detects bare /closethread', () => {
+    expect(extractSessionCommand('/closethread', trigger)).toBe('/closethread');
   });
 
-  it('detects /close with trigger prefix', () => {
-    expect(extractSessionCommand('@Andy /close', trigger)).toBe('/close');
+  it('detects /closethread with trigger prefix', () => {
+    expect(extractSessionCommand('@Andy /closethread', trigger)).toBe('/closethread');
   });
 
-  it('rejects /close with extra text', () => {
-    expect(extractSessionCommand('/close now', trigger)).toBeNull();
+  it('rejects /closethread with extra text', () => {
+    expect(extractSessionCommand('/closethread now', trigger)).toBeNull();
   });
 });
 
@@ -256,7 +256,7 @@ describe('handleSessionCommand', () => {
   it('handles /close by closing stdin immediately without running agent', async () => {
     const deps = makeDeps();
     const result = await handleSessionCommand({
-      missedMessages: [makeMsg('/close')],
+      missedMessages: [makeMsg('/closethread')],
       isMainGroup: true,
       groupName: 'test',
       triggerPattern: trigger,
