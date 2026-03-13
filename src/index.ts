@@ -158,19 +158,23 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   const isMainGroup = group.isMain === true;
 
   const sinceTimestamp = lastAgentTimestamp[chatJid] || "";
-  const missedMessages = getAllMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  let missedMessages = getAllMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
 
   if (missedMessages.length === 0) return true;
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
+    const triggerIdx = missedMessages.findIndex(
       (m) =>
         TRIGGER_PATTERN.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
-    if (!hasTrigger) return true;
+    if (triggerIdx < 0) return true;
+    // Anchor the prompt window at the earliest trigger so it's guaranteed
+    // to be in-context. Messages beyond MAX_PROMPT_MESSAGES stay pending
+    // and will be picked up on the next run.
+    missedMessages = missedMessages.slice(triggerIdx, triggerIdx + MAX_PROMPT_MESSAGES);
   }
 
   const prompt = formatMessagesWithCap(missedMessages, TIMEZONE, MAX_PROMPT_MESSAGES);
