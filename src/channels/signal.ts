@@ -14,10 +14,23 @@ import { ChannelOpts, registerChannel } from './registry.js';
 
 const SIGNAL_PREFIX = 'signal:';
 
-function getSignalPhoneNumber(): string {
-  if (process.env.SIGNAL_PHONE_NUMBER) return process.env.SIGNAL_PHONE_NUMBER;
-  const env = readEnvFile(['SIGNAL_PHONE_NUMBER']);
-  return env.SIGNAL_PHONE_NUMBER || '';
+function getSignalEnv(): { botPhone: string; userPhone: string } {
+  const env = readEnvFile([
+    'SIGNAL_BOT_PHONE',
+    'SIGNAL_USER_PHONE',
+    'SIGNAL_PHONE_NUMBER',
+  ]);
+  return {
+    botPhone:
+      process.env.SIGNAL_BOT_PHONE ||
+      env.SIGNAL_BOT_PHONE ||
+      // Legacy fallback
+      process.env.SIGNAL_PHONE_NUMBER ||
+      env.SIGNAL_PHONE_NUMBER ||
+      '',
+    userPhone:
+      process.env.SIGNAL_USER_PHONE || env.SIGNAL_USER_PHONE || '',
+  };
 }
 
 /**
@@ -39,7 +52,10 @@ export class SignalChannel implements Channel {
   name = 'signal';
 
   private signal!: InstanceType<typeof SignalCli>;
-  private phoneNumber: string;
+  /** Bot's own phone number (signal-cli account) — SIGNAL_BOT_PHONE */
+  private botPhone: string;
+  /** User's phone number — DM replies go here in primary device mode — SIGNAL_USER_PHONE */
+  private userPhone: string;
   private connected = false;
   private outgoingQueue: Array<{ phone: string; text: string }> = [];
   private flushing = false;
@@ -47,14 +63,19 @@ export class SignalChannel implements Channel {
 
   constructor(opts: ChannelOpts) {
     this.opts = opts;
-    this.phoneNumber = getSignalPhoneNumber();
+    const env = getSignalEnv();
+    this.botPhone = env.botPhone;
+    this.userPhone = env.userPhone;
   }
 
   async connect(): Promise<void> {
-    this.signal = new SignalCli(this.phoneNumber);
+    this.signal = new SignalCli(this.botPhone);
 
     this.signal.on('message', (params: unknown) => {
-      logger.debug({ params: JSON.stringify(params).slice(0, 200) }, 'Signal: raw event received');
+      logger.debug(
+        { params: JSON.stringify(params).slice(0, 200) },
+        'Signal: raw event received',
+      );
       this.handleMessage(params).catch((err) =>
         logger.error({ err }, 'Signal: unhandled error in message handler'),
       );
@@ -66,7 +87,10 @@ export class SignalChannel implements Channel {
 
     await this.signal.connect();
     this.connected = true;
-    logger.info({ phoneNumber: this.phoneNumber }, 'Signal: connected');
+    logger.info(
+      { botPhone: this.botPhone, userPhone: this.userPhone || '(none)' },
+      'Signal: connected',
+    );
 
     // Flush any messages queued while disconnected
     this.flushOutgoingQueue().catch((err) =>
@@ -83,7 +107,13 @@ export class SignalChannel implements Channel {
   }
 
   async sendMessage(jid: string, text: string): Promise<void> {
-    const phone = jidToPhone(jid);
+    const rawPhone = jidToPhone(jid);
+    // In primary device mode, the registered JID is the bot's own number.
+    // Route DM replies to the owner's phone number instead.
+    const phone =
+      rawPhone === this.botPhone && this.userPhone
+        ? this.userPhone
+        : rawPhone;
     const prefixed = `${ASSISTANT_NAME}: ${text}`;
 
     if (!this.connected) {
@@ -97,7 +127,7 @@ export class SignalChannel implements Channel {
 
     try {
       await this.signal.sendMessage(phone, prefixed);
-      logger.info({ jid, length: prefixed.length }, 'Signal: message sent');
+      logger.info({ jid, phone, length: prefixed.length }, 'Signal: message sent');
     } catch (err) {
       this.outgoingQueue.push({ phone, text: prefixed });
       logger.warn(
@@ -132,14 +162,19 @@ export class SignalChannel implements Channel {
     const envelope = p?.envelope as Record<string, unknown> | undefined;
     if (!envelope) return;
 
-    const source = (envelope.source ?? envelope.sourceNumber ?? '') as string;
+    // source may be a UUID (primary mode) or phone number (linked mode)
+    const source = (envelope.sourceNumber ?? envelope.source ?? '') as string;
     const sourceName = (envelope.sourceName ?? source) as string;
     const timestamp = new Date(
       Number(envelope.timestamp) || Date.now(),
     ).toISOString();
 
-    const dataMsg = envelope.dataMessage as Record<string, unknown> | undefined;
-    const syncMsg = envelope.syncMessage as Record<string, unknown> | undefined;
+    const dataMsg = envelope.dataMessage as
+      | Record<string, unknown>
+      | undefined;
+    const syncMsg = envelope.syncMessage as
+      | Record<string, unknown>
+      | undefined;
 
     // Only process data messages and sync messages (Note to Self outbound)
     if (!dataMsg && !syncMsg) return;
@@ -155,7 +190,9 @@ export class SignalChannel implements Channel {
       // signal-cli receives syncs for ALL conversations (groups, DMs, Note to Self).
       // We only care about Note to Self (destination = own number) and bot echoes.
       // Skip syncs for other conversations to avoid triggering the agent.
-      const sent = syncMsg.sentMessage as Record<string, unknown> | undefined;
+      const sent = syncMsg.sentMessage as
+        | Record<string, unknown>
+        | undefined;
       if (!sent) return;
 
       chatPhone = (sent.destinationNumber ??
@@ -164,7 +201,7 @@ export class SignalChannel implements Channel {
 
       // Only process messages destined for our own number (Note to Self / bot echo)
       // Skip syncs for group chats and other DMs
-      if (chatPhone !== this.phoneNumber) return;
+      if (chatPhone !== this.botPhone) return;
 
       text = sent.message as string | undefined;
       attachments = (sent.attachments as unknown[]) ?? [];
@@ -172,7 +209,10 @@ export class SignalChannel implements Channel {
         typeof text === 'string' && text.startsWith(`${ASSISTANT_NAME}:`);
       isFromMe = !isBotMessage;
     } else if (dataMsg) {
-      chatPhone = source;
+      // In primary device mode, DMs arrive as dataMessages.
+      // Use the bot's own number as chatPhone — the registered JID matches this.
+      // Replies are routed to SIGNAL_OWNER_PHONE via sendMessage().
+      chatPhone = this.botPhone;
       text = dataMsg.message as string | undefined;
       attachments = (dataMsg.attachments as unknown[]) ?? [];
       isFromMe = false;
@@ -210,10 +250,17 @@ export class SignalChannel implements Channel {
       // signal-cli stores downloaded attachments at ~/.local/share/signal-cli/attachments/<id>
       // The SDK event provides id/filename but not the full local path, so we resolve it.
       const attId = audioAttachment.id as string | undefined;
-      const signalAttachDir = path.join(os.homedir(), '.local', 'share', 'signal-cli', 'attachments');
-      const localPath = attId && fs.existsSync(path.join(signalAttachDir, attId))
-        ? path.join(signalAttachDir, attId)
-        : (audioAttachment.localPath as string | undefined);
+      const signalAttachDir = path.join(
+        os.homedir(),
+        '.local',
+        'share',
+        'signal-cli',
+        'attachments',
+      );
+      const localPath =
+        attId && fs.existsSync(path.join(signalAttachDir, attId))
+          ? path.join(signalAttachDir, attId)
+          : (audioAttachment.localPath as string | undefined);
 
       if (!localPath) {
         logger.warn(
@@ -279,7 +326,8 @@ export class SignalChannel implements Channel {
 // ---------------------------------------------------------------------------
 
 registerChannel('signal', (opts: ChannelOpts) => {
-  if (!getSignalPhoneNumber()) {
+  const { botPhone } = getSignalEnv();
+  if (!botPhone) {
     logger.warn('Signal: not configured. Run /add-signal to set up.');
     return null;
   }
