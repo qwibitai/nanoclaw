@@ -183,6 +183,31 @@ Exit codes:
 - 3: CI checks failed
 - 4: PR head updated (autofix commit detected)
 
+## Haiku Subagent Parallel Monitoring
+
+For cost-efficient parallel monitoring, spawn Haiku subagents:
+
+```bash
+# Monitor CI in background while doing other work
+agent:Haiku
+description: Monitor PR CI status
+prompt: |
+  Monitor PR #<PR_NUMBER> checks every 2 minutes.
+  Use gh pr checks <PR_NUMBER> --repo ingpoc/nanoclaw
+  Report: check status (pass/fail/pending), any failures.
+  Stop when all pass or any fails.
+  Reply with final status.
+model: haiku
+```
+
+Spawn multiple Haiku agents in parallel for:
+
+- CI status monitoring
+- Review comment detection
+- PR head update detection
+
+Haiku is cost-efficient (~68K tokens/tick) for monitoring loops.
+
 ## Failure Handling
 
 - **AUTONOMOUS MODE**: When checks fail, use Auto-Fix Handlers first:
