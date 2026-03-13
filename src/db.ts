@@ -286,22 +286,51 @@ export function getAllMessagesSince(
 ): NewMessage[] {
   // Drain loop using ASC ordering so we page forward from the cursor,
   // unlike getMessagesSince which returns the N most-recent (DESC).
-  const sql = `
+  // First batch uses strict timestamp > to preserve the "since" contract.
+  // Subsequent batches use composite (timestamp, id) cursor to avoid
+  // skipping messages when rows share the same timestamp at a boundary.
+  const initialSql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
     FROM messages
     WHERE chat_jid = ? AND timestamp > ?
       AND is_bot_message = 0 AND content NOT LIKE ?
       AND content != '' AND content IS NOT NULL
-    ORDER BY timestamp
+    ORDER BY timestamp, id
+    LIMIT ?
+  `;
+  const pageSql = `
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
+    FROM messages
+    WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND id > ?))
+      AND is_bot_message = 0 AND content NOT LIKE ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp, id
     LIMIT ?
   `;
   const all: NewMessage[] = [];
-  let cursor = sinceTimestamp;
+  let cursorTs = sinceTimestamp;
+  let cursorId: string | null = null;
   while (true) {
-    const batch = db.prepare(sql).all(chatJid, cursor, `${botPrefix}:%`, batchSize) as NewMessage[];
+    const batch: NewMessage[] =
+      cursorId === null
+        ? (db
+            .prepare(initialSql)
+            .all(chatJid, cursorTs, `${botPrefix}:%`, batchSize) as NewMessage[])
+        : (db
+            .prepare(pageSql)
+            .all(
+              chatJid,
+              cursorTs,
+              cursorTs,
+              cursorId,
+              `${botPrefix}:%`,
+              batchSize,
+            ) as NewMessage[]);
     if (batch.length === 0) break;
     all.push(...batch);
-    cursor = batch[batch.length - 1].timestamp;
+    const last = batch[batch.length - 1];
+    cursorTs = last.timestamp;
+    cursorId = last.id;
     if (batch.length < batchSize) break;
   }
   return all;

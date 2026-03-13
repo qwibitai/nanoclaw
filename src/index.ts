@@ -437,10 +437,7 @@ function recoverPendingMessages(): void {
     const sinceTimestamp = lastAgentTimestamp[chatJid] || "";
     const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME, 1);
     if (pending.length > 0) {
-      logger.info(
-        { group: group.name, pendingCount: pending.length },
-        "Recovery: found unprocessed messages",
-      );
+      logger.info({ group: group.name }, "Recovery: found unprocessed messages");
       queue.enqueueMessageCheck(chatJid);
     }
   }

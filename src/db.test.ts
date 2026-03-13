@@ -443,7 +443,7 @@ describe("getAllMessagesSince", () => {
   });
 
   it("handles count exactly equal to batchSize", () => {
-    // 10 messages with batchSize 5 → two full batches
+    // 6 messages (5 through 10) with batchSize 3 → two full batches
     const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:04.000Z", "Andy", 3);
     expect(msgs).toHaveLength(6);
     expect(msgs[0].content).toBe("message 5");
@@ -460,7 +460,55 @@ describe("getAllMessagesSince", () => {
   it("preserves chronological order across batches", () => {
     const msgs = getAllMessagesSince("group@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
     for (let i = 1; i < msgs.length; i++) {
-      expect(msgs[i].timestamp > msgs[i - 1].timestamp).toBe(true);
+      expect(msgs[i].timestamp >= msgs[i - 1].timestamp).toBe(true);
+    }
+  });
+
+  it("does not skip messages when all share the same timestamp", () => {
+    storeChatMetadata("dup@g.us", "2024-01-01T00:00:00.000Z");
+    for (let i = 1; i <= 5; i++) {
+      store({
+        id: `dup-${i}`,
+        chat_jid: "dup@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `dup message ${i}`,
+        timestamp: "2024-01-01T00:00:01.000Z",
+      });
+    }
+    const msgs = getAllMessagesSince("dup@g.us", "2024-01-01T00:00:00.000Z", "Andy", 3);
+    expect(msgs).toHaveLength(5);
+    const ids = msgs.map((m) => m.id);
+    for (let i = 1; i <= 5; i++) {
+      expect(ids).toContain(`dup-${i}`);
+    }
+  });
+
+  it("handles mixed unique and duplicate timestamps across batches", () => {
+    storeChatMetadata("mix@g.us", "2024-01-01T00:00:00.000Z");
+    const rows = [
+      { id: "mix-a1", ts: "2024-01-01T00:00:01.000Z" },
+      { id: "mix-a2", ts: "2024-01-01T00:00:01.000Z" },
+      { id: "mix-b1", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-b2", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-b3", ts: "2024-01-01T00:00:02.000Z" },
+      { id: "mix-c1", ts: "2024-01-01T00:00:03.000Z" },
+    ];
+    for (const r of rows) {
+      store({
+        id: r.id,
+        chat_jid: "mix@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `content ${r.id}`,
+        timestamp: r.ts,
+      });
+    }
+    const msgs = getAllMessagesSince("mix@g.us", "2024-01-01T00:00:00.000Z", "Andy", 2);
+    expect(msgs).toHaveLength(6);
+    const ids = msgs.map((m) => m.id);
+    for (const r of rows) {
+      expect(ids).toContain(r.id);
     }
   });
 });
