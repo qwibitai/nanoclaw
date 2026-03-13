@@ -78,7 +78,7 @@ export { escapeXml, formatMessages } from "./router.js";
 let lastTimestamp = "";
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
-let lastAgentTimestamp: Record<string, string> = {};
+let lastAgentTimestamp: Record<string, { ts: string; id: string }> = {};
 let messageLoopRunning = false;
 
 const channels: Channel[] = [];
@@ -88,7 +88,13 @@ function loadState(): void {
   lastTimestamp = getRouterState("last_timestamp") || "";
   const agentTs = getRouterState("last_agent_timestamp");
   try {
-    lastAgentTimestamp = agentTs ? JSON.parse(agentTs) : {};
+    const raw: Record<string, string | { ts: string; id: string }> = agentTs
+      ? JSON.parse(agentTs)
+      : {};
+    lastAgentTimestamp = {};
+    for (const [key, val] of Object.entries(raw)) {
+      lastAgentTimestamp[key] = typeof val === "string" ? { ts: val, id: "" } : val;
+    }
   } catch {
     logger.warn("Corrupted last_agent_timestamp in DB, resetting");
     lastAgentTimestamp = {};
@@ -163,8 +169,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   const isMainGroup = group.isMain === true;
 
-  const sinceTimestamp = lastAgentTimestamp[chatJid] || "";
-  let missedMessages = getAllMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME);
+  const cursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
+  let missedMessages = getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id);
 
   if (missedMessages.length === 0) return true;
 
@@ -190,8 +196,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
   // these messages. Save the old cursor so we can roll back on error.
-  const previousCursor = lastAgentTimestamp[chatJid] || "";
-  lastAgentTimestamp[chatJid] = missedMessages[missedMessages.length - 1].timestamp;
+  const previousCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
+  const last = missedMessages[missedMessages.length - 1];
+  lastAgentTimestamp[chatJid] = { ts: last.timestamp, id: last.id };
   saveState();
 
   logger.info({ group: group.name, messageCount: missedMessages.length }, "Processing messages");
@@ -410,10 +417,13 @@ async function startMessageLoop(): Promise<void> {
 
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
+          const pipeCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
           const allPending = getAllMessagesSince(
             chatJid,
-            lastAgentTimestamp[chatJid] || "",
+            pipeCursor.ts,
             ASSISTANT_NAME,
+            200,
+            pipeCursor.id,
           );
           const messagesToSend = allPending.length > 0 ? allPending : groupMessages;
           const formatted = formatMessagesWithCap(messagesToSend, TIMEZONE, MAX_PROMPT_MESSAGES);
@@ -423,7 +433,8 @@ async function startMessageLoop(): Promise<void> {
               { chatJid, count: messagesToSend.length },
               "Piped messages to active container",
             );
-            lastAgentTimestamp[chatJid] = messagesToSend[messagesToSend.length - 1].timestamp;
+            const pipeLast = messagesToSend[messagesToSend.length - 1];
+            lastAgentTimestamp[chatJid] = { ts: pipeLast.timestamp, id: pipeLast.id };
             saveState();
             // Show typing indicator while the container processes the piped message
             channel
@@ -448,8 +459,8 @@ async function startMessageLoop(): Promise<void> {
  */
 function recoverPendingMessages(): void {
   for (const [chatJid, group] of Object.entries(registeredGroups)) {
-    const sinceTimestamp = lastAgentTimestamp[chatJid] || "";
-    const pending = getMessagesSince(chatJid, sinceTimestamp, ASSISTANT_NAME, 1);
+    const recoverCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
+    const pending = getMessagesSince(chatJid, recoverCursor.ts, ASSISTANT_NAME, 1);
     if (pending.length > 0) {
       logger.info({ group: group.name }, "Recovery: found unprocessed messages");
       queue.enqueueMessageCheck(chatJid);

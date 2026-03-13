@@ -31,6 +31,7 @@ function createSchema(database: Database.Database): void {
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
     CREATE INDEX IF NOT EXISTS idx_timestamp ON messages(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_chat_ts_id ON messages(chat_jid, timestamp, id);
 
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
       id TEXT PRIMARY KEY,
@@ -278,17 +279,26 @@ export function getMessagesSince(
   return db.prepare(sql).all(chatJid, sinceTimestamp, `${botPrefix}:%`, limit) as NewMessage[];
 }
 
+/**
+ * Drain all non-bot messages after the given cursor.
+ *
+ * Pages forward using `ORDER BY timestamp, id`. Note that `id` ordering is
+ * lexicographic — this may not match real-world arrival order within a shared
+ * timestamp, but no messages are lost because the composite cursor
+ * `(timestamp, id)` is a total order over the primary key.
+ *
+ * When `sinceId` is provided the first batch uses the composite cursor
+ * `(timestamp > ? OR (timestamp = ? AND id > ?))` instead of timestamp-only,
+ * so callers can resume exactly where they left off without skipping rows that
+ * share the cursor timestamp.
+ */
 export function getAllMessagesSince(
   chatJid: string,
   sinceTimestamp: string,
   botPrefix: string,
   batchSize: number = 200,
+  sinceId?: string,
 ): NewMessage[] {
-  // Drain loop using ASC ordering so we page forward from the cursor,
-  // unlike getMessagesSince which returns the N most-recent (DESC).
-  // First batch uses strict timestamp > to preserve the "since" contract.
-  // Subsequent batches use composite (timestamp, id) cursor to avoid
-  // skipping messages when rows share the same timestamp at a boundary.
   const initialSql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
     FROM messages
@@ -311,7 +321,7 @@ export function getAllMessagesSince(
   const pageStmt = db.prepare(pageSql);
   const all: NewMessage[] = [];
   let cursorTs = sinceTimestamp;
-  let cursorId: string | null = null;
+  let cursorId: string | null = sinceId || null;
   while (true) {
     const batch: NewMessage[] =
       cursorId === null
