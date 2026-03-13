@@ -11,14 +11,20 @@ import {
 } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import {
+  addBacklogItem,
+  addShipLogEntry,
   createTask,
+  deleteBacklogItem,
   deleteTask,
   findMessageById,
+  getBacklog,
   getMessagesAroundTimestamp,
+  getShipLog,
   getTaskById,
   getThreadMessages,
   getThreadMetadata,
   getThreadOrigin,
+  updateBacklogItem,
   updateTask,
 } from './db.js';
 import { searchThreads } from './thread-search.js';
@@ -237,6 +243,16 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For ship_log / backlog
+    itemId?: string;
+    title?: string;
+    description?: string;
+    pr_url?: string;
+    branch?: string;
+    tags?: string;
+    status?: string;
+    priority?: string;
+    notes?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -515,6 +531,120 @@ export async function processTaskIpc(
       }
       break;
 
+    case 'add_ship_log':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized add_ship_log attempt blocked',
+        );
+        break;
+      }
+      if (data.title) {
+        const entryId = `ship-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        addShipLogEntry({
+          id: entryId,
+          title: data.title,
+          description: data.description || null,
+          pr_url: data.pr_url || null,
+          branch: data.branch || null,
+          tags: data.tags || null,
+          shipped_at: new Date().toISOString(),
+        });
+        logger.info(
+          { entryId, title: data.title },
+          'Ship log entry added via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'add_ship_log missing title');
+      }
+      break;
+
+    case 'add_backlog_item':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized add_backlog_item attempt blocked',
+        );
+        break;
+      }
+      if (data.title) {
+        const itemId = `backlog-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const now = new Date().toISOString();
+        addBacklogItem({
+          id: itemId,
+          title: data.title,
+          description: data.description || null,
+          status:
+            (data.status as 'open' | 'in_progress' | 'resolved' | 'wont_fix') ||
+            'open',
+          priority: (data.priority as 'low' | 'medium' | 'high') || 'medium',
+          tags: data.tags || null,
+          notes: data.notes || null,
+          created_at: now,
+          updated_at: now,
+          resolved_at: null,
+        });
+        logger.info(
+          { itemId, title: data.title },
+          'Backlog item added via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'add_backlog_item missing title');
+      }
+      break;
+
+    case 'update_backlog_item':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized update_backlog_item attempt blocked',
+        );
+        break;
+      }
+      if (data.itemId) {
+        const updates: Parameters<typeof updateBacklogItem>[1] = {};
+        if (data.title !== undefined) updates.title = data.title;
+        if (data.description !== undefined)
+          updates.description = data.description;
+        if (data.status !== undefined)
+          updates.status = data.status as
+            | 'open'
+            | 'in_progress'
+            | 'resolved'
+            | 'wont_fix';
+        if (data.priority !== undefined)
+          updates.priority = data.priority as 'low' | 'medium' | 'high';
+        if (data.tags !== undefined) updates.tags = data.tags;
+        if (data.notes !== undefined) updates.notes = data.notes;
+        if (data.status === 'resolved' || data.status === 'wont_fix') {
+          updates.resolved_at = new Date().toISOString();
+        }
+        updateBacklogItem(data.itemId, updates);
+        logger.info(
+          { itemId: data.itemId, updates },
+          'Backlog item updated via IPC',
+        );
+      } else {
+        logger.warn({ data }, 'update_backlog_item missing itemId');
+      }
+      break;
+
+    case 'delete_backlog_item':
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized delete_backlog_item attempt blocked',
+        );
+        break;
+      }
+      if (data.itemId) {
+        deleteBacklogItem(data.itemId);
+        logger.info({ itemId: data.itemId }, 'Backlog item deleted via IPC');
+      } else {
+        logger.warn({ data }, 'delete_backlog_item missing itemId');
+      }
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
@@ -569,6 +699,8 @@ function processQueryIpc(
     limit?: number;
     query?: string;
     threadKey?: string;
+    // For backlog/ship_log queries
+    status?: string;
   },
   sourceGroup: string,
   isMain: boolean,
@@ -838,6 +970,46 @@ function processQueryIpc(
             error: 'Search failed',
           });
         });
+      break;
+    }
+
+    case 'list_backlog': {
+      if (!isMain) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Unauthorized: backlog is accessible to the main group only',
+        });
+        break;
+      }
+      const items = getBacklog(data.status, data.limit || 50);
+      logger.info(
+        { sourceGroup, count: items.length },
+        'IPC list_backlog query served',
+      );
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'ok',
+        items,
+      });
+      break;
+    }
+
+    case 'list_ship_log': {
+      if (!isMain) {
+        writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+          status: 'error',
+          error: 'Unauthorized: ship log is accessible to the main group only',
+        });
+        break;
+      }
+      const entries = getShipLog(data.limit || 20);
+      logger.info(
+        { sourceGroup, count: entries.length },
+        'IPC list_ship_log query served',
+      );
+      writeQueryResponse(ipcBaseDir, sourceGroup, data.requestId, {
+        status: 'ok',
+        entries,
+      });
       break;
     }
 

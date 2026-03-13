@@ -688,6 +688,227 @@ Use this to understand the current NanoClaw deployment:
   },
 );
 
+// --- Ship log and backlog tools ---
+
+server.tool(
+  'add_ship_log',
+  'Record a shipped feature, fix, or improvement in the ship log. Call this when work is merged/deployed.',
+  {
+    title: z.string().describe('Short title of what was shipped (e.g. "Fix duplicate inbox triage", "Add thread search")'),
+    description: z.string().optional().describe('More detail about what was shipped and why'),
+    pr_url: z.string().optional().describe('GitHub PR URL if applicable'),
+    branch: z.string().optional().describe('Branch name that was merged'),
+    tags: z.array(z.string()).optional().describe('Tags for categorization (e.g. ["bugfix", "nanoclaw", "discord"])'),
+  },
+  async (args) => {
+    const data = {
+      type: 'add_ship_log',
+      title: args.title,
+      description: args.description,
+      pr_url: args.pr_url,
+      branch: args.branch,
+      tags: args.tags ? JSON.stringify(args.tags) : undefined,
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Logged to ship log: "${args.title}"` }] };
+  },
+);
+
+server.tool(
+  'add_backlog_item',
+  'Add an item to the debug/fix backlog. Use this to track bugs, issues, or improvements to address later.',
+  {
+    title: z.string().describe('Short description of the issue or task'),
+    description: z.string().optional().describe('Full details, repro steps, or context'),
+    priority: z.enum(['low', 'medium', 'high']).optional().default('medium').describe('Priority level'),
+    tags: z.array(z.string()).optional().describe('Tags (e.g. ["discord", "session", "auth"])'),
+    notes: z.string().optional().describe('Initial notes or observations'),
+  },
+  async (args) => {
+    const data = {
+      type: 'add_backlog_item',
+      title: args.title,
+      description: args.description,
+      priority: args.priority,
+      tags: args.tags ? JSON.stringify(args.tags) : undefined,
+      notes: args.notes,
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Added to backlog: "${args.title}". Use list_backlog to find the assigned ID.` }] };
+  },
+);
+
+server.tool(
+  'update_backlog_item',
+  'Update the status, priority, title, description, notes, or tags of a backlog item.',
+  {
+    item_id: z.string().describe('The backlog item ID (e.g. backlog-1234567890-abc123)'),
+    status: z.enum(['open', 'in_progress', 'resolved', 'wont_fix']).optional().describe('New status'),
+    priority: z.enum(['low', 'medium', 'high']).optional().describe('New priority'),
+    title: z.string().optional().describe('Updated title'),
+    description: z.string().optional().describe('Updated description'),
+    notes: z.string().optional().describe('Progress notes or resolution details'),
+    tags: z.array(z.string()).optional().describe('Updated tags (replaces existing tags)'),
+  },
+  async (args) => {
+    const data: Record<string, string | undefined> = {
+      type: 'update_backlog_item',
+      itemId: args.item_id,
+    };
+    if (args.status !== undefined) data.status = args.status;
+    if (args.priority !== undefined) data.priority = args.priority;
+    if (args.title !== undefined) data.title = args.title;
+    if (args.description !== undefined) data.description = args.description;
+    if (args.notes !== undefined) data.notes = args.notes;
+    if (args.tags !== undefined) data.tags = JSON.stringify(args.tags);
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Backlog item ${args.item_id} updated.` }] };
+  },
+);
+
+server.tool(
+  'delete_backlog_item',
+  'Permanently delete a backlog item.',
+  {
+    item_id: z.string().describe('The backlog item ID to delete'),
+  },
+  async (args) => {
+    const data = {
+      type: 'delete_backlog_item',
+      itemId: args.item_id,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(TASKS_DIR, data);
+    return { content: [{ type: 'text' as const, text: `Backlog item ${args.item_id} deleted.` }] };
+  },
+);
+
+server.tool(
+  'list_backlog',
+  'List backlog items. Optionally filter by status. Returns items ordered by priority (high first).',
+  {
+    status: z.enum(['open', 'in_progress', 'resolved', 'wont_fix']).optional().describe('Filter by status. Omit to see all items (open + in_progress first).'),
+    limit: z.number().max(50).optional().default(20).describe('Maximum items to return (default: 20, max: 50). Use a larger limit only when doing a full audit.'),
+  },
+  async (args) => {
+    try {
+      const requestId = writeQueryFile({
+        type: 'list_backlog',
+        status: args.status,
+        limit: args.limit,
+      });
+
+      const response = await waitForResponse(requestId) as {
+        status: string;
+        error?: string;
+        items?: Array<{
+          id: string;
+          title: string;
+          description: string | null;
+          status: string;
+          priority: string;
+          tags: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+          resolved_at: string | null;
+        }>;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${response.error || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const items = response.items || [];
+      if (items.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No backlog items found.' }] };
+      }
+
+      const formatted = items
+        .map((item) => {
+          let tagStr = '';
+          if (item.tags) {
+            try { tagStr = ` [${(JSON.parse(item.tags) as string[]).join(', ')}]`; } catch { /* malformed tags — skip */ }
+          }
+          const notes = item.notes ? `\n   Notes: ${item.notes}` : '';
+          return `- [${item.id}] **${item.title}**${tagStr}\n   Status: ${item.status} | Priority: ${item.priority} | Created: ${item.created_at.slice(0, 10)}${notes}`;
+        })
+        .join('\n\n');
+
+      return { content: [{ type: 'text' as const, text: `Backlog (${items.length} items):\n\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'list_ship_log',
+  'View the ship log — recent features, fixes, and improvements that have been shipped.',
+  {
+    limit: z.number().optional().default(20).describe('Maximum entries to return (default: 20)'),
+  },
+  async (args) => {
+    try {
+      const requestId = writeQueryFile({
+        type: 'list_ship_log',
+        limit: args.limit,
+      });
+
+      const response = await waitForResponse(requestId) as {
+        status: string;
+        error?: string;
+        entries?: Array<{
+          id: string;
+          title: string;
+          description: string | null;
+          pr_url: string | null;
+          branch: string | null;
+          tags: string | null;
+          shipped_at: string;
+        }>;
+      };
+
+      if (response.status !== 'ok') {
+        return {
+          content: [{ type: 'text' as const, text: `Error: ${response.error || 'Unknown error'}` }],
+          isError: true,
+        };
+      }
+
+      const entries = response.entries || [];
+      if (entries.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'Ship log is empty.' }] };
+      }
+
+      const formatted = entries
+        .map((e) => {
+          let tagStr = '';
+          if (e.tags) {
+            try { tagStr = ` [${(JSON.parse(e.tags) as string[]).join(', ')}]`; } catch { /* malformed tags — skip */ }
+          }
+          const pr = e.pr_url ? `\n   PR: ${e.pr_url}` : '';
+          const desc = e.description ? `\n   ${e.description}` : '';
+          return `- **${e.title}**${tagStr} — ${e.shipped_at.slice(0, 10)}${desc}${pr}`;
+        })
+        .join('\n\n');
+
+      return { content: [{ type: 'text' as const, text: `Ship log (${entries.length} entries):\n\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Error: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);

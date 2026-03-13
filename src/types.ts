@@ -106,6 +106,29 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+export interface ShipLogEntry {
+  id: string;
+  title: string;
+  description: string | null;
+  pr_url: string | null;
+  branch: string | null;
+  tags: string | null; // JSON array
+  shipped_at: string;
+}
+
+export interface BacklogItem {
+  id: string;
+  title: string;
+  description: string | null;
+  status: 'open' | 'in_progress' | 'resolved' | 'wont_fix';
+  priority: 'low' | 'medium' | 'high';
+  tags: string | null; // JSON array
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+}
+
 // --- Channel abstraction ---
 
 export interface Channel {

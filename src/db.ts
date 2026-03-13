@@ -6,9 +6,11 @@ import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
+  BacklogItem,
   NewMessage,
   RegisteredGroup,
   ScheduledTask,
+  ShipLogEntry,
   TaskRunLog,
 } from './types.js';
 
@@ -157,6 +159,35 @@ function createSchema(database: Database.Database): void {
       indexed_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_thread_meta_group ON thread_metadata(group_folder);
+  `);
+
+  // Ship log and backlog for tracking shipped features and open issues
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS ship_log (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      pr_url TEXT,
+      branch TEXT,
+      tags TEXT,
+      shipped_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ship_log_shipped_at ON ship_log(shipped_at);
+
+    CREATE TABLE IF NOT EXISTS backlog (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      tags TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_backlog_status ON backlog(status);
+    CREATE INDEX IF NOT EXISTS idx_backlog_priority ON backlog(priority);
   `);
 
   // Migrate existing sessions into sessions_v2 (skip if already migrated)
@@ -1290,6 +1321,133 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Ship log accessors ---
+
+export function addShipLogEntry(entry: ShipLogEntry): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO ship_log (id, title, description, pr_url, branch, tags, shipped_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entry.id,
+    entry.title,
+    entry.description,
+    entry.pr_url,
+    entry.branch,
+    entry.tags,
+    entry.shipped_at,
+  );
+}
+
+export function getShipLog(limit: number = 50): ShipLogEntry[] {
+  return db
+    .prepare(`SELECT * FROM ship_log ORDER BY shipped_at DESC LIMIT ?`)
+    .all(limit) as ShipLogEntry[];
+}
+
+// --- Backlog accessors ---
+
+export function addBacklogItem(item: BacklogItem): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO backlog (id, title, description, status, priority, tags, notes, created_at, updated_at, resolved_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    item.id,
+    item.title,
+    item.description,
+    item.status,
+    item.priority,
+    item.tags,
+    item.notes,
+    item.created_at,
+    item.updated_at,
+    item.resolved_at,
+  );
+}
+
+export function updateBacklogItem(
+  id: string,
+  updates: Partial<
+    Pick<
+      BacklogItem,
+      | 'title'
+      | 'description'
+      | 'status'
+      | 'priority'
+      | 'tags'
+      | 'notes'
+      | 'resolved_at'
+    >
+  >,
+): void {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+
+  if (updates.title !== undefined) {
+    fields.push('title = ?');
+    values.push(updates.title);
+  }
+  if (updates.description !== undefined) {
+    fields.push('description = ?');
+    values.push(updates.description);
+  }
+  if (updates.status !== undefined) {
+    fields.push('status = ?');
+    values.push(updates.status);
+  }
+  if (updates.priority !== undefined) {
+    fields.push('priority = ?');
+    values.push(updates.priority);
+  }
+  if (updates.tags !== undefined) {
+    fields.push('tags = ?');
+    values.push(updates.tags);
+  }
+  if (updates.notes !== undefined) {
+    fields.push('notes = ?');
+    values.push(updates.notes);
+  }
+  if (updates.resolved_at !== undefined) {
+    fields.push('resolved_at = ?');
+    values.push(updates.resolved_at);
+  }
+
+  if (fields.length === 0) return;
+
+  fields.push('updated_at = ?');
+  values.push(new Date().toISOString());
+  values.push(id);
+  db.prepare(`UPDATE backlog SET ${fields.join(', ')} WHERE id = ?`).run(
+    ...values,
+  );
+}
+
+export function deleteBacklogItem(id: string): void {
+  db.prepare('DELETE FROM backlog WHERE id = ?').run(id);
+}
+
+const PRIORITY_ORDER = `CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END`;
+
+export function getBacklog(
+  status?: string,
+  limit: number = 100,
+): BacklogItem[] {
+  if (status) {
+    return db
+      .prepare(
+        `SELECT * FROM backlog WHERE status = ? ORDER BY ${PRIORITY_ORDER}, created_at DESC LIMIT ?`,
+      )
+      .all(status, limit) as BacklogItem[];
+  }
+  return db
+    .prepare(
+      `SELECT * FROM backlog ORDER BY
+         CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END,
+         ${PRIORITY_ORDER},
+         created_at DESC LIMIT ?`,
+    )
+    .all(limit) as BacklogItem[];
 }
 
 // --- JSON migration ---

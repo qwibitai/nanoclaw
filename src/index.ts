@@ -1167,13 +1167,16 @@ function recoverPendingMessages(): void {
       );
       queue.enqueueMessageCheck(chatJid); // parent processes itself
     }
-
   }
 
   // Notify threads that were mid-processing when the service stopped.
   // Single query returns all in-flight threads with their correct chat_jid.
   const inFlightThreads = findAllInFlightThreads();
-  for (const { thread_id, chat_jid: parentJid, group_folder } of inFlightThreads) {
+  for (const {
+    thread_id,
+    chat_jid: parentJid,
+    group_folder,
+  } of inFlightThreads) {
     const threadJid = `${parentJid}:thread:${thread_id}`;
     const channel = findChannel(channels, parentJid);
     if (channel?.isConnected()) {
