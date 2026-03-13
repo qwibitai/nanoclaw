@@ -241,6 +241,11 @@ function buildContainerArgs(
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());
 
+  // Pass Perplexity API key to containers for research tool
+  if (process.env.PERPLEXITY_API_KEY) {
+    args.push('-e', 'PERPLEXITY_API_KEY=' + process.env.PERPLEXITY_API_KEY);
+  }
+
   // Run as host user so bind-mounted files are accessible.
   // Skip when running as root (uid 0), as the container's node user (uid 1000),
   // or when getuid is unavailable (native Windows without WSL).

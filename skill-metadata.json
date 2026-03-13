@@ -1,0 +1,6 @@
+{
+  "name": "perplexity-research",
+  "description": "Perplexity API CLI for web research inside agent containers",
+  "tier": 0,
+  "dependencies": []
+}
