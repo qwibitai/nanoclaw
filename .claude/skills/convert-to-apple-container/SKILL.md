@@ -41,10 +41,6 @@ Apple Container requires macOS. It does not work on Linux.
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `convert-to-apple-container` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
-
-### Check current runtime
-
 ```bash
 grep "CONTAINER_RUNTIME_BIN" src/container-runtime.ts
 ```
@@ -53,37 +49,33 @@ If it already shows `'container'`, the runtime is already Apple Container. Skip 
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Initialize skills system (if needed)
-
-If `.nanoclaw/` directory doesn't exist yet:
+### Ensure upstream remote
 
 ```bash
-npx tsx scripts/apply-skill.ts --init
+git remote -v
 ```
 
-Or call `initSkillsSystem()` from `skills-engine/migrate.ts`.
-
-### Apply the skill
+If `upstream` is missing, add it:
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/convert-to-apple-container
+git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
-This deterministically:
-- Replaces `src/container-runtime.ts` with the Apple Container implementation
-- Replaces `src/container-runtime.test.ts` with Apple Container-specific tests
-- Updates `src/container-runner.ts` with .env shadow mount fix and privilege dropping
-- Updates `container/Dockerfile` with entrypoint that shadows .env via `mount --bind`
-- Updates `container/build.sh` to default to `container` runtime
-- Records the application in `.nanoclaw/state.yaml`
+### Merge the skill branch
 
-If the apply reports merge conflicts, read the intent files:
-- `modify/src/container-runtime.ts.intent.md` — what changed and invariants
-- `modify/src/container-runner.ts.intent.md` — .env shadow and privilege drop changes
-- `modify/container/Dockerfile.intent.md` — entrypoint changes for .env shadowing
-- `modify/container/build.sh.intent.md` — what changed for build script
+```bash
+git fetch upstream skill/apple-container
+git merge upstream/skill/apple-container
+```
+
+This merges in:
+- `src/container-runtime.ts` — Apple Container implementation (replaces Docker)
+- `src/container-runtime.test.ts` — Apple Container-specific tests
+- `src/container-runner.ts` — .env shadow mount fix and privilege dropping
+- `container/Dockerfile` — entrypoint that shadows .env via `mount --bind`
+- `container/build.sh` — default runtime set to `container`
+
+If the merge reports conflicts, resolve them by reading the conflicted files and understanding the intent of both sides.
 
 ### Validate code changes
 

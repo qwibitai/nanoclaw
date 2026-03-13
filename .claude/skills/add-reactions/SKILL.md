@@ -11,31 +11,45 @@ This skill adds emoji reaction support to NanoClaw's WhatsApp channel: receive a
 
 ### Check if already applied
 
-Read `.nanoclaw/state.yaml`. If `reactions` is in `applied_skills`, skip to Phase 3 (Verify). The code changes are already in place.
+Check if `src/status-tracker.ts` exists:
+
+```bash
+test -f src/status-tracker.ts && echo "Already applied" || echo "Not applied"
+```
+
+If already applied, skip to Phase 3 (Verify).
 
 ## Phase 2: Apply Code Changes
 
-Run the skills engine to apply this skill's code package. The package files are in this directory alongside this SKILL.md.
-
-### Apply the skill
+### Ensure WhatsApp fork remote
 
 ```bash
-npx tsx scripts/apply-skill.ts .claude/skills/add-reactions
+git remote -v
 ```
 
-This deterministically:
-- Adds `scripts/migrate-reactions.ts` (database migration for `reactions` table with composite PK and indexes)
-- Adds `src/status-tracker.ts` (forward-only emoji state machine for message lifecycle signaling, with persistence and retry)
-- Adds `src/status-tracker.test.ts` (unit tests for StatusTracker)
-- Adds `container/skills/reactions/SKILL.md` (agent-facing documentation for the `react_to_message` MCP tool)
-- Modifies `src/db.ts` — adds `Reaction` interface, `reactions` table schema, `storeReaction`, `getReactionsForMessage`, `getMessagesByReaction`, `getReactionsByUser`, `getReactionStats`, `getLatestMessage`, `getMessageFromMe`
-- Modifies `src/channels/whatsapp.ts` — adds `messages.reaction` event handler, `sendReaction()`, `reactToLatestMessage()` methods
-- Modifies `src/types.ts` — adds optional `sendReaction` and `reactToLatestMessage` to `Channel` interface
-- Modifies `src/ipc.ts` — adds `type: 'reaction'` IPC handler with group-scoped authorization
-- Modifies `src/index.ts` — wires `sendReaction` dependency into IPC watcher
-- Modifies `src/group-queue.ts` — `GroupQueue` class for per-group container concurrency with retry
-- Modifies `container/agent-runner/src/ipc-mcp-stdio.ts` — adds `react_to_message` MCP tool exposed to container agents
-- Records the application in `.nanoclaw/state.yaml`
+If `whatsapp` is missing, add it:
+
+```bash
+git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git
+```
+
+### Merge the skill branch
+
+```bash
+git fetch whatsapp skill/reactions
+git merge whatsapp/skill/reactions || {
+  git checkout --theirs package-lock.json
+  git add package-lock.json
+  git merge --continue
+}
+```
+
+This adds:
+- `scripts/migrate-reactions.ts` (database migration for `reactions` table with composite PK and indexes)
+- `src/status-tracker.ts` (forward-only emoji state machine for message lifecycle signaling, with persistence and retry)
+- `src/status-tracker.test.ts` (unit tests for StatusTracker)
+- `container/skills/reactions/SKILL.md` (agent-facing documentation for the `react_to_message` MCP tool)
+- Reaction support in `src/db.ts`, `src/channels/whatsapp.ts`, `src/types.ts`, `src/ipc.ts`, `src/index.ts`, `src/group-queue.ts`, and `container/agent-runner/src/ipc-mcp-stdio.ts`
 
 ### Run database migration
 
