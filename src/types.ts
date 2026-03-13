@@ -96,11 +96,7 @@ export interface Channel {
     targetAuthor?: string,
   ): Promise<void>;
   // Optional: send an image/file attachment with optional caption.
-  sendImage?(
-    jid: string,
-    filePath: string,
-    caption?: string,
-  ): Promise<void>;
+  sendImage?(jid: string, filePath: string, caption?: string): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
 }

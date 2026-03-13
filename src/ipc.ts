@@ -66,11 +66,7 @@ export interface IpcDeps {
     emoji: string,
     targetAuthor?: string,
   ) => Promise<void>;
-  sendImage: (
-    jid: string,
-    filePath: string,
-    caption?: string,
-  ) => Promise<void>;
+  sendImage: (jid: string, filePath: string, caption?: string) => Promise<void>;
   registeredGroups: () => Record<string, RegisteredGroup>;
   registerGroup: (jid: string, group: RegisteredGroup) => void;
   syncGroups: (force: boolean) => Promise<void>;
@@ -193,11 +189,7 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     sourceGroup,
                   );
                   if (hostPath && fs.existsSync(hostPath)) {
-                    await deps.sendImage(
-                      data.chatJid,
-                      hostPath,
-                      data.caption,
-                    );
+                    await deps.sendImage(data.chatJid, hostPath, data.caption);
                     logger.info(
                       {
                         chatJid: data.chatJid,
