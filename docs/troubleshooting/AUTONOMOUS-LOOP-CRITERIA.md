@@ -2,6 +2,36 @@
 
 Template for evaluating whether a workflow failure should become autonomous.
 
+## Main Agent Responsibility: Be Smart
+
+The main agent using this criteria must be smart about **when** to apply autonomous loops:
+
+### When to Use Autonomous Loops
+
+- **High frequency**: Issue occurs often in your workflow
+- **Deterministic fix**: Same fix always works
+- **Time-consuming**: Saves significant wait time
+- **Non-blocking**: Doesn't prevent other work
+
+### When NOT to Use
+
+- **One-off tasks**: Single execution, not recurring
+- **Requires judgment**: Human context needed
+- **Expensive**: More cost than manual intervention
+- **Fast enough**: Manual is faster
+
+### Decision: Spawn vs Skip
+
+Before implementing autonomous handler:
+
+1. **Assess frequency**: Is this a recurring pattern?
+2. **Assess complexity**: Can it be fully automated?
+3. **Assess cost**: Tokens saved > tokens spent?
+4. **Assess risk**: What if it goes wrong?
+
+If all yes → implement autonomous loop
+If any no → keep manual
+
 ## Decision Matrix
 
 | Parameter | Description | Score (1-5) | Weight |
