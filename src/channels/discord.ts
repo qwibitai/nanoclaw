@@ -64,9 +64,9 @@ export class DiscordChannel implements Channel {
   private static MEMBER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   /** Resolve the parent channel ID from an interaction (thread → parent, else null). */
-  private static getInteractionParentId(
-    interaction: { channel: { isThread(): boolean; parentId?: string | null } | null },
-  ): string | null {
+  private static getInteractionParentId(interaction: {
+    channel: { isThread(): boolean; parentId?: string | null } | null;
+  }): string | null {
     const ch = interaction.channel;
     return ch?.isThread() ? (ch.parentId ?? null) : null;
   }
@@ -703,9 +703,7 @@ export class DiscordChannel implements Channel {
   private injectMessage(interaction: ButtonInteraction, prompt: string): void {
     // Resolve JID: if in a thread, use parent channel for group lookup
     const parentId = DiscordChannel.getInteractionParentId(interaction);
-    const jid = parentId
-      ? `dc:${parentId}`
-      : `dc:${interaction.channelId}`;
+    const jid = parentId ? `dc:${parentId}` : `dc:${interaction.channelId}`;
     const msgId = interaction.id;
     const sender = interaction.user.id;
     const senderName = interaction.user.username;
