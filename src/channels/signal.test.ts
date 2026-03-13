@@ -46,7 +46,9 @@ function createFakeSignalCli() {
     gracefulShutdown: ReturnType<typeof vi.fn>;
   };
   instance.connect = vi.fn().mockResolvedValue(undefined);
-  instance.sendMessage = vi.fn().mockResolvedValue({ timestamp: Date.now(), results: [] });
+  instance.sendMessage = vi
+    .fn()
+    .mockResolvedValue({ timestamp: Date.now(), results: [] });
   instance.sendTyping = vi.fn().mockResolvedValue(undefined);
   instance.gracefulShutdown = vi.fn().mockResolvedValue(undefined);
   return instance;
@@ -550,7 +552,9 @@ describe('SignalChannel', () => {
     });
 
     it('falls back when transcribeAudioFile throws', async () => {
-      vi.mocked(transcribeAudioFile).mockRejectedValueOnce(new Error('whisper fail'));
+      vi.mocked(transcribeAudioFile).mockRejectedValueOnce(
+        new Error('whisper fail'),
+      );
 
       const opts = createTestOpts();
       await connectChannel(opts);
@@ -672,7 +676,10 @@ describe('SignalChannel', () => {
 
       await channel.setTyping!('signal:+447700900001', true);
 
-      expect(fakeSignalCli.sendTyping).toHaveBeenCalledWith('+447700900001', false);
+      expect(fakeSignalCli.sendTyping).toHaveBeenCalledWith(
+        '+447700900001',
+        false,
+      );
     });
 
     it('calls sendTyping with stop=true when typing stops', async () => {
@@ -682,7 +689,10 @@ describe('SignalChannel', () => {
 
       await channel.setTyping!('signal:+447700900001', false);
 
-      expect(fakeSignalCli.sendTyping).toHaveBeenCalledWith('+447700900001', true);
+      expect(fakeSignalCli.sendTyping).toHaveBeenCalledWith(
+        '+447700900001',
+        true,
+      );
     });
 
     it('handles typing failure gracefully', async () => {
@@ -693,7 +703,9 @@ describe('SignalChannel', () => {
       fakeSignalCli.sendTyping.mockRejectedValueOnce(new Error('failed'));
 
       // Should not throw
-      await expect(channel.setTyping!('signal:+447700900001', true)).resolves.toBeUndefined();
+      await expect(
+        channel.setTyping!('signal:+447700900001', true),
+      ).resolves.toBeUndefined();
     });
   });
 });

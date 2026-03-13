@@ -120,7 +120,9 @@ export class SignalChannel implements Channel {
 
     const source = (envelope.source ?? envelope.sourceNumber ?? '') as string;
     const sourceName = (envelope.sourceName ?? source) as string;
-    const timestamp = new Date(Number(envelope.timestamp) || Date.now()).toISOString();
+    const timestamp = new Date(
+      Number(envelope.timestamp) || Date.now(),
+    ).toISOString();
 
     const dataMsg = envelope.dataMessage as Record<string, unknown> | undefined;
     const syncMsg = envelope.syncMessage as Record<string, unknown> | undefined;
@@ -139,7 +141,9 @@ export class SignalChannel implements Channel {
       const sent = syncMsg.sentMessage as Record<string, unknown> | undefined;
       if (!sent) return;
 
-      chatPhone = (sent.destinationNumber ?? sent.destination ?? source) as string;
+      chatPhone = (sent.destinationNumber ??
+        sent.destination ??
+        source) as string;
       text = sent.message as string | undefined;
       attachments = (sent.attachments as unknown[]) ?? [];
       isFromMe = true;
@@ -150,7 +154,8 @@ export class SignalChannel implements Channel {
       attachments = (dataMsg.attachments as unknown[]) ?? [];
       isFromMe = false;
       // Detect bot messages by assistant name prefix (fallback detection)
-      isBotMessage = typeof text === 'string' && text.startsWith(`${ASSISTANT_NAME}:`);
+      isBotMessage =
+        typeof text === 'string' && text.startsWith(`${ASSISTANT_NAME}:`);
     } else {
       return;
     }
@@ -158,7 +163,9 @@ export class SignalChannel implements Channel {
     // Find first audio attachment
     const audioAttachment = attachments.find((att) => {
       const a = att as Record<string, unknown>;
-      return typeof a.contentType === 'string' && a.contentType.startsWith('audio/');
+      return (
+        typeof a.contentType === 'string' && a.contentType.startsWith('audio/')
+      );
     }) as Record<string, unknown> | undefined;
 
     // Skip protocol-only messages — no text and no audio attachment
@@ -185,7 +192,10 @@ export class SignalChannel implements Channel {
           const transcript = await transcribeAudioFile(localPath);
           if (transcript) {
             finalContent = `[Voice: ${transcript}]`;
-            logger.info({ chatJid, length: transcript.length }, 'Signal: voice transcribed');
+            logger.info(
+              { chatJid, length: transcript.length },
+              'Signal: voice transcribed',
+            );
           } else {
             finalContent = '[Voice Message - transcription unavailable]';
           }

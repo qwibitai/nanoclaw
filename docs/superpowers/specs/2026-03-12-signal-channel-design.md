@@ -33,7 +33,7 @@ Add Signal as a messaging channel for NanoClaw, following the same self-register
 - **Prerequisites:** Java 17+ on macOS (signal-cli is JVM-based). Linux uses native binary.
 - **Auth:** Linked device via `npx signal-sdk connect "NanoClaw"` — displays QR in terminal, user scans from Signal app.
 - **Messages:** Event-driven (`signal.on("message", ...)`) with full envelope data.
-- **Sending:** `signal.sendMessage({ recipients: [phoneNumber], message: text })` (options object, not positional args)
+- **Sending:** `signal.sendMessage(recipient, text, options?)` — positional args: phone number, message text, optional options object
 
 ### Alternatives Considered
 
@@ -86,7 +86,7 @@ class SignalChannel implements Channel {
   // Subscribe to "message" events
 
   async sendMessage(jid: string, text: string): Promise<void>
-  // Strip "signal:" prefix, call signal.sendMessage({ recipients: [phone], message: text })
+  // Strip "signal:" prefix, call signal.sendMessage(phone, text)
 
   isConnected(): boolean
   // Return internal connection state
@@ -143,7 +143,7 @@ If signal-sdk does not expose the `syncMessage` vs `dataMessage` distinction cle
 ```
 Container IPC → routeOutbound() → findChannel() via ownsJid("signal:...")
   → SignalChannel.sendMessage("signal:+447700900000", text)
-    → signal.sendMessage({ recipients: ["+447700900000"], message: text })
+    → signal.sendMessage("+447700900000", text)
 ```
 
 ### Voice Transcription

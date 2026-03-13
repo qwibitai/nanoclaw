@@ -82,10 +82,7 @@ export async function transcribeAudioMessage(
     console.log(`Downloaded audio message: ${buffer.length} bytes`);
 
     // Write buffer to a temp .ogg file, then use the generic transcriber
-    const tmpOgg = path.join(
-      os.tmpdir(),
-      `nanoclaw-wa-${Date.now()}.ogg`,
-    );
+    const tmpOgg = path.join(os.tmpdir(), `nanoclaw-wa-${Date.now()}.ogg`);
     let transcript: string | null;
     try {
       fs.writeFileSync(tmpOgg, buffer);
