@@ -14,6 +14,8 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const SEARCH_REQUESTS_DIR = path.join(IPC_DIR, 'search-requests');
+const SEARCH_RESPONSES_DIR = path.join(IPC_DIR, 'search-responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -329,6 +331,93 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
+    };
+  },
+);
+
+server.tool(
+  'session_search',
+  'Search past conversations for relevant context. Use when the user references past work or you need historical context.',
+  {
+    query: z.string().describe('Search query for finding relevant conversations'),
+    limit: z.number().optional().default(3).describe('Maximum number of results to return (default: 3)'),
+  },
+  async (args) => {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const requestData = {
+      type: 'session_search',
+      query: args.query,
+      limit: args.limit,
+      request_id: requestId,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Write search request
+    writeIpcFile(SEARCH_REQUESTS_DIR, requestData);
+
+    // Poll for response (max 10 seconds)
+    const responsePath = path.join(SEARCH_RESPONSES_DIR, `${requestId}.json`);
+    const timeoutMs = 10000;
+    const pollIntervalMs = 100;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeoutMs) {
+      if (fs.existsSync(responsePath)) {
+        try {
+          const responseData = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+
+          // Clean up response file
+          fs.unlinkSync(responsePath);
+
+          if (responseData.results && Array.isArray(responseData.results)) {
+            const formatted = responseData.results
+              .map(
+                (r: { filename: string; date: string | null; snippet: string }) =>
+                  `- **${r.filename}** (${r.date || 'no date'})\n  ${r.snippet}`
+              )
+              .join('\n\n');
+
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Found ${responseData.results.length} conversation(s) matching "${args.query}":\n\n${formatted}`,
+                },
+              ],
+            };
+          } else {
+            return {
+              content: [{ type: 'text' as const, text: 'No matching conversations found.' }],
+            };
+          }
+        } catch (err) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Error reading search response: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+
+      // Wait before next poll
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    // Timeout
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Search request timed out after ${timeoutMs / 1000} seconds. The host may be busy indexing conversations.`,
+        },
+      ],
+      isError: true,
     };
   },
 );
