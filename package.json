@@ -19,7 +19,7 @@
     "lint:fix": "oxlint --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "turbo run format:check lint typecheck test",
+    "check": "turbo run format:check lint typecheck test knip",
     "knip": "knip",
     "knip:fix": "knip --fix"
   },

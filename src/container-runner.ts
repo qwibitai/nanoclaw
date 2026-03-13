@@ -47,6 +47,7 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  tanren?: { apiUrl: string; apiKey: string };
 }
 
 export interface ContainerOutput {
@@ -209,7 +210,11 @@ function buildVolumeMounts(group: RegisteredGroup, isMain: boolean): VolumeMount
   return mounts;
 }
 
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
+function buildContainerArgs(
+  mounts: VolumeMount[],
+  containerName: string,
+  tanrenApiUrl?: string,
+): string[] {
   const args: string[] = ["run", "-i", "--rm", "--name", containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -227,6 +232,10 @@ function buildContainerArgs(mounts: VolumeMount[], containerName: string): strin
     args.push("-e", "ANTHROPIC_API_KEY=placeholder");
   } else {
     args.push("-e", "CLAUDE_CODE_OAUTH_TOKEN=placeholder");
+  }
+
+  if (tanrenApiUrl) {
+    args.push("-e", `TANREN_API_URL=${tanrenApiUrl}`);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -269,7 +278,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, "-");
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, input.tanren?.apiUrl);
 
   logger.debug(
     {

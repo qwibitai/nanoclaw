@@ -5,8 +5,8 @@
   "ignoreDependencies": ["pino-pretty", "@vitest/coverage-v8"],
   "ignoreExportsUsedInFile": true,
   "rules": {
-    "files": "warn",
-    "exports": "warn",
+    "files": "error",
+    "exports": "error",
     "types": "warn"
   }
 }

@@ -276,6 +276,22 @@ first broken step) so you get the full picture before deciding how to proceed.
 
 ---
 
+### Tanren Integration (optional)
+
+NanoClaw dispatches coding phases to the tanren HTTP API for execution on
+provisioned VMs. Configuration: set `TANREN_API_URL` and `TANREN_API_KEY`
+in `.env`. The orchestrator runs a health check at startup (non-blocking).
+
+Main group containers receive 13 tanren MCP tools (dispatch, VM management,
+run lifecycle, events) registered as a separate MCP server process. Non-main
+groups never have access to tanren tools.
+
+The container's tanren implementation is intentionally minimal: raw fetch
+calls with no retry logic. The host-side `TanrenClient` (src/tanren/) has
+full retry/backoff for orchestrator use.
+
+---
+
 ## 7. Domain-Specific Pipeline Arms
 
 NanoClaw's group architecture naturally supports domain-specific processing
