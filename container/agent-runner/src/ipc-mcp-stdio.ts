@@ -63,6 +63,34 @@ server.tool(
 );
 
 server.tool(
+  'add_reaction',
+  `Add an emoji reaction to a message. Use this to acknowledge messages (e.g., :eyes: when you've seen it, :white_check_mark: when done, :thumbsup: to approve). The emoji name should be without colons (e.g., "thumbsup" not ":thumbsup:"). The message_id is the message's timestamp ID from the conversation history.`,
+  {
+    message_id: z.string().describe('The message timestamp ID to react to (from message history)'),
+    emoji: z.string().describe('Emoji name without colons (e.g., "thumbsup", "eyes", "white_check_mark")'),
+    target_jid: z.string().optional().describe('(Main group only) JID of the chat. Defaults to current chat.'),
+  },
+  async (args) => {
+    const targetJid = isMain && args.target_jid ? args.target_jid : chatJid;
+
+    const data = {
+      type: 'add_reaction',
+      chatJid: targetJid,
+      messageId: args.message_id,
+      emoji: args.emoji,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return {
+      content: [{ type: 'text' as const, text: `Reaction :${args.emoji}: added to message ${args.message_id}.` }],
+    };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
