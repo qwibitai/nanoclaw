@@ -298,6 +298,27 @@ server.tool(
 );
 
 server.tool(
+  'send_image',
+  "Send an image to the user or group by URL. Use after generating an image with fal.ai. The URL must be publicly accessible.",
+  {
+    url: z.string().describe('The URL of the image to send'),
+    caption: z.string().optional().describe('Optional caption text shown with the image'),
+  },
+  async (args) => {
+    const data = {
+      type: 'image',
+      chatJid,
+      imageUrl: args.url,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+    writeIpcFile(MESSAGES_DIR, data);
+    return { content: [{ type: 'text' as const, text: 'Image sent.' }] };
+  },
+);
+
+server.tool(
   'register_group',
   `Register a new chat/group so the agent can respond to messages there. Main group only.
 

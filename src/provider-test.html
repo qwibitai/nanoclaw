@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NanoClaw - Multi-Provider Tester</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; padding: 24px; }
+    .container { max-width: 1400px; margin: 0 auto; }
+    h1 { color: #1a1a2e; margin-bottom: 6px; font-size: 20px; font-weight: 600; }
+    .subtitle { color: #666; margin-bottom: 20px; font-size: 13px; }
+    .card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .test-rows { display: flex; flex-direction: column; gap: 10px; }
+
+    /* Row layout */
+    .test-row { display: grid; grid-template-columns: 160px 1fr 1fr 1fr auto auto; gap: 8px; align-items: end; padding: 14px; background: #fafafa; border-radius: 8px; border: 1px solid #e8e8e8; }
+    .ctrl { display: flex; flex-direction: column; min-width: 0; }
+    label { margin-bottom: 4px; color: #555; font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* Inputs */
+    select, input[type="text"], input[type="password"] {
+      width: 100%; padding: 7px 10px; border: 1px solid #d0d0d0; border-radius: 5px;
+      font-size: 13px; font-family: inherit; background: white; color: #333;
+    }
+    select:focus, input:focus { outline: none; border-color: #4f7cff; box-shadow: 0 0 0 2px rgba(79,124,255,0.15); }
+
+    /* Combobox */
+    .combo-wrap { position: relative; display: flex; }
+    .combo-input { border-radius: 5px 0 0 5px !important; flex: 1; min-width: 0; }
+    .combo-arrow {
+      flex-shrink: 0; width: 28px; background: #f0f0f0; border: 1px solid #d0d0d0;
+      border-left: none; border-radius: 0 5px 5px 0; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;
+    }
+    .combo-arrow:hover { background: #e4e4e4; }
+    .dropdown {
+      position: absolute; top: 100%; left: 0; right: 0; background: white;
+      border: 1px solid #d0d0d0; border-top: none; border-radius: 0 0 6px 6px;
+      max-height: 200px; overflow-y: auto; z-index: 100; display: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .dropdown.open { display: block; }
+    .drop-item { padding: 7px 10px; cursor: pointer; font-size: 12px; color: #333; border-bottom: 1px solid #f0f0f0; }
+    .drop-item:last-child { border-bottom: none; }
+    .drop-item:hover { background: #eef2ff; color: #4f7cff; }
+    .drop-item.dim { color: #aaa; cursor: default; font-style: italic; }
+
+    /* Buttons */
+    button { padding: 7px 14px; border: none; border-radius: 5px; font-size: 13px; cursor: pointer; transition: background 0.15s; white-space: nowrap; font-family: inherit; font-weight: 500; }
+    .btn-test { background: #4f7cff; color: white; }
+    .btn-test:hover { background: #3a64e8; }
+    .btn-test:disabled { background: #a8bcfa; cursor: not-allowed; }
+    .btn-del { background: #ff4d4d; color: white; padding: 7px 10px; }
+    .btn-del:hover { background: #e03333; }
+    .btn-add { background: #00b37e; color: white; padding: 9px 18px; margin-top: 14px; }
+    .btn-add:hover { background: #009c6b; }
+
+    /* Result area */
+    .result-wrap { grid-column: 1 / -1; display: none; }
+    .result-wrap.show { display: block; }
+    .result-status {
+      padding: 6px 10px; border-radius: 5px 5px 0 0; font-size: 11px; font-weight: 600;
+      font-family: monospace; display: flex; gap: 12px; align-items: center;
+    }
+    .result-response {
+      padding: 10px 12px; border-radius: 0 0 5px 5px; font-size: 13px; line-height: 1.5;
+      white-space: pre-wrap; border-top: 1px solid rgba(0,0,0,0.06);
+    }
+    .result-wrap.ok .result-status { background: #e6f4ea; color: #1e6e3a; }
+    .result-wrap.ok .result-response { background: #f6fef8; color: #1a3a25; }
+    .result-wrap.err .result-status { background: #fdecea; color: #9c1c1c; }
+    .result-wrap.err .result-response { background: #fff5f5; color: #5c1010; font-family: monospace; font-size: 12px; }
+    .result-wrap.loading .result-status { background: #e8f0fe; color: #1a56c4; }
+    .result-wrap.loading .result-response { display: none; }
+
+    /* Saved key indicator */
+    .saved-dot { display: inline-block; width: 7px; height: 7px; background: #00b37e; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🧪 Multi-Provider Tester</h1>
+    <p class="subtitle">Test AI provider connections — saved keys are loaded automatically</p>
+    <div class="card">
+      <div id="rows" class="test-rows"></div>
+      <button class="btn-add" id="addBtn">+ Add Row</button>
+    </div>
+  </div>
+
+  <script>
+    var providerList = [];
+    var defaults = {};
+    var savedKeys = {};  // { anthropic: true/false, ... }
+    var rowCount = 0;
+
+    // Load providers + saved key info in parallel
+    Promise.all([
+      fetch('/api/providers').then(function(r) { return r.json(); }),
+      fetch('/api/saved-keys').then(function(r) { return r.json(); })
+    ]).then(function(results) {
+      providerList = results[0].providers;
+      defaults = results[0].defaults;
+      savedKeys = results[1];
+      addRow();
+    }).catch(function(e) {
+      document.getElementById('rows').innerHTML =
+        '<p style="color:red;padding:10px">Failed to load: ' + e.message + '</p>';
+    });
+
+    document.getElementById('addBtn').addEventListener('click', addRow);
+
+    function addRow() {
+      if (providerList.length === 0) return;
+      var id = rowCount++;
+      var row = document.createElement('div');
+      row.className = 'test-row';
+      row.id = 'row-' + id;
+
+      var opts = '<option value="">Select provider...</option>';
+      for (var i = 0; i < providerList.length; i++) {
+        var p = providerList[i];
+        var dot = savedKeys[p.key] ? '<span class="saved-dot"></span>' : '';
+        opts += '<option value="' + p.key + '">' + p.name + (savedKeys[p.key] ? ' ★' : '') + '</option>';
+      }
+
+      row.innerHTML =
+        '<div class="ctrl"><label>Provider</label><select id="prov-' + id + '">' + opts + '</select></div>' +
+        '<div class="ctrl"><label>Model</label><div class="combo-wrap"><input type="text" class="combo-input" id="model-' + id + '" placeholder="Select provider first..." autocomplete="off"><button class="combo-arrow" id="arrow-' + id + '" tabindex="-1">▾</button><div class="dropdown" id="drop-' + id + '"></div></div></div>' +
+        '<div class="ctrl"><label>API Key</label><input type="password" id="key-' + id + '" placeholder="Paste API key..."></div>' +
+        '<div class="ctrl"><label>Message</label><input type="text" id="msg-' + id + '" placeholder="Say OK" value="Say OK"></div>' +
+        '<button class="btn-test" id="test-' + id + '">Test</button>' +
+        '<button class="btn-del" id="del-' + id + '">×</button>';
+
+      var resultWrap = document.createElement('div');
+      resultWrap.className = 'result-wrap';
+      resultWrap.id = 'res-' + id;
+      resultWrap.innerHTML = '<div class="result-status" id="res-status-' + id + '"></div><div class="result-response" id="res-response-' + id + '"></div>';
+      row.appendChild(resultWrap);
+
+      document.getElementById('rows').appendChild(row);
+      bindRow(id);
+    }
+
+    function bindRow(id) {
+      var provSel = document.getElementById('prov-' + id);
+      var modelIn = document.getElementById('model-' + id);
+      var arrow   = document.getElementById('arrow-' + id);
+      var drop    = document.getElementById('drop-' + id);
+      var keyIn   = document.getElementById('key-' + id);
+      var allModels = [];
+
+      function openDrop(list) {
+        if (!list || list.length === 0) return;
+        var html = '';
+        var q = modelIn.value.toLowerCase();
+        var filtered = q ? list.filter(function(m) { return m.toLowerCase().indexOf(q) >= 0; }) : list;
+        for (var i = 0; i < filtered.length; i++) {
+          html += '<div class="drop-item" data-model="' + filtered[i] + '">' + filtered[i] + '</div>';
+        }
+        drop.innerHTML = html || '<div class="drop-item dim">No matches</div>';
+        drop.classList.add('open');
+      }
+
+      function closeDrop() { drop.classList.remove('open'); }
+
+      function fetchAndShowModels(provKey, apiKey) {
+        drop.innerHTML = '<div class="drop-item dim">Loading models...</div>';
+        drop.classList.add('open');
+        var body = { provider: provKey };
+        if (apiKey) body.apiKey = apiKey;
+        fetch('/api/fetch-models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (data.success && data.models.length > 0) {
+              allModels = data.models;
+              openDrop(allModels);
+            } else {
+              drop.innerHTML = '<div class="drop-item dim">No models found</div>';
+              setTimeout(closeDrop, 1500);
+            }
+          }).catch(function() {
+            drop.innerHTML = '<div class="drop-item dim">Error fetching models</div>';
+            setTimeout(closeDrop, 1500);
+          });
+      }
+
+      provSel.addEventListener('change', function() {
+        var key = provSel.value;
+        if (!key) return;
+        modelIn.value = defaults[key] || '';
+        allModels = [];
+        closeDrop();
+        // auto-fetch: use typed key, else rely on server's .env fallback
+        var apiKey = keyIn.value.trim();
+        fetchAndShowModels(key, apiKey);
+      });
+
+      keyIn.addEventListener('change', function() {
+        var key = provSel.value;
+        var apiKey = keyIn.value.trim();
+        if (key && apiKey && allModels.length === 0) {
+          fetchAndShowModels(key, apiKey);
+        }
+      });
+
+      arrow.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (drop.classList.contains('open')) { closeDrop(); return; }
+        if (allModels.length > 0) { openDrop(allModels); return; }
+        var key = provSel.value;
+        if (!key) { drop.innerHTML = '<div class="drop-item dim">Select a provider first</div>'; drop.classList.add('open'); return; }
+        fetchAndShowModels(key, keyIn.value.trim());
+      });
+
+      modelIn.addEventListener('input', function() {
+        if (allModels.length > 0) openDrop(allModels);
+      });
+
+      modelIn.addEventListener('focus', function() {
+        if (allModels.length > 0) openDrop(allModels);
+      });
+
+      drop.addEventListener('click', function(e) {
+        var item = e.target.closest('.drop-item');
+        if (item && item.dataset.model) {
+          modelIn.value = item.dataset.model;
+          closeDrop();
+        }
+      });
+
+      document.addEventListener('click', function(e) {
+        if (!drop.contains(e.target) && e.target !== modelIn && e.target !== arrow) closeDrop();
+      });
+
+      document.getElementById('msg-' + id).addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') runTest(id);
+      });
+
+      document.getElementById('test-' + id).addEventListener('click', function() { runTest(id); });
+      document.getElementById('del-' + id).addEventListener('click', function() {
+        var row = document.getElementById('row-' + id);
+        if (row) row.remove();
+      });
+
+      // If provider has a saved key, pre-select nothing but show a hint in placeholder
+      if (keyIn) {
+        // placeholder updated dynamically when provider is selected
+        provSel.addEventListener('change', function() {
+          var key = provSel.value;
+          keyIn.placeholder = (key && savedKeys[key]) ? '(saved — paste to override)' : 'Paste API key...';
+        });
+      }
+    }
+
+    function runTest(id) {
+      var provider = document.getElementById('prov-' + id).value;
+      var model    = document.getElementById('model-' + id).value.trim();
+      var apiKey   = document.getElementById('key-' + id).value.trim();
+      var message  = document.getElementById('msg-' + id).value.trim();
+      var resWrap  = document.getElementById('res-' + id);
+      var resStat  = document.getElementById('res-status-' + id);
+      var resResp  = document.getElementById('res-response-' + id);
+      var btn      = document.getElementById('test-' + id);
+
+      if (!provider || !model) {
+        resWrap.className = 'result-wrap show err';
+        resStat.textContent = 'Select a provider and model first';
+        resResp.textContent = '';
+        return;
+      }
+      // apiKey can be empty if saved — backend will use .env
+      if (!apiKey && !savedKeys[provider]) {
+        resWrap.className = 'result-wrap show err';
+        resStat.textContent = 'API key required';
+        resResp.textContent = '';
+        return;
+      }
+
+      resWrap.className = 'result-wrap show loading';
+      resStat.textContent = 'Testing ' + provider + '…';
+      resResp.textContent = '';
+      btn.disabled = true;
+
+      var body = { provider: provider, model: model, message: message };
+      if (apiKey) body.apiKey = apiKey;
+
+      fetch('/api/test-provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.success) {
+            resWrap.className = 'result-wrap show ok';
+            resStat.textContent = '✓ ' + data.provider + '   ' + data.responseTime + ' ms  — saving key…';
+            resResp.textContent = data.responseText || '(no response text)';
+            if (apiKey) saveKey(provider, apiKey, resStat, data);
+            else { resStat.textContent = '✓ ' + data.provider + '   ' + data.responseTime + ' ms'; }
+          } else {
+            resWrap.className = 'result-wrap show err';
+            resStat.textContent = '✗ ' + data.provider + '  HTTP ' + data.status;
+            resResp.textContent = data.details || '';
+          }
+        })
+        .catch(function(e) {
+          resWrap.className = 'result-wrap show err';
+          resStat.textContent = 'Network error';
+          resResp.textContent = e.message;
+        })
+        .finally(function() { btn.disabled = false; });
+    }
+
+    function saveKey(provider, apiKey, statusEl, testData) {
+      fetch('/api/save-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: provider, apiKey: apiKey })
+      }).then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.success) {
+            savedKeys[provider] = true;
+            statusEl.textContent = '✓ ' + testData.provider + '   ' + testData.responseTime + ' ms  — saved as ' + data.envVar;
+          } else {
+            statusEl.textContent = '✓ ' + testData.provider + '   ' + testData.responseTime + ' ms  — (key not saved: ' + data.error + ')';
+          }
+        });
+    }
+  </script>
+</body>
+</html>

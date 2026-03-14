@@ -26,8 +26,13 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+// Read third-party API keys from .env at module load time.
+// These are injected into containers as env vars (not via the credential proxy).
+const thirdPartyEnv = readEnvFile(['FAL_KEY']);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -83,6 +88,17 @@ function buildVolumeMounts(
       mounts.push({
         hostPath: '/dev/null',
         containerPath: '/workspace/project/.env',
+        readonly: true,
+      });
+    }
+
+    // Shadow the messages database so the main agent cannot read messages from
+    // other groups. Each group only sees its own messages via the formatted prompt.
+    const dbFile = path.join(projectRoot, 'store', 'messages.db');
+    if (fs.existsSync(dbFile)) {
+      mounts.push({
+        hostPath: '/dev/null',
+        containerPath: '/workspace/project/store/messages.db',
         readonly: true,
       });
     }
@@ -192,6 +208,11 @@ function buildVolumeMounts(
   );
   if (!fs.existsSync(groupAgentRunnerDir) && fs.existsSync(agentRunnerSrc)) {
     fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  } else if (fs.existsSync(agentRunnerSrc) && fs.existsSync(groupAgentRunnerDir)) {
+    // Always overwrite framework file so MCP server updates propagate
+    const ipcSrc = path.join(agentRunnerSrc, 'ipc-mcp-stdio.ts');
+    const ipcDst = path.join(groupAgentRunnerDir, 'ipc-mcp-stdio.ts');
+    if (fs.existsSync(ipcSrc)) fs.copyFileSync(ipcSrc, ipcDst);
   }
   mounts.push({
     hostPath: groupAgentRunnerDir,
@@ -236,6 +257,12 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Inject fal.ai API key if configured
+  const falKey = process.env.FAL_KEY || thirdPartyEnv.FAL_KEY;
+  if (falKey) {
+    args.push('-e', `FAL_KEY=${falKey}`);
   }
 
   // Runtime-specific args for host gateway resolution

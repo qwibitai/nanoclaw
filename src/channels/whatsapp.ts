@@ -6,9 +6,11 @@ import makeWASocket, {
   Browsers,
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   normalizeMessageContent,
+  proto,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
 
@@ -17,6 +19,7 @@ import {
   ASSISTANT_NAME,
   STORE_DIR,
 } from '../config.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { getLastGroupSync, setLastGroupSync, updateChatName } from '../db.js';
 import { logger } from '../logger.js';
 import {
@@ -28,6 +31,14 @@ import {
 import { registerChannel, ChannelOpts } from './registry.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function extractMessageText(msg: proto.IMessage | null | undefined): string {
+  if (!msg) return '';
+  const n = normalizeMessageContent(msg);
+  if (!n) return '';
+  return n.conversation || n.extendedTextMessage?.text ||
+         n.imageMessage?.caption || n.videoMessage?.caption || '';
+}
 
 export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
@@ -203,15 +214,37 @@ export class WhatsAppChannel implements Channel {
           // Only deliver full message for registered groups
           const groups = this.opts.registeredGroups();
           if (groups[chatJid]) {
-            const content =
+            const textContent =
               normalized.conversation ||
               normalized.extendedTextMessage?.text ||
               normalized.imageMessage?.caption ||
               normalized.videoMessage?.caption ||
               '';
 
+            // Download image attachment and save to group folder so the agent can edit it
+            let attachmentRef = '';
+            if (normalized.imageMessage) {
+              const group = groups[chatJid];
+              try {
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                if (buffer instanceof Buffer) {
+                  const groupDir = resolveGroupFolderPath(group.folder);
+                  const attachDir = path.join(groupDir, 'attachments');
+                  fs.mkdirSync(attachDir, { recursive: true });
+                  const filename = `${Date.now()}.jpg`;
+                  fs.writeFileSync(path.join(attachDir, filename), buffer);
+                  attachmentRef = `\n[Image saved: /workspace/group/attachments/${filename}]`;
+                  logger.info({ chatJid, filename }, 'Image attachment saved');
+                }
+              } catch (err) {
+                logger.warn({ err, chatJid }, 'Failed to download image attachment');
+              }
+            }
+
+            const content = textContent + attachmentRef;
+
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
-            if (!content) continue;
+            if (!content.trim()) continue;
 
             const sender = msg.key.participant || msg.key.remoteJid || '';
             const senderName = msg.pushName || sender.split('@')[0];
@@ -225,6 +258,22 @@ export class WhatsAppChannel implements Channel {
               ? fromMe
               : content.startsWith(`${ASSISTANT_NAME}:`);
 
+            const contextInfo =
+              normalized.extendedTextMessage?.contextInfo ||
+              normalized.imageMessage?.contextInfo ||
+              normalized.videoMessage?.contextInfo;
+
+            let quoted_content: string | undefined;
+            let quoted_sender_name: string | undefined;
+
+            if (contextInfo?.quotedMessage) {
+              quoted_content = extractMessageText(contextInfo.quotedMessage) || undefined;
+              if (quoted_content) {
+                const jid = contextInfo.participant || '';
+                quoted_sender_name = jid.split('@')[0] || undefined;
+              }
+            }
+
             this.opts.onMessage(chatJid, {
               id: msg.key.id || '',
               chat_jid: chatJid,
@@ -234,6 +283,8 @@ export class WhatsAppChannel implements Channel {
               timestamp,
               is_from_me: fromMe,
               is_bot_message: isBotMessage,
+              quoted_content,
+              quoted_sender_name,
             });
           }
         } catch (err) {
@@ -274,6 +325,19 @@ export class WhatsAppChannel implements Channel {
         'Failed to send, message queued',
       );
     }
+  }
+
+  async sendImage(jid: string, imageUrl: string, caption?: string): Promise<void> {
+    if (!this.sock) throw new Error('WhatsApp not connected');
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download image (${response.status}): ${imageUrl}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await this.sock.sendMessage(jid, {
+      image: buffer,
+      caption: caption ?? '',
+    });
   }
 
   isConnected(): boolean {

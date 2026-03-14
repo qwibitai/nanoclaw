@@ -47,9 +47,16 @@ interface SessionsIndex {
   entries: SessionEntry[];
 }
 
+type ImageContentBlock = {
+  type: 'image';
+  source: { type: 'base64'; media_type: string; data: string };
+};
+type TextContentBlock = { type: 'text'; text: string };
+type ContentBlock = TextContentBlock | ImageContentBlock;
+
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
@@ -67,10 +74,10 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(content: string | ContentBlock[]): void {
     this.queue.push({
       type: 'user',
-      message: { role: 'user', content: text },
+      message: { role: 'user', content },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -323,6 +330,43 @@ function waitForIpcMessage(): Promise<string | null> {
   });
 }
 
+// Max image size to inline as base64 (5 MB). Larger images are left as path references only.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Detect [Image saved: /workspace/group/attachments/...] references in the prompt.
+ * Returns a content block array with the full text plus one image block per attachment,
+ * or the original string if no images are found or files can't be read.
+ */
+function buildContentBlocks(prompt: string): string | ContentBlock[] {
+  const imagePattern = /\[Image saved: (\/workspace\/group\/attachments\/[^\]]+)\]/g;
+  const imagePaths: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = imagePattern.exec(prompt)) !== null) {
+    imagePaths.push(match[1]);
+  }
+  if (imagePaths.length === 0) return prompt;
+
+  const blocks: ContentBlock[] = [{ type: 'text', text: prompt }];
+  for (const imagePath of imagePaths) {
+    try {
+      const stat = fs.statSync(imagePath);
+      if (stat.size > MAX_IMAGE_BYTES) {
+        log(`Skipping oversized image (${stat.size} bytes): ${imagePath}`);
+        continue;
+      }
+      const data = fs.readFileSync(imagePath).toString('base64');
+      const ext = imagePath.split('.').pop()?.toLowerCase() ?? 'jpg';
+      const media_type = ext === 'png' ? 'image/png' : ext === 'gif' ? 'image/gif' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+      blocks.push({ type: 'image', source: { type: 'base64', media_type, data } });
+      log(`Attached image: ${imagePath} (${stat.size} bytes)`);
+    } catch (err) {
+      log(`Failed to read image ${imagePath}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return blocks.length > 1 ? blocks : prompt;
+}
+
 /**
  * Run a single query and stream results via writeOutput.
  * Uses MessageStream (AsyncIterable) to keep isSingleUserTurn=false,
@@ -338,7 +382,7 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+  stream.push(buildContentBlocks(prompt));
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;
@@ -396,6 +440,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      model: 'claude-haiku-4-5-20251001',
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,

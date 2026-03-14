@@ -16,7 +16,18 @@ export function formatMessages(
 ): string {
   const lines = messages.map((m) => {
     const displayTime = formatLocalTime(m.timestamp, timezone);
-    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${escapeXml(m.content)}</message>`;
+
+    let body: string;
+    if (m.quoted_content) {
+      const qSender = escapeXml(m.quoted_sender_name || '');
+      const qText = escapeXml(m.quoted_content);
+      const reply = escapeXml(m.content);
+      body = `\n  <quoted sender="${qSender}">${qText}</quoted>\n  ${reply}\n`;
+    } else {
+      body = escapeXml(m.content);
+    }
+
+    return `<message sender="${escapeXml(m.sender_name)}" time="${escapeXml(displayTime)}">${body}</message>`;
   });
 
   const header = `<context timezone="${escapeXml(timezone)}" />\n`;

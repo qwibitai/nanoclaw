@@ -51,6 +51,8 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
+  quoted_content?: string;
+  quoted_sender_name?: string;
 }
 
 export interface ScheduledTask {
@@ -90,6 +92,8 @@ export interface Channel {
   setTyping?(jid: string, isTyping: boolean): Promise<void>;
   // Optional: sync group/chat names from the platform.
   syncGroups?(force: boolean): Promise<void>;
+  // Optional: send an image by URL with optional caption.
+  sendImage?(jid: string, imageUrl: string, caption?: string): Promise<void>;
 }
 
 // Callback type that channels use to deliver inbound messages
