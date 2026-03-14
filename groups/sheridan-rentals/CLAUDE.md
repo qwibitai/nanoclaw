@@ -277,7 +277,8 @@ When the task fires:
 2. Read `brand-voice.md`, `content-calendar.md` (check log to avoid topic repeats within 2 weeks), `viral-patterns.md`, and `asset-catalog.md`
 3. Generate 5 posts following the content calendar themes, using viral pattern hook types (vary across the week)
 4. **Select a photo** for each post from `asset-catalog.md` using the theme-to-photo mapping. Record the Drive file ID alongside each post.
-5. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo, and place-id from `houston-places.md`
+   - **If asset-catalog.md has no photos yet**: Note "NO PHOTO" in the Drive File ID column of `pending-posts.md` and generate the post as text-only. When photos become available, update `asset-catalog.md` and future posts will automatically include them.
+5. Write all posts to `pending-posts.md` with status "awaiting-approval" — each entry must include: message text, Drive file ID for the photo (or "NO PHOTO"), and place-id from `houston-places.md`
 6. Send WhatsApp preview of all 5 posts for owner review
 
 ### Handling Approval Messages
@@ -295,8 +296,13 @@ When the owner requests changes (e.g., "change Wednesday to..." or "I don't like
 A scheduled task (`sheridan-fb-post-daily`) reads `pending-posts.md` and posts today's approved content:
 1. Find today's entry by date
 2. If approved:
-   a. Download the photo from Drive: `drive.ts download --file-id <id> --output /tmp/fb-photo.jpg`
-   b. Post with photo and location: `post-facebook.ts --message "..." --source /tmp/fb-photo.jpg --place-id <tomball_place_id>`
+   a. If Drive file ID is present (not "NO PHOTO"):
+      - Download the photo from Drive: `drive.ts download --file-id <id> --output /tmp/fb-photo.jpg`
+      - Post with photo and location: `post-facebook.ts --message "..." --source /tmp/fb-photo.jpg --place-id <tomball_place_id>`
+   b. If Drive file ID is "NO PHOTO" (no photos available in asset-catalog.md):
+      - Post text-only with geo-tag: `post-facebook.ts --message "..." --place-id <tomball_place_id>`
+      - Do NOT pass `--source`. Text-only posts should follow the "40-80 chars + engagement hook" format from content-creation guidelines.
+      - The post still goes through the normal pending-posts.md approval workflow.
    c. Record the post_id in `pending-posts.md` and `content-calendar.md` log
 3. If not approved → skip and notify: "Skipping today's post — not yet approved"
 4. If already posted → skip silently
