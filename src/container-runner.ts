@@ -26,7 +26,6 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
-import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
@@ -234,14 +233,9 @@ function buildContainerArgs(
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
   }
 
-  // Pass Letta credentials if configured (agent-runner uses these for the Letta MCP server)
-  const lettaSecrets = readEnvFile(['LETTA_BASE_URL', 'LETTA_PASSWORD']);
-  if (lettaSecrets.LETTA_BASE_URL) {
-    args.push('-e', `LETTA_BASE_URL=${lettaSecrets.LETTA_BASE_URL}`);
-  }
-  if (lettaSecrets.LETTA_PASSWORD) {
-    args.push('-e', `LETTA_PASSWORD=${lettaSecrets.LETTA_PASSWORD}`);
-  }
+  // Pass QMD search endpoint URL if daemon is running
+  const qmdUrl = `http://${CONTAINER_HOST_GATEWAY}:8181/mcp`;
+  args.push('-e', `QMD_URL=${qmdUrl}`);
 
   // Runtime-specific args for host gateway resolution
   args.push(...hostGatewayArgs());

@@ -42,22 +42,17 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 
 You have two memory systems. Use both proactively.
 
-### Letta (structured long-term memory)
+### QMD (semantic search over your knowledge base)
 
-You have access to Letta via `mcp__letta__*` tools. Your Letta agent is "Claire Memory" (agent-911e27bc-53bc-498d-9ede-7bbcdb16decd).
+You have access to QMD via `mcp__qmd__*` tools. QMD indexes your Obsidian vault, group memory files, conversation archives, and research notes.
 
-At the START of every session:
-1. Use `mcp__letta__letta_memory_unified` to read your memory blocks (user_profile, research_context, active_projects, preferences)
-2. This gives you instant recall of who the user is, what they're working on, and how they like things
+Use QMD when you need to find information but don't know which file it's in:
+- `mcp__qmd__query` — hybrid semantic + keyword search (best quality)
+- `mcp__qmd__get` — retrieve a specific document by path or #docid
+- `mcp__qmd__multi_get` — batch retrieve by glob pattern
+- `mcp__qmd__status` — check index health and collection stats
 
-During conversations, update Letta memory when you learn:
-- User preferences, communication style, timezone
-- People — names, roles, relationships
-- Projects — what's active, deadlines, status
-- Decisions and their reasoning
-- Facts about the user or their work
-
-Use `mcp__letta__letta_memory_unified` with action "update_block" to update specific memory blocks. Keep blocks concise and current — replace outdated info rather than appending.
+For simple lookups where you know the file, use Read/Grep directly — they're faster.
 
 ### File-based memory (local per-group)
 

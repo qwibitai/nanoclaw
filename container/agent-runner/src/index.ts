@@ -408,7 +408,7 @@ async function runQuery(
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
         'mcp__nanoclaw__*',
-        'mcp__letta__*'
+        'mcp__qmd__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -424,14 +424,10 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        ...(process.env.LETTA_BASE_URL ? {
-          letta: {
-            command: 'letta-mcp-server',
-            args: [],
-            env: {
-              LETTA_BASE_URL: process.env.LETTA_BASE_URL,
-              LETTA_PASSWORD: process.env.LETTA_PASSWORD || '',
-            },
+        ...(process.env.QMD_URL ? {
+          qmd: {
+            type: 'http' as const,
+            url: process.env.QMD_URL,
           },
         } : {}),
       },
