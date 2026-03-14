@@ -417,3 +417,9 @@ export function generateAllowlistTemplate(): string {
 
   return JSON.stringify(template, null, 2);
 }
+
+/** @internal - for tests only. Clears cached allowlist so each test starts fresh. */
+export function _resetMountCacheForTests(): void {
+  cachedAllowlist = null;
+  allowlistLoadError = null;
+}
