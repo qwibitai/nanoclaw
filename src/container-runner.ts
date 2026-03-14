@@ -932,7 +932,8 @@ function buildVolumeMounts(
       // If settings file is corrupted, recreate it
       fs.writeFileSync(
         settingsFile,
-        JSON.stringify({ env: requiredEnv, ...requiredSettings }, null, 2) + '\n',
+        JSON.stringify({ env: requiredEnv, ...requiredSettings }, null, 2) +
+          '\n',
       );
     }
   }
