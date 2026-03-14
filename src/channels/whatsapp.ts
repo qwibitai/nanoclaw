@@ -260,9 +260,7 @@ export class WhatsAppChannel implements Channel {
                 const groupDir = path.join(GROUPS_DIR, groups[chatJid].folder);
                 const attachDir = path.join(groupDir, 'attachments');
                 fs.mkdirSync(attachDir, { recursive: true });
-                const rawName =
-                  docMsg.fileName ||
-                  `doc-${Date.now()}.pdf`;
+                const rawName = docMsg.fileName || `doc-${Date.now()}.pdf`;
                 // Sanitize filename: keep only safe characters
                 const safeName = rawName
                   .replace(/[^a-zA-Z0-9._-]/g, '_')
