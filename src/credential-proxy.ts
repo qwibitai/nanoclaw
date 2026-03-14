@@ -16,6 +16,7 @@ import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { getFreshOAuthToken } from './oauth-token.js';
 
 export type AuthMode = 'api-key' | 'oauth';
 
@@ -45,10 +46,10 @@ export function startCredentialProxy(
   const makeRequest = isHttps ? httpsRequest : httpRequest;
 
   return new Promise((resolve, reject) => {
-    const server = createServer((req, res) => {
+    const server = createServer(async (req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
+      req.on('end', async () => {
         const body = Buffer.concat(chunks);
         const headers: Record<string, string | number | string[] | undefined> =
           {
@@ -67,14 +68,13 @@ export function startCredentialProxy(
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: replace placeholder Bearer token with the real one
-          // only when the container actually sends an Authorization header
-          // (exchange request + auth probes). Post-exchange requests use
-          // x-api-key only, so they pass through without token injection.
+          // OAuth mode: replace placeholder Bearer token with fresh token
+          // Fetch from credentials file on each request (auto-refreshes if expired)
           if (headers['authorization']) {
+            const freshToken = await getFreshOAuthToken();
             delete headers['authorization'];
-            if (oauthToken) {
-              headers['authorization'] = `Bearer ${oauthToken}`;
+            if (freshToken) {
+              headers['authorization'] = `Bearer ${freshToken}`;
             }
           }
         }
