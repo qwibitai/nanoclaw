@@ -22,7 +22,7 @@ export type {
   DispatchRunStatus,
   ErrorOccurredEvent,
   EventsQuery,
-  HTTPValidationError,
+  ExecuteRequest,
   HealthResponse,
   IntegrityRepairs,
   Outcome,

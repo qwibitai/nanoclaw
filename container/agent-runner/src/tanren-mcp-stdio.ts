@@ -104,6 +104,7 @@ async function main() {
       environment_profile: z.string().optional().describe("VM environment profile"),
       context: z.string().optional().describe("Additional context for the agent"),
       gate_cmd: z.string().optional().describe("Gate command to run after execution"),
+      issue: z.number().optional().describe("GitHub issue number to link to this dispatch"),
     },
     async (args) => {
       try {
@@ -178,18 +179,28 @@ async function main() {
 
   server.tool(
     "tanren_execute",
-    "Execute the agent phase on a provisioned environment.",
+    "Execute the agent phase on a provisioned environment. Requires project, spec_path, and phase.",
     {
       env_id: z.string().describe("Environment ID from provision"),
+      project: z.string().describe("GitHub project (owner/repo)"),
+      spec_path: z.string().describe("Path to spec file in the repo"),
+      phase: z.string().describe("Phase to execute (e.g. 'do-task', 'audit')"),
+      cli: z.string().optional().describe("CLI tool to use (e.g. 'claude', 'codex')"),
+      model: z.string().optional().describe("Model override"),
+      timeout: z.number().optional().describe("Timeout in seconds"),
+      context: z.string().optional().describe("Additional context for the agent"),
+      gate_cmd: z.string().optional().describe("Gate command to run after execution"),
     },
     async (args) => {
       try {
+        const { env_id, ...body } = args;
         return ok(
           await tanrenFetch(
             apiUrl,
             apiKey,
             "POST",
-            `/api/v1/run/${encodeURIComponent(args.env_id)}/execute`,
+            `/api/v1/run/${encodeURIComponent(env_id)}/execute`,
+            body,
           ),
         );
       } catch (e) {

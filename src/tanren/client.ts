@@ -14,6 +14,7 @@ import type {
   DispatchDetail,
   DispatchRequest,
   EventsQuery,
+  ExecuteRequest,
   HealthResponse,
   PaginatedEvents,
   ProvisionRequest,
@@ -104,8 +105,8 @@ export class TanrenClient {
     return this.request("POST", "/api/v1/run/provision", req);
   }
 
-  async runExecute(envId: string): Promise<RunExecuteAccepted> {
-    return this.request("POST", `/api/v1/run/${encodeURIComponent(envId)}/execute`);
+  async runExecute(envId: string, req: ExecuteRequest): Promise<RunExecuteAccepted> {
+    return this.request("POST", `/api/v1/run/${encodeURIComponent(envId)}/execute`, req);
   }
 
   async runTeardown(envId: string): Promise<RunTeardownAccepted> {

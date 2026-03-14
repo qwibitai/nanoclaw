@@ -180,10 +180,20 @@ describe("TanrenClient — happy path", () => {
   it("runExecute()", async () => {
     const body = { env_id: "env-1", dispatch_id: "d-1", status: "executing" };
     const f = mockFetch(200, body);
-    const result = await makeClient(f).runExecute("env-1");
+    const executeReq = {
+      project: "owner/repo",
+      spec_path: "specs/s1/spec.md",
+      phase: "do-task" as const,
+    };
+    const result = await makeClient(f).runExecute("env-1", executeReq);
     expect(result).toEqual(body);
     expect(f.mock.calls[0][0]).toBe(`${BASE_URL}/api/v1/run/env-1/execute`);
     expect(f.mock.calls[0][1]?.method).toBe("POST");
+    expect(JSON.parse(f.mock.calls[0][1]?.body as string)).toMatchObject({
+      project: "owner/repo",
+      spec_path: "specs/s1/spec.md",
+      phase: "do-task",
+    });
   });
 
   it("runTeardown()", async () => {

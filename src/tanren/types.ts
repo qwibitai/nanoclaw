@@ -43,6 +43,18 @@ export interface DispatchRequest {
   environment_profile?: string;
   context?: string | null;
   gate_cmd?: string | null;
+  issue?: number;
+}
+
+export interface ExecuteRequest {
+  project: string;
+  spec_path: string;
+  phase: Phase;
+  cli?: Cli;
+  model?: string | null;
+  timeout?: number;
+  context?: string | null;
+  gate_cmd?: string | null;
 }
 
 export interface ProvisionRequest {
@@ -172,6 +184,8 @@ export interface RunTeardownAccepted {
 export interface RunStatus {
   env_id: string;
   status: RunEnvironmentStatus;
+  vm_id?: string | null;
+  host?: string | null;
   phase?: Phase | null;
   outcome?: Outcome | null;
   started_at?: string | null;
@@ -324,8 +338,4 @@ export interface ValidationError {
   type: string;
   input?: unknown;
   ctx?: Record<string, unknown>;
-}
-
-export interface HTTPValidationError {
-  detail?: ValidationError[];
 }
