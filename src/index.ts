@@ -507,7 +507,11 @@ async function main(): Promise<void> {
           return;
         }
       }
-      storeMessage(msg);
+      try {
+        storeMessage(msg);
+      } catch (err) {
+        logger.error({ err, chatJid: msg.chat_jid }, 'Failed to store message');
+      }
     },
     onChatMetadata: (
       chatJid: string,
