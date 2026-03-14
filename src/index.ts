@@ -2,13 +2,17 @@ import fs from 'fs';
 import path from 'path';
 
 import {
+  ALWAYS_ON_CONTAINERS,
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  GROUPS_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  TELEGRAM_BOT_POOL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { initBotPool } from './channels/telegram.js';
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -28,6 +32,7 @@ import {
 } from './container-runtime.js';
 import {
   getAllChats,
+  deleteSession,
   getAllRegisteredGroups,
   getAllSessions,
   getAllTasks,
@@ -43,7 +48,7 @@ import {
   storeMessage,
 } from './db.js';
 import { GroupQueue } from './group-queue.js';
-import { resolveGroupFolderPath } from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { startIpcWatcher } from './ipc.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
@@ -58,6 +63,11 @@ import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+function buildGroupTriggerPattern(group: RegisteredGroup): RegExp {
+  const escaped = group.trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}\\b`, 'i');
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
@@ -115,6 +125,72 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
 }
 
 /**
+ * Auto-register group folders that have a group.json with a JID mapping.
+ * Called at startup after loadState() so that groups/ directories become
+ * active registered_groups entries without needing the main agent to
+ * register them manually.
+ */
+function autoRegisterGroupFolders(): void {
+  let entries: string[];
+  try {
+    entries = fs
+      .readdirSync(GROUPS_DIR, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    logger.warn('Could not read groups directory for auto-registration');
+    return;
+  }
+
+  const existingJids = new Set(Object.keys(registeredGroups));
+
+  for (const folder of entries) {
+    if (!isValidGroupFolder(folder)) continue;
+
+    const configPath = path.join(GROUPS_DIR, folder, 'group.json');
+    if (!fs.existsSync(configPath)) {
+      // Only warn if the folder has a CLAUDE.md (it's meant to be a real group)
+      if (fs.existsSync(path.join(GROUPS_DIR, folder, 'CLAUDE.md'))) {
+        logger.debug(
+          { folder },
+          'Group folder has CLAUDE.md but no group.json — skipping auto-registration',
+        );
+      }
+      continue;
+    }
+
+    let config: { jid?: string; requiresTrigger?: boolean; isMain?: boolean };
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    } catch (err) {
+      logger.warn({ folder, err }, 'Invalid group.json, skipping');
+      continue;
+    }
+
+    if (!config.jid) {
+      logger.warn({ folder }, 'group.json missing jid field, skipping');
+      continue;
+    }
+
+    if (existingJids.has(config.jid)) continue;
+
+    registerGroup(config.jid, {
+      name: folder,
+      folder,
+      trigger: `@${ASSISTANT_NAME}`,
+      added_at: new Date().toISOString(),
+      requiresTrigger: config.requiresTrigger,
+      isMain: config.isMain,
+    });
+
+    logger.info(
+      { folder, jid: config.jid },
+      'Auto-registered group from group.json',
+    );
+  }
+}
+
+/**
  * Get available groups list for the agent.
  * Returns groups ordered by most recent activity.
  */
@@ -164,15 +240,21 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   if (missedMessages.length === 0) return true;
 
-  // For non-main groups, check if trigger is required and present
+  // Trigger gating: non-main groups with requiresTrigger !== false must have
+  // at least one message matching the trigger pattern before processing.
+  // Messages accumulate and are included as context when a trigger arrives.
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
-        (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+    const triggerPattern = buildGroupTriggerPattern(group);
+    const hasTrigger = missedMessages.some((m) =>
+      triggerPattern.test(m.content.trim()),
     );
-    if (!hasTrigger) return true;
+    if (!hasTrigger) {
+      logger.debug(
+        { chatJid, messageCount: missedMessages.length },
+        'No trigger in pending messages, skipping (will accumulate)',
+      );
+      return true;
+    }
   }
 
   const prompt = formatMessages(missedMessages, TIMEZONE);
@@ -189,10 +271,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  // Track idle timer for closing stdin when agent is idle
+  // Track idle timer for closing stdin when agent is idle.
+  // Persistent (always-on) containers skip the idle timer entirely — they stay
+  // alive until explicitly shut down.
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   const resetIdleTimer = () => {
+    if (ALWAYS_ON_CONTAINERS) return;
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       logger.debug(
@@ -297,7 +382,7 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && output.status !== 'error') {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -315,6 +400,7 @@ async function runAgent(
         chatJid,
         isMain,
         assistantName: ASSISTANT_NAME,
+        persistent: ALWAYS_ON_CONTAINERS,
       },
       (proc, containerName) =>
         queue.registerProcess(chatJid, proc, containerName, group.folder),
@@ -327,6 +413,10 @@ async function runAgent(
     }
 
     if (output.status === 'error') {
+      // Clear stale session so the next attempt starts fresh rather than
+      // retrying a resume that will fail if the transcript wasn't written.
+      delete sessions[group.folder];
+      deleteSession(group.folder);
       logger.error(
         { group: group.name, error: output.error },
         'Container agent error',
@@ -388,18 +478,13 @@ async function startMessageLoop(): Promise<void> {
           }
 
           const isMainGroup = group.isMain === true;
-          const needsTrigger = !isMainGroup && group.requiresTrigger !== false;
 
-          // For non-main groups, only act on trigger messages.
-          // Non-trigger messages accumulate in DB and get pulled as
-          // context when a trigger eventually arrives.
-          if (needsTrigger) {
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
-                (m.is_from_me ||
-                  isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
+          // Trigger gating: skip non-main groups that require a trigger
+          // when no message in the batch matches the pattern.
+          if (!isMainGroup && group.requiresTrigger !== false) {
+            const triggerPattern = buildGroupTriggerPattern(group);
+            const hasTrigger = groupMessages.some((m) =>
+              triggerPattern.test(m.content.trim()),
             );
             if (!hasTrigger) continue;
           }
@@ -470,6 +555,7 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+  autoRegisterGroupFolders();
 
   // Start credential proxy (containers route API calls through this)
   const proxyServer = await startCredentialProxy(
@@ -540,6 +626,10 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (TELEGRAM_BOT_POOL.length > 0) {
+    await initBotPool(TELEGRAM_BOT_POOL);
+  }
+
   // Start subsystems (independently of connection handler)
   startSchedulerLoop({
     registeredGroups: () => registeredGroups,
@@ -578,6 +668,20 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+
+  // Start always-on containers for all registered groups so agents are
+  // immediately available when messages arrive.
+  if (ALWAYS_ON_CONTAINERS) {
+    const groupJids = Object.keys(registeredGroups);
+    if (groupJids.length > 0) {
+      logger.info(
+        { groupCount: groupJids.length },
+        'Starting persistent containers for all registered groups',
+      );
+      queue.startPersistentContainers(groupJids);
+    }
+  }
+
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
