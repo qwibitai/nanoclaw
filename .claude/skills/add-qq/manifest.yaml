@@ -1,0 +1,21 @@
+skill: qqbot
+version: 1.0.0
+description: "QQ Bot API integration via WebSocket"
+core_version: 0.1.0
+adds:
+  - src/channels/qqbot.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+  - package.json
+structured:
+  npm_dependencies:
+    ws: "^8.18.0"
+  npm_dev_dependencies:
+    "@types/ws": "^8.5.0"
+  env_additions:
+    - QQBOT_APP_ID
+    - QQBOT_CLIENT_SECRET
+conflicts: []
+depends: []
+test: "npm run build"
