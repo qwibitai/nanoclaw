@@ -85,3 +85,96 @@ As Gentech (lead):
 - Send your own messages only to synthesize, comment, or direct the team
 - Wrap internal coordination in `<internal>` tags
 - Focus on high-level coordination and final synthesis
+
+---
+
+## Admin Context
+
+This is the *main channel*, which has elevated privileges.
+
+## Container Mounts
+
+Main has read-only access to the project and read-write access to its group folder:
+
+| Container Path | Host Path | Access |
+|----------------|-----------|--------|
+| `/workspace/project` | Project root | read-only |
+| `/workspace/group` | `groups/gentech_agency/` | read-write |
+
+Key paths inside the container:
+- `/workspace/project/store/messages.db` - SQLite database
+- `/workspace/project/store/messages.db` (registered_groups table) - Group config
+- `/workspace/project/groups/` - All group folders
+
+---
+
+## Managing Groups
+
+### Finding Available Groups
+
+Available groups are provided in `/workspace/ipc/available_groups.json`. Groups are ordered by most recent activity.
+
+If a group isn't in the list, request a fresh sync:
+
+```bash
+echo '{"type": "refresh_groups"}' > /workspace/ipc/tasks/refresh_$(date +%s).json
+```
+
+Then re-read `available_groups.json`.
+
+*Fallback*: Query the SQLite database directly:
+
+```bash
+sqlite3 /workspace/project/store/messages.db "
+  SELECT jid, name, last_message_time
+  FROM chats
+  WHERE jid LIKE 'tg:%'
+  ORDER BY last_message_time DESC
+  LIMIT 10;
+"
+```
+
+### Registered Groups Config
+
+Groups are registered in the SQLite `registered_groups` table:
+
+Fields:
+- *Key*: The chat JID (e.g., `tg:-1001234567890`)
+- *name*: Display name for the group
+- *folder*: Channel-prefixed folder name under `groups/`
+- *trigger*: The trigger word
+- *requiresTrigger*: Whether trigger prefix is needed (default: `true`)
+- *isMain*: Whether this is the main control group
+- *added_at*: ISO timestamp when registered
+
+### Adding a Group
+
+1. Query the database to find the group's JID
+2. Use the `register_group` MCP tool with the JID, name, folder, and trigger
+3. Optionally include `containerConfig` for additional mounts
+4. The group folder is created automatically: `/workspace/project/groups/{folder-name}/`
+5. Optionally create an initial `CLAUDE.md` for the group
+
+Folder naming: `telegram_group-name` (lowercase, hyphens).
+
+### Removing a Group
+
+1. Read `/workspace/project/data/registered_groups.json`
+2. Remove the entry for that group
+3. Write the updated JSON back
+4. The group folder and its files remain (don't delete them)
+
+---
+
+## Global Memory
+
+You can read and write to `/workspace/project/groups/global/CLAUDE.md` for facts that should apply to all groups. Only update global memory when explicitly asked to "remember this globally" or similar.
+
+---
+
+## Scheduling for Other Groups
+
+When scheduling tasks for other groups, use the `target_group_jid` parameter with the group's JID:
+- `schedule_task(prompt: "...", schedule_type: "cron", schedule_value: "0 9 * * 1", target_group_jid: "tg:-1003872552815")`
+
+The task will run in that group's context with access to their files and memory.
