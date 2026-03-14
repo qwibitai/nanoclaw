@@ -202,6 +202,17 @@ This allows you to use:
 
 Note: The model must support the Anthropic API format for best compatibility.
 
+**Can I use AWS Bedrock?**
+
+Yes. NanoClaw natively supports AWS Bedrock. Instead of using an Anthropic API key, configure your Bedrock region and model in your `.env` file:
+
+```bash
+AWS_REGION=us-east-1
+AWS_BEDROCK_MODEL=anthropic.claude-3-5-sonnet-20241022-v2:0
+```
+
+NanoClaw's credential proxy will automatically translate Anthropic API requests to AWS SDK calls and securely load your AWS terminal credentials (e.g. from `~/.aws/credentials` or AWS SSO) without exposing them to the agent's container.
+
 **How do I debug issues?**
 
 Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach that underlies NanoClaw.

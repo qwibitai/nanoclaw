@@ -16,8 +16,9 @@ import { request as httpRequest, RequestOptions } from 'http';
 
 import { readEnvFile } from './env.js';
 import { logger } from './logger.js';
+import { handleBedrockRequest } from './bedrock.js';
 
-export type AuthMode = 'api-key' | 'oauth';
+export type AuthMode = 'api-key' | 'oauth' | 'bedrock';
 
 export interface ProxyConfig {
   authMode: AuthMode;
@@ -32,9 +33,13 @@ export function startCredentialProxy(
     'CLAUDE_CODE_OAUTH_TOKEN',
     'ANTHROPIC_AUTH_TOKEN',
     'ANTHROPIC_BASE_URL',
+    'AWS_REGION',
+    'AWS_BEDROCK_MODEL',
   ]);
 
-  const authMode: AuthMode = secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const authMode: AuthMode = secrets.AWS_REGION && secrets.AWS_BEDROCK_MODEL 
+    ? 'bedrock' 
+    : secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
   const oauthToken =
     secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
 
@@ -61,6 +66,18 @@ export function startCredentialProxy(
         delete headers['connection'];
         delete headers['keep-alive'];
         delete headers['transfer-encoding'];
+
+        if (authMode === 'bedrock') {
+          // Bedrock mode: Translate request and route via AWS SDK
+          handleBedrockRequest(
+            req,
+            res,
+            body,
+            secrets.AWS_REGION,
+            secrets.AWS_BEDROCK_MODEL
+          );
+          return;
+        }
 
         if (authMode === 'api-key') {
           // API key mode: inject x-api-key on every request
@@ -120,6 +137,8 @@ export function startCredentialProxy(
 
 /** Detect which auth mode the host is configured for. */
 export function detectAuthMode(): AuthMode {
-  const secrets = readEnvFile(['ANTHROPIC_API_KEY']);
-  return secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
+  const secrets = readEnvFile(['ANTHROPIC_API_KEY', 'AWS_REGION', 'AWS_BEDROCK_MODEL']);
+  return secrets.AWS_REGION && secrets.AWS_BEDROCK_MODEL 
+    ? 'bedrock' 
+    : secrets.ANTHROPIC_API_KEY ? 'api-key' : 'oauth';
 }

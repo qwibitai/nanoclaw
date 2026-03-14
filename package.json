@@ -19,6 +19,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
+    "@aws-sdk/credential-providers": "^3.1009.0",
     "better-sqlite3": "^11.8.1",
     "cron-parser": "^5.5.0",
     "pino": "^9.6.0",

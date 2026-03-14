@@ -103,6 +103,8 @@ export async function run(_args: string[]): Promise<void> {
     const envContent = fs.readFileSync(envFile, 'utf-8');
     if (/^(CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY)=/m.test(envContent)) {
       credentials = 'configured';
+    } else if (/^AWS_REGION=/m.test(envContent) && /^AWS_BEDROCK_MODEL=/m.test(envContent)) {
+      credentials = 'configured';
     }
   }
 
