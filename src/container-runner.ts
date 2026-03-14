@@ -840,10 +840,7 @@ async function cacheWorktreeUntrackedFiles(
  * Skips files that already exist (git-checked-out version wins).
  * Synchronous to match existing prepareThreadWorkspace patterns. Best-effort.
  */
-function restoreWorktreeCachedFiles(
-  wtPath: string,
-  groupFolder: string,
-): void {
+function restoreWorktreeCachedFiles(wtPath: string, groupFolder: string): void {
   const repoName = path.basename(wtPath);
   const cacheDir = path.join(WORKTREE_CACHE_DIR, groupFolder, repoName);
 
