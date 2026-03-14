@@ -58,12 +58,22 @@ export function getAnthropicApiKey(): string {
 /**
  * Returns HTTP auth headers for direct Anthropic API calls.
  * Supports both API key mode (ANTHROPIC_API_KEY → x-api-key) and
- * OAuth mode (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN → Authorization: Bearer).
+ * OAuth mode (CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN → exchange for temp API key).
+ *
+ * In OAuth mode, exchanges the OAuth token for a temporary API key via
+ * POST /api/oauth/claude_cli/create_api_key (same mechanism the credential proxy uses
+ * for containers). The temp key is cached with a 50-minute TTL.
+ *
  * Throws if neither credential is available in .env.
  */
 let cachedAuthHeaders: Record<string, string> | undefined;
-export function getAnthropicAuthHeaders(): Record<string, string> {
-  if (cachedAuthHeaders) return cachedAuthHeaders;
+let cachedAuthHeadersExpiry = 0;
+export async function getAnthropicAuthHeaders(): Promise<
+  Record<string, string>
+> {
+  if (cachedAuthHeaders && Date.now() < cachedAuthHeadersExpiry) {
+    return cachedAuthHeaders;
+  }
   const secrets = readEnvFile([
     'ANTHROPIC_API_KEY',
     'CLAUDE_CODE_OAUTH_TOKEN',
@@ -71,11 +81,26 @@ export function getAnthropicAuthHeaders(): Record<string, string> {
   ]);
   if (secrets.ANTHROPIC_API_KEY) {
     cachedAuthHeaders = { 'x-api-key': secrets.ANTHROPIC_API_KEY };
+    cachedAuthHeadersExpiry = Infinity;
   } else {
     const oauthToken =
       secrets.CLAUDE_CODE_OAUTH_TOKEN || secrets.ANTHROPIC_AUTH_TOKEN;
     if (!oauthToken) throw new Error('No Anthropic credentials found in .env');
-    cachedAuthHeaders = { Authorization: `Bearer ${oauthToken}` };
+    // Exchange OAuth token for a temporary API key
+    const resp = await fetch(
+      'https://api.anthropic.com/api/oauth/claude_cli/create_api_key',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${oauthToken}` },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+    if (!resp.ok)
+      throw new Error(`OAuth key exchange failed: HTTP ${resp.status}`);
+    const data = (await resp.json()) as { raw_key?: string };
+    if (!data.raw_key) throw new Error('No raw_key in OAuth exchange response');
+    cachedAuthHeaders = { 'x-api-key': data.raw_key };
+    cachedAuthHeadersExpiry = Date.now() + 50 * 60 * 1000; // 50 min TTL
   }
   return cachedAuthHeaders;
 }
