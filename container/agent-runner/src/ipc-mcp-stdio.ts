@@ -10,6 +10,9 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
+import { memoryStore, memorySearch, memoryDelete, memoryCount, memoryList, memoryUpdate, memoryStatus } from './memory.js';
+import { SmartExtractor } from './smart-extractor.js';
+import { logLearning, logError } from './self-improvement-files.js';
 
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
@@ -330,6 +333,280 @@ Use available_groups.json to find the JID for a group. The folder name must be c
     return {
       content: [{ type: 'text' as const, text: `Group "${args.name}" registered. It will start receiving messages immediately.` }],
     };
+  },
+);
+
+// --- Semantic Memory Tools (LanceDB + Gemini embeddings) ---
+
+server.tool(
+  'memory_store',
+  `Store a memory for long-term semantic recall. Use this to remember important facts, decisions, preferences, and context that should persist across sessions.
+
+Categories:
+- "profile": User identity, role, background
+- "preferences": User preferences, settings, likes/dislikes
+- "entities": Named entities (people, projects, tools, orgs)
+- "events": Temporal events, milestones, incidents
+- "cases": Problem-solution pairs, debugging sessions
+- "patterns": Recurring behaviors, workflows, habits
+Legacy aliases also work: "preference", "decision", "entity", "fact", "reflection", "other"
+
+Importance: 0.0-1.0 (higher = more important to remember)`,
+  {
+    text: z.string().describe('The memory text to store (clear, self-contained statement)'),
+    category: z.enum(['profile', 'preferences', 'entities', 'events', 'cases', 'patterns', 'preference', 'decision', 'entity', 'fact', 'reflection', 'other']).default('cases').describe('Memory category'),
+    importance: z.number().min(0).max(1).default(0.7).describe('How important this memory is (0.0-1.0)'),
+    scope: z.string().default('global').describe('Scope for memory isolation (e.g. group ID or topic). Defaults to "global".'),
+  },
+  async (args) => {
+    try {
+      const id = await memoryStore(args.text, args.category, args.importance, {}, args.scope);
+      return { content: [{ type: 'text' as const, text: `Memory stored (${id}): "${args.text.slice(0, 80)}..."` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to store memory: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_search',
+  'Search memories by semantic similarity. Returns the most relevant memories for a given query.',
+  {
+    query: z.string().describe('What to search for (natural language)'),
+    limit: z.number().min(1).max(20).default(5).describe('Max results to return'),
+    category: z.enum(['profile', 'preferences', 'entities', 'events', 'cases', 'patterns', 'preference', 'decision', 'entity', 'fact', 'reflection', 'other']).optional().describe('Filter by category'),
+    scope: z.union([z.string(), z.array(z.string())]).default('global').describe('Scope filter for memory isolation. Pass a string or array of strings. Defaults to "global".'),
+  },
+  async (args) => {
+    try {
+      const results = await memorySearch(args.query, args.limit, args.category, args.scope);
+      if (results.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No memories found.' }] };
+      }
+      const formatted = results
+        .map((r, i) => {
+          const date = new Date(r.timestamp).toISOString().split('T')[0];
+          const meta = JSON.parse(r.metadata || '{}');
+          const extra = meta.l1_overview ? `\n   Detail: ${meta.l1_overview.slice(0, 200)}` : '';
+          return `${i + 1}. [${r.category}] ${r.text}\n   ID: ${r.id} | Importance: ${r.importance} | Date: ${date} | Distance: ${r._distance.toFixed(3)}${extra}`;
+        })
+        .join('\n\n');
+      return { content: [{ type: 'text' as const, text: `Found ${results.length} memories:\n\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Memory search failed: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_delete',
+  'Delete a specific memory by ID.',
+  {
+    id: z.string().describe('The memory ID to delete'),
+    scope: z.string().optional().describe('Scope to verify ownership. If provided, deletion fails if the memory belongs to a different scope.'),
+  },
+  async (args) => {
+    try {
+      await memoryDelete(args.id, args.scope);
+      return { content: [{ type: 'text' as const, text: `Memory ${args.id} deleted.` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to delete memory: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'memory_count',
+  'Get the total number of stored memories.',
+  {
+    scope: z.string().optional().describe('Optional scope filter. If provided, counts only memories in this scope.'),
+  },
+  async (args) => {
+    try {
+      const count = await memoryCount(args.scope);
+      return { content: [{ type: 'text' as const, text: `Total memories: ${count}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to count memories: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// --- Memory List Tool ---
+
+server.tool(
+  'memory_list',
+  'List stored memories with optional filters. Returns paginated results sorted by timestamp.',
+  {
+    scope: z.string().optional().describe('Filter by scope'),
+    category: z.string().optional().describe('Filter by category (profile, preferences, entities, events, cases, patterns)'),
+    limit: z.number().min(1).max(100).default(20).describe('Max results per page'),
+    offset: z.number().min(0).default(0).describe('Pagination offset'),
+  },
+  async (args) => {
+    try {
+      const results = await memoryList(args.scope, args.category, args.limit, args.offset);
+      if (results.length === 0) {
+        return { content: [{ type: 'text' as const, text: 'No memories found.' }] };
+      }
+      const formatted = results.map((r, i) => {
+        const date = new Date(r.timestamp).toISOString().split('T')[0];
+        return `${args.offset + i + 1}. [${r.category}] ${r.text.slice(0, 120)}\n   ID: ${r.id} | Importance: ${r.importance} | Date: ${date}`;
+      }).join('\n\n');
+      return { content: [{ type: 'text' as const, text: `Memories (${args.offset + 1}-${args.offset + results.length}):\n\n${formatted}` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to list memories: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// --- Memory Status Tool ---
+
+server.tool(
+  'memory_status',
+  'Get memory system stats: total count, tier distribution, category breakdown, FTS health.',
+  {
+    scope: z.string().optional().describe('Optional scope filter'),
+  },
+  async (args) => {
+    try {
+      const status = await memoryStatus(args.scope);
+      const lines: string[] = [
+        `Total memories: ${status.totalCount}`,
+        '',
+        'Tier distribution:',
+        ...Object.entries(status.tierDistribution).map(([tier, count]) => `  ${tier}: ${count}`),
+        '',
+        'Category breakdown:',
+        ...Object.entries(status.categoryCounts).map(([cat, count]) => `  ${cat}: ${count}`),
+        '',
+        'Scope breakdown:',
+        ...Object.entries(status.scopeCounts).map(([scope, count]) => `  ${scope}: ${count}`),
+        '',
+        `FTS: supported=${status.ftsHealth.supported}, index=${status.ftsHealth.indexExists}${status.ftsHealth.lastError ? `, error: ${status.ftsHealth.lastError}` : ''}`,
+      ];
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to get status: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// --- Memory Update Tool ---
+
+server.tool(
+  'memory_update',
+  'Update an existing memory. Only provided fields are changed.',
+  {
+    id: z.string().describe('The memory ID to update'),
+    text: z.string().optional().describe('New memory text (will re-embed)'),
+    importance: z.number().min(0).max(1).optional().describe('New importance value'),
+    category: z.string().optional().describe('New category'),
+    scope: z.string().optional().describe('Scope to verify ownership'),
+  },
+  async (args) => {
+    try {
+      const updates: Record<string, unknown> = {};
+      if (args.text !== undefined) updates.text = args.text;
+      if (args.importance !== undefined) updates.importance = args.importance;
+      if (args.category !== undefined) updates.category = args.category;
+
+      const success = await memoryUpdate(args.id, updates, args.scope);
+      if (!success) {
+        return { content: [{ type: 'text' as const, text: `Memory ${args.id} not found or not accessible.` }], isError: true };
+      }
+      return { content: [{ type: 'text' as const, text: `Memory ${args.id} updated.` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to update memory: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// --- Memory Extract Tool ---
+
+server.tool(
+  'memory_extract',
+  'Manually trigger smart memory extraction from conversation text. Requires EXTRACTION_PROVIDER to be configured.',
+  {
+    conversation_text: z.string().describe('The conversation text to extract memories from'),
+    scope: z.string().default('global').describe('Scope for extracted memories'),
+  },
+  async (args) => {
+    try {
+      const extractor = SmartExtractor.getInstance();
+      if (!extractor.isAvailable()) {
+        return {
+          content: [{ type: 'text' as const, text: 'Smart extraction is not available. Set EXTRACTION_PROVIDER to enable it.' }],
+          isError: true,
+        };
+      }
+
+      const stats = await extractor.extractAndPersist(args.conversation_text, args.scope);
+      const lines = [
+        `Extraction complete:`,
+        `  Extracted: ${stats.extracted}`,
+        `  Created: ${stats.created}`,
+        `  Merged: ${stats.merged}`,
+        `  Skipped: ${stats.skipped}`,
+        `  Supported: ${stats.supported}`,
+        `  Superseded: ${stats.superseded}`,
+        `  Contradicted: ${stats.contradicted}`,
+        `  Errors: ${stats.errors}`,
+      ];
+      return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Extraction failed: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+// --- Self-Improvement Log Tool ---
+
+server.tool(
+  'self_improvement_log',
+  'Log a learning, error, pattern, or insight for self-improvement. Entries are stored in .learnings/ files.',
+  {
+    type: z.enum(['learning', 'error', 'pattern', 'insight']).describe('Type of entry'),
+    text: z.string().describe('The learning or error description'),
+    context: z.string().optional().describe('Optional context about when/why this was learned'),
+  },
+  async (args) => {
+    try {
+      if (args.type === 'error') {
+        await logError(args.text, args.context);
+      } else {
+        await logLearning(args.text, args.type, args.context);
+      }
+      return { content: [{ type: 'text' as const, text: `${args.type} logged successfully.` }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text' as const, text: `Failed to log ${args.type}: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   },
 );
 

@@ -39,8 +39,8 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY agent-runner/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (--legacy-peer-deps: openai@4 peer-wants zod@3, but claude-agent-sdk needs zod@4)
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY agent-runner/ ./

@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -26,8 +27,25 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+// Tool credentials (not Claude API secrets) — passed to containers for MCP tools
+const TOOL_SECRET_KEYS = [
+  // LanceDB storage
+  'LANCEDB_URI', 'LANCEDB_API_KEY', 'MEMORY_LANCEDB_DIR',
+  // Embedding providers
+  'EMBEDDING_PROVIDER', 'EMBEDDING_API_KEY', 'EMBEDDING_MODEL',
+  'EMBEDDING_BASE_URL', 'EMBEDDING_DIM',
+  'GEMINI_API_KEY', 'JINA_API_KEY', 'OPENAI_API_KEY',
+  // Rerank providers
+  'RERANK_PROVIDER', 'RERANK_API_KEY', 'RERANK_MODEL', 'RERANK_ENDPOINT',
+  'SILICONFLOW_API_KEY', 'VOYAGE_API_KEY', 'PINECONE_API_KEY',
+  // Extraction LLM (smart memory extraction)
+  'EXTRACTION_PROVIDER', 'EXTRACTION_API_KEY', 'EXTRACTION_MODEL', 'EXTRACTION_BASE_URL',
+];
+const toolSecrets = readEnvFile(TOOL_SECRET_KEYS);
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -212,10 +230,16 @@ function buildVolumeMounts(
   return mounts;
 }
 
+interface ContainerArgsResult {
+  args: string[];
+  /** Temp env-file path to clean up after the container exits (if any). */
+  envFilePath?: string;
+}
+
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
-): string[] {
+): ContainerArgsResult {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
@@ -236,6 +260,21 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Tool API keys (non-Claude credentials for MCP tools like semantic memory)
+  // Write to a temp file and use --env-file to avoid leaking secrets in ps/cmdline.
+  const envLines: string[] = [];
+  for (const key of TOOL_SECRET_KEYS) {
+    if (toolSecrets[key]) {
+      envLines.push(`${key}=${toolSecrets[key]}`);
+    }
+  }
+  let envFilePath: string | undefined;
+  if (envLines.length > 0) {
+    envFilePath = path.join(os.tmpdir(), `.nanoclaw-env-${Date.now()}`);
+    fs.writeFileSync(envFilePath, envLines.join('\n'), { mode: 0o600 });
+    args.push('--env-file', envFilePath);
   }
 
   // Runtime-specific args for host gateway resolution
@@ -261,7 +300,7 @@ function buildContainerArgs(
 
   args.push(CONTAINER_IMAGE);
 
-  return args;
+  return { args, envFilePath };
 }
 
 export async function runContainerAgent(
@@ -278,7 +317,7 @@ export async function runContainerAgent(
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const { args: containerArgs, envFilePath } = buildContainerArgs(mounts, containerName);
 
   logger.debug(
     {
@@ -434,6 +473,10 @@ export async function runContainerAgent(
 
     container.on('close', (code) => {
       clearTimeout(timeout);
+      // Clean up temp env-file now that the container has exited
+      if (envFilePath) {
+        try { fs.unlinkSync(envFilePath); } catch {}
+      }
       const duration = Date.now() - startTime;
 
       if (timedOut) {
@@ -629,6 +672,9 @@ export async function runContainerAgent(
 
     container.on('error', (err) => {
       clearTimeout(timeout);
+      if (envFilePath) {
+        try { fs.unlinkSync(envFilePath); } catch {}
+      }
       logger.error(
         { group: group.name, containerName, error: err },
         'Container spawn error',
