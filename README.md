@@ -11,6 +11,7 @@
   <a href="README_zh.md">中文</a>&nbsp; • &nbsp;
   <a href="https://discord.gg/VDdww8qS42"><img src="https://img.shields.io/discord/1470188214710046894?label=Discord&logo=discord&v=2" alt="Discord" valign="middle"></a>&nbsp; • &nbsp;
   <a href="repo-tokens"><img src="repo-tokens/badge.svg" alt="34.9k tokens, 17% of context window" valign="middle"></a>
+  [![Chat with Repo](https://badge.forgithub.com/qwibitai/nanoclaw?tab=readme-ov-file&maxTokens=10000000&include=src%2F**%2Ccontainer%2F**%2Claunchd%2F**%2CCLAUDE.md&badge=chat)](https://uithub.com/qwibitai/nanoclaw?tab=readme-ov-file&maxTokens=10000000&include=src%2F**%2Ccontainer%2F**%2Claunchd%2F**%2CCLAUDE.md)
 </p>
 
 ---
