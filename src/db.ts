@@ -90,6 +90,7 @@ function createSchema(database: Database.Database): void {
       date TEXT,
       content TEXT NOT NULL,
       indexed_at REAL NOT NULL,
+      file_mtime REAL NOT NULL,
       UNIQUE(group_folder, filename)
     );
 
@@ -100,6 +101,10 @@ function createSchema(database: Database.Database): void {
     );
 
     CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGIN
+      INSERT INTO conversations_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS conversations_au AFTER UPDATE ON conversations BEGIN
+      INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.id, old.content);
       INSERT INTO conversations_fts(rowid, content) VALUES (new.id, new.content);
     END;
     CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
@@ -667,8 +672,8 @@ export interface ConversationSearchResult {
 
 /**
  * Index conversation files for a group into the FTS5 search table.
- * Scans groups/{folder}/conversations/*.md and inserts new entries.
- * Skips already-indexed files based on filename uniqueness constraint.
+ * Scans groups/{folder}/conversations/*.md and indexes/updates entries.
+ * Tracks file mtime to re-index modified files automatically.
  */
 export function indexConversations(groupFolder: string): number {
   if (!isValidGroupFolder(groupFolder)) {
@@ -691,22 +696,31 @@ export function indexConversations(groupFolder: string): number {
       f.endsWith('.md')
     );
 
-    const insertStmt = db.prepare(
-      `INSERT OR IGNORE INTO conversations (group_folder, filename, date, content, indexed_at)
-       VALUES (?, ?, ?, ?, ?)`
+    // Use INSERT OR REPLACE to update files that have been modified
+    // The UNIQUE(group_folder, filename) constraint handles upserts
+    const upsertStmt = db.prepare(
+      `INSERT OR REPLACE INTO conversations (group_folder, filename, date, content, indexed_at, file_mtime)
+       VALUES (?, ?, ?, ?, ?, ?)`
     );
 
     for (const filename of files) {
       const filePath = path.join(conversationsDir, filename);
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
+        const stats = fs.statSync(filePath);
+        const fileMtime = stats.mtimeMs;
 
         // Extract date from filename pattern: YYYY-MM-DD-*.md
         const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
         const date = dateMatch ? dateMatch[1] : null;
 
-        insertStmt.run(groupFolder, filename, date, content, indexedAt);
-        indexedCount++;
+        const result = upsertStmt.run(groupFolder, filename, date, content, indexedAt, fileMtime);
+
+        // Only count if this was a new insert or an update (changes > 0)
+        // changes = 0 means the row was identical and REPLACE did nothing
+        if (result.changes > 0) {
+          indexedCount++;
+        }
       } catch (err) {
         logger.warn(
           { groupFolder, filename, err },

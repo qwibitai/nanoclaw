@@ -336,10 +336,10 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 );
 
 server.tool(
-  'session_search',
-  'Search past conversations for relevant context. Use when the user references past work or you need historical context.',
+  'search_session_fts',
+  'Search past conversations using keyword/FTS5 search. Fast but requires exact keyword matching. For semantic search, use search_conversations instead.',
   {
-    query: z.string().describe('Search query for finding relevant conversations'),
+    query: z.string().describe('Search query for finding relevant conversations (uses keyword matching)'),
     limit: z.number().optional().default(3).describe('Maximum number of results to return (default: 3)'),
   },
   async (args) => {

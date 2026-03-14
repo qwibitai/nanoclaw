@@ -148,10 +148,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
       // Process session search requests from this group's IPC directory
       const searchRequestsDir = path.join(ipcBaseDir, sourceGroup, 'search-requests');
       const searchResponsesDir = path.join(ipcBaseDir, sourceGroup, 'search-responses');
-      fs.mkdirSync(searchResponsesDir, { recursive: true });
 
       try {
         if (fs.existsSync(searchRequestsDir)) {
+          // Create responses dir only if there are requests to process
+          if (!fs.existsSync(searchResponsesDir)) {
+            fs.mkdirSync(searchResponsesDir, { recursive: true });
+          }
+
           const requestFiles = fs
             .readdirSync(searchRequestsDir)
             .filter((f) => f.endsWith('.json'));
@@ -196,6 +200,14 @@ export function startIpcWatcher(deps: IpcDeps): void {
               // Clean up request file
               fs.unlinkSync(filePath);
             } catch (err) {
+              // Handle ENOENT gracefully (file disappeared between readdir and read)
+              if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+                logger.debug(
+                  { file, sourceGroup },
+                  'Search request file disappeared before processing'
+                );
+                continue;
+              }
               logger.error(
                 { file, sourceGroup, err },
                 'Error processing session search request'
