@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -162,6 +163,26 @@ function buildVolumeMounts(
     containerPath: '/home/node/.claude',
     readonly: false,
   });
+
+  // Gmail OAuth credentials (conditional — only if ~/.gmail-mcp exists)
+  const gmailDir = path.join(os.homedir(), '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false,
+    });
+  }
+
+  // Google Workspace CLI credentials (conditional — only if ~/.config/gws exists)
+  const gwsDir = path.join(os.homedir(), '.config', 'gws');
+  if (fs.existsSync(gwsDir)) {
+    mounts.push({
+      hostPath: gwsDir,
+      containerPath: '/home/node/.config/gws',
+      readonly: false, // gws writes token cache
+    });
+  }
 
   // Per-group IPC namespace: each group gets its own IPC directory
   // This prevents cross-group privilege escalation via IPC
