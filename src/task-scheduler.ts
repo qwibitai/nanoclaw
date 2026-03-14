@@ -114,6 +114,8 @@ async function runTask(
   );
 
   if (!group) {
+    // Stop retry churn — group won't reappear without manual intervention.
+    updateTask(task.id, { status: 'paused' });
     logger.error(
       { taskId: task.id, groupFolder: task.group_folder },
       'Group not found for task',
