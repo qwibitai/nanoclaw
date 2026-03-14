@@ -129,6 +129,7 @@ AskUserQuestion (multiSelect): Which messaging channels do you want to enable?
 - Telegram (authenticates via bot token from @BotFather)
 - Slack (authenticates via Slack app with Socket Mode)
 - Discord (authenticates via Discord bot token)
+- Matrix (authenticates via access token for any homeserver)
 
 **Delegate to each selected channel's own skill.** Each channel skill handles its own code installation, authentication, registration, and JID resolution. This avoids duplicating channel-specific logic and ensures JIDs are always correct.
 
@@ -138,6 +139,7 @@ For each selected channel, invoke its skill:
 - **Telegram:** Invoke `/add-telegram`
 - **Slack:** Invoke `/add-slack`
 - **Discord:** Invoke `/add-discord`
+- **Matrix:** Invoke `/add-matrix`
 
 Each skill will:
 1. Install the channel code (via `git merge` of the skill branch)
