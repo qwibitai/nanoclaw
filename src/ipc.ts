@@ -26,6 +26,23 @@ export interface IpcDeps {
 
 let ipcWatcherRunning = false;
 
+function parseLocalOnceScheduleValue(value: string): Date | null {
+  if (/[Zz]$/.test(value) || /[+-]\d{2}:\d{2}$/.test(value)) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (isNaN(date.getTime())) {
+    return null;
+  }
+
+  if (date.getTime() <= Date.now()) {
+    return null;
+  }
+
+  return date;
+}
+
 export function startIpcWatcher(deps: IpcDeps): void {
   if (ipcWatcherRunning) {
     logger.debug('IPC watcher already running, skipping duplicate start');
@@ -236,11 +253,11 @@ export async function processTaskIpc(
           }
           nextRun = new Date(Date.now() + ms).toISOString();
         } else if (scheduleType === 'once') {
-          const date = new Date(data.schedule_value);
-          if (isNaN(date.getTime())) {
+          const date = parseLocalOnceScheduleValue(data.schedule_value);
+          if (!date) {
             logger.warn(
               { scheduleValue: data.schedule_value },
-              'Invalid timestamp',
+              'Invalid once timestamp',
             );
             break;
           }
@@ -380,6 +397,18 @@ export async function processTaskIpc(
             if (!isNaN(ms) && ms > 0) {
               updates.next_run = new Date(Date.now() + ms).toISOString();
             }
+          } else if (updatedTask.schedule_type === 'once') {
+            const date = parseLocalOnceScheduleValue(
+              updatedTask.schedule_value,
+            );
+            if (!date) {
+              logger.warn(
+                { taskId: data.taskId, value: updatedTask.schedule_value },
+                'Invalid once timestamp in task update',
+              );
+              break;
+            }
+            updates.next_run = date.toISOString();
           }
         }
 
