@@ -19,6 +19,46 @@ export interface TelegramChannelOpts {
 }
 
 /**
+ * Parse [[Label|callback_data]] button syntax from message text.
+ * Buttons on the same line form a row; different lines = different rows.
+ * Returns the cleaned text (without button syntax) and the keyboard layout.
+ *
+ * Example input:
+ *   "Pick an option:\n• Task 1 [[✅ Keep|keep_1]] [[🗑️ Delete|delete_1]]"
+ * Example output:
+ *   cleanText: "Pick an option:\n• Task 1"
+ *   keyboard: [[{ text: "✅ Keep", callback_data: "keep_1" }, { text: "🗑️ Delete", callback_data: "delete_1" }]]
+ */
+function parseInlineButtons(text: string): {
+  cleanText: string;
+  keyboard: Array<Array<{ text: string; callback_data: string }>>;
+} {
+  const buttonPattern = /\[\[([^\]|]+)\|([^\]]+)\]\]/g;
+  const keyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+  const lines = text.split('\n');
+  const cleanLines: string[] = [];
+
+  for (const line of lines) {
+    const buttons: Array<{ text: string; callback_data: string }> = [];
+    const cleanLine = line
+      .replace(buttonPattern, (_, label, data) => {
+        buttons.push({ text: label.trim(), callback_data: data.trim() });
+        return '';
+      })
+      .trim();
+
+    if (buttons.length > 0) {
+      keyboard.push(buttons);
+      if (cleanLine) cleanLines.push(cleanLine);
+    } else {
+      cleanLines.push(line);
+    }
+  }
+
+  return { cleanText: cleanLines.join('\n').trim(), keyboard };
+}
+
+/**
  * Send a message with Telegram Markdown parse mode, falling back to plain text.
  * Claude's output naturally matches Telegram's Markdown v1 format:
  *   *bold*, _italic_, `code`, ```code blocks```, [links](url)
@@ -27,7 +67,7 @@ async function sendTelegramMessage(
   api: { sendMessage: Api['sendMessage'] },
   chatId: string | number,
   text: string,
-  options: { message_thread_id?: number } = {},
+  options: { message_thread_id?: number; reply_markup?: any } = {},
 ): Promise<void> {
   try {
     await api.sendMessage(chatId, text, {
@@ -208,6 +248,38 @@ export class TelegramChannel implements Channel {
     this.bot.on('message:location', (ctx) => storeNonText(ctx, '[Location]'));
     this.bot.on('message:contact', (ctx) => storeNonText(ctx, '[Contact]'));
 
+    // Handle inline keyboard button clicks
+    this.bot.on('callback_query:data', async (ctx) => {
+      // Dismiss the loading spinner on the button
+      await ctx.answerCallbackQuery();
+
+      const chatId = ctx.chat?.id || ctx.from.id;
+      const chatJid = `tg:${chatId}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id.toString() ||
+        'Unknown';
+
+      this.opts.onMessage(chatJid, {
+        id: ctx.callbackQuery.id,
+        chat_jid: chatJid,
+        sender: ctx.from?.id.toString() || '',
+        sender_name: senderName,
+        content: ctx.callbackQuery.data,
+        timestamp: new Date().toISOString(),
+        is_from_me: false,
+      });
+
+      logger.info(
+        { chatJid, data: ctx.callbackQuery.data },
+        'Callback query received',
+      );
+    });
+
     // Handle errors gracefully
     this.bot.catch((err) => {
       logger.error({ err: err.message }, 'Telegram bot error');
@@ -239,21 +311,29 @@ export class TelegramChannel implements Channel {
 
     try {
       const numericId = jid.replace(/^tg:/, '');
+      const { cleanText, keyboard } = parseInlineButtons(text);
+      const replyMarkup =
+        keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
 
       // Telegram has a 4096 character limit per message — split if needed
       const MAX_LENGTH = 4096;
-      if (text.length <= MAX_LENGTH) {
-        await sendTelegramMessage(this.bot.api, numericId, text);
+      if (cleanText.length <= MAX_LENGTH) {
+        await sendTelegramMessage(this.bot.api, numericId, cleanText, {
+          reply_markup: replyMarkup,
+        });
       } else {
-        for (let i = 0; i < text.length; i += MAX_LENGTH) {
-          await sendTelegramMessage(
-            this.bot.api,
-            numericId,
-            text.slice(i, i + MAX_LENGTH),
-          );
+        const chunks: string[] = [];
+        for (let i = 0; i < cleanText.length; i += MAX_LENGTH) {
+          chunks.push(cleanText.slice(i, i + MAX_LENGTH));
+        }
+        for (let i = 0; i < chunks.length; i++) {
+          // Only attach buttons to the last chunk
+          await sendTelegramMessage(this.bot.api, numericId, chunks[i], {
+            reply_markup: i === chunks.length - 1 ? replyMarkup : undefined,
+          });
         }
       }
-      logger.info({ jid, length: text.length }, 'Telegram message sent');
+      logger.info({ jid, length: cleanText.length }, 'Telegram message sent');
     } catch (err) {
       logger.error({ jid, err }, 'Failed to send Telegram message');
     }
