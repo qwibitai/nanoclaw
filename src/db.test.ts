@@ -287,6 +287,94 @@ describe("getMessagesSince", () => {
     expect(msgs.map((m) => m.id)).toEqual(["d2"]);
   });
 
+  it("composite cursor returns deterministic order with tied timestamps", () => {
+    const jid = "tied-order@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    // Insert 5 messages with same timestamp and scrambled ids
+    for (const id of ["e", "b", "d", "a", "c"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T,
+      });
+    }
+    // limit=3 should return the 3 lexicographically largest ids in ascending order
+    const msgs = getMessagesSince(jid, "", "Andy", 3);
+    expect(msgs.map((m) => m.id)).toEqual(["c", "d", "e"]);
+  });
+
+  it("sequential cursor advancement with tied timestamps produces no duplicates or gaps", () => {
+    const jid = "tied-advance@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["e", "b", "d", "a", "c"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T,
+      });
+    }
+    // Fetch newest 3
+    const batch1 = getMessagesSince(jid, "", "Andy", 3);
+    expect(batch1).toHaveLength(3);
+    // Advance cursor to last returned message
+    const last = batch1[batch1.length - 1];
+    const batch2 = getMessagesSince(jid, last.timestamp, "Andy", 3, last.id);
+    // Should be empty — no more messages after the newest 3
+    expect(batch2).toHaveLength(0);
+
+    // Drain all via getAllMessagesSince with batch size 2
+    const all = getAllMessagesSince(jid, "", "Andy", 2);
+    expect(all).toHaveLength(5);
+    expect(all.map((m) => m.id)).toEqual(["a", "b", "c", "d", "e"]);
+    // No duplicates
+    expect(new Set(all.map((m) => m.id)).size).toBe(5);
+  });
+
+  it("composite cursor with limit across mixed timestamps does not produce duplicates", () => {
+    const jid = "mixed-ts@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+    const T1 = "2024-01-01T00:00:01.000Z";
+    const T2 = "2024-01-01T00:00:02.000Z";
+    // 4 messages at T1
+    for (const id of ["m1", "m2", "m3", "m4"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T1,
+      });
+    }
+    // 2 messages at T2
+    for (const id of ["m5", "m6"]) {
+      store({
+        id,
+        chat_jid: jid,
+        sender: "u@s",
+        sender_name: "U",
+        content: `msg-${id}`,
+        timestamp: T2,
+      });
+    }
+    // Fetch newest 3 via getMessagesSince
+    const batch1 = getMessagesSince(jid, "", "Andy", 3);
+    expect(batch1).toHaveLength(3);
+    expect(batch1.map((m) => m.id)).toEqual(["m4", "m5", "m6"]);
+    // Advance cursor, verify empty
+    const last = batch1[batch1.length - 1];
+    const batch2 = getMessagesSince(jid, last.timestamp, "Andy", 3, last.id);
+    expect(batch2).toHaveLength(0);
+  });
+
   it("recovery probe with limit=1 and sinceId finds tied-timestamp messages", () => {
     const jid = "cursor-recovery@g.us";
     storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");

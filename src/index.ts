@@ -204,7 +204,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     isTailDrain = pendingTailDrain.delete(chatJid);
-    if (isTailDrain) savePendingTailDrain();
+    // DB save deferred until batch completes (crash safety)
     if (isTailDrain) {
       // Continuation of a truncated trigger window — skip trigger requirement.
       // Process oldest-first; cap overflow for another cycle.
@@ -305,6 +305,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         pendingTailDrain.add(chatJid);
         savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
+      } else if (isTailDrain) {
+        savePendingTailDrain();
       }
       return true;
     }
@@ -323,6 +325,8 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     pendingTailDrain.add(chatJid);
     savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
+  } else if (isTailDrain) {
+    savePendingTailDrain();
   }
   return true;
 }

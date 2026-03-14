@@ -273,9 +273,9 @@ export function getMessagesSince(
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
+      ORDER BY timestamp DESC, id DESC
       LIMIT ?
-    ) ORDER BY timestamp
+    ) ORDER BY timestamp, id
   `;
   const compositeSql = `
     SELECT * FROM (
@@ -284,9 +284,9 @@ export function getMessagesSince(
       WHERE chat_jid = ? AND (timestamp > ? OR (timestamp = ? AND id > ?))
         AND is_bot_message = 0 AND content NOT LIKE ?
         AND content != '' AND content IS NOT NULL
-      ORDER BY timestamp DESC
+      ORDER BY timestamp DESC, id DESC
       LIMIT ?
-    ) ORDER BY timestamp
+    ) ORDER BY timestamp, id
   `;
   const cursorId = sinceId || null;
   if (cursorId !== null) {
