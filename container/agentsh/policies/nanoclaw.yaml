@@ -1,0 +1,673 @@
+# NanoClaw Agent Container Security Policy
+#
+# This policy enforces security for AI agents running inside nanoclaw's Docker
+# containers. Each container runs the Claude Agent SDK with browser automation
+# (Chromium) in an isolated environment.
+#
+# Container layout:
+#   /workspace/group/   — Per-group writable working directory (isolated per chat)
+#   /workspace/global/  — Shared memory across groups (read-only for non-main)
+#   /workspace/project/ — Host project source code (read-only, main group only)
+#   /workspace/extra/   — User-allowlisted additional mounts
+#   /workspace/ipc/     — IPC files for host<->container communication
+#   /app/               — Agent-runner source (recompiled on startup, per-group)
+#   /home/node/.claude/  — Claude SDK sessions and skills (per-group)
+#
+# Security strategy:
+#   - File access: Workspace read/write with soft-delete recovery, system read-only,
+#     credentials and secrets always blocked (DLP file layer)
+#   - Network: Allow web browsing (HTTPS/HTTP) but block private networks (except
+#     the credential proxy on the Docker host). Threat feeds auto-block malicious
+#     domains. Cloud metadata services blocked to prevent SSRF.
+#   - Commands: Dev tools allowed, dangerous system commands blocked, rm -rf blocked
+#   - API calls: Route through agentsh DLP proxy which redacts PII before forwarding
+#     to the nanoclaw credential proxy (which injects real API keys)
+#
+# Rule evaluation: First match wins. Order matters within each section.
+
+version: 1
+name: nanoclaw
+description: |
+  Security policy for NanoClaw agent containers. Allows workspace operations,
+  web browsing, package registries. Blocks sensitive paths and credentials.
+  Threat feeds provide malicious domain blocking. DLP prevents PII leakage.
+
+# =============================================================================
+# FILE OPERATION RULES
+# =============================================================================
+# Controls what the agent can read, write, and delete on the filesystem.
+# The container already provides isolation via Docker, but these rules add
+# defense-in-depth: even if an agent escapes the intended workspace, agentsh
+# blocks access to sensitive paths.
+
+file_rules:
+  # ---------------------------------------------------------------------------
+  # Workspace directories — the agent's primary working area
+  # Each group (chat) gets its own /workspace/group/ directory, isolated from
+  # other groups. The agent reads/writes files here for its tasks.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-workspace-read
+    description: Read access to all workspace directories
+    paths:
+      - "/workspace"
+      - "/workspace/**"
+    operations: [read, open, stat, list, readlink]
+    decision: allow
+
+  - name: allow-workspace-group-write
+    description: Write access to group working directory
+    paths:
+      - "/workspace/group"
+      - "/workspace/group/**"
+    operations: [write, create, mkdir, chmod, rename]
+    decision: allow
+
+  # Soft-delete instead of permanent delete — files are moved to a trash
+  # directory and can be recovered. Protects against accidental data loss
+  # from agent mistakes.
+  - name: soft-delete-workspace-group
+    description: Soft-delete for group files (recoverable)
+    paths:
+      - "/workspace/group/**"
+    operations: [delete, rmdir]
+    decision: soft_delete
+    message: "File moved to trash (recoverable): {{.Path}}"
+
+  # IPC directory is how the container communicates with the host process.
+  # The agent writes messages, task schedules, and reads input here.
+  # Full access needed including delete (for cleanup of processed messages).
+  - name: allow-workspace-ipc-write
+    description: Write to IPC directory for host communication
+    paths:
+      - "/workspace/ipc"
+      - "/workspace/ipc/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: allow
+
+  # Extra mounts are user-allowlisted directories from the host, validated
+  # by mount-security.ts against an external allowlist (tamper-proof).
+  - name: allow-workspace-extra-write
+    description: Write to extra mount directories
+    paths:
+      - "/workspace/extra"
+      - "/workspace/extra/**"
+    operations: [write, create, mkdir, chmod, rename]
+    decision: allow
+
+  # The project root (/workspace/project/) is mounted read-only so agents
+  # cannot modify the host application code. This is critical — a writable
+  # mount would let the agent alter nanoclaw's own source on the host.
+  - name: deny-workspace-project-write
+    description: Project root is read-only (host code protection)
+    paths:
+      - "/workspace/project/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: deny
+
+  # Global memory is shared across all groups. Non-main groups get read-only
+  # access to prevent cross-group data corruption.
+  - name: deny-workspace-global-write
+    description: Global memory is read-only
+    paths:
+      - "/workspace/global/**"
+    operations: [write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # Application directories
+  # The agent-runner TypeScript source is copied per-group so each group can
+  # customize it (add tools, change behavior). Recompiled on each startup.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-app-readwrite
+    description: Read/write agent-runner source (per-group customization)
+    paths:
+      - "/app"
+      - "/app/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename]
+    decision: allow
+
+  - name: allow-build-output
+    description: Compiled TypeScript output
+    paths:
+      - "/tmp/dist"
+      - "/tmp/dist/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Home directory — Claude sessions, agentsh data, npm cache
+  # Each group gets its own /home/node/.claude/ mounted in, containing
+  # isolated session history, skills, and settings.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-home-readwrite
+    description: Full access to node home for sessions and config
+    paths:
+      - "/home/node"
+      - "/home/node/**"
+    operations: [read, open, stat, list, readlink, write, create, mkdir, chmod, rename, delete, rmdir]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Temp directories — used by npm, tsc, Chromium, and agent operations
+  # ---------------------------------------------------------------------------
+
+  - name: allow-tmp
+    description: Full access to temp directories
+    paths:
+      - "/tmp"
+      - "/tmp/**"
+      - "/var/tmp/**"
+    operations: ["*"]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # System paths — read-only access to binaries and libraries
+  # The agent needs to read system tools (node, npm, git, chromium, etc.)
+  # but must never modify them.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-system-read
+    description: Read system binaries, libraries, and tools
+    paths:
+      - "/usr/**"
+      - "/lib/**"
+      - "/lib64/**"
+      - "/bin/**"
+      - "/sbin/**"
+      - "/opt/**"
+    operations: [read, open, stat, list, readlink]
+    decision: allow
+
+  # Minimal /etc access — only files needed for DNS resolution, TLS,
+  # font rendering (Chromium), and agentsh config.
+  - name: allow-etc-read
+    description: Read safe system configuration
+    paths:
+      - "/etc/hosts"
+      - "/etc/hostname"
+      - "/etc/resolv.conf"
+      - "/etc/ssl/**"
+      - "/etc/ca-certificates/**"
+      - "/etc/localtime"
+      - "/etc/timezone"
+      - "/etc/mime.types"
+      - "/etc/protocols"
+      - "/etc/services"
+      - "/etc/fonts/**"
+      - "/etc/chromium/**"
+      - "/etc/agentsh/**"
+      - "/etc/nsswitch.conf"
+    operations: [read, open, stat, list]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # DLP file layer — block access to credentials and sensitive data
+  # Even though the container doesn't mount these paths, these rules provide
+  # defense-in-depth. If a mount misconfiguration or escape occurs, the agent
+  # still can't read secrets. The nanoclaw credential proxy handles API keys
+  # separately — containers never see real credentials.
+  # ---------------------------------------------------------------------------
+
+  - name: deny-env-files
+    description: Block .env files (credentials handled by proxy)
+    paths:
+      - "**/.env"
+      - "**/.env.*"
+      - "**/secrets/**"
+      - "**/credentials/**"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-ssh-keys
+    description: Block SSH key access
+    paths:
+      - "**/.ssh/**"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-cloud-credentials
+    description: Block cloud provider credentials
+    paths:
+      - "**/.aws/**"
+      - "**/.gcloud/**"
+      - "**/.azure/**"
+      - "**/.kube/**"
+      - "**/.config/gcloud/**"
+      - "**/.docker/config.json"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-git-credentials
+    description: Block git credentials
+    paths:
+      - "**/.git-credentials"
+      - "**/.netrc"
+    operations: ["*"]
+    decision: deny
+
+  - name: deny-system-sensitive
+    description: Block password files and kernel interfaces
+    paths:
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/etc/group"
+      - "/etc/gshadow"
+      - "/etc/sudoers"
+      - "/etc/sudoers.d/**"
+      - "/etc/security/**"
+      - "/proc/**"
+      - "/sys/**"
+    operations: ["*"]
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # Default deny — anything not explicitly allowed above is blocked
+  # ---------------------------------------------------------------------------
+
+  - name: default-deny-files
+    description: Deny all other file operations
+    paths:
+      - "**"
+    operations: ["*"]
+    decision: deny
+
+# =============================================================================
+# NETWORK OPERATION RULES
+# =============================================================================
+# Controls outbound network connections from the container.
+# Rule ordering is critical here:
+#   1. Localhost (agentsh proxy lives here)
+#   2. Credential proxy on Docker host (private IP, specific port)
+#   3. Known-good destinations (registries, code hosting, CDNs)
+#   4. Block private networks and metadata services
+#   5. Allow general web browsing (HTTPS/HTTP) — comes AFTER private network
+#      blocks so agents can't use port 443 to reach internal services
+#   6. Default deny everything else
+#
+# Threat feeds (configured in config.yaml) automatically block connections to
+# known malicious domains. These are checked before any rule evaluation.
+
+network_rules:
+  # ---------------------------------------------------------------------------
+  # Localhost — the agentsh DLP proxy runs on 127.0.0.1:18081 inside the
+  # container. All LLM API calls route through it for PII redaction.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-localhost
+    description: Allow localhost connections (agentsh proxy, local services)
+    cidrs:
+      - "127.0.0.1/32"
+      - "::1/128"
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Credential proxy — runs on the Docker host, injects real API keys into
+  # requests. The container only sees placeholder credentials. This rule
+  # allows connections to port 3001 on any private IP (the Docker host
+  # gateway IP varies by platform). Must come BEFORE block-private-networks.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-credential-proxy
+    description: Allow connection to nanoclaw credential proxy on host
+    cidrs:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+    ports: [3001]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Package registries — needed for npm install, pip install, etc.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-npm
+    description: npm registry
+    domains:
+      - "registry.npmjs.org"
+      - "*.npmjs.org"
+      - "*.npmjs.com"
+    ports: [443, 80]
+    decision: allow
+
+  - name: allow-pypi
+    description: PyPI
+    domains:
+      - "pypi.org"
+      - "files.pythonhosted.org"
+      - "*.pypi.org"
+    ports: [443, 80]
+    decision: allow
+
+  - name: allow-go-proxy
+    description: Go module proxy
+    domains:
+      - "proxy.golang.org"
+      - "sum.golang.org"
+    ports: [443]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Code hosting — agents frequently clone repos, read READMEs, use APIs
+  # ---------------------------------------------------------------------------
+
+  - name: allow-github
+    description: GitHub access
+    domains:
+      - "github.com"
+      - "*.github.com"
+      - "*.githubusercontent.com"
+      - "api.github.com"
+    ports: [443, 80]
+    decision: allow
+
+  - name: allow-gitlab
+    description: GitLab access
+    domains:
+      - "gitlab.com"
+      - "*.gitlab.com"
+    ports: [443, 80]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # CDNs — used by npm packages, web content, and documentation
+  # ---------------------------------------------------------------------------
+
+  - name: allow-cdns
+    description: Common CDNs
+    domains:
+      - "*.cloudflare.com"
+      - "*.cloudfront.net"
+      - "*.akamaized.net"
+      - "*.fastly.net"
+      - "cdn.jsdelivr.net"
+      - "unpkg.com"
+    ports: [443, 80]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Blocked networks — these MUST come before the broad browsing rules below
+  # ---------------------------------------------------------------------------
+
+  # Cloud metadata services are a common SSRF target. An agent tricked into
+  # fetching http://169.254.169.254/ could leak cloud credentials.
+  - name: block-metadata-services
+    description: Block cloud metadata services (SSRF protection)
+    cidrs:
+      - "169.254.169.254/32"
+      - "100.100.100.200/32"
+      - "fd00:ec2::254/128"
+    decision: deny
+
+  # Block all private/internal networks. The credential proxy exception above
+  # (port 3001 only) is the sole allowed private network connection.
+  # This prevents agents from scanning or accessing internal infrastructure.
+  - name: block-private-networks
+    description: Block private/internal networks (except credential proxy)
+    cidrs:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+      - "169.254.0.0/16"
+      - "fc00::/7"
+      - "fe80::/10"
+    decision: deny
+
+  # ---------------------------------------------------------------------------
+  # Web browsing — the agent uses Chromium (via agent-browser) to browse the
+  # web for research, data extraction, and API access. We allow HTTPS/HTTP
+  # broadly AFTER blocking private networks and metadata services.
+  # Malicious domains are automatically blocked by threat feeds (configured
+  # in config.yaml) which are checked before rule evaluation.
+  # ---------------------------------------------------------------------------
+
+  - name: allow-https
+    description: Allow HTTPS for web browsing and API access
+    ports: [443]
+    decision: allow
+
+  - name: allow-http
+    description: Allow HTTP for web access
+    ports: [80]
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Default deny — block non-standard ports, raw TCP, etc.
+  # ---------------------------------------------------------------------------
+
+  - name: default-deny-network
+    description: Deny all other network connections
+    domains:
+      - "*"
+    decision: deny
+
+# =============================================================================
+# COMMAND RULES
+# =============================================================================
+# Controls which commands the agent can execute through the bash shim.
+# The Claude Agent SDK runs commands via /bin/bash -c "...", which the agentsh
+# shim intercepts. These rules determine what's allowed.
+#
+# Strategy: Allow dev tools the agent needs, block dangerous system commands
+# and raw network tools that could be used for lateral movement.
+
+command_rules:
+  # ---------------------------------------------------------------------------
+  # Safe read-only commands — standard Unix utilities for file inspection,
+  # text processing, and environment queries
+  # ---------------------------------------------------------------------------
+
+  - name: allow-safe-commands
+    description: Standard safe commands
+    commands:
+      - ls
+      - cat
+      - head
+      - tail
+      - grep
+      - find
+      - wc
+      - sort
+      - uniq
+      - diff
+      - pwd
+      - echo
+      - date
+      - which
+      - whoami
+      - id
+      - uname
+      - test
+      - true
+      - false
+      - basename
+      - dirname
+      - realpath
+      - readlink
+      - stat
+      - file
+      - tee
+      - tr
+      - cut
+      - paste
+      - sed
+      - awk
+      - xargs
+      - seq
+      - printf
+      - env
+      - printenv
+      - md5sum
+      - sha256sum
+    decision: allow
+
+  # Dev tools — the agent needs these for code tasks: git for version control,
+  # node/npm for JavaScript, curl/wget for downloads, tar/zip for archives
+  - name: allow-dev-tools
+    description: Development, build, and download tools
+    commands:
+      - git
+      - node
+      - npm
+      - npx
+      - python
+      - python3
+      - pip
+      - pip3
+      - tsc
+      - make
+      - cmake
+      - curl
+      - wget
+      - tar
+      - gzip
+      - gunzip
+      - unzip
+      - zip
+      - jq
+    decision: allow
+
+  # Browser automation — the agent uses Chromium via agent-browser for web
+  # research, data extraction, and testing
+  - name: allow-chromium
+    description: Browser automation
+    commands:
+      - chromium
+      - chromium-browser
+      - agent-browser
+    decision: allow
+
+  - name: allow-agentsh
+    description: agentsh tooling
+    commands:
+      - agentsh
+      - agentsh-shell-shim
+    decision: allow
+
+  # File operations — cp, mv, rm, etc. are needed for normal agent work.
+  # rm -rf is blocked separately below to prevent mass deletion.
+  - name: allow-file-ops
+    description: File operations (rm -rf blocked separately)
+    commands:
+      - cp
+      - mv
+      - mkdir
+      - touch
+      - ln
+      - chmod
+      - rm
+    decision: allow
+
+  # ---------------------------------------------------------------------------
+  # Blocked operations — dangerous commands that should never be needed
+  # by a coding agent
+  # ---------------------------------------------------------------------------
+
+  # Block rm -rf specifically. Individual file removal is allowed above,
+  # but recursive force-delete can destroy entire directory trees.
+  - name: block-rm-recursive-force
+    description: Block recursive force delete
+    commands:
+      - rm
+    args_patterns:
+      - ".*-rf.*"
+      - ".*-fr.*"
+    decision: deny
+    message: "Recursive force delete blocked. Remove files individually."
+
+  # System administration commands — the agent runs as non-root in a container,
+  # but blocking these adds defense-in-depth
+  - name: block-system-commands
+    description: Block system administration
+    commands:
+      - shutdown
+      - reboot
+      - init
+      - systemctl
+      - service
+      - mount
+      - umount
+      - fdisk
+      - mkfs
+      - dd
+      - kill
+      - killall
+      - pkill
+    decision: deny
+
+  # Privilege escalation — these could be used to escape the non-root sandbox
+  - name: block-shell-escape
+    description: Block privilege escalation
+    commands:
+      - sudo
+      - su
+      - chroot
+      - nsenter
+      - unshare
+    decision: deny
+
+  # Raw network tools — these enable port scanning, reverse shells, and
+  # lateral movement. The agent should use curl/wget for HTTP and
+  # agent-browser for web interaction instead.
+  - name: block-raw-network
+    description: Block raw network tools
+    commands:
+      - nc
+      - netcat
+      - ncat
+      - socat
+      - telnet
+      - ssh
+      - scp
+      - rsync
+      - nmap
+    decision: deny
+
+  # Package manager access — the container image has all needed tools
+  # pre-installed. Blocking apt/dpkg prevents the agent from installing
+  # arbitrary system packages that could weaken security.
+  - name: block-package-manager
+    description: Block system package installation
+    commands:
+      - apt
+      - apt-get
+      - dpkg
+      - yum
+      - rpm
+    decision: deny
+    message: "System package installation blocked. Use pre-installed tools."
+
+# =============================================================================
+# RESOURCE LIMITS
+# =============================================================================
+# Prevent runaway agents from consuming excessive host resources.
+# These complement Docker's own resource limits (set in container-runner.ts).
+
+resource_limits:
+  max_memory_mb: 4096          # 4GB — enough for Chromium + Node.js + agent work
+  memory_swap_max_mb: 0        # No swap — fail fast on OOM rather than thrashing
+  cpu_quota_percent: 80        # 80% of one core
+  pids_max: 200                # Chromium spawns many processes
+  disk_read_bps_max: 104857600 # 100 MB/s
+  disk_write_bps_max: 52428800 # 50 MB/s
+  command_timeout: 10m         # Single command max — prevents hung processes
+  session_timeout: 2h          # Total session max — prevents zombie containers
+  idle_timeout: 30m            # Kill container after 30min of no activity
+
+# =============================================================================
+# AUDIT
+# =============================================================================
+# Log denied and approved operations for security review.
+# Allowed operations are not logged to avoid noise — the agent makes thousands
+# of allowed file/command operations per session.
+
+audit:
+  log_allowed: false           # Too noisy for normal operations
+  log_denied: true             # Always log blocked attempts
+  log_approved: true           # Log approval decisions
+  include_stdout: false        # Can be very large (agent output)
+  include_stderr: true         # Errors are important for debugging
+  include_file_content: false  # Never log file contents (privacy)
+  retention_days: 7            # Keep audit logs for 1 week

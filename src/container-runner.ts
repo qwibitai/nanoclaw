@@ -221,10 +221,13 @@ function buildContainerArgs(
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
+  // Route API traffic through agentsh DLP proxy -> credential proxy -> Anthropic.
+  // The agentsh proxy (port 18081 inside container) redacts PII from prompts,
+  // then forwards to the credential proxy on the host which injects real API keys.
+  args.push('-e', 'ANTHROPIC_BASE_URL=http://127.0.0.1:18081');
   args.push(
     '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    `NANOCLAW_CREDENTIAL_PROXY_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
   );
 
   // Mirror the host's auth method with a placeholder value.
