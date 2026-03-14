@@ -456,6 +456,12 @@ async function runQuery(
         result: textResult || null,
         newSessionId
       });
+
+      // End this turn after a result so the host can start the next turn cleanly.
+      // Keeping the stream open here can trap follow-up IPC messages in one long query.
+      // Stop IPC polling too so follow-up messages remain queued for next turn.
+      ipcPolling = false;
+      stream.end();
     }
   }
 
