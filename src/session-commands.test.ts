@@ -45,7 +45,9 @@ describe('extractSessionCommand', () => {
   });
 
   it('detects /closethread with trigger prefix', () => {
-    expect(extractSessionCommand('@Andy /closethread', trigger)).toBe('/closethread');
+    expect(extractSessionCommand('@Andy /closethread', trigger)).toBe(
+      '/closethread',
+    );
   });
 
   it('rejects /closethread with extra text', () => {
@@ -151,11 +153,16 @@ describe('handleSessionCommand', () => {
       deps,
     });
     expect(result).toEqual({ handled: true, success: true });
-    expect(deps.runAgent).toHaveBeenCalledWith('/compact', expect.any(Function));
+    expect(deps.runAgent).toHaveBeenCalledWith(
+      '/compact',
+      expect.any(Function),
+    );
   });
 
   it('sends denial to non-allowlisted sender in non-main group', async () => {
-    const deps = makeDeps({ canSenderInteract: vi.fn().mockReturnValue(false) });
+    const deps = makeDeps({
+      canSenderInteract: vi.fn().mockReturnValue(false),
+    });
     const result = await handleSessionCommand({
       missedMessages: [makeMsg('/compact', { is_from_me: false })],
       isMainGroup: false,

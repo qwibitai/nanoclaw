@@ -15,6 +15,7 @@ import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Channel } from '../types.js';
+import { transformTablesInText } from '../table-renderer.js';
 
 // Slack's chat.postMessage API limits text to ~4000 characters per call.
 // Messages exceeding this are split into sequential chunks.
@@ -366,31 +367,55 @@ export class SlackChannel implements Channel {
       return;
     }
 
+    // Capture original text before any transformation so the catch block can
+    // queue pre-transform content (sendMessage will re-apply transforms on retry).
+    const originalText = text;
     try {
       // Thread ts from JID takes priority (thread-session mode),
       // then fall back to replyThreadTs map (legacy mode)
       const threadTs = parsed ? parsed.threadId : this.replyThreadTs.get(jid);
       text = this.replaceMentions(text);
 
-      // Slack limits messages to ~4000 characters; split if needed
+      // Convert markdown tables: single table → Slack Block Kit attachment,
+      // multiple tables → monospace code blocks inline.
+      const { text: transformed, slackAttachmentBlocks } =
+        transformTablesInText('slack', text);
+      text = transformed;
+      const attachments = slackAttachmentBlocks?.length
+        ? [{ blocks: slackAttachmentBlocks }]
+        : undefined;
+
+      // Slack limits messages to ~4000 characters; split if needed.
+      // Attachment blocks are sent only with the last chunk.
       if (text.length <= MAX_MESSAGE_LENGTH) {
         await this.app.client.chat.postMessage({
           channel: channelId,
           text,
           thread_ts: threadTs,
+          ...(attachments ? { attachments } : {}),
         });
       } else {
+        const chunks: string[] = [];
         for (let i = 0; i < text.length; i += MAX_MESSAGE_LENGTH) {
+          chunks.push(text.slice(i, i + MAX_MESSAGE_LENGTH));
+        }
+        for (let i = 0; i < chunks.length - 1; i++) {
           await this.app.client.chat.postMessage({
             channel: channelId,
-            text: text.slice(i, i + MAX_MESSAGE_LENGTH),
+            text: chunks[i],
             thread_ts: threadTs,
           });
         }
+        await this.app.client.chat.postMessage({
+          channel: channelId,
+          text: chunks[chunks.length - 1],
+          thread_ts: threadTs,
+          ...(attachments ? { attachments } : {}),
+        });
       }
       logger.info({ jid, length: text.length, threadTs }, 'Slack message sent');
     } catch (err) {
-      this.outgoingQueue.push({ jid, text });
+      this.outgoingQueue.push({ jid, text: originalText });
       logger.warn(
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send Slack message, queued',
@@ -816,13 +841,20 @@ export class SlackChannel implements Channel {
         const item = this.outgoingQueue.shift()!;
         const channelId = item.jid.replace(/^slack:/, '');
         const threadTs = this.replyThreadTs.get(item.jid);
+        const flushedText = this.replaceMentions(item.text);
+        const { text: transformed, slackAttachmentBlocks } =
+          transformTablesInText('slack', flushedText);
+        const attachments = slackAttachmentBlocks?.length
+          ? [{ blocks: slackAttachmentBlocks }]
+          : undefined;
         await this.app.client.chat.postMessage({
           channel: channelId,
-          text: item.text,
+          text: transformed,
           thread_ts: threadTs,
+          ...(attachments ? { attachments } : {}),
         });
         logger.info(
-          { jid: item.jid, length: item.text.length },
+          { jid: item.jid, length: transformed.length },
           'Queued Slack message sent',
         );
       }

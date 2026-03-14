@@ -5,6 +5,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 // Mock registry (registerChannel runs at import time)
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
+// Mock table renderer — pass text through unchanged by default
+vi.mock('../table-renderer.js', () => ({
+  transformTablesInText: vi.fn((_platform: string, text: string) => ({ text })),
+}));
+
 // Mock env reader (used by the factory, not needed in unit tests)
 vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 
@@ -122,6 +127,7 @@ vi.mock('discord.js', () => {
 
 import { DiscordChannel } from './discord.js';
 import type { ChannelOpts } from './registry.js';
+import { transformTablesInText } from '../table-renderer.js';
 
 // --- Test helpers ---
 
@@ -862,6 +868,61 @@ describe('DiscordChannel', () => {
     it('has name "discord"', () => {
       const channel = new DiscordChannel('test-token', createTestOpts());
       expect(channel.name).toBe('discord');
+    });
+  });
+
+  // --- Table rendering integration ---
+
+  describe('table rendering integration', () => {
+    it('calls transformTablesInText with platform "discord" before sending', async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage('dc:1234567890123456', 'Hello');
+
+      expect(vi.mocked(transformTablesInText)).toHaveBeenCalledWith(
+        'discord',
+        'Hello',
+      );
+    });
+
+    it('sends the transformed text returned by transformTablesInText', async () => {
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: 'TRANSFORMED',
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      await channel.sendMessage('dc:1234567890123456', 'Original');
+
+      const textChannel =
+        await currentClient().channels.fetch('1234567890123456');
+      // sendChunked calls target.send(text) when there are no components
+      expect(textChannel.send).toHaveBeenCalledWith('TRANSFORMED');
+    });
+
+    it('passes transformed text to buildPrButtons, not original', async () => {
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: 'No PR links here',
+      });
+
+      const opts = createTestOpts();
+      const channel = new DiscordChannel('test-token', opts);
+      await channel.connect();
+
+      // Original text has a PR link but transformed does not — no buttons expected
+      await channel.sendMessage(
+        'dc:1234567890123456',
+        'https://github.com/owner/repo/pull/1',
+      );
+
+      const textChannel =
+        await currentClient().channels.fetch('1234567890123456');
+      // Called with no components because transformed text has no PR link
+      expect(textChannel.send).toHaveBeenCalledWith('No PR links here');
     });
   });
 });

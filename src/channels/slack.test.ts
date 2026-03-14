@@ -5,6 +5,11 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 // Mock registry (registerChannel runs at import time)
 vi.mock('./registry.js', () => ({ registerChannel: vi.fn() }));
 
+// Mock table renderer — pass text through unchanged by default
+vi.mock('../table-renderer.js', () => ({
+  transformTablesInText: vi.fn((_platform: string, text: string) => ({ text })),
+}));
+
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Jonesy',
@@ -98,6 +103,7 @@ import { SlackChannel } from './slack.js';
 import type { ChannelOpts } from './registry.js';
 import { updateChatName } from '../db.js';
 import { readEnvFile } from '../env.js';
+import { transformTablesInText } from '../table-renderer.js';
 
 // --- Test helpers ---
 
@@ -867,6 +873,122 @@ describe('SlackChannel', () => {
     it('has name "slack"', () => {
       const channel = new SlackChannel(createTestOpts());
       expect(channel.name).toBe('slack');
+    });
+  });
+
+  // --- Table rendering integration ---
+
+  describe('table rendering integration', () => {
+    it('calls transformTablesInText with platform "slack" before sending', async () => {
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('slack:C0123456789', 'Hello');
+
+      expect(vi.mocked(transformTablesInText)).toHaveBeenCalledWith(
+        'slack',
+        'Hello',
+      );
+    });
+
+    it('sends without attachments when no slackAttachmentBlocks returned', async () => {
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: 'No table',
+      });
+
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('slack:C0123456789', 'No table');
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith(
+        expect.not.objectContaining({ attachments: expect.anything() }),
+      );
+    });
+
+    it('sends slackAttachmentBlocks in attachments when returned', async () => {
+      const fakeBlock = {
+        type: 'table' as const,
+        column_settings: [{ align: 'left' as const, is_wrapped: false }],
+        rows: [[{ type: 'raw_text' as const, text: 'Header' }]],
+      };
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: 'Summary text',
+        slackAttachmentBlocks: [fakeBlock],
+      });
+
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('slack:C0123456789', 'Original');
+
+      expect(currentApp().client.chat.postMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: 'Summary text',
+          attachments: [{ blocks: [fakeBlock] }],
+        }),
+      );
+    });
+
+    it('attaches blocks only to last chunk when text is chunked', async () => {
+      const fakeBlock = {
+        type: 'table' as const,
+        column_settings: [{ align: 'left' as const, is_wrapped: false }],
+        rows: [[{ type: 'raw_text' as const, text: 'Header' }]],
+      };
+      const longText = 'A'.repeat(4001);
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: longText,
+        slackAttachmentBlocks: [fakeBlock],
+      });
+
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('slack:C0123456789', 'Original');
+
+      const calls = vi.mocked(currentApp().client.chat.postMessage).mock.calls;
+      expect(calls).toHaveLength(2);
+      // First chunk: no attachments
+      expect(calls[0][0]).not.toHaveProperty('attachments');
+      // Last chunk: has attachments
+      expect(calls[1][0]).toHaveProperty('attachments', [
+        { blocks: [fakeBlock] },
+      ]);
+    });
+
+    it('queues original pre-transform text on send failure for correct retry', async () => {
+      const fakeBlock = {
+        type: 'table' as const,
+        column_settings: [{ align: 'left' as const, is_wrapped: false }],
+        rows: [[{ type: 'raw_text' as const, text: 'Header' }]],
+      };
+      // Table transformation strips the table from text and puts it in slackAttachmentBlocks
+      vi.mocked(transformTablesInText).mockReturnValueOnce({
+        text: 'Surrounding text only',
+        slackAttachmentBlocks: [fakeBlock],
+      });
+      // Make postMessage fail
+      vi.mocked(currentApp().client.chat.postMessage).mockRejectedValueOnce(
+        new Error('network error'),
+      );
+
+      const opts = createTestOpts();
+      const channel = new SlackChannel(opts);
+      await channel.connect();
+
+      await channel.sendMessage('slack:C0123456789', 'Original with table');
+
+      // transformTablesInText should have been called with the original text, not the stripped version
+      expect(vi.mocked(transformTablesInText)).toHaveBeenNthCalledWith(
+        1,
+        'slack',
+        'Original with table',
+      );
     });
   });
 });

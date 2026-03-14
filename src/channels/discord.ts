@@ -32,6 +32,7 @@ import { getAnthropicApiKey, readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import { Attachment, Channel } from '../types.js';
+import { transformTablesInText } from '../table-renderer.js';
 
 /**
  * Ask Haiku to generate a short, descriptive thread title from the user's message.
@@ -64,7 +65,8 @@ async function generateThreadName(userMessage: string): Promise<string> {
     const data = (await resp.json()) as {
       content: Array<{ type: string; text?: string }>;
     };
-    const name = data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
+    const name =
+      data.content?.find((c) => c.type === 'text')?.text?.trim() ?? '';
     return name.slice(0, 100) || 'Thread';
   } catch (err) {
     logger.debug({ err }, 'Failed to generate thread name');
@@ -525,6 +527,7 @@ export class DiscordChannel implements Channel {
 
       const textChannel = channel as TextChannel;
       text = await this.replaceMentions(text, textChannel);
+      ({ text } = transformTablesInText('discord', text));
       const components = this.buildPrButtons(text);
       await this.sendChunked(textChannel, text, components);
       logger.info({ jid, length: text.length }, 'Discord message sent');
@@ -565,6 +568,7 @@ export class DiscordChannel implements Channel {
       });
 
       text = await this.replaceMentions(text, textChannel);
+      ({ text } = transformTablesInText('discord', text));
       const components = this.buildPrButtons(text);
       await this.sendChunked(thread, text, components);
 
