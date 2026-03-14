@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -14,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  OPENAI_PROXY_PORT,
   TIMEZONE,
 } from './config.js';
 import { resolveGroupFolderPath, resolveGroupIpcPath } from './group-folder.js';
@@ -41,6 +43,8 @@ export interface ContainerInput {
   isMain: boolean;
   isScheduledTask?: boolean;
   assistantName?: string;
+  engine?: 'claude' | 'codex';
+  secrets?: Record<string, string>;
 }
 
 export interface ContainerOutput {
@@ -59,6 +63,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  engine: 'claude' | 'codex' = 'claude',
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const projectRoot = process.cwd();
@@ -199,6 +204,19 @@ function buildVolumeMounts(
     readonly: false,
   });
 
+  // Codex engine: mount host's ~/.codex so the SDK can find session credentials.
+  // The SDK reads auth.json and may write refreshed tokens back.
+  if (engine === 'codex') {
+    const hostCodexHome = path.join(os.homedir(), '.codex');
+    if (fs.existsSync(hostCodexHome)) {
+      mounts.push({
+        hostPath: hostCodexHome,
+        containerPath: '/home/node/.codex',
+        readonly: false,
+      });
+    }
+  }
+
   // Additional mounts validated against external allowlist (tamper-proof from containers)
   if (group.containerConfig?.additionalMounts) {
     const validatedMounts = validateAdditionalMounts(
@@ -212,30 +230,51 @@ function buildVolumeMounts(
   return mounts;
 }
 
+/**
+ * Read Codex-specific secrets from .env for passing to the container via stdin.
+ * Secrets are never written to disk or mounted as files.
+ */
 function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
+  engine: 'claude' | 'codex' = 'claude',
 ): string[] {
   const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
 
-  // Route API traffic through the credential proxy (containers never see real secrets)
-  args.push(
-    '-e',
-    `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
-  );
-
-  // Mirror the host's auth method with a placeholder value.
-  // API key mode: SDK sends x-api-key, proxy replaces with real key.
-  // OAuth mode:   SDK exchanges placeholder token for temp API key,
-  //               proxy injects real OAuth token on that exchange request.
-  const authMode = detectAuthMode();
-  if (authMode === 'api-key') {
-    args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+  if (engine === 'codex') {
+    // Codex engine: route OpenAI SDK requests through the OpenAI credential proxy.
+    // The proxy injects the real OPENAI_API_KEY so it never enters the container.
+    // Containers that use ~/.codex session auth (no API key) will ignore these
+    // env vars — the SDK falls back to the mounted auth file automatically.
+    //
+    // No /v1 suffix here: the OpenAI SDK appends /v1 to OPENAI_BASE_URL itself.
+    // Adding /v1 here would produce double-prefix (/v1/v1/...) when users set
+    // OPENAI_BASE_URL to a custom endpoint that already includes /v1.
+    args.push(
+      '-e',
+      `OPENAI_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${OPENAI_PROXY_PORT}`,
+    );
+    args.push('-e', 'OPENAI_API_KEY=placeholder');
   } else {
-    args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    // Claude engine: route Anthropic SDK requests through the Claude credential proxy.
+    args.push(
+      '-e',
+      `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`,
+    );
+
+    // Mirror the host's auth method with a placeholder value.
+    // API key mode: SDK sends x-api-key, proxy replaces with real key.
+    // OAuth mode:   SDK exchanges placeholder token for temp API key,
+    //               proxy injects real OAuth token on that exchange request.
+    const authMode = detectAuthMode();
+    if (authMode === 'api-key') {
+      args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
+    } else {
+      args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+    }
   }
 
   // Runtime-specific args for host gateway resolution
@@ -275,10 +314,11 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const engine: 'claude' | 'codex' = process.env.AGENT_ENGINE === 'codex' ? 'codex' : 'claude';
+  const mounts = buildVolumeMounts(group, input.isMain, engine);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  const containerArgs = buildContainerArgs(mounts, containerName, engine);
 
   logger.debug(
     {
@@ -318,8 +358,12 @@ export async function runContainerAgent(
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
+    // Pass engine via stdin so the agent-runner selects the correct runtime.
+    // Credentials are injected by the host-side proxy — never via stdin or env.
+    input.engine = engine;
     container.stdin.write(JSON.stringify(input));
     container.stdin.end();
+    delete input.engine;
 
     // Streaming output: parse OUTPUT_START/END marker pairs as they arrive
     let parseBuffer = '';

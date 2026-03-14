@@ -47,8 +47,16 @@ export const CONTAINER_MAX_OUTPUT_SIZE = parseInt(
   process.env.CONTAINER_MAX_OUTPUT_SIZE || '10485760',
   10,
 ); // 10MB default
+// Credential proxy ports: 19001-19099 is the nanoclaw proxy namespace.
+// Range chosen to avoid: OS ephemeral ports (32768-60999), common dev-tool
+// ports (3000-9999), and any services running on this host.
+// Both ports are configurable via environment variables.
 export const CREDENTIAL_PROXY_PORT = parseInt(
-  process.env.CREDENTIAL_PROXY_PORT || '3001',
+  process.env.CREDENTIAL_PROXY_PORT || '19001',
+  10,
+);
+export const OPENAI_PROXY_PORT = parseInt(
+  process.env.OPENAI_PROXY_PORT || '19002',
   10,
 );
 export const IPC_POLL_INTERVAL = 1000;

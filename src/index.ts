@@ -5,11 +5,13 @@ import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
   IDLE_TIMEOUT,
+  OPENAI_PROXY_PORT,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
-import { startCredentialProxy } from './credential-proxy.js';
+import { startCredentialProxy, startOpenAIProxy } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -477,10 +479,24 @@ async function main(): Promise<void> {
     PROXY_BIND_HOST,
   );
 
+  // Start OpenAI credential proxy for Codex engine (only when AGENT_ENGINE=codex)
+  let openAIProxyServer: Awaited<ReturnType<typeof startOpenAIProxy>> | null = null;
+  if (process.env.AGENT_ENGINE === 'codex') {
+    const openaiSecrets = readEnvFile(['OPENAI_API_KEY']);
+    if (!openaiSecrets.OPENAI_API_KEY) {
+      logger.warn(
+        'AGENT_ENGINE=codex but OPENAI_API_KEY is not set in .env. ' +
+        'API requests will fail unless ~/.codex session auth is configured.',
+      );
+    }
+    openAIProxyServer = await startOpenAIProxy(OPENAI_PROXY_PORT, PROXY_BIND_HOST);
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     proxyServer.close();
+    openAIProxyServer?.close();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
