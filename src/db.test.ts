@@ -9,8 +9,10 @@ import {
   getAllRegisteredGroups,
   getMessagesSince,
   getNewMessages,
+  getRouterState,
   getTaskById,
   setRegisteredGroup,
+  setRouterState,
   storeChatMetadata,
   storeMessage,
   updateTask,
@@ -729,6 +731,73 @@ describe("getAllMessagesSince", () => {
     const secondIds = second.map((m) => m.id);
     expect(secondIds).toEqual(["t08", "t09", "t10"]);
   });
+
+  it("maxRows caps total returned rows", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      3,
+      undefined,
+      5,
+    );
+    expect(msgs).toHaveLength(5);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[4].content).toBe("message 5");
+  });
+
+  it("maxRows less than batchSize uses single bounded query", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      4,
+    );
+    expect(msgs).toHaveLength(4);
+    expect(msgs[0].content).toBe("message 1");
+    expect(msgs[3].content).toBe("message 4");
+  });
+
+  it("maxRows equal to total rows returns all", () => {
+    const msgs = getAllMessagesSince(
+      "group@g.us",
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      3,
+      undefined,
+      10,
+    );
+    expect(msgs).toHaveLength(10);
+  });
+
+  it("maxRows with composite cursor", () => {
+    storeChatMetadata("maxcur@g.us", "2024-01-01T00:00:00.000Z");
+    const T = "2024-01-01T00:00:01.000Z";
+    for (const id of ["a", "b", "c"]) {
+      store({
+        id,
+        chat_jid: "maxcur@g.us",
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `msg ${id}`,
+        timestamp: T,
+      });
+    }
+    store({
+      id: "d",
+      chat_jid: "maxcur@g.us",
+      sender: "user@s.whatsapp.net",
+      sender_name: "User",
+      content: "msg d",
+      timestamp: "2024-01-01T00:00:02.000Z",
+    });
+    // Start after "a", cap to 2 rows
+    const msgs = getAllMessagesSince("maxcur@g.us", T, "Andy", 200, "a", 2);
+    expect(msgs).toHaveLength(2);
+    expect(msgs.map((m) => m.id)).toEqual(["b", "c"]);
+  });
 });
 
 // --- RegisteredGroup isMain round-trip ---
@@ -762,5 +831,124 @@ describe("registered group isMain", () => {
     const group = groups["group@g.us"];
     expect(group).toBeDefined();
     expect(group.isMain).toBeUndefined();
+  });
+});
+
+// --- router_state pending_tail_drain round-trip ---
+
+describe("router_state pending_tail_drain", () => {
+  it("round-trips JSON array", () => {
+    const jids = ["a@g.us", "b@g.us"];
+    setRouterState("pending_tail_drain", JSON.stringify(jids));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual(["a@g.us", "b@g.us"]);
+  });
+
+  it("handles empty array", () => {
+    setRouterState("pending_tail_drain", JSON.stringify([]));
+    const raw = getRouterState("pending_tail_drain");
+    expect(raw).toBeDefined();
+    expect(JSON.parse(raw!)).toEqual([]);
+  });
+});
+
+// --- Regression: trigger scanning and piping with large backlogs ---
+
+describe("large backlog trigger scanning", () => {
+  it("getAllMessagesSince without maxRows returns full backlog for trigger scanning", () => {
+    const jid = "backlog@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 300; i++) {
+      store({
+        id: `bl-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: i === 250 ? "@Andy trigger message" : `message ${i}`,
+        timestamp: `2024-01-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // Without maxRows: returns all 300 — trigger at position 250 is discoverable
+    const all = getAllMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 200);
+    expect(all).toHaveLength(300);
+    const triggerIdx = all.findIndex((m) => m.content.includes("@Andy"));
+    expect(triggerIdx).toBeGreaterThanOrEqual(0);
+
+    // With maxRows=200: returns only oldest 200 — trigger is NOT discoverable (the bug)
+    const capped = getAllMessagesSince(
+      jid,
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      200,
+    );
+    expect(capped).toHaveLength(200);
+    const cappedTriggerIdx = capped.findIndex((m) => m.content.includes("@Andy"));
+    expect(cappedTriggerIdx).toBe(-1);
+  });
+
+  it("getMessagesSince returns newest messages including recent trigger", () => {
+    const jid = "pipe@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 300; i++) {
+      store({
+        id: `pipe-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: i === 300 ? "@Andy trigger" : `message ${i}`,
+        timestamp: `2024-01-01T00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // getMessagesSince (newest N): trigger is included because it's the last message
+    const newest = getMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 200);
+    expect(newest).toHaveLength(200);
+    expect(newest[newest.length - 1].content).toBe("@Andy trigger");
+
+    // getAllMessagesSince with maxRows (oldest N): trigger is NOT included (the bug)
+    const oldest = getAllMessagesSince(
+      jid,
+      "2024-01-01T00:00:00.000Z",
+      "Andy",
+      200,
+      undefined,
+      200,
+    );
+    expect(oldest).toHaveLength(200);
+    const hasTrigger = oldest.some((m) => m.content.includes("@Andy"));
+    expect(hasTrigger).toBe(false);
+  });
+
+  it("getMessagesSince cursor advancement leaves no residual", () => {
+    const jid = "residual@g.us";
+    storeChatMetadata(jid, "2024-01-01T00:00:00.000Z");
+
+    for (let i = 1; i <= 10; i++) {
+      store({
+        id: `res-${i}`,
+        chat_jid: jid,
+        sender: "user@s.whatsapp.net",
+        sender_name: "User",
+        content: `message ${i}`,
+        timestamp: `2024-01-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      });
+    }
+
+    // Fetch newest 5
+    const batch = getMessagesSince(jid, "2024-01-01T00:00:00.000Z", "Andy", 5);
+    expect(batch).toHaveLength(5);
+    expect(batch[0].id).toBe("res-6");
+    expect(batch[4].id).toBe("res-10");
+
+    // Advance cursor to last returned message, fetch again — should be empty
+    const last = batch[batch.length - 1];
+    const next = getMessagesSince(jid, last.timestamp, "Andy", 5, last.id);
+    expect(next).toHaveLength(0);
   });
 });

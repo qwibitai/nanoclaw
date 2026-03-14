@@ -325,6 +325,7 @@ export function getAllMessagesSince(
   botPrefix: string,
   batchSize: number = 200,
   sinceId?: string,
+  maxRows?: number,
 ): NewMessage[] {
   const initialSql = `
     SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me
@@ -350,23 +351,26 @@ export function getAllMessagesSince(
   let cursorTs = sinceTimestamp;
   let cursorId: string | null = sinceId || null;
   while (true) {
+    const remaining = maxRows !== undefined ? maxRows - all.length : batchSize;
+    if (remaining <= 0) break;
+    const limit = maxRows !== undefined ? Math.min(batchSize, remaining) : batchSize;
     const batch: NewMessage[] =
       cursorId === null
-        ? (initialStmt.all(chatJid, cursorTs, `${botPrefix}:%`, batchSize) as NewMessage[])
+        ? (initialStmt.all(chatJid, cursorTs, `${botPrefix}:%`, limit) as NewMessage[])
         : (pageStmt.all(
             chatJid,
             cursorTs,
             cursorTs,
             cursorId,
             `${botPrefix}:%`,
-            batchSize,
+            limit,
           ) as NewMessage[]);
     if (batch.length === 0) break;
     all.push(...batch);
     const last = batch[batch.length - 1];
     cursorTs = last.timestamp;
     cursorId = last.id;
-    if (batch.length < batchSize) break;
+    if (batch.length < limit) break;
   }
   return all;
 }

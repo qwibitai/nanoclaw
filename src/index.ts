@@ -100,6 +100,15 @@ function loadState(): void {
     logger.warn("Corrupted last_agent_timestamp in DB, resetting");
     lastAgentTimestamp = {};
   }
+  const tailDrainRaw = getRouterState("pending_tail_drain");
+  try {
+    const arr: string[] = tailDrainRaw ? JSON.parse(tailDrainRaw) : [];
+    pendingTailDrain.clear();
+    for (const jid of arr) pendingTailDrain.add(jid);
+  } catch {
+    logger.warn("Corrupted pending_tail_drain in DB, resetting");
+    pendingTailDrain.clear();
+  }
   sessions = getAllSessions();
   registeredGroups = getAllRegisteredGroups();
   logger.info({ groupCount: Object.keys(registeredGroups).length }, "State loaded");
@@ -108,6 +117,10 @@ function loadState(): void {
 function saveState(): void {
   setRouterState("last_timestamp", lastTimestamp);
   setRouterState("last_agent_timestamp", JSON.stringify(lastAgentTimestamp));
+}
+
+function savePendingTailDrain(): void {
+  setRouterState("pending_tail_drain", JSON.stringify([...pendingTailDrain]));
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -154,6 +167,11 @@ export function _setRegisteredGroups(groups: Record<string, RegisteredGroup>): v
   registeredGroups = groups;
 }
 
+/** @internal - exported for testing */
+export function _getPendingTailDrain(): ReadonlySet<string> {
+  return pendingTailDrain;
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -174,7 +192,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let missedMessages = getAllMessagesSince(chatJid, cursor.ts, ASSISTANT_NAME, 200, cursor.id);
 
   if (missedMessages.length === 0) {
-    pendingTailDrain.delete(chatJid);
+    if (pendingTailDrain.delete(chatJid)) savePendingTailDrain();
     return true;
   }
 
@@ -186,6 +204,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     isTailDrain = pendingTailDrain.delete(chatJid);
+    if (isTailDrain) savePendingTailDrain();
     if (isTailDrain) {
       // Continuation of a truncated trigger window — skip trigger requirement.
       // Process oldest-first; cap overflow for another cycle.
@@ -284,6 +303,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       );
       if (truncated) {
         pendingTailDrain.add(chatJid);
+        savePendingTailDrain();
         queue.enqueueMessageCheck(chatJid);
       }
       return true;
@@ -291,13 +311,17 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     // Roll back cursor so retries can re-process these messages
     lastAgentTimestamp[chatJid] = previousCursor;
     saveState();
-    if (isTailDrain) pendingTailDrain.add(chatJid);
+    if (isTailDrain) {
+      pendingTailDrain.add(chatJid);
+      savePendingTailDrain();
+    }
     logger.warn({ group: group.name }, "Agent error, rolled back message cursor for retry");
     return false;
   }
 
   if (truncated) {
     pendingTailDrain.add(chatJid);
+    savePendingTailDrain();
     queue.enqueueMessageCheck(chatJid);
   }
   return true;
@@ -444,11 +468,11 @@ async function startMessageLoop(): Promise<void> {
           // Pull all messages since lastAgentTimestamp so non-trigger
           // context that accumulated between triggers is included.
           const pipeCursor = lastAgentTimestamp[chatJid] || { ts: "", id: "" };
-          const allPending = getAllMessagesSince(
+          const allPending = getMessagesSince(
             chatJid,
             pipeCursor.ts,
             ASSISTANT_NAME,
-            200,
+            MAX_PROMPT_MESSAGES,
             pipeCursor.id,
           );
           const messagesToSend = allPending.length > 0 ? allPending : groupMessages;
