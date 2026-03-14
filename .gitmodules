@@ -1,0 +1,9 @@
+[submodule "groups/global"]
+	path = groups/global
+	url = git@github.com:mlwynne24/nanoclaw-group-global.git
+[submodule "groups/main"]
+	path = groups/main
+	url = git@github.com:mlwynne24/nanoclaw-group-main.git
+[submodule "groups/graham-shops"]
+	path = groups/graham-shops
+	url = git@github.com:mlwynne24/nanoclaw-group-graham-shops.git
