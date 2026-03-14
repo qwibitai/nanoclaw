@@ -130,6 +130,7 @@ vi.mock("discord.js", () => {
 
 import { DiscordChannel, DiscordChannelOpts } from "./discord.js";
 import { getRestartPlan, restartNanoClawService } from "../service-control.js";
+import { PartialSendError } from "../types.js";
 
 // --- Test helpers ---
 
@@ -676,27 +677,38 @@ describe("DiscordChannel", () => {
       expect(currentClient().channels.fetch).toHaveBeenCalledWith("9876543210");
     });
 
-    it("handles send failure gracefully", async () => {
+    it("propagates send failure to caller", async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel("test-token", opts);
       await channel.connect();
 
       currentClient().channels.fetch.mockRejectedValueOnce(new Error("Channel not found"));
 
-      // Should not throw
-      await expect(
-        channel.sendMessage("dc:1234567890123456", "Will fail"),
-      ).resolves.toBeUndefined();
+      await expect(channel.sendMessage("dc:1234567890123456", "Will fail")).rejects.toThrow(
+        "Channel not found",
+      );
     });
 
-    it("does nothing when client is not initialized", async () => {
+    it("throws when client is not initialized", async () => {
       const opts = createTestOpts();
       const channel = new DiscordChannel("test-token", opts);
 
       // Don't connect — client is null
-      await channel.sendMessage("dc:1234567890123456", "No client");
+      await expect(channel.sendMessage("dc:1234567890123456", "No client")).rejects.toThrow(
+        "Discord client not initialized",
+      );
+    });
 
-      // No error, no API call
+    it("throws when channel is not text-based", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      currentClient().channels.fetch.mockResolvedValueOnce(null);
+
+      await expect(channel.sendMessage("dc:1234567890123456", "No channel")).rejects.toThrow(
+        "Discord channel not found or not text-based",
+      );
     });
 
     it("splits messages exceeding 2000 characters", async () => {
@@ -716,6 +728,72 @@ describe("DiscordChannel", () => {
       expect(mockChannel.send).toHaveBeenCalledTimes(2);
       expect(mockChannel.send).toHaveBeenNthCalledWith(1, "x".repeat(2000));
       expect(mockChannel.send).toHaveBeenNthCalledWith(2, "x".repeat(1000));
+    });
+
+    it("throws PartialSendError when later chunk fails after earlier chunks succeed", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const sendError = new Error("Discord API rate limit");
+      const mockChannel = {
+        send: vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(sendError),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const longText = "x".repeat(3000);
+      const err = await channel
+        .sendMessage("dc:1234567890123456", longText)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(PartialSendError);
+      const partial = err as PartialSendError;
+      expect(partial.chunksSent).toBe(1);
+      expect(partial.totalChunks).toBe(2);
+      expect(partial.cause).toBe(sendError);
+    });
+
+    it("throws original error when first chunk fails (no partial delivery)", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const sendError = new Error("Discord API unavailable");
+      const mockChannel = {
+        send: vi.fn().mockRejectedValueOnce(sendError),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const longText = "x".repeat(3000);
+      const err = await channel
+        .sendMessage("dc:1234567890123456", longText)
+        .catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(PartialSendError);
+      expect(err).toBe(sendError);
+    });
+
+    it("does not throw PartialSendError for single-chunk message failure", async () => {
+      const opts = createTestOpts();
+      const channel = new DiscordChannel("test-token", opts);
+      await channel.connect();
+
+      const sendError = new Error("Send failed");
+      const mockChannel = {
+        send: vi.fn().mockRejectedValueOnce(sendError),
+        sendTyping: vi.fn(),
+      };
+      currentClient().channels.fetch.mockResolvedValue(mockChannel);
+
+      const shortText = "Hello world";
+      const err = await channel
+        .sendMessage("dc:1234567890123456", shortText)
+        .catch((e: unknown) => e);
+
+      expect(err).not.toBeInstanceOf(PartialSendError);
+      expect(err).toBe(sendError);
     });
   });
 

@@ -100,6 +100,23 @@ export interface Channel {
   purgeMessages?(jid: string, options?: PurgeOptions): Promise<number>;
 }
 
+/**
+ * Thrown by Channel.sendMessage when a multi-chunk send partially succeeds.
+ * At least one chunk was delivered to the user before the error occurred.
+ * Callers should treat this as "output was sent" to avoid duplicate retries.
+ */
+export class PartialSendError extends Error {
+  override name = "PartialSendError";
+  constructor(
+    message: string,
+    public readonly chunksSent: number,
+    public readonly totalChunks: number,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+  }
+}
+
 // Callback type that channels use to deliver inbound messages
 export type OnInboundMessage = (chatJid: string, message: NewMessage) => void;
 
