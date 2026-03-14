@@ -32,6 +32,8 @@ import { RegisteredGroup } from './types.js';
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const STREAM_TEXT_MARKER = '---NANOCLAW_STREAM_TEXT---';
+const STREAM_TEXT_END_MARKER = '---NANOCLAW_STREAM_TEXT_END---';
 
 export interface ContainerInput {
   prompt: string;
@@ -269,6 +271,7 @@ export async function runContainerAgent(
   input: ContainerInput,
   onProcess: (proc: ChildProcess, containerName: string) => void,
   onOutput?: (output: ContainerOutput) => Promise<void>,
+  onStreamDelta?: (text: string) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
@@ -347,6 +350,30 @@ export async function runContainerAgent(
       // Stream-parse for output markers
       if (onOutput) {
         parseBuffer += chunk;
+
+        // Parse STREAM_TEXT markers (real-time text deltas for draft display)
+        if (onStreamDelta) {
+          let stIdx: number;
+          while ((stIdx = parseBuffer.indexOf(STREAM_TEXT_MARKER)) !== -1) {
+            const stEnd = parseBuffer.indexOf(STREAM_TEXT_END_MARKER, stIdx);
+            if (stEnd === -1) break;
+
+            const streamText = parseBuffer
+              .slice(stIdx + STREAM_TEXT_MARKER.length, stEnd)
+              .trim();
+            parseBuffer = parseBuffer.slice(stEnd + STREAM_TEXT_END_MARKER.length);
+
+            if (streamText) {
+              try {
+                onStreamDelta(streamText);
+              } catch {
+                // Best-effort — don't break the main flow
+              }
+            }
+          }
+        }
+
+        // Parse OUTPUT markers (complete results)
         let startIdx: number;
         while ((startIdx = parseBuffer.indexOf(OUTPUT_START_MARKER)) !== -1) {
           const endIdx = parseBuffer.indexOf(OUTPUT_END_MARKER, startIdx);

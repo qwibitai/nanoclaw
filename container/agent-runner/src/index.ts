@@ -106,11 +106,20 @@ async function readStdin(): Promise<string> {
 
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
+const STREAM_TEXT_MARKER = '---NANOCLAW_STREAM_TEXT---';
+const STREAM_TEXT_END_MARKER = '---NANOCLAW_STREAM_TEXT_END---';
 
 function writeOutput(output: ContainerOutput): void {
   console.log(OUTPUT_START_MARKER);
   console.log(JSON.stringify(output));
   console.log(OUTPUT_END_MARKER);
+}
+
+/** Emit accumulated streaming text for the host to display as a draft. */
+function writeStreamText(text: string): void {
+  console.log(STREAM_TEXT_MARKER);
+  console.log(text);
+  console.log(STREAM_TEXT_END_MARKER);
 }
 
 function log(message: string): void {
@@ -366,6 +375,12 @@ async function runQuery(
   let messageCount = 0;
   let resultCount = 0;
 
+  // Streaming state: accumulate text deltas and flush periodically
+  const STREAM_FLUSH_MS = 300;
+  let streamBuffer = '';
+  let lastStreamFlush = 0;
+  let isTextBlock = false;
+
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
   let globalClaudeMd: string | undefined;
@@ -424,6 +439,7 @@ async function runQuery(
           },
         },
       },
+      includePartialMessages: true,
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
       },
@@ -447,10 +463,48 @@ async function runQuery(
       log(`Task notification: task=${tn.task_id} status=${tn.status} summary=${tn.summary}`);
     }
 
+    // Stream text deltas to host for real-time draft display
+    if (message.type === 'stream_event') {
+      const event = (message as any).event;
+      const parentToolUseId = (message as any).parent_tool_use_id;
+
+      // Only stream main agent text (skip subagent streams)
+      if (parentToolUseId === null || parentToolUseId === undefined) {
+        if (event?.type === 'content_block_start') {
+          isTextBlock = event.content_block?.type === 'text';
+          if (isTextBlock) {
+            streamBuffer = '';
+            lastStreamFlush = 0;
+          }
+        }
+
+        if (event?.type === 'content_block_delta' && isTextBlock) {
+          if (event.delta?.type === 'text_delta' && event.delta.text) {
+            streamBuffer += event.delta.text;
+            const now = Date.now();
+            if (now - lastStreamFlush >= STREAM_FLUSH_MS) {
+              writeStreamText(streamBuffer);
+              lastStreamFlush = now;
+            }
+          }
+        }
+
+        if (event?.type === 'content_block_stop' && isTextBlock) {
+          if (streamBuffer) {
+            writeStreamText(streamBuffer);
+          }
+          streamBuffer = '';
+          isTextBlock = false;
+        }
+      }
+    }
+
     if (message.type === 'result') {
       resultCount++;
       const textResult = 'result' in message ? (message as { result?: string }).result : null;
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
+      streamBuffer = '';
+      isTextBlock = false;
       writeOutput({
         status: 'success',
         result: textResult || null,
