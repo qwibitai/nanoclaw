@@ -254,6 +254,38 @@ describe('resume_task authorization', () => {
   });
 });
 
+// --- task not found (idempotent) ---
+
+describe('task operations on non-existent tasks', () => {
+  it('cancel_task on non-existent task does not throw or warn', async () => {
+    await processTaskIpc(
+      { type: 'cancel_task', taskId: 'task-nonexistent' },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+    // Should not throw - treated as no-op
+  });
+
+  it('pause_task on non-existent task does not throw or warn', async () => {
+    await processTaskIpc(
+      { type: 'pause_task', taskId: 'task-nonexistent' },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+  });
+
+  it('resume_task on non-existent task does not throw or warn', async () => {
+    await processTaskIpc(
+      { type: 'resume_task', taskId: 'task-nonexistent' },
+      'whatsapp_main',
+      true,
+      deps,
+    );
+  });
+});
+
 // --- cancel_task authorization ---
 
 describe('cancel_task authorization', () => {

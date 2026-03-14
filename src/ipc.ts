@@ -4,8 +4,14 @@ import path from 'path';
 import { CronExpressionParser } from 'cron-parser';
 
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
-import { AvailableGroup } from './container-runner.js';
-import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import { AvailableGroup, writeTasksSnapshot } from './container-runner.js';
+import {
+  createTask,
+  deleteTask,
+  getAllTasks,
+  getTaskById,
+  updateTask,
+} from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -178,6 +184,24 @@ export async function processTaskIpc(
 ): Promise<void> {
   const registeredGroups = deps.registeredGroups();
 
+  /** Refresh current_tasks.json so the running container sees updated state */
+  const refreshSnapshot = () => {
+    const tasks = getAllTasks();
+    writeTasksSnapshot(
+      sourceGroup,
+      isMain,
+      tasks.map((t) => ({
+        id: t.id,
+        groupFolder: t.group_folder,
+        prompt: t.prompt,
+        schedule_type: t.schedule_type,
+        schedule_value: t.schedule_value,
+        status: t.status,
+        next_run: t.next_run,
+      })),
+    );
+  };
+
   switch (data.type) {
     case 'schedule_task':
       if (
@@ -270,60 +294,85 @@ export async function processTaskIpc(
           { taskId, sourceGroup, targetFolder, contextMode },
           'Task created via IPC',
         );
+        refreshSnapshot();
       }
       break;
 
     case 'pause_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'paused' });
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task paused via IPC',
+            'Task not found for pause (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task pause attempt',
           );
+          break;
         }
+        updateTask(data.taskId, { status: 'paused' });
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task paused via IPC',
+        );
+        refreshSnapshot();
       }
       break;
 
     case 'resume_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          updateTask(data.taskId, { status: 'active' });
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task resumed via IPC',
+            'Task not found for resume (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task resume attempt',
           );
+          break;
         }
+        updateTask(data.taskId, { status: 'active' });
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task resumed via IPC',
+        );
+        refreshSnapshot();
       }
       break;
 
     case 'cancel_task':
       if (data.taskId) {
         const task = getTaskById(data.taskId);
-        if (task && (isMain || task.group_folder === sourceGroup)) {
-          deleteTask(data.taskId);
+        if (!task) {
           logger.info(
             { taskId: data.taskId, sourceGroup },
-            'Task cancelled via IPC',
+            'Task not found for cancel (already deleted)',
           );
-        } else {
+          break;
+        }
+        if (!isMain && task.group_folder !== sourceGroup) {
           logger.warn(
             { taskId: data.taskId, sourceGroup },
             'Unauthorized task cancel attempt',
           );
+          break;
         }
+        deleteTask(data.taskId);
+        logger.info(
+          { taskId: data.taskId, sourceGroup },
+          'Task cancelled via IPC',
+        );
+        refreshSnapshot();
       }
       break;
 
@@ -388,6 +437,7 @@ export async function processTaskIpc(
           { taskId: data.taskId, sourceGroup, updates },
           'Task updated via IPC',
         );
+        refreshSnapshot();
       }
       break;
 
