@@ -207,9 +207,9 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
 
-  // Track the last output to avoid sending duplicate messages when SDK returns multiple results
+  // Track last sent message to prevent duplicate sends when SDK returns multiple identical results
   // See: https://github.com/qwibitai/nanoclaw/issues/1020
-  let lastOutput: string | null = null;
+  let lastSentMessage: string | null = null;
 
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
@@ -222,9 +222,13 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
       logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
       if (text) {
-        // Track the last output instead of sending immediately
-        lastOutput = text;
-        outputSentToUser = true;
+        // Only send if this is a different message than the last one sent
+        // This prevents duplicates while preserving streaming UX and distinct outputs
+        if (text !== lastSentMessage) {
+          await channel.sendMessage(chatJid, text);
+          lastSentMessage = text;
+          outputSentToUser = true;
+        }
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
@@ -238,11 +242,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       hadError = true;
     }
   });
-
-  // Send only the last output to avoid duplicate messages
-  if (lastOutput) {
-    await channel.sendMessage(chatJid, lastOutput);
-  }
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
