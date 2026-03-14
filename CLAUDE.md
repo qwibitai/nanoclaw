@@ -61,4 +61,4 @@ systemctl --user restart nanoclaw
 
 ## Container Build Cache
 
-The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+The container uses Docker for agent isolation. To force a clean rebuild: `docker builder prune && ./container/build.sh`.

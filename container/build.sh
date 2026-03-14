@@ -8,22 +8,7 @@ cd "$SCRIPT_DIR"
 
 IMAGE_NAME="nanoclaw-agent"
 TAG="${1:-latest}"
-CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-container}"
-
-# Download GitHub CLI binary for linux/arm64 if not already present.
-# Apple Container builds have no network access, so we pre-download
-# the binary on the host and COPY it in via the Dockerfile.
-GH_VERSION="2.67.0"
-GH_BIN="gh"
-if [ ! -f "$GH_BIN" ]; then
-  echo "Downloading GitHub CLI v${GH_VERSION} for linux/arm64..."
-  GH_TAR="gh_${GH_VERSION}_linux_arm64.tar.gz"
-  curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/${GH_TAR}" -o "/tmp/${GH_TAR}"
-  tar -xzf "/tmp/${GH_TAR}" -C /tmp
-  cp "/tmp/gh_${GH_VERSION}_linux_arm64/bin/gh" "$GH_BIN"
-  rm -rf "/tmp/${GH_TAR}" "/tmp/gh_${GH_VERSION}_linux_arm64"
-  echo "GitHub CLI downloaded."
-fi
+CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-docker}"
 
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
