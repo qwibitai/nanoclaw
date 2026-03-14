@@ -235,6 +235,7 @@ export async function memoryStore(
   category: string = 'general',
   importance: number = 0.7,
   meta: Record<string, unknown> = {},
+  scope: string = 'global',
 ): Promise<string> {
   const store = getStore();
   const embedder = getEmbedder();
@@ -243,7 +244,7 @@ export async function memoryStore(
   const entry = await store.store({
     text,
     category: normalizeCategory(category),
-    scope: 'global',
+    scope,
     importance,
     metadata: JSON.stringify(meta),
     vector,
@@ -256,6 +257,7 @@ export async function memorySearch(
   query: string,
   limit: number = 5,
   category?: string,
+  scope: string = 'global',
 ): Promise<Array<{
   id: string;
   text: string;
@@ -270,7 +272,7 @@ export async function memorySearch(
   const results = await retriever.retrieve({
     query,
     limit,
-    scopeFilter: ['global'],
+    scopeFilter: [scope],
     ...(category ? { category: normalizeCategory(category) } : {}),
     source: 'manual',
   });
