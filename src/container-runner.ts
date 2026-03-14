@@ -27,6 +27,7 @@ import {
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
+import { indexConversations } from './db.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -274,6 +275,23 @@ export async function runContainerAgent(
 
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
+
+  // Index conversations for session search before spawning agent
+  // This is best-effort: indexing failures shouldn't block the agent
+  try {
+    const indexedCount = indexConversations(group.folder);
+    if (indexedCount > 0) {
+      logger.debug(
+        { group: group.name, folder: group.folder, indexedCount },
+        'Conversation indexing complete before agent spawn'
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      { group: group.name, folder: group.folder, err },
+      'Conversation indexing failed (non-critical, proceeding with agent spawn)'
+    );
+  }
 
   const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');

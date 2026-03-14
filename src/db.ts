@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { ASSISTANT_NAME, DATA_DIR, STORE_DIR } from './config.js';
+import { ASSISTANT_NAME, DATA_DIR, GROUPS_DIR, STORE_DIR } from './config.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import {
@@ -82,6 +82,34 @@ function createSchema(database: Database.Database): void {
       container_config TEXT,
       requires_trigger INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS conversations (
+      id INTEGER PRIMARY KEY,
+      group_folder TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      date TEXT,
+      content TEXT NOT NULL,
+      indexed_at REAL NOT NULL,
+      file_mtime REAL NOT NULL,
+      UNIQUE(group_folder, filename)
+    );
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS conversations_fts USING fts5(
+      content,
+      content=conversations,
+      content_rowid=id
+    );
+
+    CREATE TRIGGER IF NOT EXISTS conversations_ai AFTER INSERT ON conversations BEGIN
+      INSERT INTO conversations_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS conversations_au AFTER UPDATE ON conversations BEGIN
+      INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.id, old.content);
+      INSERT INTO conversations_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS conversations_ad AFTER DELETE ON conversations BEGIN
+      INSERT INTO conversations_fts(conversations_fts, rowid, content) VALUES('delete', old.id, old.content);
+    END;
   `);
 
   // Add context_mode column if it doesn't exist (migration for existing DBs)
@@ -632,6 +660,140 @@ export function getAllRegisteredGroups(): Record<string, RegisteredGroup> {
     };
   }
   return result;
+}
+
+// --- Conversation search (FTS5) ---
+
+export interface ConversationSearchResult {
+  filename: string;
+  date: string | null;
+  snippet: string;
+}
+
+/**
+ * Index conversation files for a group into the FTS5 search table.
+ * Scans groups/{folder}/conversations/*.md and indexes/updates entries.
+ * Tracks file mtime to re-index modified files automatically.
+ */
+export function indexConversations(groupFolder: string): number {
+  if (!isValidGroupFolder(groupFolder)) {
+    logger.warn({ groupFolder }, 'Invalid group folder for conversation indexing');
+    return 0;
+  }
+
+  const conversationsDir = path.join(GROUPS_DIR, groupFolder, 'conversations');
+
+  if (!fs.existsSync(conversationsDir)) {
+    // No conversations directory yet, that's fine
+    return 0;
+  }
+
+  let indexedCount = 0;
+  const indexedAt = Date.now() / 1000; // Unix timestamp
+
+  try {
+    const files = fs.readdirSync(conversationsDir).filter((f) =>
+      f.endsWith('.md')
+    );
+
+    // Use INSERT OR REPLACE to update files that have been modified
+    // The UNIQUE(group_folder, filename) constraint handles upserts
+    const upsertStmt = db.prepare(
+      `INSERT OR REPLACE INTO conversations (group_folder, filename, date, content, indexed_at, file_mtime)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    );
+
+    for (const filename of files) {
+      const filePath = path.join(conversationsDir, filename);
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const stats = fs.statSync(filePath);
+        const fileMtime = stats.mtimeMs;
+
+        // Extract date from filename pattern: YYYY-MM-DD-*.md
+        const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})/);
+        const date = dateMatch ? dateMatch[1] : null;
+
+        const result = upsertStmt.run(groupFolder, filename, date, content, indexedAt, fileMtime);
+
+        // Only count if this was a new insert or an update (changes > 0)
+        // changes = 0 means the row was identical and REPLACE did nothing
+        if (result.changes > 0) {
+          indexedCount++;
+        }
+      } catch (err) {
+        logger.warn(
+          { groupFolder, filename, err },
+          'Failed to index conversation file'
+        );
+      }
+    }
+
+    if (indexedCount > 0) {
+      logger.info(
+        { groupFolder, indexedCount, totalFiles: files.length },
+        'Conversation indexing complete'
+      );
+    }
+  } catch (err) {
+    logger.error({ groupFolder, err }, 'Failed to scan conversations directory');
+  }
+
+  return indexedCount;
+}
+
+/**
+ * Search conversations using FTS5 full-text search.
+ * Returns matching results with filename, date, and content snippet.
+ */
+export function searchConversations(
+  groupFolder: string,
+  query: string,
+  limit: number = 3,
+): ConversationSearchResult[] {
+  if (!isValidGroupFolder(groupFolder)) {
+    logger.warn({ groupFolder }, 'Invalid group folder for conversation search');
+    return [];
+  }
+
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  try {
+    // FTS5 search with snippet for context
+    // snippet() returns ~64 chars around matched terms with <b> tags
+    const sql = `
+      SELECT
+        c.filename,
+        c.date,
+        snippet(conversations_fts, -1, '', '', '...', 20) as snippet
+      FROM conversations c
+      INNER JOIN conversations_fts fts ON c.id = fts.rowid
+      WHERE c.group_folder = ?
+        AND conversations_fts MATCH ?
+      ORDER BY c.date DESC
+      LIMIT ?
+    `;
+
+    const rows = db
+      .prepare(sql)
+      .all(groupFolder, query, limit) as Array<{
+        filename: string;
+        date: string | null;
+        snippet: string;
+      }>;
+
+    // Clean up snippet: remove FTS5 markup tags
+    return rows.map((row) => ({
+      filename: row.filename,
+      date: row.date,
+      snippet: row.snippet.replace(/<b>|<\/b>/g, ''),
+    }));
+  } catch (err) {
+    logger.error({ groupFolder, query, err }, 'Conversation search failed');
+    return [];
+  }
 }
 
 // --- JSON migration ---
