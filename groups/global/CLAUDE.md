@@ -152,7 +152,6 @@ Structure every response for scannability — regardless of channel:
 - Use bullet points for lists, not paragraphs
 - Bold key terms inline
 - Short paragraphs — no walls of text
-- Use `---` to visually separate major sections when there are multiple distinct blocks
 
 ## Message Formatting
 
